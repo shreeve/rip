@@ -151,6 +151,59 @@ encodeParam = (v) ->
 
 encodeParams = (params) -> params.map encodeParam
 
+# ── Reading harbor's wire ────────────────────────────────────────────
+#
+# `/sql` answers in newline-delimited JSON, not one JSON document: a
+# `schema` line, one `row` line per row, then `end` — or a single
+# `error` line, which is also the body of every non-200. Streaming is
+# the point (harbor writes rows as DuckDB produces them, so a large
+# result never has to be buffered whole on either side), and it means
+# `response.json()` cannot read a result at all: two lines in, the
+# parse fails. This reader folds either shape into the one envelope the
+# rest of the adapter consumes.
+#
+# Only `sql_error` and `unsupported_type` are engine domains and travel
+# as `errorCode`, so they classify as QueryError below; `unauthorized`,
+# `not_found` and the rest are availability problems and are left to
+# fall through to ConnectionError.
+
+ENGINE_ERROR_CODES =! ['sql_error', 'unsupported_type']
+
+parseNdjson = (text) ->
+  env = { columns: [], data: [] }
+  for line in String(text).split('\n')
+    trimmed = line.trim()
+    continue unless trimmed
+    msg =
+      try
+        JSON.parse trimmed
+      catch
+        null
+    continue unless isPlainObject msg
+    switch msg.type
+      when 'schema' then env.columns = msg.columns ?? []
+      when 'row' then env.data.push msg.values ?? []
+      when 'end' then env.rowCount = msg.rowCount
+      when 'error'
+        env.error = msg.message ?? 'db request failed'
+        env.errorCode = msg.code if ENGINE_ERROR_CODES.includes msg.code
+      else null
+  env.rowCount ?= env.data.length
+  env
+
+# One JSON object with no `type` is a body to read verbatim — `/health`,
+# and every fetch double in the test suite. Anything else is NDJSON.
+parseBody = (text) ->
+  trimmed = String(text ?? '').trim()
+  return {} unless trimmed
+  once =
+    try
+      JSON.parse trimmed
+    catch
+      undefined
+  return once if isPlainObject(once) and not once.type?
+  parseNdjson trimmed
+
 # Await a promise while honoring an AbortSignal: reject with the abort
 # reason the moment it fires, even when the injected fetch ignores its
 # signal — a hung socket can never outlive the deadline.
@@ -220,9 +273,14 @@ export def harborAdapter(opts = {})
           error = ConnectionError.new "db: harbor at #{base} is unreachable: #{detail.message}"
         error.cause = cause
         throw error
+      # `text` then parse, because a result is NDJSON. A double that
+      # only implements `json` (the test suite) is still read that way.
       data = {}
       try
-        data = response.json!
+        data = if typeof response.text is 'function'
+          parseBody response.text!
+        else
+          response.json!
       catch
         data = {}
       if not response.ok or data.ok is false or data.error?
@@ -771,23 +829,26 @@ export Model = (table, databaseOrOpts = null) ->
 
 PROBE_TIMEOUT_MS =! 5000
 
-# 200 with `{ ok: true }` means healthy; anything else (503, a non-ok
-# body, a transport failure, or a timeout) reads as not reachable. The
-# timeout keeps a half-open TCP from hanging boot indefinitely.
+# GET /health, which is the endpoint harbor actually serves and the one
+# it leaves unauthenticated on purpose, so a probe needs no credential.
+# It answers `{"status":"ok"}`; `{ok:true}` is accepted too, so a future
+# harbor (or a stand-in) may use either spelling. Anything else -- a 404,
+# a 503, a non-ok body, a transport failure, or a timeout -- reads as not
+# reachable. The timeout keeps a half-open TCP from hanging boot forever.
 reachable = (url, fetchFn) ->
   ctrl = AbortController.new()
   timer = setTimeout (-> ctrl.abort()), PROBE_TIMEOUT_MS
   try
-    res = fetchFn! "#{url}/ready", { signal: ctrl.signal }
+    res = fetchFn! "#{url}/health", { signal: ctrl.signal }
     return false unless res?.ok
     data = res.json!
-    data?.ok is true
+    data?.status is 'ok' or data?.ok is true
   catch
     false
   finally
     clearTimeout timer
 
-# Boot probe: GET /ready. Returns 'running' or throws. Prefer this name;
+# Boot probe: GET /health. Returns 'running' or throws. Prefer this name;
 # `ensureRunning` is the same check (apps still import that spelling).
 export def assertReachable(url = null, opts = {})
   fetchFn = opts.fetch ?? fetch

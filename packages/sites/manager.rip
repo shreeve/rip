@@ -993,8 +993,15 @@ export main = (argv) ->
     body.bridge = hubBridge if hubBridge?
     body
 
+  # Answering /status only means the control socket is up, which happens
+  # long before the workers boot. `ready` is the honest signal: false
+  # until the app is registered with the edge, so a manager still
+  # booting — or dying in a crash-loop because a worker cannot reach its
+  # database — is never mistaken for a running site.
+  registered = false
+
   status = ->
-    { name: args.name, root: project.root, hosts, site, operation, stopping, workers: workers.length, watch: { app: args.watchApp, api: args.watchApi }, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
+    { name: args.name, root: project.root, hosts, site, operation, stopping, ready: registered, workers: workers.length, watch: { app: args.watchApp, api: args.watchApi }, migration: (if migration? then { id: migration.id, phase: migration.phase, outcome: migration.outcome } else null) }
 
   managerOutput = (text) ->
     stream = if args.accessMode is 'raw' then process.stderr else process.stdout
@@ -1903,6 +1910,7 @@ export main = (argv) ->
       process.exitCode = await finished
       return
     appId = registrationId
+    registered = true
     appWatchReady = true
     scheduleAppReconcile() if appReconcile
     apiWatchReady = true

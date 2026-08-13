@@ -365,13 +365,13 @@ p "\nping / status"
 
 test! "ping returns ok + url + database when harbor is healthy", ->
   fetch = fetchDouble
-    '/ready': { json: { ok: true } }
+    '/health': { json: { status: 'ok' } }
     '/sql': { json: { columns: [{ name: 'current_database()', duckdbType: 'VARCHAR' }], data: [['medlabs']], rowCount: 1 } }
   info = ping! { url: 'http://h:9494', fetch }
   eq info, { ok: true, url: 'http://h:9494', database: 'medlabs' }
 
-test! "ping throws ConnectionError when /ready fails", ->
-  fetch = fetchDouble { '/ready': { status: 503, json: { ok: false } } }
+test! "ping throws ConnectionError when /health fails", ->
+  fetch = fetchDouble { '/health': { status: 503, json: { status: 'down' } } }
   err = trap! (-> ping { url: 'http://down', fetch })
   ok err instanceof ConnectionError
   ok /not reachable/.test err.message
@@ -428,6 +428,68 @@ test! "parameters ride alongside sql, omitted when empty", ->
   eq fetch.calls[0].body, { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
   adapter.query! 'SELECT 1', []
   eq fetch.calls[1].body, { sql: 'SELECT 1' }
+
+p "\nAdapter — harbor's NDJSON wire"
+
+# What harbor actually sends: a `schema` line, one `row` line each, then
+# `end` — never one JSON document. The doubles above hand back a parsed
+# envelope, which is convenient but cannot catch a reader that only
+# knows how to call `response.json()`. These use `text`, like fetch.
+ndjson = (lines) ->
+  body = lines.map(JSON.stringify).join('\n') + '\n'
+  (url, init) ->
+    Promise.resolve { ok: true, status: 200, statusText: '', text: (-> Promise.resolve body) }
+
+test! "a streamed result reads back as columns, data and rowCount", ->
+  fetch = ndjson [
+    { type: 'schema', columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true }] }
+    { type: 'row', values: [1] }
+    { type: 'row', values: [2] }
+    { type: 'end', rowCount: 2, timeMs: 0 }
+  ]
+  result = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT id FROM u'
+  eq result,
+    columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true, type: 'INTEGER' }]
+    data: [[1], [2]]
+    rowCount: 2
+
+test! "a statement with no result set is empty, not a parse failure", ->
+  fetch = ndjson [{ type: 'schema', columns: [] }, { type: 'end', rowCount: 0, timeMs: 1 }]
+  eq harborAdapter!({ url: 'http://h', fetch }).query!('CHECKPOINT'),
+    { columns: [], data: [], rowCount: 0 }
+
+test! "temporal cells decode through the streamed wire too", ->
+  fetch = ndjson [
+    { type: 'schema', columns: [{ name: 'at', duckdbType: 'TIMESTAMP' }] }
+    { type: 'row', values: ['2024-03-15T10:30:00'] }
+    { type: 'end', rowCount: 1 }
+  ]
+  result = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT at FROM e'
+  ok result.data[0][0] instanceof Date
+  eq result.data[0][0].toISOString(), '2024-03-15T10:30:00.000Z'
+
+# An engine error can arrive after the 200 header, mid-stream — harbor
+# has already committed to a status by the time DuckDB fails.
+test! "an error line mid-stream is a QueryError, whatever the status was", ->
+  fetch = ndjson [
+    { type: 'schema', columns: [{ name: 'x', duckdbType: 'INTEGER' }] }
+    { type: 'error', code: 'sql_error', message: 'Conversion Error: bad cast' }
+  ]
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT x FROM u')
+  ok err instanceof QueryError
+  eq err.code, 'sql_error'
+  ok /bad cast/.test err.message
+
+# Only the engine domains are query errors. A rejected credential is an
+# availability problem and must not look like bad SQL to a retry loop.
+test! "a non-engine error line is a ConnectionError, not a QueryError", ->
+  denied = '{"type":"error","code":"unauthorized","message":"missing or invalid bearer token"}'
+  fetch = (url) ->
+    Promise.resolve { ok: false, status: 401, statusText: 'Unauthorized', text: (-> Promise.resolve denied) }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT 1')
+  ok err instanceof ConnectionError
+  ok not (err instanceof QueryError)
+  eq err.httpStatus, 401
 
 p "\nAdapter — transactions"
 
@@ -1023,18 +1085,23 @@ p "\nBoot probe — assertReachable"
 
 reply = (status, body) -> { ok: status >= 200 and status < 400, status, json: (-> body) }
 
-test! "a healthy /ready resolves to running", ->
+test! "a healthy /health resolves to running", ->
   hit = null
-  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { status: 'ok' })
   eq assertReachable!('http://harbor:9494', { fetch }), 'running'
-  eq hit, 'http://harbor:9494/ready'
+  eq hit, 'http://harbor:9494/health'
+
+# harbor answers `{"status":"ok"}`; `{ok:true}` is accepted too so a
+# stand-in may use either spelling.
+test! "an ok:true body is accepted as well as status:ok", ->
+  eq assertReachable!('http://harbor:9494', { fetch: (-> Promise.resolve reply(200, { ok: true })) }), 'running'
 
 test! "a 503 throws not-reachable", ->
-  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(503, { ok: false })) })
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(503, { status: 'down' })) })
   ok /not reachable at http:\/\/harbor:9494/.test err.message
 
-test! "a 200 body without ok:true is not reachable", ->
-  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(200, { ok: false })) })
+test! "a 200 body that says neither is not reachable", ->
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(200, { status: 'starting' })) })
   ok /not reachable/.test err.message
 
 test! "a transport failure is caught and reported as not-reachable", ->
@@ -1043,21 +1110,21 @@ test! "a transport failure is caught and reported as not-reachable", ->
 
 test! "a trailing slash is trimmed from the resolved url", ->
   hit = null
-  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { status: 'ok' })
   assertReachable! 'http://harbor:9494///', { fetch }
-  eq hit, 'http://harbor:9494/ready'
+  eq hit, 'http://harbor:9494/health'
 
 test! "an omitted url falls back to RIP_DB_URL then the local default", ->
   hit = null
-  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { status: 'ok' })
   prev = process.env.RIP_DB_URL
   try
     process.env.RIP_DB_URL = 'http://env-harbor:9494'
     assertReachable! null, { fetch }
-    eq hit, 'http://env-harbor:9494/ready'
+    eq hit, 'http://env-harbor:9494/health'
     delete process.env.RIP_DB_URL
     assertReachable! null, { fetch }
-    eq hit, 'http://127.0.0.1:9494/ready'
+    eq hit, 'http://127.0.0.1:9494/health'
   finally
     if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
 

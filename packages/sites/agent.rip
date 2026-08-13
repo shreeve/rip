@@ -231,7 +231,7 @@ snapshotApp = (app) ->
     name: app.name
     root: app.root
     desired: app.desired
-    state: if manager? then (if manager.stopping then 'stopping' else 'running') else 'stopped'
+    state: if manager? then (if manager.stopping then 'stopping' else if manager.ready is false then 'starting' else 'running') else 'stopped'
     pid: if manager? then readOwnerPid(app.root) else null
     url: appUrl(app, manager)
     hosts: app.hosts
@@ -317,9 +317,19 @@ children = Map.new()
 starting = Map.new()
 restartCounts = Map.new()
 
+# A manager answers /status as soon as its control socket is up, which
+# is well before its workers have booted and it has registered with the
+# edge. Only `ready` says the site is actually serving, so both the
+# short-circuit and the readiness wait below hold out for it -- without
+# that, a manager crash-looping on a failed boot (an unreachable
+# database, say) reports "running" forever and never surfaces the log
+# tail that explains why. `isnt false` so a manager predating the field
+# still counts as ready.
+ready = (live) -> live? and live.ready isnt false
+
 startApp = (app, automatic = false) ->
   live = managerStatus! app
-  if live?
+  if ready live
     app.desired = 'running'
     app.lastError = null
     saveState()
@@ -333,37 +343,47 @@ startApp = (app, automatic = false) ->
     log = openSync logPath, 'a', 0o600
     child = null
     try
-      argv = serverArgv app
-      child = spawn argv[0], argv.slice(1),
-        cwd: app.root
-        detached: true
-        stdio: ['ignore', log, log]
-        env: { ...process.env, JANUS_CONTROL: state.edge.control }
-      children.set app.id, child
-      child.on 'exit', (code, signal) ->
-        children.delete app.id
-        app.lastExit = { code, signal: signal or null, at: Date.new().toISOString() }
-        saveState()
-        if app.desired is 'running'
-          count = (restartCounts.get(app.id) or 0) + 1
-          restartCounts.set app.id, count
-          delay = Math.min 30000, 500 * 2 ** Math.min(count - 1, 6)
-          setTimeout (-> startApp(app, true).catch((error) -> app.lastError = error.message; saveState())), delay
+      # A manager that is up but not yet ready is mid-boot (or looping
+      # through one). Wait it out rather than spawn a rival that would
+      # only lose the manager lock and confuse the diagnosis.
+      unless live?
+        argv = serverArgv app
+        child = spawn argv[0], argv.slice(1),
+          cwd: app.root
+          detached: true
+          stdio: ['ignore', log, log]
+          env: { ...process.env, JANUS_CONTROL: state.edge.control }
+        children.set app.id, child
+        child.on 'exit', (code, signal) ->
+          children.delete app.id
+          app.lastExit = { code, signal: signal or null, at: Date.new().toISOString() }
+          saveState()
+          if app.desired is 'running'
+            count = (restartCounts.get(app.id) or 0) + 1
+            restartCounts.set app.id, count
+            delay = Math.min 30000, 500 * 2 ** Math.min(count - 1, 6)
+            # Re-read `desired` when the timer fires, not when it is set:
+            # a start that gives up marks the app stopped, and a restart
+            # scheduled just before that must not undo it. Without this
+            # a site whose boot can never succeed restarts forever.
+            setTimeout (->
+              return unless app.desired is 'running'
+              startApp(app, true).catch((error) -> app.lastError = error.message; saveState())), delay
     finally
       closeSync log
     deadline = Date.now() + 30000
     loop
       live = managerStatus! app
-      if live?
+      if ready live
         restartCounts.set app.id, 0
         app.desired = 'running'
         app.lastError = null
         saveState()
         return snapshotApp! app
-      break if child.exitCode? or Date.now() >= deadline
+      break if child?.exitCode? or Date.now() >= deadline
       sleep! 25
     diagnostic = tail(logPath, 20).trim()
-    message = if child.exitCode? then "manager exited #{child.exitCode}" else 'manager readiness deadline expired'
+    message = if child?.exitCode? then "manager exited #{child.exitCode}" else 'manager readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
     app.lastError = message
     app.desired = 'stopped' unless automatic
