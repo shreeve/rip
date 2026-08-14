@@ -141,15 +141,16 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // A valid edit after the crash: the restart-once policy brings
       // TS diagnostics back (the bad call maps onto .rip source again).
       // The misuse rides an ANNOTATED binding so the revived pipeline has
-      // a diagnostic the gradual gate publishes.
+      // a diagnostic the gradual gate publishes. Same caveat as above: the
+      // revival can land another diagnostic in this publish, so assert the
+      // mapped TS diagnostic is present rather than counting the batch.
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: GOOD + 'n: number = 42\nbad = n.toUpperCase()\nconsole.log bad\n' }],
       });
       const recovered = await wait();
-      expect(recovered.diagnostics).toHaveLength(1);
-      expect(recovered.diagnostics[0].code).toBe(2339);
+      expect(recovered.diagnostics.some((d) => d.code === 2339)).toBe(true);
 
       // And hover answers (bounded — the request must not hang).
       const hover = await hoverAt(client, 1, 2);
