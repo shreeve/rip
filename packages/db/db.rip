@@ -1362,7 +1362,7 @@ export def createMcpServer(deps)
         tableName = parts.slice(1).join '.'
         [
           '''
-            SELECT column_name AS name, data_type AS type, is_nullable = 'YES' AS nullable, comment
+            SELECT column_name AS name, data_type AS type, is_nullable AS nullable, comment
             FROM duckdb_columns() WHERE database_name = current_database() AND schema_name = ? AND table_name = ? ORDER BY column_index
           '''
           [schemaName, tableName]
@@ -1370,7 +1370,7 @@ export def createMcpServer(deps)
       else
         [
           '''
-            SELECT column_name AS name, data_type AS type, is_nullable = 'YES' AS nullable, comment
+            SELECT column_name AS name, data_type AS type, is_nullable AS nullable, comment
             FROM duckdb_columns() WHERE database_name = current_database() AND table_name = ? ORDER BY column_index
           '''
           [table]
