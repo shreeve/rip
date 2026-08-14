@@ -38,6 +38,10 @@
       "name": "@rip/decimal",
       "version": "4.0.0",
     },
+    "packages/fake": {
+      "name": "@rip/fake",
+      "version": "4.0.0",
+    },
     "packages/googlesheets": {
       "name": "@rip/googlesheets",
       "version": "4.0.0",
@@ -173,6 +177,8 @@
     "@rip/db": ["@rip/db@workspace:packages/db"],
 
     "@rip/decimal": ["@rip/decimal@workspace:packages/decimal"],
+
+    "@rip/fake": ["@rip/fake@workspace:packages/fake"],
 
     "@rip/googlesheets": ["@rip/googlesheets@workspace:packages/googlesheets"],
 
