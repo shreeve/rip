@@ -486,6 +486,7 @@ test! 'stop command gracefully deregisters and exits the canonical manager', ->
       site: null
       operation: 'Active'
       stopping: true
+      ready: true
       workers: 0
       watch: { app: false, api: false }
       migration: null
