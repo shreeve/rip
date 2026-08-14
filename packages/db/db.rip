@@ -10,6 +10,10 @@
 
 DEFAULT_URL =! 'http://127.0.0.1:9495'
 DEFAULT_TIMEOUT_MS =! 30_000
+# How long to spend telling harbor to stop a statement we have already
+# given up on. Short on purpose: the caller is owed its error now, and a
+# cancel that does not land is retried by harbor's own deadline anyway.
+CANCEL_TIMEOUT_MS =! 2_000
 { readFileSync } = import!('node:fs')
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
@@ -238,6 +242,25 @@ abortable = (signal, promise) ->
     onAbort() if signal.aborted
     return
 
+# ── Naming a statement so it can be stopped ──────────────────────────
+#
+# A statement that has entered DuckDB does not come back until it is
+# done, and harbor runs a bounded number at once — so abandoning a query
+# locally does not release anything. The wire abort only stops us
+# listening; the connection stays out of service until the statement
+# finishes on its own. Naming it is what makes it stoppable.
+#
+# harbor takes the id from the caller rather than issuing one, and it has
+# to: its reply does not begin until the statement is streaming or done,
+# so an id in the response would arrive far too late to cancel anything.
+# It answers `409` while a statement of that name is still running, so
+# the id must be fresh per request rather than stable per caller — a
+# retry reusing one could collide with the attempt it is replacing.
+_queryN = 0
+newQueryId = ->
+  _queryN = (_queryN + 1) % 1_000_000
+  "rip-#{_queryN.toString(36)}-#{Math.random().toString(36).slice(2, 10)}"
+
 export def harborAdapter(opts = {})
   base = resolveUrl opts.url
   token = opts.token ?? envToken()
@@ -261,7 +284,37 @@ export def harborAdapter(opts = {})
   # one AbortController: the timeoutMs deadline arms a timer, and the
   # caller's signal (when given) is relayed in — either aborts the
   # in-flight fetch for real, not just the caller's promise.
+  # Best effort, and deliberately not awaited by the caller's error path:
+  # the caller is owed its failure now. Cancelling a statement that has
+  # already finished is `{"cancelled":false}`, not an error, so a late
+  # cancel costs nothing. Never rejects.
+  stopStatement = (queryId) ->
+    return unless queryId?
+    try
+      ctrl = AbortController.new()
+      timer = setTimeout (-> ctrl.abort()), CANCEL_TIMEOUT_MS
+      try
+        abortable! ctrl.signal, fetchFn "#{base}/sql/queries/#{encodeURIComponent queryId}",
+          method: 'DELETE'
+          headers: headers()
+          signal: ctrl.signal
+      finally
+        clearTimeout timer if timer?
+    catch
+      null
+    return
+
   post = (path, body, sql = null, signal = null) ->
+    # Every statement is named, and carries our deadline to the server as
+    # well as enforcing it here. A client that times out without telling
+    # harbor leaves behind exactly the runaway that a deadline exists to
+    # kill — the connection stays out of service long after we stopped
+    # caring. `timeoutMs: 0` disables both clocks, ours and harbor's.
+    queryId = null
+    if path is '/sql'
+      queryId = newQueryId()
+      body = { ...body, queryId }
+      body.timeoutMs = timeoutMs if timeoutMs > 0
     ctrl = AbortController.new()
     timedOut = false
     timer = null
@@ -296,6 +349,10 @@ export def harborAdapter(opts = {})
           error.code = 'ABORTED'
         else
           error = ConnectionError.new "db: harbor at #{base} is unreachable: #{detail.message}"
+        # We stopped listening; the statement did not stop running. Say so
+        # to harbor, or the connection stays out of service until the query
+        # finishes on its own. Not awaited — the caller gets its error now.
+        stopStatement queryId if timedOut or signal?.aborted
         error.cause = cause
         throw error
       # `text` then parse, because a result is NDJSON. A double that
@@ -328,7 +385,13 @@ export def harborAdapter(opts = {})
         # an HTTP failure with no engine code is an availability problem
         # (a ConnectionError) — so a caller's retry loop keyed on
         # ConnectionError catches a 5xx during a query.
-        error = if data.errorCode?
+        error = if response.status is 499 or data.harborCode is 'cancelled'
+          # Someone stopped this statement — our own deadline reaching harbor,
+          # this caller's signal, or another client holding the same id. It is
+          # the same event as a local abort and gets the same type, so one
+          # `catch` covers a cancellation however it was delivered.
+          CancelledError.new message
+        else if data.errorCode?
           e = QueryError.new message
           e.code = data.errorCode
           e.details = data.errorDetails if data.errorDetails?

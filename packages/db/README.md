@@ -255,6 +255,15 @@ Every request honors `timeoutMs` (default 30s; `0` disables) and a
 caller's `AbortSignal`. Timeouts are `ConnectionError` with code
 `TIMEOUT`; caller aborts use code `ABORTED`.
 
+Giving up locally is not enough — the statement is still running on
+harbor, holding a connection. So every statement is sent with a name
+(`queryId`) and with `timeoutMs` as harbor's own deadline, and when we
+stop waiting we send `DELETE /sql/queries/<id>` to stop it there too.
+That cancel gets two seconds of its own: the caller is owed its error
+now, and harbor's deadline collects anything the cancel misses. A
+statement harbor stopped for some other reason comes back `499`, which
+is a `CancelledError` — not a transport failure.
+
 ```coffee
 import { harborAdapter, createClient } from 'rip/db'
 

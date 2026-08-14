@@ -75,12 +75,21 @@ bySql = (replies) ->
   fetchFn
 
 hangingFetch = ->
-  seen = { signal: null }
+  seen = { signal: null, calls: [] }
   fetchFn = (url, init) ->
-    seen.signal = init?.signal ?? null
+    seen.calls.push { url, method: init?.method ?? 'GET' }
+    # First only: giving up on a statement sends a second request to cancel
+    # it, and these tests ask about the signal of the one that hung.
+    seen.signal ?= init?.signal ?? null
     Promise.new (->)
   fetchFn.seen = seen
   fetchFn
+
+# Every /sql body now carries a per-statement name and our deadline.
+# Neither is what most of these assertions are about, so drop them.
+sent = (body) ->
+  { queryId, timeoutMs, ...rest } = body
+  rest
 
 harborFetch = (columns, data) ->
   calls = []
@@ -461,15 +470,15 @@ test! "returns columns as { name, type } objects with harbor extras", ->
     ]
     data: [[1, 'Ada']]
     rowCount: 1
-  eq fetch.calls[0].body, { sql: 'SELECT id, name FROM users' }
+  eq sent(fetch.calls[0].body), { sql: 'SELECT id, name FROM users' }
 
 test! "parameters ride alongside sql, omitted when empty", ->
   fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
   adapter = harborAdapter { url: 'http://h', fetch }
   adapter.query! 'SELECT * FROM u WHERE id = ?', [42]
-  eq fetch.calls[0].body, { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
+  eq sent(fetch.calls[0].body), { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
   adapter.query! 'SELECT 1', []
-  eq fetch.calls[1].body, { sql: 'SELECT 1' }
+  eq sent(fetch.calls[1].body), { sql: 'SELECT 1' }
 
 p "\nAdapter — harbor's NDJSON wire"
 
@@ -588,7 +597,7 @@ test! "begin pins a session, carries it per statement, and drops it on commit", 
   tx = harborAdapter!({ url: 'http://h', fetch }).begin!
   tx.query! 'INSERT INTO u VALUES (?)', ['x']
   tx.commit!
-  bodies = fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.body
+  bodies = fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> sent c.body
   eq bodies[0], { sql: 'BEGIN', sessionId: 'sess-1' }
   eq bodies[1], { sql: 'INSERT INTO u VALUES (?)', params: ['x'], sessionId: 'sess-1' }
   eq bodies[2], { sql: 'COMMIT', sessionId: 'sess-1' }
@@ -695,6 +704,9 @@ test! "a transaction statement honors the caller signal too", ->
     sql = if init?.body? then JSON.parse(init.body).sql else null
     if sql is 'BEGIN'
       return Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
+    # Giving up on a statement sends a cancel for it; answer that rather
+    # than letting it overwrite the signal this test is about.
+    return Promise.resolve { ok: true, status: 200, json: (-> { cancelled: true }) } if url.includes '/sql/queries/'
     seen.signal = init?.signal ?? null
     Promise.new (->)
   tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!
@@ -704,6 +716,66 @@ test! "a transaction statement honors the caller signal too", ->
   err = caught! pending
   eq err.code, 'ABORTED'
   eq seen.signal?.aborted, true
+
+# Aborting the wire only stops us listening. The statement runs on inside
+# DuckDB, holding a connection out of service, until harbor is told to
+# stop it — which it can only do if we named the statement on the way in.
+test! "giving up on a statement tells harbor to stop it, by name", ->
+  seen = { posted: null, cancel: null }
+  fetch = (url, init) ->
+    if url.includes '/sql/queries/'
+      seen.cancel = { url, method: init?.method }
+      return Promise.resolve { ok: true, status: 200, json: (-> { cancelled: true }) }
+    seen.posted = JSON.parse init.body
+    Promise.new (->)
+  controller = AbortController.new()
+  pending = harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).query 'SELECT 1', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  eq err.code, 'ABORTED'
+  ok seen.posted.queryId?, 'the statement should have been named'
+  eq seen.cancel?.method, 'DELETE'
+  eq seen.cancel?.url, "http://h/sql/queries/#{seen.posted.queryId}"
+
+# A client that times out without saying so leaves behind exactly the
+# runaway a deadline exists to kill, so ours goes to harbor as well.
+test! "our deadline is harbor's too, and zero opts out of both", ->
+  bodies = []
+  fetch = (url, init) ->
+    return Promise.resolve { ok: true, status: 200, json: (-> { cancelled: true }) } if url.includes '/sql/queries/'
+    bodies.push JSON.parse init.body
+    Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
+  harborAdapter!({ url: 'http://h', fetch, timeoutMs: 250 }).query! 'SELECT 1'
+  eq bodies[0].timeoutMs, 250
+  harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).query! 'SELECT 1'
+  eq bodies[1].timeoutMs, undefined
+
+# harbor refuses a name already in flight, so a cancel is never a coin
+# flip between two live statements. Reusing one would make it one.
+test! "each statement gets its own name", ->
+  bodies = []
+  fetch = (url, init) ->
+    bodies.push JSON.parse init.body
+    Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
+  adapter = harborAdapter! { url: 'http://h', fetch }
+  adapter.query! 'SELECT 1'
+  adapter.query! 'SELECT 2'
+  ok bodies[0].queryId isnt bodies[1].queryId, 'two statements must not share a name'
+
+# However the stop was delivered — our deadline reaching harbor, this
+# caller, or another client holding the same id — it is the same event as
+# a local abort, so one catch covers a cancellation either way.
+test! "a 499 from harbor is a CancelledError, not a transport failure", ->
+  fetch = (url, init) ->
+    Promise.resolve
+      ok: false
+      status: 499
+      statusText: ''
+      text: -> Promise.resolve JSON.stringify { type: 'error', code: 'cancelled', message: 'the statement was cancelled' }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT 1')
+  ok err instanceof CancelledError
+  eq err.code, 'ABORTED'
+  eq err.httpStatus, 499
 
 test! "a fast response is untouched by the deadline", ->
   fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
@@ -1082,7 +1154,10 @@ test! "an abort mid-flight hands the signal to the adapter", ->
 
 test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
   fetchSignal = null
-  fetch = (url, init) -> fetchSignal = init?.signal ?? null; Promise.new (->)
+  fetch = (url, init) ->
+    return Promise.resolve { ok: true, status: 200, json: (-> { cancelled: true }) } if url.includes '/sql/queries/'
+    fetchSignal = init?.signal ?? null
+    Promise.new (->)
   controller = AbortController.new()
   pending = createClient(harborAdapter { url: 'http://h', fetch }).query 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
@@ -1160,7 +1235,7 @@ test! "posts to /sql with bearer token and returns the envelope", ->
   r = sql! 'SELECT 1'
   eq seen.url, 'http://h:9494/sql'
   eq seen.headers.Authorization, 'Bearer secret'
-  eq seen.body, { sql: 'SELECT 1' }
+  eq sent(seen.body), { sql: 'SELECT 1' }
   eq r.data, [[1]]
 
 test! "a harbor error envelope becomes a QueryError with the code", ->
