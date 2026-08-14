@@ -8,10 +8,25 @@ PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 
+# Same order agent.rip's resolveCaddy uses, minus the runtime-only
+# sources: env, then the packaged binary, then PATH. Test and production
+# should not disagree about where a Janus binary comes from — and an env
+# var alone made this lane depend on which shell you happened to be in.
+PACKAGED_CADDY = join(import.meta.dir, '..', '..', 'bin', 'caddy-janus')
+
 releasedCaddy = ->
-  binary = process.env.JANUS_CADDY
-  throw Error.new('test:janus requires JANUS_CADDY=/path/to/janus-enabled-caddy') unless binary?
-  throw Error.new("JANUS_CADDY is not an existing file: #{binary}") unless existsSync binary
+  binary = process.env.JANUS_CADDY or
+    (existsSync(PACKAGED_CADDY) and PACKAGED_CADDY) or
+    Bun.which('caddy')
+  unless binary
+    throw Error.new("""
+      test:janus found no Janus-enabled Caddy. Looked, in order, at:
+        JANUS_CADDY                     (unset)
+        #{PACKAGED_CADDY}
+        caddy on PATH
+      Drop a built binary at either path, or export JANUS_CADDY.
+    """)
+  throw Error.new("Janus binary is not an existing file: #{binary}") unless existsSync binary
   binary
 
 waitFor = (name, fn, timeout = 8000) ->
