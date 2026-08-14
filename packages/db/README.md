@@ -32,13 +32,13 @@ is outside this package (keep the DuckDB process up yourself).
 ```sql
 INSTALL harbor FROM community;
 LOAD harbor;
-CALL harbor_serve(bind := '127.0.0.1', port := 9494, token := 'rip-token');
+CALL harbor_serve(bind := '127.0.0.1', port := 9495, token := 'rip-token');
 ```
 
 Keep that DuckDB process open — when it exits, harbor exits with it.
 
 ```bash
-export RIP_DB_URL=http://127.0.0.1:9494
+export RIP_DB_URL=http://127.0.0.1:9495
 export RIP_DB_TOKEN=rip-token   # omit only if harbor_serve(..., token := NULL)
 ```
 
@@ -113,7 +113,7 @@ rip packages/db/example.rip
 
 | Env / option | Meaning | Default |
 |---|---|---|
-| `RIP_DB_URL` | Harbor base URL | `http://127.0.0.1:9494` |
+| `RIP_DB_URL` | Harbor base URL | `http://127.0.0.1:9495` |
 | `RIP_DB_TOKEN` | Bearer token for `/sql` | unset (only when harbor is unauthenticated) |
 
 URL resolution is one rule everywhere (adapter, probe, CLI, MCP):
@@ -122,7 +122,7 @@ trimmed.
 
 ```coffee
 connect!                                    # env / default
-connect! 'http://127.0.0.1:9494'            # string URL
+connect! 'http://127.0.0.1:9495'            # string URL
 connect! url: '…', token: '…', timeoutMs: 60_000
 connect! { adapter }                        # tests / custom wires
 ```
@@ -332,7 +332,7 @@ as a synonym for `rip-db ping`.
 ## MCP
 
 ```bash
-rip-db mcp --url http://127.0.0.1:9494
+rip-db mcp --url http://127.0.0.1:9495
 ```
 
 ```json
@@ -342,7 +342,7 @@ rip-db mcp --url http://127.0.0.1:9494
       "command": "rip-db",
       "args": ["mcp"],
       "env": {
-        "RIP_DB_URL": "http://127.0.0.1:9494",
+        "RIP_DB_URL": "http://127.0.0.1:9495",
         "RIP_DB_TOKEN": "<token>"
       }
     }

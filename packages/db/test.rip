@@ -295,6 +295,44 @@ test! "Model find/where/order/limit/all compose SQL over the default", ->
   eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "active" = ? ORDER BY name LIMIT 20'
   eq adapter.log[0].params, [true]
 
+# LIMIT and OFFSET are the only builder values that reach SQL as text, so
+# they are the only ones where a caller's value could carry SQL.
+test! "limit and offset refuse anything that is not a row count", ->
+  connect { adapter: fakeAdapter([]) }
+  User = Model 'users'
+  for bad in ['1; DROP TABLE users', -1, 1.5, null, '20']
+    err = trap! (-> User.limit bad)
+    ok isDbError(err), "limit(#{JSON.stringify bad}) should be refused"
+    eq err.code, 'BAD_REQUEST'
+  eq trap!(-> User.offset('0 UNION SELECT 1'))?.code, 'BAD_REQUEST'
+
+# `offset` starts a chain like every other builder entry point, so a page
+# does not have to be spelled through `limit` first.
+test! "Model.offset starts a chain, and pages with limit and order", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }], data: [[21]], rowCount: 1 }
+    { columns: [{ name: 'id' }], data: [[21]], rowCount: 1 }
+  ]
+  connect { adapter }
+  User = Model 'users'
+  User.offset(20).all!
+  eq adapter.log[0].sql, 'SELECT * FROM "users" OFFSET 20'
+  User.order('id').limit(10).offset(20).all!
+  eq adapter.log[1].sql, 'SELECT * FROM "users" ORDER BY id LIMIT 10 OFFSET 20'
+
+# `undefined` reads as a typo, and either silent interpretation returns a
+# wrong answer rather than an error: dropping the key matches every row,
+# binding it matches none. `null` is a real condition and still works.
+test! "an undefined condition is refused; null still means IS NULL", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }]
+  connect { adapter }
+  User = Model 'users'
+  eq trap!(-> User.where(active: undefined).all())?.code, 'BAD_REQUEST'
+  eq trap!(-> User.or(active: undefined).all())?.code, 'BAD_REQUEST'
+  eq trap!(-> User.not(active: undefined).all())?.code, 'BAD_REQUEST'
+  User.where(deleted_at: null).all!
+  eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "deleted_at" IS NULL'
+
 test! "Model insert/update/destroy round-trip through findOne shapes", ->
   adapter = fakeAdapter [
     { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }
@@ -395,7 +433,7 @@ test! "omitted adapter url falls back to RIP_DB_URL then the local default", ->
     eq fetch.calls[0].url, 'http://env-adapter:9494/sql'
     delete process.env.RIP_DB_URL
     harborAdapter!({ fetch }).query! 'SELECT 1'
-    eq fetch.calls[1].url, 'http://127.0.0.1:9494/sql'
+    eq fetch.calls[1].url, 'http://127.0.0.1:9495/sql'
   finally
     if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
 
@@ -483,6 +521,33 @@ test! "an error line mid-stream is a QueryError, whatever the status was", ->
   ok err instanceof QueryError
   eq err.code, 'sql_error'
   ok /bad cast/.test err.message
+
+# harbor drops the `end` line only when the stream broke — nothing can be
+# written once the socket is gone, so the missing terminator IS the report.
+# Rows that arrived before the break must never pass as the whole answer.
+test! "a stream that stops without its terminator is incomplete, not short", ->
+  fetch = ndjson [
+    { type: 'schema', columns: [{ name: 'id', duckdbType: 'INTEGER' }] }
+    { type: 'row', values: [1] }
+  ]
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT id FROM u')
+  ok isDbError err
+  eq err.code, 'truncated'
+  ok /incomplete/.test err.message
+
+# A body that cannot be read is a failure, not an empty result set. The
+# distinction matters because zero rows is a legitimate answer and this
+# is not one.
+test! "an unreadable body on a 200 is a ConnectionError, not zero rows", ->
+  fetch = (url, init) ->
+    Promise.resolve
+      ok: true
+      status: 200
+      statusText: ''
+      text: -> Promise.reject(Error.new 'socket hang up')
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT 1')
+  ok err instanceof ConnectionError
+  ok /could not be read/.test err.message
 
 # Only the engine domains are query errors. A rejected credential is an
 # availability problem and must not look like bad SQL to a retry loop.
@@ -1053,7 +1118,7 @@ p "\nCLI — pure helpers"
 test "resolveUrl: explicit wins, then env, then default", ->
   eq resolveUrl('http://h:9494/', {}), 'http://h:9494'
   eq resolveUrl(null, { RIP_DB_URL: 'http://env:9494///' }), 'http://env:9494'
-  eq resolveUrl(null, {}), 'http://127.0.0.1:9494'
+  eq resolveUrl(null, {}), 'http://127.0.0.1:9495'
 
 test "sqlString: quotes and rejects NUL", ->
   eq sqlString('/tmp/x'), "'/tmp/x'"
@@ -1273,7 +1338,7 @@ test! "an omitted url falls back to RIP_DB_URL then the local default", ->
     eq hit, 'http://env-harbor:9494/ready'
     delete process.env.RIP_DB_URL
     assertReachable! null, { fetch }
-    eq hit, 'http://127.0.0.1:9494/ready'
+    eq hit, 'http://127.0.0.1:9495/ready'
   finally
     if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
 

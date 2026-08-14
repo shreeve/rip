@@ -8,7 +8,7 @@
 # CLI (import.meta.main): rip-db dump | load | checkpoint | mcp
 # ==============================================================================
 
-DEFAULT_URL =! 'http://127.0.0.1:9494'
+DEFAULT_URL =! 'http://127.0.0.1:9495'
 DEFAULT_TIMEOUT_MS =! 30_000
 { readFileSync } = import!('node:fs')
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
@@ -171,6 +171,7 @@ ENGINE_ERROR_CODES =! ['sql_error', 'unsupported_type']
 
 parseNdjson = (text) ->
   env = { columns: [], data: [] }
+  sawEnd = false
   for line in String(text).split('\n')
     trimmed = line.trim()
     continue unless trimmed
@@ -183,7 +184,9 @@ parseNdjson = (text) ->
     switch msg.type
       when 'schema' then env.columns = msg.columns ?? []
       when 'row' then env.data.push msg.values ?? []
-      when 'end' then env.rowCount = msg.rowCount
+      when 'end'
+        sawEnd = true
+        env.rowCount = msg.rowCount
       when 'error'
         env.error = msg.message ?? 'db request failed'
         # Two fields, because they answer different questions. `errorCode`
@@ -193,11 +196,22 @@ parseNdjson = (text) ->
         env.harborCode = msg.code if msg.code?
         env.errorCode = msg.code if ENGINE_ERROR_CODES.includes msg.code
       else null
+  # A result ends with `end`, and harbor omits it in exactly one case: the
+  # stream broke. That omission is the only signal that can survive a dead
+  # socket, since nothing can be written once the connection is gone — so
+  # its absence is the truncation report, not a missing field. Without this
+  # the rows that did arrive would be handed back as though they were all
+  # of them, which is the one failure a result reader must never have.
+  # An `error` line is its own terminator and already says what happened.
+  if not sawEnd and not env.error?
+    env.error = 'db: the result stream ended without its terminator, so the result is incomplete'
+    env.harborCode = 'truncated'
   env.rowCount ?= env.data.length
   env
 
-# One JSON object with no `type` is a body to read verbatim — `/health`,
-# and every fetch double in the test suite. Anything else is NDJSON.
+# One JSON object with no `type` is a body to read verbatim — `/ready`,
+# a session open, and every fetch double in the test suite. Anything
+# else is NDJSON.
 parseBody = (text) ->
   trimmed = String(text ?? '').trim()
   return {} unless trimmed
@@ -286,14 +300,27 @@ export def harborAdapter(opts = {})
         throw error
       # `text` then parse, because a result is NDJSON. A double that
       # only implements `json` (the test suite) is still read that way.
+      #
+      # A body that cannot be read at all is not an empty result. Reading it
+      # is the whole of how a complete answer is told from a truncated one,
+      # so a failure here has to be raised rather than become zero rows —
+      # but only when the status claimed success, since a non-2xx already
+      # has its own story and the message below tells it better.
       data = {}
+      unread = null
       try
         data = if typeof response.text is 'function'
           parseBody response.text!
         else
           response.json!
-      catch
+      catch cause
         data = {}
+        unread = cause
+      if unread? and response.ok
+        error = ConnectionError.new "db: harbor at #{base} sent a response that could not be read: #{unread.message}"
+        error.cause = unread
+        error.httpStatus = response.status
+        throw error
       if not response.ok or data.ok is false or data.error?
         message = (data.error or "db request failed: #{response.status} #{response.statusText ?? ''}").trim()
         # Classify by DOMAIN, not by whether SQL was present: the engine
@@ -661,6 +688,27 @@ _conflictClause = (conflict, keys) ->
   sets = updateCols.map((k) -> "#{ident k} = EXCLUDED.#{ident k}").join(', ')
   " ON CONFLICT (#{ident conflict}) DO UPDATE SET #{sets}"
 
+# LIMIT and OFFSET are the only caller values in this builder that reach
+# SQL as text. Column names go through `ident`, comparison values bind as
+# `?`, and the free-form clauses (`select`, `order`, `group`, `having`)
+# are SQL by contract — a builder that quoted them could not express
+# `ORDER BY created_at DESC`. A row count has no such excuse: there is
+# exactly one legitimate shape, so anything else is refused rather than
+# interpolated.
+_rowCount = (what, n) ->
+  badRequest "#{what} requires a non-negative integer" unless Number.isSafeInteger(n) and n >= 0
+  n
+
+# `undefined` in a condition is a caller bug — an unset variable, nearly
+# every time. Neither silent reading is defensible: dropping the key
+# widens the query to every row, and binding it serializes to `null` and
+# matches none, so the same typo either returns the table or returns
+# nothing. Both are wrong answers rather than errors. `null` is a real
+# condition and still means IS NULL / IS NOT NULL.
+_assertDefined = (method, key, val) ->
+  return unless val is undefined
+  badRequest "#{method} condition for '#{key}' is undefined — pass null to match NULL, or omit the key"
+
 # Immutable SQL builder. Wire-agnostic — hands off to module-level
 # findAll / findOne / query / value (the process default).
 class QueryBuilder
@@ -687,6 +735,7 @@ class QueryBuilder
       b._params = b._params.concat params
     else if typeof conditions is 'object'
       for own key, val of conditions
+        _assertDefined 'where', key, val
         if val is null
           b._wheres.push { clause: "#{ident key} IS NULL", join: 'AND' }
         else
@@ -702,6 +751,7 @@ class QueryBuilder
     else if typeof conditions is 'object'
       parts = []
       for own key, val of conditions
+        _assertDefined 'or', key, val
         if val is null
           parts.push "#{ident key} IS NULL"
         else
@@ -717,6 +767,7 @@ class QueryBuilder
       b._params = b._params.concat params
     else if typeof conditions is 'object'
       for own key, val of conditions
+        _assertDefined 'not', key, val
         if val is null
           b._wheres.push { clause: "#{ident key} IS NOT NULL", join: 'AND' }
         else
@@ -742,12 +793,12 @@ class QueryBuilder
 
   limit: (n) ->
     b = @_clone()
-    b._limit = n
+    b._limit = _rowCount 'limit', n
     b
 
   offset: (n) ->
     b = @_clone()
-    b._offset = n
+    b._offset = _rowCount 'offset', n
     b
 
   _buildWhere: ->
@@ -842,7 +893,7 @@ export Model = (table, databaseOrOpts = null) ->
 
   all: (limit = null) ->
     sql = "SELECT * FROM #{tableName}"
-    sql += " LIMIT #{limit}" if limit?
+    sql += " LIMIT #{_rowCount 'limit', limit}" if limit?
     findAll! sql
 
   where: (conditions, params = []) -> _qb().where(conditions, params)
@@ -852,6 +903,7 @@ export Model = (table, databaseOrOpts = null) ->
   order: (expr) -> _qb().order(expr)
   group: (expr) -> _qb().group(expr)
   limit: (n) -> _qb().limit(n)
+  offset: (n) -> _qb().offset(n)
 
   count: ->
     (query! "SELECT COUNT(*) AS n FROM #{tableName}").rows[0]?.n ?? null
@@ -946,8 +998,9 @@ reachable = (url, fetchFn) ->
   finally
     clearTimeout timer
 
-# Boot probe: GET /health. Returns 'running' or throws. Prefer this name;
-# `ensureRunning` is the same check (apps still import that spelling).
+# Boot probe: GET /ready, falling back to /health on an older harbor.
+# Returns 'running' or throws. Prefer this name; `ensureRunning` is the
+# same check (apps still import that spelling).
 export def assertReachable(url = null, opts = {})
   fetchFn = opts.fetch ?? fetch
   resolved = resolveUrl url
@@ -1346,7 +1399,7 @@ This CLI does not start or stop a database server. Run your
 duckdb-harbor instance separately and point RIP_DB_URL at it.
 
 Environment:
-  RIP_DB_URL    Harbor base URL (default http://127.0.0.1:9494)
+  RIP_DB_URL    Harbor base URL (default http://127.0.0.1:9495)
   RIP_DB_TOKEN  Harbor bearer token (only when harbor requires one)
 '''
 
@@ -1386,7 +1439,7 @@ their uncommitted writes).
 Usage: rip-db mcp [--url URL]
 
 Start the MCP stdio server (line-delimited JSON-RPC over stdin/stdout).
-Default harbor URL is RIP_DB_URL or http://127.0.0.1:9494.
+Default harbor URL is RIP_DB_URL or http://127.0.0.1:9495.
 '''
 }
 
