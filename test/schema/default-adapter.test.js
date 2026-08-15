@@ -15,6 +15,7 @@
 // temporal suite. The adapter reads the global fetch, so each test
 // swaps in a scripted double and restores it.
 import { test, expect, describe } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 const orm = await import('../../src/runtime/orm.js');
 
@@ -186,19 +187,13 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
   // this adapter is what a schema-model app gets with nothing installed —
   // and it was still pointing at harbor's pre-9495 port long after
   // packages/db and harbor itself had moved.
-  test('the unconfigured default targets harbor\'s own default port', async () => {
-    const seen = [];
-    const fetch = async (url) => {
-      seen.push(url);
-      return { ok: true, status: 200, json: async () => ({ ok: true, columns: [], data: [], rowCount: 0 }) };
-    };
-    const saved = process.env.RIP_DB_URL;
-    delete process.env.RIP_DB_URL;
-    try {
-      await withFetch(fetch, () => orm.__schemaAdapterFor(null).query('SELECT 1'));
-    } finally {
-      if (saved === undefined) delete process.env.RIP_DB_URL; else process.env.RIP_DB_URL = saved;
-    }
-    expect(seen[0]).toBe('http://127.0.0.1:9495/sql');
+  // The fallback is only observable on a pristine module — sibling tests
+  // install adapters on the shared one, and a second module instance
+  // re-runs orm.js's globalThis publishing. So pin the source, the way
+  // packages/db pins DEFAULT_TIMEOUT_MS.
+  test('the unconfigured default targets harbor\'s own default port', () => {
+    const src = readFileSync(new URL('../../src/runtime/orm.js', import.meta.url), 'utf8');
+    expect(src).toContain("env.RIP_DB_URL || 'http://127.0.0.1:9495'");
+    expect(src).not.toContain('9494');
   });
 });

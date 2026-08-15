@@ -14597,13 +14597,32 @@ const runtimeBodies = new Map();
 const runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, 'utf8');
-    runtimeBodies.set(rt.key, raw
-      .replace(/^export \{[^}]*\};\s*$/m, '')
-      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/m, '')
-      .trimEnd());
+    const body = raw
+      .replace(/^export \{[^}]*\};\s*$/gm, '')
+      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '')
+      .trimEnd();
+    // Inline delivery splices these bodies into a shared IIFE scope,
+    // where a surviving `import`/`export` is a syntax error in emitted
+    // code — and nothing downstream re-parses the output, so the
+    // compile SUCCEEDS and the program fails to load. Both strips are
+    // global so a runtime may carry several; anything they cannot
+    // reach is refused here rather than shipped.
+    const stray = /^[ \t]*(import|export)\b.*$/m.exec(body);
+    if (stray) {
+      throw new Error(
+        `emitter: runtime '${rt.key}' carries a top-level ${stray[1]} that inline delivery cannot strip — ` +
+        `${JSON.stringify(stray[0].trim())}. Inline bodies share one IIFE scope, so it would emit unparseable ` +
+        `output. Use the './name.js' import form, or move the dependency into RUNTIME_TABLE 'requires'.`);
+    }
+    runtimeBodies.set(rt.key, body);
   }
   return runtimeBodies.get(rt.key);
 };
+
+// `requires` is one key or several; normalizing here keeps the closure
+// and the fusion walk from each re-deciding what shape it is.
+const runtimeRequires = (rt) =>
+  rt.requires == null ? [] : (Array.isArray(rt.requires) ? rt.requires : [rt.requires]);
 
 // Does the tree REFERENCE any of `names` as a free identifier? The
 // trigger rule: reference a delivered runtime name → get the
@@ -15019,8 +15038,17 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // A runtime whose body depends on a sibling runtime delivers both —
   // in BOTH modes, so mode parity is exact (the toolchain path would
   // resolve the dependency through the module graph regardless).
-  for (const rt of RUNTIME_TABLE) {
-    if (rt.requires && runtimes.has(rt.key)) runtimes.add(rt.requires);
+  // Transitive: a dependency may itself require another, and the table
+  // is not guaranteed to be sorted dependency-last. Loop to a fixpoint
+  // rather than trusting the declaration order.
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const rt of RUNTIME_TABLE) {
+      if (!runtimes.has(rt.key)) continue;
+      for (const dep of runtimeRequires(rt)) {
+        if (!runtimes.has(dep)) { runtimes.add(dep); grew = true; }
+      }
+    }
   }
   if (runtimeDelivery !== 'none') {
     // Injection units: one per delivered runtime, except inline mode
@@ -15044,20 +15072,38 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       // import-delivered face means giving these units a signature source too.
       for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
     } else {
-      const fused = new Set(active.filter((rt) => rt.requires).map((rt) => rt.requires));
+      const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {
         if (fused.has(rt.key)) continue;
-        if (rt.requires) {
-          const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
-          // A fused unit states the union of its runtimes' face types
-          // — and only when one of them HAS a table: the assertion
-          // types every bound name, so an empty union would flatten
-          // names that infer honestly through the IIFE to `any`.
-          const types = (dep.types || rt.types) ? { ...dep.types, ...rt.types } : undefined;
-          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt), types });
-        } else {
+        // Dependency-first, deduped: a body may only reference names
+        // its dependencies already bound, so order is load-bearing.
+        const chain = [];
+        const visit = (r) => {
+          if (chain.includes(r)) return;
+          for (const key of runtimeRequires(r)) {
+            const dep = RUNTIME_TABLE.find((d) => d.key === key);
+            if (dep) visit(dep);
+          }
+          chain.push(r);
+        };
+        visit(rt);
+        if (chain.length === 1) {
           units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
+          continue;
         }
+        // A fused unit states the union of its runtimes' face types
+        // — and only when one of them HAS a table: the assertion
+        // types every bound name, so an empty union would flatten
+        // names that infer honestly through the IIFE to `any`.
+        const types = chain.some((r) => r.types)
+          ? Object.assign({}, ...chain.map((r) => r.types))
+          : undefined;
+        units.push({
+          runtimes: chain,
+          names: chain.flatMap((r) => r.names),
+          body: chain.map((r) => runtimeText(r)).join('\n'),
+          types,
+        });
       }
     }
     const programId = stores.idOf(parseResult.sexpr);

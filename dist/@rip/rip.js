@@ -18849,10 +18849,16 @@ var runtimeBodies = new Map;
 var runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, "utf8");
-    runtimeBodies.set(rt.key, raw.replace(/^export \{[^}]*\};\s*$/m, "").replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/m, "").trimEnd());
+    const body = raw.replace(/^export \{[^}]*\};\s*$/gm, "").replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, "").trimEnd();
+    const stray = /^[ \t]*(import|export)\b.*$/m.exec(body);
+    if (stray) {
+      throw new Error(`emitter: runtime '${rt.key}' carries a top-level ${stray[1]} that inline delivery cannot strip — ` + `${JSON.stringify(stray[0].trim())}. Inline bodies share one IIFE scope, so it would emit unparseable ` + `output. Use the './name.js' import form, or move the dependency into RUNTIME_TABLE 'requires'.`);
+    }
+    runtimeBodies.set(rt.key, body);
   }
   return runtimeBodies.get(rt.key);
 };
+var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var referencesNames = (sexpr, names, isDecl = () => false) => {
   if (names.size === 0)
     return false;
@@ -19192,9 +19198,18 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
       runtimes.add(rt.key);
     }
   }
-  for (const rt of RUNTIME_TABLE) {
-    if (rt.requires && runtimes.has(rt.key))
-      runtimes.add(rt.requires);
+  for (let grew = true;grew; ) {
+    grew = false;
+    for (const rt of RUNTIME_TABLE) {
+      if (!runtimes.has(rt.key))
+        continue;
+      for (const dep of runtimeRequires(rt)) {
+        if (!runtimes.has(dep)) {
+          runtimes.add(dep);
+          grew = true;
+        }
+      }
+    }
   }
   if (runtimeDelivery !== "none") {
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
@@ -19203,18 +19218,34 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
       for (const rt of active)
         units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
     } else {
-      const fused = new Set(active.filter((rt) => rt.requires).map((rt) => rt.requires));
+      const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {
         if (fused.has(rt.key))
           continue;
-        if (rt.requires) {
-          const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
-          const types = dep.types || rt.types ? { ...dep.types, ...rt.types } : undefined;
-          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + `
-` + runtimeText(rt), types });
-        } else {
+        const chain = [];
+        const visit = (r) => {
+          if (chain.includes(r))
+            return;
+          for (const key of runtimeRequires(r)) {
+            const dep = RUNTIME_TABLE.find((d) => d.key === key);
+            if (dep)
+              visit(dep);
+          }
+          chain.push(r);
+        };
+        visit(rt);
+        if (chain.length === 1) {
           units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
+          continue;
         }
+        const types = chain.some((r) => r.types) ? Object.assign({}, ...chain.map((r) => r.types)) : undefined;
+        units.push({
+          runtimes: chain,
+          names: chain.flatMap((r) => r.names),
+          body: chain.map((r) => runtimeText(r)).join(`
+`),
+          types
+        });
       }
     }
     const programId = stores.idOf(parseResult.sexpr);

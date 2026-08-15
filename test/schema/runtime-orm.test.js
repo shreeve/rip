@@ -17,7 +17,8 @@
 import { test, expect, describe, beforeEach } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit, _runtimeTable } from '../../src/emitter.js';
+import { readFileSync } from 'node:fs';
 import { Mappings } from '../../src/stores.js';
 import { describeExtended } from '../support/extended.js';
 import { recordingAdapter, row, rows } from '../support/recording-adapter.js';
@@ -2081,6 +2082,34 @@ describe('orm: runtime delivery', () => {
     // the orm body made it in, its import line stripped
     expect(code).toContain('__schemaInstallPersistence({');
     expect(code).not.toContain("from './schema.js'");
+  });
+
+  // Inline delivery splices runtime bodies into one IIFE, so a surviving
+  // top-level import/export is a syntax error in emitted code — and
+  // nothing re-parses the output, so the compile used to SUCCEED and the
+  // program failed to load. The strip is global (a runtime may carry
+  // several sibling imports) and anything it cannot reach is refused.
+  test('inline delivery strips EVERY sibling import, not just the first', () => {
+    const raw = readFileSync(new URL('../../src/runtime/orm.js', import.meta.url), 'utf8');
+    const twoImports = raw.replace(
+      /^(import \{[^}]*\} from '\.\/schema\.js';)$/m,
+      "$1\nimport { __schemaNothing } from './reactive.js';");
+    expect((twoImports.match(/^import /gm) ?? []).length).toBe(2);
+    const stripped = twoImports
+      .replace(/^export \{[^}]*\};\s*$/gm, '')
+      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '');
+    expect(/^[ \t]*import\b/m.test(stripped)).toBe(false);
+    expect(/^[ \t]*export\b/m.test(stripped)).toBe(false);
+  });
+
+  test('every delivered runtime body is free of top-level import/export', () => {
+    for (const rt of _runtimeTable()) {
+      const body = readFileSync(rt.url, 'utf8')
+        .replace(/^export \{[^}]*\};\s*$/gm, '')
+        .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '');
+      const stray = /^[ \t]*(import|export)\b.*$/m.exec(body);
+      expect(stray ? `${rt.key}: ${stray[0].trim()}` : null).toBe(null);
+    }
   });
 
   test('a transaction-only module (no schema declaration) still gets the fused pair', () => {
