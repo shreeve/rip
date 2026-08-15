@@ -1803,6 +1803,40 @@ test! "connect installs the adapter for the schema ORM", ->
     eq row.id, 7
     ok fetch.calls.some (c) -> c.sql? and /FROM "users"/.test(c.sql)
 
+# The two tiers open transactions by different mechanisms — this one
+# hands the callback a session-bound surface, the ORM pins its handle in
+# an AsyncLocalStorage keyed by adapter. Neither used to see the other,
+# so a model write inside `transaction!` ran autocommit on a second
+# connection and SURVIVED the rollback. Both directions must enroll.
+test! "a model statement inside a rip/db transaction runs on that session", ->
+  fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
+  connect { url: 'http://harbor', fetch }
+  __SchemaRegistry.scope! ->
+    User = __schema model 'User', field('name')
+    transaction! (tx) ->
+      tx.query! 'DELETE FROM "users"'
+      User.create! { name: 'Ada' }
+    statements = fetch.calls.filter (c) -> c.sql?
+    opened = statements.find (c) -> c.sql is 'BEGIN'
+    insert = statements.find (c) -> c.sql.startsWith 'INSERT INTO "users"'
+    ok opened?.sessionId?, 'the transaction opened a session'
+    eq insert.sessionId, opened.sessionId
+    eq (statements.find (c) -> c.sql is 'COMMIT').sessionId, opened.sessionId
+
+test! "a raw statement inside a schema transaction runs on that session", ->
+  fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
+  connect { url: 'http://harbor', fetch }
+  __SchemaRegistry.scope! ->
+    User = __schema model 'User', field('name')
+    __schemaTransaction! ->
+      User.create! { name: 'Ada' }
+      query! 'DELETE FROM "users"'
+    statements = fetch.calls.filter (c) -> c.sql?
+    opened = statements.find (c) -> c.sql is 'BEGIN'
+    raw = statements.find (c) -> c.sql is 'DELETE FROM "users"'
+    ok opened?.sessionId?, 'the transaction opened a session'
+    eq raw.sessionId, opened.sessionId
+
 p "\nORM — row hydration"
 
 test! "create() hydrates from INSERT ... RETURNING", ->

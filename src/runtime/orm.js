@@ -880,6 +880,38 @@ async function __schemaTransaction(optsOrFn, maybeFn) {
   return result;
 }
 
+// Bind an ALREADY-OPEN handle as this adapter's ambient transaction for
+// the duration of `fn`, so schema-model statements inside enroll on it
+// instead of running autocommit on another connection.
+//
+// This exists because a transaction opened by the other tier (rip/db's
+// `transaction`) is invisible here: `__schemaRunSQL` routes on this
+// store alone, so a model write inside someone else's transaction used
+// to commit itself and survive that transaction's rollback.
+//
+// The caller owns begin/commit/rollback; this owns only the ambience
+// and the hooks that depend on the outcome. `fn` is handed a `settle`
+// it calls once the commit or rollback has actually landed, so
+// afterCommit never fires ahead of the COMMIT it reports.
+// The open handle for this adapter's ambient transaction, or null. The
+// mirror of __schemaAdoptTransaction: it lets the other tier see a
+// transaction WE opened, so a raw statement issued inside one joins it
+// rather than committing itself on another connection.
+function __schemaTxHandle(adapter) {
+  const store = __schemaTxStore(adapter);
+  return store ? store.handle : null;
+}
+
+async function __schemaAdoptTransaction(adapter, handle, fn) {
+  const als = await __schemaTxALSGet();
+  const store = { adapter, handle, after: [] };
+  // Copy-on-run, as __schemaTransaction does: other adapters' ambient
+  // contexts stay visible; only this adapter's slot is bound.
+  const next = new Map(als.getStore() || []);
+  next.set(adapter, store);
+  return als.run(next, () => fn((outcome) => __schemaFlushTxHooks(store, outcome)));
+}
+
 async function __schemaFlushTxHooks(store, hookName) {
   // Dedupe by instance: a row saved twice in one transaction gets one
   // callback.
@@ -2485,7 +2517,7 @@ const schema = {
 // The last two are the build-an-unsaved-instance seam rip/fake's
 // Model.factory() augmentation composes with — normalize caller
 // input, construct without saving.
-export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex, __schemaNormalizePersistenceInput, __schemaConstructInputInstance };
+export { schema, __schemaSetAdapter, __schemaTransaction, __schemaAdoptTransaction, __schemaTxHandle, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex, __schemaNormalizePersistenceInput, __schemaConstructInputInstance };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and
@@ -2496,6 +2528,10 @@ if (typeof globalThis !== 'undefined') {
   const g = globalThis;
   g.__ripSchema = g.__ripSchema || {};
   g.__ripSchema.__schemaSetAdapter = __schemaSetAdapter;
+  // So a transaction opened by rip/db can enroll model statements that
+  // run inside it, instead of letting them commit on their own.
+  g.__ripSchema.__schemaAdoptTransaction = __schemaAdoptTransaction;
+  g.__ripSchema.__schemaTxHandle = __schemaTxHandle;
   if (g.__ripDbAdapter && !__schemaAdapterExplicit) {
     try {
       __schemaSetAdapter(g.__ripDbAdapter);

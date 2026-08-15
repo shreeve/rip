@@ -615,8 +615,11 @@ export def createClient(adapter)
   # to that session — whose own transaction() JOINS this one (no
   # savepoints), so a nested call reuses the session rather than
   # opening a second — commit on return, roll back on any throw.
-  attempt = (fn) ->
-    tx = adapter.begin!
+  # Run the callback against an open session, committing on return and
+  # rolling back on a throw. `settle` reports the landed outcome to
+  # whoever else is enrolled in this transaction (the schema ORM), so
+  # its commit-time hooks never fire ahead of the COMMIT they describe.
+  runTx = (fn, tx, settle) ->
     joined = null
     join = (inner) -> inner joined
     joined = makeSurface(((sql, params, signal) -> tx.query sql, params, { signal }), join)
@@ -630,12 +633,29 @@ export def createClient(adapter)
         tx.rollback!
       catch
         null
+      settle! 'afterRollback'
       throw error
     # Commit runs OUTSIDE the try: a failed COMMIT propagates on its
     # own — it must not trigger a rollback against a session the
     # adapter already dropped.
     tx.commit!
+    settle! 'afterCommit'
     result
+
+  # A schema-model statement routes through the ORM's own ambient
+  # transaction store, which knows nothing about a session opened here.
+  # Left alone, a model write inside this block would run autocommit on
+  # another connection and survive this transaction's rollback — so
+  # hand the ORM our open handle for the duration.
+  noSettle = -> undefined
+
+  attempt = (fn) ->
+    tx = adapter.begin!
+    adopt = globalThis.__ripSchema?.__schemaAdoptTransaction
+    if typeof adopt is 'function'
+      adopt! adapter, tx, (settle) -> runTx fn, tx, settle
+    else
+      runTx fn, tx, noSettle
 
   transaction = (fn, opts = {}) ->
     fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
@@ -659,7 +679,16 @@ export def createClient(adapter)
         sleep! wait
     return
 
-  makeSurface(((sql, params, signal) -> adapter.query sql, params, { signal }), transaction)
+  # A statement issued outside any transaction of ours still belongs
+  # inside one the schema ORM opened: its handle is ambient for this
+  # adapter, and going straight to the adapter would run autocommit on
+  # a different connection and survive that transaction's rollback.
+  run = (sql, params, signal) ->
+    handle = globalThis.__ripSchema?.__schemaTxHandle?(adapter)
+    if handle? then handle.query sql, params, { signal }
+    else adapter.query sql, params, { signal }
+
+  makeSurface(run, transaction)
 
 # ==[ Module default — connect / query / Model ]==============================
 #
