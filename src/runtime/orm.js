@@ -640,7 +640,7 @@ function __schemaEncodeParam(v) {
 function __schemaDefaultAdapter(overrides) {
   const env = (typeof process !== 'undefined' && process.env) || {};
   const base = () => String(
-    overrides?.url || env.RIP_DB_URL || 'http://127.0.0.1:9494').replace(/\/+$/, '');
+    overrides?.url || env.RIP_DB_URL || 'http://127.0.0.1:9495').replace(/\/+$/, '');
   const headers = () => {
     const h = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     const token = overrides?.token || env.RIP_DB_TOKEN;

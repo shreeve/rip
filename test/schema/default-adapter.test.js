@@ -180,4 +180,25 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(decodedCell instanceof Date).toBe(true);
     expect(decodedCell.getTime()).toBe(UTC);
   });
+
+  // The unconfigured default has to reach the harbor a developer actually
+  // started. `src/cli/schema.js` advertises the RIP_DB_URL-only path, so
+  // this adapter is what a schema-model app gets with nothing installed —
+  // and it was still pointing at harbor's pre-9495 port long after
+  // packages/db and harbor itself had moved.
+  test('the unconfigured default targets harbor\'s own default port', async () => {
+    const seen = [];
+    const fetch = async (url) => {
+      seen.push(url);
+      return { ok: true, status: 200, json: async () => ({ ok: true, columns: [], data: [], rowCount: 0 }) };
+    };
+    const saved = process.env.RIP_DB_URL;
+    delete process.env.RIP_DB_URL;
+    try {
+      await withFetch(fetch, () => orm.__schemaAdapterFor(null).query('SELECT 1'));
+    } finally {
+      if (saved === undefined) delete process.env.RIP_DB_URL; else process.env.RIP_DB_URL = saved;
+    }
+    expect(seen[0]).toBe('http://127.0.0.1:9495/sql');
+  });
 });
