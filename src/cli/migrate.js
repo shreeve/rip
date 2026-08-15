@@ -80,141 +80,97 @@ function migrateRows(res) {
 
 // ── introspection ─────────────────────────────────────────────────────
 
-// Resolve a FOREIGN KEY's referenced table out of constraint_text when
-// the catalog row carries no referenced_table column. The text form is
-// `… REFERENCES <table>(<columns>)` with the table name UNQUOTED, so a
-// name holding spaces or parens is ambiguous on its own — the tail is
-// matched against the known deployed table names instead, longest
-// match winning. Returns null when nothing matches: the caller records
-// the target as unknown, and unknown blocks (never passes).
-function refFromConstraintText(text, tableNames) {
-  const m = String(text || '').match(/REFERENCES\s+(.*)$/i);
-  if (!m) return null;
-  const tail = m[1];
-  let best = null;
-  for (const name of tableNames) {
-    if (!tail.startsWith(name)) continue;
-    const cm = tail.slice(name.length).match(/^\s*\(([^()]*)\)\s*$/);
-    if (!cm) continue;
-    if (!best || name.length > best.refTable.length) {
-      const refCols = cm[1].split(',').map((s) => s.trim());
-      best = { refTable: name, refColumn: refCols.length === 1 ? refCols[0] : refCols.join(', ') };
-    }
+// Every verb that touches the database requires a catalog-capable
+// adapter, presence-tested exactly like begin(): plan/status/make read
+// the deployed schema through it, and migrate's own recovery story
+// ("verify with `rip schema status`") is dead on an adapter that
+// cannot answer status. The refusal names the fix.
+function requireCatalog(who) {
+  const adapter = __schemaAdapterFor(null);
+  if (typeof adapter?.catalog !== 'function') {
+    throw new Error(
+      who + ': the configured adapter has no catalog() — the deployed schema is read in one ' +
+      'GET /catalog call, which needs duckdb-harbor >= v0.9.0. Upgrade the deployment your ' +
+      'adapter (or RIP_DB_URL) points at, or configure an adapter that implements catalog().');
   }
-  return best;
+  return adapter;
 }
 
 // Build the DeployedSchema — an array of canonical table specs in the
-// same shape `_tableSpec()` produces — from the live database by
-// querying DuckDB's own catalog directly. This is the migration
-// differ's single source of truth: an adapter's optional `introspect()`
-// is a thin, portable capability (bare column names/types) and is
-// deliberately NOT trusted here — a diff needs notNull, defaults,
-// uniqueness, indexes, foreign keys, and sequences, which only the
-// catalog carries. The queries route through the same `query()` seam
-// (over harbor's /sql for the shipped DuckDB adapter), so no adapter or
-// harbor change is needed. The `_rip_migrations` history table is the
-// runner's own state and is filtered out below.
+// same shape `_tableSpec()` produces — from the adapter's `catalog()`:
+// one authenticated `GET /catalog` on duckdb-harbor, one stable JSON
+// contract (`{harborVersion, duckdbVersion, tables, sequences}`) that
+// never varies with the DuckDB version harbor links. Foreign keys
+// arrive as structural fields (`columns`/`refTable`/`refColumns`),
+// so a referenced table is never recovered from constraint prose.
+// The `_rip_migrations` history table is the runner's own state and
+// is filtered out below.
 export async function introspect() {
-  const q = (sql) => runSQL(sql, []);
-  // Every catalog is scoped to the CURRENT database, not just to the
-  // `main` schema. An ATTACHed database has a `main` schema too, so a
-  // schema-only filter reports its tables as ours — and the differ,
-  // finding them undeclared, plans `DROP TABLE` against a database the
-  // migration was never about. `information_schema` spells the catalog
-  // `table_catalog`; the duckdb_* functions spell it `database_name`.
-  const tablesRes = await q("SELECT table_name FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema = 'main' AND table_type = 'BASE TABLE'");
-  const columnsRes = await q("SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_catalog = current_database() AND table_schema = 'main' ORDER BY table_name, ordinal_position");
-  const constraintsRes = await q("SELECT table_name, constraint_type, constraint_column_names, constraint_text, referenced_table, referenced_column_names FROM duckdb_constraints() WHERE database_name = current_database() AND schema_name = 'main'");
-  const indexesRes = await q("SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE database_name = current_database() AND schema_name = 'main'");
-  const sequencesRes = await q("SELECT sequence_name, start_value FROM duckdb_sequences() WHERE database_name = current_database() AND schema_name = 'main'");
+  const adapter = requireCatalog('schema.introspect');
+  const doc = await adapter.catalog(UNBOUNDED);
 
+  // Only `main` holds tables under management: the contract reports
+  // every schema in the served database, and a schema-qualified table
+  // cannot even be declared (`crm.accounts` is refused at the model),
+  // so tables outside `main` must never reach the differ — undeclared
+  // there reads as drop-table.
   const tables = new Map();
-  for (const r of migrateRows(tablesRes)) {
-    if (RUNNER_TABLES.has(r.table_name)) continue;
-    tables.set(r.table_name, {
-      name: r.table_name,
+  for (const t of doc?.tables ?? []) {
+    if (t.schema !== 'main' || RUNNER_TABLES.has(t.name)) continue;
+    const columns = (t.columns ?? []).map((c) => ({
+      name: c.name,
+      type: c.type,
+      notNull: c.notNull === true,
+      unique: false,
+      default: c.default != null && c.default !== '' ? c.default : null,
+      was: null,
+    }));
+    // The spec's primaryKey is a single-column identity. The contract
+    // reports a composite PRIMARY KEY as its full column list; the
+    // spec has no representation for one, so it stays null and its
+    // member columns stay unmarked — the pk-shape gate then compares
+    // the columns as ordinary columns.
+    const pk = t.primaryKey ?? [];
+    let primaryKey = null;
+    if (pk.length === 1) {
+      primaryKey = pk[0];
+      const col = columns.find((c) => c.name === pk[0]);
+      if (col) col.primary = true;
+    }
+    tables.set(t.name, {
+      name: t.name,
       sequence: null,
-      primaryKey: null,
-      columns: [],
-      indexes: [],
-      foreignKeys: [],
+      primaryKey,
+      columns,
+      // The contract's indexes are exactly duckdb_indexes(): the ones
+      // CREATE INDEX made, never the internal ART indexes behind
+      // PRIMARY KEY / UNIQUE constraints.
+      indexes: (t.indexes ?? []).map((ix) => ({
+        name: ix.name,
+        columns: [...(ix.columns ?? [])],
+        unique: ix.unique === true,
+      })),
+      // Multi-column FK arrays fold onto the spec's per-column shape:
+      // a joined column list, and the first referenced column.
+      foreignKeys: (t.foreignKeys ?? []).map((fk) => {
+        const cols = fk.columns ?? [];
+        return {
+          column: cols.length === 1 ? cols[0] : cols.join(', '),
+          refTable: fk.refTable,
+          refColumn: (fk.refColumns ?? [])[0] ?? null,
+        };
+      }),
       tableWas: null,
     });
   }
 
-  for (const r of migrateRows(columnsRes)) {
-    const t = tables.get(r.table_name);
-    if (!t) continue;
-    t.columns.push({
-      name: r.column_name,
-      type: r.data_type,
-      notNull: r.is_nullable === 'NO',
-      unique: false,
-      default: r.column_default != null && r.column_default !== '' ? r.column_default : null,
-      was: null,
-    });
-  }
-
-  // constraint_column_names arrives as a JSON array over harbor, or as
-  // a "[a, b]" string from other transports. Normalize to string[].
-  const listOf = (v) => {
-    if (Array.isArray(v)) return v.map(String);
-    if (typeof v === 'string') {
-      const inner = v.replace(/^\[/, '').replace(/\]$/, '').trim();
-      return inner ? inner.split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')) : [];
-    }
-    return [];
-  };
-
-  for (const r of migrateRows(constraintsRes)) {
-    const t = tables.get(r.table_name);
-    if (!t) continue;
-    const cols = listOf(r.constraint_column_names);
-    if (r.constraint_type === 'PRIMARY KEY' && cols.length === 1) {
-      t.primaryKey = cols[0];
-      const col = t.columns.find((c) => c.name === cols[0]);
-      if (col) col.primary = true;
-    } else if (r.constraint_type === 'UNIQUE' && cols.length === 1) {
-      const col = t.columns.find((c) => c.name === cols[0]);
-      if (col) col.unique = true;
-    } else if (r.constraint_type === 'FOREIGN KEY') {
-      const colName = cols.length === 1 ? cols[0] : cols.join(', ');
-      // The catalog's referenced_table column is authoritative.
-      // constraint_text is the fallback for transports that omit it,
-      // and it carries the referenced table UNQUOTED — a name holding
-      // spaces or parens cannot be split out of it blind, so the text
-      // is matched against the known deployed table names (longest
-      // match). A constraint whose target remains undetermined keeps
-      // refTable null, which the differ reads as "may reference any
-      // table" — an unknown reference blocks, never passes.
-      let refTable = typeof r.referenced_table === 'string' && r.referenced_table !== '' ? r.referenced_table : null;
-      let refColumn = refTable ? (listOf(r.referenced_column_names)[0] ?? null) : null;
-      if (!refTable) {
-        const parsed = refFromConstraintText(r.constraint_text, tables.keys());
-        if (parsed) ({ refTable, refColumn } = parsed);
-      }
-      t.foreignKeys.push({ column: colName, refTable, refColumn });
-    }
-  }
-
-  for (const r of migrateRows(indexesRes)) {
-    const t = tables.get(r.table_name);
-    if (!t) continue;
-    t.indexes.push({
-      name: r.index_name,
-      columns: listOf(r.expressions),
-      unique: r.is_unique === true || r.is_unique === 'true',
-    });
-  }
-
-  for (const r of migrateRows(sequencesRes)) {
+  for (const s of doc?.sequences ?? []) {
     // Attach by the `<table>_seq` naming convention the DDL emitter
     // uses.
-    const tableName = String(r.sequence_name).replace(/_seq$/, '');
-    const t = tables.get(tableName);
-    if (t && String(r.sequence_name).endsWith('_seq')) {
-      t.sequence = { name: r.sequence_name, start: Number(r.start_value) };
+    const name = String(s.name);
+    const t = tables.get(name.replace(/_seq$/, ''));
+    if (t && name.endsWith('_seq')) {
+      t.sequence = { name, start: Number(s.start) };
     }
   }
 
@@ -1326,6 +1282,10 @@ export async function make(name, opts = {}) {
 }
 
 export async function migrate(opts = {}) {
+  // Applying without the ability to introspect afterwards would leave
+  // every failure remedy ("verify with `rip schema status`") dead —
+  // so the capability is required up front, before any file is read.
+  requireCatalog('schema.migrate');
   const dir = opts.dir || 'migrations';
   const files = await migrationFiles(dir);
   rejectDuplicateVersions(files, 'schema.migrate');

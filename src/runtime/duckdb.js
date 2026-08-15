@@ -306,8 +306,8 @@ function toResult(env) {
 }
 
 /**
- * An Adapter Contract v2 value — `{ query, begin, capabilities }` —
- * speaking to duckdb-harbor over HTTP.
+ * An Adapter Contract v2 value — `{ query, begin, catalog,
+ * capabilities }` — speaking to duckdb-harbor over HTTP.
  *
  * @param {object} [opts]
  * @param {string} [opts.url]        harbor base URL; else RIP_DB_URL, else the default
@@ -372,7 +372,7 @@ function harborAdapter(opts = {}) {
     }
   };
 
-  const post = async (path, body, sql = null, signal = null, timeoutOverride) => {
+  const request = async (method, path, body, sql = null, signal = null, timeoutOverride) => {
     // Every statement is named, and carries our deadline to the server
     // as well as enforcing it here. A client that times out without
     // telling harbor leaves behind exactly the runaway a deadline
@@ -406,9 +406,9 @@ function harborAdapter(opts = {}) {
       let response = null;
       try {
         response = await abortable(ctrl.signal, fetchFn(`${base}${path}`, {
-          method: 'POST',
+          method,
           headers: headers(),
-          body: JSON.stringify(body),
+          ...(body != null ? { body: JSON.stringify(body) } : {}),
           signal: ctrl.signal,
         }));
       } catch (cause) {
@@ -508,19 +508,44 @@ function harborAdapter(opts = {}) {
   };
 
   const query = async (sql, params = null, opts = {}) =>
-    toResult(await post('/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
+    toResult(await request('POST', '/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
       sql, opts?.signal, opts?.timeoutMs));
 
+  // The deployed schema in ONE authenticated call — `GET /catalog`
+  // (duckdb-harbor >= 0.9.0): tables with columns, primary keys,
+  // genuine CREATE INDEX indexes, STRUCTURAL foreign keys, and
+  // sequences, as a stable JSON contract that never varies with the
+  // DuckDB version harbor links. The read rides the same bearer
+  // headers, body machinery, and error taxonomy as every other
+  // request. A 404 gets its own words, because it means the
+  // deployment predates the endpoint — the fix is an upgrade, never
+  // a retry.
+  const catalog = async (opts = {}) => {
+    try {
+      return await request('GET', '/catalog', null, null, opts?.signal, opts?.timeoutMs);
+    } catch (error) {
+      if (error?.httpStatus === 404) {
+        const upgrade = new ConnectionError(
+          `db: harbor at ${shown} has no /catalog endpoint — reading the deployed schema takes ` +
+          'one GET /catalog call, which needs duckdb-harbor >= v0.9.0. Upgrade that deployment.');
+        upgrade.httpStatus = 404;
+        upgrade.cause = error;
+        throw upgrade;
+      }
+      throw error;
+    }
+  };
+
   const begin = async (options = {}) => {
-    const session = await post('/sql/sessions/new', {});
+    const session = await request('POST', '/sql/sessions/new', {});
     const sessionId = session.sessionId;
     // No session id means no isolation — refuse loudly rather than run
     // BEGIN/COMMIT as independent autocommit statements on the pool.
     if (sessionId == null) {
       throw new DbError('db: harbor returned no session id for the transaction');
     }
-    const run = async (sql, params = null, opts = {}) => toResult(await post(
-      '/sql',
+    const run = async (sql, params = null, opts = {}) => toResult(await request(
+      'POST', '/sql',
       params?.length ? { sql, params: encodeParams(params), sessionId } : { sql, sessionId },
       sql, opts?.signal, opts?.timeoutMs));
     const drop = async () => {
@@ -568,6 +593,9 @@ function harborAdapter(opts = {}) {
   return {
     query,
     begin,
+    // Presence IS the capability, exactly as with begin(): the
+    // migration runner tests `typeof adapter.catalog === 'function'`.
+    catalog,
     // DuckDB rolls DDL back with the transaction, so the migration
     // runner may claim a whole-file rollback.
     capabilities: { tx: true, ddlTransactional: true },

@@ -2,7 +2,7 @@
 // loader-preloaded harness (src/cli/schema.js), end-to-end in
 // subprocesses (the cli.test.js conventions: real fixture files in a
 // temp cwd, stdout/stderr/exit-status assertions). The fixture
-// adapter is FILE-BACKED (Contract v2 with introspect()), so state —
+// adapter is FILE-BACKED (Contract v2 with catalog()), so state —
 // the `_rip_migrations` history and the statement log — survives
 // across the separate `make` and `migrate` processes; it has no
 // begin(), so the non-transactional posture surfaces exactly as a
@@ -34,52 +34,58 @@ const rip = (args, opts = {}) => {
 };
 
 // The file-backed Contract-v2 fake. State: { deployed, history, log }.
-// It answers the runner's DuckDB catalog queries from the stored
-// canonical `deployed` spec — the same shape real DuckDB reports over
-// harbor — since introspection is no longer an adapter method.
+// Its catalog() serves the stored canonical `deployed` spec as the
+// `GET /catalog` contract document — the mapping duckdb-harbor
+// performs — with a spec column's `unique` flag materialized as its
+// auto-named single-column unique index (the one shape the ORM's DDL
+// ever gives uniqueness).
 const FILEDB = `import { readFileSync, writeFileSync, existsSync } from 'fs';
 export function fileDB(path) {
   const load = () => existsSync(path)
     ? JSON.parse(readFileSync(path, 'utf8'))
     : { deployed: { tables: [] }, history: [], log: [] };
   const save = (s) => writeFileSync(path, JSON.stringify(s));
-  const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
-  const catalog = (sql, tables) => {
-    if (sql.includes('information_schema.tables')) return res(['table_name'], tables.map((t) => [t.name]));
-    if (sql.includes('information_schema.columns')) {
-      const rows = [];
-      for (const t of tables) for (const c of t.columns) rows.push([t.name, c.name, c.type, c.notNull ? 'NO' : 'YES', c.default ?? null]);
-      return res(['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows);
-    }
-    if (sql.includes('duckdb_constraints()')) {
-      const rows = [];
-      for (const t of tables) {
-        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')']);
-        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')']);
-        for (const fk of t.foreignKeys || []) rows.push([t.name, 'FOREIGN KEY', [fk.column],
-          'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')']);
-      }
-      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows);
-    }
-    if (sql.includes('duckdb_indexes()')) {
-      const rows = [];
-      for (const t of tables) for (const ix of t.indexes || []) rows.push([t.name, ix.name, ix.unique === true, ix.columns]);
-      return res(['table_name', 'index_name', 'is_unique', 'expressions'], rows);
-    }
-    if (sql.includes('duckdb_sequences()')) {
-      const rows = [];
-      for (const t of tables) if (t.sequence) rows.push([t.sequence.name, t.sequence.start]);
-      return res(['sequence_name', 'start_value'], rows);
-    }
-    return null;
-  };
+  const contractDoc = (tables) => ({
+    harborVersion: '0.9.0',
+    duckdbVersion: 'v1.5.5',
+    tables: [...tables]
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .map((t) => {
+        const indexes = (t.indexes || []).map((ix) => ({ name: ix.name, columns: [...ix.columns], unique: ix.unique === true }));
+        for (const c of t.columns) {
+          const auto = 'idx_' + t.name + '_' + c.name;
+          if (c.unique && !indexes.some((ix) => ix.name === auto)) indexes.push({ name: auto, columns: [c.name], unique: true });
+        }
+        return {
+          name: t.name,
+          schema: 'main',
+          columns: t.columns.map((c) => ({
+            name: c.name, type: c.type, notNull: c.notNull === true,
+            default: c.default ?? null, primary: c.primary === true,
+          })),
+          primaryKey: t.primaryKey != null ? [t.primaryKey] : [],
+          indexes,
+          foreignKeys: (t.foreignKeys || []).map((fk) => ({
+            columns: fk.column.split(', '), refTable: fk.refTable, refSchema: 'main',
+            refColumns: fk.refColumn != null ? fk.refColumn.split(', ') : [],
+          })),
+        };
+      }),
+    sequences: tables.filter((t) => t.sequence)
+      .map((t) => ({ name: t.sequence.name, start: t.sequence.start }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+  });
   return {
+    async catalog() {
+      const s = load();
+      s.log.push('GET /catalog');
+      save(s);
+      return contractDoc((s.deployed && s.deployed.tables) || []);
+    },
     async query(sql, params = []) {
       const s = load();
       s.log.push(sql);
       if (/FAIL_NOW/.test(sql)) { save(s); throw new Error('Parser Error: FAIL_NOW tripped'); }
-      const cat = catalog(sql, (s.deployed && s.deployed.tables) || []);
-      if (cat) { save(s); return cat; }
       let out = { columns: [], data: [], rowCount: 0 };
       if (sql.startsWith('SELECT version')) {
         out = {
