@@ -142,9 +142,9 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   Writing goes **through the join model**, never around it:
 
   ```
-  await user.addTeams! team, {role: 'member'}   # → 1  (links added)
-  await user.removeTeams! [red, blue]           # → 2  (links removed)
-  await user.setTeams! [red], {role: 'member'}  # → {added: 1, removed: 1}
+  n = user.addTeams!    team, {role: 'member'}  # → 1  (links added)
+  n = user.removeTeams! [red, blue]             # → 2  (links removed)
+  r = user.setTeams!    [red], {role: 'member'} # → {added: 1, removed: 1}
   ```
 
   Named off the ACCESSOR (`{as: labels}` → `addLabels`), because the
