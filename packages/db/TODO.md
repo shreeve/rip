@@ -495,12 +495,12 @@ transaction-scope identities. `duckdb.js` itself is runtime-portable (no
 
 ## Harbor (Rust)
 
-- [ ] **Ship v0.9.1.** The `uniqueConstraints` catalog field and the
-      version bump sit verified and uncommitted in the harbor tree;
-      the rip-side mapping already tolerates both 0.9.0 and 0.9.1
-      documents. Before any deploy to `live`: one `make check` against
-      a real v1.5.5 engine — the local suites run on the v2 alpha CLI
-      only.
+- [x] **Ship v0.9.1.** Released — the `uniqueConstraints` catalog
+      field, ten assets across five platforms; the rip-side mapping
+      tolerates both 0.9.0 and 0.9.1 documents. The full check suite
+      ran against a real v1.5.5 engine (official CLI + the
+      v1.5.5-stamped extension) with every suite green, so the
+      stable-engine precondition for deploying to `live` is met.
 - [ ] Structured constraint errors (code, table, column, constraint), so
       the ORM stops parsing English.
 - [ ] Reserve capacity for cancel/health requests so the control plane
