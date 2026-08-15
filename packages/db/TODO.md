@@ -310,9 +310,131 @@ target's key, and cross-adapter FK suppression.
 | polymorphic `belongsTo` | one FK plus a type column pointing at several models. **No workaround** |
 | single-table inheritance | one table, a discriminator column, several models. **No workaround** |
 | schema-qualified tables (`crm.accounts`) | refused with a positioned message — a dot would ride through the quoter as ONE identifier. Workaround: put the schema on the connection's search path and name the table bare |
-| explicit SQL column type (`DECIMAL(10,2)`) | types come from `__SCHEMA_SQL_TYPES`; an unrecognized field type falls through to `VARCHAR` silently. Worth a rejection of its own |
+| explicit SQL column type (`DECIMAL(10,2)`) | see **Money** below — the DDL is not the binding constraint, the wire is |
 | `CHECK` constraints | deliberately deferred: `migrate.js` does not diff CHECKs, so adding one to the column spec creates permanent undetectable drift. **Revive with:** CHECK diffing in the planner |
 | `ignored_columns` | a projection question, not a naming one — see above |
+
+The three with no workaround each need a decision before any code.
+Written out so they are not re-derived; **do not start one without
+answering its open question.**
+
+### Composite primary keys
+
+```
+Membership = schema :model
+  @primaryKey [userId, teamId]
+  userId! integer
+  teamId! integer
+```
+
+A composite key is necessarily NATURAL — nothing generates a tuple —
+so every part must be a declared required field, and the `@idStart`
+rejection already written for natural keys carries over.
+
+**Blast radius: 83 `primaryKey` references** across `orm.js` (63),
+`schema.js` (9), `types/schemas.js` (7), `migrate.js` (4). Identity
+stops being a value and becomes a tuple, which changes: `_snapshot`,
+`__schemaPersistedIdentity`, `find`/`findMany`, every
+`WHERE pk = ?`, the relation memo's identity comparison (tuples need
+`__schemaSameValue` element-wise), the `byId` maps in preload (keyed by
+a joined tuple), the RETURNING check, `projectableFields`,
+`jsonSchemaModelColumns`, and the DDL (a table-level
+`PRIMARY KEY (a, b)` instead of an inline one).
+
+**Open question: what happens to `@belongsTo` pointing AT such a
+model?** A composite FK is two columns that must be written, read,
+compared and constrained as a unit — a second feature at least as large
+as this one. The cheap answer is to REFUSE it with a message, which
+costs little because the classic composite-key table is a join table:
+it points at others, and nothing points at it. Decide this first; it is
+the difference between a contained change and an open-ended one.
+
+**Revive when:** a table that is not a join table needs one.
+
+### Polymorphic belongsTo
+
+```
+Comment = schema :model
+  body! string
+  @belongsTo Commentable, {polymorphic: true}   # commentable_id + commentable_type
+
+Post = schema :model
+  @hasMany Comment, {via: commentable}          # WHERE commentable_id = ? AND commentable_type = 'Post'
+```
+
+The target name becomes a ROLE rather than a model, and the `_type`
+column holds a model name the registry resolves. The inverse side needs
+its own option — `as:` already means "the accessor name", so Rails'
+`has_many :comments, as: :commentable` cannot be spelled that way here;
+`via:` is proposed above.
+
+**Blast radius: ~17 relation sites, zero identity sites** — the
+smallest of the three, and the only one that cannot destabilize what
+has already shipped. Eager loading groups by `_type` and issues one
+query per distinct type. No FK constraint is possible by nature, so the
+DDL emits a NOTE the way cross-adapter relations already do.
+
+**Open question: none blocking.** This one is ready to build.
+
+### Single-table inheritance
+
+```
+Vehicle = schema :model
+  @sti kind          # the discriminator column
+  wheels! integer
+
+Car = schema :model
+  @inherits Vehicle  # same table, kind = 'Car'
+  doors? integer
+```
+
+Subclass normalize = base fields ∪ own fields, base's table, base's pk.
+Subclass queries add `WHERE kind = 'Car'`; base queries hydrate each row
+into the subclass its `kind` names; INSERT writes the discriminator.
+
+**Open question, and it is a real hazard: how does the base learn its
+subclasses?** `Vehicle.toSQL()` must emit ONE table carrying the union
+of every subclass's columns, with subclass-specific ones nullable. The
+registry has no reverse lookup, and even with one, `Vehicle.toSQL()`
+called before `Car` is declared would silently emit a table missing
+Car's columns — a wrong table with no complaint, which is exactly the
+failure class the column-type rejection above was just written to end.
+
+Two candidate answers, neither free: declare the subclass columns on the
+BASE (explicit, no ordering hazard, but then the subclass is only a
+scope), or require the base to name its subtypes
+(`@subtypes [Car, Truck]`) so the DDL is complete by declaration.
+**Decide this before writing anything.**
+
+**Note first:** `@mixin` plus a literal-typed `kind` field and a
+`@defaultScope` already covers a good part of what STI is used for,
+without one table's shape depending on another module's import order.
+
+### Money
+
+**Use integer cents.** Not a placeholder — it is the only exact
+representation the current pipeline has end to end:
+
+- `integer` → `INTEGER`, exact in the column, exact on the wire, exact
+  in JS up to 2^53 cents (≈ $90 trillion), and the database can `SUM`,
+  `ORDER BY`, and compare it.
+- `number` → `DOUBLE`. Binary floating point; `0.1 + 0.2` is the whole
+  argument.
+- `~:Decimal` (from `rip/decimal`) validates and coerces exactly in JS,
+  but `typeName` is `any`, so the column is **JSON** — the database
+  cannot sum, index, or compare it.
+- An explicit `{type: "DECIMAL(9,2)"}` escape hatch would be a **trap**,
+  and this is the reason not to add one: `harbor.js` decodes only
+  temporal columns off `duckdbType` (`decodeRows`, `temporalKind`), so a
+  DECIMAL comes back as a plain JSON number. The DDL would be right and
+  every value would silently be a float. The DDL is not the binding
+  constraint — the wire is.
+
+**Revive when** more than two decimal places are needed (4dp unit
+prices, tax rates) or the database must do the rounding. The fix is then
+a real `decimal` field type mapping to `DECIMAL(p, s)` **and** a wire
+decode that reconstructs a `Decimal` — a package + runtime + harbor
+change, not a type override.
 | `dependent: :destroy` / `ON DELETE CASCADE` | behavior, not mapping. A `beforeDestroy` hook or a DB constraint covers it |
 | `belongsTo primary_key:` (FK to a non-pk column) | rare; the FK always references the target's declared key |
 | HABTM with no join model | deliberate. There is always a join table; naming it as a model is the honest form, and it is what makes `{through:}` writable |

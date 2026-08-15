@@ -3139,6 +3139,38 @@ describe('orm: runtime delivery', () => {
       expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
     });
   });
+
+  // Every column type is a DELIBERATE answer. The catch-all used to be
+  // VARCHAR, which turned a typo'd type name into a shipped column
+  // that nothing complained about at either layer.
+  test('a field type with no column form is refused, not rendered VARCHAR', async () => {
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      K4.__schema(model('Addr', field('city')));         // a :model, for the relation case
+      K4.__schema({ kind: 'shape', name: 'Point', entries: [field('x', 'integer')] });
+      K4.__schema({ kind: 'enum', name: 'Role', entries: [{ tag: 'enum-member', name: 'admin' }] });
+      K4.__schema({ kind: 'mixin', name: 'Mx', entries: [field('y')] });
+      const ddl = (f) => {
+        try { return K4.__schema(model('T' + (ddl.n = (ddl.n || 0) + 1), f)).toSQL(); }
+        catch (e) { return e.message; }
+      };
+      // the typo: nothing declares it, and it is not intrinsic
+      expect(ddl(field('a', 'stirng')))
+        .toMatch(/unknown field type 'stirng'.*no schema declares it, and it is not one of: any, boolean/s);
+      // a nested schema is an object, so it is a JSON document — the
+      // same answer the array form has always given
+      expect(ddl(field('a', 'Point'))).toContain('"a" JSON');
+      expect(ddl(field('a', 'Point', { array: true }))).toContain('"a" JSON');
+      // an enum materializes to its member value
+      expect(ddl(field('a', 'Role'))).toContain('"a" VARCHAR');
+      // a row does not nest inside a column
+      expect(ddl(field('a', 'Addr'))).toMatch(/is a :model.*@belongsTo Addr/s);
+      expect(ddl(field('a', 'Mx'))).toMatch(/is a :mixin, which has no column form/);
+      // the intrinsics still map as they did
+      expect(ddl(field('a', 'uuid'))).toContain('"a" UUID');
+      expect(ddl(field('a', 'string', { constraints: { max: 24 } }))).toContain('"a" VARCHAR(24)');
+    });
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════

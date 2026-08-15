@@ -2836,9 +2836,47 @@ const __SCHEMA_SQL_TYPES = {
   url: 'VARCHAR', uuid: 'UUID', phone: 'VARCHAR', zip: 'VARCHAR', json: 'JSON', any: 'JSON',
 };
 
-function __schemaColumnSpec(column, field) {
-  let base = __SCHEMA_SQL_TYPES[field.typeName] || 'VARCHAR';
-  if (field.array) base = 'JSON';
+// A field's declared type → its column type. Every answer is
+// DELIBERATE: there is no catch-all, because the catch-all was
+// `VARCHAR` and it turned a typo'd type name into a shipped column
+// that nothing complained about — `amt! stirng` used to render
+// `"amt" VARCHAR` and validate every value it was handed.
+//
+// Resolved at DDL time, which is the moment a column type is committed
+// and the last moment the registry can be asked. `def` is the model
+// being rendered, named only so the rejection can say where.
+function __schemaColumnType(field, def) {
+  // An array of anything is a JSON document, whatever the element is.
+  if (field.array) return 'JSON';
+  const intrinsic = __SCHEMA_SQL_TYPES[field.typeName];
+  if (intrinsic) return intrinsic;
+  const nested = __SchemaRegistry.get(field.typeName);
+  const where = ' (on ' + (def?.name || 'model') + ')';
+  if (!nested) {
+    throw new Error("schema: unknown field type '" + field.typeName + "'" + where +
+      ' — no schema declares it, and it is not one of: ' +
+      Object.keys(__SCHEMA_SQL_TYPES).sort().join(', ') +
+      '. A type Rip cannot map has no column it could honestly render');
+  }
+  switch (nested.kind) {
+    // An enum materializes to its member value, which is what the
+    // column holds — not the enum.
+    case 'enum': return 'VARCHAR';
+    // A nested schema is an object, so it is a JSON document — the
+    // same answer the array form has always given.
+    case 'shape': case 'input': case 'union': return 'JSON';
+    case 'model':
+      throw new Error("schema: field type '" + field.typeName + "'" + where +
+        ' is a :model — a row does not nest inside a column. Declare the ' +
+        'relation instead: @belongsTo ' + field.typeName);
+    default:
+      throw new Error("schema: field type '" + field.typeName + "'" + where +
+        ' is a :' + nested.kind + ', which has no column form');
+  }
+}
+
+function __schemaColumnSpec(column, field, def) {
+  let base = __schemaColumnType(field, def);
   if (base === 'VARCHAR' && field.constraints?.max != null) {
     base = 'VARCHAR(' + field.constraints.max + ')';
   }
@@ -2883,7 +2921,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
     });
   }
   for (const [n, f] of norm.fields) {
-    const col = __schemaColumnSpec(norm.columnOf.get(n), f);
+    const col = __schemaColumnSpec(norm.columnOf.get(n), f, this);
     // A natural key is an ordinary column that happens to be the
     // identity: its type, length, and default are the field's. It
     // takes PRIMARY KEY and nothing else — no sequence exists to
@@ -2913,7 +2951,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
     columns.push({
       name: rel.foreignKey,
       type: targetNorm?.primaryKeyField
-        ? __schemaColumnSpec(rel.foreignKey, targetNorm.primaryKeyField).type
+        ? __schemaColumnSpec(rel.foreignKey, targetNorm.primaryKeyField, targetDef).type
         : 'INTEGER',
       notNull: !rel.optional, unique: false, default: null, was: null,
     });
