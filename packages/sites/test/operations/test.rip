@@ -16,6 +16,12 @@ export const fileDB = (path) => {
     : { history: [], log: [] }
   const save = (state) => writeFileSync(path, JSON.stringify(state))
   return {
+    // The runner requires a catalog-capable adapter for every
+    // migration verb; this double deploys nothing, so its contract
+    // document is empty.
+    async catalog() {
+      return { harborVersion: '0.9.0', duckdbVersion: 'v1.5.5', tables: [], sequences: [] }
+    },
     async query(sql, params = []) {
       const state = load()
       state.log.push(sql)

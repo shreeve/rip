@@ -96,8 +96,9 @@ rip packages/db/example.rip
 - **`Model(table)`** — lightweight ActiveRecord SQL builder (`pk`
   defaults to `id`); schema `:model` remains the typed ORM
 - **`ping`** — `/ready` + `current_database()` health check (`rip-db status` is the CLI alias)
-- **One adapter contract** — `query` / `begin` / `capabilities`; no
-  `introspect()` — catalog SQL goes through `query`
+- **One adapter contract** — `query` / `begin` / `catalog` /
+  `capabilities`; no `introspect()` — the deployed schema comes from
+  one `GET /catalog` call (duckdb-harbor ≥ 0.9.0)
 - **Error hierarchy** — `DbError` → `QueryError` | `ConnectionError` |
   `CancelledError`, catchable with `isDbError`
 - **Temporal wire seam** — TIMESTAMP/DATE/TIMESTAMPTZ decode to real
@@ -254,9 +255,11 @@ is positional row arrays — the shape the schema ORM hydrates from.
   DuckDB rolls DDL back with the transaction
 
 There is deliberately no `introspect()` method. Schema introspection
-for migrations reads DuckDB's catalogs through `query`
-(`information_schema`, `duckdb_constraints()`, `duckdb_indexes()`,
-`duckdb_sequences()`).
+for migrations reads the whole deployed shape through **`catalog`** —
+one authenticated `GET /catalog` (duckdb-harbor ≥ 0.9.0) returning a
+stable JSON contract: tables with columns, primary keys, genuine
+`CREATE INDEX` indexes, structural foreign keys, and sequences. A 404
+from an older harbor refuses loudly and names the upgrade.
 
 Every request honors `timeoutMs` (default 30s; `0` disables) and a
 caller's `AbortSignal`. Timeouts are `ConnectionError` with code

@@ -80,61 +80,50 @@ function migrateAdapter(deployed, opts = {}) {
   // held raises the duplicate-key error the runner classifies as
   // "lock held"; release clears it; --force deletes then re-acquires.
   const lock = { held: false };
-  // Faithfully answer the DuckDB catalog queries the runner's
-  // introspect() issues, synthesizing them from the canonical `deployed`
-  // spec — exactly what real DuckDB returns over harbor, so the runner's
-  // parse/rebuild round-trips through the same path the live adapter uses.
+  // Serve the deployed spec as the `GET /catalog` contract document —
+  // the mapping duckdb-harbor performs — so the runner's introspect()
+  // round-trips through the same document shape the live adapter
+  // returns. A spec column's `unique` flag materializes as its
+  // auto-named single-column unique index, the one shape the ORM's
+  // DDL ever gives uniqueness (never inline column UNIQUE).
   const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
-  const catalogAnswer = (sql) => {
-    const tables = deployed.tables || [];
-    if (sql.includes('information_schema.tables')) {
-      return res(['table_name'], tables.map((t) => [t.name]));
-    }
-    if (sql.includes('information_schema.columns')) {
-      const rows = [];
-      for (const t of tables) for (const c of t.columns) {
-        rows.push([t.name, c.name, c.type, c.notNull ? 'NO' : 'YES', c.default ?? null]);
-      }
-      return res(['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows);
-    }
-    if (sql.includes('duckdb_constraints()')) {
-      const rows = [];
-      for (const t of tables) {
-        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')', null, null]);
-        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')', null, null]);
-        for (const fk of t.foreignKeys || []) {
-          // Real 1.5.5 FK rows carry referenced_table /
-          // referenced_column_names beside the UNQUOTED
-          // constraint_text. A canned fk can override the text
-          // (constraintText, for replaying captured catalog rows) or
-          // withhold the metadata columns (refMeta: false) to exercise
-          // the constraint-text fallback and the fail-closed path.
-          const text = fk.constraintText !== undefined ? fk.constraintText
-            : 'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')';
-          const meta = fk.refMeta === false ? [null, null] : [fk.refTable, [fk.refColumn]];
-          rows.push([t.name, 'FOREIGN KEY', [fk.column], text, ...meta]);
+  const contractDoc = () => {
+    const tables = [...(deployed.tables || [])]
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .map((t) => {
+        const indexes = (t.indexes || []).map((ix) => ({
+          name: ix.name, columns: [...ix.columns], unique: ix.unique === true,
+        }));
+        for (const c of t.columns) {
+          const auto = 'idx_' + t.name + '_' + c.name;
+          if (c.unique && !indexes.some((ix) => ix.name === auto)) {
+            indexes.push({ name: auto, columns: [c.name], unique: true });
+          }
         }
-      }
-      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text', 'referenced_table', 'referenced_column_names'], rows);
-    }
-    if (sql.includes('duckdb_indexes()')) {
-      const rows = [];
-      for (const t of tables) for (const ix of t.indexes || []) {
-        rows.push([t.name, ix.name, ix.unique === true, ix.columns]);
-      }
-      return res(['table_name', 'index_name', 'is_unique', 'expressions'], rows);
-    }
-    if (sql.includes('duckdb_sequences()')) {
-      const rows = [];
-      for (const t of tables) if (t.sequence) rows.push([t.sequence.name, t.sequence.start]);
-      return res(['sequence_name', 'start_value'], rows);
-    }
-    return null;
+        return {
+          name: t.name,
+          schema: 'main',
+          columns: t.columns.map((c) => ({
+            name: c.name, type: c.type, notNull: c.notNull === true,
+            default: c.default ?? null, primary: c.primary === true,
+          })),
+          primaryKey: t.primaryKey != null ? [t.primaryKey] : [],
+          indexes,
+          foreignKeys: (t.foreignKeys || []).map((fk) => ({
+            columns: fk.column.split(', '),
+            refTable: fk.refTable,
+            refSchema: 'main',
+            refColumns: fk.refColumn != null ? fk.refColumn.split(', ') : [],
+          })),
+        };
+      });
+    const sequences = (deployed.tables || []).filter((t) => t.sequence)
+      .map((t) => ({ name: t.sequence.name, start: t.sequence.start }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return { harborVersion: '0.9.0', duckdbVersion: 'v1.5.5', tables, sequences };
   };
   const answer = (sql, params, staged) => {
     if (opts.failOn && opts.failOn.test(sql)) throw new Error(opts.failMessage || ('injected failure: ' + sql));
-    const catalog = catalogAnswer(sql);
-    if (catalog) return catalog;
     if (sql.startsWith('DELETE FROM _rip_migration_lock')) {
       lock.held = false;
       return { columns: [], data: [], rowCount: 1 };
@@ -171,6 +160,10 @@ function migrateAdapter(deployed, opts = {}) {
     async query(sql, params = []) {
       calls.push({ sql, params });
       return answer(sql, params, null);
+    },
+    async catalog() {
+      calls.push({ sql: '<CATALOG>', params: [] });
+      return contractDoc();
     },
   };
   if (opts.tx) {
@@ -444,13 +437,13 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(missing[0].sql[0]).toContain('has no users_seq sequence in the database');
   });
 
-  // An ATTACHed database has a `main` schema of its own, so a
-  // schema-only filter reported its tables as deployed here — and the
-  // differ, finding them undeclared, planned `DROP TABLE` against a
-  // database the migration was never about. Every catalog read must
-  // name the current database.
-  test('every catalog read is scoped to the current database, not just to main', async () => {
+  // The deployed schema comes from the adapter's catalog() — one call,
+  // zero SQL — and only its `main` schema reaches the differ: the
+  // contract reports every schema in the served database, and a table
+  // from another schema, being undeclared, would read as drop-table.
+  test('introspect() is ONE catalog() call, no SQL; non-main schemas never reach the differ', async () => {
     const seen = [];
+    let catalogCalls = 0;
     const recorder = {
       capabilities: { tx: true, ddlTransactional: true },
       begin: () => { throw new Error('not used'); },
@@ -458,17 +451,26 @@ describe('migrate: the differ — step kinds and classes', () => {
         seen.push(sql);
         return { columns: [], data: [], rowCount: 0 };
       },
+      catalog: async () => {
+        catalogCalls++;
+        return {
+          harborVersion: '0.9.0', duckdbVersion: 'v1.5.5',
+          tables: [{
+            name: 'tags', schema: 'app',
+            columns: [{ name: 'id', type: 'INTEGER', notNull: true, default: null, primary: true }],
+            primaryKey: ['id'], indexes: [], foreignKeys: [],
+          }],
+          sequences: [],
+        };
+      },
     };
-    await K4.scope(async () => {
+    const deployed = await K4.scope(async () => {
       K4.setAdapter(recorder);
-      await mig.introspect();
+      return mig.introspect();
     });
-    const catalogReads = seen.filter((s) =>
-      /information_schema\.|duckdb_(constraints|indexes|sequences)\(\)/.test(s));
-    expect(catalogReads.length).toBe(5);
-    for (const sql of catalogReads) {
-      expect(sql).toContain('current_database()');
-    }
+    expect(catalogCalls).toBe(1);
+    expect(seen).toEqual([]);
+    expect(deployed.tables).toEqual([]);
   });
 
   test('the history table never enters the diff: filtered at the introspect() branch AND inside diffSchemas', async () => {
@@ -533,8 +535,8 @@ describe('migrate: the differ — step kinds and classes', () => {
 // Every pin in this block is backed by a behavior measured against
 // real DuckDB 1.5.5 (the shipped engine): the freeze surface of
 // FK-referenced and indexed tables, the ALTERs the engine still
-// permits on them, catalog constraint rendering for names that need
-// quoting, and case-insensitive identifier matching.
+// permits on them, FK references to names that need quoting, and
+// case-insensitive identifier matching.
 describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', () => {
   const run4 = (fn) => K4.scope(async () => {
     const deployedRef = { value: { tables: [] } };
@@ -675,49 +677,52 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
     expect(noise).toEqual([]);
   });
 
-  // ── FK-reference resolution for names that need quoting ───────────
-  // 1.5.5 emits the referenced table UNQUOTED in constraint_text
-  // (`… REFERENCES User Accounts(id)`) and carries the authoritative
-  // referenced_table column beside it.
+  // ── FK-reference names that need quoting ──────────────────────────
+  // The contract carries the referenced table as a STRUCTURAL field,
+  // so a name holding spaces is data, never something split out of
+  // constraint prose.
 
-  const spacedPair = (fkExtra) => async (deployedRef) => {
-    K4.__schema(model('UserAccount', dir('table', { name: 'User Accounts' }), field('name')));
-    K4.__schema(model('OrderX', dir('table', { name: 'Orders' }), field('name', 'string', { optional: true }),
-      dir('belongsTo', { target: 'UserAccount', foreignKey: 'owner_id', optional: true })));
-    deployedRef.value = { tables: [
-      table('User Accounts', [col('name', 'VARCHAR', { notNull: true }), col('stale')]),
-      table('Orders', [col('name'), col('owner_id', 'INTEGER')],
-        { foreignKeys: [{ column: 'owner_id', refTable: 'User Accounts', refColumn: 'id', ...fkExtra }] }),
-    ] };
-    return mig.plan();
-  };
-
-  test('a spaced referenced-table name resolves through referenced_table metadata: the freeze holds', async () => {
-    const r = await run4(spacedPair({}));
+  test('a spaced referenced-table name arrives structurally: the freeze holds', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('UserAccount', dir('table', { name: 'User Accounts' }), field('name')));
+      K4.__schema(model('OrderX', dir('table', { name: 'Orders' }), field('name', 'string', { optional: true }),
+        dir('belongsTo', { target: 'UserAccount', foreignKey: 'owner_id', optional: true })));
+      deployedRef.value = { tables: [
+        table('User Accounts', [col('name', 'VARCHAR', { notNull: true }), col('stale')]),
+        table('Orders', [col('name'), col('owner_id', 'INTEGER')],
+          { foreignKeys: [{ column: 'owner_id', refTable: 'User Accounts', refColumn: 'id' }] }),
+      ] };
+      return mig.plan();
+    });
     const drop = r.find((s) => s.kind === 'drop-column');
     expect(drop.table).toBe('User Accounts');
     expect(drop.class).toBe('blocked');
     expect(drop.notes.some((n) => n.includes('Orders.owner_id'))).toBe(true);
   });
 
-  test('without the metadata columns, the verbatim constraint_text resolves by longest table-name match', async () => {
-    const r = await run4(spacedPair({
-      refMeta: false,
-      constraintText: 'FOREIGN KEY (owner_id) REFERENCES User Accounts(id)',
-    }));
-    const drop = r.find((s) => s.kind === 'drop-column');
-    expect(drop.class).toBe('blocked');
-    expect(drop.notes.some((n) => n.includes('Orders.owner_id'))).toBe(true);
-  });
-
-  test('an unresolvable FOREIGN KEY target fails CLOSED: it blocks rather than passes', async () => {
-    const r = await run4(spacedPair({ refMeta: false, constraintText: '' }));
+  // The differ itself still fails CLOSED on a deployed spec whose FK
+  // target is null — a caller-built deployed side can carry one even
+  // though introspect()'s contract always names the target.
+  test('a null FOREIGN KEY target in a caller-built deployed spec blocks rather than passes', () => {
+    const declared = { tables: [
+      table('User Accounts', [col('name', 'VARCHAR', { notNull: true }), col('phone')]),
+      table('Orders', [col('name'), col('owner_id', 'INTEGER')],
+        { foreignKeys: [{ column: 'owner_id', refTable: 'User Accounts', refColumn: 'id' }] }),
+    ] };
+    const deployed = { tables: [
+      table('User Accounts', [col('name', 'VARCHAR', { notNull: true }), col('stale')]),
+      table('Orders', [col('name'), col('owner_id', 'INTEGER')],
+        { foreignKeys: [{ column: 'owner_id', refTable: null, refColumn: null }] }),
+    ] };
+    const r = mig.diffSchemas(declared, deployed);
     const drop = r.find((s) => s.kind === 'drop-column');
     expect(drop.class).toBe('blocked');
     expect(drop.notes.some((n) => n.includes('could not determine') && n.includes('Orders.owner_id'))).toBe(true);
     // The engine still permits ADD COLUMN on any table, known target or
-    // not, so exempt kinds stay unblocked.
-    expect(r.filter((s) => s.kind === 'add-column').every((s) => s.class !== 'blocked')).toBe(true);
+    // not, so the exempt kind stays unblocked.
+    const adds = r.filter((s) => s.kind === 'add-column');
+    expect(adds.length).toBe(1);
+    expect(adds[0].class).not.toBe('blocked');
   });
 
   // ── the index freeze ──────────────────────────────────────────────
@@ -1037,6 +1042,74 @@ describe('migrate: identifier ownership', () => {
       }).toThrow(/control characters/);
       expect(statements.some((sql) => /DROP TABLE audit/.test(sql))).toBe(false);
     }
+  });
+});
+
+describe('migrate: the catalog contract — the one door to the deployed schema', () => {
+  test('an adapter with no catalog() refuses plan and migrate, naming the upgrade', async () => {
+    const bare = { query: async () => ({ columns: [], data: [], rowCount: 0 }) };
+    await K4.scope(async () => {
+      K4.setAdapter(bare);
+      K4.__schema(model('User', field('name')));
+      await expect(mig.plan()).rejects
+        .toThrow(/has no catalog\(\)[\s\S]*GET \/catalog[\s\S]*duckdb-harbor >= v0\.9\.0/);
+      await expect(mig.migrate({ dir: 'does-not-matter' })).rejects
+        .toThrow(/schema\.migrate: the configured adapter has no catalog\(\)/);
+    });
+  });
+
+  // A contract document with multi-column FK arrays folds onto the
+  // spec's per-column shape — a joined column list, the first
+  // referenced column — and the freeze evidence keeps working on it.
+  test('a plan built from a contract document with multi-column FK arrays', async () => {
+    const doc = {
+      harborVersion: '0.9.0', duckdbVersion: 'v1.5.5',
+      tables: [
+        {
+          name: 'links', schema: 'main',
+          columns: [
+            { name: 'a', type: 'INTEGER', notNull: false, default: null, primary: false },
+            { name: 'b', type: 'INTEGER', notNull: false, default: null, primary: false },
+          ],
+          primaryKey: [],
+          indexes: [],
+          foreignKeys: [
+            { columns: ['a', 'b'], refTable: 'users', refSchema: 'main', refColumns: ['id', 'id'] },
+          ],
+        },
+        {
+          name: 'users', schema: 'main',
+          columns: [
+            { name: 'id', type: 'INTEGER', notNull: true, default: "nextval('users_seq')", primary: true },
+            { name: 'name', type: 'VARCHAR', notNull: false, default: null, primary: false },
+          ],
+          primaryKey: ['id'],
+          indexes: [],
+          foreignKeys: [],
+        },
+      ],
+      sequences: [{ name: 'users_seq', start: 1 }],
+    };
+    const deployed = await K4.scope(async () => {
+      K4.setAdapter({ query: async () => ({ columns: [], data: [], rowCount: 0 }), catalog: async () => doc });
+      return mig.introspect();
+    });
+    expect(deployed.tables.find((t) => t.name === 'links').foreignKeys)
+      .toEqual([{ column: 'a, b', refTable: 'users', refColumn: 'id' }]);
+    expect(deployed.tables.find((t) => t.name === 'users').sequence)
+      .toEqual({ name: 'users_seq', start: 1 });
+
+    // The multi-column FK freezes its referenced table like any other:
+    // an in-place ALTER on users blocks, named by the joined columns.
+    const declared = { tables: [
+      { name: 'links', sequence: null, primaryKey: null, tableWas: null, indexes: [],
+        columns: [col('a', 'INTEGER'), col('b', 'INTEGER')],
+        foreignKeys: [{ column: 'a, b', refTable: 'users', refColumn: 'id' }] },
+      table('users', [col('name', 'VARCHAR', { notNull: true })]),
+    ] };
+    const steps = mig.diffSchemas(declared, deployed);
+    expect(steps.map((s) => s.kind + ':' + s.class)).toEqual(['set-not-null:blocked']);
+    expect(steps[0].notes.some((n) => n.includes('links.a, b'))).toBe(true);
   });
 });
 

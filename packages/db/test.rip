@@ -865,9 +865,9 @@ test "capabilities declare transactional DDL", ->
   adapter = harborAdapter { url: 'http://h', fetch: fetchDouble({}) }
   eq adapter.capabilities, { tx: true, ddlTransactional: true }
 
-test "the adapter implements query + begin with capabilities (no introspect)", ->
+test "the adapter implements query + begin + catalog with capabilities (no introspect)", ->
   adapter = harborAdapter { url: 'http://h', fetch: fetchDouble({}) }
-  for method in ['query', 'begin']
+  for method in ['query', 'begin', 'catalog']
     eq typeof adapter[method], 'function'
   eq typeof adapter.capabilities, 'object'
   ok not ('introspect' of adapter)
@@ -1702,10 +1702,11 @@ harborFetchCert = (opts = {}) ->
   fetchFn.calls = calls
   fetchFn
 
-test "harborAdapter implements query + begin + capabilities, not introspect", ->
+test "harborAdapter implements query + begin + catalog + capabilities, not introspect", ->
   a = harborAdapter { url: 'http://h', fetch: harborFetchCert() }
   eq typeof a.query, 'function'
   eq typeof a.begin, 'function'
+  eq typeof a.catalog, 'function'
   eq a.capabilities, { tx: true, ddlTransactional: true }
   ok not ('introspect' of a)
 
@@ -2025,43 +2026,33 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
   res = (names, rows) -> { ok: true, columns: names.map((name) -> { name, duckdbType: 'VARCHAR' }), data: rows, rowCount: rows.length }
   ack = { ok: true, columns: [], data: [], rowCount: 0 }
 
-  answerCatalog = (sql) ->
-    tables = catalog.tables or []
-    if sql.includes 'information_schema.tables'
-      return res ['table_name'], tables.map (t) -> [t.name]
-    if sql.includes 'information_schema.columns'
-      rows = []
-      for t in tables
-        for c in t.columns
-          rows.push [t.name, c.name, c.type, (if c.notNull then 'NO' else 'YES'), c.default ?? null]
-      return res ['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows
-    if sql.includes 'duckdb_constraints()'
-      rows = []
-      for t in tables
-        if t.primaryKey
-          rows.push [t.name, 'PRIMARY KEY', [t.primaryKey], "PRIMARY KEY (#{t.primaryKey})"]
-        for fk in t.foreignKeys or []
-          rows.push [t.name, 'FOREIGN KEY', [fk.column], "FOREIGN KEY (#{fk.column}) REFERENCES #{fk.refTable}(#{fk.refColumn})"]
-      return res ['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows
-    if sql.includes 'duckdb_indexes()'
-      rows = []
-      for t in tables
-        for ix in t.indexes or []
-          rows.push [t.name, ix.name, ix.unique is true, ix.columns]
-      return res ['table_name', 'index_name', 'is_unique', 'expressions'], rows
-    if sql.includes 'duckdb_sequences()'
-      rows = []
-      for t in tables
-        if t.sequence
-          rows.push [t.sequence.name, t.sequence.start]
-      return res ['sequence_name', 'start_value'], rows
-    null
+  # The canned deployed spec, served as the GET /catalog contract
+  # document — the mapping duckdb-harbor performs. A spec column's
+  # `unique` flag materializes as its auto-named unique index, the one
+  # shape the ORM's DDL ever gives uniqueness.
+  contractDoc = ->
+    tables = (catalog.tables or []).toSorted (a, b) -> a.name.localeCompare b.name
+    docTables = tables.map (t) ->
+      indexes = (t.indexes or []).map (ix) -> { name: ix.name, columns: [...ix.columns], unique: ix.unique is true }
+      for c in t.columns
+        auto = "idx_#{t.name}_#{c.name}"
+        if c.unique and not indexes.some((ix) -> ix.name is auto)
+          indexes.push { name: auto, columns: [c.name], unique: true }
+      {
+        name: t.name
+        schema: 'main'
+        columns: t.columns.map (c) -> { name: c.name, type: c.type, notNull: c.notNull is true, default: c.default ?? null, primary: c.primary is true }
+        primaryKey: (if t.primaryKey? then [t.primaryKey] else [])
+        indexes
+        foreignKeys: (t.foreignKeys or []).map (fk) ->
+          { columns: fk.column.split(', '), refTable: fk.refTable, refSchema: 'main', refColumns: (if fk.refColumn? then fk.refColumn.split(', ') else []) }
+      }
+    sequences = tables.filter((t) -> t.sequence).map (t) -> { name: t.sequence.name, start: t.sequence.start }
+    { harborVersion: '0.9.0', duckdbVersion: 'v1.5.5', tables: docTables, sequences }
 
   answer = (sql, params) ->
     if failSql? and failSql.test sql
       return { ok: false, error: "Parser Error: #{sql.split('\n')[0]}", errorCode: 'PARSE_ERROR' }
-    cat = answerCatalog sql
-    return cat if cat?
     if sql.startsWith 'DELETE FROM _rip_migration_lock'
       lock.held = false
       return ack
@@ -2086,6 +2077,8 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
     calls.push { url, method, sql: body?.sql ?? null, params: body?.params ?? null, sessionId: body?.sessionId ?? null }
     if method is 'DELETE'
       return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> {}) }
+    if method is 'GET' and url.endsWith '/catalog'
+      return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> contractDoc()) }
     if url.endsWith '/sql/sessions/new'
       return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> { sessionId: 'sess-1' }) }
     reply = answer body?.sql ?? '', body?.params ?? []
@@ -2109,15 +2102,16 @@ withMigDir = (files, fn) ->
   finally
     rmSync dir, { recursive: true, force: true }
 
-test! "plan() reads the catalog through /sql and proposes a create", ->
+test! "plan() reads the deployed schema in ONE GET /catalog and proposes a create", ->
   fetch = harborMigrate { catalog: { tables: [] } }
   steps = withRunner! fetch, ({ define }) ->
     define model 'User', field('name')
     mig.plan!
   eq steps.map((s) -> "#{s.kind}:#{s.table}"), ['create-table:users']
+  catalogReads = fetch.calls.filter (c) -> c.method is 'GET' and c.url.endsWith '/catalog'
+  eq catalogReads.length, 1
   sqls = fetch.calls.map((c) -> c.sql).filter Boolean
-  ok sqls.some (s) -> s.includes 'information_schema.columns'
-  ok sqls.some (s) -> s.includes 'duckdb_constraints()'
+  eq sqls.filter((s) -> /information_schema|duckdb_(constraints|indexes|sequences)/.test s), []
 
 test! "a deployed schema matching the model plans nothing", ->
   usersDeployed =

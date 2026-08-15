@@ -801,6 +801,13 @@ Optional, feature-detected:
   the same contract, pinned to one connection. Without it,
   `schema.transaction` refuses and `rip schema migrate` warns that
   migrations apply non-transactionally.
+- `catalog()` → the deployed schema as one document —
+  `{harborVersion, duckdbVersion, tables, sequences}`, the
+  duckdb-harbor `GET /catalog` contract (harbor ≥ 0.9.0): tables with
+  columns, primary keys, genuine `CREATE INDEX` indexes, and
+  structural foreign keys. The migration verbs (`plan` / `status` /
+  `make` / `migrate`) require it and refuse loudly without it; the
+  ORM's runtime read/write path never calls it.
 - `capabilities` — a truthful object; harbor declares
   `{tx: true, ddlTransactional: true}` (DuckDB rolls DDL back with the
   transaction, so the migration runner may claim whole-file rollback).

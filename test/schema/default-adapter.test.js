@@ -268,6 +268,65 @@ describe('harbor client: what an error is allowed to say', () => {
   });
 });
 
+// The catalog door: one authenticated GET, one JSON document — and a
+// 404 that names the upgrade instead of reading as an empty schema,
+// because the endpoint's absence means the deployment predates it.
+describe('harbor client: GET /catalog', () => {
+  const doc = {
+    harborVersion: '0.9.0', duckdbVersion: 'v1.5.5',
+    tables: [{
+      name: 'users', schema: 'main',
+      columns: [{ name: 'id', type: 'INTEGER', notNull: true, default: null, primary: true }],
+      primaryKey: ['id'], indexes: [], foreignKeys: [],
+    }],
+    sequences: [],
+  };
+
+  const catalogFetch = (reply) => {
+    const calls = [];
+    const fetch = async (url, init) => {
+      calls.push({ url, method: init?.method ?? 'GET', headers: init?.headers ?? {}, body: init?.body ?? null });
+      return {
+        ok: (reply.status ?? 200) < 400,
+        status: reply.status ?? 200,
+        statusText: '',
+        text: async () => JSON.stringify(reply.json ?? {}),
+      };
+    };
+    fetch.calls = calls;
+    return fetch;
+  };
+
+  test('catalog() GETs /catalog with the bearer token and returns the document verbatim', async () => {
+    const fetch = catalogFetch({ json: doc });
+    const got = await hb.harborAdapter({ url: 'http://h', token: 'tok', fetch }).catalog();
+    expect(got).toEqual(doc);
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0].url).toBe('http://h/catalog');
+    expect(fetch.calls[0].method).toBe('GET');
+    expect(fetch.calls[0].headers['Authorization']).toBe('Bearer tok');
+    expect(fetch.calls[0].body).toBe(null);
+  });
+
+  test('a 404 names the fix — the deployment needs duckdb-harbor >= v0.9.0', async () => {
+    const fetch = catalogFetch({ status: 404, json: { error: 'not found', code: 'not_found' } });
+    const err = await hb.harborAdapter({ url: 'http://h', token: 't', fetch }).catalog().catch((e) => e);
+    expect(err.name).toBe('ConnectionError');
+    expect(err.message).toContain('/catalog');
+    expect(err.message).toContain('duckdb-harbor >= v0.9.0');
+    expect(err.httpStatus).toBe(404);
+  });
+
+  test('a non-404 failure keeps the ordinary taxonomy: a 401 is a ConnectionError, not an upgrade story', async () => {
+    const fetch = catalogFetch({ status: 401, json: { error: 'unauthorized', code: 'unauthorized' } });
+    const err = await hb.harborAdapter({ url: 'http://h', token: 'bad', fetch }).catalog().catch((e) => e);
+    expect(err.name).toBe('ConnectionError');
+    expect(err.message).toContain('unauthorized');
+    expect(err.message).not.toContain('0.9.0');
+    expect(err.httpStatus).toBe(401);
+  });
+});
+
 // Harbor draws a distinction the client has to be able to express:
 // an ABSENT timeoutMs takes the deployment default
 // (HARBOR_STATEMENT_TIMEOUT_MS), while an EXPLICIT 0 means "no limit"
