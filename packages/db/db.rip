@@ -81,12 +81,29 @@ export {
 fail = (message) ->
   throw Error.new(if String(message).startsWith('db:') then message else "db: #{message}")
 
+# snake_case → camelCase for one column name — the package's single
+# camelizer, behind the opt-in `camel` projection below. A faithful
+# local twin of the runtime's `__schemaCamel` (src/runtime/vocab.js) —
+# the same one-line transform, kept byte-identical so the two tiers can
+# never disagree on a spelling; local because this package imports only
+# the substrate, never the schema runtime. Deliberately not total: only
+# `_` followed by a lowercase letter folds, so
+#   nickname_2      → nickname_2       (digit after `_`: unchanged)
+#   _internal       → Internal         (a leading `_` folds too)
+#   legacy_ISO_CODE → legacy_ISO_CODE  (ALL-CAPS segments: unchanged)
+camelName = (name) ->
+  String(name).replace /_([a-z])/g, (m, c) -> c.toUpperCase()
+
 # The adapter's `{ columns, data }` → row objects. Each adapter column
 # is a `{ name, type }` object (harbor's shape), so a row array keys by
 # `column.name`; the materialized result reports the column names. A
 # duplicate name keeps the last value, matching the engine's projection.
-materialize = (result) ->
+# `camel` — opt-in, never automatic; the default result is untouched —
+# runs the names through `camelName` before keying, so row keys and the
+# reported `columns` cannot disagree.
+materialize = (result, camel = false) ->
   names = (result?.columns ?? []).map (column) -> column.name
+  names = names.map((name) -> camelName name) if camel
   data = result?.data ?? []
   rows = for row in data
     obj = {}
@@ -117,11 +134,12 @@ raceAbort = (signal, run) ->
 # the top-level client binds it to adapter.query, a transaction binds it
 # to the session's query, and both get identical materialization and
 # projection. The caller's signal rides along so the adapter can abort
-# the underlying request.
+# the underlying request. `opts.camel` opts the result into the
+# snake_case → camelCase key projection (see `camelName`).
 makeSurface = (run, beginTx) ->
   query = (sql, params = null, opts = {}) ->
     raw = raceAbort! opts.signal, -> run(sql, params, opts.signal)
-    materialize raw
+    materialize raw, opts.camel ?? false
   rows = (sql, params = null, opts = {}) ->
     (query!(sql, params, opts)).rows
   one = (sql, params = null, opts = {}) ->
@@ -334,9 +352,10 @@ export def begin(opts = {})
 export ident = (name) ->
   '"' + String(name).replace(/"/g, '""') + '"'
 
-# Adapter envelope `{ columns, data }` → row objects.
-export def materializeAll(result)
-  (materialize result).rows
+# Adapter envelope `{ columns, data }` → row objects. `{ camel: true }`
+# opts into the snake_case → camelCase key projection (see `camelName`).
+export def materializeAll(result, opts = {})
+  (materialize result, opts.camel ?? false).rows
 
 # ==[ Boot probe ]============================================================
 

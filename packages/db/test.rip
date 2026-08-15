@@ -17,6 +17,7 @@ import {
   createMcpServer,
 } from 'rip/db'
 import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
+import { __schemaCamel } from '../../src/runtime/vocab.js'
 import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/orm.js'
 import * as mig from '../../src/cli/migrate.js'
 
@@ -294,6 +295,18 @@ test! "ident quotes and doubles embedded quotes", ->
 
 test! "materializeAll turns an adapter envelope into row objects", ->
   eq materializeAll({ columns: [{ name: 'id' }], data: [[1], [2]], rowCount: 2 }), [{ id: 1 }, { id: 2 }]
+
+test! "materializeAll { camel: true } opts an envelope into the camel projection", ->
+  eq materializeAll({ columns: [{ name: 'user_id' }], data: [[1], [2]], rowCount: 2 }, { camel: true }), [{ userId: 1 }, { userId: 2 }]
+
+test! "module-level findAll/findOne carry { camel: true } through the default", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'first_name' }], data: [['Ada'], ['Bo']], rowCount: 2 }
+    { columns: [{ name: 'first_name' }], data: [['Ada']], rowCount: 1 }
+  ]
+  connect { adapter }
+  eq findAll!('SELECT first_name FROM u', null, { camel: true }), [{ firstName: 'Ada' }, { firstName: 'Bo' }]
+  eq findOne!('SELECT first_name FROM u', null, { camel: true }), { firstName: 'Ada' }
 
 test! "module-level transaction commits through the default client", ->
   adapter = fakeAdapter [{ columns: [{ name: 'id' }], data: [[9]], rowCount: 1 }]
@@ -854,6 +867,43 @@ test! "parameters pass straight through to the adapter", ->
   adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
   createClient!(adapter).query! 'SELECT * FROM u WHERE id = ?', [42]
   eq adapter.log[0], { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
+
+p "\nClient — the opt-in camel projection"
+
+test! "{ camel: true } projects snake_case keys and columns to camelCase", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'user_id' }, { name: 'first_name' }, { name: 'created_at' }], data: [[1, 'Ada', 'now']], rowCount: 1 }]
+  result = createClient!(adapter).query! 'SELECT user_id, first_name, created_at FROM u', null, { camel: true }
+  eq result.rows, [{ userId: 1, firstName: 'Ada', createdAt: 'now' }]
+  eq result.columns, ['userId', 'firstName', 'createdAt']
+  eq result.rowCount, 1
+
+test! "without the option the keys stay the database's own — never automatic", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'user_id' }, { name: 'first_name' }], data: [[1, 'Ada']], rowCount: 1 }
+    { columns: [{ name: 'user_id' }, { name: 'first_name' }], data: [[1, 'Ada']], rowCount: 1 }
+  ]
+  client = createClient adapter
+  eq client.query!('SELECT user_id, first_name FROM u'),
+    { rows: [{ user_id: 1, first_name: 'Ada' }], columns: ['user_id', 'first_name'], rowCount: 1 }
+  eq client.query!('SELECT user_id, first_name FROM u', null, {}),
+    { rows: [{ user_id: 1, first_name: 'Ada' }], columns: ['user_id', 'first_name'], rowCount: 1 }
+
+test! "the camel projection is not total — the edge cases stay put", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'nickname_2' }, { name: '_internal' }, { name: 'legacy_ISO_CODE' }], data: [[1, 2, 3]], rowCount: 1 }]
+  result = createClient!(adapter).query! 'SELECT * FROM t', null, { camel: true }
+  eq result.rows, [{ nickname_2: 1, Internal: 2, legacy_ISO_CODE: 3 }]
+  eq result.columns, ['nickname_2', 'Internal', 'legacy_ISO_CODE']
+
+test! "the projection agrees with the runtime's __schemaCamel, spelling for spelling", ->
+  for name in ['user_id', 'first_name', 'created_at', 'nickname_2', '_internal', 'legacy_ISO_CODE', 'mdm_id', 'a_b_c', 'ALL_CAPS']
+    expected = {}
+    expected[__schemaCamel name] = 1
+    eq materializeAll({ columns: [{ name }], data: [[1]], rowCount: 1 }, { camel: true }), [expected]
+
+test! "a transaction surface takes { camel: true } like the top-level client", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'order_id' }], data: [[5]], rowCount: 1 }]
+  camelled = createClient!(adapter).transaction! (tx) -> tx.rows! 'SELECT order_id FROM o', null, { camel: true }
+  eq camelled, [{ orderId: 5 }]
 
 p "\nClient — retrying a transaction"
 

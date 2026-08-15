@@ -112,7 +112,7 @@ var __SCHEMA_MODEL_DIRECTIVES = {
   tableWas: "name",
   primaryKey: "field"
 };
-var __SCHEMA_ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey"];
+var __SCHEMA_ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
 var __SCHEMA_RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
 var __SCHEMA_FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
 var __SCHEMA_RELATION_ATTRS = {
@@ -1009,7 +1009,7 @@ function finishModelBody(entries, fail) {
     }
     if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
-        fail(`duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
+        fail(shape === "none" ? `duplicate '@${e.name}' — declared twice; a :model declares it once` : `duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
       }
       seenOnce.add(e.name);
     }
@@ -1075,7 +1075,7 @@ function finishModelBody(entries, fail) {
       claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
       const a = e.args[0];
-      const fk = a.foreignKey ?? snakeCase(a.target) + "_id";
+      const fk = a.foreignKey ?? snakeCase(a.as ?? a.target) + "_id";
       claim(camelCase(fk), fk, `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
     }
   }
@@ -1850,8 +1850,10 @@ function foldStr(n) {
 function foldHasMixin(descriptor) {
   return descriptor.entries.some((e) => e.tag === "directive" && e.name === "mixin");
 }
-function foldFkName(target) {
-  const snake = target.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+function foldFkName(arg) {
+  if (arg.foreignKey)
+    return arg.foreignKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  const snake = (arg.as ?? arg.target).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
   return (snake + "_id").replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 function foldProjectableMap(descriptor) {
@@ -1878,9 +1880,9 @@ function foldProjectableMap(descriptor) {
     else if (e.name === "softDelete")
       softDelete = true;
     else if (e.name === "belongsTo") {
-      const t = e.args && e.args[0] && e.args[0].target;
-      if (t)
-        fks.push({ fk: foldFkName(t), required: e.args[0].optional !== true });
+      const a = e.args && e.args[0];
+      if (a && a.target)
+        fks.push({ fk: foldFkName(a), required: a.optional !== true });
     }
   }
   synth("id", "integer", true);

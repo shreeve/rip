@@ -346,6 +346,100 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     }
   });
 
+  test('dump writes schema.sql beside the entry with no adapter configured, prints the path, and two runs are byte-identical', () => {
+    const d = mkdtempSync(join(tmpdir(), 'rip-schema-dump-'));
+    try {
+      // No setAdapter, no RIP_DB_URL: dump is registry-side and must
+      // work with no database reachable.
+      writeFileSync(join(d, 'models.rip'), `export User = schema :model
+  name! string
+  email! email @unique
+
+export Order = schema :model
+  total! integer
+  @belongsTo User
+`);
+      const r = spawnSync('bun', [BIN, 'schema', 'dump', 'models.rip'], { cwd: d, encoding: 'utf8', env: ENV });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('wrote schema.sql');
+      const first = readFileSync(join(d, 'schema.sql'), 'utf8');
+      expect(first).toContain('rip schema dump'); // the generated header
+      expect(first).toContain('CREATE TABLE "users"');
+      expect(first).toContain('CREATE TABLE "orders"');
+      expect(first).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
+      // Name-sorted: orders before users.
+      expect(first.indexOf('-- orders')).toBeLessThan(first.indexOf('-- users'));
+      expect(first.endsWith('\n')).toBe(true);
+      const again = spawnSync('bun', [BIN, 'schema', 'dump', 'models.rip'], { cwd: d, encoding: 'utf8', env: ENV });
+      expect(again.status).toBe(0);
+      expect(readFileSync(join(d, 'schema.sql'), 'utf8')).toBe(first);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  test('dump --check: clean exits 0; a drifted file exits nonzero with the drift message and is NOT rewritten; a missing file exits nonzero', () => {
+    const d = mkdtempSync(join(tmpdir(), 'rip-schema-check-'));
+    try {
+      writeFileSync(join(d, 'models.rip'), 'export User = schema :model\n  name! string\n');
+      const run = (...args) => spawnSync('bun', [BIN, 'schema', ...args], { cwd: d, encoding: 'utf8', env: ENV });
+
+      const missing = run('dump', '--check', 'models.rip');
+      expect(missing.status).toBe(1);
+      expect(missing.stderr).toContain('schema.sql does not exist');
+
+      expect(run('dump', 'models.rip').status).toBe(0);
+      const clean = run('dump', '--check', 'models.rip');
+      expect(clean.status).toBe(0);
+      expect(clean.stdout).toContain('schema.sql matches the declared models');
+
+      appendFileSync(join(d, 'schema.sql'), '-- drifted\n');
+      const drifted = readFileSync(join(d, 'schema.sql'), 'utf8');
+      const drift = run('dump', '--check', 'models.rip');
+      expect(drift.status).toBe(1);
+      expect(drift.stderr).toContain('schema.sql differs from the declared models');
+      expect(drift.stderr).toContain('rip schema dump');
+      // Check mode writes nothing — the drifted bytes stay.
+      expect(readFileSync(join(d, 'schema.sql'), 'utf8')).toBe(drifted);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  test('dump --out targets an explicit file; --out/--check on other verbs exit 2; --help mentions dump; zero models refuse', () => {
+    const d = mkdtempSync(join(tmpdir(), 'rip-schema-out-'));
+    try {
+      writeFileSync(join(d, 'models.rip'), 'export User = schema :model\n  name! string\n');
+      const run = (...args) => spawnSync('bun', [BIN, 'schema', ...args], { cwd: d, encoding: 'utf8', env: ENV });
+
+      const out = run('dump', 'models.rip', '--out', 'declared.sql');
+      expect(out.status).toBe(0);
+      expect(out.stdout).toContain('wrote declared.sql');
+      expect(readFileSync(join(d, 'declared.sql'), 'utf8')).toContain('CREATE TABLE "users"');
+      expect(existsSync(join(d, 'schema.sql'))).toBe(false);
+
+      const misOut = run('plan', '--out', 'x.sql');
+      expect(misOut.status).toBe(2);
+      expect(misOut.stderr).toContain('--out only applies to dump');
+      const misCheck = run('status', '--check');
+      expect(misCheck.status).toBe(2);
+      expect(misCheck.stderr).toContain('--check only applies to dump');
+
+      const help = run('--help');
+      expect(help.status).toBe(0);
+      expect(help.stdout).toContain('rip schema dump');
+      expect(help.stdout).toContain('--check');
+
+      writeFileSync(join(d, 'nomodels.rip'), 'x = 1\n');
+      const none = run('dump', 'nomodels.rip');
+      expect(none.status).toBe(1);
+      expect(none.stderr).toContain('no :model schemas are registered');
+      expect(existsSync(join(d, 'schema.sql'))).toBe(false); // no empty file
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   test('the differ rejections surface through the CLI as loud exit-1 failures (an ambiguous rename)', () => {
     write('filedb.js', FILEDB);
     write('ambig.rip', `import { fileDB } from "./filedb.js"

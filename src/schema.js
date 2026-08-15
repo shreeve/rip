@@ -996,7 +996,12 @@ function finishModelBody(entries, fail) {
     }
     if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
-        fail(`duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
+        // Argument-less once-directives (@timestamps, @softDelete) have
+        // no second value to override; the duplicate is still refused —
+        // it declares itself once.
+        fail(shape === 'none'
+          ? `duplicate '@${e.name}' — declared twice; a :model declares it once`
+          : `duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
       }
       seenOnce.add(e.name);
     }
@@ -1079,13 +1084,15 @@ function finishModelBody(entries, fail) {
     if (e.tag !== 'directive') continue;
     if (e.name === 'timestamps') { claim('createdAt', 'created_at', '@timestamps', e.start); claim('updatedAt', 'updated_at', '@timestamps', e.start); }
     else if (e.name === 'softDelete') claim('deletedAt', 'deleted_at', '@softDelete', e.start);
-    // A custom foreignKey claims THAT column, not the derived one — two
-    // relations to one model are only expressible if each owns its own.
-    // A `through` relation owns no column here at all: its foreign keys
-    // live on the join model.
+    // The claimed column mirrors the runtime's derivation: an explicit
+    // foreignKey names it directly; otherwise it derives from the
+    // ACCESSOR (`as:` if present, else the target) — which is what
+    // lets two relations to one model coexist with no explicit keys.
+    // A `through` relation owns no column here at all: its foreign
+    // keys live on the join model.
     else if (e.name === 'belongsTo') {
       const a = e.args[0];
-      const fk = a.foreignKey ?? snakeCase(a.target) + '_id';
+      const fk = a.foreignKey ?? snakeCase(a.as ?? a.target) + '_id';
       claim(camelCase(fk), fk,
         `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ''} relation`, e.start);
     }
@@ -1971,10 +1978,13 @@ function foldHasMixin(descriptor) {
   return descriptor.entries.some((e) => e.tag === 'directive' && e.name === 'mixin');
 }
 
-// The `@belongsTo <Target>` FK column name, computed exactly as the
-// runtime does (`__schemaCamel(__schemaFkName(target))` in orm.js).
-function foldFkName(target) {
-  const snake = target.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+// The `@belongsTo` FK property name, computed exactly as the runtime
+// does (`__schemaCamel(rel.foreignKey)` in orm.js): an explicit
+// foreignKey camelizes verbatim; otherwise the column derives from
+// the ACCESSOR (`as:` if present, else the target).
+function foldFkName(arg) {
+  if (arg.foreignKey) return arg.foreignKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  const snake = (arg.as ?? arg.target).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
   return (snake + '_id').replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
@@ -2000,8 +2010,8 @@ function foldProjectableMap(descriptor) {
     if (e.name === 'timestamps') timestamps = true;
     else if (e.name === 'softDelete') softDelete = true;
     else if (e.name === 'belongsTo') {
-      const t = e.args && e.args[0] && e.args[0].target;
-      if (t) fks.push({ fk: foldFkName(t), required: e.args[0].optional !== true });
+      const a = e.args && e.args[0];
+      if (a && a.target) fks.push({ fk: foldFkName(a), required: a.optional !== true });
     }
   }
   // Insertion order mirrors the runtime: id, timestamps, softDelete, then FKs.

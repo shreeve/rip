@@ -124,9 +124,12 @@ const __SCHEMA_MODEL_DIRECTIVES = {
   primaryKey: 'field',
 };
 
-// Directives a :model may declare at most once — a second one would
-// silently last-win in the runtime's read loops.
-const __SCHEMA_ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey'];
+// Directives a :model declares at most once. For the argument-carrying
+// ones a second occurrence would silently last-win in the runtime's
+// read loops; for the argument-less pair (@timestamps, @softDelete) a
+// second occurrence is a duplicate declaration of a once-thing — both
+// layers reject it rather than tolerating it idempotently.
+const __SCHEMA_ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 'timestamps', 'softDelete'];
 
 // Plain arrays, not Sets: at this size `includes` beats a hash lookup
 // and the error messages below `.join(', ')` them directly instead of
@@ -160,10 +163,13 @@ const __SCHEMA_FIELD_ATTRS = { __proto__: null, column: 'literal', was: 'column'
 
 // A relation's options.
 //   as:         the accessor name. Without it the accessor derives from
-//               the TARGET, so two relations to one model collide —
-//               this is what lets `author` and `reviewer` both reach User.
-//   foreignKey: the FK COLUMN. Without it the column derives from the
-//               target (belongsTo) or the owner (hasOne/hasMany/through).
+//               the TARGET — this is what lets `author` and `reviewer`
+//               both reach User.
+//   foreignKey: the FK COLUMN. Without it, a belongsTo derives it from
+//               the ACCESSOR (`{as: reviewer}` → reviewer_id; no as: →
+//               the target), so two named relations to one model carry
+//               their own columns; hasOne/hasMany/through derive from
+//               the OWNER.
 //   through:    the JOIN MODEL a @hasMany/@hasOne reads through.
 //   targetKey:  the join model's column pointing at the TARGET. `through`
 //               only; without it, the join model's own @belongsTo says.

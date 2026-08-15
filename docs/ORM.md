@@ -343,13 +343,18 @@ bare model name); `{targetKey:}` names the target-side column on the
 join table (quoted; requires `through`). A trailing `?` on the target
 (`Partner?`) makes the relation optional — the FK column is nullable.
 
-Accessor names default off the target model, which is why two relations
-to one model collide without `{as:}`:
+Accessor names default off the target model; `{as:}` names the role,
+and on a `@belongsTo` the FK column follows the role — `{as: reviewer}`
+derives `reviewer_id`, so two relations to one model each carry their
+own column with no further spelling:
 
 ```rip
-@belongsTo User, {as: author,   foreignKey: "author_id"}
-@belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}
+@belongsTo User, {as: author}      # author_id
+@belongsTo User, {as: reviewer}    # reviewer_id
 ```
+
+An explicit `{foreignKey: "..."}` always wins — it is the door for a
+column the database already owns under another name.
 
 Accessors are async and memoized per instance:
 
@@ -699,6 +704,15 @@ whose insert half cannot succeed has not destroyed the links it was
 replacing. Every write invalidates the owner's relation cache,
 including sibling accessors reading through the same join model.
 
+A model used as `{through:}` is a **link table by declaration**, and its
+DDL says so: `toSQL()` derives a unique index over the link pair
+(`idx_memberships_team_id_user_id`), so the same link cannot exist
+twice — even when two processes race to add it, which no client-side
+check can prevent. `addX` treats the resulting unique violation as the
+no-op it means. Declaring `@unique [ownerFk, targetFk]` yourself is the
+same index (no double emit); a plain `@index` over the pair is refused —
+the pair must be unique.
+
 ## Transactions
 
 ```rip
@@ -868,7 +882,12 @@ result.rows    # [{partner_id: 3, n: 17}, …]
 
 Raw rows are the database's own spellings — snake_case keys, plain
 objects, not instances: no hooks, no dirty tracking, no accessors.
-Bridge back to instances by primary key when you need them:
+Rows headed straight for a camelCase frontend can opt into a projection
+per call — `query! sql, params, {camel: true}` camelizes row keys and
+the `columns` list together (opt-in only; the transform matches the
+runtime's own camelizer, with the same non-total edges: `nickname_2`
+and `ALL_CAPS` stay put). Bridge back to instances by primary key when
+you need them:
 
 ```rip
 ids = (query! 'SELECT id FROM orders WHERE total > ? ORDER BY total DESC LIMIT 10', floor)

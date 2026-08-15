@@ -28,7 +28,7 @@
 // where the host has none.
 
 import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
-import { harborAdapter } from './duckdb.js';
+import { harborAdapter, decodeTemporal } from './duckdb.js';
 import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCanonicalName, __schemaAttrValueError, __SCHEMA_MODEL_DIRECTIVES, __SCHEMA_ONCE_DIRECTIVES, __SCHEMA_RELATION_DIRECTIVES, __SCHEMA_FIELD_ATTRS, __SCHEMA_RELATION_ATTRS } from './vocab.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
@@ -40,7 +40,12 @@ import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCano
 // a name can never break out of the identifier). The trusted string
 // overloads of where()/order() sit outside this helper by owner
 // decision O4; every other identifier the builder interpolates for a
-// caller passes through here.
+// caller passes through here. Namespace honesty: every `what` at a
+// call site names a COLUMN position and every name reaching this
+// helper IS a column — keys a caller may spell as camelCase
+// properties (where/order/updateAll) resolve and reject through
+// __schemaCallerColumn first, so the snake_case inventory below is
+// never shown to someone who wrote property names.
 function __schemaQuoteIdent(name, allowed, what) {
   if (typeof name !== 'string') {
     throw new Error('schema: ' + what + ' must be a string column name; got ' + (name === null ? 'null' : typeof name));
@@ -373,22 +378,45 @@ function __schemaFieldFor(norm, column) {
   return norm.fieldOf.get(column) ?? __schemaCamel(column);
 }
 
+// A structured key the CALLER wrote (where()/order()/updateAll()):
+// resolved property→column, then validated and quoted exactly as
+// every other structured identifier. The rejection speaks the
+// caller's namespace — it echoes the key AS WRITTEN and inventories
+// the model's property names (each with its column beside it where
+// the spellings differ), instead of echoing a snake_case derivation
+// of a name nobody wrote over a column list nobody typed.
+function __schemaCallerColumn(norm, key, allowed, what) {
+  const column = __schemaColumnFor(norm, key);
+  if (typeof column === 'string' && !/[\u0000-\u001f\u007f]/.test(column) &&
+      allowed !== null && !allowed.has(column)) {
+    const known = [...allowed].sort().map((col) => {
+      const prop = __schemaFieldFor(norm, col);
+      return prop === col ? col : prop + ' (column ' + col + ')';
+    }).join(', ');
+    throw new Error('schema: unknown ' + what + " '" + key + "' — known: " + known);
+  }
+  return __schemaQuoteIdent(column, allowed, what);
+}
+
 function __schemaNormalizeDirectiveRelation(def, directive) {
   const name = directive.name;
   if (!__SCHEMA_RELATION_DIRECTIVES.includes(name)) return null;
   const a = directive.args[0];
   const target = a.target;
   const targetLc = target[0].toLowerCase() + target.slice(1);
-  // Both defaults derive from a MODEL name, which is why two relations
-  // to one model collide without overrides: same accessor, same column.
-  // `as:` renames the accessor, `foreignKey:` the column — supply both
-  // and `author` and `reviewer` can each reach User independently.
+  // A belongsTo's FK column derives from its ACCESSOR — the name the
+  // relation goes by: `@belongsTo User` reads user_id, and
+  // `{as: reviewer}` reads reviewer_id, so two relations to one model
+  // coexist with no explicit keys. An explicit `{foreignKey:}` names
+  // the column directly and always wins. hasOne/hasMany keys live on
+  // the OTHER table and name the OWNER — `as:` never described them.
   const optional = !!a.optional;
   if (name === 'belongsTo') {
+    const accessor = a.as ?? targetLc;
     return {
       kind: 'belongsTo', target, optional,
-      accessor: a.as ?? targetLc,
-      foreignKey: a.foreignKey ?? __schemaFkName(target),
+      accessor,
+      foreignKey: a.foreignKey ?? __schemaFkName(accessor),
     };
   }
   // A `through` relation owns no column on either end — both foreign
@@ -604,9 +632,14 @@ function finishModelNorm(def, norm) {
     __schemaValidateDirectiveArgs(def, d);
     if (__SCHEMA_ONCE_DIRECTIVES.includes(d.name)) {
       if (seenOnce.has(d.name)) {
+        // Same verdict as the compiler: an argument-less once-directive
+        // (@timestamps, @softDelete) has no second value to override;
+        // the duplicate is still refused — it declares itself once.
         throw __schemaModelError(def, '', 'directive',
-          "duplicate '@" + d.name + "' — a :model declares it at most once " +
-          '(the second would silently override the first)');
+          __SCHEMA_MODEL_DIRECTIVES[d.name] === 'none'
+            ? "duplicate '@" + d.name + "' — declared twice; a :model declares it once"
+            : "duplicate '@" + d.name + "' — a :model declares it at most once " +
+              '(the second would silently override the first)');
       }
       seenOnce.add(d.name);
     }
@@ -768,6 +801,23 @@ function finishModelNorm(def, norm) {
   if (softDelete) claim('deletedAt', 'deleted_at', '@softDelete');
   norm.columnOf = columnOf;
   norm.fieldOf = fieldOf;
+  // The properties whose DECLARED type is temporal — the set hydrate
+  // and row absorption coerce through __schemaCoerceTemporal. An array
+  // field is a JSON document whatever its element type, so it is
+  // excluded; @timestamps / @softDelete columns are datetime by
+  // definition.
+  const temporalOf = new Map();
+  for (const [n, f] of norm.fields) {
+    if (f.array !== true && (f.typeName === 'date' || f.typeName === 'datetime')) {
+      temporalOf.set(n, f.typeName);
+    }
+  }
+  if (timestamps) {
+    temporalOf.set('createdAt', 'datetime');
+    temporalOf.set('updatedAt', 'datetime');
+  }
+  if (softDelete) temporalOf.set('deletedAt', 'datetime');
+  norm.temporalOf = temporalOf;
   const known = new Set(fieldOf.keys());
   // The field's own `{column:}` is what the table has, so it wins — and
   // a second, different one on the directive is two answers to one
@@ -1113,9 +1163,10 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
   const als = await __schemaTxALSGet();
 
   const handle = await adapter.begin(opts);
-  // `after` collects {def, inst} for every save/destroy completed
-  // inside the transaction on a model declaring afterCommit /
-  // afterRollback.
+  // `after` collects {def, inst, restore} for every save/destroy/
+  // restore/upsert completed inside the transaction on a model
+  // declaring afterCommit / afterRollback; `restore` is the instance
+  // state a ROLLBACK puts back.
   const store = { adapter, handle, after: [] };
   // Copy-on-run: other adapters' ambient contexts stay visible inside
   // the block; only this adapter's slot is (re)bound.
@@ -1126,10 +1177,39 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
     result = await als.run(nextMap, fn);
   } catch (err) {
     try { await handle.rollback(); } catch {}
-    await __schemaFlushTxHooks(store, 'afterRollback');
+    // The database revoked the transaction's writes; the enqueued
+    // instances go back to their recorded pre-write state BEFORE the
+    // hooks run, so afterRollback observes truth.
+    __schemaRollbackTxState(store);
+    try {
+      await __schemaFlushTxHooks(store, 'afterRollback');
+    } catch (hookErr) {
+      // The block's error is the transaction's outcome; a throwing
+      // afterRollback hook reports through its cause chain rather
+      // than replacing it.
+      __schemaAttachCause(err, hookErr);
+    }
     throw err;
   }
-  await handle.commit();
+  try {
+    await handle.commit();
+  } catch (e) {
+    // The COMMIT itself failed, so the outcome is genuinely UNKNOWN:
+    // the database may have made the writes durable and lost only the
+    // acknowledgment, or may have discarded them. Neither hook family
+    // runs — each would assert an outcome nobody observed — and
+    // instance state is NOT restored: unknown is not rolled-back, and
+    // un-persisting rows that may exist would manufacture a different
+    // lie. The caller must verify the rows before retrying.
+    const models = [...new Set(store.after.map((entry) => entry.def.name || '(anonymous model)'))];
+    const err = new Error(
+      'schema: COMMIT failed — the transaction outcome is indeterminate: the writes' +
+      (models.length ? ' to ' + models.join(', ') : '') +
+      ' may or may not have been applied. Neither afterCommit nor afterRollback hooks ran; ' +
+      'verify the rows before retrying. (' + ((e && e.message) || String(e)) + ')');
+    err.cause = e;
+    throw err;
+  }
   // afterCommit runs OUTSIDE the transaction — exceptions here
   // propagate but cannot roll anything back: the COMMIT already
   // happened.
@@ -1158,13 +1238,19 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
 // single `Count` column carries the affected rows — so the envelope's
 // own `rowCount` is 1 for every such statement, including one that
 // matched nothing at all. Reading it reported "1 row changed" whatever
-// happened. Take the number DuckDB actually returned, and fall back to
-// `rowCount` for an adapter that answers some other way.
+// happened. The Count shape is the one AFFIRMATIVE affected-rows
+// answer in the contract: `rowCount` counts RESULT rows (harbor
+// derives it from data.length), and a mutation without RETURNING
+// legitimately answers an empty result set whatever it matched — so a
+// bare `rowCount: 0` is "the adapter did not say", never "zero rows
+// were affected". The instance write paths (save/destroy/restore)
+// treat only an affirmed 0 as proof the row is gone; a truthless
+// adapter keeps its statements un-judged.
 //
 // Harbor sends integers past 2^53-1 as strings so they survive JSON;
 // a bulk mutation is nowhere near that, but coerce rather than hand
 // back a count whose type depends on its magnitude.
-function __schemaAffectedRows(res) {
+function __schemaAffirmedRowCount(res) {
   const cols = res?.columns;
   const data = res?.data;
   if (Array.isArray(cols) && cols.length === 1 && Array.isArray(data) && data.length === 1) {
@@ -1175,7 +1261,26 @@ function __schemaAffectedRows(res) {
       if (typeof n === 'bigint' || typeof n === 'string') return Number(n);
     }
   }
+  return null;
+}
+
+function __schemaAffectedRows(res) {
+  const affirmed = __schemaAffirmedRowCount(res);
+  if (affirmed !== null) return affirmed;
   return res?.rowCount ?? res?.rows ?? null;
+}
+
+// An instance write whose WHERE targeted the snapshot pk affirmed
+// ZERO rows: the row is GONE — deleted, or re-keyed by someone else —
+// not "no change". The instance is stale; it stops claiming a
+// persisted state the database revoked.
+function __schemaStaleRowError(def, api, pk, identity) {
+  return new SchemaError([{
+    field: pk,
+    error: 'stale',
+    message: 'schema: ' + api + ' on ' + (def.name || 'model') + ' ' + pk + '=' + String(identity) +
+      ' matched no row — the row no longer exists (stale instance); _persisted is now false',
+  }], def.name, def.kind);
 }
 
 // DuckDB's UPDATE and DELETE take a WHERE and nothing else — there is
@@ -1207,28 +1312,106 @@ async function __schemaAdoptTransaction(adapter, handle, fn) {
   // contexts stay visible; only this adapter's slot is bound.
   const next = new Map(als.getStore() || []);
   next.set(adapter, store);
-  return als.run(next, () => fn((outcome) => __schemaFlushTxHooks(store, outcome)));
+  return als.run(next, () => fn(async (outcome) => {
+    // The caller settles AFTER its COMMIT/ROLLBACK landed, so the
+    // transaction is over: unbind this adapter's ambient slot before
+    // any hook runs. A hook's own writes then go to autocommit and
+    // settle immediately — identical semantics to the native path,
+    // where the flush runs after als.run exits. A slot left bound
+    // would route hook statements to the dead handle and let the
+    // flush queue extend itself without bound.
+    next.delete(adapter);
+    if (outcome === 'afterRollback') __schemaRollbackTxState(store);
+    return __schemaFlushTxHooks(store, outcome);
+  }));
 }
 
+// Flush the queued commit/rollback callbacks against a SNAPSHOT of
+// the queue. Both transaction paths unbind the adapter's ambient slot
+// before flushing, so an entry can no longer arrive mid-flush — a
+// hook's own writes ran post-commit and settle immediately as
+// autocommit statements — and the snapshot keeps the flush finite
+// against any store something still appends to. Dedupe by instance: a
+// row saved twice in one transaction gets one callback. One hook
+// throwing must not cancel the rest: every queued callback runs, and
+// the failures rethrow after the flush (several aggregate).
 async function __schemaFlushTxHooks(store, hookName) {
-  // Dedupe by instance: a row saved twice in one transaction gets one
-  // callback.
+  const entries = store.after.slice();
   const seen = new Set();
-  for (const entry of store.after) {
+  const failures = [];
+  for (const entry of entries) {
     if (seen.has(entry.inst)) continue;
     seen.add(entry.inst);
-    await __schemaRunHook(entry.def, entry.inst, hookName);
+    try {
+      await __schemaRunHook(entry.def, entry.inst, hookName);
+    } catch (e) {
+      failures.push(e);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures,
+      'schema: ' + failures.length + ' ' + hookName + ' hooks threw');
+  }
+}
+
+// The instance state a ROLLBACK must put back, captured by each write
+// operation BEFORE it changes anything and carried on its queue entry.
+function __schemaTxRestorePoint(norm, inst) {
+  return {
+    persisted: inst._persisted,
+    snapshot: inst._snapshot,
+    pkValue: inst[norm.primaryKey],
+  };
+}
+
+// ROLLBACK revoked every row the transaction wrote, so each enqueued
+// instance goes back to the state captured when its FIRST in-tx write
+// began (entries are chronological; the first wins the dedupe) —
+// afterRollback hooks observe what the database now holds, never a
+// revoked id or snapshot. An instance created inside the transaction
+// returns to _persisted=false with no pk, so a post-rollback save()
+// takes the INSERT arm and re-creates: Active-Record semantics.
+function __schemaRollbackTxState(store) {
+  const seen = new Set();
+  for (const entry of store.after) {
+    if (seen.has(entry.inst) || !entry.restore) continue;
+    seen.add(entry.inst);
+    const { def, inst, restore } = entry;
+    inst._persisted = restore.persisted;
+    inst._snapshot = restore.snapshot;
+    const pk = def._normalize().primaryKey;
+    if (restore.pkValue === undefined) {
+      if (pk in inst) delete inst[pk];
+    } else {
+      inst[pk] = restore.pkValue;
+    }
+  }
+}
+
+// Append `extra` at the first free `cause` link of `err`'s chain (the
+// codebase's error idiom), bounded against pathological chains. A
+// non-Error throw carries no cause slot; the original still surfaces.
+function __schemaAttachCause(err, extra) {
+  let node = err;
+  for (let hops = 0; hops < 16 && node instanceof Error; hops++) {
+    if (node.cause === undefined) {
+      try { node.cause = extra; } catch {}
+      return;
+    }
+    node = node.cause;
   }
 }
 
 // Queue an instance's commit-time hooks on the ambient transaction
-// for ITS adapter. Returns false when no transaction is open — the
-// caller fires afterCommit immediately (outside a transaction, the
-// statement is the commit).
-function __schemaEnqueueTxHook(def, inst) {
+// for ITS adapter, with the pre-write state a rollback restores.
+// Returns false when no transaction is open — the caller fires
+// afterCommit immediately (outside a transaction, the statement is
+// the commit).
+function __schemaEnqueueTxHook(def, inst, restorePoint) {
   const tx = __schemaTxStore(__schemaAdapterFor(def));
   if (!tx) return false;
-  tx.after.push({ def, inst });
+  tx.after.push({ def, inst, restore: restorePoint });
   return true;
 }
 
@@ -1340,7 +1523,7 @@ class __SchemaQuery {
       const norm = this._def._normalize();
       for (const [k, v] of Object.entries(cond)) {
         const column = __schemaColumnFor(norm, k);
-        const col = __schemaQuoteIdent(column, norm.columns, 'filter column');
+        const col = __schemaCallerColumn(norm, k, norm.columns, 'where() key');
         // Either spelling reaches the field record, the same way either
         // spelling reaches the column.
         const field = norm.fields.get(__schemaFieldFor(norm, column));
@@ -1409,7 +1592,7 @@ class __SchemaQuery {
           'object, or an array of them; got ' + (entry === null ? 'null' : typeof entry));
       }
       for (const [k, dir] of Object.entries(entry)) {
-        parts.push(__schemaQuoteIdent(__schemaColumnFor(norm, k), norm.columns, 'order column') +
+        parts.push(__schemaCallerColumn(norm, k, norm.columns, 'order() key') +
           ' ' + __schemaOrderDir(dir, k));
       }
     }
@@ -1497,7 +1680,7 @@ class __SchemaQuery {
     for (const k of keys) {
       const column = __schemaColumnFor(n, k);
       const field = n.fields.get(__schemaFieldFor(n, column));
-      const quoted = __schemaQuoteIdent(column, n.callerWritableColumns, 'updateAll column');
+      const quoted = __schemaCallerColumn(n, k, n.callerWritableColumns, 'updateAll() key');
       sets.push(quoted + ' = ?');
       params.push(__schemaSerialize(values[k], field));
     }
@@ -1787,6 +1970,16 @@ function __schemaThroughInvalidate(def, inst, rel, acc) {
 // Linking something already linked is a no-op rather than a second
 // row — duplicate join rows would show up as duplicate targets on the
 // read side, which nothing else in the relation surface produces.
+//
+// The check-then-insert has an await between its halves, so two
+// concurrent adds of one tuple can both read "not linked". When the
+// join table carries a unique pair index (the deployment-side
+// recommendation), the loser's INSERT draws a unique violation that
+// MEANS "already linked": the loop below re-reads and retries only
+// what is still missing, so the add reports the rows it actually
+// wrote — usually 0. Without that index the race stands (two rows
+// land); closing it is a DDL decision the deployment owns, not
+// something a JS-side guard can reach across processes.
 async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
   const api = 'add' + acc[0].toUpperCase() + acc.slice(1) + '()';
   const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
@@ -1801,13 +1994,45 @@ async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
     throw new Error('schema: ' + api + ' attrs must be a plain object of ' + rel.through +
       ' columns; got ' + (attrs === null ? 'null' : typeof attrs));
   }
-  await plan.join.insertMany(fresh.map((id) => ({
+  const joinRow = (id) => ({
     ...(attrs || {}),
     [ownerField]: plan.identity,
     [targetField]: id,
-  })));
-  __schemaThroughInvalidate(def, inst, rel, acc);
-  return fresh.length;
+  });
+  let added = 0;
+  let toLink = fresh;
+  try {
+    while (toLink.length) {
+      try {
+        await plan.join.insertMany(toLink.map(joinRow));
+        added += toLink.length;
+        break;
+      } catch (e) {
+        if (!__schemaIsUniqueViolation(e)) throw e;
+        // insertMany is one statement, so nothing landed. Re-read: a
+        // shrunken missing set proves the violation was this race (the
+        // tuples now exist, which is what the caller asked for); no
+        // shrink means something else tripped a unique constraint (an
+        // attrs column, say) — that violation rethrows untouched.
+        const nowLinked = await __schemaThroughLinked(def, rel, plan);
+        const missing = toLink.filter((id) => !nowLinked.has(id));
+        if (missing.length === toLink.length) throw e;
+        toLink = missing;
+      }
+    }
+  } finally {
+    // Attempted SQL always invalidates: even a raced no-op just
+    // learned the join rows changed under it.
+    __schemaThroughInvalidate(def, inst, rel, acc);
+  }
+  return added;
+}
+
+// A translated DB unique violation (__schemaConstraintIssue's 'unique'
+// classification) — the shape addX's race handling keys on.
+function __schemaIsUniqueViolation(e) {
+  return e instanceof SchemaError && Array.isArray(e.issues) &&
+    e.issues.some((issue) => issue.error === 'unique');
 }
 
 async function __schemaThroughRemove(def, inst, rel, acc, items) {
@@ -1914,14 +2139,16 @@ async function __schemaRunHook(def, inst, name) {
   if (fn) await fn.call(inst);
 }
 
-// After a successful save/destroy: queue afterCommit/afterRollback on
-// the ambient transaction, or fire afterCommit immediately when no
+// After a successful save/destroy/restore/upsert: queue afterCommit/
+// afterRollback on the ambient transaction (with the pre-write state
+// a rollback restores), or fire afterCommit immediately when no
 // transaction is open. Only models declaring one of the two hooks pay
-// any cost here.
-async function __schemaSettleTxHooks(def, inst) {
+// any cost here — which also scopes rollback state restoration to
+// exactly the instances with an observer.
+async function __schemaSettleTxHooks(def, inst, restorePoint) {
   const hooks = def._normalize().hooks;
   if (!hooks.has('afterCommit') && !hooks.has('afterRollback')) return;
-  if (!__schemaEnqueueTxHook(def, inst)) {
+  if (!__schemaEnqueueTxHook(def, inst, restorePoint)) {
     await __schemaRunHook(def, inst, 'afterCommit');
   }
 }
@@ -1943,6 +2170,7 @@ async function __schemaSave(def, inst) {
   const norm = def._normalize();
   const isNew = !inst._persisted;
   const persistedIdentity = isNew ? null : __schemaPersistedIdentity(def, inst, 'save()');
+  const restorePoint = __schemaTxRestorePoint(norm, inst);
 
   await __schemaRunHook(def, inst, 'beforeValidation');
   const validated = await def._runExistingAsync(inst, {
@@ -2123,8 +2351,9 @@ async function __schemaSave(def, inst) {
       const sql = 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
         ' SET ' + sets.join(', ') + ' WHERE ' +
         __schemaQuoteIdent(pk, norm.columns, 'primary key') + ' = ?';
+      let res;
       try {
-        await __schemaRunSQL(def, sql, values);
+        res = await __schemaRunSQL(def, sql, values);
       } catch (e) {
         // The database refused the write, so nothing changed: the
         // reported diff and the managed timestamp go back to their
@@ -2132,6 +2361,18 @@ async function __schemaSave(def, inst) {
         inst.savedChanges = priorChanges;
         if (tsBumped) inst.updatedAt = priorUpdatedAt;
         throw e;
+      }
+      // An affirmed zero means the row is gone (the WHERE targets the
+      // snapshot pk): same restoration as a refused write, plus
+      // _persisted drops — the instance stops claiming a row the
+      // database revoked. A later save() on it rejects the retained
+      // pk as caller-supplied, exactly like any unsaved instance
+      // carrying a surrogate id.
+      if (__schemaAffirmedRowCount(res) === 0) {
+        inst.savedChanges = priorChanges;
+        if (tsBumped) inst.updatedAt = priorUpdatedAt;
+        inst._persisted = false;
+        throw __schemaStaleRowError(def, 'save()', norm.primaryKey, persistedIdentity);
       }
       inst._snapshot = nextSnap;
       for (const [name, version] of dirtyVersions) {
@@ -2143,12 +2384,40 @@ async function __schemaSave(def, inst) {
   if (isNew) await __schemaRunHook(def, inst, 'afterCreate');
   else       await __schemaRunHook(def, inst, 'afterUpdate');
   await __schemaRunHook(def, inst, 'afterSave');
-  await __schemaSettleTxHooks(def, inst);
+  await __schemaSettleTxHooks(def, inst, restorePoint);
   return inst;
 
   } finally {
     inst._saving = false;
   }
+}
+
+// Temporal columns hold instants; the DECLARED type (date/datetime)
+// decides coercion, never the value's shape. Harbor already decodes
+// temporals to real `Date`s at the wire seam — those pass through
+// untouched, no double conversion — but adapters that answer strings
+// (ISO-8601, DuckDB/SQLite 'YYYY-MM-DD HH:MM:SS[.fff]') or
+// epoch-millisecond numbers would otherwise hydrate a declared
+// temporal as raw wire text whose meaning shifts by adapter.
+// Interpretation MATCHES the harbor codec (decodeTemporal): a naive
+// wall-clock string is UTC, a zoned string is the instant it names, a
+// bare date is UTC midnight — one row means one instant on every
+// adapter. A value that cannot be read as an instant is adapter
+// breakage, not data: host-API normalization does not decide
+// validity, so it rejects naming the column and the value instead of
+// riding through as-is.
+function __schemaCoerceTemporal(value, typeName, column, operation) {
+  if (value == null || value instanceof Date) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value);
+  if (typeof value === 'string') {
+    const decoded = decodeTemporal(value, /[T ]/.test(value) ? 'utc' : 'civil');
+    if (decoded instanceof Date) return decoded;
+  }
+  throw new Error(
+    'schema: ' + operation + " adapter invariant — column '" + column + "' is declared " +
+    typeName + ' but the adapter delivered ' +
+    (typeof value === 'string' ? 'unparseable ' + JSON.stringify(value) : String(value) + ' (' + typeof value + ')') +
+    '; temporal columns arrive as Date, ISO-8601 / SQL timestamp text, or epoch milliseconds');
 }
 
 // Validate one adapter row before any caller reads or absorbs it.
@@ -2162,6 +2431,7 @@ function __schemaValidateAdapterRow(columns, row, operation, norm) {
       'schema: ' + operation + ' adapter invariant — expected named columns and one matching row');
   }
   const indexes = new Map();
+  const sourceOf = new Map();
   for (let i = 0; i < columns.length; i++) {
     const column = columns[i];
     if (!column || typeof column.name !== 'string' || !column.name.length) {
@@ -2170,11 +2440,17 @@ function __schemaValidateAdapterRow(columns, row, operation, norm) {
     }
     const canonical = norm ? __schemaFieldFor(norm, column.name) : __schemaCamel(column.name);
     if (indexes.has(canonical)) {
+      // Naming the table and BOTH source columns is what makes this
+      // actionable: the fix is dropping or mapping one of two real
+      // columns, and the canonical name alone identifies neither.
       throw new Error(
         "schema: " + operation + " adapter invariant — duplicate canonical column '" +
-        canonical + "'");
+        canonical + "'" + (norm ? " on table \"" + norm.tableName + '"' : '') +
+        ": columns '" + sourceOf.get(canonical) + "' and '" + column.name +
+        "' both canonicalize to it");
     }
     indexes.set(canonical, i);
+    sourceOf.set(canonical, column.name);
   }
   return indexes;
 }
@@ -2191,10 +2467,16 @@ function __schemaAbsorbRow(inst, columns, row, operation = 'row absorption', nor
   for (let i = 0; i < columns.length; i++) {
     const snake = columns[i].name;
     const key = norm ? __schemaFieldFor(norm, snake) : __schemaCamel(snake);
+    let value = row[i];
+    // Coerce BEFORE the value lands on the instance, so the snapshot
+    // taken after absorption sees the Date — dirty tracking must never
+    // diff a wire string against its own coerced self.
+    const temporal = norm && norm.temporalOf.get(key);
+    if (temporal) value = __schemaCoerceTemporal(value, temporal, snake, operation);
     if (!(key in inst)) {
-      Object.defineProperty(inst, key, { value: row[i], enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(inst, key, { value, enumerable: true, writable: true, configurable: true });
     } else {
-      inst[key] = row[i];
+      inst[key] = value;
     }
     if (snake !== key && !(snake in inst)) {
       Object.defineProperty(inst, snake, {
@@ -2210,21 +2492,35 @@ async function __schemaDestroy(def, inst, opts) {
   if (!inst._persisted) return inst;
   const norm = def._normalize();
   const identity = __schemaPersistedIdentity(def, inst, 'destroy()');
+  const restorePoint = __schemaTxRestorePoint(norm, inst);
   const hard = opts && opts.hard === true;
   await __schemaRunHook(def, inst, 'beforeDestroy');
   if (norm.softDelete && !hard) {
     const now = new Date(); // a real Date — the adapter encodes it at the wire
-    await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+    const res = await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
       ' SET "deleted_at" = ? WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
     [now, identity]);
+    // A row soft-deleted ELSEWHERE still exists, so this UPDATE
+    // matches it and re-stamps deleted_at — a write that landed, not
+    // staleness. An affirmed zero means the row itself is gone.
+    if (__schemaAffirmedRowCount(res) === 0) {
+      inst._persisted = false;
+      throw __schemaStaleRowError(def, 'destroy()', norm.primaryKey, identity);
+    }
     inst.deletedAt = now;
   } else {
-    await __schemaRunSQL(def, 'DELETE FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+    const res = await __schemaRunSQL(def, 'DELETE FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
       ' WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?', [identity]);
+    // The row was already gone: this destroy destroyed nothing, so it
+    // must not run the after-destroy lifecycle a second time.
+    if (__schemaAffirmedRowCount(res) === 0) {
+      inst._persisted = false;
+      throw __schemaStaleRowError(def, 'destroy()', norm.primaryKey, identity);
+    }
     inst._persisted = false;
   }
   await __schemaRunHook(def, inst, 'afterDestroy');
-  await __schemaSettleTxHooks(def, inst);
+  await __schemaSettleTxHooks(def, inst, restorePoint);
   return inst;
 }
 
@@ -2237,12 +2533,20 @@ async function __schemaRestore(def, inst) {
   }
   if (!inst._persisted) return inst;
   const identity = __schemaPersistedIdentity(def, inst, 'restore()');
+  const restorePoint = __schemaTxRestorePoint(norm, inst);
   await __schemaRunHook(def, inst, 'beforeUpdate');
-  await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+  const res = await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
     ' SET "deleted_at" = NULL WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
   [identity]);
+  if (__schemaAffirmedRowCount(res) === 0) {
+    inst._persisted = false;
+    throw __schemaStaleRowError(def, 'restore()', norm.primaryKey, identity);
+  }
   inst.deletedAt = null;
   await __schemaRunHook(def, inst, 'afterUpdate');
+  // restore() completes the update lifecycle it began: afterCommit /
+  // afterRollback settle exactly as save() and destroy() settle.
+  await __schemaSettleTxHooks(def, inst, restorePoint);
   return inst;
 }
 
@@ -2555,12 +2859,14 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     if (typeof text !== 'string' || !text.length) {
       throw new Error('schema: upsert() conflict target symbols must have a description');
     }
+    // Validated against the conflict-eligible set HERE, where the
+    // caller's own spelling is still in hand for the rejection.
+    __schemaCallerColumn(norm, text, norm.conflictColumns, 'upsert() conflict target');
     return __schemaColumnFor(norm, text);
   });
   if (new Set(targets).size !== targets.length) {
     throw new Error('schema: upsert() conflict target columns must be distinct');
   }
-  for (const t of targets) __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target');
   const targetKey = [...targets].sort().join('\u0000');
   if (!norm.conflictTargetKeys.has(targetKey)) {
     throw new Error(
@@ -2573,6 +2879,7 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     api: 'upsert()',
   });
   const inst = __schemaConstructInputInstance(this, canonical);
+  const restorePoint = __schemaTxRestorePoint(norm, inst);
 
   await __schemaRunHook(this, inst, 'beforeValidation');
   const validated = await this._runExistingAsync(inst, {
@@ -2666,7 +2973,7 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     }
     inst._persisted = true;
     await __schemaRunHook(this, inst, 'afterSave');
-    await __schemaSettleTxHooks(this, inst);
+    await __schemaSettleTxHooks(this, inst, restorePoint);
     return inst;
   }
   const lookupSQL = 'SELECT * FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
@@ -2797,10 +3104,12 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   // DB rows are trusted: hydrate into a class instance without
   // transforms, defaults, constraints, or refinements. Column names
   // arrive snake_case; properties live under camelCase with
-  // non-enumerable snake aliases. Values are stored verbatim as
-  // delivered by the adapter — temporals arrive already decoded to
-  // real `Date` objects at the wire seam (the adapter keys the decode
-  // off each column's duckdbType), and hydrate stores them verbatim.
+  // non-enumerable snake aliases. Values are stored as delivered by
+  // the adapter, with ONE exception: a column whose DECLARED type is
+  // temporal coerces to a real `Date` (__schemaCoerceTemporal) — an
+  // adapter that already decodes at the wire seam (harbor, keyed off
+  // duckdbType) passes through untouched, and one that answers wire
+  // text or epoch numbers hydrates the same instant.
   const norm = this._normalize();
   // The same adapter-row validation reload() runs: two spellings for
   // one canonical key (a legacy table carrying both `MRN_NBR` and
@@ -2809,7 +3118,13 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   __schemaValidateAdapterRow(columns, row, 'row hydration', norm);
   const data = {};
   for (let i = 0; i < columns.length; i++) {
-    data[__schemaFieldFor(norm, columns[i].name)] = row[i];
+    const key = __schemaFieldFor(norm, columns[i].name);
+    // Coerced BEFORE the snapshot below, so dirty tracking never diffs
+    // a wire string against its own coerced Date.
+    const temporal = norm.temporalOf.get(key);
+    data[key] = temporal
+      ? __schemaCoerceTemporal(row[i], temporal, columns[i].name, 'row hydration')
+      : row[i];
   }
   const k = this._getClass();
   const inst = new k(data, true);
@@ -3192,6 +3507,50 @@ __SchemaDef.prototype._tableSpec = function (options) {
     const cols = d.args[0].fields.map((c) => __schemaColumnFor(norm, c));
     addIndex({ name: 'idx_' + table + '_' + cols.join('_'), columns: cols, unique: d.name === 'unique' });
   }
+
+  // A model any registered relation names as `{through:}` is a LINK
+  // table: one row per (owner, target) pair. addX treats a duplicate
+  // link as pathological and its unique-violation handling makes the
+  // database the race arbiter, so the DDL states what the runtime
+  // contract already claims — the pair is UNIQUE. The asserting fact
+  // lives on the DECLARING model, an action-at-a-distance that is
+  // deliberate (owner decision); the pair resolves here through the
+  // registry exactly as the relation resolves it at use, so
+  // registration order never matters. A pair that cannot resolve
+  // (missing/ambiguous @belongsTo on this model) derives nothing —
+  // the relation itself already refuses loudly at use. Column order
+  // is canonicalized by sort: a unique constraint has no order, and a
+  // join model used as `through` from BOTH ends must derive ONE index.
+  const pairIndexOn = (pairKey) => indexes.find((ix) =>
+    ix.columns.length === 2 && [...ix.columns].sort().join('\u0000') === pairKey);
+  const derivedPairs = new Map();
+  for (const entry of __SchemaRegistry._entries.values()) {
+    if (entry.kind !== 'model') continue;
+    let ownerNorm;
+    try { ownerNorm = entry.def._normalize(); } catch { continue; }
+    for (const [, rel] of ownerNorm.relations) {
+      if (rel.through !== this.name || __SchemaRegistry.get(rel.through) !== this) continue;
+      let keys;
+      try { keys = __schemaThroughKeys(entry.def, rel, this); } catch { continue; }
+      const pair = [keys.ownerKey, keys.targetKey].sort();
+      const pairKey = pair.join('\u0000');
+      const declared = pairIndexOn(pairKey);
+      if (declared) {
+        // A declared @unique over the pair (either order) IS this
+        // index — nothing to add. A plain @index over it contradicts
+        // the link contract the through declaration asserts.
+        if (!declared.unique) {
+          throw new Error(
+            `Table '${table}': (${declared.columns.join(', ')}) is the link pair of a ` +
+            `through-relation (${entry.def.name || 'model'}.${rel.accessor} reads through ${rel.through}), ` +
+            `so it must be UNIQUE — declare '@unique' over those columns instead of '@index'.`);
+        }
+        continue;
+      }
+      derivedPairs.set(pairKey, { name: 'idx_' + table + '_' + pair.join('_'), columns: pair, unique: true });
+    }
+  }
+  for (const pairKey of [...derivedPairs.keys()].sort()) addIndex(derivedPairs.get(pairKey));
 
   return {
     name: table,

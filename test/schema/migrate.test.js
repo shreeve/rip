@@ -962,6 +962,94 @@ describe('migrate: the differ — determinism and ordering', () => {
   });
 });
 
+describe('migrate: the declared-schema dump', () => {
+  const declare = () => {
+    K4.__schema(model('User', field('name'), field('email', 'email', { unique: true })));
+    K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
+  };
+
+  test('dump() renders with NO adapter configured: registry-side only', async () => {
+    const text = await K4.scope(() => {
+      declare();
+      return mig.dump();
+    });
+    expect(text).toContain('CREATE TABLE "users"');
+    expect(text).toContain('CREATE TABLE "orders"');
+  });
+
+  test('determinism: repeated renders and reversed registration order are byte-equal, and the bytes carry no timestamp', async () => {
+    const build = (order) => K4.scope(() => {
+      const defs = {
+        User: () => K4.__schema(model('User', field('name'), field('email', 'email', { unique: true }))),
+        Order: () => K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false }))),
+      };
+      for (const n of order) defs[n]();
+      return mig.dump();
+    });
+    const a = await build(['User', 'Order']);
+    const b = await build(['Order', 'User']);
+    const c = await build(['Order', 'User']);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+    // No timestamps, no dates: the header states present facts only,
+    // so two dumps of one tree are reproducible byte-for-byte.
+    expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}|\d{2}:\d{2}/);
+  });
+
+  test('content: the generated header, then every table NAME-SORTED with its sequence/create/index shapes exactly as __schemaRenderCreate emits them', async () => {
+    const text = await K4.scope(() => {
+      declare();
+      return mig.dump();
+    });
+    const declared = await K4.scope(() => {
+      declare();
+      return mig.canonicalDeclared();
+    });
+    // The file IS: header + one section per name-sorted table, each
+    // '-- name' plus the __schemaRenderCreate blocks, blank-line
+    // separated, trailing newline.
+    const sections = declared.tables.map((t) => ['-- ' + t.name, ...orm4.__schemaRenderCreate(t)].join('\n'));
+    const header = text.slice(0, text.indexOf('\n\n'));
+    expect(header).toContain('rip schema dump');
+    expect(header).toContain('--check');
+    expect(text).toBe([header, ...sections].join('\n\n') + '\n');
+    // orders sorts before users; the section order is name order.
+    expect(text.indexOf('-- orders\n')).toBeLessThan(text.indexOf('-- users\n'));
+    expect(text).toContain('CREATE SEQUENCE "users_seq" START 1;');
+    expect(text).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(text).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
+    expect(text.endsWith(');\n')).toBe(true);
+  });
+
+  test('zero registered models refuse loudly, never an empty file', async () => {
+    await expect(K4.scope(async () => mig.dump())).rejects
+      .toThrow(/schema\.dump: no :model schemas are registered/);
+  });
+
+  test('a model on its own on: adapter is included, annotated the way the plan annotates it', async () => {
+    const text = await K4.scope(() => {
+      const own = migrateAdapter({ tables: [] });
+      K4.__schema({ ...model('Metric', field('value', 'integer')), adapter: own });
+      K4.__schema(model('User', field('name')));
+      return mig.dump();
+    });
+    expect(text).toContain('-- metrics\n-- NOTE: Metric declares its own on: adapter');
+    expect(text).toContain('CREATE TABLE "metrics"');
+    // The default-adapter table carries no such note.
+    expect(text).not.toMatch(/-- users\n-- NOTE:/);
+  });
+
+  test('renderDump sorts by name itself (determinism is its own contract) and rejects duplicate tables', () => {
+    const specs = [
+      table('users', [col('name')]),
+      table('orders', [col('total', 'INTEGER', { notNull: true })]),
+    ];
+    expect(mig.renderDump({ tables: specs })).toBe(mig.renderDump({ tables: [...specs].reverse() }));
+    expect(() => mig.renderDump({ tables: [table('users', [col('name')]), table('users', [col('name')])] }))
+      .toThrow(/table 'users' is declared twice/);
+  });
+});
+
 describe('migrate: identifier ownership', () => {
   test('DDL quotes embedded punctuation in table, column, index, sequence, and FK identifiers', () => {
     const spec = {
@@ -1147,7 +1235,12 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
     expect(dropped[0].notes.some((n) => n.includes('UNIQUE declared inline'))).toBe(true);
   });
 
-  test('a composite UNIQUE constraint is ignored: the unique flag is per-column, and composite uniqueness is modeled as unique indexes', async () => {
+  // A COMPOSITE entry has no per-column home — the unique flag is
+  // per-column, and composite uniqueness is modeled as unique indexes
+  // — so the database enforces it while diffing cannot see it. The
+  // plan states that fact as a note-unique step: informational, never
+  // silent, never a gate.
+  test('a composite UNIQUE constraint plans a note-unique step naming the table and columns; no column flag is invented', async () => {
     const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER')],
       { uniqueConstraints: [{ columns: ['a', 'b'] }] })];
     const { deployed, steps } = await K4.scope(async () => {
@@ -1155,10 +1248,101 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
       K4.__schema(model('Link', field('a', 'integer', { optional: true }), field('b', 'integer', { optional: true })));
       return { deployed: await mig.introspect(), steps: await mig.plan() };
     });
-    // Neither member column carries the flag, and no step invents one.
+    // Neither member column carries the flag, and the constraint rides
+    // the spec verbatim.
     const links = deployed.tables.find((t) => t.name === 'links');
     expect(links.columns.map((c) => c.name + ':' + c.unique)).toEqual(['id:false', 'a:false', 'b:false']);
-    expect(steps).toEqual([]);
+    expect(links.compositeUniques).toEqual([['a', 'b']]);
+    expect(steps.map((s) => s.kind + ':' + s.class + ':' + s.table)).toEqual(['note-unique:safe:links']);
+    expect(steps[0].sql[0]).toContain('links carries a composite UNIQUE constraint on (a, b)');
+    expect(steps[0].sql[0]).toContain('the model layer cannot express');
+    expect(steps[0].sql[0]).toContain('invisible to declared-vs-deployed diffing');
+    expect(steps[0].sql[0]).toContain('@unique [a, b]');
+  });
+
+  test('note-unique gates nothing: other steps on the table keep their kind and class', async () => {
+    const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER'), col('legacy', 'INTEGER')],
+      { uniqueConstraints: [{ columns: ['a', 'b'] }] })];
+    const steps = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('Link',
+        field('a', 'integer', { optional: true }),
+        field('b', 'integer', { optional: true }),
+        field('c', 'integer', { optional: true })));
+      return mig.plan();
+    });
+    expect(steps.map((s) => s.kind + ':' + s.class)).toEqual([
+      'add-column:safe', 'drop-column:destructive', 'note-unique:safe',
+    ]);
+  });
+
+  test('multiple composite constraints: one note each, ordered by column list, columns named verbatim', async () => {
+    const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER'), col('c', 'INTEGER')],
+      { uniqueConstraints: [{ columns: ['c', 'b'] }, { columns: ['a', 'b'] }] })];
+    const steps = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('Link',
+        field('a', 'integer', { optional: true }),
+        field('b', 'integer', { optional: true }),
+        field('c', 'integer', { optional: true })));
+      return mig.plan();
+    });
+    expect(steps.map((s) => s.kind)).toEqual(['note-unique', 'note-unique']);
+    expect(steps[0].sql[0]).toContain('constraint on (a, b)');
+    // Verbatim column order within the constraint — never re-sorted.
+    expect(steps[1].sql[0]).toContain('constraint on (c, b)');
+  });
+
+  // The near-miss: the model declares the EXPRESSIBLE equivalent —
+  // @unique [a, b] — over the same column set the deployed CONSTRAINT
+  // covers. The differ sees no deployed index (the ART index behind a
+  // constraint is not a duckdb_indexes() index), so it plans the
+  // CREATE UNIQUE INDEX; measured on DuckDB v1.5.5 and v2.0.0-alpha,
+  // that statement succeeds on a populated table (the constraint
+  // guarantees no duplicates exist), so the step keeps its class and
+  // the note states the redundancy.
+  test('declared @unique over the deployed composite constraint: create-index keeps its class, the note names the redundancy', async () => {
+    const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER')],
+      { uniqueConstraints: [{ columns: ['a', 'b'] }] })];
+    const steps = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('Link',
+        field('a', 'integer', { optional: true }),
+        field('b', 'integer', { optional: true }),
+        dir('unique', { fields: ['a', 'b'] })));
+      return mig.plan();
+    });
+    expect(steps.map((s) => s.kind + ':' + s.class)).toEqual(['create-index:lossy', 'note-unique:safe']);
+    expect(steps[0].sql).toEqual(['CREATE UNIQUE INDEX "idx_links_a_b" ON "links" ("a", "b");']);
+    const note = steps[1].sql[0];
+    expect(note).toContain('idx_links_a_b');
+    expect(note).toContain('redundant with this constraint');
+    expect(note).toContain('succeeds harmlessly');
+    expect(note).toContain('the plans converge');
+  });
+
+  test('declared @unique with its index ALSO deployed beside the constraint: only the note remains, naming the double enforcement', async () => {
+    const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER')], {
+      uniqueConstraints: [{ columns: ['a', 'b'] }],
+      indexes: [{ name: 'idx_links_a_b', columns: ['a', 'b'], unique: true }],
+    })];
+    const steps = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('Link',
+        field('a', 'integer', { optional: true }),
+        field('b', 'integer', { optional: true }),
+        dir('unique', { fields: ['a', 'b'] })));
+      return mig.plan();
+    });
+    expect(steps.map((s) => s.kind + ':' + s.class)).toEqual(['note-unique:safe']);
+    expect(steps[0].sql[0]).toContain('redundant with this constraint');
+    expect(steps[0].sql[0]).toContain('enforces this uniqueness twice');
+  });
+
+  test('a deployed table spec without compositeUniques (a caller-built or v0.9.0-derived spec) plans zero notes', () => {
+    const declared = { tables: [table('users', [col('name')])] };
+    const deployed = { tables: [table('users', [col('name')])] };
+    expect(mig.diffSchemas(declared, deployed)).toEqual([]);
   });
 
   // Version tolerance, pinned: a v0.9.0 harbor serves documents with
@@ -1188,6 +1372,7 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
     const empty = await read(tableDoc({ uniqueConstraints: [] }));
     expect(absent).toEqual(empty);
     expect(absent.tables[0].columns.map((c) => c.unique)).toEqual([false, false]);
+    expect(absent.tables[0].compositeUniques).toEqual([]);
   });
 });
 
