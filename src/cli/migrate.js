@@ -82,11 +82,17 @@ function migrateRows(res) {
 // runner's own state and is filtered out below.
 export async function introspect() {
   const q = (sql) => __schemaRunSQL(null, sql, []);
-  const tablesRes = await q("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_type = 'BASE TABLE'");
-  const columnsRes = await q("SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'main' ORDER BY table_name, ordinal_position");
-  const constraintsRes = await q("SELECT table_name, constraint_type, constraint_column_names, constraint_text FROM duckdb_constraints() WHERE schema_name = 'main'");
-  const indexesRes = await q("SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE schema_name = 'main'");
-  const sequencesRes = await q("SELECT sequence_name, start_value FROM duckdb_sequences() WHERE schema_name = 'main'");
+  // Every catalog is scoped to the CURRENT database, not just to the
+  // `main` schema. An ATTACHed database has a `main` schema too, so a
+  // schema-only filter reports its tables as ours — and the differ,
+  // finding them undeclared, plans `DROP TABLE` against a database the
+  // migration was never about. `information_schema` spells the catalog
+  // `table_catalog`; the duckdb_* functions spell it `database_name`.
+  const tablesRes = await q("SELECT table_name FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema = 'main' AND table_type = 'BASE TABLE'");
+  const columnsRes = await q("SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_catalog = current_database() AND table_schema = 'main' ORDER BY table_name, ordinal_position");
+  const constraintsRes = await q("SELECT table_name, constraint_type, constraint_column_names, constraint_text FROM duckdb_constraints() WHERE database_name = current_database() AND schema_name = 'main'");
+  const indexesRes = await q("SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE database_name = current_database() AND schema_name = 'main'");
+  const sequencesRes = await q("SELECT sequence_name, start_value FROM duckdb_sequences() WHERE database_name = current_database() AND schema_name = 'main'");
 
   const tables = new Map();
   for (const r of migrateRows(tablesRes)) {

@@ -832,6 +832,46 @@ describe('orm: paired reference — soft delete', () => {
     expect(r.threw).toEqual({ error: true });
   });
 
+  // DuckDB answers a bulk mutation with a one-row `Count` result set, so
+  // the envelope's own rowCount is 1 for every one of them — including a
+  // statement that matched nothing. Both bulk paths reported "1 row
+  // changed" whatever actually happened.
+  test('bulk mutations report the rows DuckDB actually changed', async () => {
+    const counted = (n) => ({ columns: [{ name: 'Count', duckdbType: 'BIGINT' }], data: [[n]], rowCount: 1 });
+    const r = await paired(async (k, adapter) => {
+      const U = k.__schema(model('Plain', field('body')));
+      adapter.on(/^UPDATE/, counted(3));
+      const updated = await U.where({ body: 'x' }).updateAll({ body: 'y' });
+      adapter.on(/^DELETE/, counted(0));
+      const deleted = await U.where({ body: 'gone' }).deleteAll();
+      return { updated, deleted };
+    });
+    expect(r.value).toEqual({ updated: 3, deleted: 0 });
+  });
+
+  // DuckDB has no `DELETE ... LIMIT`; these clauses were assembled for a
+  // SELECT and dropped here, so scoping a bulk mutation to one row
+  // mutated every matching row instead.
+  test('a bulk mutation refuses a scope DuckDB cannot honor', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = k.__schema(model('Plain', field('body')));
+      const refused = [];
+      for (const thunk of [
+        () => U.where({ body: 'x' }).limit(1).updateAll({ body: 'y' }),
+        () => U.where({ body: 'x' }).limit(1).deleteAll(),
+        () => U.where({ body: 'x' }).offset(2).deleteAll(),
+        () => U.where({ body: 'x' }).order('id').deleteAll(),
+      ]) {
+        try { await thunk(); refused.push(null); }
+        catch (e) { refused.push(e.message.slice(0, 40)); }
+      }
+      return refused;
+    });
+    expect(r.value.every((m) => m && /cannot honor/.test(m))).toBe(true);
+    // Nothing reached the database.
+    expect(r.calls.length).toBe(0);
+  });
+
   test('bulk deleteAll is soft on a @softDelete model, real otherwise; updateAll shapes', async () => {
     const r = await paired(async (k, adapter) => {
       const Note = soft(k);

@@ -897,6 +897,47 @@ async function __schemaTransaction(optsOrFn, maybeFn) {
 // mirror of __schemaAdoptTransaction: it lets the other tier see a
 // transaction WE opened, so a raw statement issued inside one joins it
 // rather than committing itself on another connection.
+// DuckDB answers a bulk UPDATE/DELETE with a one-row result set whose
+// single `Count` column carries the affected rows — so the envelope's
+// own `rowCount` is 1 for every such statement, including one that
+// matched nothing at all. Reading it reported "1 row changed" whatever
+// happened. Take the number DuckDB actually returned, and fall back to
+// `rowCount` for an adapter that answers some other way.
+//
+// Harbor sends integers past 2^53-1 as strings so they survive JSON;
+// a bulk mutation is nowhere near that, but coerce rather than hand
+// back a count whose type depends on its magnitude.
+function __schemaAffectedRows(res) {
+  const cols = res?.columns;
+  const data = res?.data;
+  if (Array.isArray(cols) && cols.length === 1 && Array.isArray(data) && data.length === 1) {
+    const name = String(cols[0]?.name ?? cols[0] ?? '');
+    if (name.toLowerCase() === 'count') {
+      const n = data[0]?.[0];
+      if (typeof n === 'number') return n;
+      if (typeof n === 'bigint' || typeof n === 'string') return Number(n);
+    }
+  }
+  return res?.rowCount ?? res?.rows ?? null;
+}
+
+// DuckDB's UPDATE and DELETE take a WHERE and nothing else — there is
+// no `DELETE ... LIMIT`, and the parser refuses one. These clauses are
+// assembled for a SELECT and were dropped on the way here, so a caller
+// who scoped a bulk mutation to one row mutated every matching row
+// instead. Refuse rather than widen. (rip/db's builder makes the same
+// promise, in the same words.)
+function __schemaAssertWhereOnly(rel, method) {
+  const ignored = [];
+  if (rel._limit != null) ignored.push('limit');
+  if (rel._offset != null) ignored.push('offset');
+  if (rel._order != null) ignored.push('order');
+  if (!ignored.length) return;
+  throw new Error(
+    `${method}() cannot honor ${ignored.join(', ')} — DuckDB's UPDATE and DELETE accept only a WHERE. ` +
+    `Narrow the condition, or read the rows first and mutate them by primary key.`);
+}
+
 function __schemaTxHandle(adapter) {
   const store = __schemaTxStore(adapter);
   return store ? store.handle : null;
@@ -1121,6 +1162,7 @@ class __SchemaQuery {
   // One UPDATE for every matching row — bypasses validation and
   // per-instance hooks (the bulk path).
   async updateAll(values) {
+    __schemaAssertWhereOnly(this, 'updateAll');
     this._applyDefaultScope();
     const n = this._def._normalize();
     const keys = values && typeof values === 'object' ? Object.keys(values) : [];
@@ -1146,12 +1188,13 @@ class __SchemaQuery {
     let sql = 'UPDATE ' + __schemaQuoteIdent(n.tableName, null, 'table') + ' SET ' + sets.join(', ');
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     const res = await __schemaRunSQL(this._def, sql, [...params, ...this._params]);
-    return res.rowCount ?? res.rows ?? null;
+    return __schemaAffectedRows(res);
   }
   // One statement for every matching row: soft-delete aware (UPDATE
   // deleted_at on a @softDelete model, real DELETE otherwise);
   // bypasses per-instance hooks (the bulk path).
   async deleteAll() {
+    __schemaAssertWhereOnly(this, 'deleteAll');
     this._applyDefaultScope();
     const n = this._def._normalize();
     const where = this._whereParts(n);
@@ -1165,7 +1208,7 @@ class __SchemaQuery {
     }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     const res = await __schemaRunSQL(this._def, sql, params);
-    return res.rowCount ?? res.rows ?? null;
+    return __schemaAffectedRows(res);
   }
 }
 

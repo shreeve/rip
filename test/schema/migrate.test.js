@@ -402,6 +402,33 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(missing[0].sql[0]).toContain('has no users_seq sequence in the database');
   });
 
+  // An ATTACHed database has a `main` schema of its own, so a
+  // schema-only filter reported its tables as deployed here — and the
+  // differ, finding them undeclared, planned `DROP TABLE` against a
+  // database the migration was never about. Every catalog read must
+  // name the current database.
+  test('every catalog read is scoped to the current database, not just to main', async () => {
+    const seen = [];
+    const recorder = {
+      capabilities: { tx: true, ddlTransactional: true },
+      begin: () => { throw new Error('not used'); },
+      query: async (sql) => {
+        seen.push(sql);
+        return { columns: [], data: [], rowCount: 0 };
+      },
+    };
+    await K4.scope(async () => {
+      K4.setAdapter(recorder);
+      await mig.introspect();
+    });
+    const catalogReads = seen.filter((s) =>
+      /information_schema\.|duckdb_(constraints|indexes|sequences)\(\)/.test(s));
+    expect(catalogReads.length).toBe(5);
+    for (const sql of catalogReads) {
+      expect(sql).toContain('current_database()');
+    }
+  });
+
   test('the history table never enters the diff: filtered at the introspect() branch AND inside diffSchemas', async () => {
     const historySpec = {
       name: '_rip_migrations', sequence: null, primaryKey: 'version',
