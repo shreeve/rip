@@ -4,7 +4,7 @@ export User = schema :model
   email!     email @unique
   phone?     string
   @timestamps
-  @has_many Order
+  @hasMany Order
 
 export Product = schema :model
   name!  string, 1..
@@ -26,7 +26,7 @@ export Order = schema :model
   total! integer, 0..
   items! OrderItem[]
   @timestamps
-  @belongs_to User
+  @belongsTo User
 
 export UserPublic    = User.pick('id', 'firstName', 'lastName', 'email', 'phone')
 export ProductPublic = Product.pick('id', 'name', 'price', 'image')

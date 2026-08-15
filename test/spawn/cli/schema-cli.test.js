@@ -113,7 +113,7 @@ export User = schema :model
 
 export Order = schema :model
   total! integer
-  @belongs_to User
+  @belongsTo User
 `;
 
 const dbState = () => JSON.parse(readFileSync(join(dir, 'db.json'), 'utf8'));

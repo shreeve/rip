@@ -380,7 +380,7 @@ describe('schema callable bodies propagate runtime delivery', () => {
   test('an effect inside a schema method reports BOTH runtimes in every mode', () => {
     for (const mode of ['none', 'import', 'inline']) {
       const { runtimes } = fullCompile(src, { runtimeDelivery: mode });
-      expect([...runtimes].sort()).toEqual(['reactive', 'schema']);
+      expect([...runtimes].sort()).toEqual(['reactive', 'schema', 'vocab']);
     }
     // The import line itself carries the reactive names.
     const { code } = fullCompile(src, { runtimeDelivery: 'import' });
@@ -416,18 +416,18 @@ describe('schema callable bodies propagate runtime delivery', () => {
 
   test('effects in ensure bodies and field transforms trigger too; reactive declarations inside method bodies as well', () => {
     const ensureSrc = 'S = schema :input\n  a! integer\n  @ensure "x", (u) -> (~> probe(u)) and true';
-    expect([...fullCompile(ensureSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema']);
+    expect([...fullCompile(ensureSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema', 'vocab']);
     const transformSrc = 'S = schema :input\n  a integer, -> (~> probe(it)) and it';
-    expect([...fullCompile(transformSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema']);
+    expect([...fullCompile(transformSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema', 'vocab']);
     const stateSrc = 'S = schema :shape\n  a! integer\n  m: ->\n    z := 1\n    z + @a';
-    expect([...fullCompile(stateSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema']);
+    expect([...fullCompile(stateSrc, { runtimeDelivery: 'import' }).runtimes].sort()).toEqual(['reactive', 'schema', 'vocab']);
   });
 
   test("a schema-only file stays schema-only: the body's `~>` computed getter is schema spelling, and impersonating calls inside methods deliver nothing", () => {
     const getterSrc = 'S = schema :shape\n  a! integer\n  double: ~> @a * 2';
-    expect([...fullCompile(getterSrc, { runtimeDelivery: 'import' }).runtimes]).toEqual(['schema']);
+    expect([...fullCompile(getterSrc, { runtimeDelivery: 'import' }).runtimes]).toEqual(['schema', 'vocab']);
     const callSrc = 'S = schema :shape\n  a! integer\n  m: -> effect @a, 1';
-    expect([...fullCompile(callSrc, { runtimeDelivery: 'import' }).runtimes]).toEqual(['schema']);
+    expect([...fullCompile(callSrc, { runtimeDelivery: 'import' }).runtimes]).toEqual(['schema', 'vocab']);
   });
 });
 

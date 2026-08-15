@@ -125,8 +125,8 @@ describe('schema declarations: the per-kind shapes', () => {
       '  posted! boolean, [false]',
       '  @timestamps',
       '  @softDelete',
-      '  @belongs_to Org?',
-      '  @has_many Person',
+      '  @belongsTo Org?',
+      '  @hasMany Person',
       '  @scope :live, -> @where(name: "a")',
     ].join('\n'));
     // Data: declared fields + id/FK/timestamps/deletedAt — timestamp
@@ -328,7 +328,7 @@ describe('schema type story on the TS face', () => {
       '  title! string',
       'M = schema :model',
       '  name! string',
-      '  @belongs_to Org',
+      '  @belongsTo Org',
       '  beforeSave: -> @name',
       '  @scope :live, -> @where(name: "a")',
       'R = schema :enum',
@@ -547,12 +547,12 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
           kind: 'model', name: 'Holder' + target,
           entries: [
             { tag: 'field', name: 'label', modifiers: ['!'], typeName: 'string', array: false },
-            { tag: 'directive', name: 'has_many', args: [{ target }] },
+            { tag: 'directive', name: 'hasMany', args: [{ target }] },
           ],
         });
         const expected = pluralize(target[0].toLowerCase() + target.slice(1));
         const protoNames = Object.getOwnPropertyNames(def._getClass().prototype);
-        expect(protoNames, `runtime accessor for has_many ${target}`).toContain(expected);
+        expect(protoNames, `runtime accessor for hasMany ${target}`).toContain(expected);
       }
     });
   });
@@ -563,7 +563,7 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
         kind: 'model', name: 'Fk',
         entries: [
           { tag: 'field', name: 'label', modifiers: ['!'], typeName: 'string', array: false },
-          { tag: 'directive', name: 'belongs_to', args: [{ target: 'MdmUser' }] },
+          { tag: 'directive', name: 'belongsTo', args: [{ target: 'MdmUser' }] },
         ],
       });
       const inst = def._hydrate([{ name: 'id' }, { name: 'label' }], [1, 'x']);
@@ -571,7 +571,7 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
       // exactly that name (and rejects a wrong spelling), so the
       // declared property IS the runtime property.
       expect(() => inst.markDirty('mdmUserId')).not.toThrow();
-      expect(() => inst.markDirty('mdmuserId')).toThrow(/not a declared field or belongs_to FK/);
+      expect(() => inst.markDirty('mdmuserId')).toThrow(/not a declared field or belongsTo FK/);
     });
   });
 

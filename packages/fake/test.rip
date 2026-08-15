@@ -126,7 +126,7 @@ FakeOwner = schema :model
 
 FakeChild = schema :model
   label! string
-  @belongs_to FakeOwner
+  @belongsTo FakeOwner
 
 adapter = recordingAdapter()
 adapter.on /INSERT INTO/i, (sql, params) -> row ['id'], [42]

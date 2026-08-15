@@ -17,7 +17,7 @@ const MODELS = `export User = schema :model
 export Order = schema :model
   total! number, 0..
   @timestamps
-  @belongs_to User
+  @belongsTo User
 
 export UserView  = User.pick("id", "firstName", "lastName", "email", "phone")
 export Greeter = schema :shape
@@ -96,7 +96,7 @@ describe('extractClientProjections', () => {
     const r = extractClientProjections(MODELS, ['UserView'], { path: 'api/models.rip' });
     expect(r.ok).toBe(true);
     expect(r.source).not.toMatch(/kind:\s*"model"/);
-    expect(r.source).not.toMatch(/has_many|belongs_to/);
+    expect(r.source).not.toMatch(/hasMany|belongsTo/);
   });
 
   test('a projection transitively ships its nested schema dependency', () => {

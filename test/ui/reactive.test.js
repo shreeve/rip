@@ -453,7 +453,7 @@ describe('delivery triggers from the emitted lowering', () => {
   test('BOTH runtimes deliver into one module: two synthetic rows, distinguished by generated range (the dual-delivery caveat)', () => {
     const src = 'count := 0\nS = schema\n  a! integer\ncount = 1';
     const { code, runtimes, mappings } = fullCompile(src, { runtimeDelivery: 'import' });
-    expect([...runtimes].sort()).toEqual(['reactive', 'schema']);
+    expect([...runtimes].sort()).toEqual(['reactive', 'schema', 'vocab']);
     const rows = mappings.rows.filter((r) => r.role === 'runtime');
     expect(rows).toHaveLength(2);
     // Same (nodeId, role) pair — the  record — so any per-runtime

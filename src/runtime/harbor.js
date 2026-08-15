@@ -275,13 +275,26 @@ function toResult(env) {
  * @param {string} [opts.url]        harbor base URL; else RIP_DB_URL, else the default
  * @param {string} [opts.token]      bearer token; else RIP_DB_TOKEN
  * @param {Function} [opts.fetch]    injected fetch (tests)
- * @param {number} [opts.timeoutMs]  per-statement deadline, ours AND harbor's; 0 disables both
+ * @param {number|null} [opts.timeoutMs] per-statement deadline, ours AND harbor's.
+ *   Three states, and the difference between the last two matters:
+ *     > 0   — run a client clock and send the same deadline to harbor
+ *     0     — no client clock; INHERIT harbor's deployment default
+ *             (HARBOR_STATEMENT_TIMEOUT_MS), by sending no field at all
+ *     null  — no client clock and NO deadline anywhere: sends an
+ *             explicit 0, which harbor reads as "no limit". This is the
+ *             documented way to opt a long statement (a migration) out
+ *             of a deployment-wide default.
+ *   Any statement may override the adapter's choice per call:
+ *   `query(sql, params, { timeoutMs })` — harbor's own protocol is
+ *   per-request, so this is the same knob, not a second one.
  */
 function harborAdapter(opts = {}) {
   const base = resolveUrl(opts.url);
   const token = opts.token ?? envToken();
   const fetchFn = opts.fetch ?? ((...a) => globalThis.fetch(...a));
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // `??` would fold `null` into the default, and `null` is meaningful
+  // here — it is the opt-out. Only an absent option takes the default.
+  const timeoutMs = opts.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
 
   // `Accept: application/x-ndjson`, explicitly, even though the reader
   // handles either shape. Harbor also offers the whole result as one
@@ -319,22 +332,30 @@ function harborAdapter(opts = {}) {
     }
   };
 
-  const post = async (path, body, sql = null, signal = null) => {
+  const post = async (path, body, sql = null, signal = null, timeoutOverride) => {
     // Every statement is named, and carries our deadline to the server
     // as well as enforcing it here. A client that times out without
     // telling harbor leaves behind exactly the runaway a deadline
-    // exists to kill. `timeoutMs: 0` disables both clocks.
+    // exists to kill.
+    //
+    // `undefined` means the caller did not override, so the adapter's
+    // own setting applies. Absent-vs-explicit-zero on the wire is a
+    // real distinction harbor draws (an absent field takes the
+    // deployment default, an explicit 0 means no limit), so the two
+    // "no client clock" states must not collapse into one here.
+    const deadline = timeoutOverride === undefined ? timeoutMs : timeoutOverride;
     let queryId = null;
     if (path === '/sql') {
       queryId = newQueryId();
       body = { ...body, queryId };
-      if (timeoutMs > 0) body.timeoutMs = timeoutMs;
+      if (deadline > 0) body.timeoutMs = deadline;
+      else if (deadline === null) body.timeoutMs = 0;
     }
     const ctrl = new AbortController();
     let timedOut = false;
     let timer = null;
-    if (timeoutMs > 0) {
-      timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
+    if (deadline > 0) {
+      timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, deadline);
     }
     const relay = () => ctrl.abort(signal.reason);
     if (signal) {
@@ -438,7 +459,8 @@ function harborAdapter(opts = {}) {
   };
 
   const query = async (sql, params = null, opts = {}) =>
-    toResult(await post('/sql', params?.length ? { sql, params: encodeParams(params) } : { sql }, sql, opts?.signal));
+    toResult(await post('/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
+      sql, opts?.signal, opts?.timeoutMs));
 
   const begin = async (options = {}) => {
     const session = await post('/sql/sessions/new', {});
@@ -451,7 +473,7 @@ function harborAdapter(opts = {}) {
     const run = async (sql, params = null, opts = {}) => toResult(await post(
       '/sql',
       params?.length ? { sql, params: encodeParams(params), sessionId } : { sql, sessionId },
-      sql, opts?.signal));
+      sql, opts?.signal, opts?.timeoutMs));
     const drop = async () => {
       // Best-effort: harbor's idle TTL reaps an abandoned session, so a
       // failed DELETE only delays cleanup, never leaks a transaction.

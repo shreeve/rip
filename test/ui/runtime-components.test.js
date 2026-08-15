@@ -1924,7 +1924,7 @@ describe('runtime delivery: the components runtime', () => {
     // `harbor` rides along as orm's dependency but binds no user-facing
     // name, so it is reported yet emits no import line of its own —
     // under import delivery orm.js resolves it through the module graph.
-    expect([...runtimes].sort()).toEqual(['components', 'harbor', 'orm', 'reactive', 'schema']);
+    expect([...runtimes].sort()).toEqual(['components', 'harbor', 'orm', 'reactive', 'schema', 'vocab']);
     const lines = code.split('\n').slice(0, 4);
     expect(lines[0]).toContain('runtime/schema.js');
     expect(lines[1]).toContain('runtime/orm.js');
@@ -1965,7 +1965,7 @@ describe('zero-cost gate: the components extension', () => {
   test('a schema-only program stays component-free (and vice versa) — runtimes deliver independently', () => {
     const s = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
     expect(s.code).not.toContain('runtime/components.js');
-    expect([...s.runtimes]).toEqual(['schema']);
+    expect([...s.runtimes]).toEqual(['schema', 'vocab']);
     const c = compile('x = __clsx("a")', { runtimeDelivery: 'import' });
     expect(c.code).not.toContain('runtime/schema.js');
     expect([...c.runtimes].sort()).toEqual(['components', 'reactive']);

@@ -161,7 +161,7 @@ const CLEAN_ROWS = [
     // :model — statics through ModelSchema, the typed query chain
     // over declared columns, relation accessors between same-file
     // models, and callable `this` (hook + scope) typed per (ii)
- 'Org = schema :model\n  title! string\nUser = schema :model\n  name!  string\n  active? boolean\n  @timestamps\n  @belongs_to Org\n  beforeSave: -> @name = @name.trim()\n  @scope :live, -> @where(active: true)\nrun = ->\n  u = await User.find(1)\n  if u\n    s: string = u.name\n    org = await u.org()\n    t: string = org.title if org\n    rows = await User.live().where(name: "a").all()\n    made = await User.create(name: "n", orgId: 1)\n    s = made.name',
+ 'Org = schema :model\n  title! string\nUser = schema :model\n  name!  string\n  active? boolean\n  @timestamps\n  @belongsTo Org\n  beforeSave: -> @name = @name.trim()\n  @scope :live, -> @where(active: true)\nrun = ->\n  u = await User.find(1)\n  if u\n    s: string = u.name\n    org = await u.org()\n    t: string = org.title if org\n    rows = await User.live().where(name: "a").all()\n    made = await User.create(name: "n", orgId: 1)\n    s = made.name',
     // :enum narrows through the bare-member type guard; :union types
     // the parse result as the constituent union
  'Role = schema :enum\n  :admin\n  :viewer\nv = JSON.parse("x")\nr: Role = "admin"\nr = Role.parse(v)\nif Role.ok(v)\n  r = v',

@@ -99,10 +99,10 @@ code "model with modifiers and directives", '''
     email!   email @unique
     bio?     text
     @timestamps
-    @belongs_to Organization
+    @belongsTo Organization
   ''', '''
   let User;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, unique: true}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongs_to", args: [{target: "Organization"}]}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, unique: true}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongsTo", args: [{target: "Organization"}]}]});
   ''', opts
 
 code "model recognizes known hook names", '''
@@ -288,17 +288,17 @@ test "inline: literal-union + other fields parse in order", '''
   [r.ok, r.value.role, r.value.name]
   ''', [true, "admin", "Alice"]
 
-# Inline directive entries — `@timestamps`, `@belongs_to X`, `@mixin M`
+# Inline directive entries — `@timestamps`, `@belongsTo X`, `@mixin M`
 # — all parse correctly inline alongside fields. Punctuation-heavy
 # grammars are the most likely place for the inline collector to get
 # semicolon-splitting wrong, so each form needs explicit coverage.
 
 code "inline: multiple directives + fields in one schema", '''
-  User = schema :model; name!; @timestamps; @belongs_to Org
+  User = schema :model; name!; @timestamps; @belongsTo Org
   Org = schema :model; name!
   ''', '''
   let Org, User;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongs_to", args: [{target: "Org"}]}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongsTo", args: [{target: "Org"}]}]});
   Org = __schema({kind: "model", name: "Org", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
   ''', opts
 
@@ -432,10 +432,10 @@ fail ":shape rejects @timestamps", '''
     @timestamps
   '''
 
-fail ":shape rejects @belongs_to", '''
+fail ":shape rejects @belongsTo", '''
   X = schema :shape
     name! string
-    @belongs_to Other
+    @belongsTo Other
   '''
 
 fail "inline @unique off :model/:mixin is rejected as persistence metadata", '''
@@ -2303,7 +2303,7 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
       name! string
     User = schema :model
       name! string
-      @belongs_to Org
+      @belongsTo Org
   ''', '''
   interface SchemaIssue { field: string; error: string; message: string; }
   type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
@@ -2463,8 +2463,8 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
 type "cross-file relation target degrades to unknown", '''
     User = schema :model
       name! string
-      @belongs_to Organization
-      @has_many Order
+      @belongsTo Organization
+      @hasMany Order
   ''', '''
   interface SchemaIssue { field: string; error: string; message: string; }
   type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
@@ -2761,20 +2761,20 @@ test ":model toSQL emits CREATE TABLE", modelHeader + '''
   [sql.includes('CREATE TABLE "users"'), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
 ''', [true, true, true, true, true]
 
-test ":model toSQL emits belongs_to FK", modelHeader + '''
+test ":model toSQL emits belongsTo FK", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
-    @belongs_to User
+    @belongsTo User
   sql = Order.toSQL()
   [sql.includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
 ''', [true]
 
-test ":model toSQL marks optional belongs_to as nullable", modelHeader + '''
+test ":model toSQL marks optional belongsTo as nullable", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
-    @belongs_to User?
+    @belongsTo User?
   sql = Order.toSQL()
   hasFK = sql.match(/"user_id" INTEGER REFERENCES "users"\\("id"\\)/)?
   hasFK
@@ -3155,17 +3155,17 @@ test "afterUpdate hook on a no-op save sees empty savedChanges (AR-compatible)",
   [fired, observed]
 ''', [1, 0]
 
-# @belongs_to FK columns (e.g. user_id from `@belongs_to User`) must
+# @belongsTo FK columns (e.g. user_id from `@belongsTo User`) must
 # participate in the same dirty / snapshot / savedChanges machinery as
 # declared fields. Reassigning inst.userId must trigger an UPDATE
 # writing user_id; an unchanged FK must be skipped on no-op saves.
 
-test ".save() writes belongs_to FK column when reassigned", modelHeader + '''
+test ".save() writes belongsTo FK column when reassigned", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
     total integer
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
   o = Order.find! 10001
   adapter.calls = []
@@ -3189,7 +3189,7 @@ test ".save() with no FK change emits no UPDATE", modelHeader + '''
     name! string
   Order = schema :model
     total integer
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
   o = Order.find! 10001
   adapter.calls = []
@@ -3204,7 +3204,7 @@ test ".save() writes both a declared field and an FK column when both change", m
   Order = schema :model
     total integer
     notes? string
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "notes"}, {name: "user_id"}], data: [[10001, 100, "old", 7]], rows: 1}
   o = Order.find! 10001
   o.notes  = "new"
@@ -3217,12 +3217,12 @@ test ".save() writes both a declared field and an FK column when both change", m
   ]
 ''', [2, ["old", "new"], [7, 9]]
 
-test "markDirty() accepts belongs_to FK column name (camelCase or snake_case)", modelHeader + '''
+test "markDirty() accepts belongsTo FK column name (camelCase or snake_case)", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
     total integer
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
   o = Order.find! 10001
   adapter.calls = []
@@ -3237,7 +3237,7 @@ test "Order.create! records FK column in savedChanges with [null, newValue]", mo
     name! string
   Order = schema :model
     total integer
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
   o = Order.create! {total: 100, userId: 7}
   o.savedChanges.get("userId")
@@ -3312,7 +3312,7 @@ test "@timestamps UPDATE bumps updated_at when only an FK changes", modelHeader 
   User = schema :model
     name! string
   Order = schema :model
-    @belongs_to User
+    @belongsTo User
     @timestamps
   adapter.canned.__default = {columns: [{name: "id"}, {name: "user_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[10001, 7, "T1", "T2"]], rows: 1}
   o = Order.find! 10001
@@ -3529,7 +3529,7 @@ test "field name with adjacent vowels and digits accepted", '''
 ''', ["line2", "addressZip"]
 
 # -- toJSON iterates own enumerable properties: id + declared + timestamps --
-# -- + @belongs_to FKs + !> eager-derived; excludes methods, ~> getters,   --
+# -- + @belongsTo FKs + !> eager-derived; excludes methods, ~> getters,   --
 # -- and internal state (_dirty/_persisted/_snapshot).                     --
 
 test ":model toJSON includes id and declared fields", modelHeader + '''
@@ -3551,12 +3551,12 @@ test ":model toJSON includes @timestamps columns", modelHeader + '''
   [json.id, json.name, json.createdAt, json.updatedAt]
 ''', [1, "a", "T1", "T2"]
 
-test ":model toJSON includes @belongs_to FK columns", modelHeader + '''
+test ":model toJSON includes @belongsTo FK columns", modelHeader + '''
   Org = schema :model
     name! string
   User = schema :model
     name! string
-    @belongs_to Org
+    @belongsTo Org
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}], data: [[1, "Alice", 42]], rows: 1}
   u = User.create! {name: "Alice", orgId: 42}
   json = u.toJSON()
@@ -3575,7 +3575,7 @@ test ":model toJSON includes !> eager-derived fields", modelHeader + '''
 
 # !> eager-derived fields must also run on .create() after the INSERT
 # RETURNING data lands — otherwise DB-assigned slots (id, @timestamps,
-# belongs_to FKs) would be invisible to the derivation.
+# belongsTo FKs) would be invisible to the derivation.
 
 test ":model.create() runs !> eager-derived after RETURNING columns arrive", modelHeader + '''
   User = schema :model
@@ -3612,7 +3612,7 @@ test ":model toJSON survives JSON.stringify round-trip with id preserved", model
   User = schema :model
     name! string
     @timestamps
-    @belongs_to Org
+    @belongsTo Org
   Org = schema :model
     name! string
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[11, "Alice", 3, "T1", "T2"]], rows: 1}
@@ -3623,11 +3623,11 @@ test ":model toJSON survives JSON.stringify round-trip with id preserved", model
 
 # -- relations resolve lazily, even cross-module style (same registry) --
 
-test "belongs_to relation resolves from registry", modelHeader + '''
+test "belongsTo relation resolves from registry", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
-    @belongs_to User
+    @belongsTo User
   # find-by-id mock: returns different rows depending on SQL
   adapter.query = (sql, params) ->
     adapter.calls.push {sql, params}
@@ -3640,12 +3640,12 @@ test "belongs_to relation resolves from registry", modelHeader + '''
   [owner.name, order.userId]
 ''', ["Alice", 42]
 
-test "has_many relation resolves from registry", modelHeader + '''
+test "hasMany relation resolves from registry", modelHeader + '''
   Account = schema :model
     name! string
-    @has_many Order
+    @hasMany Order
   Order = schema :model
-    @belongs_to Account
+    @belongsTo Account
   adapter.query = (sql, params) ->
     adapter.calls.push {sql, params}
     if sql.match /FROM "orders"/
@@ -3657,21 +3657,21 @@ test "has_many relation resolves from registry", modelHeader + '''
   orders.length
 ''', 2
 
-test "self-referential :model — Category @belongs_to Category?", modelHeader + '''
+test "self-referential :model — Category @belongsTo Category?", modelHeader + '''
   Category = schema :model
     name! string
-    @belongs_to Category?
+    @belongsTo Category?
   sql = Category.toSQL()
   [sql.includes('"category_id" INTEGER REFERENCES "categories"("id")'), Category.kind]
 ''', [true, "model"]
 
-test ".toSQL() with circular @belongs_to / @has_many doesn't loop", modelHeader + '''
+test ".toSQL() with circular @belongsTo / @hasMany doesn't loop", modelHeader + '''
   User = schema :model
     name! string
-    @has_many Order
+    @hasMany Order
   Order = schema :model
     total integer
-    @belongs_to User
+    @belongsTo User
   [User.toSQL().includes('CREATE TABLE "users"'), Order.toSQL().includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
 ''', [true, true]
 
@@ -4240,10 +4240,10 @@ test "findMany issues one IN query; [] short-circuits with no SQL", modelHeader 
 test "relation accessor memoizes; {reload: true} busts the memo", modelHeader + '''
   User = schema :model
     name! string
-    @has_many Order
+    @hasMany Order
   Order = schema :model
     total! integer
-    @belongs_to User
+    @belongsTo User
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
   u = User.find! 1
   before = adapter.calls.length
@@ -4302,7 +4302,7 @@ test "FK violation surfaces as {field, error: 'reference'}", '''
     name! string
   Order = schema :model
     total! integer
-    @belongs_to User
+    @belongsTo User
   err = null
   try
     Order.create! {total: 1, user_id: 99}
@@ -4984,7 +4984,7 @@ test "on: routes a model's SQL to its own adapter; others use the global", '''
   [calls.a.length, calls.b.length]
 ''', [1, 2]
 
-test "cross-adapter @belongs_to: accessor works, FK DDL suppressed with a note", '''
+test "cross-adapter @belongsTo: accessor works, FK DDL suppressed with a note", '''
   rows = {columns: [{name: "id"}, {name: "name"}], data: [[7, "main"]], rows: 1}
   __schemaSetAdapter { query: (sql, params) -> rows }
   __SchemaRegistry.reset()
@@ -4993,7 +4993,7 @@ test "cross-adapter @belongs_to: accessor works, FK DDL suppressed with a note",
     name! string
   Event = schema :model, on: analytics
     name? string
-    @belongs_to User
+    @belongsTo User
   sql = Event.toSQL()
   ev = Event.find! 1
   owner = ev.user!
@@ -5066,7 +5066,7 @@ test "toJSONSchema: models include DB-managed columns; refinements annotate", ''
   User = schema :model
     name! string
     @timestamps
-    @belongs_to Org
+    @belongsTo Org
     @ensure "name must not be empty-ish", (u) -> u.name.trim().length > 0
   js = User.toJSONSchema()
   out = [
@@ -5123,7 +5123,7 @@ test "_tableSpec exposes the canonical table structure", modelHeader + '''
     email!  email @unique
     @timestamps
     @softDelete
-    @belongs_to Org
+    @belongsTo Org
     @index [name, email]
   spec = User._tableSpec()
   cols = spec.columns.map (c) -> c.name
@@ -5455,10 +5455,10 @@ test '.includes(:orders) batches one IN query and fills the memo', '''
     __SchemaRegistry.reset()
     User = schema :model
       name! string
-      @has_many Order
+      @hasMany Order
     Order = schema :model
       total! integer
-      @belongs_to User
+      @belongsTo User
     adapter.canned['SELECT * FROM "users"'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
     adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =
@@ -5470,7 +5470,7 @@ test '.includes(:orders) batches one IN query and fills the memo', '''
     [queries, adapter.calls.length, a.length, b.length, a[0].total]
 ''', [2, 2, 2, 1, 100]
 
-test '.includes(:user) on belongs_to batches via findMany; instances shared', '''
+test '.includes(:user) on belongsTo batches via findMany; instances shared', '''
     adapter =
       calls: []
       canned: {}
@@ -5481,10 +5481,10 @@ test '.includes(:user) on belongs_to batches via findMany; instances shared', ''
     __SchemaRegistry.reset()
     User = schema :model
       name! string
-      @has_many Order
+      @hasMany Order
     Order = schema :model
       total! integer
-      @belongs_to User
+      @belongsTo User
     adapter.canned['SELECT * FROM "orders"'] =
       {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 1]], rows: 2}
     adapter.canned['SELECT * FROM "users" WHERE "id" IN (?)'] =
@@ -5506,10 +5506,10 @@ test 'nested includes: {orders: :user} preloads two levels', '''
     __SchemaRegistry.reset()
     User = schema :model
       name! string
-      @has_many Order
+      @hasMany Order
     Order = schema :model
       total! integer
-      @belongs_to User
+      @belongsTo User
     adapter.canned['SELECT * FROM "users"'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
     adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =

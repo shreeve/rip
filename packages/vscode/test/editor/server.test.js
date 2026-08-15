@@ -256,7 +256,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         '  name!  string',
         '  email! email @unique',
         '  @timestamps',
-        '  @belongs_to Organization',
+        '  @belongsTo Organization',
         '  @idStart 5000',
         'console.log User',
         '',

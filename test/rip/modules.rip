@@ -102,6 +102,16 @@ code "export all json", 'export * from "./data.json"', "export * from './data.js
 # Export named from module
 code "export from", 'export { add, multiply } from "./math"', "export { add, multiply } from './math';"
 
+# Renamed re-export, and the newline-separated block form — the shape a
+# package facade uses to publish a curated slice of another module.
+code "export from as", 'export { foo as betterFoo } from "./math"', "export { foo as betterFoo } from './math';"
+code "export from block", '''
+  export {
+    add
+    multiply as times
+  } from "./math"
+  ''', "export { add, multiply as times } from './math';"
+
 # ==============================================================================
 # Meta Properties (ES6)
 # ==============================================================================

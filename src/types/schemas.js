@@ -89,6 +89,10 @@ export const pluralize = (w) => {
 
 const fkCamel = (target) => camelCase(snakeCase(target) + '_id');
 const accessorOf = (target) => target[0].toLowerCase() + target.slice(1);
+// The FK property a belongsTo puts on the instance — `{foreignKey:}`
+// names the COLUMN, and the property is the camel of it, the same
+// derivation the runtime makes.
+const fkProp = (rel) => (rel.foreignKey ? camelCase(rel.foreignKey) : fkCamel(rel.target));
 
 // ── the intrinsic vocabulary ─────────────────────────────────────────
 
@@ -394,7 +398,7 @@ const mixinRefs = (descriptor, byName) => {
 
 const intersect = (base, refs) => (refs.length ? `${base} & ${refs.join(' & ')}` : base);
 
-const RELATION_KINDS = { __proto__: null, belongs_to: 'belongsTo', has_one: 'hasOne', one: 'hasOne', has_many: 'hasMany', many: 'hasMany' };
+const RELATION_KINDS = { __proto__: null, belongsTo: 'belongsTo', hasOne: 'hasOne', hasMany: 'hasMany' };
 
 const relationsOf = (descriptor) => {
   const rels = [];
@@ -403,7 +407,11 @@ const relationsOf = (descriptor) => {
     if (!kind) continue;
     const target = e.args?.[0]?.target;
     if (!target) continue;
-    rels.push({ kind, target, optional: e.args[0].optional === true });
+    const a = e.args[0];
+    rels.push({
+      kind, target, optional: a.optional === true,
+      as: a.as, foreignKey: a.foreignKey, through: a.through,
+    });
   }
   return rels;
 };
@@ -414,10 +422,11 @@ const relationsOf = (descriptor) => {
 // to real Date objects at the wire, and the runtime manages them as
 // Dates (matching the `Date` a declared date/datetime field renders).
 const modelImplicitProps = (descriptor) => {
-  const props = ['id: number'];
+  const pk = descriptor.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey');
+  const props = [`${pk?.args?.[0]?.name ?? 'id'}: number`];
   for (const rel of relationsOf(descriptor)) {
     if (rel.kind !== 'belongsTo') continue;
-    props.push(`${fkCamel(rel.target)}: number${rel.optional ? ' | null' : ''}`);
+    props.push(`${fkProp(rel)}: number${rel.optional ? ' | null' : ''}`);
   }
   const has = (n) => descriptor.entries.some((e) => e.tag === 'directive' && e.name === n);
   if (has('timestamps')) props.push('createdAt: Date', 'updatedAt: Date');
@@ -438,7 +447,7 @@ const modelCreateProps = (descriptor, known) => {
   }
   for (const rel of relationsOf(descriptor)) {
     if (rel.kind !== 'belongsTo') continue;
-    props.push(`${fkCamel(rel.target)}${rel.optional ? '?' : ''}: number${rel.optional ? ' | null' : ''}`);
+    props.push(`${fkProp(rel)}${rel.optional ? '?' : ''}: number${rel.optional ? ' | null' : ''}`);
   }
   return props;
 };
@@ -454,9 +463,9 @@ const relationAccessors = (descriptor, known) => {
   for (const rel of relationsOf(descriptor)) {
     const isKnown = known.has(rel.target);
     if (rel.kind === 'hasMany') {
-      out.push(`${pluralize(accessorOf(rel.target))}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
+      out.push(`${rel.as ?? pluralize(accessorOf(rel.target))}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
     } else {
-      out.push(`${accessorOf(rel.target)}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
+      out.push(`${rel.as ?? accessorOf(rel.target)}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
     }
   }
   return out;

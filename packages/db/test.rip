@@ -1906,13 +1906,13 @@ test! "a throwing transaction rolls back and still drops the session", ->
 
 p "\nORM — eager loading"
 
-test! "include() loads a has_many relation with one IN query", ->
+test! "include() loads a hasMany relation with one IN query", ->
   value = withHarbor! [
     [/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]
     [/^SELECT \* FROM "orders"/, hrows(['id', 'user_id'], [10, 1], [11, 1], [12, 2])]
   ], ({ define, sqls }) ->
-    define model 'Order', field('total'), dir('belongs_to', { target: 'User', optional: false })
-    User = define model 'User', field('name'), dir('has_many', { target: 'Order', optional: false })
+    define model 'Order', field('total'), dir('belongsTo', { target: 'User', optional: false })
+    User = define model 'User', field('name'), dir('hasMany', { target: 'Order', optional: false })
     users = User.where({}).includes('orders').all!
     counts = []
     for u in users

@@ -1199,7 +1199,7 @@ describe('runtime delivery: the reactive runtime', () => {
     const [l0, l1] = imp.code.split('\n');
     expect(l0).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*src\/runtime\/schema\.js";$/);
     expect(l1).toMatch(REACTIVE_IMPORT);
-    expect([...imp.runtimes]).toEqual(['schema', 'reactive']);
+    expect([...imp.runtimes]).toEqual(['schema', 'reactive', 'vocab']);
     const inl = compile(src, { runtimeDelivery: 'inline' });
     expect(inl.code.startsWith('const { __schema')).toBe(true);
     // Value pin via none+binding against the shared modules.
@@ -1235,7 +1235,7 @@ describe('zero-cost gate: the reactive extension', () => {
   test('a schema-using file stays reactive-free (and vice versa) — runtimes deliver independently', () => {
     const s = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
     expect(s.code).not.toContain('runtime/reactive.js');
-    expect([...s.runtimes]).toEqual(['schema']);
+    expect([...s.runtimes]).toEqual(['schema', 'vocab']);
     const r = compile('n = __state(1)', { runtimeDelivery: 'import' });
     expect(r.code).not.toContain('runtime/schema.js');
     expect([...r.runtimes]).toEqual(['reactive']);

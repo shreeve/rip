@@ -14475,9 +14475,21 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsObjectComprehension(sexpr),
   },
   {
+    // The schema vocabulary: directive names, arg shapes, and the
+    // naming rules every derived identifier obeys. Binds NO user-facing
+    // name — delivered only as a dependency, fused ahead of whatever
+    // requires it. The COMPILER imports the same file directly, so the
+    // vocabulary has exactly one definition across all three layers.
+    key: 'vocab',
+    names: [],
+    url: new URL('./runtime/vocab.js', import.meta.url),
+    triggers: () => false,
+  },
+  {
     key: 'schema',
     names: ['__schema', 'SchemaError', 'registerCoercer'],
     url: new URL('./runtime/schema.js', import.meta.url),
+    requires: ['vocab'],
     triggers: (sexpr, preds) => containsSchema(sexpr),
   },
   {
@@ -14495,7 +14507,7 @@ const RUNTIME_TABLE = [
     key: 'orm',
     names: ['schema', '__schemaSetAdapter'],
     url: new URL('./runtime/orm.js', import.meta.url),
-    requires: ['schema', 'harbor'],
+    requires: ['schema', 'harbor', 'vocab'],
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
   },
   {

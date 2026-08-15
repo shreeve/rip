@@ -12,8 +12,8 @@ User = schema :model
   handle? string, 2..24
   bio?    text
   @timestamps
-  @belongs_to Organization
-  @has_many Order
+  @belongsTo Organization
+  @hasMany Order
   beforeSave: -> @name = @name.trim()
   afterCreate: -> console.log @id
   greet: (prefix) -> prefix + " " + @name
@@ -22,11 +22,11 @@ User = schema :model
 Order = schema :model
   total!  ~integer
   status! "open" | "paid" | "void"
-  @belongs_to User
-  @belongs_to Coupon?
+  @belongsTo User
+  @belongsTo Coupon?
   @softDelete
   @idStart 10001
-  @tableWas legacy_orders
+  @tableWas "legacy_orders"
   @unique [:total, :status]
   @index total
 
@@ -45,4 +45,20 @@ Person = schema :model
   @mixin Stamps
   @ensure "named", (p) -> p.firstName.length > 0
 
-Inline = schema :model; label!; @timestamps; @belongs_to Person
+# The mapping directives, all four namespaces of them: bare names are
+# Rip's (a property, a model), quoted strings are the database's (a
+# table, a column).
+Patient = schema :model
+  @table "MDM_PATIENT"
+  @primaryKey patientId, {column: "PATIENT_ID"}
+  mrn!       string, {column: "MRN_NBR"}, @unique
+  firstName! string
+  @hasMany Study, {through: Enrollment}
+
+Post = schema :model
+  title! string
+  @belongsTo User, {as: author, foreignKey: "author_id"}
+  @belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}
+  @hasMany Tag, {as: labels, foreignKey: "post_id"}
+
+Inline = schema :model; label!; @timestamps; @belongsTo Person

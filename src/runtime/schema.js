@@ -19,6 +19,8 @@
 // with instructions. The shared module evaluates once per process
 // (module cache), so toolchain-path programs never trip it.
 
+import { __schemaIsCanonicalName } from './vocab.js';
+
 const __RIP_SCHEMA_SENTINEL = Symbol.for('rip.runtime.schema');
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
   throw new Error(
@@ -292,11 +294,8 @@ function __schemaUnwrapMaterializationError(error) {
 // rely on — a schema valid today must stay valid when the
 // persistence layer loads.
 //   ok:  name, mrn, firstName, mdmId, line2      bad: ID, mdmID, foo_bar
-function __schemaValidateCanonicalName(name) {
-  if (typeof name !== 'string' || !/^[a-z][a-zA-Z0-9]*$/.test(name)) return false;
-  if (/[A-Z]{2,}/.test(name)) return false;
-  return true;
-}
+// The rule itself lives in ./vocab.js, with the compiler's copy of it.
+const __schemaValidateCanonicalName = __schemaIsCanonicalName;
 
 // Structural signature of a declaration — name-shape only, function
 // bodies excluded. Two registrations with the same signature are the

@@ -70,6 +70,74 @@ var syncOpsFlag = () => {
   return ops.on;
 };
 
+// src/runtime/vocab.js
+function __schemaSnake(s) {
+  return String(s).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+}
+function __schemaIsCanonicalName(name) {
+  if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
+    return false;
+  if (/[A-Z]{2,}/.test(name))
+    return false;
+  return true;
+}
+function __schemaIsCanonicalTarget(name) {
+  if (typeof name !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(name))
+    return false;
+  if (/[A-Z]{2,}/.test(name))
+    return false;
+  return true;
+}
+function __schemaIsColumnName(name) {
+  return typeof name === "string" && /^[a-z_][a-z0-9_]*$/.test(name);
+}
+function __schemaIsLiteralColumn(name) {
+  return typeof name === "string" && name.length > 0 && !/[\u0000-\u001f\u007f".]/.test(name);
+}
+var __SCHEMA_MODEL_DIRECTIVES = {
+  __proto__: null,
+  mixin: "target",
+  timestamps: "none",
+  softDelete: "none",
+  belongsTo: "target",
+  hasOne: "target",
+  hasMany: "target",
+  index: "columns",
+  unique: "columns",
+  idStart: "int",
+  table: "name",
+  tableWas: "name",
+  primaryKey: "field"
+};
+var __SCHEMA_ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey"];
+var __SCHEMA_RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
+var __SCHEMA_FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
+var __SCHEMA_RELATION_ATTRS = {
+  __proto__: null,
+  as: "property",
+  foreignKey: "column",
+  through: "model",
+  targetKey: "column"
+};
+function __schemaAttrValueError(kind, key, value) {
+  if (typeof value !== "string" || !value.length) {
+    return "'" + key + "' requires a non-empty string";
+  }
+  if (kind === "property" && !__schemaIsCanonicalName(value)) {
+    return "'" + key + "' is a property name — canonical camelCase, e.g. {" + key + ": author}";
+  }
+  if (kind === "model" && !__schemaIsCanonicalTarget(value)) {
+    return "'" + key + "' is a model name — canonical PascalCase, e.g. {" + key + ": Membership}";
+  }
+  if (kind === "column" && !__schemaIsColumnName(value)) {
+    return "'" + key + "' is a column name Rip generates — lowercase, digits and underscores " + "only, e.g. {" + key + ': "author_id"}';
+  }
+  if (kind === "literal" && !__schemaIsLiteralColumn(value)) {
+    return "'" + key + "' is a database column name — any spelling the database uses, but with " + "no dots, double quotes, or control characters";
+  }
+  return null;
+}
+
 // src/schema.js
 var VALID_KINDS = new Set(["input", "shape", "mixin", "enum", "union", "model"]);
 var KIND_DEFAULT = "input";
@@ -87,23 +155,9 @@ var HOOK_NAMES = new Set([
   "afterCommit",
   "afterRollback"
 ]);
-var MODEL_DIRECTIVES = {
-  __proto__: null,
-  mixin: "target",
-  timestamps: "none",
-  softDelete: "none",
-  belongs_to: "target",
-  has_one: "target",
-  has_many: "target",
-  one: "target",
-  many: "target",
-  index: "columns",
-  unique: "columns",
-  idStart: "int",
-  tableWas: "name"
-};
-var RELATION_DIRECTIVES = new Set(["belongs_to", "has_one", "has_many", "one", "many"]);
-var snakeCase = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+var MODEL_DIRECTIVES = __SCHEMA_MODEL_DIRECTIVES;
+var RELATION_DIRECTIVES = __SCHEMA_RELATION_DIRECTIVES;
+var snakeCase = __schemaSnake;
 var SCHEMA_COERCIBLE_TYPES = new Set(["integer", "number", "boolean", "date", "datetime"]);
 var SCHEMA_NAMED_COERCER_TYPES = {
   __proto__: null,
@@ -478,7 +532,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
           fail(`:input schemas are fields-only — '${e.name}' is a ${e.tag}; use :shape or :model if you need behavior`, e.start);
         }
         if (e.tag === "directive" && e.name !== "mixin") {
-          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["timestamps", "softDelete", "belongs_to", "has_many", "has_one", "one", "many", "unique", "index", "idStart", "tableWas"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
+          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["timestamps", "softDelete", "belongsTo", "hasMany", "hasOne", "unique", "index", "idStart", "table", "tableWas", "primaryKey"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
         }
       }
     }
@@ -820,10 +874,9 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end]
   });
 }
-var SCHEMA_FIELD_ATTRS = new Set(["was"]);
-function parseAttrsTokens(part, fieldName, fail) {
+function parseOptionsBracket(part, vocab, what, fail) {
   if (part[part.length - 1]?.kind !== "}") {
-    fail(`field '${fieldName}' — the '{…}' attrs bracket never closes`, part[0].start);
+    fail(`${what} — the '{…}' options bracket never closes`, part[0].start);
   }
   const inner = part.slice(1, -1).filter((t) => t.kind !== "TERMINATOR" && t.kind !== "INDENT" && t.kind !== "OUTDENT");
   const attrs = {};
@@ -832,29 +885,58 @@ function parseAttrsTokens(part, fieldName, fail) {
       continue;
     const keyTok = item[0];
     if (!isWord(keyTok)) {
-      fail(`field attrs must be '{key: value}' pairs — got ${keyTok.kind}`, keyTok.start);
+      fail(`${what} options must be '{key: value}' pairs — got ${keyTok.kind}`, keyTok.start);
     }
     const key = keyTok.value;
-    if (!SCHEMA_FIELD_ATTRS.has(key)) {
-      fail(`unknown field attr '${key}' — known attrs: ${[...SCHEMA_FIELD_ATTRS].join(", ")}`, keyTok.start);
+    const kind = vocab[key];
+    if (kind === undefined) {
+      fail(`unknown ${what} option '${key}' — known options: ${Object.keys(vocab).join(", ")}`, keyTok.start);
     }
     if (key in attrs)
-      fail(`field '${fieldName}' repeats attr '${key}'`, keyTok.start);
+      fail(`${what} repeats option '${key}'`, keyTok.start);
     let vs = 1;
     if (item[vs]?.kind === ":")
       vs++;
     const valToks = item.slice(vs);
     if (valToks.length !== 1) {
-      fail(`field attr '${key}' takes a single literal value`, (valToks[0] ?? keyTok).start);
+      fail(`${what} option '${key}' takes a single value`, (valToks[0] ?? keyTok).start);
     }
-    const value = literalOf(valToks[0], `field '${fieldName}' attr '${key}'`, fail);
-    if (key === "was" && typeof value !== "string") {
-      fail(`field attr 'was' requires a string column name — {was: "first_name"}`, keyTok.start);
+    const valTok = valToks[0];
+    const bare = kind === "property" || kind === "model";
+    let value;
+    if (bare) {
+      if (!isWord(valTok) && !isKeywordWord(valTok)) {
+        const wrote = valTok.kind === "STRING" && valTok.value.startsWith('"') ? JSON.parse(valTok.value) : null;
+        const shown = wrote && !__schemaAttrValueError(kind, key, wrote) ? wrote : kind === "model" ? "Membership" : "author";
+        fail(`${what} option '${key}' names ${kind === "model" ? "a model" : "a property"}, ` + `so it is written BARE — '{${key}: ${shown}}', ` + `not ${valTok.kind === "STRING" ? valTok.value : `a ${valTok.kind}`}. ` + `Quoting would name a database identifier, which is a different thing`, valTok.start);
+      }
+      value = valTok.value;
+    } else {
+      if (valTok.kind !== "STRING" || !valTok.value.startsWith('"')) {
+        fail(`${what} option '${key}' names a database column, so it is QUOTED — ` + `'{${key}: "${isWord(valTok) ? __schemaSnake(valTok.value) : "author_id"}"}'. ` + `A bare name would be a Rip name, which is a different thing`, valTok.start);
+      }
+      value = JSON.parse(valTok.value);
     }
+    const why = __schemaAttrValueError(kind, key, value);
+    if (why)
+      fail(`${what} option ${why}; got '${value}'`, keyTok.start);
     attrs[key] = value;
   }
   if (!Object.keys(attrs).length) {
-    fail(`field '${fieldName}' has an empty '{…}' attrs bracket`, part[0].start);
+    fail(`${what} has an empty '{…}' options bracket`, part[0].start);
+  }
+  return attrs;
+}
+function parseAttrsTokens(part, fieldName, fail) {
+  return parseOptionsBracket(part, __SCHEMA_FIELD_ATTRS, `field '${fieldName}'`, fail);
+}
+function parseRelationAttrs(part, directiveName, fail) {
+  const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
+  if (attrs.through && directiveName !== "hasMany") {
+    fail(`@${directiveName} option 'through' is @hasMany-only — a many-to-many reads through a join model`, part[0].start);
+  }
+  if (attrs.targetKey && !attrs.through) {
+    fail(`@${directiveName} option 'targetKey' names a column on the join model, so it requires 'through' — '{through: Membership, targetKey: "team_id"}'`, part[0].start);
   }
   return attrs;
 }
@@ -924,7 +1006,7 @@ function finishModelBody(entries, fail) {
     if (shape === undefined) {
       fail(`unknown directive '@${e.name}' on :model — legal: ${Object.keys(MODEL_DIRECTIVES).map((n) => "@" + n).join(", ")}, @ensure, @scope, @defaultScope`, e.nameStart ?? e.start);
     }
-    if (e.name === "idStart" || e.name === "tableWas") {
+    if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
         fail(`duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
       }
@@ -936,38 +1018,48 @@ function finishModelBody(entries, fail) {
   const hasMixin = entries.some((e) => e.tag === "directive" && e.name === "mixin");
   if (hasMixin)
     return;
-  const known = new Set(["id"]);
-  const fieldBySnake = new Map;
+  const known = new Set;
+  const ownerOf = new Map;
+  const claim = (col, owner, at) => {
+    if (known.has(col)) {
+      fail(`${ownerOf.get(col)} and ${owner} both own column '${col}' — every table column has exactly one owner`, at);
+    }
+    known.add(col);
+    ownerOf.set(col, owner);
+  };
+  const pkDirective = entries.find((e) => e.tag === "directive" && e.name === "primaryKey");
+  const pkColumn = pkDirective ? pkDirective.args[0].column : "id";
+  const pkName = pkDirective ? pkDirective.args[0].name : "id";
+  claim(pkColumn, pkDirective ? `@primaryKey ${pkName}` : "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
+  const columnOfField = new Map;
   for (const e of entries) {
     if (e.tag !== "field")
       continue;
-    const col = snakeCase(e.name);
-    fieldBySnake.set(col, e.name);
-    known.add(col);
+    const col = e.attrs?.column ?? snakeCase(e.name);
+    columnOfField.set(e.name, col);
+    claim(col, `field '${e.name}'`, e.start);
+  }
+  if (columnOfField.has(pkName)) {
+    fail(`the primary key '${pkName}' is also declared as a field — the primary key is runtime-managed (its value arrives from the INSERT's RETURNING), so it is never also a declared field`, pkDirective?.start ?? entries.find((e) => e.tag === "field" && e.name === pkName).start);
   }
   for (const e of entries) {
     if (e.tag !== "directive")
       continue;
-    const claim = (col, owner) => {
-      if (known.has(col)) {
-        const f = fieldBySnake.get(col);
-        fail(`${f ? `field '${f}'` : "an earlier directive"} and ${owner} both own column '${col}' — every table column has exactly one owner; ${f ? "rename the field or drop the directive" : "drop the duplicate"}`, e.start);
-      }
-      known.add(col);
-    };
     if (e.name === "timestamps") {
-      claim("created_at", "@timestamps");
-      claim("updated_at", "@timestamps");
+      claim("created_at", "@timestamps", e.start);
+      claim("updated_at", "@timestamps", e.start);
     } else if (e.name === "softDelete")
-      claim("deleted_at", "@softDelete");
-    else if (e.name === "belongs_to")
-      claim(snakeCase(e.args[0].target) + "_id", `the @belongs_to ${e.args[0].target} relation`);
+      claim("deleted_at", "@softDelete", e.start);
+    else if (e.name === "belongsTo") {
+      const a = e.args[0];
+      claim(a.foreignKey ?? snakeCase(a.target) + "_id", `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
+    }
   }
   for (const e of entries) {
     if (e.tag !== "directive" || e.name !== "index" && e.name !== "unique")
       continue;
     e.args[0].fields.forEach((c, ci) => {
-      if (!known.has(snakeCase(c))) {
+      if (!columnOfField.has(c) && !known.has(snakeCase(c))) {
         fail(`@${e.name}: unknown column '${c}' — the table has: ${[...known].sort().join(", ")}`, e.colTokens?.[ci]?.start ?? e.start);
       }
     });
@@ -993,12 +1085,28 @@ function parseModelDirectiveArgs(e, shape, fail) {
         optional = true;
         pos++;
       }
+      let relAttrs = null;
+      if (tokens[pos]?.kind === "," && tokens[pos + 1]?.kind === "{") {
+        relAttrs = parseRelationAttrs(tokens.slice(pos + 1), e.name, fail);
+        pos = tokens.length;
+      }
       if (pos < tokens.length)
-        junk(tokens[pos], `takes exactly one target name — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? "?" : ""}'`);
-      if (!/^[A-Z][a-zA-Z0-9]*$/.test(t0.value) || /[A-Z]{2,}/.test(t0.value)) {
+        junk(tokens[pos], `takes one target name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? "?" : ""}'`);
+      if (!__schemaIsCanonicalTarget(t0.value)) {
         fail(`@${e.name}: target '${t0.value}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, t0.start);
       }
-      return optional ? [{ target: t0.value, optional: true }] : [{ target: t0.value }];
+      const arg = { target: t0.value };
+      if (optional)
+        arg.optional = true;
+      if (relAttrs?.as)
+        arg.as = relAttrs.as;
+      if (relAttrs?.foreignKey)
+        arg.foreignKey = relAttrs.foreignKey;
+      if (relAttrs?.through)
+        arg.through = relAttrs.through;
+      if (relAttrs?.targetKey)
+        arg.targetKey = relAttrs.targetKey;
+      return [arg];
     }
     case "columns": {
       const fields = [];
@@ -1075,16 +1183,54 @@ function parseModelDirectiveArgs(e, shape, fail) {
     case "name": {
       const t0 = tokens[0];
       let name = null;
-      if (t0?.kind === "STRING" && t0.value.startsWith('"'))
+      let quoted = false;
+      if (t0?.kind === "STRING") {
+        if (!t0.value.startsWith('"')) {
+          fail(`@${e.name} takes a plain string literal (heredocs have no literal form)`, t0.start);
+        }
         name = JSON.parse(t0.value);
-      else if (isWord(t0) || isKeywordWord(t0))
+        quoted = true;
+      } else if (isWord(t0) || isKeywordWord(t0)) {
         name = t0.value;
+      }
+      const want = e.name === "table" ? `a table name — '@table UserProfile' or '@table "user_profile"'` : `the previous table name — '@tableWas LegacyUsers' or '@tableWas "legacy_users"'`;
       if (name === null || !name.length) {
-        fail(`@${e.name} requires the previous table name — '@tableWas legacy_users'`, (t0 ?? { start: e.start }).start);
+        fail(`@${e.name} requires ${want}`, (t0 ?? { start: e.start }).start);
+      }
+      if (name.includes(".")) {
+        fail(`@${e.name} '${name}': schema-qualified table names are not supported yet — use a bare table name`, (t0 ?? { start: e.start }).start);
       }
       if (tokens.length > 1)
-        junk(tokens[1], `takes one prior table name — unexpected ${tokens[1].kind}`);
+        junk(tokens[1], `takes one table name — unexpected ${tokens[1].kind}`);
+      if (quoted) {} else {
+        if (/[A-Z]{2,}/.test(name)) {
+          fail(`@${e.name} ${name}: a bare name is a LOGICAL name that Rip snake_cases, and consecutive capitals convert surprisingly ('${name}' → '${snakeCase(name)}'). Spell it 'MdmUser'-style, or name the table exactly by quoting it: '@${e.name} "${name}"'`, t0.start);
+        }
+        name = snakeCase(name);
+      }
       return [{ name }];
+    }
+    case "field": {
+      const t0 = tokens[0];
+      if (!isWord(t0) && !isKeywordWord(t0)) {
+        fail(`@${e.name} requires a property name — '@${e.name} patientId'`, (t0 ?? { start: e.start }).start);
+      }
+      let pos = 1;
+      let attrs = null;
+      if (tokens[pos]?.kind === "," && tokens[pos + 1]?.kind === "{") {
+        attrs = parseOptionsBracket(tokens.slice(pos + 1), __SCHEMA_FIELD_ATTRS, `@${e.name}`, fail);
+        pos = tokens.length;
+      }
+      if (pos < tokens.length)
+        junk(tokens[pos], `takes one property name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}'`);
+      if (attrs?.was) {
+        fail(`@${e.name} option 'was' is a field-rename annotation; a primary-key rename is not a supported migration`, e.start);
+      }
+      if (!__schemaIsCanonicalName(t0.value)) {
+        fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
+      }
+      const arg = { name: t0.value, column: attrs?.column ?? snakeCase(t0.value) };
+      return [arg];
     }
   }
   return null;
@@ -1614,16 +1760,18 @@ function entryLiteral(e, fnCode, marks = {}) {
     case "directive": {
       const obj = [`tag: "directive"`, `name: ${JSON.stringify(e.name)}`];
       if (e.args) {
-        if (e.name === "mixin" || RELATION_DIRECTIVES.has(e.name)) {
+        if (e.name === "mixin" || RELATION_DIRECTIVES.includes(e.name)) {
           const a = e.args[0];
-          obj.push(`args: [{target: ${JSON.stringify(a.target)}${a.optional ? ", optional: true" : ""}}]`);
+          obj.push(`args: [{target: ${JSON.stringify(a.target)}${a.optional ? ", optional: true" : ""}` + `${a.as ? `, as: ${JSON.stringify(a.as)}` : ""}` + `${a.foreignKey ? `, foreignKey: ${JSON.stringify(a.foreignKey)}` : ""}` + `${a.through ? `, through: ${JSON.stringify(a.through)}` : ""}` + `${a.targetKey ? `, targetKey: ${JSON.stringify(a.targetKey)}` : ""}}]`);
+        } else if (e.name === "primaryKey") {
+          obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}, column: ${JSON.stringify(e.args[0].column)}}]`);
         } else if (e.name === "on") {
           obj.push(`args: [{field: ${JSON.stringify(e.args[0].field)}}]`);
         } else if (e.name === "unique" || e.name === "index") {
           obj.push(`args: [{fields: ${JSON.stringify(e.args[0].fields)}}]`);
         } else if (e.name === "idStart") {
           obj.push(`args: [{value: ${e.args[0].value}}]`);
-        } else if (e.name === "tableWas") {
+        } else if (e.name === "table" || e.name === "tableWas") {
           obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}}]`);
         }
       }
@@ -1697,7 +1845,7 @@ function foldProjectableMap(descriptor) {
       timestamps = true;
     else if (e.name === "softDelete")
       softDelete = true;
-    else if (e.name === "belongs_to") {
+    else if (e.name === "belongsTo") {
       const t = e.args && e.args[0] && e.args[0].target;
       if (t)
         fks.push({ fk: foldFkName(t), required: e.args[0].optional !== true });
@@ -18721,9 +18869,16 @@ var RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsObjectComprehension(sexpr)
   },
   {
+    key: "vocab",
+    names: [],
+    url: new URL("./runtime/vocab.js", import.meta.url),
+    triggers: () => false
+  },
+  {
     key: "schema",
     names: ["__schema", "SchemaError", "registerCoercer"],
     url: new URL("./runtime/schema.js", import.meta.url),
+    requires: ["vocab"],
     triggers: (sexpr, preds) => containsSchema(sexpr)
   },
   {
@@ -18736,7 +18891,7 @@ var RUNTIME_TABLE = [
     key: "orm",
     names: ["schema", "__schemaSetAdapter"],
     url: new URL("./runtime/orm.js", import.meta.url),
-    requires: ["schema", "harbor"],
+    requires: ["schema", "harbor", "vocab"],
     triggers: (sexpr, preds) => containsModelSchema(sexpr)
   },
   {
@@ -20039,13 +20194,7 @@ function __schemaMaterializationError(error, field) {
 function __schemaUnwrapMaterializationError(error) {
   return error && error[__SCHEMA_MATERIALIZATION_ERROR] ? { thrown: error.error, derivedField: error.field } : { thrown: error, derivedField: "" };
 }
-function __schemaValidateCanonicalName(name) {
-  if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
-    return false;
-  if (/[A-Z]{2,}/.test(name))
-    return false;
-  return true;
-}
+var __schemaValidateCanonicalName = __schemaIsCanonicalName;
 function __schemaSignature(def) {
   const safe = (v) => JSON.stringify(v ?? null, (k, x) => x instanceof RegExp ? String(x) : typeof x === "function" ? "<fn>" : x);
   const parts = [def.kind];

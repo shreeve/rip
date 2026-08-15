@@ -268,7 +268,7 @@ describe('schema DSL: loud rejections', () => {
     lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
     lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);
     lexFails('I = schema :input\n  a! string\n  @timestamps', /:model-only/);
-    lexFails('S = schema :shape\n  a! string\n  @belongs_to User', /:model-only/);
+    lexFails('S = schema :shape\n  a! string\n  @belongsTo User', /:model-only/);
     lexFails('S = schema :shape\n  a! string\n  @scope :hot, -> @where(a: 1)', /query scopes.*:model-only/);
     lexFails('M = schema :mixin\n  a! string\n  @defaultScope -> @where(a: 1)', /query scopes.*:model-only/);
     lexFails('S = schema :shape, on: analytics\n  a! string', /'on:'.*applies to :model only/);
@@ -289,10 +289,10 @@ describe('schema DSL: loud rejections', () => {
   });
 
   test('malformed or junk-bearing directive args reject at their own position', () => {
-    lexFails('U = schema :model\n  name! string\n  @belongs_to User Order junk 42', /@belongs_to: takes exactly one target name/);
+    lexFails('U = schema :model\n  name! string\n  @belongsTo User Order junk 42', /@belongsTo: takes one target name and an optional '\{…\}' options bracket/);
     lexFails('U = schema :model\n  name! string\n  @timestamps yes please', /@timestamps: takes no arguments/);
     lexFails('U = schema :model\n  name! string\n  @softDelete now', /@softDelete: takes no arguments/);
-    lexFails('U = schema :model\n  name! string\n  @belongs_to', /@belongs_to requires a target name/);
+    lexFails('U = schema :model\n  name! string\n  @belongsTo', /@belongsTo requires a target name/);
     lexFails('U = schema :model\n  name! string\n  @idStart soon', /@idStart requires an integer literal/);
     lexFails('U = schema :model\n  name! string\n  @idStart 1.5', /integer literal; got 1\.5/);
     lexFails('U = schema :model\n  name! string\n  @idStart 10 20', /unexpected NUMBER after the integer/);
@@ -300,14 +300,23 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  name! string\n  @index', /@index requires a field name or list/);
     lexFails('U = schema :model\n  name! string\n  @unique [:name] extra', /unexpected IDENTIFIER after the column list/);
     lexFails('U = schema :model\n  name! string\n  @tableWas', /@tableWas requires the previous table name/);
-    lexFails('U = schema :model\n  name! string\n  @tableWas a b', /takes one prior table name/);
+    lexFails('U = schema :model\n  name! string\n  @tableWas a b', /takes one table name/);
+    lexFails('U = schema :model\n  name! string\n  @table', /@table requires a table name/);
+    lexFails('U = schema :model\n  name! string\n  @table a b', /takes one table name/);
+    // A dotted name would ride through the identifier quoter as ONE
+    // identifier — `"crm.accounts"` names a table literally called that.
+    // Bare form is caught by the lexer; the quoted form needs its own
+    // guard, and both must refuse rather than target the wrong table.
+    lexFails('U = schema :model\n  name! string\n  @table crm.accounts', /takes one table name/);
+    lexFails('U = schema :model\n  name! string\n  @table "crm.accounts"',
+      /schema-qualified table names are not supported yet/);
   });
 
   test('@unique/@index columns must exist on the table (mixin-free models)', () => {
     lexFails('U = schema :model\n  name! string\n  @unique [nope, missing]', /@unique: unknown column 'nope' — the table has: id, name/);
     lexFails('U = schema :model\n  name! string\n  @index bogus_column', /@index: unknown column 'bogus_column'/);
     // implicit columns count as known
-    const ok = 'U = schema :model\n  name! string\n  @timestamps\n  @softDelete\n  @belongs_to Org\n  @index createdAt\n  @index [org_id, deleted_at]\n  @unique :name';
+    const ok = 'U = schema :model\n  name! string\n  @timestamps\n  @softDelete\n  @belongsTo Org\n  @index createdAt\n  @index [org_id, deleted_at]\n  @unique :name';
     expect(() => tokenize(ok)).not.toThrow();
     // a @mixin defers the whole check to the runtime root (its fields
     // are not parse-visible; normalize re-checks the expanded set)
@@ -315,15 +324,15 @@ describe('schema DSL: loud rejections', () => {
   });
 
   test('relation targets must be canonical PascalCase', () => {
-    lexFails('U = schema :model\n  name! string\n  @belongs_to MDMUser', /target 'MDMUser' is not canonical PascalCase/);
-    lexFails('U = schema :model\n  name! string\n  @has_many APIKey', /not canonical PascalCase/);
-    lexFails('U = schema :model\n  name! string\n  @has_one profile', /not canonical PascalCase/);
-    expect(() => tokenize('U = schema :model\n  name! string\n  @belongs_to MdmUser')).not.toThrow();
+    lexFails('U = schema :model\n  name! string\n  @belongsTo MDMUser', /target 'MDMUser' is not canonical PascalCase/);
+    lexFails('U = schema :model\n  name! string\n  @hasMany APIKey', /not canonical PascalCase/);
+    lexFails('U = schema :model\n  name! string\n  @hasOne profile', /not canonical PascalCase/);
+    expect(() => tokenize('U = schema :model\n  name! string\n  @belongsTo MdmUser')).not.toThrow();
   });
 
   test('model-only field spellings: attrs and inline @unique errors', () => {
-    lexFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field attr 'wat' — known attrs: was/);
-    lexFails('U = schema :model\n  a! string, {was: 5}', /'was' requires a string column name/);
+    lexFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field 'a' option 'wat' — known options: column, was/);
+    lexFails('U = schema :model\n  a! string, {was: 5}', /'was' names a database column, so it is QUOTED/);
     lexFails('U = schema :model\n  a! string, {was: "x"}, {was: "y"}', /more than one '\{…\}' attrs bracket/);
     lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*only inline attribute is '@unique'/);
     lexFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
@@ -331,24 +340,100 @@ describe('schema DSL: loud rejections', () => {
 
   test('a field and a directive owning one column collide (mixin-free models)', () => {
     // the exact repro: the field's snake column IS the relation's FK
-    lexFails('U = schema :model\n  userId! integer\n  name! string\n  @belongs_to User',
-      /field 'userId' and the @belongs_to User relation both own column 'user_id'/);
+    lexFails('U = schema :model\n  userId! integer\n  name! string\n  @belongsTo User',
+      /field 'userId' and the @belongsTo User relation both own column 'user_id'/);
     lexFails('U = schema :model\n  createdAt! datetime\n  @timestamps',
       /field 'createdAt' and @timestamps both own column 'created_at'/);
     lexFails('U = schema :model\n  deletedAt? datetime\n  @softDelete',
       /field 'deletedAt' and @softDelete both own column 'deleted_at'/);
     // duplicate relations claim one column too — directive-vs-directive
-    lexFails('U = schema :model\n  name! string\n  @belongs_to Org\n  @belongs_to Org',
-      /an earlier directive and the @belongs_to Org relation both own column 'org_id'/);
+    lexFails('U = schema :model\n  name! string\n  @belongsTo Org\n  @belongsTo Org',
+      /the @belongsTo Org relation and the @belongsTo Org relation both own column 'org_id'/);
     // the legal neighbors stay legal
-    expect(() => tokenize('U = schema :model\n  userName! string\n  @belongs_to User')).not.toThrow();
+    expect(() => tokenize('U = schema :model\n  userName! string\n  @belongsTo User')).not.toThrow();
   });
 
   test('duplicate @idStart / @tableWas reject at the second occurrence (the silent last-wins family)', () => {
     lexFails('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200',
       /duplicate '@idStart' — a :model declares it at most once/);
-    lexFails('U = schema :model\n  name! string\n  @tableWas old_users\n  @tableWas older_users',
+    lexFails('U = schema :model\n  name! string\n  @tableWas "old_users"\n  @tableWas "older_users"',
       /duplicate '@tableWas'/);
+    lexFails('U = schema :model\n  name! string\n  @table "a"\n  @table "b"', /duplicate '@table'/);
+    lexFails('U = schema :model\n  name! string\n  @table Alpha\n  @table Beta', /duplicate '@table'/);
+  });
+
+  // Quoting picks the NAMESPACE, and the two forms are not
+  // interchangeable spellings of one thing:
+  //   @table UserProfile     — a LOGICAL name, snake_cased for you
+  //   @table "user_profile"  — the LITERAL table, used verbatim
+  // Getting it backwards is the interesting case, so each wrong form
+  // must name the right one rather than just refusing.
+  test('@table / @tableWas: bare is a logical name, quoted is the literal table', () => {
+    // Read the resolved name out of the EMITTED descriptor: a `:model`
+    // cannot be evaluated in this process (no persistence runtime here,
+    // by design), and the resolution happens at parse time anyway.
+    const nameOf = (src) => {
+      const { code } = compile(src);
+      return code.match(/name: "table(?:Was)?", args: \[\{name: "([^"]+)"\}\]/)?.[1]
+        ?? `NO MATCH in: ${code}`;
+    };
+    // BARE — any case you like; all of them snake_case to one answer.
+    expect(nameOf('M = schema :model\n  n! string\n  @table UserProfile')).toBe('user_profile');
+    expect(nameOf('M = schema :model\n  n! string\n  @table userProfile')).toBe('user_profile');
+    expect(nameOf('M = schema :model\n  n! string\n  @table user_profile')).toBe('user_profile');
+    expect(nameOf('M = schema :model\n  n! string\n  @table Accounts')).toBe('accounts');
+    expect(nameOf('M = schema :model\n  n! string\n  @tableWas LegacyUsers')).toBe('legacy_users');
+
+    // QUOTED — verbatim, and deliberately unpoliced: the literal form
+    // exists to reach a table Rip did not name, so an inherited
+    // schema's ugly identifier has to survive it intact.
+    expect(nameOf('M = schema :model\n  n! string\n  @table "user_profile"')).toBe('user_profile');
+    expect(nameOf("M = schema :model\n  n! string\n  @table 'user_profile'")).toBe('user_profile');
+    expect(nameOf('M = schema :model\n  n! string\n  @table "UserProfile"')).toBe('UserProfile');
+    expect(nameOf('M = schema :model\n  n! string\n  @table "USER_MASTER"')).toBe('USER_MASTER');
+    expect(nameOf('M = schema :model\n  n! string\n  @table "tblUsers"')).toBe('tblUsers');
+
+    // The one bare-form guard, shared with every other bare name in the
+    // language: consecutive capitals convert surprisingly, and quoting
+    // is the escape.
+    lexFails('M = schema :model\n  n! string\n  @table MDMUser',
+      /consecutive capitals convert surprisingly \('MDMUser' → 'mdmuser'\).*'@table "MDMUser"'/s);
+  });
+
+  // Both relation defaults derive from a MODEL name, so two relations to
+  // one model share an accessor and a column. `as:` and `foreignKey:`
+  // are what make `author` and `reviewer` to User expressible at all.
+  test('@belongsTo/@hasMany accept {as:, foreignKey:} and refuse what would mis-map', () => {
+    const ok = [
+      'P = schema :model',
+      '  title! string',
+      '  @belongsTo User, {as: author, foreignKey: "author_id"}',
+      '  @belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}',
+      '  @hasMany Tag, {as: labels, foreignKey: "post_id"}',
+    ].join('\n');
+    expect(() => tokenize(ok)).not.toThrow();
+    // optional marker still binds to the target, before the options
+    expect(() => tokenize('P = schema :model\n  t! string\n  @belongsTo User?, {as: author}')).not.toThrow();
+
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {inverse: "x"}',
+      /unknown @belongsTo option 'inverse' — known options: as, foreignKey, through, targetKey/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: Author}',
+      /'as' is a property name — canonical camelCase/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: authorID}',
+      /'as' is a property name — canonical camelCase/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: "authorId"}',
+      /'foreignKey' is a column name Rip generates/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: a, as: b}',
+      /@belongsTo repeats option 'as'/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {}',
+      /@belongsTo has an empty '\{…\}' options bracket/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: 5}',
+      /option 'as' names a property, so it is written BARE/);
+    // QUOTING PICKS THE NAMESPACE, both ways
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: "author"}',
+      /option 'as' names a property, so it is written BARE — '\{as: author\}'/);
+    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: author_id}',
+      /option 'foreignKey' names a database column, so it is QUOTED/);
     // positioned at the SECOND occurrence
     try {
       tokenize('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200');
@@ -503,7 +588,7 @@ describe('runtime delivery: injection machinery', () => {
     const { code, runtimes } = compile(SRC);
     expect(code).not.toContain('import');
     expect(code.startsWith('let S = __schema(')).toBe(true);
-    expect([...runtimes]).toEqual(['schema']);
+    expect([...runtimes]).toEqual(['schema', 'vocab']);
   });
 
   test("'import' injects ONE import of the shared runtime module, mapped synthetic", () => {
@@ -624,7 +709,7 @@ describe('runtime delivery: injection machinery', () => {
     // import mode: the one injected import arrives
     const a = compile(SRC_REG, { runtimeDelivery: 'import' });
     expect(a.code.split('\n')[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from ".*runtime\/schema\.js";$/);
-    expect([...a.runtimes]).toEqual(['schema']);
+    expect([...a.runtimes]).toEqual(['schema', 'vocab']);
     // inline byte shape: self-contained IIFE
     const b = compile(SRC_REG, { runtimeDelivery: 'inline' });
     expect(b.code.startsWith('const { __schema, SchemaError, registerCoercer } = (() => {')).toBe(true);
@@ -638,14 +723,14 @@ describe('runtime delivery: injection machinery', () => {
     // runtime use
     const c = compile(SRC_REG, { runtimeDelivery: 'none' });
     expect(c.code).not.toContain('import');
-    expect([...c.runtimes]).toEqual(['schema']);
+    expect([...c.runtimes]).toEqual(['schema', 'vocab']);
   });
 
   test('a SchemaError-only module (catch handler) triggers delivery too', () => {
     const src = 'try\n  f()\ncatch e\n  throw e if e instanceof SchemaError';
     const { code, runtimes } = compile(src, { runtimeDelivery: 'import' });
     expect(code.split('\n')[0]).toMatch(/^import \{ __schema, SchemaError, registerCoercer \} from/);
-    expect([...runtimes]).toEqual(['schema']);
+    expect([...runtimes]).toEqual(['schema', 'vocab']);
   });
 
   test('NAME occurrences that are not references never trigger (zero-cost holds)', () => {
@@ -710,16 +795,21 @@ describe('runtime delivery: injection machinery', () => {
     ]) {
       const { code, runtimes } = compile(src, { runtimeDelivery: 'import' });
       expect(code).toContain('runtime/schema.js');
-      expect([...runtimes]).toEqual(['schema']);
+      expect([...runtimes]).toEqual(['schema', 'vocab']);
     }
   });
 
   test('the runtime module itself is inject-free plain JavaScript', () => {
     const text = readFileSync(new URL('../../src/runtime/schema.js', import.meta.url).pathname, 'utf8');
-    // no import statements (the runtime cannot depend on its own
-    // injection or anything else), one single-line export tail (the
-    // seam the inliner strips)
-    expect(/^import /m.test(text)).toBe(false);
+    // The runtime cannot depend on its own injection, and it may not
+    // reach outside the runtime family. It once had NO imports at all;
+    // it now carries exactly one, to `./vocab.js`, so the naming rules
+    // and the directive vocabulary have a single definition shared with
+    // the compiler and the ORM runtime. That import is legal only
+    // because the emitter strips single-line relative sibling imports
+    // and `requires: ['vocab']` fuses the dependency ahead of it.
+    const imports = text.match(/^import .*$/gm) ?? [];
+    expect(imports).toEqual([`import { __schemaIsCanonicalName } from './vocab.js';`]);
     expect(text).toMatch(/^export \{ __schema, SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence \};$/m);
   });
 });

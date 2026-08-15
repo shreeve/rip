@@ -201,3 +201,56 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(src).not.toContain('9494');
   });
 });
+
+// Harbor draws a distinction the client has to be able to express:
+// an ABSENT timeoutMs takes the deployment default
+// (HARBOR_STATEMENT_TIMEOUT_MS), while an EXPLICIT 0 means "no limit"
+// (duckdb-harbor src/lib.rs, `None | Null => configured_statement_timeout()`).
+// Those are the only two ways to have no client clock, and collapsing
+// them means a deployment-wide deadline either cannot be set or cannot
+// be escaped — the migration runner needs the escape, since a large
+// CREATE INDEX runs for minutes while a request handler past ~30s is
+// already lost.
+describe('statement deadline: absent vs explicit zero', () => {
+  const ok = { '/sql': { json: { columns: [], data: [], rowCount: 0 } } };
+  const sent = async (adapterOpts, queryOpts) => {
+    const fetch = fetchDouble(ok);
+    await withFetch(fetch, () =>
+      orm.__schemaConnect({ url: 'http://h', ...adapterOpts }).query('SELECT 1', null, queryOpts));
+    return fetch.calls.find(c => c.url.endsWith('/sql')).body;
+  };
+
+  test('0 sends no field at all — inherit harbor\'s deployment default', async () => {
+    expect(await sent({ timeoutMs: 0 })).not.toHaveProperty('timeoutMs');
+  });
+
+  test('null sends an explicit 0 — no deadline anywhere', async () => {
+    expect((await sent({ timeoutMs: null })).timeoutMs).toBe(0);
+  });
+
+  test('a positive number rides to harbor as well as running here', async () => {
+    expect((await sent({ timeoutMs: 4500 })).timeoutMs).toBe(4500);
+  });
+
+  test('a statement overrides the adapter, both directions', async () => {
+    // harbor's protocol is per-request, so this is the same knob.
+    expect((await sent({ timeoutMs: 0 }, { timeoutMs: null })).timeoutMs).toBe(0);
+    expect(await sent({ timeoutMs: 9000 }, { timeoutMs: 0 })).not.toHaveProperty('timeoutMs');
+    // An omitted override is not an override.
+    expect((await sent({ timeoutMs: 4500 }, {})).timeoutMs).toBe(4500);
+  });
+
+  // The app default is deliberately 0 — protected by whatever the
+  // operator configured — and every migration statement opts out.
+  test('the ORM default inherits; the migration runner opts out', () => {
+    const ormSrc = readFileSync(new URL('../../src/runtime/orm.js', import.meta.url), 'utf8');
+    expect(ormSrc).toContain('timeoutMs: 0');
+    const migrateSrc = readFileSync(new URL('../../src/cli/migrate.js', import.meta.url), 'utf8');
+    expect(migrateSrc).toContain('const UNBOUNDED = { timeoutMs: null }');
+    // Every statement goes through the one wrapper; the wrapper's own
+    // definition is the single permitted mention of the raw funnel.
+    const raw = migrateSrc.match(/__schemaRunSQL\(null,/g) ?? [];
+    expect(raw.length).toBe(1);
+    expect(migrateSrc).toContain('const runSQL = (sql, params = []) => __schemaRunSQL(null, sql, params, UNBOUNDED)');
+  });
+});

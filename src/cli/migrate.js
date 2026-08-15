@@ -56,6 +56,17 @@ const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE, OPERATIONS_TABLE]);
 
 export { __schemaAdapterConfigured as adapterConfigured };
 
+// Every statement the runner issues opts out of harbor's deployment-wide
+// statement deadline (HARBOR_STATEMENT_TIMEOUT_MS). `timeoutMs: null`
+// sends an explicit 0, which harbor documents as "no limit"; a plain 0
+// would send nothing and inherit the default instead. A migration is the
+// one workload where a long statement is expected rather than a runaway
+// — a 200M-row CREATE INDEX is ~26s on a laptop and minutes on a small
+// cloud VM, so a deadline sized for request handlers would kill it with
+// no escape. The app path keeps the default and stays protected.
+const UNBOUNDED = { timeoutMs: null };
+const runSQL = (sql, params = []) => __schemaRunSQL(null, sql, params, UNBOUNDED);
+
 // ── row materializer ──────────────────────────────────────────────────
 
 function migrateRows(res) {
@@ -81,7 +92,7 @@ function migrateRows(res) {
 // harbor change is needed. The `_rip_migrations` history table is the
 // runner's own state and is filtered out below.
 export async function introspect() {
-  const q = (sql) => __schemaRunSQL(null, sql, []);
+  const q = (sql) => runSQL(sql, []);
   // Every catalog is scoped to the CURRENT database, not just to the
   // `main` schema. An ATTACHed database has a `main` schema too, so a
   // schema-only filter reports its tables as ours — and the differ,
@@ -368,7 +379,7 @@ function topoOrder(names, depsOf, what) {
       throw new Error(
         'schema.plan: ' + what + ' order is impossible — tables ' + [...remaining].join(', ') +
         ' reference each other via FOREIGN KEY (a cycle). DuckDB cannot add FK constraints after ' +
-        'CREATE TABLE, so no statement order satisfies this; break the cycle (drop one @belongs_to, ' +
+        'CREATE TABLE, so no statement order satisfies this; break the cycle (drop one @belongsTo, ' +
         'or move one side behind its own adapter).');
     }
   }
@@ -796,8 +807,7 @@ function rejectDuplicateVersions(files, who) {
 
 async function appliedMigrations() {
   try {
-    const res = await __schemaRunSQL(null,
-      'SELECT version, name, checksum, applied_at FROM ' + MIGRATIONS_TABLE + ' ORDER BY version', []);
+    const res = await runSQL('SELECT version, name, checksum, applied_at FROM ' + MIGRATIONS_TABLE + ' ORDER BY version', []);
     return migrateRows(res);
   } catch (e) {
     // History table doesn't exist yet — nothing applied. Anything
@@ -808,19 +818,16 @@ async function appliedMigrations() {
 }
 
 async function ensureMigrationsTable() {
-  await __schemaRunSQL(null,
-    'CREATE TABLE IF NOT EXISTS ' + MIGRATIONS_TABLE +
+  await runSQL('CREATE TABLE IF NOT EXISTS ' + MIGRATIONS_TABLE +
     ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
 }
 
 async function recordMigrationOperation(id, outcome, detail = null) {
   if (!id) return;
-  await __schemaRunSQL(null,
-    'CREATE TABLE IF NOT EXISTS ' + OPERATIONS_TABLE +
+  await runSQL('CREATE TABLE IF NOT EXISTS ' + OPERATIONS_TABLE +
     ' (id VARCHAR PRIMARY KEY, outcome VARCHAR, detail VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
-  await __schemaRunSQL(null, 'DELETE FROM ' + OPERATIONS_TABLE + ' WHERE id = ?', [id]);
-  await __schemaRunSQL(null,
-    'INSERT INTO ' + OPERATIONS_TABLE + ' (id, outcome, detail) VALUES (?, ?, ?)',
+  await runSQL('DELETE FROM ' + OPERATIONS_TABLE + ' WHERE id = ?', [id]);
+  await runSQL('INSERT INTO ' + OPERATIONS_TABLE + ' (id, outcome, detail) VALUES (?, ?, ?)',
     [id, outcome, detail]);
 }
 
@@ -834,8 +841,7 @@ async function recordMigrationOperation(id, outcome, detail = null) {
 // behind — `--force` clears a stale lock before acquiring. Applies run
 // UNDER the lock; status/plan are read-only and take none.
 async function ensureLockTable() {
-  await __schemaRunSQL(null,
-    'CREATE TABLE IF NOT EXISTS ' + LOCK_TABLE +
+  await runSQL('CREATE TABLE IF NOT EXISTS ' + LOCK_TABLE +
     ' (id INTEGER PRIMARY KEY, acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, owner VARCHAR)', []);
 }
 
@@ -847,14 +853,14 @@ async function acquireMigrationLock(opts = {}) {
   if (opts.coordinated && (opts.force || opts.repair)) {
     throw new Error('schema.migrate: coordinated migration rejects --force and --repair');
   }
-  if (opts.force) await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE, []);
+  if (opts.force) await runSQL('DELETE FROM ' + LOCK_TABLE, []);
   const owner = opts.ownerToken || (
     (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : ((typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid + ':' + Date.now() : 'rip-schema:' + Date.now())
   );
   try {
-    await __schemaRunSQL(null, 'INSERT INTO ' + LOCK_TABLE + ' (id, owner) VALUES (1, ?)', [owner]);
+    await runSQL('INSERT INTO ' + LOCK_TABLE + ' (id, owner) VALUES (1, ?)', [owner]);
   } catch (e) {
     if (/violates (unique|primary key) constraint|already taken|Duplicate key/i.test(e?.message || '')) {
       const err = new Error(
@@ -874,7 +880,7 @@ async function releaseMigrationLock(owner) {
   // successful apply) leaves a stale lock the next run clears with
   // --force; it must never mask the migration's own outcome.
   try {
-    await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1 AND owner = ?', [owner]);
+    await runSQL('DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1 AND owner = ?', [owner]);
   } catch {
     // swallowed on purpose — see above
   }
@@ -1104,8 +1110,7 @@ async function migrateApply(opts, files) {
     const a = appliedByVersion.get(f.version);
     if (!a || a.checksum === f.checksum) continue;
     if (opts.repair) {
-      await __schemaRunSQL(null,
-        'UPDATE ' + MIGRATIONS_TABLE + ' SET checksum = ? WHERE version = ?',
+      await runSQL('UPDATE ' + MIGRATIONS_TABLE + ' SET checksum = ? WHERE version = ?',
         [f.checksum, f.version]);
     } else {
       throw new Error(
@@ -1129,10 +1134,9 @@ async function migrateApply(opts, files) {
     let at = -1; // index of the statement in flight; statements.length = the history row
     const apply = async () => {
       for (at = 0; at < statements.length; at++) {
-        await __schemaRunSQL(null, statements[at], []);
+        await runSQL(statements[at], []);
       }
-      await __schemaRunSQL(null,
-        'INSERT INTO ' + MIGRATIONS_TABLE + ' (version, name, checksum) VALUES (?, ?, ?)',
+      await runSQL('INSERT INTO ' + MIGRATIONS_TABLE + ' (version, name, checksum) VALUES (?, ?, ?)',
         [f.version, f.name, f.checksum]);
     };
     // Transactional apply when the adapter supports it (the adapter

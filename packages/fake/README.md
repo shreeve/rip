@@ -89,7 +89,7 @@ Attribute precedence, lowest to highest: schema-derived fakes → the
 model's own `seed` method (an ordinary method returning an attribute
 object, receiving factory's extra arguments) → a plain-object argument
 as direct overrides. Fields with declared defaults are left to the
-save pipeline, and a required `@belongs_to` foreign key must be passed
+save pipeline, and a required `@belongsTo` foreign key must be passed
 explicitly — factories never invent one.
 
 ```coffee

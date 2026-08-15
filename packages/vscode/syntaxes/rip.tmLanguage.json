@@ -1238,8 +1238,8 @@
     "schema-directives": {
       "patterns": [
         {
-          "comment": "Directives that carry a SCHEMA name: the relationship set (@belongs_to User, @has_many Order) and @mixin, whose argument is the schema being folded in (@mixin Stamped). Without the name captured here the directive word alone was scoped and the schema it names fell through with nothing.",
-          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne|mixin))\\s+([A-Z]\\w*)",
+          "comment": "Directives that carry a SCHEMA name: the relationship set (@belongsTo User, @hasMany Order) and @mixin, whose argument is the schema being folded in (@mixin Stamped). Without the name captured here the directive word alone was scoped and the schema it names fell through with nothing.",
+          "match": "(@(?:belongsTo|hasMany|hasOne|mixin))\\s+([A-Z]\\w*)",
           "captures": {
             "1": { "name": "entity.name.function.decorator.rip" },
             "2": { "name": "entity.name.type.rip" }
@@ -1278,7 +1278,7 @@
         },
         {
           "comment": "Standalone / field-level directives — an explicit allowlist, NOT a \\w+ catch-all, so instance member access (@email, @role, @first) inside hook/computed bodies falls through to the @-variable rule instead of being mis-scoped as a directive. @id and @index are intentionally omitted: @id collides with the common @id member access, and @index always carries a column arg (handled by the composite/single-column rules above).",
-          "match": "@(?:timestamps|softDelete|soft_delete|unique|mixin|ensure|check|scope|defaultScope|idStart|on|where|belongs_to|belongsTo|has_many|hasMany|has_one|hasOne)\\b",
+          "match": "@(?:timestamps|softDelete|unique|mixin|ensure|check|scope|defaultScope|idStart|tableWas|table|primaryKey|on|where|belongsTo|hasMany|hasOne)\\b",
           "name": "entity.name.function.decorator.rip"
         }
       ]

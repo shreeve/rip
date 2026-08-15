@@ -207,7 +207,7 @@ describe('migrate: the differ — step kinds and classes', () => {
   test('empty database: CREATE for every model, safe, parent before child regardless of registration order', async () => {
     const r = await run4(async () => {
       // Child registered FIRST — the order that broke the old lowering (#109).
-      K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       K4.__schema(model('User', field('name')));
       return mig.plan();
     });
@@ -342,6 +342,40 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(r[1].notes[0]).toContain('can be removed once this migration lands');
   });
 
+  // If the differ derived the table name from the MODEL name anywhere
+  // instead of reading the spec, a `@table` override would read as "the
+  // declared table is missing and this deployed one is undeclared" —
+  // a destructive create + drop against live data. Pin both directions.
+  test('@table: the differ targets the override, not the derived name', async () => {
+    const deployed = async (deployedRef) => {
+      K4.__schema(model('Profile', field('nick'), dir('table', { name: 'user_profile' })));
+      deployedRef.value = { tables: [table('user_profile', [col('nick', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    };
+    expect(await run4(deployed)).toEqual([]);
+
+    const fresh = await run4(async (deployedRef) => {
+      K4.__schema(model('Profile', field('nick'), dir('table', { name: 'user_profile' })));
+      deployedRef.value = { tables: [] };
+      return mig.plan();
+    });
+    expect(fresh.map((s) => s.kind)).toEqual(['create-table']);
+    expect(fresh[0].table).toBe('user_profile');
+    expect(fresh[0].sql.join('\n')).toContain('CREATE TABLE "user_profile"');
+    expect(fresh[0].sql.join('\n')).not.toContain('profiles');
+  });
+
+  test('@table composes with @tableWas: rename from the deployed name to the override', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('Client', field('name'),
+        dir('table', { name: 'client_records' }), dir('tableWas', { name: 'customers' })));
+      deployedRef.value = { tables: [table('customers', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(r.map((s) => s.kind)).toEqual(['rename-table']);
+    expect(r[0].sql).toEqual(['ALTER TABLE "customers" RENAME TO "client_records";']);
+  });
+
   test('a consumed rename signal is inert: the new name deployed, the old gone', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('Member', field('givenName', 'string', { attrs: { was: 'first_name' } }), dir('tableWas', { name: 'users' })));
@@ -353,7 +387,7 @@ describe('migrate: the differ — step kinds and classes', () => {
 
   test('FK additions on existing tables are notes; new required column with FK carries the note', async () => {
     const r = await run4(async (deployedRef) => {
-      K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       K4.__schema(model('User', field('name')));
       deployedRef.value = { tables: [
         table('users', [col('name', 'VARCHAR', { notNull: true })]),
@@ -373,7 +407,7 @@ describe('migrate: the differ — step kinds and classes', () => {
 
   test('note-fk fires for an EXISTING column that should gain a reference', async () => {
     const r = await run4(async (deployedRef) => {
-      K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       K4.__schema(model('User', field('name')));
       deployedRef.value = { tables: [
         table('users', [col('name', 'VARCHAR', { notNull: true })]),
@@ -472,7 +506,7 @@ describe('migrate: the differ — step kinds and classes', () => {
   test('the FK freeze: ALTERs on referenced tables classify blocked; ADD COLUMN and index DDL stay safe', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('User', field('fullName', 'string', { attrs: { was: 'name' } }), field('phone', 'string', { optional: true })));
-      K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       deployedRef.value = { tables: [
         table('users', [col('name', 'VARCHAR', { notNull: true })]),
         table('orders', [col('total', 'INTEGER', { notNull: true }), col('user_id', 'INTEGER', { notNull: true })],
@@ -494,7 +528,7 @@ describe('migrate: the differ — determinism and ordering', () => {
   test('same pair, repeated runs: byte-identical steps and rendered plan', async () => {
     const declared = await K4.scope(() => {
       K4.__schema(model('User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')));
-      K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       return mig.canonicalDeclared();
     });
     const deployed = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
@@ -508,7 +542,7 @@ describe('migrate: the differ — determinism and ordering', () => {
     const build = (order) => K4.scope(() => {
       const defs = {
         User: () => K4.__schema(model('User', field('name'))),
-        Order: () => K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false }))),
+        Order: () => K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false }))),
         Coupon: () => K4.__schema(model('Coupon', field('code', 'string', { unique: true }))),
       };
       for (const n of order) defs[n]();
@@ -851,7 +885,7 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
     const bodyOf = () => withDir(async (mdir) => {
       const out = await K4.scope(async () => {
         K4.setAdapter(migrateAdapter({ tables: [] }));
-        K4.__schema(model('Order', field('total', 'integer'), dir('belongs_to', { target: 'User', optional: false })));
+        K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
         K4.__schema(model('User', field('name'), field('email', 'email', { unique: true })));
         return mig.make('init', { dir: mdir });
       });
@@ -895,7 +929,7 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
           { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] }),
       ] }));
       K4.__schema(model('User', field('fullName', 'string', { attrs: { was: 'name' } })));
-      K4.__schema(model('Order', dir('belongs_to', { target: 'User', optional: false })));
+      K4.__schema(model('Order', dir('belongsTo', { target: 'User', optional: false })));
       return mig.make('x', { dir: mdir, allowLossy: true, allowDestructive: true });
     }))).rejects.toThrow(/cannot execute while foreign keys reference the table[\s\S]*no flag overrides this/);
   });
