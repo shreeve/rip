@@ -64,6 +64,10 @@ const table = (name, cols, opts = {}) => ({
   columns: [pkCol(name + '_seq'), ...cols],
   indexes: opts.indexes ?? [],
   foreignKeys: opts.foreignKeys ?? [],
+  // Test-only routing for the fake's contract document: uniqueness the
+  // deployed table declares as a CONSTRAINT (inline/table-level
+  // UNIQUE) rather than as a unique index.
+  ...(opts.uniqueConstraints ? { uniqueConstraints: opts.uniqueConstraints } : {}),
   tableWas: null,
 });
 
@@ -85,7 +89,9 @@ function migrateAdapter(deployed, opts = {}) {
   // round-trips through the same document shape the live adapter
   // returns. A spec column's `unique` flag materializes as its
   // auto-named single-column unique index, the one shape the ORM's
-  // DDL ever gives uniqueness (never inline column UNIQUE).
+  // DDL ever gives uniqueness (never inline column UNIQUE); a table's
+  // `uniqueConstraints` (hand-written inline/table-level UNIQUE)
+  // passes through as the contract's uniqueConstraints field.
   const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
   const contractDoc = () => {
     const tables = [...(deployed.tables || [])]
@@ -108,6 +114,7 @@ function migrateAdapter(deployed, opts = {}) {
             default: c.default ?? null, primary: c.primary === true,
           })),
           primaryKey: t.primaryKey != null ? [t.primaryKey] : [],
+          uniqueConstraints: (t.uniqueConstraints ?? []).map((uc) => ({ columns: [...uc.columns] })),
           indexes,
           foreignKeys: (t.foreignKeys || []).map((fk) => ({
             columns: fk.column.split(', '),
@@ -120,7 +127,7 @@ function migrateAdapter(deployed, opts = {}) {
     const sequences = (deployed.tables || []).filter((t) => t.sequence)
       .map((t) => ({ name: t.sequence.name, start: t.sequence.start }))
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { harborVersion: '0.9.0', duckdbVersion: 'v1.5.5', tables, sequences };
+    return { harborVersion: '0.9.1', duckdbVersion: 'v1.5.5', tables, sequences };
   };
   const answer = (sql, params, staged) => {
     if (opts.failOn && opts.failOn.test(sql)) throw new Error(opts.failMessage || ('injected failure: ' + sql));
@@ -1110,6 +1117,77 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
     const steps = mig.diffSchemas(declared, deployed);
     expect(steps.map((s) => s.kind + ':' + s.class)).toEqual(['set-not-null:blocked']);
     expect(steps[0].notes.some((n) => n.includes('links.a, b'))).toBe(true);
+  });
+
+  // Uniqueness declared as a CONSTRAINT (a hand-written inline or
+  // table-level UNIQUE) arrives in the contract's uniqueConstraints —
+  // it is invisible to the indexes list, whose internal ART index is
+  // not a `duckdb_indexes()` index. A single-column entry is the
+  // column's unique flag, so the differ sees one fact either way the
+  // database spells it.
+  test("a single-column UNIQUE constraint is the column's unique flag: @unique plans nothing, dropping @unique plans drop-unique", async () => {
+    const deployedTables = [table('users', [col('email', 'VARCHAR', { notNull: true })],
+      { uniqueConstraints: [{ columns: ['email'] }] })];
+    // Parity: the model's @unique and the deployed constraint are the
+    // same fact — nothing to plan.
+    const parity = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('User', field('email', 'email', { unique: true })));
+      return mig.plan();
+    });
+    expect(parity).toEqual([]);
+    // Dropping @unique against the constraint plans drop-unique, whose
+    // note names the inline-UNIQUE limit.
+    const dropped = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('User', field('email', 'email')));
+      return mig.plan();
+    });
+    expect(dropped.map((s) => s.kind + ':' + s.class)).toEqual(['drop-unique:safe']);
+    expect(dropped[0].notes.some((n) => n.includes('UNIQUE declared inline'))).toBe(true);
+  });
+
+  test('a composite UNIQUE constraint is ignored: the unique flag is per-column, and composite uniqueness is modeled as unique indexes', async () => {
+    const deployedTables = [table('links', [col('a', 'INTEGER'), col('b', 'INTEGER')],
+      { uniqueConstraints: [{ columns: ['a', 'b'] }] })];
+    const { deployed, steps } = await K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+      K4.__schema(model('Link', field('a', 'integer', { optional: true }), field('b', 'integer', { optional: true })));
+      return { deployed: await mig.introspect(), steps: await mig.plan() };
+    });
+    // Neither member column carries the flag, and no step invents one.
+    const links = deployed.tables.find((t) => t.name === 'links');
+    expect(links.columns.map((c) => c.name + ':' + c.unique)).toEqual(['id:false', 'a:false', 'b:false']);
+    expect(steps).toEqual([]);
+  });
+
+  // Version tolerance, pinned: a v0.9.0 harbor serves documents with
+  // no uniqueConstraints field at all, and the verbs require
+  // catalog(), not the field — absent reads exactly as empty.
+  test('a document without uniqueConstraints (v0.9.0) introspects exactly like one carrying the field empty', async () => {
+    const tableDoc = (extra) => ({
+      name: 'users', schema: 'main',
+      columns: [
+        { name: 'id', type: 'INTEGER', notNull: true, default: "nextval('users_seq')", primary: true },
+        { name: 'email', type: 'VARCHAR', notNull: true, default: null, primary: false },
+      ],
+      primaryKey: ['id'], indexes: [], foreignKeys: [],
+      ...extra,
+    });
+    const read = (t) => K4.scope(async () => {
+      K4.setAdapter({
+        query: async () => ({ columns: [], data: [], rowCount: 0 }),
+        catalog: async () => ({
+          harborVersion: '0.9.0', duckdbVersion: 'v1.5.5',
+          tables: [t], sequences: [{ name: 'users_seq', start: 1 }],
+        }),
+      });
+      return mig.introspect();
+    });
+    const absent = await read(tableDoc({}));
+    const empty = await read(tableDoc({ uniqueConstraints: [] }));
+    expect(absent).toEqual(empty);
+    expect(absent.tables[0].columns.map((c) => c.unique)).toEqual([false, false]);
   });
 });
 

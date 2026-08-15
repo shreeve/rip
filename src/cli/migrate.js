@@ -125,6 +125,20 @@ export async function introspect() {
       default: c.default != null && c.default !== '' ? c.default : null,
       was: null,
     }));
+    // The contract's uniqueConstraints carry uniqueness declared as a
+    // CONSTRAINT (inline column UNIQUE and table-level UNIQUE alike) —
+    // uniqueness the indexes list never reports, because the internal
+    // ART index behind a constraint is not a `duckdb_indexes()` index.
+    // A single-column entry is the column's unique flag. A v0.9.0
+    // harbor serves documents without the field, which reads as none —
+    // the verbs require catalog(), not this field.
+    for (const uc of t.uniqueConstraints ?? []) {
+      const cols = uc.columns ?? [];
+      // Composite entries are ignored: the differ's unique flag is per-column; composite uniqueness is modeled as unique indexes.
+      if (cols.length !== 1) continue;
+      const col = columns.find((c) => c.name === cols[0]);
+      if (col) col.unique = true;
+    }
     // The spec's primaryKey is a single-column identity. The contract
     // reports a composite PRIMARY KEY as its full column list; the
     // spec has no representation for one, so it stays null and its
