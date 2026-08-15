@@ -18,6 +18,7 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const orm = await import('../../src/runtime/orm.js');
+const hb = await import('../../src/runtime/harbor.js');
 
 const adapter = () => orm.__schemaConnect({ url: 'http://h' });
 
@@ -199,6 +200,71 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     const src = readFileSync(new URL('../../src/runtime/harbor.js', import.meta.url), 'utf8');
     expect(src).toContain("const DEFAULT_URL = 'http://127.0.0.1:9495'");
     expect(src).not.toContain('9494');
+  });
+});
+
+// The wire client's error surface: a caller reads these fields to
+// decide whether to retry, how long to wait, and what to log — so a
+// field that is present when the server said nothing, or a message
+// that carries the URL's password into a log, is a defect in the
+// client rather than in the caller.
+describe('harbor client: what an error is allowed to say', () => {
+  // fetchDouble's response has no `headers`, which is exactly the
+  // "server sent no Retry-After" case; a header-bearing reply overrides.
+  const failWith = async (status, json, headers) => {
+    const fetch = async () => ({
+      ok: status < 400, status, statusText: '', json: async () => json,
+      headers: headers ? { get: (k) => headers[k] ?? null } : undefined,
+    });
+    try { await hb.harborAdapter({ url: 'http://h', token: 't', fetch }).query('SELECT 1', []); }
+    catch (e) { return e; }
+    throw new Error('expected a rejection');
+  };
+
+  // `Number(null)` is 0, so an absent header used to stamp
+  // retryAfterMs = 0 on EVERY error — and a caller testing
+  // `if (e.retryAfterMs)` reads 0 as an instruction to retry now,
+  // skipping the backoff it would otherwise have run.
+  test('retryAfterMs appears only when the server actually sent one', async () => {
+    const silent = await failWith(503, { error: 'no lease available', code: 'no_lease_available' });
+    expect('retryAfterMs' in silent).toBe(false);
+    const spoken = await failWith(503, { error: 'no lease available' }, { 'Retry-After': '2' });
+    expect(spoken.retryAfterMs).toBe(2000);
+    // A header that is present but not a number says nothing either.
+    const junk = await failWith(503, { error: 'busy' }, { 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' });
+    expect('retryAfterMs' in junk).toBe(false);
+  });
+
+  // Unreachable-harbor messages are the ones most likely to reach a
+  // log or a bug report, and a URL is the one place a password sits in
+  // plain text in a connection string.
+  test('an unreachable harbor is named without the credentials in its URL', async () => {
+    const fetch = async () => { throw new TypeError('fetch failed'); };
+    const a = hb.harborAdapter({ url: 'http://admin:s3cret@db:9495', token: 't', fetch });
+    await expect(a.query('SELECT 1', [])).rejects.toThrow(/http:\/\/<redacted>@db:9495/);
+    await expect(a.query('SELECT 1', [])).rejects.not.toThrow(/s3cret/);
+  });
+
+  // A cancellation is its own event: a retry loop keyed on
+  // ConnectionError must not catch it, and a caller that asked for the
+  // cancellation must be able to tell its own request apart from a
+  // server-side deadline.
+  test('a cancelled statement carries harbor\'s own code, or ABORTED when it sent none', async () => {
+    const named = await failWith(499, { error: 'the statement was cancelled', code: 'cancelled', harborCode: 'cancelled' });
+    expect(named.name).toBe('CancelledError');
+    expect(named.code).toBe('cancelled');
+    const bare = await failWith(499, { error: 'the statement was cancelled' });
+    expect(bare.name).toBe('CancelledError');
+    expect(bare.code).toBe('ABORTED');
+  });
+
+  // A param that has no wire form must refuse here, where the caller's
+  // stack is, rather than travel as null/"NaN" and land in a row.
+  test('a parameter with no wire form refuses at the client', () => {
+    for (const bad of [undefined, NaN, Infinity, -Infinity, 10n]) {
+      expect(() => hb.encodeParam(bad)).toThrow();
+    }
+    expect(hb.encodeParams([null, 0, -0, 'a', true])).toEqual([null, 0, -0, 'a', true]);
   });
 });
 

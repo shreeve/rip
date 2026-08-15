@@ -283,8 +283,12 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
   test('make gates: a destructive plan refuses without the flag and writes with it', () => {
     write('filedb.js', FILEDB);
     write('gated.rip', MODELS.replace('"./db.json"', '"./gated-db.json"'));
-    // Deployed: users exists with a stray column and a stray table —
-    // drop-column + drop-table are both destructive.
+    // Deployed: users matches its model; a stray table the models do not
+    // declare makes the plan destructive. A stray COLUMN would not serve
+    // here: users carries an index, and DuckDB refuses every non-ADD
+    // ALTER on an indexed table, so a drop-column step is blocked, not
+    // destructive (pinned in test/schema/migrate.test.js) — DROP TABLE
+    // stays legal because a table drops its own indexes with it.
     writeFileSync(join(dir, 'gated-db.json'), JSON.stringify({
       deployed: { tables: [
         {
@@ -293,10 +297,16 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
             { name: 'id', type: 'INTEGER', notNull: true, unique: false, primary: true, default: "nextval('users_seq')" },
             { name: 'name', type: 'VARCHAR', notNull: true, unique: false, default: null },
             { name: 'email', type: 'VARCHAR', notNull: true, unique: true, default: null },
-            { name: 'legacy', type: 'VARCHAR', notNull: false, unique: false, default: null },
           ],
           indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
           foreignKeys: [], tableWas: null,
+        },
+        {
+          name: 'staging', sequence: null, primaryKey: null,
+          columns: [
+            { name: 'x', type: 'INTEGER', notNull: false, unique: false, default: null },
+          ],
+          indexes: [], foreignKeys: [], tableWas: null,
         },
       ] },
       history: [], log: [],
@@ -306,7 +316,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     const refuse = rip(['schema', 'make', 'cleanup', 'gated.rip', '--dir', 'gated-migrations']);
     expect(refuse.status).toBe(1);
     expect(refuse.stderr).toContain('gated steps');
-    expect(refuse.stderr).toContain('[destructive] drop-column users');
+    expect(refuse.stderr).toContain('[destructive] drop-table staging');
     expect(refuse.stderr).toContain('--allow-lossy / --allow-destructive');
     expect(existsSync(join(dir, 'gated-migrations'))).toBe(false);
 
@@ -314,7 +324,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(allow.status).toBe(0);
     expect(allow.stdout).toContain('wrote ' + join('gated-migrations', '0001_cleanup.sql'));
     const body = readFileSync(join(dir, 'gated-migrations/0001_cleanup.sql'), 'utf8');
-    expect(body).toContain('ALTER TABLE "users" DROP COLUMN "legacy";');
+    expect(body).toContain('DROP TABLE "staging";');
   });
 
   test('entry auto-discovery: a cwd models.rip is found without naming it', () => {

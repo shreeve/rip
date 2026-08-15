@@ -80,6 +80,30 @@ function migrateRows(res) {
 
 // ── introspection ─────────────────────────────────────────────────────
 
+// Resolve a FOREIGN KEY's referenced table out of constraint_text when
+// the catalog row carries no referenced_table column. The text form is
+// `… REFERENCES <table>(<columns>)` with the table name UNQUOTED, so a
+// name holding spaces or parens is ambiguous on its own — the tail is
+// matched against the known deployed table names instead, longest
+// match winning. Returns null when nothing matches: the caller records
+// the target as unknown, and unknown blocks (never passes).
+function refFromConstraintText(text, tableNames) {
+  const m = String(text || '').match(/REFERENCES\s+(.*)$/i);
+  if (!m) return null;
+  const tail = m[1];
+  let best = null;
+  for (const name of tableNames) {
+    if (!tail.startsWith(name)) continue;
+    const cm = tail.slice(name.length).match(/^\s*\(([^()]*)\)\s*$/);
+    if (!cm) continue;
+    if (!best || name.length > best.refTable.length) {
+      const refCols = cm[1].split(',').map((s) => s.trim());
+      best = { refTable: name, refColumn: refCols.length === 1 ? refCols[0] : refCols.join(', ') };
+    }
+  }
+  return best;
+}
+
 // Build the DeployedSchema — an array of canonical table specs in the
 // same shape `_tableSpec()` produces — from the live database by
 // querying DuckDB's own catalog directly. This is the migration
@@ -101,7 +125,7 @@ export async function introspect() {
   // `table_catalog`; the duckdb_* functions spell it `database_name`.
   const tablesRes = await q("SELECT table_name FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema = 'main' AND table_type = 'BASE TABLE'");
   const columnsRes = await q("SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_catalog = current_database() AND table_schema = 'main' ORDER BY table_name, ordinal_position");
-  const constraintsRes = await q("SELECT table_name, constraint_type, constraint_column_names, constraint_text FROM duckdb_constraints() WHERE database_name = current_database() AND schema_name = 'main'");
+  const constraintsRes = await q("SELECT table_name, constraint_type, constraint_column_names, constraint_text, referenced_table, referenced_column_names FROM duckdb_constraints() WHERE database_name = current_database() AND schema_name = 'main'");
   const indexesRes = await q("SELECT table_name, index_name, is_unique, expressions FROM duckdb_indexes() WHERE database_name = current_database() AND schema_name = 'main'");
   const sequencesRes = await q("SELECT sequence_name, start_value FROM duckdb_sequences() WHERE database_name = current_database() AND schema_name = 'main'");
 
@@ -155,12 +179,22 @@ export async function introspect() {
       const col = t.columns.find((c) => c.name === cols[0]);
       if (col) col.unique = true;
     } else if (r.constraint_type === 'FOREIGN KEY') {
-      const m = String(r.constraint_text || '').match(/FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\S+?)\s*\(([^)]+)\)/i);
-      if (m) {
-        t.foreignKeys.push({ column: m[1].trim(), refTable: m[2].trim(), refColumn: m[3].trim() });
-      } else if (cols.length === 1) {
-        t.foreignKeys.push({ column: cols[0], refTable: null, refColumn: null });
+      const colName = cols.length === 1 ? cols[0] : cols.join(', ');
+      // The catalog's referenced_table column is authoritative.
+      // constraint_text is the fallback for transports that omit it,
+      // and it carries the referenced table UNQUOTED — a name holding
+      // spaces or parens cannot be split out of it blind, so the text
+      // is matched against the known deployed table names (longest
+      // match). A constraint whose target remains undetermined keeps
+      // refTable null, which the differ reads as "may reference any
+      // table" — an unknown reference blocks, never passes.
+      let refTable = typeof r.referenced_table === 'string' && r.referenced_table !== '' ? r.referenced_table : null;
+      let refColumn = refTable ? (listOf(r.referenced_column_names)[0] ?? null) : null;
+      if (!refTable) {
+        const parsed = refFromConstraintText(r.constraint_text, tables.keys());
+        if (parsed) ({ refTable, refColumn } = parsed);
       }
+      t.foreignKeys.push({ column: colName, refTable, refColumn });
     }
   }
 
@@ -195,9 +229,21 @@ export async function introspect() {
 // the plan can say so out loud.
 export function canonicalDeclared() {
   const tables = [];
+  // One table, one model. Two models naming the same table would fold
+  // into a single map entry downstream, so whichever declared last
+  // would define the table and the other's columns would read as
+  // drops — a plan that changes with declaration order.
+  const claimedBy = new Map();
   for (const [, entry] of __SchemaRegistry._entries) {
     if (entry.kind !== 'model') continue;
     const spec = entry.def._tableSpec();
+    if (claimedBy.has(spec.name)) {
+      throw new Error(
+        "schema.plan: models " + claimedBy.get(spec.name) + ' and ' + entry.def.name +
+        " both map to table '" + spec.name + "' — one table has one model. " +
+        'Give one of them an @table naming a different table.');
+    }
+    claimedBy.set(spec.name, entry.def.name);
     if (entry.def._adapter) spec.ownAdapter = entry.def.name;
     tables.push(spec);
   }
@@ -227,12 +273,15 @@ function typeKey(t) {
 // Tolerant default comparison: deployed defaults round-trip through
 // the catalog with cosmetic differences (CAST wrappers, now() for
 // CURRENT_TIMESTAMP, case). Don't emit ALTERs for representation
-// noise.
+// noise. Case-folding applies to function/keyword spellings ONLY: a
+// string literal's payload is data, so 'Active' and 'active' are two
+// different defaults and compare case-sensitively.
 function defaultKey(d) {
   if (d == null) return '';
   let s = String(d).trim();
   const cast = s.match(/^CAST\s*\(\s*(.*?)\s+AS\s+[A-Za-z0-9_ ()]+\)$/i);
   if (cast) s = cast[1].trim();
+  if (/^'(?:[^']|'')*'$/.test(s)) return s;
   s = s.toLowerCase();
   if (s === 'now()' || s === 'current_timestamp()' || s === 'get_current_timestamp()') s = 'current_timestamp';
   return s;
@@ -313,47 +362,112 @@ function validateSchemaIdentifiers(schema, side) {
 //     adds get a separate CREATE UNIQUE INDEX; FK constraints cannot
 //     be added to an existing table at all (note emitted).
 //   - A table referenced by another table's FOREIGN KEY is frozen for
-//     everything except ADD COLUMN and index DDL ("Dependency Error:
-//     cannot alter entry") — even DROP TABLE … CASCADE is refused.
-//     Steps that hit this wall classify as `blocked`: the change
-//     requires dropping/rebuilding the referencing tables around it.
+//     everything except ADD COLUMN, SET/DROP DEFAULT, and index DDL
+//     ("Dependency Error: cannot alter entry") — even DROP TABLE …
+//     CASCADE is refused. Steps that hit this wall classify as
+//     `blocked`: the change requires dropping/rebuilding the
+//     referencing tables around it. A SELF-referencing FK does not
+//     freeze its own table.
+//   - A table carrying ANY index is frozen the same way for every
+//     in-place ALTER except ADD COLUMN, SET/DROP DEFAULT, and index
+//     DDL — regardless of which column the index covers or the
+//     statement touches. The remedy is manual: drop the index(es),
+//     apply, recreate.
 //   - No ALTER SEQUENCE RESTART → sequence-start drift is a NOTE
 //     step, never silence.
 
-// Step kinds DuckDB executes even when the table is FK-referenced.
+// Step kinds DuckDB executes even when the table is FK-referenced or
+// carries indexes: ADD COLUMN, index DDL (add-unique/drop-unique are
+// index DDL under the fold), SET/DROP DEFAULT — plus the note kinds,
+// which execute nothing.
 const UNBLOCKED_KINDS = new Set([
   'create-table', 'add-column', 'create-index', 'drop-index',
-  'note-fk', 'note-sequence', 'note-adapter',
+  'add-unique', 'drop-unique', 'alter-default',
+  'note-fk', 'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case',
 ]);
+
+// Steps on a renamed table carry the NEW name; deployed evidence is
+// keyed by the OLD one. Map new → old off the plan's own rename steps.
+const renamedFrom = (steps) =>
+  new Map(steps.filter((s) => s.kind === 'rename-table' && s.oldName).map((s) => [s.table, s.oldName]));
 
 // Mark steps that DuckDB will refuse because the target table is
 // referenced by other tables' FOREIGN KEYs. A drop-table step is
 // exempt from blocking by FKs whose OWNING table is itself dropped in
 // this plan: drops order children-first, so by the time the parent's
-// DROP runs its referencing tables are gone.
+// DROP runs its referencing tables are gone. A self-referencing FK
+// never freezes its own table. A FOREIGN KEY whose referenced table
+// is UNKNOWN (the catalog evidence resolved to nothing) may reference
+// ANY table, so it blocks every non-exempt step — unknown fails
+// closed, never open.
 function applyFkBlocks(steps, deployed) {
   const droppedTables = new Set(steps.filter((s) => s.kind === 'drop-table').map((s) => s.table));
+  const oldNames = renamedFrom(steps);
   const referencedBy = new Map(); // table → [{from, ref: 'child.fk_col'}]
+  const unknownRefs = []; // [{from, ref}] — FKs with an undetermined target
   for (const t of deployed.tables) {
     for (const fk of t.foreignKeys) {
-      if (!fk.refTable) continue;
+      if (fk.refTable === t.name) continue;
+      if (fk.refTable == null) {
+        unknownRefs.push({ from: t.name, ref: t.name + '.' + fk.column });
+        continue;
+      }
       if (!referencedBy.has(fk.refTable)) referencedBy.set(fk.refTable, []);
       referencedBy.get(fk.refTable).push({ from: t.name, ref: t.name + '.' + fk.column });
     }
   }
   for (const s of steps) {
     if (UNBLOCKED_KINDS.has(s.kind)) continue;
-    let refs = referencedBy.get(s.table) ||
-      (s.kind === 'rename-table' && s.oldName ? referencedBy.get(s.oldName) : null);
-    if (refs && s.kind === 'drop-table') {
-      refs = refs.filter((r) => !droppedTables.has(r.from));
+    const dropFilter = (list) =>
+      (s.kind === 'drop-table' ? list.filter((r) => !droppedTables.has(r.from)) : list);
+    const refs = dropFilter(referencedBy.get(s.table) ||
+      (oldNames.has(s.table) ? referencedBy.get(oldNames.get(s.table)) : null) || []);
+    if (refs.length) {
+      s.class = 'blocked';
+      s.notes.push(
+        'DuckDB refuses this ALTER while ' + refs.map((r) => r.ref).join(', ') + ' reference(s) this table ' +
+        '("Dependency Error"). Rebuild the referencing table(s) around this change, or ' +
+        'apply it manually with the referencing tables dropped and recreated.');
     }
-    if (!refs || !refs.length) continue;
+    const unknowns = dropFilter(unknownRefs);
+    if (unknowns.length) {
+      s.class = 'blocked';
+      s.notes.push(
+        'the FOREIGN KEY on ' + unknowns.map((r) => r.ref).join(', ') + ' has a referenced table this ' +
+        'introspection could not determine, so it may reference this one — an unknown reference blocks, ' +
+        'never passes. Fix the catalog evidence (or drop the constraint), then re-plan.');
+    }
+  }
+  return steps;
+}
+
+// The index twin of applyFkBlocks: DuckDB refuses every in-place
+// ALTER except ADD COLUMN, SET/DROP DEFAULT, and index DDL on a table
+// carrying ANY index ("Dependency Error", regardless of which column
+// the index covers or the statement touches) — and the ORM's own DDL
+// creates an index for every @unique field and @index. The remedy
+// stays manual by design: drop the index(es), apply the change,
+// recreate them — auto-planning that sandwich would silently widen a
+// migration's blast radius, so the plan blocks and names it instead.
+const INDEX_BLOCKED_KINDS = new Set([
+  'rename-table', 'rename-column', 'set-not-null', 'drop-not-null', 'alter-type', 'drop-column',
+]);
+
+function applyIndexBlocks(steps, deployed) {
+  const oldNames = renamedFrom(steps);
+  const indexesOn = new Map(deployed.tables
+    .filter((t) => (t.indexes || []).length)
+    .map((t) => [t.name, t.indexes]));
+  for (const s of steps) {
+    if (!INDEX_BLOCKED_KINDS.has(s.kind)) continue;
+    const ixs = indexesOn.get(s.table) ||
+      (oldNames.has(s.table) ? indexesOn.get(oldNames.get(s.table)) : null);
+    if (!ixs) continue;
     s.class = 'blocked';
     s.notes.push(
-      'DuckDB refuses this ALTER while ' + refs.map((r) => r.ref).join(', ') + ' reference(s) this table ' +
-      '("Dependency Error"). Rebuild the referencing table(s) around this change, or ' +
-      'apply it manually with the referencing tables dropped and recreated.');
+      'DuckDB refuses this ALTER while index(es) ' + ixs.map((ix) => ix.name).join(', ') + ' exist on this ' +
+      'table ("Dependency Error"). Drop the index(es), apply the change, then recreate: ' +
+      ixs.map((ix) => __schemaRenderIndex({ name: s.table }, ix)).join(' '));
   }
   return steps;
 }
@@ -399,6 +513,15 @@ export function diffSchemas(declared, deployed) {
   // property it borrows from canonicalDeclared().
   const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   const declaredSorted = [...declared.tables].sort(byName);
+  // canonicalDeclared() refuses this at the model level; a
+  // caller-built `declared` reaches the same maps without passing
+  // through it, and the maps below would silently keep the last one.
+  for (let i = 1; i < declaredSorted.length; i++) {
+    if (declaredSorted[i].name === declaredSorted[i - 1].name) {
+      throw new Error("schema.plan: table '" + declaredSorted[i].name +
+        "' is declared twice — one table has one declaration.");
+    }
+  }
   // The fold is a COMPARISON normalization only — create-table steps
   // render from the raw spec, or the folded-away single-column
   // unique indexes would silently vanish from migration-created
@@ -412,6 +535,25 @@ export function diffSchemas(declared, deployed) {
   const pTables = new Map(deployed.tables
     .filter((t) => !RUNNER_TABLES.has(t.name))
     .map((t) => [t.name, foldSpec(t)]));
+
+  // Deployed dependency evidence, per table: the FK references and
+  // (raw, unfolded) index lists under which the engine refuses
+  // in-place ALTERs. diffTable consults these where a step would
+  // otherwise piggyback a statement the engine refuses on such a
+  // table; the block passes over applyFkBlocks / applyIndexBlocks.
+  const fkRefsOn = new Map();     // table → ['child.fk_col', …]
+  const unknownFkRefs = [];       // FKs whose referenced table is undetermined
+  const indexNamesOn = new Map(); // table → [index name, …]
+  for (const t of deployed.tables) {
+    if (RUNNER_TABLES.has(t.name)) continue;
+    for (const fk of t.foreignKeys || []) {
+      if (fk.refTable === t.name) continue;
+      if (fk.refTable == null) { unknownFkRefs.push(t.name + '.' + fk.column); continue; }
+      if (!fkRefsOn.has(fk.refTable)) fkRefsOn.set(fk.refTable, []);
+      fkRefsOn.get(fk.refTable).push(t.name + '.' + fk.column);
+    }
+    if ((t.indexes || []).length) indexNamesOn.set(t.name, t.indexes.map((ix) => ix.name));
+  }
 
   // Rename-signal validation, BEFORE anything consumes them: a
   // `@tableWas` the differ cannot act on coherently is a rejection,
@@ -452,6 +594,10 @@ export function diffSchemas(declared, deployed) {
       });
       pTables.delete(d.tableWas);
       pTables.set(name, { ...old, name });
+      // The dependency evidence follows the rename with the spec.
+      for (const m of [fkRefsOn, indexNamesOn]) {
+        if (m.has(d.tableWas)) { m.set(name, m.get(d.tableWas)); m.delete(d.tableWas); }
+      }
     }
   }
 
@@ -459,11 +605,21 @@ export function diffSchemas(declared, deployed) {
   // create-table steps on purpose — a new child table's FOREIGN KEY
   // freezes its parent the moment it exists, so a migration that both
   // alters `orders` and creates `invoices REFERENCES orders` must
-  // alter first.
+  // alter first. A matched table on its own adapter still diffs
+  // against the DEFAULT adapter's same-named table (introspection
+  // reads only that database), so its steps carry the note-adapter
+  // step the create path already emits — the plan says out loud whose
+  // database the DDL would hit.
   for (const [name, d] of dTables) {
     const p = pTables.get(name);
     if (!p) continue;
-    diffTable(d, p, steps);
+    const before = steps.length;
+    diffTable(d, p, steps, {
+      fkRefs: fkRefsOn.get(name) || [],
+      indexNames: indexNamesOn.get(name) || [],
+      unknownFkRefs,
+    });
+    if (d.ownAdapter && steps.length > before) steps.push(adapterNote(name, d.ownAdapter));
   }
 
   // New tables, FK-topologically ordered: a created child's
@@ -484,14 +640,7 @@ export function diffSchemas(declared, deployed) {
       sql: __schemaRenderCreate(dRaw.get(name)),
       notes: [],
     });
-    if (d.ownAdapter) {
-      steps.push({
-        table: name, kind: 'note-adapter', class: 'safe',
-        sql: ['-- NOTE: ' + d.ownAdapter + ' declares its own on: adapter; this plan reads and writes the ' +
-              'DEFAULT adapter\'s database only — apply this table\'s DDL against its own database yourself'],
-        notes: [],
-      });
-    }
+    if (d.ownAdapter) steps.push(adapterNote(name, d.ownAdapter));
   }
 
   // Dropped tables (deployed but not declared) — the "someone ran
@@ -514,13 +663,43 @@ export function diffSchemas(declared, deployed) {
     steps.push({ table: name, kind: 'drop-table', class: 'destructive', sql, notes: [] });
   }
 
-  return applyFkBlocks(steps, deployed);
+  return applyIndexBlocks(applyFkBlocks(steps, deployed), deployed);
 }
 
-function diffTable(d, p, steps) {
+// The step that names whose database a table's DDL would hit: a model
+// with its own on: adapter plans here against the DEFAULT adapter's
+// database (introspection reads only that one). Emitted beside the
+// table's create step and beside any matched-table diff steps.
+const adapterNote = (table, ownAdapter) => ({
+  table, kind: 'note-adapter', class: 'safe',
+  sql: ['-- NOTE: ' + ownAdapter + ' declares its own on: adapter; this plan reads and writes the ' +
+        'DEFAULT adapter\'s database only — apply this table\'s DDL against its own database yourself'],
+  notes: [],
+});
+
+function diffTable(d, p, steps, deps) {
   const t = d.name;
   const dCols = new Map(d.columns.map((c) => [c.name, c]));
   const pCols = new Map(p.columns.map((c) => [c.name, c]));
+
+  // A moved PRIMARY KEY is not a column diff, and the column diff's
+  // answer to it is actively wrong: it reads as one column added and
+  // another dropped, so the ADD backfills fresh sequence values and
+  // every row's identity silently changes while child FKs keep
+  // pointing at the old ones. There is no ALTER that moves a primary
+  // key, so say so and stop — a blocked step an operator reads beats
+  // a plan that rewrites identities and calls the rewriting half safe.
+  if (d.primaryKey && p.primaryKey && d.primaryKey !== p.primaryKey) {
+    steps.push({
+      table: t, kind: 'note-primary-key', class: 'blocked',
+      sql: ['-- BLOCKED: ' + t + ' primary key ' + p.primaryKey + ' -> ' + d.primaryKey],
+      notes: ['the deployed primary key is ' + p.primaryKey + ' and the model declares ' +
+        d.primaryKey + '. Moving a primary key is not an ALTER: the values must be copied, ' +
+        'the constraint moved, and every referencing foreign key updated in step. Do it as a ' +
+        'hand-written migration, or keep the deployed column name.'],
+    });
+    return;
+  }
 
   // Rename-signal validation (the column half of the rename rule):
   // duplicates, still-declared old names, and old-and-new-both-
@@ -531,7 +710,8 @@ function diffTable(d, p, steps) {
     if (dCols.has(col.was)) {
       throw new Error(
         "schema.plan: {was: '" + col.was + "'} on " + t + '.' + name + ' names a column the model still ' +
-        'declares — a rename\'s old column cannot also be live. Remove the was:, or rename the other field.');
+        'declares — a rename\'s old column cannot also be live. Remove the was:, or free the old name by ' +
+        'renaming the field that declares it.');
     }
     if (wasClaims.has(col.was)) {
       throw new Error(
@@ -565,9 +745,39 @@ function diffTable(d, p, steps) {
     }
   }
 
+  // What the engine's dependency tracking holds over this table — the
+  // conditions under which every in-place ALTER (SET NOT NULL
+  // included) draws "Dependency Error": FK references from other
+  // tables, any index, or a FOREIGN KEY whose target is unknown
+  // (which may reference this table, so it counts — fail closed).
+  const holds = [];
+  if (deps.fkRefs.length) holds.push('FOREIGN KEY ' + deps.fkRefs.join(', '));
+  if (deps.indexNames.length) holds.push('index(es) ' + deps.indexNames.join(', '));
+  if (deps.unknownFkRefs.length) holds.push('FOREIGN KEY(s) with an undetermined target (' + deps.unknownFkRefs.join(', ') + ')');
+
   // Added columns.
   for (const [name, col] of dCols) {
     if (pCols.has(name)) continue;
+    // DuckDB matches identifiers case-insensitively, so a declared
+    // column differing from a deployed one only by letter case is
+    // neither an add (the ADD collides with the existing column) nor
+    // a rename (RENAME cannot change only case). The pair is stated
+    // and blocked, and the deployed column is withheld from the drop
+    // list — an add + drop here would fail at apply and read as a
+    // data-destroying rewrite besides.
+    const cased = [...pCols.keys()].find((n2) => n2.toLowerCase() === name.toLowerCase());
+    if (cased && !dCols.has(cased)) {
+      steps.push({
+        table: t, kind: 'note-column-case', class: 'blocked',
+        sql: ['-- BLOCKED: ' + t + '.' + cased + ' -> ' + name + ' changes only letter case'],
+        notes: ['the declared column ' + name + ' and the deployed column ' + cased + ' differ only by ' +
+          'letter case, which DuckDB cannot express: identifiers match case-insensitively, so the ADD ' +
+          'collides with the existing column and no RENAME applies. Declare {column: "' + cased + '"} to ' +
+          'keep the deployed spelling, or rebuild the table.'],
+      });
+      pCols.delete(cased);
+      continue;
+    }
     const sql = [];
     const notes = [];
     let cls = 'safe';
@@ -591,12 +801,33 @@ function diffTable(d, p, steps) {
           ', then apply: ALTER TABLE ' + t + ' ALTER COLUMN ' + name + ' SET NOT NULL;');
         notes.push('the SET NOT NULL is withheld — it fails on any populated table until ' + t + '.' + name +
           ' is backfilled; after the backfill, the next plan emits it as its own step');
+      } else if (holds.length) {
+        // The default backfills, but DuckDB refuses SET NOT NULL
+        // outright while anything depends on the table — piggybacking
+        // it here would ship a step that fails at apply, riding around
+        // the FK/index blocks by kind. The executable half is WITHHELD
+        // like the no-default case; the ADD (with its backfilling
+        // DEFAULT) is permitted and stays. The next plan emits
+        // set-not-null as its own step, which blocks with the remedy.
+        sql.push('-- REQUIRED, but ' + holds.join(' and ') + ' depend(s) on ' + t + ' and DuckDB refuses ' +
+          'SET NOT NULL while they exist; after clearing them, apply: ALTER TABLE ' + t +
+          ' ALTER COLUMN ' + name + ' SET NOT NULL;');
+        notes.push('the SET NOT NULL is withheld — DuckDB refuses it ("Dependency Error") while ' +
+          holds.join(' and ') + ' depend(s) on ' + t + '; the next plan emits it as its own step');
       } else {
         sql.push('ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
           ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' SET NOT NULL;');
       }
     }
     if (col.unique) {
+      if (col.default != null) {
+        // The DEFAULT backfills every existing row with the same
+        // value, so the piggybacked unique index fails on any table
+        // holding more than one row.
+        cls = 'lossy';
+        notes.push('fails if existing rows hold duplicates — and the DEFAULT backfills every existing ' +
+          'row with the same value, so any table holding 2+ rows fails the CREATE UNIQUE INDEX');
+      }
       sql.push('CREATE UNIQUE INDEX ' + __schemaQuoteIdent('idx_' + t + '_' + name, null, 'index') +
         ' ON ' + __schemaQuoteIdent(t, null, 'table') +
         ' (' + __schemaQuoteIdent(name, null, 'index column') + ');');
@@ -624,7 +855,40 @@ function diffTable(d, p, steps) {
   for (const [name, dc] of dCols) {
     const pc = pCols.get(name);
     if (!pc) continue;
-    if (dc.primary || pc.primary) continue; // pk shape is fixed (INTEGER + nextval)
+    // A SURROGATE pk has a fixed shape (INTEGER + nextval), so when
+    // BOTH sides verify as that shape and agree there is nothing to
+    // diff — the skip fires there and ONLY there. A NATURAL pk is an
+    // ordinary column that happens to be the identity — its type,
+    // length and nullability are the field's, and they drift like any
+    // other, so two natural sides fall through to the normal column
+    // diff. Every OTHER pk disagreement — a deployed pk of the wrong
+    // shape, a missing PRIMARY KEY constraint, a surrogate↔natural
+    // posture flip on the same column name — has no ALTER that fixes
+    // a primary key in place, and the column diff's answer (add +
+    // drop) rewrites row identities; so it blocks and says so.
+    const surrogate = (c) => c.primary === true && /nextval\(/i.test(String(c.default ?? ''));
+    const dPk = dc.primary === true;
+    const pPk = pc.primary === true;
+    if (dPk || pPk) {
+      const dSur = surrogate(dc);
+      const pSur = surrogate(pc);
+      if (dSur && pSur && typeKey(dc.type) === typeKey(pc.type) && dc.notNull === pc.notNull) continue;
+      if (dPk !== pPk || dSur || pSur) {
+        const pkShape = (c, sur, isPk) => sur
+          ? 'a surrogate primary key (' + c.type + ' + ' + c.default + ')'
+          : (isPk ? 'a ' + c.type + ' primary key' : 'a non-primary ' + c.type + ' column') +
+            (c.default != null ? ' with DEFAULT ' + c.default : ' with no default');
+        steps.push({
+          table: t, kind: 'note-primary-key', class: 'blocked',
+          sql: ['-- BLOCKED: ' + t + '.' + name + ' primary-key shape differs from the model'],
+          notes: ['the model declares ' + t + '.' + name + ' as ' + pkShape(dc, dSur, dPk) +
+            ' but the database holds ' + pkShape(pc, pSur, pPk) + '. No ALTER changes a primary key in ' +
+            'place: fix it as a hand-written migration (copy the values, move the constraint, update every ' +
+            'referencing foreign key in step), or align the model with the deployed shape.'],
+        });
+        continue;
+      }
+    }
     if (typeKey(dc.type) !== typeKey(pc.type)) {
       steps.push({
         table: t, kind: 'alter-type', class: 'lossy',
@@ -1026,8 +1290,9 @@ export async function make(name, opts = {}) {
   if (blocked.length) {
     const list = blocked.map((s) => '  [blocked] ' + s.kind + ' ' + s.table + '\n    ' + s.notes.join('\n    ')).join('\n');
     throw new Error(
-      'schema.make: the plan contains steps DuckDB cannot execute while foreign keys reference the table:\n' +
-      list + '\nThese need a manual rebuild of the referencing tables; no flag overrides this.');
+      'schema.make: the plan contains steps DuckDB cannot execute while other entries (foreign keys, ' +
+      'indexes) depend on the table:\n' +
+      list + '\nThese need the dependent entries dropped or rebuilt around the change by hand; no flag overrides this.');
   }
   const gated = [];
   for (const s of steps) {

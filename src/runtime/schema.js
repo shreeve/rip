@@ -563,7 +563,7 @@ class __SchemaDef {
       }
     }
 
-    this._norm = {
+    const norm = {
       fields, methods, computed, derived, hooks, scopes, defaultScope,
       directives, enumMembers, ensures,
       hasAsyncEnsures: ensures.some((r) => r.async),
@@ -573,7 +573,17 @@ class __SchemaDef {
     // constructor rejects), so the seam is present here by
     // construction: relations, tableName, reserved-name enforcement,
     // and the directive/argument validation (#102–#105) attach now.
-    if (this.kind === 'model') __schemaPersistence.finishModelNorm(this, this._norm);
+    //
+    // CACHE ONLY ON SUCCESS. finishModelNorm is where every model-level
+    // rejection lives — the column-ownership gate, the natural-key
+    // posture, attr validation, duplicate directives, unknown @index
+    // columns — and caching before it ran latched a norm with
+    // `columns`, `columnOf`, `fieldOf` and `relations` all undefined.
+    // The schema then reported NO error on every later call and failed
+    // as a TypeError deep in a query instead. A rejected model must
+    // keep rejecting, with the same message, forever.
+    if (this.kind === 'model') __schemaPersistence.finishModelNorm(this, norm);
+    this._norm = norm;
     return this._norm;
   }
 

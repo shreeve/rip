@@ -35,6 +35,14 @@ function resolveUrl(url, env) {
   return String(url || (env || {}).RIP_DB_URL || DEFAULT_URL).replace(/\/+$/, '');
 }
 
+// The URL as it may be SAID. `http://user:secret@host` is a legal
+// harbor URL and it reaches error messages, which reach logs — so
+// userinfo is stripped for display. Only the display form is redacted;
+// the URL that is dialled is untouched.
+function displayUrl(url) {
+  return String(url).replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1<redacted>@');
+}
+
 function envToken() {
   return (typeof process !== 'undefined' && process.env) ? process.env.RIP_DB_TOKEN : null;
 }
@@ -55,8 +63,17 @@ class ConnectionError extends DbError {
 class QueryError extends DbError {
   constructor(message) { super(message); this.name = 'QueryError'; }
 }
+// `code` says WHO cancelled: 'ABORTED' is the caller's own signal,
+// and harbor's own code (e.g. 'cancelled' from a statement deadline)
+// wins when harbor supplied one — the two are different events and a
+// deployment with HARBOR_STATEMENT_TIMEOUT_MS set needs to tell them
+// apart to diagnose anything.
 class CancelledError extends DbError {
-  constructor(message) { super(message); this.name = 'CancelledError'; this.code = 'ABORTED'; }
+  constructor(message, code = 'ABORTED') {
+    super(message);
+    this.name = 'CancelledError';
+    this.code = code;
+  }
 }
 
 function isDbError(value) { return value instanceof DbError; }
@@ -117,14 +134,35 @@ function isPlainObject(v) {
     (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 }
 
-// An Invalid Date is a caller bug: it throws loudly here instead of
-// letting JSON silently turn it into `null`.
+// A value JSON would silently turn into `null` is a caller bug, and
+// binding NULL for it means writing something the caller never asked
+// for. All of them throw loudly here, for the one reason: an Invalid
+// Date, NaN, ±Infinity, and `undefined` all serialize to `null`, and
+// the difference between "no value" and "the value NULL" is not
+// something a database can recover afterwards.
 function encodeParam(v) {
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) {
       throw new TypeError('db: cannot bind an Invalid Date as a query parameter');
     }
     return v.toISOString();
+  }
+  if (v === undefined) {
+    throw new TypeError(
+      'db: cannot bind `undefined` as a query parameter — JSON drops it to null; ' +
+      'pass null if the value really is SQL NULL');
+  }
+  if (typeof v === 'number' && !Number.isFinite(v)) {
+    throw new TypeError(
+      'db: cannot bind ' + (Number.isNaN(v) ? 'NaN' : String(v)) +
+      ' as a query parameter — JSON turns it into null, which would write ' +
+      'SQL NULL for a number the caller computed');
+  }
+  if (typeof v === 'bigint') {
+    throw new TypeError(
+      'db: cannot bind a BigInt as a query parameter — JSON cannot serialize it. ' +
+      'Bind a Number if the value is within 2^53, or a string for an exact ' +
+      'BIGINT/HUGEINT literal');
   }
   if (Array.isArray(v)) return v.map(encodeParam);
   if (isPlainObject(v)) {
@@ -290,6 +328,8 @@ function toResult(env) {
  */
 function harborAdapter(opts = {}) {
   const base = resolveUrl(opts.url);
+  // What error messages may say — never the credentials in the URL.
+  const shown = displayUrl(base);
   const token = opts.token ?? envToken();
   const fetchFn = opts.fetch ?? ((...a) => globalThis.fetch(...a));
   // `??` would fold `null` into the default, and `null` is meaningful
@@ -378,13 +418,13 @@ function harborAdapter(opts = {}) {
         // tells them apart.
         let error;
         if (timedOut) {
-          error = new ConnectionError(`db: harbor at ${base} timed out after ${timeoutMs}ms`);
+          error = new ConnectionError(`db: harbor at ${shown} timed out after ${deadline}ms`);
           error.code = 'TIMEOUT';
         } else if (signal?.aborted) {
           error = new ConnectionError('db: harbor request aborted by the caller');
           error.code = 'ABORTED';
         } else {
-          error = new ConnectionError(`db: harbor at ${base} is unreachable: ${cause.message}`);
+          error = new ConnectionError(`db: harbor at ${shown} is unreachable: ${cause.message}`);
         }
         // We stopped listening; the statement did not stop running. Say
         // so to harbor, or the connection stays out of service until
@@ -412,7 +452,7 @@ function harborAdapter(opts = {}) {
       }
       if (unread != null && response.ok) {
         const error = new ConnectionError(
-          `db: harbor at ${base} sent a response that could not be read: ${unread.message}`);
+          `db: harbor at ${shown} sent a response that could not be read: ${unread.message}`);
         error.cause = unread;
         error.httpStatus = response.status;
         throw error;
@@ -429,7 +469,7 @@ function harborAdapter(opts = {}) {
           // Someone stopped this statement — our deadline reaching
           // harbor, this caller's signal, or another client holding the
           // same id. Same event as a local abort, same type.
-          error = new CancelledError(message);
+          error = new CancelledError(message, data.harborCode ?? 'ABORTED');
         } else if (data.errorCode != null) {
           error = new QueryError(message);
           error.code = data.errorCode;
@@ -446,9 +486,18 @@ function harborAdapter(opts = {}) {
         // transaction pool with nothing free. Honouring the server's
         // number beats inventing a backoff that is either too eager or
         // too patient.
-        let after = NaN;
-        try { after = Number(response.headers?.get?.('Retry-After')); } catch { after = NaN; }
-        if (Number.isFinite(after) && after >= 0) error.retryAfterMs = after * 1000;
+        // ABSENT is not zero. `Number(null)` is 0, which passed the
+        // finite check and stamped `retryAfterMs = 0` on EVERY error —
+        // and a client testing `if error.retryAfterMs?` sees 0 as
+        // present, so it obeys a server instruction the server never
+        // gave and skips its own backoff entirely. Read the header
+        // first; only a header that is actually there speaks.
+        let raw = null;
+        try { raw = response.headers?.get?.('Retry-After') ?? null; } catch { raw = null; }
+        if (raw != null && String(raw).trim() !== '') {
+          const after = Number(raw);
+          if (Number.isFinite(after) && after >= 0) error.retryAfterMs = after * 1000;
+        }
         throw error;
       }
       return data;

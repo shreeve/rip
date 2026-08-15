@@ -2092,6 +2092,95 @@ describe('orm: the defect battery (#102–#105)', () => {
 // this side-only unit tier (no reference dependence)
 // ════════════════════════════════════════════════════════════════════
 
+// _normalize() memoizes, and finishModelNorm — where every
+// model-level rejection lives — used to run AFTER the memo was
+// stored. So the first call threw and every call after it returned
+// the half-built norm: a model the runtime had already refused went
+// on to build SQL from it. A rejected model must keep rejecting.
+describe('orm: a refused model stays refused', () => {
+  const twoOwners = (k) => k.__schema(model('Bad',
+    field('a', 'string', { attrs: { column: 'x' } }),
+    field('b', 'string', { attrs: { column: 'x' } })));
+
+  test('the second _normalize() throws the same error as the first', async () => {
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      const Bad = twoOwners(K4);
+      const first = (() => { try { Bad._normalize(); } catch (e) { return e.message; } })();
+      expect(first).toMatch(/both own column 'x'/);
+      expect(() => Bad._normalize()).toThrow(first);
+    });
+  });
+
+  test('a query on a refused model refuses instead of reaching the adapter', async () => {
+    const r = await paired(async (k) => {
+      const Bad = twoOwners(k);
+      try { Bad._normalize(); } catch {}
+      try { await Bad.where({ a: '1' }).all(); return 'accepted'; } catch { return 'rejected'; }
+    });
+    expect(r.value).toBe('rejected');
+    expect(r.calls.length).toBe(0);
+  });
+
+  // A relation's key-type lookup normalizes its TARGET inside a
+  // try/catch, so an unrelated model touching a broken one used to
+  // swallow the error and leave the memo behind for everyone else.
+  test('a third party touching it cannot swallow the refusal', async () => {
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      const Bad = twoOwners(K4);
+      const Good = K4.__schema(model('Good', field('t'), dir('belongsTo', { target: 'Bad' })));
+      Good.toJSONSchema();
+      expect(() => Bad._normalize()).toThrow(/both own column 'x'/);
+    });
+  });
+});
+
+describe('orm: names that reach SQL as text, not as identifiers', () => {
+  // Identifiers go through __schemaQuoteIdent; the sequence name in a
+  // column DEFAULT is the one name that reaches SQL as a string
+  // LITERAL, where a quote of the other kind ends the string early.
+  test("a table name containing ' escapes inside nextval()", async () => {
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      const sql = K4.__schema(model('O', dir('table', { name: "o'brien" }), field('n'))).toSQL();
+      expect(sql).toContain(`CREATE SEQUENCE "o'brien_seq"`);
+      expect(sql).toContain(`DEFAULT nextval('o''brien_seq')`);
+    });
+  });
+
+  // A VARCHAR width is a count of characters. `..2.5` reads fine as a
+  // validation bound and used to render as VARCHAR(2.5), which no
+  // database accepts — and rounding it would silently redefine the
+  // column.
+  test('a fractional maximum length is refused, not rendered', async () => {
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      const V = K4.__schema(model('V', field('n', 'string', { constraints: { max: 2.5 } })));
+      expect(() => V.toSQL()).toThrow(/VARCHAR width must be a positive whole number/);
+      const W = K4.__schema(model('W', field('n', 'string', { constraints: { max: 2 } })));
+      expect(W.toSQL()).toContain('VARCHAR(2)');
+    });
+  });
+
+  // Column names canonicalize through the model's own map, so a
+  // {column:} field and a same-named-after-camelCase sibling are two
+  // distinct keys. Without `norm`, upsert's RETURNING validator
+  // derived both names and called a correct row a duplicate column.
+  test('upsert() canonicalizes its RETURNING row through the column map', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/INSERT/, rows(['id', 'MRN_NBR', 'mrn_nbr'], [1, 'A', 'B']));
+      const P = k.__schema(model('P',
+        field('mrn', 'string', { attrs: { column: 'MRN_NBR' } }),
+        field('mrnNbr'),
+        dir('unique', { fields: ['mrn'] })));
+      const inst = await P.upsert({ mrn: 'A', mrnNbr: 'B' }, { conflict: ['mrn'] });
+      return { id: inst.id, mrn: inst.mrn, mrnNbr: inst.mrnNbr };
+    });
+    expect(r.value).toEqual({ id: 1, mrn: 'A', mrnNbr: 'B' });
+  });
+});
+
 describe('orm:  unit tier', () => {
   test('an anonymous :model rejects (its table name derives from the name)', async () => {
     await K4.scope(() => {
@@ -3412,5 +3501,468 @@ describe('orm: SQL structure ownership', () => {
     });
     expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE "name" LIKE ? OR "email" = ? ORDER BY created_at DESC, name');
     expect(r.calls[0].params).toEqual(['A%', 'x']);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// mapping gates, through-write integrity, and memo races
+// ════════════════════════════════════════════════════════════════════
+
+// An adapter with hold(re, times): the first `times` matching
+// statements PAUSE until release(), so a test can force the exact
+// interleavings the relation memo must survive. Handlers receive a
+// per-rule call counter; answers compute at issue time.
+function holdableAdapter() {
+  const calls = [];
+  const rules = [];
+  const holds = [];
+  const answer = (sql, params) => {
+    for (const r of rules) {
+      if (r.re.test(sql)) {
+        r.count = (r.count || 0) + 1;
+        return typeof r.handler === 'function' ? r.handler(sql, params, r.count) : r.handler;
+      }
+    }
+    return { columns: [], data: [], rowCount: 0 };
+  };
+  const adapter = {
+    calls,
+    on(re, handler) { rules.push({ re, handler }); return adapter; },
+    hold(re, times = 1) {
+      const h = {
+        re, remaining: times, waiters: [],
+        release() { h.remaining = 0; const w = h.waiters; h.waiters = []; for (const r of w) r(); },
+      };
+      holds.push(h);
+      return h;
+    },
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      const res = answer(sql, params);
+      for (const h of holds) {
+        if (h.remaining > 0 && h.re.test(sql)) {
+          h.remaining--;
+          await new Promise((r) => h.waiters.push(r));
+        }
+      }
+      return res;
+    },
+  };
+  return adapter;
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+// User —hasMany through Membership→ Team, with the join declaring the
+// two @belongsTo the key resolution reads. `joinExtras` adds entries
+// to Membership (a required field, a defaultScope).
+function throughWorld(k, ...joinExtras) {
+  const U = k.__schema(model('User', field('name'),
+    dir('hasMany', { target: 'Team', through: 'Membership' })));
+  k.__schema(model('Team', field('label')));
+  k.__schema(model('Membership', ...joinExtras,
+    dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+  return U;
+}
+
+describe('orm: the column-mapping gates', () => {
+  test('an inline literal-union field renders VARCHAR and still validates', async () => {
+    await K4.scope(() => {
+      const T = K4.__schema(model('Ticket',
+        field('state', 'literal-union', { literals: ['open', 'closed'] })));
+      expect(T.toSQL()).toContain('"state" VARCHAR NOT NULL');
+      expect(T.parse({ state: 'open' }).state).toBe('open');
+      expect(() => T.parse({ state: 'nope' })).toThrow();
+    });
+  });
+
+  test("a {column:} field beside a belongsTo deriving the same property rejects, naming both columns", async () => {
+    await K4.scope(() => {
+      K4.__schema(model('User', field('name')));
+      const Post = K4.__schema(model('Post',
+        field('title'),
+        field('userId', 'integer', { attrs: { column: 'USER_REF' } }),
+        dir('belongsTo', { target: 'User' })));
+      let err = null;
+      try { Post._normalize(); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(rt4.SchemaError);
+      expect(err?.message).toMatch(/field 'userId' and the @belongsTo User relation both own property 'userId'/);
+      expect(err?.message).toMatch(/'USER_REF' and 'user_id'/);
+    });
+  });
+
+  test('hydrate validates adapter rows exactly as reload() does', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      // A legacy table carrying BOTH the mapped column and a sibling
+      // spelling of the same canonical key.
+      adapter.on(/^SELECT \* FROM "recs"/, rows(['id', 'MRN_NBR', 'mrn'], [1, 'mapped', 'legacy']));
+      const Rec = K4.__schema(model('Rec', field('mrn', 'string', { attrs: { column: 'MRN_NBR' } })));
+      let err = null;
+      try { await Rec.all(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/row hydration adapter invariant — duplicate canonical column 'mrn'/);
+      err = null;
+      try { await Rec.find(1); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/duplicate canonical column 'mrn'/);
+    });
+  });
+});
+
+describe('orm: through-write integrity', () => {
+  test('a set() whose insert half cannot validate leaves the links intact — no DELETE issues', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT "user_id", "team_id"/, rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red']));
+      const U = throughWorld(K4, field('role')); // role is REQUIRED on the join
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      expect((await u.teams()).map((t) => t.id)).toEqual([10]);
+      let err = null;
+      try { await u.setTeams([20]); } catch (e) { err = e; } // no {role:} attr
+      expect(err).toBeInstanceOf(rt4.SchemaError);
+      expect(err?.issues?.some((i) => i.field === '[0].role')).toBe(true);
+      expect(adapter.calls.some((c) => /^DELETE/.test(c.sql))).toBe(false);
+      expect(adapter.calls.some((c) => /^INSERT/.test(c.sql))).toBe(false);
+      // The links really are intact, so the memo's answer stays true.
+      expect((await u.teams()).map((t) => t.id)).toEqual([10]);
+    });
+  });
+
+  test('a successful set() invalidates the memo even when the adapter under-reports affected rows', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let unlinked = false;
+      adapter.on(/^SELECT "user_id", "team_id"/, () =>
+        unlinked ? rows(['user_id', 'team_id']) : rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red']));
+      // A bun:sqlite-shaped adapter: the DELETE really lands but its
+      // envelope reports zero affected rows.
+      adapter.on(/^DELETE FROM "memberships"/, () => {
+        unlinked = true;
+        return { columns: [], data: [], rowCount: 0 };
+      });
+      const U = throughWorld(K4);
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      expect((await u.teams()).map((t) => t.id)).toEqual([10]);
+      await u.setTeams([]);
+      const before = adapter.calls.length;
+      expect(await u.teams()).toEqual([]); // re-queried: the memo is gone
+      expect(adapter.calls.length).toBeGreaterThan(before);
+    });
+  });
+
+  test('setX refuses non-object attrs, exactly as addX does', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = throughWorld(K4);
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      let err = null;
+      try { await u.setTeams([10], 'admin'); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/setTeams\(\) attrs must be a plain object of Membership columns/);
+      expect(adapter.calls.length).toBe(0);
+    });
+  });
+
+  test('a through-write invalidates sibling relations over the same join model', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT "user_id", "team_id"/, rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red']));
+      adapter.on(/^INSERT INTO "memberships"/, row(['id', 'user_id', 'team_id'], [7, 1, 11]));
+      const U = K4.__schema(model('User', field('name'),
+        dir('hasMany', { target: 'Team', through: 'Membership' }),
+        dir('hasMany', { target: 'Team', as: 'squads', through: 'Membership' })));
+      K4.__schema(model('Team', field('label')));
+      K4.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      await u.teams();
+      await u.squads(); // both memoized over the same join table
+      await u.addTeams(11);
+      const before = adapter.calls.length;
+      await u.teams();
+      const afterTeams = adapter.calls.length;
+      expect(afterTeams).toBeGreaterThan(before); // own accessor re-queries
+      await u.squads();
+      expect(adapter.calls.length).toBeGreaterThan(afterTeams); // the sibling does too
+    });
+  });
+
+  test('a through resolving owner and target to ONE column refuses, naming the options', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const Category = K4.__schema(model('Category', field('name'),
+        dir('hasMany', { target: 'Category', as: 'children', through: 'CategoryLink' }),
+        dir('hasMany', { target: 'Category', as: 'selves', through: 'CategoryLink', foreignKey: 'category_id', targetKey: 'category_id' })));
+      K4.__schema(model('CategoryLink', dir('belongsTo', { target: 'Category' })));
+      const c = Category._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'root']);
+      // ONE @belongsTo to the shared model answers BOTH sides — refused.
+      let err = null;
+      try { await c.children(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/one column cannot hold both ends of a link/);
+      expect(err?.message).toMatch(/foreignKey/);
+      expect(err?.message).toMatch(/targetKey/);
+      // The explicitly degenerate pair takes the same refusal.
+      err = null;
+      try { await c.selves(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/one column cannot hold both ends of a link/);
+      expect(adapter.calls.length).toBe(0);
+    });
+  });
+
+  test('a two-@belongsTo join with explicit keys still resolves', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT "user_id", "friend_id"/, rows(['user_id', 'friend_id'], [1, 2]));
+      adapter.on(/FROM "users" WHERE "id" IN/, rows(['id', 'name'], [2, 'b']));
+      const U = K4.__schema(model('User', field('name'),
+        dir('hasMany', { target: 'User', as: 'friends', through: 'Friendship', foreignKey: 'user_id', targetKey: 'friend_id' })));
+      K4.__schema(model('Friendship',
+        dir('belongsTo', { target: 'User', as: 'user', foreignKey: 'user_id' }),
+        dir('belongsTo', { target: 'User', as: 'friend', foreignKey: 'friend_id' })));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'a']);
+      const friends = await u.friends();
+      expect(adapter.calls[0].sql).toBe(
+        'SELECT "user_id", "friend_id" FROM "friendships" WHERE "user_id" IN (?)');
+      expect(friends.map((f) => f.name)).toEqual(['b']);
+    });
+  });
+
+  test("the pair read applies the join's @defaultScope, matching the unlink", async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT "user_id", "team_id"/, rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red']));
+      adapter.on(/^DELETE/, { columns: [{ name: 'Count' }], data: [[1]], rowCount: 1 });
+      const U = throughWorld(K4, field('kind'),
+        defaultScopeEntry(function () { return this.where({ kind: 'active' }); }));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      await u.teams();
+      expect(adapter.calls[0].sql).toBe(
+        'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?) AND "kind" = ?');
+      expect(adapter.calls[0].params).toEqual([1, 'active']);
+      await u.removeTeams(10);
+      const del = adapter.calls.find((c) => /^DELETE/.test(c.sql));
+      expect(del.sql).toBe(
+        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?) AND "kind" = ?');
+      expect(del.params).toEqual([1, 10, 'active']);
+    });
+  });
+});
+
+describe('orm: the accessor memo under races', () => {
+  function shopperWorld(k) {
+    const U = k.__schema(model('Shopper', field('name'),
+      dir('hasMany', { target: 'Purchase', foreignKey: 'shopper_id' })));
+    k.__schema(model('Purchase', field('total', 'integer'),
+      dir('belongsTo', { target: 'Shopper', foreignKey: 'shopper_id' })));
+    return U;
+  }
+
+  test('{reload: true} supersedes an earlier in-flight plain read', async () => {
+    await K4.scope(async () => {
+      const adapter = holdableAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/FROM "purchases"/, (sql, params, count) =>
+        count === 1
+          ? rows(['id', 'total', 'shopper_id'], [10, 5, 1])
+          : rows(['id', 'total', 'shopper_id'], [10, 5, 1], [11, 6, 1]));
+      const h = adapter.hold(/FROM "purchases"/, 1);
+      const U = shopperWorld(K4);
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'a']);
+      const stale = u.purchases();                       // held in flight
+      await tick();
+      const fresh = await u.purchases({ reload: true }); // resolves second query
+      expect(fresh.length).toBe(2);
+      h.release();
+      expect((await stale).length).toBe(1);              // the old read still answers its caller
+      const before = adapter.calls.length;
+      expect((await u.purchases()).length).toBe(2);      // the memo holds the reload image
+      expect(adapter.calls.length).toBe(before);
+    });
+  });
+
+  test('a hard destroy landing mid-read: the read resolves and memoizes nothing', async () => {
+    await K4.scope(async () => {
+      const adapter = holdableAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/FROM "purchases"/, rows(['id', 'total', 'shopper_id'], [10, 5, 1]));
+      const h = adapter.hold(/FROM "purchases"/, 1);
+      const U = shopperWorld(K4);
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'a']);
+      const p = u.purchases();           // query in flight, held
+      await tick();
+      await u.destroy({ hard: true });   // _persisted flips false mid-read
+      h.release();
+      const out = await p;               // the data already arrived: no throw
+      expect(out.length).toBe(1);
+      expect(u._relMemo?.get('purchases')).toBeUndefined();
+    });
+  });
+
+  test('lazy and eager through-reads agree: pair order, same hasOne pick', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT "user_id", "team_id"/, rows(['user_id', 'team_id'], [1, 11], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red'], [11, 'blue']));
+      adapter.on(/FROM "users"/, rows(['id', 'name'], [1, 'a']));
+      const U = throughWorld(K4);
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'a']);
+      const lazy = await u.teams();
+      const us = await U.includes('teams').all();
+      const eager = await us[0].teams();
+      expect(lazy.map((t) => t.id)).toEqual([11, 10]);   // pair order on BOTH paths
+      expect(eager.map((t) => t.id)).toEqual([11, 10]);
+      // hasOne through: the same pick on both paths.
+      adapter.on(/^SELECT "owner_id", "badge_id"/, rows(['owner_id', 'badge_id'], [1, 99], [1, 42]));
+      adapter.on(/FROM "badges"/, rows(['id', 'kind'], [42, 'silver'], [99, 'gold']));
+      adapter.on(/FROM "owners"/, rows(['id', 'name'], [1, 'a']));
+      const O = K4.__schema(model('Owner', field('name'),
+        dir('hasOne', { target: 'Badge', through: 'Award' })));
+      K4.__schema(model('Badge', field('kind')));
+      K4.__schema(model('Award',
+        dir('belongsTo', { target: 'Owner' }), dir('belongsTo', { target: 'Badge' })));
+      const o = O._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'a']);
+      expect((await o.badge()).kind).toBe('gold');       // first pair's target
+      const os = await O.includes('badge').all();
+      expect((await os[0].badge()).kind).toBe('gold');
+    });
+  });
+});
+
+describe('orm: chain starters and structured where', () => {
+  test('order/limit/offset start a chain as model statics', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT/, rows(['id', 'title'], [1, 'A']));
+      const Post = K4.__schema(model('Post', field('title'), dir('timestamps')));
+      await Post.order({ createdAt: 'desc' }).limit(2).offset(1).all();
+      await Post.limit(2).all();
+      await Post.offset(3).all();
+      expect(adapter.calls.map((c) => c.sql)).toEqual([
+        'SELECT * FROM "posts" ORDER BY "created_at" DESC LIMIT 2 OFFSET 1',
+        'SELECT * FROM "posts" LIMIT 2',
+        'SELECT * FROM "posts" OFFSET 3',
+      ]);
+    });
+  });
+
+  test('structured where refuses undefined values and keeps null → IS NULL', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^SELECT/, rows(['id', 'title'], [1, 'A']));
+      const Post = K4.__schema(model('Post', field('title')));
+      let err = null;
+      try { await Post.where({ title: undefined }).all(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/where\(\) value for 'title' is undefined/);
+      expect(err?.message).toMatch(/pass null to match IS NULL/);
+      expect(adapter.calls.length).toBe(0);
+      await Post.where({ title: null }).all();
+      expect(adapter.calls[0].sql).toBe('SELECT * FROM "posts" WHERE "title" IS NULL');
+    });
+  });
+});
+
+describe('orm: write-path honesty', () => {
+  test("upsert whose RETURNING lacks the pk rejects with _persisted still false", async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^INSERT INTO "users"/, row(['name', 'email'], ['A', 'a@b.c']));
+      let seen = null;
+      const U = K4.__schema(model('User', field('name'), field('email', 'email', { unique: true }),
+        hook('beforeSave', function () { seen = this; })));
+      let err = null;
+      try { await U.upsert({ name: 'A', email: 'a@b.c' }, { on: 'email' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/upsert\(\) RETURNING for User produced no id/);
+      expect(err?.message).not.toMatch(/on persisted/);
+      expect(seen?._persisted).toBe(false);
+    });
+  });
+
+  test('a refused UPDATE restores savedChanges and the managed timestamp', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let fail = false;
+      adapter.on(/^UPDATE "users"/, () => {
+        if (fail) throw new Error('duckdb: IO Error: disk full');
+        return { columns: [], data: [], rowCount: 1 };
+      });
+      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const t0 = new Date('2026-01-01T00:00:00Z');
+      const u = U._hydrate(
+        [{ name: 'id' }, { name: 'name' }, { name: 'created_at' }, { name: 'updated_at' }],
+        [1, 'ann', t0, t0]);
+      u.name = 'bea';
+      await u.save();
+      const goodChanges = u.savedChanges;
+      const goodTs = u.updatedAt;
+      expect(goodChanges.get('name')).toEqual(['ann', 'bea']);
+      fail = true;
+      u.name = 'cyd';
+      let err = null;
+      try { await u.save(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/disk full/);
+      // The DB refused the write: the instance reports the last save
+      // that actually happened, matching the untouched snapshot.
+      expect(u.savedChanges).toBe(goodChanges);
+      expect(u.savedChanges.get('name')).toEqual(['ann', 'bea']);
+      expect(u.updatedAt).toBe(goodTs);
+      expect(u._snapshot.name).toBe('bea');
+    });
+  });
+
+  test('an unreachable, never-configured default adapter names the fix', async () => {
+    await K4.scope(async () => {
+      const hadUrl = Object.prototype.hasOwnProperty.call(process.env, 'RIP_DB_URL');
+      const priorUrl = process.env.RIP_DB_URL;
+      delete process.env.RIP_DB_URL;
+      try {
+        // The at-import default carries the implicit marker; model it
+        // with an adapter failing the way harbor's client does.
+        const unreachable = {
+          __schemaImplicitDefault: true,
+          async query() {
+            const e = new Error('db: harbor at http://127.0.0.1:4213 is unreachable: Unable to connect');
+            e.name = 'ConnectionError';
+            throw e;
+          },
+        };
+        const M = K4.__schema({ kind: 'model', name: 'Lone', entries: [field('name')], adapter: unreachable });
+        let err = null;
+        try { await M.count(); } catch (e) { err = e; }
+        expect(err?.message).toMatch(/no database is configured/);
+        expect(err?.message).toMatch(/schema\.setAdapter/);
+        expect(err?.message).toMatch(/RIP_DB_URL/);
+        expect(err?.cause?.name).toBe('ConnectionError');
+        // An explicitly-configured adapter keeps the connection message.
+        const explicit = {
+          async query() {
+            const e = new Error('db: harbor at http://db.internal:4213 is unreachable');
+            e.name = 'ConnectionError';
+            throw e;
+          },
+        };
+        const N = K4.__schema({ kind: 'model', name: 'Named', entries: [field('name')], adapter: explicit });
+        err = null;
+        try { await N.count(); } catch (e) { err = e; }
+        expect(err?.message).toMatch(/is unreachable/);
+        expect(err?.message).not.toMatch(/no database is configured/);
+      } finally {
+        if (hadUrl) process.env.RIP_DB_URL = priorUrl;
+      }
+    });
   });
 });

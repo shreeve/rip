@@ -11,6 +11,9 @@ Permanent documentation:
   (layout, package.json, README LAF, tests) and earned-shape inventory.
 - [docs/SERVER.md](docs/SERVER.md) — Rip Sites' system-wide
   Caddy/Janus/manager/worker architecture and lifecycle contract.
+- [docs/ORM.md](docs/ORM.md) — the `schema :model` user guide:
+  declaration DSL, naming, the query surface, persistence,
+  transactions, and the adapter contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
   constitution: browser publication consumption, live changes, reconnect

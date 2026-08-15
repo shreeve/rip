@@ -54,6 +54,20 @@ function __schemaQuoteIdent(name, allowed, what) {
   return '"' + name.replace(/"/g, '""') + '"';
 }
 
+// The one place a name reaches SQL as a string LITERAL rather than an
+// identifier: nextval() takes the sequence by name, in quotes of the
+// other kind. Identifiers go through __schemaQuoteIdent; this is its
+// literal twin, and both exist so no name is ever pasted raw.
+function __schemaQuoteLiteral(text, what) {
+  if (typeof text !== 'string') {
+    throw new Error('schema: ' + what + ' must be a string; got ' + (text === null ? 'null' : typeof text));
+  }
+  if (/[\u0000-\u001f\u007f]/.test(text)) {
+    throw new Error('schema: ' + what + ' contains control characters: ' + JSON.stringify(text));
+  }
+  return "'" + text.replace(/'/g, "''") + "'";
+}
+
 // LIMIT/OFFSET are numeric SQL positions interpolated as bare
 // integers: only an actual number that is a safe non-negative integer
 // may reach them — no coercion, no numeric strings (a request-derived
@@ -443,11 +457,19 @@ function __schemaThroughKeys(def, rel, join) {
       ' (' + hits.map((r) => r.accessor).join(', ') + ') — name the column to say which: ' +
       '{through: ' + rel.through + ', ' + option + ': "' + hits[0].foreignKey + '"}');
   };
-  return {
-    joinNorm,
-    ownerKey: side(rel.foreignKey, def.name, 'owner'),
-    targetKey: side(rel.targetKey, rel.target, 'target'),
-  };
+  const ownerKey = side(rel.foreignKey, def.name, 'owner');
+  const targetKey = side(rel.targetKey, rel.target, 'target');
+  // One column cannot hold both ends of a link. A self-referential
+  // relation whose join model declares ONE @belongsTo to the shared
+  // target resolves both sides to that same column — every row its
+  // own partner, guessed rather than refused.
+  if (ownerKey === targetKey) {
+    throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
+      ' reads through ' + rel.through + " with '" + ownerKey +
+      "' as both its owner and target column — one column cannot hold both ends of a link; " +
+      'name distinct columns with {foreignKey: "…"} and {targetKey: "…"}');
+  }
+  return { joinNorm, ownerKey, targetKey };
 }
 
 // Validate one directive's argument SHAPE against the vocabulary.
@@ -700,6 +722,18 @@ function finishModelNorm(def, norm) {
         ownerOf.get(col) + ' and ' + owner + " both own column '" + col +
         "' — every table column has exactly one owner");
     }
+    // The mirror of the column gate: one property reads exactly one
+    // column. A `{column:}` field beside a relation deriving the same
+    // property would otherwise map one property onto two columns —
+    // duplicate-column DDL and INSERTs, and a phantom column in the
+    // canonical sets.
+    const prior = columnOf.get(property);
+    if (prior !== undefined) {
+      throw __schemaModelError(def, property, 'collision',
+        ownerOf.get(prior) + ' and ' + owner + " both own property '" + property +
+        "' (columns '" + prior + "' and '" + col +
+        "') — every property reads exactly one column");
+    }
     columnOf.set(property, col);
     fieldOf.set(col, property);
     ownerOf.set(col, owner);
@@ -940,6 +974,11 @@ function __schemaAssertAdapter(a, who) {
 }
 
 let __schemaAdapter = __schemaDefaultAdapter();
+// Nothing chose this adapter — it exists so a first ORM call has
+// somewhere to route. The marker lets the SQL funnel reword its
+// connection failures as the configuration problem they are; every
+// explicitly-built adapter (setAdapter, connect, on:) lacks it.
+__schemaAdapter.__schemaImplicitDefault = true;
 
 // Whether anything beyond the unconfigured default is in play — the
 // CLI's pre-flight check reads this so a `rip schema` run against
@@ -1032,6 +1071,19 @@ async function __schemaRunSQL(def, sql, params, opts) {
   try {
     return await (tx ? tx.handle.query(sql, params, opts) : adapter.query(sql, params, opts));
   } catch (e) {
+    // A connection failure on the never-configured default adapter is
+    // a configuration problem, not a network one: name the fix — the
+    // CLI pre-flight's own wording — instead of a mystery endpoint.
+    const env = (typeof process !== 'undefined' && process.env) || {};
+    if (e?.name === 'ConnectionError' && adapter.__schemaImplicitDefault === true && !env.RIP_DB_URL) {
+      const err = new Error(
+        'schema: no database is configured — nothing installed an adapter and RIP_DB_URL is unset, ' +
+        'so this statement dialed the default duckdb-harbor endpoint. Call schema.setAdapter(adapter) ' +
+        'or schema.setAdapter(schema.connect({url, token})), or set RIP_DB_URL (and RIP_DB_TOKEN). ' +
+        '(' + (e.message || String(e)) + ')');
+      err.cause = e;
+      throw err;
+    }
     throw __schemaTranslateDBError(e, def);
   }
 }
@@ -1295,7 +1347,14 @@ class __SchemaQuery {
         const field = norm.fields.get(__schemaFieldFor(norm, column));
         const opaque = !!field &&
           (field.array === true || field.typeName === 'json' || field.typeName === 'any');
-        if (v === null || v === undefined) {
+        if (v === undefined) {
+          // An undefined value is an absent parameter, not a filter —
+          // rendering IS NULL for it turns `where(title: params.title)`
+          // with a missing param into a silent empty result.
+          throw new Error("schema: where() value for '" + k + "' is undefined — an absent " +
+            'value cannot filter; pass null to match IS NULL, or omit the key');
+        }
+        if (v === null) {
           this._clauses.push(col + ' IS NULL');
         } else if (Array.isArray(v)) {
           // An empty IN list matches nothing — `IN ()` is a syntax
@@ -1548,13 +1607,22 @@ function __schemaJoinModel(def, rel) {
 // instances.
 async function __schemaThroughPairs(def, rel, join, keys, identities) {
   if (!identities.length) return [];
+  // The join model's own read filters — @defaultScope and @softDelete
+  // — apply here exactly as deleteAll applies them to the unlink:
+  // both halves of a set() diff must see the same rows, and a scoped
+  // join model scopes its reads wherever they are issued.
+  const scoped = new __SchemaQuery(join);
+  scoped._applyDefaultScope();
+  const where = [
+    __schemaQuoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
+      ' IN (' + identities.map(() => '?').join(', ') + ')',
+    ...scoped._whereParts(keys.joinNorm),
+  ];
   const sql = 'SELECT ' + __schemaQuoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
     ', ' + __schemaQuoteIdent(keys.targetKey, keys.joinNorm.columns, 'through target key') +
     ' FROM ' + __schemaQuoteIdent(keys.joinNorm.tableName, null, 'table') +
-    ' WHERE ' + __schemaQuoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
-    ' IN (' + identities.map(() => '?').join(', ') + ')' +
-    (keys.joinNorm.softDelete ? ' AND "deleted_at" IS NULL' : '');
-  const res = await __schemaRunSQL(join, sql, identities);
+    ' WHERE ' + where.join(' AND ');
+  const res = await __schemaRunSQL(join, sql, [...identities, ...scoped._params]);
   return (res.data || []).filter((row) => row[1] != null);
 }
 
@@ -1704,10 +1772,17 @@ async function __schemaThroughLinked(def, rel, plan) {
 }
 
 // Every write invalidates the memo: the relation's value changed, and
-// the accessor must not answer from a cache that predates it.
-function __schemaThroughInvalidate(inst, acc) {
+// the accessor must not answer from a cache that predates it. The
+// write landed in the JOIN TABLE, so every relation reading through
+// the same join model answers from the changed rows — sibling
+// accessors' memo entries clear along with the writer's own.
+function __schemaThroughInvalidate(def, inst, rel, acc) {
   inst._relGeneration++;
-  if (inst._relMemo) inst._relMemo.delete(acc);
+  if (!inst._relMemo) return;
+  inst._relMemo.delete(acc);
+  for (const [sibling, r] of def._normalize().relations) {
+    if (r.through === rel.through) inst._relMemo.delete(sibling);
+  }
 }
 
 // Linking something already linked is a no-op rather than a second
@@ -1732,7 +1807,7 @@ async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
     [ownerField]: plan.identity,
     [targetField]: id,
   })));
-  __schemaThroughInvalidate(inst, acc);
+  __schemaThroughInvalidate(def, inst, rel, acc);
   return fresh.length;
 }
 
@@ -1741,31 +1816,44 @@ async function __schemaThroughRemove(def, inst, rel, acc, items) {
   const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
   if (!plan.targetIds.length) return 0;
   const removed = await __schemaThroughUnlink(def, rel, plan, plan.targetIds);
-  __schemaThroughInvalidate(inst, acc);
+  __schemaThroughInvalidate(def, inst, rel, acc);
   return removed;
 }
 
 // Make the link set exactly this. Both halves are computed from one
 // read of the current set, so `set` costs the same round trips as an
-// add and a remove that already knew what to do.
+// add and a remove that already knew what to do. The fresh rows
+// validate BEFORE the unlink DELETE — a set() whose insert half
+// cannot succeed must not have destroyed the links it was replacing —
+// and the memo invalidates whenever either half was ATTEMPTED (a
+// failed insert after a landed delete still changed the link set, and
+// an adapter whose rowCount is untruthful for mutations must not talk
+// the accessor into keeping a stale answer).
 async function __schemaThroughSet(def, inst, rel, acc, items, attrs) {
   const api = 'set' + acc[0].toUpperCase() + acc.slice(1) + '()';
+  if (attrs != null && !__schemaIsPlainObject(attrs)) {
+    throw new Error('schema: ' + api + ' attrs must be a plain object of ' + rel.through +
+      ' columns; got ' + (attrs === null ? 'null' : typeof attrs));
+  }
   const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
   const linked = await __schemaThroughLinked(def, rel, plan);
   const wanted = new Set(plan.targetIds);
   const stale = [...linked].filter((id) => !wanted.has(id));
   const fresh = plan.targetIds.filter((id) => !linked.has(id));
+  const joinNorm = plan.keys.joinNorm;
+  const freshRows = fresh.map((id) => ({
+    ...(attrs || {}),
+    [__schemaFieldFor(joinNorm, plan.keys.ownerKey)]: plan.identity,
+    [__schemaFieldFor(joinNorm, plan.keys.targetKey)]: id,
+  }));
+  if (freshRows.length) await __schemaValidateInsertRows(plan.join, freshRows);
   let removed = 0;
-  if (stale.length) removed = await __schemaThroughUnlink(def, rel, plan, stale);
-  if (fresh.length) {
-    const joinNorm = plan.keys.joinNorm;
-    await plan.join.insertMany(fresh.map((id) => ({
-      ...(attrs || {}),
-      [__schemaFieldFor(joinNorm, plan.keys.ownerKey)]: plan.identity,
-      [__schemaFieldFor(joinNorm, plan.keys.targetKey)]: id,
-    })));
+  try {
+    if (stale.length) removed = await __schemaThroughUnlink(def, rel, plan, stale);
+    if (freshRows.length) await plan.join.insertMany(freshRows);
+  } finally {
+    if (stale.length || fresh.length) __schemaThroughInvalidate(def, inst, rel, acc);
   }
-  if (removed || fresh.length) __schemaThroughInvalidate(inst, acc);
   return { added: fresh.length, removed };
 }
 
@@ -1800,7 +1888,16 @@ async function __schemaResolveRelation(def, rel, identity) {
       : [];
     const targetIds = [...new Set(pairs.map((p) => p[1]))];
     const found = targetIds.length ? await target.findMany(targetIds) : [];
-    return rel.kind === 'hasOne' ? (found[0] ?? null) : found;
+    // Pair order is the relation's one deterministic order, and the
+    // eager path already answers in it — re-order the findMany result
+    // to match, so hasOne picks the same row on both paths.
+    const byId = new Map(found.map((r) => [r[targetNorm.primaryKey], r]));
+    const ordered = [];
+    for (const id of targetIds) {
+      const r = byId.get(id);
+      if (r) ordered.push(r);
+    }
+    return rel.kind === 'hasOne' ? (ordered[0] ?? null) : ordered;
   }
   if (rel.kind === 'hasOne') {
     return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).first();
@@ -1873,7 +1970,10 @@ async function __schemaSave(def, inst) {
 
   // savedChanges resets at the start of every save so it always
   // reflects the most recent write; afterCreate/afterUpdate/afterSave
-  // read the just-completed diff.
+  // read the just-completed diff. The prior diff is kept so a refused
+  // UPDATE can put it back — the instance then reports the last save
+  // that actually happened, exactly as _snapshot and _dirty do.
+  const priorChanges = inst.savedChanges;
   inst.savedChanges = new Map();
 
   if (isNew) {
@@ -2006,12 +2106,16 @@ async function __schemaSave(def, inst) {
     // is always overwritten on real writes, never diffed); declaring
     // updatedAt as a user field is rejected at normalize, so a
     // duplicate SET cannot arise.
+    let priorUpdatedAt = null;
+    let tsBumped = false;
     if (norm.timestamps && sets.length > 0) {
       const newTs = new Date(); // a real Date — the adapter encodes it at the wire
       const oldTs = inst.updatedAt != null ? inst.updatedAt : null;
       sets.push('"updated_at" = ?');
       values.push(newTs);
       inst.updatedAt = newTs;
+      priorUpdatedAt = oldTs;
+      tsBumped = true;
       changes.set('updatedAt', [oldTs, newTs]);
     }
     if (sets.length) {
@@ -2020,7 +2124,16 @@ async function __schemaSave(def, inst) {
       const sql = 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
         ' SET ' + sets.join(', ') + ' WHERE ' +
         __schemaQuoteIdent(pk, norm.columns, 'primary key') + ' = ?';
-      await __schemaRunSQL(def, sql, values);
+      try {
+        await __schemaRunSQL(def, sql, values);
+      } catch (e) {
+        // The database refused the write, so nothing changed: the
+        // reported diff and the managed timestamp go back to their
+        // pre-attempt values, matching the untouched _snapshot/_dirty.
+        inst.savedChanges = priorChanges;
+        if (tsBumped) inst.updatedAt = priorUpdatedAt;
+        throw e;
+      }
       inst._snapshot = nextSnap;
       for (const [name, version] of dirtyVersions) {
         if (inst._dirtyVersions.get(name) === version) inst._dirty.delete(name);
@@ -2183,7 +2296,7 @@ function __schemaCanonicalDBValue(v, field) {
   return serialized instanceof Date ? serialized.getTime() : serialized;
 }
 
-function __schemaReturnedRow(res, operation, allowZero) {
+function __schemaReturnedRow(res, operation, allowZero, norm) {
   const data = Array.isArray(res?.data) ? res.data : null;
   if (!data) {
     throw new Error('schema: ' + operation + ' RETURNING invariant — adapter data must be an array');
@@ -2197,7 +2310,7 @@ function __schemaReturnedRow(res, operation, allowZero) {
   }
   const columns = res.columns;
   const row = data[0];
-  const indexes = __schemaValidateAdapterRow(columns, row, operation + ' RETURNING');
+  const indexes = __schemaValidateAdapterRow(columns, row, operation + ' RETURNING', norm);
   return { columns, row, indexes };
 }
 
@@ -2384,6 +2497,24 @@ __SchemaDef.prototype.count = function () {
   return new __SchemaQuery(this).count();
 };
 
+// The builder's chain starters are model statics too — a chain may
+// begin at any of them (`Post.order(…).limit(2).all()`), exactly as
+// where() starts one.
+__SchemaDef.prototype.order = function (spec) {
+  this._assertModel('order');
+  return new __SchemaQuery(this).order(spec);
+};
+
+__SchemaDef.prototype.limit = function (n) {
+  this._assertModel('limit');
+  return new __SchemaQuery(this).limit(n);
+};
+
+__SchemaDef.prototype.offset = function (n) {
+  this._assertModel('offset');
+  return new __SchemaQuery(this).offset(n);
+};
+
 __SchemaDef.prototype.create = async function (data) {
   this._assertModel('create');
   // Normalize caller input before construction. Refinements run once
@@ -2516,13 +2647,25 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     cols.map((c) => __schemaQuoteIdent(c, norm.callerWritableColumns, 'upsert column')).join(', ') + ')' +
     ' VALUES (' + placeholders.join(', ') + ')' + conflict + ' RETURNING *';
   const res = await __schemaRunSQL(this, sql, values);
-  const returned = __schemaReturnedRow(res, 'upsert()', updateCols.length === 0);
+  // `norm` canonicalizes column names through the model's own map: without
+  // it a {column:} field and a same-named-after-camelCase sibling look like
+  // two spellings of one canonical key, and a correct RETURNING * is
+  // rejected as a duplicate column.
+  const returned = __schemaReturnedRow(res, 'upsert()', updateCols.length === 0, norm);
   if (returned) {
     __schemaAbsorbRow(inst, returned.columns, returned.row, 'upsert() RETURNING', norm);
     this._applyEagerDerived(inst);
     inst._snapshot = __schemaSnapshot(norm, inst);
+    // The RETURNING row must have produced the primary key BEFORE the
+    // instance is marked persisted — a malformed adapter response must
+    // not manufacture a "persisted" instance with no identity.
+    if (inst._snapshot[norm.primaryKey] == null) {
+      throw new Error(
+        'schema: upsert() RETURNING for ' + (this.name || 'model') + ' produced no ' +
+        norm.primaryKey + " — the adapter's query() must answer the RETURNING row with the " +
+        'primary key (Adapter Contract v2)');
+    }
     inst._persisted = true;
-    __schemaPersistedIdentity(this, inst, 'upsert()');
     await __schemaRunHook(this, inst, 'afterSave');
     await __schemaSettleTxHooks(this, inst);
     return inst;
@@ -2565,16 +2708,12 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   return existing;
 };
 
-// Bulk insert: validates EVERY row first (all failures collect into
-// one SchemaError, issues prefixed [i].field, before any SQL), then
-// one multi-VALUES INSERT … RETURNING *. Per-instance hooks are
-// deliberately skipped — this is the bulk path.
-__SchemaDef.prototype.insertMany = async function (rows) {
-  this._assertModel('insertMany');
-  if (!Array.isArray(rows)) throw new Error('schema: insertMany(rows) expects an array');
-  if (!rows.length) return [];
-  const norm = this._normalize();
-
+// The DB-free half of insertMany: canonicalize and validate every
+// row, collecting ALL failures into one SchemaError (issues prefixed
+// [i].field) before any SQL. setX runs it against the fresh join rows
+// BEFORE its unlink DELETE, so a set() that cannot insert has not yet
+// destroyed anything.
+async function __schemaValidateInsertRows(def, rows) {
   const canonicalRows = [];
   const allErrs = [];
   for (let i = 0; i < rows.length; i++) {
@@ -2582,8 +2721,8 @@ __SchemaDef.prototype.insertMany = async function (rows) {
     const rowErrs = [];
     let canonical = null;
     try {
-      canonical = __schemaCanonicalInput(this, data, 'insertMany()');
-      const result = await this._runAsync(canonical, {
+      canonical = __schemaCanonicalInput(def, data, 'insertMany()');
+      const result = await def._runAsync(canonical, {
         materialize: false,
         materializeNested: true,
         derived: 'throw',
@@ -2591,7 +2730,7 @@ __SchemaDef.prototype.insertMany = async function (rows) {
       if (result.ok) canonical = result.value;
       else if (result.thrown) throw result.thrown;
       else {
-        const src = result.from || this;
+        const src = result.from || def;
         throw new SchemaError(result.errors, src.name, src.kind);
       }
     } catch (e) {
@@ -2607,7 +2746,20 @@ __SchemaDef.prototype.insertMany = async function (rows) {
     }
     canonicalRows.push(canonical);
   }
-  if (allErrs.length) throw new SchemaError(allErrs, this.name, this.kind);
+  if (allErrs.length) throw new SchemaError(allErrs, def.name, def.kind);
+  return canonicalRows;
+}
+
+// Bulk insert: validates EVERY row first (all failures collect into
+// one SchemaError, issues prefixed [i].field, before any SQL), then
+// one multi-VALUES INSERT … RETURNING *. Per-instance hooks are
+// deliberately skipped — this is the bulk path.
+__SchemaDef.prototype.insertMany = async function (rows) {
+  this._assertModel('insertMany');
+  if (!Array.isArray(rows)) throw new Error('schema: insertMany(rows) expects an array');
+  if (!rows.length) return [];
+  const norm = this._normalize();
+  const canonicalRows = await __schemaValidateInsertRows(this, rows);
 
   // Column set = union of written columns across rows (missing values
   // insert as NULL / column default).
@@ -2651,6 +2803,11 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   // real `Date` objects at the wire seam (the adapter keys the decode
   // off each column's duckdbType), and hydrate stores them verbatim.
   const norm = this._normalize();
+  // The same adapter-row validation reload() runs: two spellings for
+  // one canonical key (a legacy table carrying both `MRN_NBR` and
+  // `mrn`) would otherwise hydrate whichever value came last — and a
+  // later save would write it back through the mapped column.
+  __schemaValidateAdapterRow(columns, row, 'row hydration', norm);
   const data = {};
   for (let i = 0; i < columns.length; i++) {
     data[__schemaFieldFor(norm, columns[i].name)] = row[i];
@@ -2721,18 +2878,37 @@ __SchemaDef.prototype._getClass = function () {
     Object.defineProperty(klass.prototype, acc, {
       enumerable: false, configurable: true,
       value: async function (opts) {
+        const reload = !!(opts && opts.reload === true);
         const identity = __schemaRelationIdentity(def, this, rel);
+        // A reload supersedes every read already in flight: bumping
+        // the generation drops their memo eligibility, while this
+        // read's own post-await check keys on the bumped value — an
+        // older plain read can never memoize its stale image over the
+        // reload's result.
+        if (reload) {
+          this._relGeneration++;
+          if (this._relMemo) this._relMemo.delete(acc);
+        }
         const generation = this._relGeneration;
         const memo = this._relMemo && this._relMemo.get(acc);
-        if (!(opts && opts.reload === true) && memo &&
-            __schemaSameValue(memo.identity, identity)) {
+        if (!reload && memo && __schemaSameValue(memo.identity, identity)) {
           return memo.value;
         }
         const v = await __schemaResolveRelation(def, rel, identity);
-        if (this._relGeneration === generation &&
-            __schemaSameValue(__schemaRelationIdentity(def, this, rel), identity)) {
-          __schemaRelMemoSet(this, acc, identity, v);
+        // The re-check decides memo ELIGIBILITY only. Deriving the
+        // identity can itself throw — a hard destroy landing mid-read
+        // leaves no persisted identity — and that must not poison a
+        // read whose data already arrived: decline to memoize,
+        // return the value.
+        let eligible = this._relGeneration === generation;
+        if (eligible) {
+          try {
+            eligible = __schemaSameValue(__schemaRelationIdentity(def, this, rel), identity);
+          } catch {
+            eligible = false;
+          }
         }
+        if (eligible) __schemaRelMemoSet(this, acc, identity, v);
         return v;
       },
     });
@@ -2850,6 +3026,11 @@ function __schemaColumnType(field, def) {
   if (field.array) return 'JSON';
   const intrinsic = __SCHEMA_SQL_TYPES[field.typeName];
   if (intrinsic) return intrinsic;
+  // An inline literal union (`status! "draft" | "published"`)
+  // materializes to its member value — the same VARCHAR a registered
+  // :enum renders. It lives on the field itself, never in the
+  // registry, so it answers before the registry is asked.
+  if (field.typeName === 'literal-union') return 'VARCHAR';
   const nested = __SchemaRegistry.get(field.typeName);
   const where = ' (on ' + (def?.name || 'model') + ')';
   if (!nested) {
@@ -2878,7 +3059,17 @@ function __schemaColumnType(field, def) {
 function __schemaColumnSpec(column, field, def) {
   let base = __schemaColumnType(field, def);
   if (base === 'VARCHAR' && field.constraints?.max != null) {
-    base = 'VARCHAR(' + field.constraints.max + ')';
+    // A VARCHAR width is a count of characters, so only a positive
+    // integer has a rendering. `..2.5` reads fine as a validation
+    // bound but renders as VARCHAR(2.5), which no database accepts —
+    // and picking 2 or 3 on the caller's behalf is guessing at the
+    // one number the column is defined by.
+    const max = field.constraints.max;
+    if (!Number.isSafeInteger(max) || max < 1) {
+      throw new Error("schema: column '" + column + "' has a maximum length of " + String(max) +
+        ' — a VARCHAR width must be a positive whole number of characters');
+    }
+    base = 'VARCHAR(' + max + ')';
   }
   return {
     name: column,
@@ -2917,7 +3108,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
     columns.push({
       name: norm.primaryKeyColumn, type: 'INTEGER',
       notNull: true, unique: false, primary: true,
-      default: "nextval('" + seq + "')", was: null,
+      default: 'nextval(' + __schemaQuoteLiteral(seq, 'sequence name') + ')', was: null,
     });
   }
   for (const [n, f] of norm.fields) {

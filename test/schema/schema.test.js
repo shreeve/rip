@@ -323,6 +323,69 @@ describe('schema DSL: loud rejections', () => {
     expect(() => tokenize('U = schema :model\n  name! string\n  @mixin Stamps\n  @index createdAt')).not.toThrow();
   });
 
+  // @index/@unique are written in FIELD space and resolve through
+  // `{column:}` — but a column's own name has to work too, because
+  // `known` is exactly the set the failure message offers, and
+  // rejecting a name it lists as present is the message arguing with
+  // itself. (The runtime accepted both all along.)
+  test('@index/@unique resolve through {column:}, from either side', () => {
+    const src = (line) => 'U = schema :model\n  name! string, {column: "USER_NAME"}\n  ' + line;
+    expect(() => tokenize(src('@index [:USER_NAME]'))).not.toThrow();
+    expect(() => tokenize(src('@index [:name]'))).not.toThrow();
+    expect(() => tokenize(src('@unique :USER_NAME'))).not.toThrow();
+    lexFails(src('@index [:nope]'), /@index: unknown column 'nope' — the table has: USER_NAME, id/);
+  });
+
+  // A surrogate primary key is a property↔column pair like any
+  // field's, so `@primaryKey pid, {column: "PID"}` puts 'pid' in
+  // property space and `@index [pid]` resolves to column 'PID' —
+  // exactly as the runtime's __schemaColumnFor resolves it.
+  test('@index/@unique resolve the surrogate primary key through its {column:}', () => {
+    const pk = 'U = schema :model\n  name! string\n  @primaryKey pid, {column: "PID"}\n  ';
+    expect(() => tokenize(pk + '@index [pid]')).not.toThrow();
+    expect(() => tokenize(pk + '@unique [pid]')).not.toThrow();
+    expect(() => tokenize(pk + '@index [:PID]')).not.toThrow();
+    // A natural key resolves through its field declaration.
+    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primaryKey mrn\n  @index [mrn]')).not.toThrow();
+    // A genuinely unknown name still rejects with the column list.
+    lexFails(pk + '@index [nope]', /@index: unknown column 'nope' — the table has: PID, name/);
+    // The descriptor carries the pair the runtime resolves: the pk's
+    // property→column mapping beside the index written in field space.
+    const desc = new Function('__schema', compile(pk + '@index [pid]').code + '\nreturn U;')((d) => d);
+    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey').args[0])
+      .toEqual({ name: 'pid', column: 'PID' });
+    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'index').args[0].fields)
+      .toEqual(['pid']);
+  });
+
+  // The ownership gate's PROPERTY side: `{column:}` renames a field's
+  // storage, so a relation deriving the same property over its own
+  // column is one property reading two columns — duplicate-column DDL
+  // and INSERTs hidden behind the rename.
+  test('a property claiming two columns rejects positioned', () => {
+    lexFails('U = schema :model\n  userId! integer, {column: "USER_REF"}\n  @belongsTo User',
+      /field 'userId' and the @belongsTo User relation both own property 'userId' \(columns 'USER_REF' and 'user_id'\) — every property reads exactly one column/);
+    lexFails('U = schema :model\n  createdAt! datetime, {column: "CREATED"}\n  @timestamps',
+      /field 'createdAt' and @timestamps both own property 'createdAt' \(columns 'CREATED' and 'created_at'\)/);
+    // Same column on both sides is the column-side collision, unchanged.
+    lexFails('U = schema :model\n  userId! integer, {column: "user_id"}\n  @belongsTo User',
+      /field 'userId' and the @belongsTo User relation both own column 'user_id' — every table column has exactly one owner/);
+    // An unrelated field+relation pair still compiles.
+    expect(() => tokenize('U = schema :model\n  title! string, {column: "TITLE"}\n  @belongsTo User')).not.toThrow();
+  });
+
+  // Two spellings that canonicalize to one column make DDL the
+  // database refuses — rejected here with the runtime's wording,
+  // before membership, as the runtime judges it.
+  test('@index/@unique columns must be distinct after canonicalization', () => {
+    lexFails('U = schema :model\n  email! string\n  @unique [:email, :email]',
+      /@unique columns must be distinct after canonicalization: email, email/);
+    lexFails('U = schema :model\n  userId! integer\n  @index [:userId, :user_id]',
+      /@index columns must be distinct after canonicalization: user_id, user_id/);
+    // A legitimate multi-column index still compiles.
+    expect(() => tokenize('U = schema :model\n  a! string\n  b! string\n  @index [:a, :b]')).not.toThrow();
+  });
+
   test('relation targets must be canonical PascalCase', () => {
     lexFails('U = schema :model\n  name! string\n  @belongsTo MDMUser', /target 'MDMUser' is not canonical PascalCase/);
     lexFails('U = schema :model\n  name! string\n  @hasMany APIKey', /not canonical PascalCase/);
