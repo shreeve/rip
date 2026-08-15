@@ -7,6 +7,7 @@
 //
 //   rip schema status  [entry.rip] [--dir DIR]
 //   rip schema plan    [entry.rip]
+//   rip schema dump    [entry.rip] [--out FILE] [--check]
 //   rip schema make <name> [entry.rip] [--dir DIR] [--allow-lossy] [--allow-destructive]
 //   rip schema migrate [entry.rip] [--dir DIR] [--repair]
 //
@@ -21,7 +22,7 @@
 // Exit codes follow the rip CLI's convention: 2 for usage errors,
 // 1 for operational failures, 0 for success.
 
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { CompileError } from '../compile.js';
@@ -37,6 +38,8 @@ const USAGE = `rip schema — diff declared :model schemas against the database 
 Usage:
   rip schema status  [entry.rip] [--dir DIR]        applied / pending / drift + the current plan
   rip schema plan    [entry.rip]                    print the classified diff (no files touched)
+  rip schema dump    [entry.rip] [--out FILE]       write schema.sql — the declared shape of every table
+                     [--check]                      (no database touched; --check verifies instead of writing)
   rip schema make <name> [entry.rip] [--dir DIR]    write migrations/NNNN_<name>.sql from the diff
                      [--allow-lossy] [--allow-destructive]
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
@@ -45,6 +48,10 @@ Usage:
 entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDIDATES.join(' | ')})
 --dir DIR       migrations directory (default: migrations/ beside the models entry —
                 e.g. api/models.rip -> api/migrations — falling back to ./migrations)
+--out FILE      dump output file (default: schema.sql beside the models entry —
+                e.g. api/models.rip -> api/schema.sql — falling back to ./schema.sql)
+--check         dump only: exit nonzero when the file on disk differs from the
+                declared models (the CI seam) — writes nothing
 --allow-lossy   include steps that may lose data on existing rows (type changes, SET NOT NULL)
 --allow-destructive   include DROP TABLE / DROP COLUMN steps
 --repair        re-record checksums for applied migrations whose files changed
@@ -65,13 +72,15 @@ if (!cmd || cmd === '--help' || cmd === '-h') {
   console.log(USAGE);
   process.exit(0);
 }
-if (!['status', 'plan', 'make', 'migrate'].includes(cmd)) {
-  die(`unknown subcommand '${cmd}' — expected status, plan, make, or migrate\n\n${USAGE}`, 2);
+if (!['status', 'plan', 'dump', 'make', 'migrate'].includes(cmd)) {
+  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, or migrate\n\n${USAGE}`, 2);
 }
 
 const rest = args.slice(1);
 const flags = {
   dir: null,
+  out: null,
+  check: false,
   allowLossy: false,
   allowDestructive: false,
   repair: false,
@@ -86,6 +95,11 @@ for (let i = 0; i < rest.length; i++) {
     flags.dir = rest[++i];
     if (!flags.dir) die('--dir requires a directory argument', 2);
   }
+  else if (a === '--out') {
+    flags.out = rest[++i];
+    if (!flags.out) die('--out requires a file argument', 2);
+  }
+  else if (a === '--check') flags.check = true;
   else if (a === '--allow-lossy') flags.allowLossy = true;
   else if (a === '--allow-destructive') flags.allowDestructive = true;
   else if (a === '--repair') flags.repair = true;
@@ -98,6 +112,8 @@ for (let i = 0; i < rest.length; i++) {
   else if (a.startsWith('-')) die(`unknown flag: ${a}\n\n${USAGE}`, 2);
   else positional.push(a);
 }
+if (flags.out && cmd !== 'dump') die('--out only applies to dump', 2);
+if (flags.check && cmd !== 'dump') die('--check only applies to dump', 2);
 if (flags.allowLossy && cmd !== 'make') die('--allow-lossy only applies to make', 2);
 if (flags.allowDestructive && cmd !== 'make') die('--allow-destructive only applies to make', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
@@ -135,6 +151,16 @@ if (!flags.dir) {
   flags.dir = [beside, 'migrations'].find((c) => existsSync(c)) || beside;
 }
 
+// The dump file follows the same idiom: schema.sql beside the models
+// entry (api/models.rip -> api/schema.sql), with ./schema.sql kept as
+// a fallback for layouts that hold it at the root. An explicit --out
+// always wins; when neither candidate exists (a first dump), write
+// beside the entry.
+if (cmd === 'dump' && !flags.out) {
+  const beside = join(dirname(entry), 'schema.sql');
+  flags.out = [beside, 'schema.sql'].find((c) => existsSync(c)) || beside;
+}
+
 // Importing the entry registers every :model it declares (directly
 // or transitively) and runs any adapter installation it performs.
 try {
@@ -144,10 +170,12 @@ try {
   die(`the models entry threw while loading (${entry}):\n${e?.message || String(e)}`);
 }
 
-// Pre-flight: an unconfigured adapter means every verb would surface
-// a connection error against the default endpoint — name the real
-// problem instead.
-if (!migration.adapterConfigured()) {
+// Pre-flight: an unconfigured adapter means every database-touching
+// verb would surface a connection error against the default endpoint —
+// name the real problem instead. `dump` is exempt: it renders the
+// DECLARED schema from the registry alone and must work with no
+// database reachable.
+if (cmd !== 'dump' && !migration.adapterConfigured()) {
   die(
     'no database is configured — the entry installed no adapter and RIP_DB_URL is unset.\n' +
     `Call schema.setAdapter(adapter) or schema.connect({url}) + setAdapter in ${entry}, ` +
@@ -191,6 +219,21 @@ try {
       console.log('drift: the database differs from the models in ways no pending migration explains');
     }
     printSteps(st.steps);
+
+  } else if (cmd === 'dump') {
+    const text = migration.dump();
+    if (flags.check) {
+      if (!existsSync(flags.out)) {
+        die(`${flags.out} does not exist — write it with \`rip schema dump\``);
+      }
+      if (readFileSync(flags.out, 'utf8') !== text) {
+        die(`${flags.out} differs from the declared models — regenerate with \`rip schema dump\``);
+      }
+      console.log(`${flags.out} matches the declared models`);
+    } else {
+      writeFileSync(flags.out, text);
+      console.log(`wrote ${flags.out}`);
+    }
 
   } else if (cmd === 'make') {
     const out = await migration.make(name, {

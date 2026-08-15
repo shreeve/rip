@@ -129,15 +129,22 @@ export async function introspect() {
     // CONSTRAINT (inline column UNIQUE and table-level UNIQUE alike) —
     // uniqueness the indexes list never reports, because the internal
     // ART index behind a constraint is not a `duckdb_indexes()` index.
-    // A single-column entry is the column's unique flag. A v0.9.0
-    // harbor serves documents without the field, which reads as none —
-    // the verbs require catalog(), not this field.
+    // A single-column entry is the column's unique flag. A COMPOSITE
+    // entry has no per-column home — the spec models composite
+    // uniqueness as unique indexes — so it rides the spec verbatim in
+    // `compositeUniques` for the differ to state out loud (note-unique),
+    // never silently dropped. A v0.9.0 harbor serves documents without
+    // the field, which reads as none — the verbs require catalog(), not
+    // this field.
+    const compositeUniques = [];
     for (const uc of t.uniqueConstraints ?? []) {
       const cols = uc.columns ?? [];
-      // Composite entries are ignored: the differ's unique flag is per-column; composite uniqueness is modeled as unique indexes.
-      if (cols.length !== 1) continue;
-      const col = columns.find((c) => c.name === cols[0]);
-      if (col) col.unique = true;
+      if (cols.length === 1) {
+        const col = columns.find((c) => c.name === cols[0]);
+        if (col) col.unique = true;
+      } else if (cols.length > 1) {
+        compositeUniques.push([...cols]);
+      }
     }
     // The spec's primaryKey is a single-column identity. The contract
     // reports a composite PRIMARY KEY as its full column list; the
@@ -174,6 +181,7 @@ export async function introspect() {
           refColumn: (fk.refColumns ?? [])[0] ?? null,
         };
       }),
+      compositeUniques,
       tableWas: null,
     });
   }
@@ -303,6 +311,11 @@ function validateSchemaIdentifiers(schema, side) {
         __schemaQuoteIdent(column, null, side + ' index column');
       }
     }
+    for (const constraint of table.compositeUniques || []) {
+      for (const column of constraint) {
+        __schemaQuoteIdent(column, null, side + ' unique-constraint column');
+      }
+    }
     for (const fk of table.foreignKeys || []) {
       __schemaQuoteIdent(fk.column, null, side + ' foreign-key column');
       if (fk.refTable != null) {
@@ -345,6 +358,10 @@ function validateSchemaIdentifiers(schema, side) {
 //     apply, recreate.
 //   - No ALTER SEQUENCE RESTART → sequence-start drift is a NOTE
 //     step, never silence.
+//   - A composite UNIQUE constraint has no spec representation (the
+//     unique flag is per-column; composite uniqueness is modeled as
+//     unique indexes) → a NOTE step per deployed constraint, never
+//     silence.
 
 // Step kinds DuckDB executes even when the table is FK-referenced or
 // carries indexes: ADD COLUMN, index DDL (add-unique/drop-unique are
@@ -353,7 +370,7 @@ function validateSchemaIdentifiers(schema, side) {
 const UNBLOCKED_KINDS = new Set([
   'create-table', 'add-column', 'create-index', 'drop-index',
   'add-unique', 'drop-unique', 'alter-default',
-  'note-fk', 'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case',
+  'note-fk', 'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case', 'note-unique',
 ]);
 
 // Steps on a renamed table carry the NEW name; deployed evidence is
@@ -940,6 +957,50 @@ function diffTable(d, p, steps, deps) {
     });
   }
 
+  // Composite UNIQUE constraints (hand-written `UNIQUE (a, b)` DDL)
+  // have no spec representation — the unique flag is per-column, and
+  // composite uniqueness is modeled as unique indexes — so the
+  // database enforces them while declared-vs-deployed diffing cannot
+  // see them. A fact the planner sees but cannot act on is a NOTE
+  // step (the sequence-drift rule), one per constraint, ordered by
+  // column list; it gates nothing and reclassifies nothing. When the
+  // model declares a unique index over the same column set, the note
+  // also states the redundancy — and any planned CREATE UNIQUE INDEX
+  // stays as classed: measured on DuckDB v1.5.5 and v2.0.0-alpha,
+  // a unique index over an already-constrained column
+  // set creates successfully on a populated table (the constraint
+  // guarantees no duplicates exist), lands in duckdb_indexes(), and
+  // drops cleanly with the constraint still enforcing.
+  const composites = [...(p.compositeUniques ?? [])]
+    .map((cols) => [...cols])
+    .sort((a, b) => {
+      const ka = a.join(', ');
+      const kb = b.join(', ');
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+  for (const cols of composites) {
+    const list = cols.join(', ');
+    const set = new Set(cols);
+    const twin = d.indexes.find((ix) =>
+      ix.unique && ix.columns.length === set.size && ix.columns.every((c) => set.has(c)));
+    const twinDeployed = twin && p.indexes.some((ix) =>
+      ix.name === twin.name && ix.unique === twin.unique &&
+      ix.columns.join(',') === twin.columns.join(','));
+    let text = '-- NOTE: ' + t + ' carries a composite UNIQUE constraint on (' + list + ') that the model ' +
+      'layer cannot express — the database enforces it, but it is invisible to declared-vs-deployed ' +
+      'diffing; the expressible equivalent is a unique index (@unique [' + list + '])';
+    if (twin) {
+      text += '. The declared unique index ' + twin.name + ' (' + twin.columns.join(', ') + ') covers the ' +
+        'same columns and is redundant with this constraint' +
+        (twinDeployed
+          ? ' — the database enforces this uniqueness twice'
+          : '; its CREATE UNIQUE INDEX succeeds harmlessly — DuckDB accepts a unique index over an ' +
+            'already-constrained column set, and the constraint guarantees no duplicates exist — after ' +
+            'which the index is visible to diffing and the plans converge');
+    }
+    steps.push({ table: t, kind: 'note-unique', class: 'safe', sql: [text], notes: [] });
+  }
+
   // FK diffs are notes only — DuckDB has no ALTER TABLE ADD/DROP
   // CONSTRAINT.
   const pFks = new Set(p.foreignKeys.map((f) => f.column));
@@ -988,6 +1049,62 @@ export function renderPlan(steps) {
     lines.push('');
   }
   return lines.join('\n');
+}
+
+// ── the declared-schema dump ──────────────────────────────────────────
+//
+// `rip schema dump` writes the DECLARED shape of every registered
+// :model into one file — the checked-in answer to "is that column
+// email or email_addr?", and the CI seam (--check) that surfaces
+// naming drift the day it appears. Registry-side only: no adapter and
+// no catalog — the file states what the models declare, never what a
+// database holds.
+
+const DUMP_HEADER =
+  "-- The declared schema: every registered :model's table, rendered by\n" +
+  '-- `rip schema dump`. Generated — change the models and re-run the dump;\n' +
+  '-- CI verifies this file with `rip schema dump --check`.';
+
+// Render a declared schema as the dump file's complete text.
+// DETERMINISM is this function's own contract, not a property it
+// borrows from canonicalDeclared(): tables render NAME-SORTED
+// regardless of the caller's ordering, duplicates reject, and the
+// bytes carry no timestamps — one declared schema, one byte sequence.
+export function renderDump(declared) {
+  // Table names also head each section as a `-- name` comment, where a
+  // control character could terminate the line — validate the complete
+  // identifier surface before any text is rendered (renderPlan's rule).
+  validateSchemaIdentifiers(declared, 'declared');
+  const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const tables = [...declared.tables].sort(byName);
+  for (let i = 1; i < tables.length; i++) {
+    if (tables[i].name === tables[i - 1].name) {
+      throw new Error("schema.dump: table '" + tables[i].name +
+        "' is declared twice — one table has one declaration.");
+    }
+  }
+  const sections = [DUMP_HEADER];
+  for (const t of tables) {
+    const lines = ['-- ' + t.name];
+    // The cross-adapter annotation the plan output carries as its
+    // note-adapter step: this table's DDL targets its own database,
+    // not the default adapter's.
+    if (t.ownAdapter) {
+      lines.push('-- NOTE: ' + t.ownAdapter +
+        ' declares its own on: adapter — this table lives in that adapter\'s database, not the default one');
+    }
+    lines.push(...__schemaRenderCreate(t));
+    sections.push(lines.join('\n'));
+  }
+  return sections.join('\n\n') + '\n';
+}
+
+export function dump() {
+  const declared = canonicalDeclared();
+  if (!declared.tables.length) {
+    throw new Error('schema.dump: no :model schemas are registered — import your model files first');
+  }
+  return renderDump(declared);
 }
 
 // ── migration files & history ─────────────────────────────────────────
