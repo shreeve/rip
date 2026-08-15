@@ -342,6 +342,70 @@ test! "an undefined condition is refused; null still means IS NULL", ->
   User.where(deleted_at: null).all!
   eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "deleted_at" IS NULL'
 
+# The statement puts WHERE before HAVING, but a chain may be written in
+# either order. Params used to accumulate as the chain was called, so
+# spelling `having` first swapped the binds and answered a different
+# question without ever erroring.
+test! "binds follow the SQL, not the order the chain was written in", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }], data: [[3]], rowCount: 1 }
+    { columns: [{ name: 'id' }], data: [[3]], rowCount: 1 }
+  ]
+  connect { adapter }
+  T = Model 't'
+  T.where('id > ?', [1]).group('id').having('SUM(n) > ?', [25]).all!
+  T.group('id').having('SUM(n) > ?', [25]).where('id > ?', [1]).all!
+  eq adapter.log[0].sql, adapter.log[1].sql
+  eq adapter.log[0].params, [1, 25]
+  eq adapter.log[1].params, [1, 25]
+
+# DuckDB has no `DELETE ... LIMIT` — the parser refuses one. The builder
+# assembles those clauses for a SELECT and used to drop them here, so a
+# caller who asked to remove one row removed every row matching the
+# where. Refuse the scope rather than quietly widening the blast radius.
+test! "update and destroy refuse a scope they cannot honor", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }
+    { columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }
+  ]
+  connect { adapter }
+  T = Model 't'
+  scoped = [
+    (-> T.where(s: 'y').limit(1).destroy())
+    (-> T.where(s: 'y').limit(1).update(n: 9))
+    (-> T.where(s: 'y').offset(2).destroy())
+    (-> T.where(s: 'y').order('n').destroy())
+    (-> T.group('s').having('COUNT(*) > ?', [1]).destroy())
+  ]
+  for attempt in scoped
+    err = trap! attempt
+    ok isDbError(err), 'a scope UPDATE/DELETE cannot honor must be refused'
+    eq err.code, 'BAD_REQUEST'
+  # A plain where still mutates, and its binds still ride along.
+  T.where(s: 'y').destroy!
+  eq adapter.log[0].sql, 'DELETE FROM "t" WHERE "s" = ? RETURNING *'
+  eq adapter.log[0].params, ['y']
+  T.where(s: 'y').update! n: 9
+  eq adapter.log[1].sql, 'UPDATE "t" SET "n" = ? WHERE "s" = ? RETURNING *'
+  eq adapter.log[1].params, [9, 'y']
+
+# A bare HAVING groups the whole table, so counting one counts groups
+# and has to wrap. The plain path counts rows in place — and must not
+# carry HAVING's param to a statement that has no HAVING to bind it.
+test! "count wraps when it groups, and never carries a dropped param", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }
+    { columns: [{ name: 'n' }], data: [[2]], rowCount: 1 }
+  ]
+  connect { adapter }
+  T = Model 't'
+  T.where('id > ?', [0]).group('id').having('SUM(n) > ?', [25]).count!
+  eq adapter.log[0].sql, 'SELECT COUNT(*) AS n FROM (SELECT 1 FROM "t" WHERE id > ? GROUP BY id HAVING SUM(n) > ?) AS _t'
+  eq adapter.log[0].params, [0, 25]
+  T.where('id > ?', [0]).count!
+  eq adapter.log[1].sql, 'SELECT COUNT(*) AS n FROM "t" WHERE id > ?'
+  eq adapter.log[1].params, [0]
+
 test! "Model insert/update/destroy round-trip through findOne shapes", ->
   adapter = fakeAdapter [
     { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }

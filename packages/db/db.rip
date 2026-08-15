@@ -772,13 +772,29 @@ _assertDefined = (method, key, val) ->
   return unless val is undefined
   badRequest "#{method} condition for '#{key}' is undefined — pass null to match NULL, or omit the key"
 
+# DuckDB's UPDATE and DELETE take a WHERE and nothing else — there is no
+# `DELETE ... LIMIT`, and the parser refuses one. The builder assembles
+# those clauses for a SELECT, so `update`/`destroy` used to drop them on
+# the floor: `where(status: 'y').limit(1).destroy!` deleted every row
+# matching the where, not one of them. Silently touching more rows than
+# asked is the one failure a data-mutating call must never have, so a
+# scope this statement cannot honor is refused rather than ignored.
+_assertWhereOnly = (method, b) ->
+  ignored = []
+  ignored.push 'limit'  if b._limit?
+  ignored.push 'offset' if b._offset?
+  ignored.push 'order'  if b._order?
+  ignored.push 'group'  if b._group?
+  ignored.push 'having' if b._having?
+  return if ignored.length is 0
+  badRequest "#{method} cannot honor #{ignored.join(', ')} — DuckDB's UPDATE and DELETE accept only a WHERE. Narrow the condition, or select the rows first and #{method} them by primary key"
+
 # Immutable SQL builder. Wire-agnostic — hands off to module-level
 # findAll / findOne / query / value (the process default).
 class QueryBuilder
   constructor: (@table, @database = null) ->
     @_tableName = if @database then "#{ident @database}.#{ident @table}" else ident(@table)
     @_wheres = []
-    @_params = []
     @_order = null
     @_group = null
     @_having = null
@@ -794,48 +810,44 @@ class QueryBuilder
   where: (conditions, params = []) ->
     b = @_clone()
     if typeof conditions is 'string'
-      b._wheres.push { clause: conditions, join: 'AND' }
-      b._params = b._params.concat params
+      b._wheres.push { clause: conditions, join: 'AND', params: [...params] }
     else if typeof conditions is 'object'
       for own key, val of conditions
         _assertDefined 'where', key, val
         if val is null
-          b._wheres.push { clause: "#{ident key} IS NULL", join: 'AND' }
+          b._wheres.push { clause: "#{ident key} IS NULL", join: 'AND', params: [] }
         else
-          b._wheres.push { clause: "#{ident key} = ?", join: 'AND' }
-          b._params.push val
+          b._wheres.push { clause: "#{ident key} = ?", join: 'AND', params: [val] }
     b
 
   or: (conditions, params = []) ->
     b = @_clone()
     if typeof conditions is 'string'
-      b._wheres.push { clause: conditions, join: 'OR' }
-      b._params = b._params.concat params
+      b._wheres.push { clause: conditions, join: 'OR', params: [...params] }
     else if typeof conditions is 'object'
       parts = []
+      vals = []
       for own key, val of conditions
         _assertDefined 'or', key, val
         if val is null
           parts.push "#{ident key} IS NULL"
         else
           parts.push "#{ident key} = ?"
-          b._params.push val
-      b._wheres.push { clause: "(#{parts.join(' AND ')})", join: 'OR' }
+          vals.push val
+      b._wheres.push { clause: "(#{parts.join(' AND ')})", join: 'OR', params: vals }
     b
 
   not: (conditions, params = []) ->
     b = @_clone()
     if typeof conditions is 'string'
-      b._wheres.push { clause: "NOT (#{conditions})", join: 'AND' }
-      b._params = b._params.concat params
+      b._wheres.push { clause: "NOT (#{conditions})", join: 'AND', params: [...params] }
     else if typeof conditions is 'object'
       for own key, val of conditions
         _assertDefined 'not', key, val
         if val is null
-          b._wheres.push { clause: "#{ident key} IS NOT NULL", join: 'AND' }
+          b._wheres.push { clause: "#{ident key} IS NOT NULL", join: 'AND', params: [] }
         else
-          b._wheres.push { clause: "#{ident key} != ?", join: 'AND' }
-          b._params.push val
+          b._wheres.push { clause: "#{ident key} != ?", join: 'AND', params: [val] }
     b
 
   order: (expr) ->
@@ -850,8 +862,7 @@ class QueryBuilder
 
   having: (clause, params = []) ->
     b = @_clone()
-    b._having = clause
-    b._params = b._params.concat params
+    b._having = { clause, params: [...params] }
     b
 
   limit: (n) ->
@@ -874,53 +885,74 @@ class QueryBuilder
         parts.push "#{w.join} #{w.clause}"
     " WHERE #{parts.join(' ')}"
 
+  # Binds follow the SQL, not the chain. Each clause carries its own
+  # params, so `having(...).where(...)` and `where(...).having(...)`
+  # emit the same statement with the same values -- writing the chain
+  # in an unusual order used to swap the binds and answer a different
+  # question without erroring.
+  _whereParams: ->
+    @_wheres.flatMap (w) -> w.params
+
+  _selectParams: ->
+    params = @_whereParams()
+    params = params.concat @_having.params if @_having
+    params
+
   _toSQL: ->
     sql = "SELECT #{@_select} FROM #{@_tableName}"
     sql += @_buildWhere()
     sql += " GROUP BY #{@_group}" if @_group
-    sql += " HAVING #{@_having}" if @_having
+    sql += " HAVING #{@_having.clause}" if @_having
     sql += " ORDER BY #{@_order}" if @_order
     sql += " LIMIT #{@_limit}" if @_limit?
     sql += " OFFSET #{@_offset}" if @_offset?
     sql
 
   all: ->
-    findAll! @_toSQL(), @_params
+    findAll! @_toSQL(), @_selectParams()
 
   first: ->
     b = @_clone()
     b._limit = 1
-    findOne! b._toSQL(), b._params
+    findOne! b._toSQL(), b._selectParams()
 
+  # Grouping (or a bare HAVING, which groups the whole table) makes the
+  # count a count of groups, so it has to wrap. Only the plain case can
+  # count rows in place -- and it must not carry HAVING's params to a
+  # statement that has no HAVING.
   count: ->
-    if @_group
-      inner = "SELECT 1 FROM #{@_tableName}#{@_buildWhere()} GROUP BY #{@_group}"
-      inner += " HAVING #{@_having}" if @_having
+    if @_group or @_having
+      inner = "SELECT 1 FROM #{@_tableName}#{@_buildWhere()}"
+      inner += " GROUP BY #{@_group}" if @_group
+      inner += " HAVING #{@_having.clause}" if @_having
       sql = "SELECT COUNT(*) AS n FROM (#{inner}) AS _t"
+      params = @_selectParams()
     else
       sql = "SELECT COUNT(*) AS n FROM #{@_tableName}"
       sql += @_buildWhere()
-    (query! sql, @_params).rows[0]?.n ?? null
+      params = @_whereParams()
+    (query! sql, params).rows[0]?.n ?? null
 
   update: (data) ->
+    _assertWhereOnly 'update', @
     keys = (k for k, v of data when v isnt undefined)
     badRequest 'update requires at least one column to set' if keys.length is 0
     sets = keys.map((k) -> "#{ident k} = ?").join(', ')
     vals = keys.map (k) -> data[k]
     sql = "UPDATE #{@_tableName} SET #{sets}#{@_buildWhere()} RETURNING *"
-    findAll! sql, [...vals, ...@_params]
+    findAll! sql, [...vals, ...@_whereParams()]
 
   destroy: ->
+    _assertWhereOnly 'destroy', @
     sql = "DELETE FROM #{@_tableName}#{@_buildWhere()} RETURNING *"
-    findAll! sql, @_params
+    findAll! sql, @_whereParams()
 
   _clone: ->
     b = QueryBuilder.new(@table, @database)
-    b._wheres = [...@_wheres]
-    b._params = [...@_params]
+    b._wheres = @_wheres.map (w) -> { ...w, params: [...w.params] }
     b._order = @_order
     b._group = @_group
-    b._having = @_having
+    b._having = if @_having then { clause: @_having.clause, params: [...@_having.params] } else null
     b._limit = @_limit
     b._offset = @_offset
     b._select = @_select

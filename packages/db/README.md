@@ -190,7 +190,14 @@ Builder chains: `where` / `or` / `not` / `select` / `order` / `group` /
 `having` / `limit` / `offset`, then `all!` / `first!` / `count!` /
 `update!` / `destroy!`. Object `where` uses `?` binds; string form is
 an escape hatch (`where 'age > ?', [21]`). `ident(name)` quotes
-identifiers.
+identifiers. Binds follow the statement, not the chain, so
+`having(…).where(…)` and `where(…).having(…)` send the same values.
+
+`update!` and `destroy!` take a `where` and nothing else. DuckDB has no
+`DELETE … LIMIT`, so a chain carrying `limit` / `offset` / `order` /
+`group` / `having` is refused rather than run without it — asking to
+touch one row must never touch every matching row. Narrow the
+condition, or select the rows first and mutate them by primary key.
 
 | | `Model 'users'` (this package) | `schema :model` (Rip language) |
 |---|---|---|
