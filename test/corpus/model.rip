@@ -54,6 +54,15 @@ Patient = schema :model
   mrn!       string, {column: "MRN_NBR"}, @unique
   firstName! string
   @hasMany Study, {through: Enrollment}
+  @hasOne Insurer, {as: payer, through: Enrollment}
+
+# Declaring the pk as a field, alongside an explicit @primaryKey, is
+# what makes it a caller-supplied NATURAL key: no sequence, and the
+# INSERT writes it like any other column.
+Country = schema :model
+  @primaryKey iso
+  iso!  string, 2..2
+  name! string
 
 Post = schema :model
   title! string

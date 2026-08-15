@@ -94,6 +94,35 @@ const accessorOf = (target) => target[0].toLowerCase() + target.slice(1);
 // derivation the runtime makes.
 const fkProp = (rel) => (rel.foreignKey ? camelCase(rel.foreignKey) : fkCamel(rel.target));
 
+// The primary key, and which of the two postures it is in. Declaring
+// the pk as a field alongside an explicit @primaryKey is what makes it
+// a caller-supplied NATURAL key — the same two-part rule the compiler
+// and the runtime read.
+const primaryKeyName = (descriptor) =>
+  descriptor.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey')
+    ?.args?.[0]?.name ?? 'id';
+
+const isNaturalKey = (descriptor) => {
+  const pk = descriptor.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey');
+  return !!pk && descriptor.entries.some((e) => e.tag === 'field' && e.name === pk.args[0].name);
+};
+
+// A `through` relation is the one kind the owner can write, so it
+// carries three more methods, named off the accessor. `add`/`remove`
+// answer with how many links changed; `set` reports both halves.
+const throughWriters = (rel, acc, isKnown) => {
+  if (!rel.through) return [];
+  const Acc = acc[0].toUpperCase() + acc.slice(1);
+  const one = isKnown ? rel.target : 'unknown';
+  const items = `items: ${one} | number | string | Array<${one} | number | string>`;
+  const attrs = 'attrs?: Record<string, unknown>';
+  return [
+    `add${Acc}(${items}, ${attrs}): Promise<number>`,
+    `remove${Acc}(${items}): Promise<number>`,
+    `set${Acc}(${items}, ${attrs}): Promise<{ added: number; removed: number }>`,
+  ];
+};
+
 // ── the intrinsic vocabulary ─────────────────────────────────────────
 
 // Rip's built-in field-type names → TS types. Everything stringy is
@@ -422,8 +451,10 @@ const relationsOf = (descriptor) => {
 // to real Date objects at the wire, and the runtime manages them as
 // Dates (matching the `Date` a declared date/datetime field renders).
 const modelImplicitProps = (descriptor) => {
-  const pk = descriptor.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey');
-  const props = [`${pk?.args?.[0]?.name ?? 'id'}: number`];
+  const pkName = primaryKeyName(descriptor);
+  // A NATURAL key is a declared field — it already types as itself,
+  // with its own declared type, so nothing implicit is added for it.
+  const props = isNaturalKey(descriptor) ? [] : [`${pkName}: number`];
   for (const rel of relationsOf(descriptor)) {
     if (rel.kind !== 'belongsTo') continue;
     props.push(`${fkProp(rel)}: number${rel.optional ? ' | null' : ''}`);
@@ -440,9 +471,13 @@ const modelImplicitProps = (descriptor) => {
 // columns (id, timestamps, deletedAt) are omitted — the DB fills them.
 const modelCreateProps = (descriptor, known) => {
   const props = [];
+  const pkName = isNaturalKey(descriptor) ? primaryKeyName(descriptor) : null;
   for (const e of descriptor.entries) {
     if (e.tag !== 'field') continue;
-    const required = e.modifiers.includes('!') && e.constraints?.default === undefined;
+    // A natural key is always required at insert: nothing generates
+    // it, so a default cannot stand in for it either.
+    const required = e.name === pkName ||
+      (e.modifiers.includes('!') && e.constraints?.default === undefined);
     props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}`);
   }
   for (const rel of relationsOf(descriptor)) {
@@ -463,9 +498,13 @@ const relationAccessors = (descriptor, known) => {
   for (const rel of relationsOf(descriptor)) {
     const isKnown = known.has(rel.target);
     if (rel.kind === 'hasMany') {
-      out.push(`${rel.as ?? pluralize(accessorOf(rel.target))}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
+      const acc = rel.as ?? pluralize(accessorOf(rel.target));
+      out.push(`${acc}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
+      out.push(...throughWriters(rel, acc, isKnown));
     } else {
-      out.push(`${rel.as ?? accessorOf(rel.target)}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
+      const acc = rel.as ?? accessorOf(rel.target);
+      out.push(`${acc}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
+      out.push(...throughWriters(rel, acc, isKnown));
     }
   }
   return out;
@@ -613,7 +652,13 @@ export function schemaTypeStory(decl, byName, known) {
     const aliasLines = linesFor(false);
     const faceAliasLines = linesFor(true);
     const typeNames = [dataName, createName, ...(hasEnsures ? [ensureName] : []), name];
-    let constType = `ModelSchema<${name}, ${dataName}, number, ${createName}>`;
+    // `find(id)` takes whatever the key IS: the surrogate's number, or
+    // a natural key's own declared type.
+    const pkEntry = isNaturalKey(descriptor)
+      ? descriptor.entries.find((e) => e.tag === 'field' && e.name === primaryKeyName(descriptor))
+      : null;
+    const idType = pkEntry ? fieldType(pkEntry, known) : 'number';
+    let constType = `ModelSchema<${name}, ${dataName}, ${idType}, ${createName}>`;
     if (scopeNames.length) {
       const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
       aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);

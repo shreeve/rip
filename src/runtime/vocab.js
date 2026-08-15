@@ -164,7 +164,7 @@ const __SCHEMA_FIELD_ATTRS = { __proto__: null, column: 'literal', was: 'column'
 //               this is what lets `author` and `reviewer` both reach User.
 //   foreignKey: the FK COLUMN. Without it the column derives from the
 //               target (belongsTo) or the owner (hasOne/hasMany/through).
-//   through:    the JOIN MODEL of a many-to-many. @hasMany only.
+//   through:    the JOIN MODEL a @hasMany/@hasOne reads through.
 //   targetKey:  the join model's column pointing at the TARGET. `through`
 //               only; without it, the join model's own @belongsTo says.
 const __SCHEMA_RELATION_ATTRS = {

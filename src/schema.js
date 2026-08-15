@@ -612,12 +612,10 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   if (line[1]?.kind === ':') {
     fail(`schema fields use 'name type' (space, no colon) — got '${name}:'`, line[1].start);
   }
-  // The pk column is runtime-owned on a :model (sequence default,
-  // RETURNING absorption) — a declared `id` field would duplicate the
-  // DDL column; the runtime rejects the hand-built descriptor too.
-  if (kind === 'model' && name === 'id') {
-    fail(`field 'id' collides with the runtime-managed primary key — a :model's id is sequence-assigned; drop the declaration`, first.start);
-  }
+  // A declared field named for the pk is checked in finishModelBody,
+  // not here: whether it is a collision or a NATURAL KEY declaration
+  // depends on an @primaryKey elsewhere in the body, which this
+  // per-line pass cannot see yet.
 
   // Modifiers: adjacent (unspaced) `!` / `?` tokens. A bang after an
   // IDENTIFIER scans DAMMIT; after a keyword-word name it stays
@@ -903,11 +901,11 @@ function parseAttrsTokens(part, fieldName, fail) {
 
 function parseRelationAttrs(part, directiveName, fail) {
   const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
-  // `through:` is the many-to-many form and has no meaning on the two
-  // single-column relations — a `belongsTo` through a join model is not
-  // a relation, it is a query.
-  if (attrs.through && directiveName !== 'hasMany') {
-    fail(`@${directiveName} option 'through' is @hasMany-only — a many-to-many reads through a join model`, part[0].start);
+  // `through:` names a hop the OWNER does not store, which is what
+  // @hasMany and @hasOne both are. @belongsTo stores its key in its own
+  // row, so a `through` on it is not a relation, it is a query.
+  if (attrs.through && directiveName === 'belongsTo') {
+    fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, part[0].start);
   }
   // `targetKey:` names a column ON the join model, so without one there
   // is nothing for it to name.
@@ -1020,9 +1018,42 @@ function finishModelBody(entries, fail) {
     ownerOf.set(col, owner);
   };
   const pkDirective = entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey');
-  const pkColumn = pkDirective ? pkDirective.args[0].column : 'id';
+  const pkColumn = pkDirective ? (pkDirective.args[0].column ?? snakeCase(pkDirective.args[0].name)) : 'id';
   const pkName = pkDirective ? pkDirective.args[0].name : 'id';
-  claim(pkColumn, pkDirective ? `@primaryKey ${pkName}` : 'the primary key', pkDirective?.start ?? entries[0]?.start ?? 0);
+  // Declaring the pk as a field is what makes it a caller-supplied
+  // NATURAL key — but only alongside an explicit @primaryKey naming it.
+  // A bare `id! integer` is someone saying "I have an id", not "turn
+  // off the sequence", so it stays the collision it always was. Judged
+  // BEFORE any column is claimed, so the pk gets the message about the
+  // pk instead of the generic two-owners one.
+  const pkFieldEntry = entries.find((e) => e.tag === 'field' && e.name === pkName) ?? null;
+  const naturalKey = !!(pkDirective && pkFieldEntry);
+  if (!pkDirective && pkFieldEntry) {
+    fail(`field '${pkName}' collides with the runtime-managed primary key — a :model's ${pkName} is sequence-assigned. Drop the declaration, or write '@primaryKey ${pkName}' to make it a caller-supplied natural key instead`,
+      pkFieldEntry.start);
+  }
+  // A natural key is the caller's to supply, so it must be one
+  // required value, and there is no sequence behind it to seed.
+  if (naturalKey) {
+    if (!pkFieldEntry.modifiers?.includes('!')) {
+      fail(`the primary key '${pkName}' is declared optional — a row's identity is never absent; declare it required ('${pkName}! string')`, pkFieldEntry.start);
+    }
+    if (pkFieldEntry.array) {
+      fail(`the primary key '${pkName}' is declared as an array — a primary key is one value`, pkFieldEntry.start);
+    }
+    const idStart = entries.find((e) => e.tag === 'directive' && e.name === 'idStart');
+    if (idStart) {
+      fail(`@idStart seeds the sequence behind a runtime-managed primary key, but '${pkName}' is declared as a field, which makes it caller-supplied — there is no sequence to seed. Drop @idStart, or drop the field declaration`, idStart.start);
+    }
+    // The field's own `{column:}` is what the table has, so a second,
+    // different one on the directive is two answers to one question.
+    if (pkDirective.args[0].column !== undefined &&
+        pkDirective.args[0].column !== (pkFieldEntry.attrs?.column ?? snakeCase(pkName))) {
+      fail(`@primaryKey names column '${pkDirective.args[0].column}' but field '${pkName}' reads a different one — state the column once, on the field`, pkDirective.start);
+    }
+  } else {
+    claim(pkColumn, 'the primary key', pkDirective?.start ?? entries[0]?.start ?? 0);
+  }
   // The field's own name resolves @index/@unique, which are written in
   // FIELD space; the column is what the table actually has.
   const columnOfField = new Map();
@@ -1031,10 +1062,6 @@ function finishModelBody(entries, fail) {
     const col = e.attrs?.column ?? snakeCase(e.name);
     columnOfField.set(e.name, col);
     claim(col, `field '${e.name}'`, e.start);
-  }
-  if (columnOfField.has(pkName)) {
-    fail(`the primary key '${pkName}' is also declared as a field — the primary key is runtime-managed (its value arrives from the INSERT's RETURNING), so it is never also a declared field`,
-      pkDirective?.start ?? entries.find((e) => e.tag === 'field' && e.name === pkName).start);
   }
   for (const e of entries) {
     if (e.tag !== 'directive') continue;
@@ -1242,7 +1269,12 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (!__schemaIsCanonicalName(t0.value)) {
         fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
       }
-      const arg = { name: t0.value, column: attrs?.column ?? snakeCase(t0.value) };
+      // `column` is emitted only when the author WROTE one. The
+      // derived default lives in the runtime, so a natural key (whose
+      // column comes from the field) can tell "no column stated" from
+      // "this column stated" and refuse only a real disagreement.
+      const arg = { name: t0.value };
+      if (attrs?.column) arg.column = attrs.column;
       return [arg];
     }
   }
@@ -1834,7 +1866,8 @@ function entryLiteral(e, fnCode, marks = {}) {
             `${a.through ? `, through: ${JSON.stringify(a.through)}` : ''}` +
             `${a.targetKey ? `, targetKey: ${JSON.stringify(a.targetKey)}` : ''}}]`);
         } else if (e.name === 'primaryKey') {
-          obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}, column: ${JSON.stringify(e.args[0].column)}}]`);
+          obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}` +
+            `${e.args[0].column ? `, column: ${JSON.stringify(e.args[0].column)}` : ''}}]`);
         } else if (e.name === 'on') {
           obj.push(`args: [{field: ${JSON.stringify(e.args[0].field)}}]`);
         } else if (e.name === 'unique' || e.name === 'index') {

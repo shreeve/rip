@@ -104,11 +104,62 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   declarations, and ambiguity (two `@belongsTo` to one end) is refused
   with the option that settles it, never guessed.
 
-  Not shipped, deliberately: `@primaryKey` **renames** the surrogate, it
-  does not turn it into a caller-supplied natural key — the pk is still
-  INTEGER, still `nextval`, still RETURNING-absorbed, and still rejected
-  as caller input. `through:` is `@hasMany`-only, and reads only; a
-  `hasOne through` and writing through a join model are unbuilt.
+- **Natural keys, `hasOne through`, and writing a join model.**
+
+  **Declaring the pk as a field is what makes it caller-supplied** —
+  alongside an explicit `@primaryKey` naming it. There is no third
+  reading: a declared pk field with a surrogate posture would be a
+  `string` field over an INTEGER sequence column, and an undeclared
+  natural key would be a column with no type. So no separate flag
+  states it.
+
+  ```
+  @primaryKey patientId        nothing declares it → the runtime's
+                               INTEGER surrogate, unchanged
+  @primaryKey mrn              mrn is declared, with a type and
+  mrn! string                  constraints → the caller supplies it
+  ```
+
+  It takes BOTH declarations on purpose. A bare `id! integer` with no
+  `@primaryKey` stays exactly the collision it always was, because the
+  default name is precisely where a silent posture flip would go
+  unnoticed — the error now names the escape instead of just refusing.
+
+  Everything downstream follows the declaration: no `CREATE SEQUENCE`,
+  the column takes the field's own type and length, the INSERT writes
+  it, `@idStart` is refused (nothing to seed), an absent key is a
+  `SchemaError` naming the posture rather than a NOT NULL violation
+  from the database, and `find(id)` types as the key's own type. A
+  `belongsTo` to such a model gets an FK **as wide as the key it
+  points at** — `VARCHAR` referencing `countries(iso)`, not the
+  surrogate's `INTEGER`.
+
+  `through:` now also works on `@hasOne` — the same two queries, one
+  target instead of a list. `@belongsTo` still refuses it, and the
+  message says why: it holds its key in its own row, so there is
+  nothing to read through.
+
+  Writing goes **through the join model**, never around it:
+
+  ```
+  await user.addTeams! team, {role: 'member'}   # → 1  (links added)
+  await user.removeTeams! [red, blue]           # → 2  (links removed)
+  await user.setTeams! [red], {role: 'member'}  # → {added: 1, removed: 1}
+  ```
+
+  Named off the ACCESSOR (`{as: labels}` → `addLabels`), because the
+  accessor is the only name unique per relation — two relations to one
+  target share a target name, and depluralizing an arbitrary `as:`
+  would be a guess. Links go in via the join's own `insertMany`, so its
+  fields, defaults, `@timestamps`, and validation all apply and extra
+  required columns are passable as `attrs`; they come out via its
+  `deleteAll`, so a `@softDelete` join soft-deletes. Adding an existing
+  link is a no-op, not a second row — duplicate join rows would read
+  back as duplicate targets. Every write busts the relation memo.
+
+  Still unbuilt: `has_and_belongs_to_many` without a join model (there
+  is always a join model here, and naming it is the honest form), and
+  composite keys.
 
 - **One deadline knob, three states, one place.** `timeoutMs` on an
   adapter or on a single statement: `> 0` runs a client clock and sends

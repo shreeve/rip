@@ -377,23 +377,25 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
       foreignKey: a.foreignKey ?? __schemaFkName(target),
     };
   }
+  // A `through` relation owns no column on either end — both foreign
+  // keys live on the JOIN model — so `foreignKey`/`targetKey` name
+  // columns THERE, and both may stay unresolved until query time,
+  // when the join model is registered and its own @belongsTo can say.
+  // The kind still decides the SHAPE of the answer: hasOne takes the
+  // first row, hasMany takes them all.
+  if (a.through) {
+    return {
+      kind: name, target, optional, through: a.through,
+      accessor: a.as ?? (name === 'hasOne' ? targetLc : __schemaPluralize(targetLc)),
+      foreignKey: a.foreignKey ?? null,
+      targetKey: a.targetKey ?? null,
+    };
+  }
   if (name === 'hasOne') {
     return {
       kind: 'hasOne', target, optional,
       accessor: a.as ?? targetLc,
       foreignKey: a.foreignKey ?? __schemaFkName(def.name),
-    };
-  }
-  // A `through` relation owns no column on either end — both foreign
-  // keys live on the JOIN model — so `foreignKey`/`targetKey` name
-  // columns THERE, and both may stay unresolved until query time,
-  // when the join model is registered and its own @belongsTo can say.
-  if (a.through) {
-    return {
-      kind: 'hasMany', target, optional, through: a.through,
-      accessor: a.as ?? __schemaPluralize(targetLc),
-      foreignKey: a.foreignKey ?? null,
-      targetKey: a.targetKey ?? null,
     };
   }
   return {
@@ -488,8 +490,9 @@ function __schemaValidateDirectiveArgs(def, d) {
           const why = __schemaAttrValueError(kind, key, value);
           if (why) bad('option ' + why + "; got '" + value + "'");
         }
-        if (args[0].through !== undefined && d.name !== 'hasMany') {
-          bad("option 'through' is @hasMany-only — a many-to-many reads through a join model");
+        if (args[0].through !== undefined && d.name === 'belongsTo') {
+          bad("option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own " +
+            'row, so it has nothing to read through');
         }
         if (args[0].targetKey !== undefined && args[0].through === undefined) {
           bad("option 'targetKey' names a column on the join model, so it requires 'through'");
@@ -607,11 +610,11 @@ function finishModelNorm(def, norm) {
   norm.softDelete = softDelete;
   norm.tableWas = tableWas;
   // The primary key is a PROPERTY and a COLUMN, and `{column:}` lets
-  // them differ — the same pair every declared field has. It stays
-  // runtime-managed either way: `@primaryKey` renames the surrogate, it
-  // does not turn it into a caller-supplied natural key.
+  // them differ — the same pair every declared field has.
   norm.primaryKey = primaryKey?.name ?? 'id';
-  norm.primaryKeyColumn = primaryKey?.column ?? 'id';
+  norm.primaryKeyColumn = primaryKey
+    ? (primaryKey.column ?? __schemaSnake(primaryKey.name))
+    : 'id';
   // `@table` is a permanent override; `@tableWas` is a one-time rename
   // signal the differ consumes and the author then deletes. Both are in
   // table-name space, so they compose: @tableWas names the DEPLOYED
@@ -619,13 +622,56 @@ function finishModelNorm(def, norm) {
   // entirely when @table is present.
   norm.tableName = table ?? __schemaTableName(def.name);
 
-  // The pk column is runtime-owned (sequence default, RETURNING
-  // absorption, snapshot WHERE): a declared field of the same name
-  // would duplicate the DDL column and let user input write the pk the
-  // insert paths reject (the caller-supplied-pk posture). Mixin-included
-  // fields collide identically — on a :model, the pk has one owner.
-  if (norm.fields.has(norm.primaryKey)) {
+  // ── surrogate or natural: DECLARING the pk as a field is the switch ─
+  //
+  // These are the only two coherent readings, and the declaration
+  // settles which:
+  //
+  //   @primaryKey patientId          nothing declares patientId, so
+  //                                  nothing says what it holds — it is
+  //                                  the runtime's INTEGER surrogate:
+  //                                  sequence default, RETURNING
+  //                                  absorption, caller input refused
+  //
+  //   @primaryKey mrn                mrn IS declared, with a type and
+  //   mrn! string                    constraints — a NATURAL key the
+  //                                  caller supplies, which the INSERT
+  //                                  writes like any other column
+  //
+  // There is no third case: a declared pk field with a surrogate
+  // posture would be a `string` field over an INTEGER sequence column,
+  // and an undeclared natural key would be a column with no type. The
+  // two facts are one fact, so no separate flag states it.
+  //
+  // It takes BOTH declarations, though — an @primaryKey naming the
+  // field. A bare `id! integer` with no @primaryKey keeps colliding as
+  // it always has, because someone writing that means "I have an id",
+  // not "turn off the sequence", and the default name is exactly where
+  // a silent posture flip would be unnoticeable.
+  const pkField = primaryKey ? (norm.fields.get(norm.primaryKey) ?? null) : null;
+  norm.primaryKeyField = pkField;
+  norm.naturalKey = pkField !== null;
+  if (!pkField && norm.fields.has(norm.primaryKey)) {
     collision(norm.primaryKey, 'the runtime-managed primary key');
+  }
+  if (pkField) {
+    if (pkField.optional === true || pkField.required !== true) {
+      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+        "the primary key '" + norm.primaryKey + "' is declared optional — a row's " +
+        'identity is never absent; declare it required (!)');
+    }
+    if (pkField.array === true) {
+      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+        "the primary key '" + norm.primaryKey + "' is declared as an array — a primary key is one value");
+    }
+    for (const d of norm.directives) {
+      if (d.name === 'idStart') {
+        throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+          "@idStart seeds the sequence behind a runtime-managed primary key, but '" +
+          norm.primaryKey + "' is declared as a field, which makes it caller-supplied — " +
+          'there is no sequence to seed. Drop @idStart, or drop the field declaration');
+      }
+    }
   }
 
   // ── the property ↔ column mapping ───────────────────────────────────
@@ -658,7 +704,9 @@ function finishModelNorm(def, norm) {
     fieldOf.set(col, property);
     ownerOf.set(col, owner);
   };
-  claim(norm.primaryKey, norm.primaryKeyColumn, 'the primary key');
+  // A natural key claims its column as the FIELD it is, once — the
+  // field loop below does it. A surrogate has no field to do it.
+  if (!norm.naturalKey) claim(norm.primaryKey, norm.primaryKeyColumn, 'the primary key');
   for (const [n, f] of norm.fields) {
     // The compiler checks these too; `__schema({…})` is a second
     // entry point that takes a hand-built descriptor, so the runtime
@@ -687,6 +735,18 @@ function finishModelNorm(def, norm) {
   norm.columnOf = columnOf;
   norm.fieldOf = fieldOf;
   const known = new Set(fieldOf.keys());
+  // The field's own `{column:}` is what the table has, so it wins — and
+  // a second, different one on the directive is two answers to one
+  // question rather than a default being overridden.
+  if (norm.naturalKey) {
+    const fieldColumn = columnOf.get(norm.primaryKey);
+    if (primaryKey?.column !== undefined && primaryKey.column !== fieldColumn) {
+      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+        "@primaryKey names column '" + primaryKey.column + "' but field '" + norm.primaryKey +
+        "' reads column '" + fieldColumn + "' — state the column once, on the field");
+    }
+    norm.primaryKeyColumn = fieldColumn;
+  }
 
   // @index / @unique columns must exist on the table — an index over
   // an undeclared column is invalid DDL that would otherwise surface
@@ -755,6 +815,20 @@ function decorateDef(def, desc) {
   }
 }
 
+// A belongsTo FK holds a copy of the target's key, so it is that
+// key's type. Resolved lazily and defensively: the target may not be
+// registered yet, and asking an unregistered one is not an error here
+// — the relation's own validation says that, at query time, with a
+// better message. The convention's INTEGER surrogate is the answer
+// until the target can say otherwise.
+function __schemaRelationKeyType(rel) {
+  const target = __SchemaRegistry.get(rel.target);
+  if (!target || target.kind !== 'model') return 'integer';
+  let targetNorm;
+  try { targetNorm = target._normalize(); } catch { return 'integer'; }
+  return targetNorm.primaryKeyField?.typeName ?? 'integer';
+}
+
 // The full projectable column set: declared fields plus the columns a
 // :model manages implicitly — id, @timestamps, @softDelete, and
 // belongsTo FKs. Algebra operates over THIS set, so a client
@@ -771,23 +845,28 @@ function projectableFields(def) {
       });
     }
   };
+  // A natural key is already in `norm.fields` with its declared type,
+  // and `col` never overwrites — so this line only fires for the
+  // runtime's INTEGER surrogate.
   col(norm.primaryKey, 'integer', true);
   if (norm.timestamps) { col('createdAt', 'datetime', true); col('updatedAt', 'datetime', true); }
   if (norm.softDelete) col('deletedAt', 'datetime', false);
   for (const [, rel] of norm.relations) {
-    if (rel.kind === 'belongsTo') col(__schemaFieldFor(norm, rel.foreignKey), 'integer', !rel.optional);
+    if (rel.kind !== 'belongsTo') continue;
+    col(__schemaFieldFor(norm, rel.foreignKey), __schemaRelationKeyType(rel), !rel.optional);
   }
   return out;
 }
 
 function jsonSchemaModelColumns(def, properties) {
   const norm = def._normalize();
-  properties[norm.primaryKey] = { type: 'integer' };
+  if (!norm.naturalKey) properties[norm.primaryKey] = { type: 'integer' };
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
+    const t = __schemaRelationKeyType(rel) === 'integer' ? 'integer' : 'string';
     properties[__schemaFieldFor(norm, rel.foreignKey)] = rel.optional
-      ? { type: ['integer', 'null'] }
-      : { type: 'integer' };
+      ? { type: [t, 'null'] }
+      : { type: t };
   }
   if (norm.timestamps) {
     properties.createdAt = { type: 'string', format: 'date-time' };
@@ -1545,7 +1624,9 @@ async function __schemaPreload(def, instances, specs) {
       for (const inst of instances) {
         const request = requests.get(inst);
         if (!current(inst, request)) continue;
-        __schemaRelMemoSet(inst, spec.name, request.identity, groups.get(request.identity) || []);
+        const g = groups.get(request.identity) || [];
+        __schemaRelMemoSet(inst, spec.name, request.identity,
+          rel.kind === 'hasOne' ? (g[0] ?? null) : g);
       }
     } else {
       const fkCamel = __schemaFieldFor(targetNorm, rel.foreignKey);
@@ -1576,6 +1657,129 @@ async function __schemaPreload(def, instances, specs) {
   }
 }
 
+// ── writing a `through` relation ──────────────────────────────────────
+//
+// The link is a ROW, not a column, so linking and unlinking are the
+// join model's INSERTs and DELETEs — and they go THROUGH the join
+// model rather than around it: `insertMany` validates every row and
+// respects the join's own fields, defaults, and `@timestamps`, and
+// `deleteAll` respects its `@softDelete`. A join model with required
+// columns of its own is therefore usable: pass them as `attrs`.
+//
+// Hooks are skipped, which is `insertMany`'s documented bulk-path
+// contract; a join row needing per-row hooks is a model the caller
+// should create directly.
+
+// The pieces every write needs: the join model, its two columns, the
+// owner's identity, and the target identities being named.
+function __schemaThroughPlan(def, inst, rel, acc, items, api) {
+  const join = __schemaJoinModel(def, rel);
+  const keys = __schemaThroughKeys(def, rel, join);
+  const identity = __schemaPersistedIdentity(def, inst, api);
+  const list = items == null ? [] : (Array.isArray(items) ? items : [items]);
+  const targetNorm = __SchemaRegistry.get(rel.target)?._normalize();
+  const targetIds = list.map((item, i) => {
+    // An instance names itself; a bare value is already an identity.
+    if (item !== null && typeof item === 'object') {
+      const pk = targetNorm ? targetNorm.primaryKey : 'id';
+      const v = item[pk];
+      if (v == null) {
+        throw new Error('schema: ' + api + ' received an unsaved ' + rel.target +
+          ' at [' + i + '] — it has no ' + pk + ' to link to; save it first');
+      }
+      return v;
+    }
+    if (item == null) {
+      throw new Error('schema: ' + api + ' received ' + String(item) + ' at [' + i + ']');
+    }
+    return item;
+  });
+  return { join, keys, identity, targetIds: [...new Set(targetIds)] };
+}
+
+// The target identities this owner is already linked to.
+async function __schemaThroughLinked(def, rel, plan) {
+  const pairs = await __schemaThroughPairs(def, rel, plan.join, plan.keys, [plan.identity]);
+  return new Set(pairs.map((p) => p[1]));
+}
+
+// Every write invalidates the memo: the relation's value changed, and
+// the accessor must not answer from a cache that predates it.
+function __schemaThroughInvalidate(inst, acc) {
+  inst._relGeneration++;
+  if (inst._relMemo) inst._relMemo.delete(acc);
+}
+
+// Linking something already linked is a no-op rather than a second
+// row — duplicate join rows would show up as duplicate targets on the
+// read side, which nothing else in the relation surface produces.
+async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
+  const api = 'add' + acc[0].toUpperCase() + acc.slice(1) + '()';
+  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
+  if (!plan.targetIds.length) return 0;
+  const linked = await __schemaThroughLinked(def, rel, plan);
+  const fresh = plan.targetIds.filter((id) => !linked.has(id));
+  if (!fresh.length) return 0;
+  const joinNorm = plan.keys.joinNorm;
+  const ownerField = __schemaFieldFor(joinNorm, plan.keys.ownerKey);
+  const targetField = __schemaFieldFor(joinNorm, plan.keys.targetKey);
+  if (attrs != null && !__schemaIsPlainObject(attrs)) {
+    throw new Error('schema: ' + api + ' attrs must be a plain object of ' + rel.through +
+      ' columns; got ' + (attrs === null ? 'null' : typeof attrs));
+  }
+  await plan.join.insertMany(fresh.map((id) => ({
+    ...(attrs || {}),
+    [ownerField]: plan.identity,
+    [targetField]: id,
+  })));
+  __schemaThroughInvalidate(inst, acc);
+  return fresh.length;
+}
+
+async function __schemaThroughRemove(def, inst, rel, acc, items) {
+  const api = 'remove' + acc[0].toUpperCase() + acc.slice(1) + '()';
+  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
+  if (!plan.targetIds.length) return 0;
+  const removed = await __schemaThroughUnlink(def, rel, plan, plan.targetIds);
+  __schemaThroughInvalidate(inst, acc);
+  return removed;
+}
+
+// Make the link set exactly this. Both halves are computed from one
+// read of the current set, so `set` costs the same round trips as an
+// add and a remove that already knew what to do.
+async function __schemaThroughSet(def, inst, rel, acc, items, attrs) {
+  const api = 'set' + acc[0].toUpperCase() + acc.slice(1) + '()';
+  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
+  const linked = await __schemaThroughLinked(def, rel, plan);
+  const wanted = new Set(plan.targetIds);
+  const stale = [...linked].filter((id) => !wanted.has(id));
+  const fresh = plan.targetIds.filter((id) => !linked.has(id));
+  let removed = 0;
+  if (stale.length) removed = await __schemaThroughUnlink(def, rel, plan, stale);
+  if (fresh.length) {
+    const joinNorm = plan.keys.joinNorm;
+    await plan.join.insertMany(fresh.map((id) => ({
+      ...(attrs || {}),
+      [__schemaFieldFor(joinNorm, plan.keys.ownerKey)]: plan.identity,
+      [__schemaFieldFor(joinNorm, plan.keys.targetKey)]: id,
+    })));
+  }
+  if (removed || fresh.length) __schemaThroughInvalidate(inst, acc);
+  return { added: fresh.length, removed };
+}
+
+// Through the join model's own query builder, so a `@softDelete` join
+// soft-deletes and a plain one really deletes — one rule, stated once,
+// in `deleteAll`.
+function __schemaThroughUnlink(def, rel, plan, targetIds) {
+  const { joinNorm, ownerKey, targetKey } = plan.keys;
+  const where = __schemaQuoteIdent(ownerKey, joinNorm.columns, 'through owner key') + ' = ?' +
+    ' AND ' + __schemaQuoteIdent(targetKey, joinNorm.columns, 'through target key') +
+    ' IN (' + targetIds.map(() => '?').join(', ') + ')';
+  return new __SchemaQuery(plan.join).where(where, plan.identity, ...targetIds).deleteAll();
+}
+
 function __schemaRelationIdentity(def, inst, rel) {
   if (rel.kind === 'belongsTo') return inst[__schemaFieldFor(def._normalize(), rel.foreignKey)];
   return __schemaPersistedIdentity(def, inst, 'resolve relation ' + rel.accessor);
@@ -1595,7 +1799,8 @@ async function __schemaResolveRelation(def, rel, identity) {
       ? await __schemaThroughPairs(def, rel, join, keys, [identity])
       : [];
     const targetIds = [...new Set(pairs.map((p) => p[1]))];
-    return targetIds.length ? await target.findMany(targetIds) : [];
+    const found = targetIds.length ? await target.findMany(targetIds) : [];
+    return rel.kind === 'hasOne' ? (found[0] ?? null) : found;
   }
   if (rel.kind === 'hasOne') {
     return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).first();
@@ -1672,9 +1877,16 @@ async function __schemaSave(def, inst) {
   inst.savedChanges = new Map();
 
   if (isNew) {
-    // Checked after every before-hook ran (a hook is one more channel
-    // that can preset the pk).
-    if (inst[norm.primaryKey] != null) {
+    // Checked after every before-hook ran — a hook is one more channel
+    // that can set the pk, and both postures care which way it went.
+    // A natural key is the caller's to supply and the INSERT's to
+    // write; a surrogate is the runtime's, and a preset value would
+    // arm the RETURNING check below to pass on a garbage response.
+    if (norm.naturalKey) {
+      if (inst[norm.primaryKey] == null) {
+        throw __schemaMissingPkError(def, 'save()', norm.primaryKey);
+      }
+    } else if (inst[norm.primaryKey] != null) {
       throw __schemaCallerPkError(def, 'save()', norm.primaryKey);
     }
     const cols = [], placeholders = [], values = [];
@@ -2001,8 +2213,23 @@ function __schemaCallerPkError(def, api, pk) {
   return new Error(
     'schema: ' + api + ' on ' + (def.name || 'model') + ' received a caller-supplied ' + pk +
     ' — the primary key is runtime-managed (the INSERT never writes it; the real ' + pk +
-    ' arrives via RETURNING). Remove ' + pk + ' from the data, or run explicit-id SQL ' +
+    ' arrives via RETURNING). Remove ' + pk + ' from the data, declare ' + pk +
+    ' as a field to make it a caller-supplied natural key, or run explicit-id SQL ' +
     'through the adapter.');
+}
+
+// The natural-key mirror: the caller owns the identity, so an absent
+// one is not something the database will fill in. Caught here rather
+// than as a NOT NULL violation, because the reason is a posture the
+// model declared, not a constraint the table happens to carry.
+function __schemaMissingPkError(def, api, pk) {
+  return new SchemaError([{
+    field: pk,
+    error: 'required',
+    message: 'schema: ' + api + ' on ' + (def.name || 'model') + ' has no ' + pk +
+      ' — ' + pk + ' is declared as a field, which makes it a caller-supplied ' +
+      'natural key: nothing generates it, so the INSERT has no identity to write',
+  }], def.name, def.kind);
 }
 
 function __schemaCanonicalInput(def, data, api) {
@@ -2024,7 +2251,7 @@ function __schemaCanonicalInput(def, data, api) {
     managed.set(name, label);
     managed.set(column, label);
   };
-  addManaged(norm.primaryKey, norm.primaryKeyColumn, 'primary key');
+  if (!norm.naturalKey) addManaged(norm.primaryKey, norm.primaryKeyColumn, 'primary key');
   if (norm.timestamps) {
     addManaged('createdAt', 'created_at', 'managed timestamp');
     addManaged('updatedAt', 'updated_at', 'managed timestamp');
@@ -2234,7 +2461,11 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   await __schemaRunHook(this, inst, 'afterValidation');
   await __schemaRunHook(this, inst, 'beforeSave');
 
-  if (inst[norm.primaryKey] != null) {
+  if (norm.naturalKey) {
+    if (inst[norm.primaryKey] == null) {
+      throw __schemaMissingPkError(this, 'upsert()', norm.primaryKey);
+    }
+  } else if (inst[norm.primaryKey] != null) {
     throw __schemaCallerPkError(this, 'upsert()', norm.primaryKey);
   }
 
@@ -2505,6 +2736,24 @@ __SchemaDef.prototype._getClass = function () {
         return v;
       },
     });
+    // A `through` relation is the one kind the owner can WRITE, because
+    // the link is a row of its own rather than a column on either end.
+    // Three verbs, named off the ACCESSOR — `teams` → addTeams —
+    // because the accessor is the only name guaranteed unique per
+    // relation: two relations to one target share a target name, and
+    // depluralizing an arbitrary `{as:}` would be a guess.
+    if (rel.through) {
+      const Acc = acc[0].toUpperCase() + acc.slice(1);
+      const verb = (name, fn) => {
+        Object.defineProperty(klass.prototype, name + Acc, {
+          enumerable: false, configurable: true, writable: true,
+          value: async function (items, attrs) { return fn(def, this, rel, acc, items, attrs); },
+        });
+      };
+      verb('add', __schemaThroughAdd);
+      verb('remove', __schemaThroughRemove);
+      verb('set', __schemaThroughSet);
+    }
   }
 
   Object.defineProperty(klass.prototype, 'save', {
@@ -2626,33 +2875,52 @@ __SchemaDef.prototype._tableSpec = function (options) {
   }
 
   const columns = [];
-  columns.push({
-    name: norm.primaryKeyColumn, type: 'INTEGER',
-    notNull: true, unique: false, primary: true,
-    default: "nextval('" + seq + "')", was: null,
-  });
+  if (!norm.naturalKey) {
+    columns.push({
+      name: norm.primaryKeyColumn, type: 'INTEGER',
+      notNull: true, unique: false, primary: true,
+      default: "nextval('" + seq + "')", was: null,
+    });
+  }
   for (const [n, f] of norm.fields) {
-    columns.push(__schemaColumnSpec(norm.columnOf.get(n), f));
+    const col = __schemaColumnSpec(norm.columnOf.get(n), f);
+    // A natural key is an ordinary column that happens to be the
+    // identity: its type, length, and default are the field's. It
+    // takes PRIMARY KEY and nothing else — no sequence exists to
+    // default from, because nothing generates it.
+    if (norm.naturalKey && n === norm.primaryKey) {
+      col.primary = true;
+      col.notNull = true;
+      col.unique = false;
+    }
+    columns.push(col);
   }
 
   const foreignKeys = [];
   const notes = [];
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
+    const targetDef = __SchemaRegistry.get(rel.target);
+    // An unregistered target cannot say where it lives or what it is
+    // keyed by, so the convention answers — the same names and the
+    // same INTEGER surrogate it would have chosen.
+    const targetNorm = targetDef && targetDef.kind === 'model' ? targetDef._normalize() : null;
+    const refTable = targetNorm ? targetNorm.tableName : __schemaTableName(rel.target);
+    const refColumn = targetNorm ? targetNorm.primaryKeyColumn : 'id';
+    // An FK holds a copy of the key it points at, so it is exactly as
+    // wide: a target with a natural `string` key needs a VARCHAR FK,
+    // not the surrogate's INTEGER.
     columns.push({
-      name: rel.foreignKey, type: 'INTEGER',
+      name: rel.foreignKey,
+      type: targetNorm?.primaryKeyField
+        ? __schemaColumnSpec(rel.foreignKey, targetNorm.primaryKeyField).type
+        : 'INTEGER',
       notNull: !rel.optional, unique: false, default: null, was: null,
     });
     // A cross-adapter relation cannot carry a database FK constraint
     // — the referenced table is in another database. The accessor
     // still works (a second query); the DDL suppresses the constraint
     // with a note.
-    const targetDef = __SchemaRegistry.get(rel.target);
-    // An unregistered target cannot say where it lives, so the
-    // convention answers — the same names it would have chosen.
-    const targetNorm = targetDef && targetDef.kind === 'model' ? targetDef._normalize() : null;
-    const refTable = targetNorm ? targetNorm.tableName : __schemaTableName(rel.target);
-    const refColumn = targetNorm ? targetNorm.primaryKeyColumn : 'id';
     const crossAdapter = targetDef &&
       (targetDef._adapter || null) !== (this._adapter || null);
     if (crossAdapter) {
@@ -2699,7 +2967,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
 
   return {
     name: table,
-    sequence: { name: seq, start: idStart },
+    sequence: norm.naturalKey ? null : { name: seq, start: idStart },
     primaryKey: norm.primaryKeyColumn,
     columns, indexes, foreignKeys, notes,
     tableWas: norm.tableWas || null,
@@ -2765,8 +3033,10 @@ __SchemaDef.prototype.toSQL = function (options) {
   const blocks = [];
   if (header) blocks.push(header);
   if (dropFirst) {
-    blocks.push('DROP TABLE IF EXISTS ' + __schemaQuoteIdent(spec.name, null, 'table') +
-      ' CASCADE;\nDROP SEQUENCE IF EXISTS ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') + ';');
+    blocks.push('DROP TABLE IF EXISTS ' + __schemaQuoteIdent(spec.name, null, 'table') + ' CASCADE;' +
+      (spec.sequence
+        ? '\nDROP SEQUENCE IF EXISTS ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') + ';'
+        : ''));
   }
   blocks.push(...__schemaRenderCreate(spec));
   return blocks.join('\n\n') + '\n';

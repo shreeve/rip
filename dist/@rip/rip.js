@@ -658,9 +658,6 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   if (line[1]?.kind === ":") {
     fail(`schema fields use 'name type' (space, no colon) — got '${name}:'`, line[1].start);
   }
-  if (kind === "model" && name === "id") {
-    fail(`field 'id' collides with the runtime-managed primary key — a :model's id is sequence-assigned; drop the declaration`, first.start);
-  }
   const modifiers = [];
   let pos = 1;
   while (pos < line.length) {
@@ -932,8 +929,8 @@ function parseAttrsTokens(part, fieldName, fail) {
 }
 function parseRelationAttrs(part, directiveName, fail) {
   const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
-  if (attrs.through && directiveName !== "hasMany") {
-    fail(`@${directiveName} option 'through' is @hasMany-only — a many-to-many reads through a join model`, part[0].start);
+  if (attrs.through && directiveName === "belongsTo") {
+    fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, part[0].start);
   }
   if (attrs.targetKey && !attrs.through) {
     fail(`@${directiveName} option 'targetKey' names a column on the join model, so it requires 'through' — '{through: Membership, targetKey: "team_id"}'`, part[0].start);
@@ -1028,9 +1025,30 @@ function finishModelBody(entries, fail) {
     ownerOf.set(col, owner);
   };
   const pkDirective = entries.find((e) => e.tag === "directive" && e.name === "primaryKey");
-  const pkColumn = pkDirective ? pkDirective.args[0].column : "id";
+  const pkColumn = pkDirective ? pkDirective.args[0].column ?? snakeCase(pkDirective.args[0].name) : "id";
   const pkName = pkDirective ? pkDirective.args[0].name : "id";
-  claim(pkColumn, pkDirective ? `@primaryKey ${pkName}` : "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
+  const pkFieldEntry = entries.find((e) => e.tag === "field" && e.name === pkName) ?? null;
+  const naturalKey = !!(pkDirective && pkFieldEntry);
+  if (!pkDirective && pkFieldEntry) {
+    fail(`field '${pkName}' collides with the runtime-managed primary key — a :model's ${pkName} is sequence-assigned. Drop the declaration, or write '@primaryKey ${pkName}' to make it a caller-supplied natural key instead`, pkFieldEntry.start);
+  }
+  if (naturalKey) {
+    if (!pkFieldEntry.modifiers?.includes("!")) {
+      fail(`the primary key '${pkName}' is declared optional — a row's identity is never absent; declare it required ('${pkName}! string')`, pkFieldEntry.start);
+    }
+    if (pkFieldEntry.array) {
+      fail(`the primary key '${pkName}' is declared as an array — a primary key is one value`, pkFieldEntry.start);
+    }
+    const idStart = entries.find((e) => e.tag === "directive" && e.name === "idStart");
+    if (idStart) {
+      fail(`@idStart seeds the sequence behind a runtime-managed primary key, but '${pkName}' is declared as a field, which makes it caller-supplied — there is no sequence to seed. Drop @idStart, or drop the field declaration`, idStart.start);
+    }
+    if (pkDirective.args[0].column !== undefined && pkDirective.args[0].column !== (pkFieldEntry.attrs?.column ?? snakeCase(pkName))) {
+      fail(`@primaryKey names column '${pkDirective.args[0].column}' but field '${pkName}' reads a different one — state the column once, on the field`, pkDirective.start);
+    }
+  } else {
+    claim(pkColumn, "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
+  }
   const columnOfField = new Map;
   for (const e of entries) {
     if (e.tag !== "field")
@@ -1038,9 +1056,6 @@ function finishModelBody(entries, fail) {
     const col = e.attrs?.column ?? snakeCase(e.name);
     columnOfField.set(e.name, col);
     claim(col, `field '${e.name}'`, e.start);
-  }
-  if (columnOfField.has(pkName)) {
-    fail(`the primary key '${pkName}' is also declared as a field — the primary key is runtime-managed (its value arrives from the INSERT's RETURNING), so it is never also a declared field`, pkDirective?.start ?? entries.find((e) => e.tag === "field" && e.name === pkName).start);
   }
   for (const e of entries) {
     if (e.tag !== "directive")
@@ -1229,7 +1244,9 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (!__schemaIsCanonicalName(t0.value)) {
         fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
       }
-      const arg = { name: t0.value, column: attrs?.column ?? snakeCase(t0.value) };
+      const arg = { name: t0.value };
+      if (attrs?.column)
+        arg.column = attrs.column;
       return [arg];
     }
   }
@@ -1764,7 +1781,7 @@ function entryLiteral(e, fnCode, marks = {}) {
           const a = e.args[0];
           obj.push(`args: [{target: ${JSON.stringify(a.target)}${a.optional ? ", optional: true" : ""}` + `${a.as ? `, as: ${JSON.stringify(a.as)}` : ""}` + `${a.foreignKey ? `, foreignKey: ${JSON.stringify(a.foreignKey)}` : ""}` + `${a.through ? `, through: ${JSON.stringify(a.through)}` : ""}` + `${a.targetKey ? `, targetKey: ${JSON.stringify(a.targetKey)}` : ""}}]`);
         } else if (e.name === "primaryKey") {
-          obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}, column: ${JSON.stringify(e.args[0].column)}}]`);
+          obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}` + `${e.args[0].column ? `, column: ${JSON.stringify(e.args[0].column)}` : ""}}]`);
         } else if (e.name === "on") {
           obj.push(`args: [{field: ${JSON.stringify(e.args[0].field)}}]`);
         } else if (e.name === "unique" || e.name === "index") {

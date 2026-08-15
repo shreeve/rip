@@ -2891,6 +2891,254 @@ describe('orm: runtime delivery', () => {
       dir('belongsTo', { target: 'TeamC', as: 'backup', foreignKey: 'backup_id' }),
     ], { targetKey: 'primary_id' })).toBe('ok');
   });
+
+  // A `through` @hasOne is the same read with a different SHAPE — the
+  // owner reaches at most one target. @belongsTo is the one that
+  // cannot: it holds its key in its own row.
+  test('@hasOne through: the same two queries, answering with one target', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/FROM "memberships"/, rows(['user_id', 'badge_id'], [1, 99]));
+      adapter.on(/FROM "badges"/, rows(['id', 'kind'], [99, 'gold']));
+      const U = K4.__schema(model('User', field('name'),
+        dir('hasOne', { target: 'Badge', through: 'Membership' })));
+      K4.__schema(model('Badge', field('kind')));
+      K4.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Badge' })));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      const badge = await u.badge();
+      expect(badge.kind).toBe('gold');
+      expect(adapter.calls.map((c) => c.sql)).toEqual([
+        'SELECT "user_id", "badge_id" FROM "memberships" WHERE "user_id" IN (?)',
+        'SELECT * FROM "badges" WHERE "id" IN (?)',
+      ]);
+      // …and the batched path agrees with the lone accessor
+      adapter.calls.length = 0;
+      adapter.on(/FROM "users"/, rows(['id', 'name'], [1, 'ann'], [2, 'bob']));
+      const us = await U.includes('badge').all();
+      expect((await us[0].badge()).kind).toBe('gold');
+      expect(await us[1].badge()).toBeNull();
+      expect(adapter.calls.length).toBe(3);
+    });
+  });
+
+  test('@belongsTo refuses through: it holds its key in its own row', async () => {
+    await K4.scope(() => {
+      expect(() => K4.__schema(model('P', field('t'),
+        dir('belongsTo', { target: 'U', through: 'J' })))._normalize())
+        .toThrow(/'through' is for @hasMany\/@hasOne/);
+    });
+  });
+
+  // ── writing a through relation ────────────────────────────────────
+  //
+  // The link is a ROW, so linking goes THROUGH the join model —
+  // insertMany validates it and honors its own fields and defaults,
+  // deleteAll honors its @softDelete. Three verbs named off the
+  // accessor, because the accessor is the only per-relation-unique name.
+
+  test('add/remove/set write the join model, and are named off the accessor', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name'),
+        dir('hasMany', { target: 'Team', as: 'labels', through: 'Membership' })));
+      K4.__schema(model('Team', field('label')));
+      K4.__schema(model('Membership', field('role'),
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      // `{as: labels}` names the accessor, so it names the writers too
+      expect(typeof u.addLabels).toBe('function');
+      expect(typeof u.removeLabels).toBe('function');
+      expect(typeof u.setLabels).toBe('function');
+
+      adapter.on(/SELECT "user_id"/, rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/INSERT/, rows(['id', 'user_id', 'team_id', 'role'], [5, 1, 11, 'member']));
+      // 10 is already linked, so only 11 is written — linking twice is
+      // a no-op, never a second row (which would read as a duplicate)
+      expect(await u.addLabels([{ id: 10 }, 11], { role: 'member' })).toBe(1);
+      expect(adapter.calls.map((c) => c.sql)).toEqual([
+        'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?)',
+        'INSERT INTO "memberships" ("role", "user_id", "team_id") VALUES (?, ?, ?) RETURNING *',
+      ]);
+      expect(adapter.calls[1].params).toEqual(['member', 1, 11]);
+      // adding nothing new costs no INSERT at all
+      adapter.calls.length = 0;
+      expect(await u.addLabels(10)).toBe(0);
+      expect(adapter.calls.length).toBe(1);
+
+      adapter.calls.length = 0;
+      adapter.on(/DELETE/, { columns: [], data: [], rowCount: 1 });
+      expect(await u.removeLabels(10)).toBe(1);
+      expect(adapter.calls[0].sql).toBe(
+        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?)');
+      expect(adapter.calls[0].params).toEqual([1, 10]);
+
+      // set = both halves off ONE read of the current set
+      adapter.calls.length = 0;
+      expect(await u.setLabels([11, 12], { role: 'member' })).toEqual({ added: 2, removed: 1 });
+      expect(adapter.calls.map((c) => c.sql)).toEqual([
+        'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?)',
+        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?)',
+        'INSERT INTO "memberships" ("role", "user_id", "team_id") VALUES (?, ?, ?), (?, ?, ?) RETURNING *',
+      ]);
+    });
+  });
+
+  test('a through write refuses what it cannot link, and busts the memo', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name'),
+        dir('hasMany', { target: 'Team', through: 'Membership' })));
+      const T = K4.__schema(model('Team', field('label')));
+      K4.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+
+      // an unsaved target has no identity to link to
+      let err = null;
+      try { await u.addTeams(new (T._getClass())({ label: 'new' })); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/addTeams\(\) received an unsaved Team at \[0\] — it has no id to link to/);
+      // …and neither does an unsaved owner
+      err = null;
+      const fresh = new (U._getClass())({ name: 'new' });
+      try { await fresh.addTeams(1); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/requires a persisted instance/);
+      expect(adapter.calls.length).toBe(0);
+
+      // a write invalidates the accessor's memo — the relation changed
+      adapter.on(/SELECT "user_id"/, rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/FROM "teams"/, rows(['id', 'label'], [10, 'red']));
+      expect((await u.teams()).map((t) => t.label)).toEqual(['red']);
+      adapter.on(/DELETE/, { columns: [], data: [], rowCount: 1 });
+      await u.removeTeams(10);
+      adapter.calls.length = 0;
+      await u.teams();
+      // the memo would have answered with 0 queries; it re-read instead
+      expect(adapter.calls.length).toBeGreaterThan(0);
+    });
+  });
+
+  // ── natural primary keys ──────────────────────────────────────────
+  //
+  // Declaring the pk as a field — alongside an explicit @primaryKey
+  // naming it — is what makes it caller-supplied. It takes BOTH: a
+  // bare `id! integer` stays the collision it always was, because the
+  // default name is exactly where a silent posture flip would go
+  // unnoticed.
+
+  test('a natural key is the caller\'s to supply, and the whole write path follows', async () => {
+    const src = [
+ 'Patient = schema :model',
+ '  @primaryKey mrn',
+ '  mrn!  string, {column: "MRN_NBR"}',
+ '  name! string',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const P = new Function('__schema', `${code}\nreturn Patient;`)(rt4.__schema);
+      const spec = P._tableSpec();
+      // no sequence exists, because nothing generates the key
+      expect(spec.sequence).toBeNull();
+      expect(spec.primaryKey).toBe('MRN_NBR');
+      const sql = P.toSQL({ dropFirst: true });
+      expect(sql).toContain('"MRN_NBR" VARCHAR PRIMARY KEY');
+      expect(sql).not.toContain('nextval');
+      expect(sql).not.toContain('SEQUENCE');
+
+      // the INSERT writes the key like any other column
+      adapter.on(/INSERT/, row(['MRN_NBR', 'name'], ['M1', 'Ann']));
+      const p = await P.create({ mrn: 'M1', name: 'Ann' });
+      expect(adapter.calls[0].sql).toBe(
+        'INSERT INTO "patients" ("MRN_NBR", "name") VALUES (?, ?) RETURNING *');
+      expect(adapter.calls[0].params).toEqual(['M1', 'Ann']);
+      expect(p.mrn).toBe('M1');
+
+      // …and identity still targets the originally-loaded row
+      adapter.calls.length = 0;
+      adapter.on(/UPDATE/, { columns: [], data: [], rowCount: 1 });
+      p.name = 'Bea';
+      await p.save();
+      expect(adapter.calls[0].sql).toBe(
+        'UPDATE "patients" SET "name" = ? WHERE "MRN_NBR" = ?');
+      expect(adapter.calls[0].params).toEqual(['Bea', 'M1']);
+
+      // an absent key is refused HERE, naming the posture — not left
+      // to surface as a NOT NULL violation from the database
+      adapter.calls.length = 0;
+      let err = null;
+      try { await P.create({ name: 'NoKey' }); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(rt4.SchemaError);
+      expect(err.issues.some((i) => i.field === 'mrn' && i.error === 'required')).toBe(true);
+      expect(adapter.calls.length).toBe(0);
+
+      // the JSON-Schema export says string, not the surrogate's integer
+      expect(P.toJSONSchema().properties.mrn).toEqual({ type: 'string' });
+    });
+  });
+
+  test('a foreign key is as wide as the key it points at', async () => {
+    const src = [
+ 'Country = schema :model',
+ '  @primaryKey iso',
+ '  iso!  string',
+ '  name! string',
+ '',
+ 'City = schema :model',
+ '  name! string',
+ '  @belongsTo Country',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(() => {
+      K4.setAdapter(recordingAdapter());
+      const [, C] = new Function('__schema', `${code}\nreturn [Country, City];`)(rt4.__schema);
+      const sql = C.toSQL();
+      // the surrogate's INTEGER would be wrong: this key is a string
+      expect(sql).toContain('"country_id" VARCHAR NOT NULL REFERENCES "countries"("iso")');
+      expect(C.toJSONSchema().properties.countryId).toEqual({ type: 'string' });
+    });
+  });
+
+  test('it takes BOTH declarations — a bare pk field is still a collision', async () => {
+    // no @primaryKey: `id` is the runtime's, and saying otherwise is
+    // an error that names the escape
+    expect(() => compile('U = schema :model\n  id! integer\n  n! string'))
+      .toThrow(/field 'id' collides with the runtime-managed primary key.*write '@primaryKey id' to make it a caller-supplied natural key/s);
+    // …and the escape works
+    expect(() => compile('U = schema :model\n  @primaryKey id\n  id! uuid\n  n! string')).not.toThrow();
+    // a caller-supplied key has nothing generating it, so it is
+    // required, scalar, and has no sequence to seed
+    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn? string'))
+      .toThrow(/primary key 'mrn' is declared optional/);
+    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn! string\n  @idStart 5'))
+      .toThrow(/there is no sequence to seed/);
+    // and the column is stated once, on the field
+    expect(() => compile('U = schema :model\n  @primaryKey mrn, {column: "A"}\n  mrn! string, {column: "B"}'))
+      .toThrow(/state the column once, on the field/);
+  });
+
+  test('the runtime holds the same natural-key line on a hand-built descriptor', async () => {
+    await K4.scope(() => {
+      const said = (entries) => {
+        try {
+          K4.__schema(model('N' + (said.n = (said.n || 0) + 1), ...entries))._normalize();
+          return 'no error';
+        } catch (e) { return e.message; }
+      };
+      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn', 'string', { optional: true })]))
+        .toMatch(/primary key 'mrn' is declared optional/);
+      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), dir('idStart', { value: 5 })]))
+        .toMatch(/there is no sequence to seed/);
+      expect(said([field('id', 'integer')]))
+        .toMatch(/id collides with the runtime-managed primary key/);
+      // the legal shape stays legal
+      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
+    });
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
