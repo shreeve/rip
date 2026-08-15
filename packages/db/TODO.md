@@ -27,14 +27,6 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 `LIKE` scans, one `nextval`, and two daily sweeps — zero `JOIN`, zero
 `GROUP BY`, zero aggregate.
 
-## Do now
-
-- [ ] **Commit medlabs' `api/schema.sql` and wire `--check` into its
-      CI.** The dump is written and current (162 lines, all ten
-      models); the evidence loop closes when it is checked in and
-      diffed on every change. Until then the file answers naming
-      questions locally but drift does not fail a build.
-
 ## Decisions parked — each needs an owner call before code
 
 - [ ] **Full composite-UNIQUE modeling in the differ.** The plan now
@@ -46,6 +38,12 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
       Revive if hand-written composite-constraint tables become real.
 
 ## Landed
+
+- **medlabs' schema dump is checked in and diffed on every run.**
+  `api/schema.sql` is committed, and `test/api/schema.test.rip` runs
+  `rip schema dump --check` as the first case of the suite — medlabs
+  has no hosted CI, so its test suite is the build; a hosted CI, when
+  it arrives, inherits the check by running the suite.
 
 - **A table Rip did not name is now addressable.** Six mapping slots,
   all obeying ONE rule — *quoting picks the namespace*: a bare
