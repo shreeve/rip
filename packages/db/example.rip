@@ -10,7 +10,7 @@
 #   export RIP_DB_TOKEN=rip-token   # match harbor_serve
 #   rip example.rip
 
-import { connect, ensureRunning, query, findOne, Model } from 'rip/db'
+import { connect, ensureRunning, query, findOne } from 'rip/db'
 
 ensureRunning!
 connect!
@@ -20,7 +20,3 @@ p row
 
 result = query! 'SELECT 40 + 2 AS answer'
 p result.rows
-
-# Lightweight table helper (pk defaults to "id")
-# User = Model 'users'
-# p User.find! 1

@@ -1182,8 +1182,8 @@ function __schemaAffectedRows(res) {
 // no `DELETE ... LIMIT`, and the parser refuses one. These clauses are
 // assembled for a SELECT and were dropped on the way here, so a caller
 // who scoped a bulk mutation to one row mutated every matching row
-// instead. Refuse rather than widen. (rip/db's builder makes the same
-// promise, in the same words.)
+// instead. Refuse rather than widen: a scope the statement cannot
+// honor is an error, never a silently wider write.
 function __schemaAssertWhereOnly(rel, method) {
   const ignored = [];
   if (rel._limit != null) ignored.push('limit');

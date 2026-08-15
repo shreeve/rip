@@ -1,18 +1,15 @@
 #!/usr/bin/env rip
 # ==============================================================================
-# rip/db — DuckDB over duckdb-harbor: adapter, client, boot probe,
+# rip/db — DuckDB over duckdb-harbor: client tier, boot probe,
 # MCP stdio server, and the rip-db operational CLI in one file.
 #
-# Library: connect (global default), module-level query/find*/Model,
+# Library: connect (global default), module-level query/find*/transaction,
 # harborAdapter, createClient, assertReachable, …
 # CLI (import.meta.main): rip-db dump | load | checkpoint | mcp
 # ==============================================================================
 
 { readFileSync } = import!('node:fs')
 VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
-
-envToken = ->
-  if typeof process isnt 'undefined' then process.env?.RIP_DB_TOKEN else null
 
 # Soft doorbell to the schema ORM — never hard-import the runtime so
 # this package can load outside the monorepo. `connect` publishes the
@@ -43,6 +40,7 @@ wireSchemaAdapter = (adapter) ->
 import {
   harborAdapter
   resolveUrl
+  envToken
   DbError
   ConnectionError
   QueryError
@@ -52,7 +50,9 @@ import {
 
 # `encodeParams` is deliberately not among them: it is harbor's wire
 # encoder, internal to the transport, and not part of this package's
-# surface. ROOT_EXPORTS in test.rip pins that.
+# surface. ROOT_EXPORTS in test.rip pins that. `envToken` is imported
+# for the MCP entry's missing-credential warning and stays private for
+# the same reason.
 export {
   harborAdapter
   resolveUrl
@@ -262,10 +262,10 @@ export def createClient(adapter)
 
   makeSurface(run, transaction)
 
-# ==[ Module default — connect / query / Model ]==============================
+# ==[ Module default — connect / query ]======================================
 #
 # One process-wide default adapter+client. `connect(...)` installs (and
-# rewires) it; module-level `query` / `findOne` / `findAll` / `Model` /
+# rewires) it; module-level `query` / `findOne` / `findAll` /
 # `transaction` read it on every call. Omit `connect` and the first
 # module-level call lazy-installs from RIP_DB_URL / RIP_DB_TOKEN. Power
 # users still build `harborAdapter` + `createClient` by hand; schema
@@ -289,12 +289,10 @@ defaultPair = ->
 # Pass `adapter` to skip harbor (tests / custom wires). Returns the client;
 # `.adapter` is the same handle the schema ORM uses.
 #
-#   import { connect, query, findOne, Model, ensureRunning } from 'rip/db'
+#   import { connect, query, findOne, ensureRunning } from 'rip/db'
 #   ensureRunning!
 #   connect!                              # or connect! 'http://…'
 #   findOne! 'SELECT * FROM users WHERE id = ?', [1]
-#   User = Model 'users'
-#   User.where(active: true).all!
 export def connect(urlOrOpts = null, opts = {})
   o = if urlOrOpts? and typeof urlOrOpts is 'object' and not Array.isArray(urlOrOpts)
     urlOrOpts
@@ -339,326 +337,6 @@ export ident = (name) ->
 # Adapter envelope `{ columns, data }` → row objects.
 export def materializeAll(result)
   (materialize result).rows
-
-badRequest = (message) ->
-  err = QueryError.new "db: #{message}"
-  err.code = 'BAD_REQUEST'
-  throw err
-
-_conflictClause = (conflict, keys) ->
-  return '' unless conflict
-  updateCols = keys.filter (k) -> k isnt conflict
-  return " ON CONFLICT (#{ident conflict}) DO NOTHING" if updateCols.length is 0
-  sets = updateCols.map((k) -> "#{ident k} = EXCLUDED.#{ident k}").join(', ')
-  " ON CONFLICT (#{ident conflict}) DO UPDATE SET #{sets}"
-
-# LIMIT and OFFSET are the only caller values in this builder that reach
-# SQL as text. Column names go through `ident`, comparison values bind as
-# `?`, and the free-form clauses (`select`, `order`, `group`, `having`)
-# are SQL by contract — a builder that quoted them could not express
-# `ORDER BY created_at DESC`. A row count has no such excuse: there is
-# exactly one legitimate shape, so anything else is refused rather than
-# interpolated.
-_rowCount = (what, n) ->
-  badRequest "#{what} requires a non-negative integer" unless Number.isSafeInteger(n) and n >= 0
-  n
-
-# `undefined` in a condition is a caller bug — an unset variable, nearly
-# every time. Neither silent reading is defensible: dropping the key
-# widens the query to every row, and binding it serializes to `null` and
-# matches none, so the same typo either returns the table or returns
-# nothing. Both are wrong answers rather than errors. `null` is a real
-# condition and still means IS NULL / IS NOT NULL.
-_assertDefined = (method, key, val) ->
-  return unless val is undefined
-  badRequest "#{method} condition for '#{key}' is undefined — pass null to match NULL, or omit the key"
-
-# DuckDB's UPDATE and DELETE take a WHERE and nothing else — there is no
-# `DELETE ... LIMIT`, and the parser refuses one. The builder assembles
-# those clauses for a SELECT, so `update`/`destroy` used to drop them on
-# the floor: `where(status: 'y').limit(1).destroy!` deleted every row
-# matching the where, not one of them. Silently touching more rows than
-# asked is the one failure a data-mutating call must never have, so a
-# scope this statement cannot honor is refused rather than ignored.
-_assertWhereOnly = (method, b) ->
-  ignored = []
-  ignored.push 'limit'  if b._limit?
-  ignored.push 'offset' if b._offset?
-  ignored.push 'order'  if b._order?
-  ignored.push 'group'  if b._group?
-  ignored.push 'having' if b._having?
-  return if ignored.length is 0
-  badRequest "#{method} cannot honor #{ignored.join(', ')} — DuckDB's UPDATE and DELETE accept only a WHERE. Narrow the condition, or select the rows first and #{method} them by primary key"
-
-# Immutable SQL builder. Wire-agnostic — hands off to module-level
-# findAll / findOne / query / value (the process default).
-class QueryBuilder
-  constructor: (@table, @database = null) ->
-    @_tableName = if @database then "#{ident @database}.#{ident @table}" else ident(@table)
-    @_wheres = []
-    @_order = null
-    @_group = null
-    @_having = null
-    @_limit = null
-    @_offset = null
-    @_select = '*'
-
-  select: (cols) ->
-    b = @_clone()
-    b._select = if Array.isArray(cols) then cols.join(', ') else cols
-    b
-
-  where: (conditions, params = []) ->
-    b = @_clone()
-    if typeof conditions is 'string'
-      b._wheres.push { clause: conditions, join: 'AND', params: [...params] }
-    else if typeof conditions is 'object'
-      for own key, val of conditions
-        _assertDefined 'where', key, val
-        if val is null
-          b._wheres.push { clause: "#{ident key} IS NULL", join: 'AND', params: [] }
-        else
-          b._wheres.push { clause: "#{ident key} = ?", join: 'AND', params: [val] }
-    b
-
-  or: (conditions, params = []) ->
-    b = @_clone()
-    if typeof conditions is 'string'
-      b._wheres.push { clause: conditions, join: 'OR', params: [...params] }
-    else if typeof conditions is 'object'
-      parts = []
-      vals = []
-      for own key, val of conditions
-        _assertDefined 'or', key, val
-        if val is null
-          parts.push "#{ident key} IS NULL"
-        else
-          parts.push "#{ident key} = ?"
-          vals.push val
-      b._wheres.push { clause: "(#{parts.join(' AND ')})", join: 'OR', params: vals }
-    b
-
-  not: (conditions, params = []) ->
-    b = @_clone()
-    if typeof conditions is 'string'
-      b._wheres.push { clause: "NOT (#{conditions})", join: 'AND', params: [...params] }
-    else if typeof conditions is 'object'
-      for own key, val of conditions
-        _assertDefined 'not', key, val
-        if val is null
-          b._wheres.push { clause: "#{ident key} IS NOT NULL", join: 'AND', params: [] }
-        else
-          b._wheres.push { clause: "#{ident key} != ?", join: 'AND', params: [val] }
-    b
-
-  order: (expr) ->
-    b = @_clone()
-    b._order = expr
-    b
-
-  group: (expr) ->
-    b = @_clone()
-    b._group = expr
-    b
-
-  having: (clause, params = []) ->
-    b = @_clone()
-    b._having = { clause, params: [...params] }
-    b
-
-  limit: (n) ->
-    b = @_clone()
-    b._limit = _rowCount 'limit', n
-    b
-
-  offset: (n) ->
-    b = @_clone()
-    b._offset = _rowCount 'offset', n
-    b
-
-  _buildWhere: ->
-    return '' if @_wheres.length is 0
-    parts = []
-    for w, i in @_wheres
-      if i is 0
-        parts.push w.clause
-      else
-        parts.push "#{w.join} #{w.clause}"
-    " WHERE #{parts.join(' ')}"
-
-  # Binds follow the SQL, not the chain. Each clause carries its own
-  # params, so `having(...).where(...)` and `where(...).having(...)`
-  # emit the same statement with the same values -- writing the chain
-  # in an unusual order used to swap the binds and answer a different
-  # question without erroring.
-  _whereParams: ->
-    @_wheres.flatMap (w) -> w.params
-
-  _selectParams: ->
-    params = @_whereParams()
-    params = params.concat @_having.params if @_having
-    params
-
-  _toSQL: ->
-    sql = "SELECT #{@_select} FROM #{@_tableName}"
-    sql += @_buildWhere()
-    sql += " GROUP BY #{@_group}" if @_group
-    sql += " HAVING #{@_having.clause}" if @_having
-    sql += " ORDER BY #{@_order}" if @_order
-    sql += " LIMIT #{@_limit}" if @_limit?
-    sql += " OFFSET #{@_offset}" if @_offset?
-    sql
-
-  all: ->
-    findAll! @_toSQL(), @_selectParams()
-
-  first: ->
-    b = @_clone()
-    b._limit = 1
-    findOne! b._toSQL(), b._selectParams()
-
-  # Grouping (or a bare HAVING, which groups the whole table) makes the
-  # count a count of groups, so it has to wrap. Only the plain case can
-  # count rows in place -- and it must not carry HAVING's params to a
-  # statement that has no HAVING.
-  count: ->
-    if @_group or @_having
-      inner = "SELECT 1 FROM #{@_tableName}#{@_buildWhere()}"
-      inner += " GROUP BY #{@_group}" if @_group
-      inner += " HAVING #{@_having.clause}" if @_having
-      sql = "SELECT COUNT(*) AS n FROM (#{inner}) AS _t"
-      params = @_selectParams()
-    else
-      sql = "SELECT COUNT(*) AS n FROM #{@_tableName}"
-      sql += @_buildWhere()
-      params = @_whereParams()
-    (query! sql, params).rows[0]?.n ?? null
-
-  update: (data) ->
-    _assertWhereOnly 'update', @
-    keys = (k for k, v of data when v isnt undefined)
-    badRequest 'update requires at least one column to set' if keys.length is 0
-    sets = keys.map((k) -> "#{ident k} = ?").join(', ')
-    vals = keys.map (k) -> data[k]
-    sql = "UPDATE #{@_tableName} SET #{sets}#{@_buildWhere()} RETURNING *"
-    findAll! sql, [...vals, ...@_whereParams()]
-
-  destroy: ->
-    _assertWhereOnly 'destroy', @
-    sql = "DELETE FROM #{@_tableName}#{@_buildWhere()} RETURNING *"
-    findAll! sql, @_whereParams()
-
-  _clone: ->
-    b = QueryBuilder.new(@table, @database)
-    b._wheres = @_wheres.map (w) -> { ...w, params: [...w.params] }
-    b._order = @_order
-    b._group = @_group
-    b._having = if @_having then { clause: @_having.clause, params: [...@_having.params] } else null
-    b._limit = @_limit
-    b._offset = @_offset
-    b._select = @_select
-    b
-
-# ActiveRecord-style table facade over the process default.
-#
-#   User = Model 'users'                         # pk defaults to 'id'
-#   User = Model 'users', pk: 'user_id'
-#   User = Model 'users', 'analytics'            # database.table
-#   User = Model 'users', database: 'analytics', pk: 'user_id'
-#   User.find! 42
-#   User.where(active: true).order('name').all!
-#
-# Distinct from schema `:model` ORM (typed models, scopes, relations) —
-# this is the lightweight SQL builder for apps that want table helpers
-# without declaring a schema.
-export Model = (table, databaseOrOpts = null) ->
-  database = null
-  pk = 'id'
-  if typeof databaseOrOpts is 'string'
-    database = databaseOrOpts
-  else if databaseOrOpts? and typeof databaseOrOpts is 'object'
-    database = databaseOrOpts.database ?? null
-    pk = databaseOrOpts.pk ?? 'id'
-  badRequest 'Model pk must be a non-empty string' unless typeof pk is 'string' and pk.length > 0
-  tableName = if database then "#{ident database}.#{ident table}" else ident(table)
-  pkCol = ident pk
-  _qb = -> QueryBuilder.new(table, database)
-
-  find: (id) ->
-    findOne! "SELECT * FROM #{tableName} WHERE #{pkCol} = ?", [id]
-
-  all: (limit = null) ->
-    sql = "SELECT * FROM #{tableName}"
-    sql += " LIMIT #{_rowCount 'limit', limit}" if limit?
-    findAll! sql
-
-  where: (conditions, params = []) -> _qb().where(conditions, params)
-  or: (conditions, params = []) -> _qb().or(conditions, params)
-  not: (conditions, params = []) -> _qb().not(conditions, params)
-  select: (cols) -> _qb().select(cols)
-  order: (expr) -> _qb().order(expr)
-  group: (expr) -> _qb().group(expr)
-  limit: (n) -> _qb().limit(n)
-  offset: (n) -> _qb().offset(n)
-
-  count: ->
-    (query! "SELECT COUNT(*) AS n FROM #{tableName}").rows[0]?.n ?? null
-
-  query: (sql, params = []) ->
-    findAll! sql, params
-
-  insert: (data) ->
-    if Array.isArray(data)
-      return [] if data.length is 0
-      keys = (k for k, v of data[0] when v isnt undefined)
-      badRequest 'insert requires at least one column' if keys.length is 0
-      cols = keys.map(ident).join(', ')
-      tuple = "(#{keys.map(-> '?').join(', ')})"
-      vals = []
-      data.forEach (row) -> vals.push(row[k]) for k in keys
-      findAll! "INSERT INTO #{tableName} (#{cols}) VALUES #{Array(data.length).fill(tuple).join(', ')} RETURNING *", vals
-    else
-      keys = (k for k, v of data when v isnt undefined)
-      badRequest 'insert requires at least one column' if keys.length is 0
-      cols = keys.map(ident).join(', ')
-      refs = keys.map(-> '?').join(', ')
-      vals = keys.map (k) -> data[k]
-      findOne! "INSERT INTO #{tableName} (#{cols}) VALUES (#{refs}) RETURNING *", vals
-
-  update: (id, data) ->
-    keys = (k for k, v of data when v isnt undefined)
-    badRequest 'update requires at least one column to set' if keys.length is 0
-    sets = keys.map((k) -> "#{ident k} = ?").join(', ')
-    vals = keys.map (k) -> data[k]
-    findOne! "UPDATE #{tableName} SET #{sets} WHERE #{pkCol} = ? RETURNING *", [...vals, id]
-
-  upsert: (data, opts = {}) ->
-    conflict = opts.on or opts.conflict
-    if Array.isArray(data)
-      return [] if data.length is 0
-      keys = (k for k, v of data[0] when v isnt undefined)
-      badRequest 'upsert requires at least one column' if keys.length is 0
-      cols = keys.map(ident).join(', ')
-      tuple = "(#{keys.map(-> '?').join(', ')})"
-      vals = []
-      data.forEach (row) -> vals.push(row[k]) for k in keys
-      sql = "INSERT INTO #{tableName} (#{cols}) VALUES #{Array(data.length).fill(tuple).join(', ')}"
-      sql += _conflictClause(conflict, keys)
-      sql += " RETURNING *"
-      findAll! sql, vals
-    else
-      keys = (k for k, v of data when v isnt undefined)
-      badRequest 'upsert requires at least one column' if keys.length is 0
-      cols = keys.map(ident).join(', ')
-      refs = keys.map(-> '?').join(', ')
-      vals = keys.map (k) -> data[k]
-      sql = "INSERT INTO #{tableName} (#{cols}) VALUES (#{refs})"
-      sql += _conflictClause(conflict, keys)
-      sql += " RETURNING *"
-      findOne! sql, vals
-
-  destroy: (id) ->
-    findOne! "DELETE FROM #{tableName} WHERE #{pkCol} = ? RETURNING *", [id]
 
 # ==[ Boot probe ]============================================================
 
@@ -919,13 +597,10 @@ TOOLS = [
   }
 ]
 
-# columns[i].name → row[i], one object per row.
+# columns[i].name → row[i], one object per row — the client's one
+# materializer, applied to a bare envelope.
 rowsToObjects = (columns, data) ->
-  names = (columns ?? []).map (c) -> c.name
-  for row in (data ?? [])
-    obj = {}
-    obj[names[i]] = value for value, i in row
-    obj
+  (materialize { columns, data }).rows
 
 # ── the protocol core ─────────────────────────────────────────────────
 
