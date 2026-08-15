@@ -425,6 +425,17 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  name! string\n  @table Alpha\n  @table Beta', /duplicate '@table'/);
   });
 
+  test('duplicate @timestamps / @softDelete reject as once-directives, not as column two-owners', () => {
+    // The argument-less pair has no second value to last-win; the
+    // duplicate is still refused — it declares itself once — and the
+    // runtime holds the same verdict on hand-built descriptors
+    // (pinned in runtime-orm.test.js).
+    lexFails('U = schema :model\n  name! string\n  @timestamps\n  @timestamps',
+      /duplicate '@timestamps' — declared twice; a :model declares it once/);
+    lexFails('U = schema :model\n  name! string\n  @softDelete\n  @softDelete',
+      /duplicate '@softDelete' — declared twice; a :model declares it once/);
+  });
+
   // Quoting picks the NAMESPACE, and the two forms are not
   // interchangeable spellings of one thing:
   //   @table UserProfile     — a LOGICAL name, snake_cased for you
@@ -463,9 +474,10 @@ describe('schema DSL: loud rejections', () => {
       /consecutive capitals convert surprisingly \('MDMUser' → 'mdmuser'\).*'@table "MDMUser"'/s);
   });
 
-  // Both relation defaults derive from a MODEL name, so two relations to
-  // one model share an accessor and a column. `as:` and `foreignKey:`
-  // are what make `author` and `reviewer` to User expressible at all.
+  // A belongsTo's FK column derives from its ACCESSOR (`as:` if
+  // present, else the target), so `author` and `reviewer` to User each
+  // claim their own column with no explicit keys; `foreignKey:` names
+  // the column directly and always wins.
   test('@belongsTo/@hasMany accept {as:, foreignKey:} and refuse what would mis-map', () => {
     const ok = [
       'P = schema :model',
@@ -504,6 +516,39 @@ describe('schema DSL: loud rejections', () => {
     } catch (e) {
       expect(e.start).toBe('U = schema :model\n  name! string\n  @idStart 100\n  @'.length);
     }
+  });
+
+  // The compiler claims the same column the runtime derives — twin
+  // agreement on the accessor-derived FK (pinned against the runtime's
+  // half in runtime-orm.test.js).
+  test('the belongsTo column claim follows the accessor: {as:} alone derives its own column', () => {
+    // two same-target relations coexist with no explicit keys
+    expect(() => tokenize('P = schema :model\n  t! string\n  @belongsTo User, {as: author}\n  @belongsTo User, {as: reviewer}')).not.toThrow();
+    // the claimed column IS the accessor-derived one…
+    lexFails('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author}',
+      /field 'authorId' and the @belongsTo User \(as author\) relation both own column 'author_id'/);
+    // …so the target-derived column stays free for a field
+    expect(() => tokenize('P = schema :model\n  userId! integer\n  @belongsTo User, {as: author}')).not.toThrow();
+    // explicit foreignKey still wins over the accessor derivation
+    lexFails('P = schema :model\n  bossId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}',
+      /field 'bossId' and the @belongsTo User \(as author\) relation both own column 'boss_id'/);
+    expect(() => tokenize('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}')).not.toThrow();
+  });
+
+  test('projection folding projects the FK the runtime would: accessor-derived, explicit foreignKey camelized', () => {
+    const src = [
+      'Post = schema :model',
+      '  title! string',
+      '  @belongsTo User, {as: author}',
+      '  @belongsTo Site, {foreignKey: "host_id"}',
+      'V = Post.pick("authorId", "hostId")',
+    ].join('\n');
+    const { code } = fullCompile(src, { foldProjections: true, runtimeDelivery: 'none' });
+    // Folded, not bailed: V is a self-contained shape whose fields are
+    // exactly the two FK properties projectableFields would expose.
+    expect(code).toContain('V = __schema({kind: "shape", name: "V", entries: [' +
+      '{tag: "field", name: "authorId", modifiers: ["!"], typeName: "integer", array: false}, ' +
+      '{tag: "field", name: "hostId", modifiers: ["!"], typeName: "integer", array: false}]});');
   });
 
   test("a :model's `id` field collides with the runtime-managed primary key", () => {

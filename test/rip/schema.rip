@@ -3253,20 +3253,25 @@ test "@timestamps INSERT records createdAt and updatedAt in savedChanges from RE
   User = schema :model
     name! string
     @timestamps
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.create! {name: "Alice"}
+  # Declared temporal columns coerce to real Dates at absorption, so
+  # the diff records instants — asserted through their ISO form.
   [
-    u.savedChanges.get("createdAt")
-    u.savedChanges.get("updatedAt")
+    u.savedChanges.get("createdAt")[0]
+    u.savedChanges.get("createdAt")[1].toISOString()
+    u.savedChanges.get("updatedAt")[0]
+    u.savedChanges.get("updatedAt")[1].toISOString()
   ]
-''', [[null, "T1"], [null, "T2"]]
+''', [null, "2026-01-01T00:00:00.000Z", null, "2026-01-02T00:00:00.000Z"]
 
 test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
   User = schema :model
     name! string
     @timestamps
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.find! 1
+  origTs = u.updatedAt
   adapter.calls = []
   u.name = "Bob"
   u.save!
@@ -3284,18 +3289,18 @@ test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
   [
     sql.includes("\\"updated_at\\" = ?")
     isDate
-    tsVal isnt "T2"            # actually changed
+    tsVal isnt origTs          # actually changed
     u.updatedAt is tsVal       # mirrored onto the instance
-    u.savedChanges.get("updatedAt")?[0]
+    u.savedChanges.get("updatedAt")?[0] is origTs
     u.savedChanges.get("updatedAt")?[1] is tsVal
   ]
-''', [true, true, true, true, "T2", true]
+''', [true, true, true, true, true, true]
 
 test "@timestamps UPDATE on a no-op save does NOT bump updated_at (no SQL)", modelHeader + '''
   User = schema :model
     name! string
     @timestamps
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.find! 1
   origTs = u.updatedAt
   adapter.calls = []
@@ -3314,7 +3319,7 @@ test "@timestamps UPDATE bumps updated_at when only an FK changes", modelHeader 
   Order = schema :model
     @belongsTo User
     @timestamps
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "user_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[10001, 7, "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "user_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[10001, 7, "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   o = Order.find! 10001
   adapter.calls = []
   o.userId = 9
@@ -3545,11 +3550,11 @@ test ":model toJSON includes @timestamps columns", modelHeader + '''
   User = schema :model
     name! string
     @timestamps
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "a", "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "a", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.create! {name: "a"}
   json = u.toJSON()
-  [json.id, json.name, json.createdAt, json.updatedAt]
-''', [1, "a", "T1", "T2"]
+  [json.id, json.name, json.createdAt.toISOString(), json.updatedAt.toISOString()]
+''', [1, "a", "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]
 
 test ":model toJSON includes @belongsTo FK columns", modelHeader + '''
   Org = schema :model
@@ -3615,11 +3620,12 @@ test ":model toJSON survives JSON.stringify round-trip with id preserved", model
     @belongsTo Org
   Org = schema :model
     name! string
-  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[11, "Alice", 3, "T1", "T2"]], rows: 1}
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[11, "Alice", 3, "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.create! {name: "Alice", orgId: 3}
   obj = JSON.parse(JSON.stringify(u))
+  # temporal columns are Dates on the instance, so stringify emits ISO
   [obj.id, obj.name, obj.orgId, obj.createdAt, obj.updatedAt]
-''', [11, "Alice", 3, "T1", "T2"]
+''', [11, "Alice", 3, "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]
 
 # -- relations resolve lazily, even cross-module style (same registry) --
 

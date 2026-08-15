@@ -266,7 +266,10 @@ describe('orm: paired reference — CRUD and the query builder', () => {
       'ORDER BY created_at DESC, name',
     ]);
     expect(r.value[0]).toMatch(/direction for 'name' must be one of/);
-    expect(r.value[1]).toMatch(/unknown order column 'nope'/);
+    // The rejection speaks the caller's namespace: the key as written,
+    // and a property-name inventory (columns beside them where the
+    // spellings differ) — never a snake_case derivation nobody wrote.
+    expect(r.value[1]).toMatch(/unknown order\(\) key 'nope' — known: .*createdAt \(column created_at\)/);
     expect(r.value[2]).toMatch(/accepts a trusted SQL string, a \{field: direction\} object/);
   });
 
@@ -623,10 +626,10 @@ describe('orm: paired reference — relations and eager loading', () => {
     expect(r.value.coupon).toBe(null);
   });
 
-  // Both defaults derive from a MODEL name, so two relations to one
-  // model share an accessor AND a column — the reason `author` and
-  // `reviewer` to User were inexpressible. `as:` renames the accessor,
-  // `foreignKey:` the column; supplying both makes them independent.
+  // A belongsTo's FK column derives from its ACCESSOR (`as:` if
+  // present, else the target), so `author` and `reviewer` to User
+  // each own their own column with no explicit keys. An explicit
+  // `foreignKey:` names the column directly and always wins.
   test('as: / foreignKey: let two relations reach one model', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/FROM "users" WHERE "id" = \?/, (sql, p) =>
@@ -674,6 +677,75 @@ describe('orm: paired reference — relations and eager loading', () => {
     });
   });
 
+  test('{as:} alone derives the FK from the ACCESSOR — two relations to one target, no explicit keys', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users" WHERE "id" = \?/, (sql, p) =>
+        rows(['id', 'name'], [p[0], p[0] === 7 ? 'Ann' : 'Bob']));
+      adapter.on(/FROM "posts"/, rows(['id', 'title', 'author_id', 'reviewer_id'], [1, 'T', 7, 9]));
+      k.__schema(model('User', field('name')));
+      const Post = k.__schema(model('Post',
+        field('title'),
+        dir('belongsTo', { target: 'User', as: 'author' }),
+        dir('belongsTo', { target: 'User', as: 'reviewer' }),
+      ));
+      const n = Post._normalize();
+      const post = await Post.first();
+      const author = await post.author();
+      const reviewer = await post.reviewer();
+      return {
+        fks: [...n.relations.values()].map((x) => x.foreignKey),
+        author: author && author.name,
+        reviewer: reviewer && reviewer.name,
+        ids: [post.authorId, post.reviewerId],
+        sql: Post.toSQL(),
+      };
+    });
+    expect(r.value.fks).toEqual(['author_id', 'reviewer_id']);
+    expect(r.value.author).toBe('Ann');
+    expect(r.value.reviewer).toBe('Bob');
+    expect(r.value.ids).toEqual([7, 9]);
+    expect(r.value.sql).toContain('"author_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"reviewer_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).not.toContain('"user_id"');
+  });
+
+  test('the accessor-derived FK copies a natural target key: type and REFERENCES in DDL', async () => {
+    await paired(async (k) => {
+      k.__schema(model('Country',
+        field('code'),
+        dir('primaryKey', { name: 'code' })));
+      const City = k.__schema(model('City', field('name'),
+        dir('belongsTo', { target: 'Country', as: 'home' })));
+      const sql = City.toSQL();
+      expect(sql).toContain('"home_id" VARCHAR NOT NULL REFERENCES "countries"("code")');
+      return null;
+    });
+  });
+
+  test('explicit {foreignKey:} still wins over the accessor derivation', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name')));
+      const Post = k.__schema(model('Post', field('title'),
+        dir('belongsTo', { target: 'User', as: 'author', foreignKey: 'boss_id' })));
+      return { fk: Post._normalize().relations.get('author').foreignKey, sql: Post.toSQL() };
+    });
+    expect(r.value.fk).toBe('boss_id');
+    expect(r.value.sql).toContain('"boss_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).not.toContain('"author_id"');
+  });
+
+  test('hasMany/hasOne keep the OWNER-derived key under as: — the accessor never named their column', async () => {
+    const r = await paired(async (k) => {
+      const User = k.__schema(model('User', field('name'),
+        dir('hasMany', { target: 'Post', as: 'authored' }),
+        dir('hasOne', { target: 'Profile', as: 'bio' })));
+      k.__schema(model('Post', field('title'), dir('belongsTo', { target: 'User' })));
+      k.__schema(model('Profile', field('body'), dir('belongsTo', { target: 'User' })));
+      return [...User._normalize().relations.values()].map((x) => [x.kind, x.accessor, x.foreignKey]);
+    });
+    expect(r.value).toEqual([['hasMany', 'authored', 'user_id'], ['hasOne', 'bio', 'user_id']]);
+  });
+
   test('hasMany takes as: / foreignKey: too, and the inverse side matches', async () => {
     const r = await paired(async (k) => {
       const User = k.__schema(model('User', field('name'),
@@ -697,10 +769,13 @@ describe('orm: paired reference — relations and eager loading', () => {
         try { k.__schema(model('Post' + (++n), ...entries))._normalize(); said.push('NOT CAUGHT'); }
         catch (e) { said.push(e.message); }
       };
-      // two relations to one model, overrides missing → one column, twice
+      // two relations to one model, no overrides at all → one accessor, twice
       refuse([field('title'),
-        dir('belongsTo', { target: 'User', as: 'author' }),
-        dir('belongsTo', { target: 'User', as: 'reviewer' })]);
+        dir('belongsTo', { target: 'User' }),
+        dir('belongsTo', { target: 'User' })]);
+      // the as:-derived column collides like any owned column
+      refuse([field('ownerId', 'integer'),
+        dir('belongsTo', { target: 'User', as: 'owner' })]);
       // an accessor that shadows a declared field
       refuse([field('author'),
         dir('belongsTo', { target: 'User', as: 'author', foreignKey: 'a_id' })]);
@@ -708,10 +783,11 @@ describe('orm: paired reference — relations and eager loading', () => {
       refuse([field('title'), dir('belongsTo', { target: 'User', foreignKey: 'authorID' })]);
       return said;
     });
-    expect(r.value[0]).toMatch(/both own column 'user_id'/);
-    expect(r.value[1]).toMatch(/author collides with field/);
-    expect(r.value[2]).toMatch(/'as' is a property name — canonical camelCase/);
-    expect(r.value[3]).toMatch(/'foreignKey' is a column name Rip generates/);
+    expect(r.value[0]).toMatch(/user collides with relation/);
+    expect(r.value[1]).toMatch(/both own column 'owner_id'/);
+    expect(r.value[2]).toMatch(/author collides with field/);
+    expect(r.value[3]).toMatch(/'as' is a property name — canonical camelCase/);
+    expect(r.value[4]).toMatch(/'foreignKey' is a column name Rip generates/);
   });
 
 
@@ -1940,6 +2016,101 @@ describe('orm: paired reference — DDL', () => {
       return {};
     });
     expect(r.threw).toEqual({ error: true });
+  });
+
+  // A `{through: J}` declaration anywhere asserts J is a LINK table,
+  // so J's DDL derives a unique index over the resolved (owner,
+  // target) pair — the database arbitration addX's violation-handling
+  // already leans on. Sorted column order; derived only when the pair
+  // resolves; never doubled beside a declared @unique on the pair.
+  test('a through-join model derives the unique link-pair index in its DDL', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      k.__schema(model('Team', field('label')));
+      const M = k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      return M.toSQL();
+    });
+    expect(r.value).toContain(
+      'CREATE UNIQUE INDEX "idx_memberships_team_id_user_id" ON "memberships" ("team_id", "user_id");');
+  });
+
+  test('the derived link-pair index is registration-order independent', async () => {
+    const userFirst = await paired(async (k) => {
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      k.__schema(model('Team', field('label')));
+      return k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' }))).toSQL();
+    });
+    const joinFirst = await paired(async (k) => {
+      const M = k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      k.__schema(model('Team', field('label')));
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      return M.toSQL();
+    });
+    expect(userFirst.value).toBe(joinFirst.value);
+    expect(userFirst.value).toContain('CREATE UNIQUE INDEX "idx_memberships_team_id_user_id"');
+  });
+
+  test('a join model used as through from BOTH ends derives ONE pair index', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      k.__schema(model('Team', field('label'), dir('hasMany', { target: 'User', through: 'Membership' })));
+      return k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' }))).toSQL();
+    });
+    expect((r.value.match(/CREATE UNIQUE INDEX/g) || []).length).toBe(1);
+    expect(r.value).toContain('"idx_memberships_team_id_user_id"');
+  });
+
+  test('an explicit @unique over the pair IS the index — no double emit, either column order', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      k.__schema(model('Team', field('label')));
+      return k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' }),
+        dir('unique', { fields: ['userId', 'teamId'] }))).toSQL();
+    });
+    expect(r.value).toContain(
+      'CREATE UNIQUE INDEX "idx_memberships_user_id_team_id" ON "memberships" ("user_id", "team_id");');
+    expect(r.value).not.toContain('idx_memberships_team_id_user_id');
+    expect((r.value.match(/CREATE UNIQUE INDEX/g) || []).length).toBe(1);
+  });
+
+  test('a plain @index over the link pair refuses — the through contract says unique', async () => {
+    const r = await paired(async (k) => {
+      k.__schema(model('User', field('name'), dir('hasMany', { target: 'Team', through: 'Membership' })));
+      k.__schema(model('Team', field('label')));
+      const M = k.__schema(model('Membership',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' }),
+        dir('index', { fields: ['teamId', 'userId'] })));
+      let err = null;
+      try { M.toSQL(); } catch (e) { err = e; }
+      return err?.message;
+    });
+    expect(r.value).toMatch(/link pair of a through-relation/);
+    expect(r.value).toMatch(/User\.teams reads through Membership/);
+    expect(r.value).toMatch(/@unique/);
+  });
+
+  test('no through user → no derived index; an unresolvable pair derives none', async () => {
+    const r = await paired(async (k) => {
+      // Membership-shaped, but nothing reads through it.
+      const Plain = k.__schema(model('Attendance',
+        dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+      k.__schema(model('User', field('name')));
+      k.__schema(model('Team', field('label')));
+      // A self-referential through whose single @belongsTo cannot say
+      // which column is which end: the relation refuses at use; the
+      // DDL simply derives nothing.
+      k.__schema(model('Category', field('name'),
+        dir('hasMany', { target: 'Category', as: 'children', through: 'CategoryLink' })));
+      const Link = k.__schema(model('CategoryLink', dir('belongsTo', { target: 'Category' })));
+      return { plain: Plain.toSQL(), link: Link.toSQL() };
+    });
+    expect(r.value.plain).not.toContain('CREATE UNIQUE INDEX');
+    expect(r.value.link).not.toContain('CREATE UNIQUE INDEX');
   });
 
   test('toSQL works with no adapter configured; ORM statics on non-models reject', async () => {
@@ -3963,6 +4134,501 @@ describe('orm: write-path honesty', () => {
       } finally {
         if (hadUrl) process.env.RIP_DB_URL = priorUrl;
       }
+    });
+  });
+});
+
+describe('orm: zero-affected-row honesty', () => {
+  test('concurrent destroy then save: the UPDATE affirms zero rows and save() throws stale', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      // DuckDB answers UPDATE/DELETE with a one-row Count column.
+      adapter.on(/^UPDATE "users"/, rows(['Count'], [0]));
+      adapter.on(/^DELETE FROM "users"/, rows(['Count'], [1]));
+      const fired = [];
+      const U = K4.__schema(model('User', field('name'), dir('timestamps'),
+        hook('afterUpdate', () => fired.push('afterUpdate')),
+        hook('afterSave', () => fired.push('afterSave')),
+        hook('afterCommit', () => fired.push('afterCommit'))));
+      const t0 = new Date('2026-01-01T00:00:00Z');
+      const cols = [{ name: 'id' }, { name: 'name' }, { name: 'created_at' }, { name: 'updated_at' }];
+      const a = U._hydrate(cols, [1, 'ann', t0, t0]);
+      const b = U._hydrate(cols, [1, 'ann', t0, t0]);
+      await b.destroy();                      // request B deletes the row
+      fired.length = 0;
+      a.name = 'zoe';
+      let err = null;
+      try { await a.save(); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(K4.SchemaError);
+      expect(err.issues).toMatchObject([{ field: 'id', error: 'stale' }]);
+      expect(err.message).toMatch(/save\(\) on User id=1 matched no row — the row no longer exists/);
+      // No completion hooks (was: silent success + afterCommit); state
+      // restored per the failed-UPDATE path, _persisted dropped.
+      expect(fired).toEqual([]);
+      expect(a._persisted).toBe(false);
+      expect(a.updatedAt).toBe(t0);
+      expect([...a.savedChanges]).toEqual([]);
+      expect(a._snapshot.name).toBe('ann');
+    });
+  });
+
+  test('destroy honesty: a vanished row throws stale; a row soft-deleted elsewhere still takes the write', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^DELETE FROM "users"/, rows(['Count'], [0]));
+      const U = K4.__schema(model('User', field('name')));
+      const gone = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      let err = null;
+      try { await gone.destroy(); } catch (e) { err = e; }
+      expect(err?.issues).toMatchObject([{ field: 'id', error: 'stale' }]);
+      expect(err?.message).toMatch(/destroy\(\) on User id=1 matched no row/);
+      expect(gone._persisted).toBe(false);
+      // A soft-deleted-elsewhere row still EXISTS, so this UPDATE
+      // matches it and re-stamps deleted_at — a landed write, honestly
+      // reported as one, never a stale verdict.
+      adapter.on(/^UPDATE "notes"/, rows(['Count'], [1]));
+      const N = K4.__schema(model('Note', field('body'), dir('softDelete')));
+      const n = N._hydrate([{ name: 'id' }, { name: 'body' }, { name: 'deleted_at' }], [1, 'hi', null]);
+      await n.destroy();
+      expect(n.deletedAt).toBeInstanceOf(Date);
+      expect(n._persisted).toBe(true);
+    });
+  });
+
+  test('restore() whose UPDATE affirms zero rows throws stale', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^UPDATE "notes"/, rows(['Count'], [0]));
+      const N = K4.__schema(model('Note', field('body'), dir('softDelete')));
+      const t0 = new Date('2026-01-01T00:00:00Z');
+      const n = N._hydrate([{ name: 'id' }, { name: 'body' }, { name: 'deleted_at' }], [1, 'hi', t0]);
+      let err = null;
+      try { await n.restore(); } catch (e) { err = e; }
+      expect(err?.issues).toMatchObject([{ field: 'id', error: 'stale' }]);
+      expect(err?.message).toMatch(/restore\(\) on Note id=1 matched no row/);
+      expect(n._persisted).toBe(false);
+      expect(n.deletedAt).toBe(t0);       // the un-delete never landed
+    });
+  });
+
+  test('a truthless mutation answer (bare rowCount, empty result set) is "did not say", never a stale verdict', async () => {
+    await K4.scope(async () => {
+      // The recording adapter's default answer is the cart-style shape:
+      // {columns: [], data: [], rowCount: 0}. Contract v2's rowCount
+      // counts RESULT rows, and a no-RETURNING UPDATE legitimately
+      // answers an empty set whatever it matched — only DuckDB's
+      // affirmative Count shape can prove "zero rows affected".
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const U = K4.__schema(model('User', field('name')));
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      u.name = 'bea';
+      await u.save();
+      expect(u._persisted).toBe(true);
+      expect(u._snapshot.name).toBe('bea');
+    });
+  });
+});
+
+describe('orm: transaction integrity', () => {
+  test('restore() settles afterCommit like save and destroy — immediately outside a transaction, at COMMIT inside one', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^UPDATE "notes"/, rows(['Count'], [1]));
+      const log = [];
+      const N = K4.__schema(model('Note', field('body'), dir('softDelete'),
+        hook('afterCommit', function () { log.push('commit'); })));
+      const n = N._hydrate([{ name: 'id' }, { name: 'body' }, { name: 'deleted_at' }], [1, 'hi', new Date()]);
+      await n.restore();
+      expect(log).toEqual(['commit']);
+      log.length = 0;
+      await K4.transaction(async () => {
+        await n.destroy();
+        await n.restore();
+        log.push('inside');
+      });
+      // destroy + restore on one instance dedupe to ONE callback, at COMMIT
+      expect(log).toEqual(['inside', 'commit']);
+    });
+  });
+
+  test('a throwing afterRollback never replaces the transaction error; it rides the cause chain', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^INSERT/, row(['id', 'name'], [1, 'a']));
+      const U = K4.__schema(model('User', field('name'),
+        hook('afterRollback', function () { throw new Error('hook exploded'); })));
+      let err = null;
+      try {
+        await K4.transaction(async () => {
+          await U.create({ name: 'a' });
+          throw new Error('the real error');
+        });
+      } catch (e) { err = e; }
+      expect(err?.message).toBe('the real error');
+      expect(err?.cause?.message).toBe('hook exploded');
+    });
+  });
+
+  test('one throwing afterCommit cancels none of the rest; several failures aggregate after the flush', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let n = 0;
+      adapter.on(/^INSERT/, (sql, params) => row(['id', 'name'], [++n, params[0]]));
+      const ran = [];
+      const U = K4.__schema(model('User', field('name'),
+        hook('afterCommit', function () {
+          if (this.name.startsWith('boom')) throw new Error(this.name);
+          ran.push(this.name);
+        })));
+      let err = null;
+      try {
+        await K4.transaction(async () => {
+          await U.create({ name: 'boom1' });
+          await U.create({ name: 'ok' });
+          await U.create({ name: 'boom2' });
+        });
+      } catch (e) { err = e; }
+      expect(ran).toEqual(['ok']);
+      expect(err).toBeInstanceOf(AggregateError);
+      expect(err.errors.map((e) => e.message)).toEqual(['boom1', 'boom2']);
+      // a single failure rethrows itself, un-wrapped
+      ran.length = 0;
+      err = null;
+      try {
+        await K4.transaction(async () => {
+          await U.create({ name: 'boom3' });
+          await U.create({ name: 'ok2' });
+        });
+      } catch (e) { err = e; }
+      expect(ran).toEqual(['ok2']);
+      expect(err?.message).toBe('boom3');
+      expect(err instanceof AggregateError).toBe(false);
+    });
+  });
+
+  test('ROLLBACK restores enqueued instance state before afterRollback runs; a post-rollback save() re-creates', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let n = 0;
+      adapter.on(/^INSERT INTO "users"/, () => row(['id', 'name'], [++n === 1 ? 42 : 43, 'ann']));
+      const observed = [];
+      const U = K4.__schema(model('User', field('name'),
+        hook('afterRollback', function () {
+          observed.push({ persisted: this._persisted, id: this.id, snapshot: this._snapshot });
+        })));
+      let leaked = null;
+      let err = null;
+      try {
+        await K4.transaction(async () => {
+          leaked = await U.create({ name: 'ann' });
+          throw new Error('later step failed');
+        });
+      } catch (e) { err = e; }
+      expect(err?.message).toBe('later step failed');
+      // The hook observed the revoked-write truth, never the phantom row.
+      expect(observed).toEqual([{ persisted: false, id: undefined, snapshot: null }]);
+      expect(leaked._persisted).toBe(false);
+      expect('id' in leaked).toBe(false);
+      // Active-Record semantics: a post-rollback save() takes the
+      // INSERT arm and re-creates under a fresh identity.
+      await leaked.save();
+      expect(leaked._persisted).toBe(true);
+      expect(leaked.id).toBe(43);
+      const tail = adapter.calls.slice(-2).map((c) => c.sql.split(' ')[0]);
+      expect(tail).toEqual(['<ROLLBACK>', 'INSERT']);
+    });
+  });
+
+  test('a failing COMMIT is indeterminate: neither hook family runs, state stays, the error says so', async () => {
+    await K4.scope(async () => {
+      const handleCalls = [];
+      const adapter = {
+        async query() { return { columns: [], data: [], rowCount: 0 }; },
+        async begin() {
+          return {
+            async query(sql) {
+              handleCalls.push(sql);
+              return { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'a']], rowCount: 1 };
+            },
+            async commit() { throw new Error('network dropped mid-COMMIT'); },
+            async rollback() { handleCalls.push('<ROLLBACK>'); },
+          };
+        },
+      };
+      K4.setAdapter(adapter);
+      const log = [];
+      const U = K4.__schema(model('User', field('name'),
+        hook('afterCommit', () => log.push('commit')),
+        hook('afterRollback', () => log.push('rollback'))));
+      let leaked = null;
+      let err = null;
+      try {
+        await K4.transaction(async () => { leaked = await U.create({ name: 'a' }); });
+      } catch (e) { err = e; }
+      expect(err?.message).toMatch(/COMMIT failed — the transaction outcome is indeterminate/);
+      expect(err?.message).toMatch(/writes to User may or may not have been applied/);
+      expect(err?.message).toMatch(/Neither afterCommit nor afterRollback hooks ran/);
+      expect(err?.cause?.message).toBe('network dropped mid-COMMIT');
+      expect(log).toEqual([]);
+      // Unknown is not rolled-back: the instance keeps its written state.
+      expect(leaked._persisted).toBe(true);
+      expect(leaked.id).toBe(1);
+      expect(handleCalls).not.toContain('<ROLLBACK>');
+    });
+  });
+
+  test('an adopted transaction settles hooks with the ambience unbound: autocommit statements, never the dead handle', async () => {
+    await K4.scope(async () => {
+      const calls = [];
+      let committed = false;
+      const answer = () => ({ columns: [{ name: 'id' }, { name: 'name' }], data: [[calls.length, 'x']], rowCount: 1 });
+      const adapter = {
+        async query(sql) { calls.push({ where: 'autocommit', post: committed, sql }); return answer(); },
+        capabilities: { tx: true },
+      };
+      K4.setAdapter(adapter);
+      const handle = {
+        async query(sql) { calls.push({ where: 'tx-handle', post: committed, sql }); return answer(); },
+      };
+      let hookRuns = 0;
+      const U = K4.__schema(model('User', field('name'),
+        hook('afterCommit', async function () {
+          hookRuns++;
+          if (hookRuns <= 2) await U.create({ name: 'cascade-' + hookRuns });
+        })));
+      await orm4.__schemaAdoptTransaction(adapter, handle, async (settle) => {
+        await U.create({ name: 'seed' });   // enrolls on the adopted handle
+        committed = true;                   // the owner's COMMIT lands here
+        await settle('afterCommit');
+      });
+      // The seed rode the handle; every hook write ran autocommit and
+      // settled immediately — identical to the native path, and the
+      // flush stayed finite because nothing re-enqueued onto the store.
+      expect(calls.filter((c) => c.where === 'tx-handle').length).toBe(1);
+      expect(calls.filter((c) => c.where === 'tx-handle' && c.post).length).toBe(0);
+      expect(calls.filter((c) => c.where === 'autocommit' && c.post).length).toBe(2);
+      expect(hookRuns).toBe(3);
+    });
+  });
+});
+
+describe('orm: addX under the unique-pair race', () => {
+  const duplicateKey = () =>
+    new Error('Constraint Error: Duplicate key "user_id: 1, team_id: 10" violates unique constraint');
+  const throughWorld = () => {
+    const U = K4.__schema(model('User', field('name'),
+      dir('hasMany', { target: 'Team', through: 'Membership' })));
+    K4.__schema(model('Team', field('label')));
+    K4.__schema(model('Membership',
+      dir('belongsTo', { target: 'User' }), dir('belongsTo', { target: 'Team' })));
+    return U;
+  };
+
+  test('a unique violation for the racing tuple is the no-op it means: honest added-count, no throw', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let reads = 0;
+      adapter.on(/^SELECT "user_id", "team_id" FROM "memberships"/, () =>
+        ++reads === 1 ? rows(['user_id', 'team_id']) : rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/^INSERT INTO "memberships"/, () => { throw duplicateKey(); });
+      const U = throughWorld();
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      expect(await u.addTeams(10)).toBe(0);
+      expect(adapter.calls.filter((c) => c.sql.startsWith('INSERT')).length).toBe(1);
+      expect(reads).toBe(2);
+    });
+  });
+
+  test('a partial race retries only the still-missing tuples and reports what it actually wrote', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      let reads = 0;
+      let inserts = 0;
+      adapter.on(/^SELECT "user_id", "team_id" FROM "memberships"/, () =>
+        ++reads === 1 ? rows(['user_id', 'team_id']) : rows(['user_id', 'team_id'], [1, 10]));
+      adapter.on(/^INSERT INTO "memberships"/, () => {
+        if (++inserts === 1) throw duplicateKey();   // the two-tuple statement loses to the race
+        return rows(['id', 'user_id', 'team_id'], [7, 1, 11]);
+      });
+      const U = throughWorld();
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      expect(await u.addTeams([10, 11])).toBe(1);
+      const insertCalls = adapter.calls.filter((c) => c.sql.startsWith('INSERT'));
+      expect(insertCalls.length).toBe(2);
+      expect(insertCalls[1].params).toEqual([1, 11]);   // only the still-missing tuple retried
+    });
+  });
+
+  test('a unique violation that is NOT the race rethrows untouched', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      // the re-read shows nothing linked: no shrink, so the violation
+      // was some other constraint (an attrs column, say)
+      adapter.on(/^SELECT "user_id", "team_id" FROM "memberships"/, rows(['user_id', 'team_id']));
+      adapter.on(/^INSERT INTO "memberships"/, () => { throw duplicateKey(); });
+      const U = throughWorld();
+      const u = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      let err = null;
+      try { await u.addTeams(10); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(K4.SchemaError);
+      expect(err.issues).toMatchObject([{ error: 'unique' }]);
+    });
+  });
+
+  test('the runtime alone cannot close the race — the unique pair index the DDL derives is the closer', async () => {
+    await K4.scope(async () => {
+      const pending = [];
+      const calls = [];
+      const adapter = {
+        calls,
+        async query(sql, params = []) {
+          calls.push({ sql, params });
+          return new Promise((resolve) => pending.push({ sql, resolve }));
+        },
+      };
+      K4.setAdapter(adapter);
+      const U = throughWorld();
+      const u1 = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      const u2 = U._hydrate([{ name: 'id' }, { name: 'name' }], [1, 'ann']);
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+      const p1 = u1.addTeams(10);
+      const p2 = u2.addTeams(10);
+      await tick();
+      // both linked-set reads answer "no links" before either insert
+      pending.splice(0).forEach((p) => p.resolve(rows(['user_id', 'team_id'])));
+      await tick();
+      pending.splice(0).forEach((p, i) => p.resolve(rows(['id', 'user_id', 'team_id'], [100 + i, 1, 10])));
+      expect(await p1).toBe(1);
+      expect(await p2).toBe(1);
+      expect(calls.filter((c) => c.sql.startsWith('INSERT')).length).toBe(2);
+    });
+  });
+});
+
+describe('orm: temporal columns hydrate as instants', () => {
+  const eventCols = ['id', 'title', 'starts_on', 'at', 'created_at', 'updated_at'].map((name) => ({ name }));
+  const eventModel = () => K4.__schema(model('Event',
+    field('title'), field('startsOn', 'date'), field('at', 'datetime'), dir('timestamps')));
+
+  test('declared date/datetime columns coerce wire strings and epoch numbers to the codec instants; a string field never', async () => {
+    await K4.scope(async () => {
+      K4.setAdapter(recordingAdapter());
+      const E = eventModel();
+      const e = E._hydrate(eventCols,
+        [1, '2026-08-01', '2026-08-01', '2026-08-01 10:30:00', '2026-08-01T10:30:00.123Z', 1754994600000]);
+      expect(e.title).toBe('2026-08-01');                                  // string-declared: untouched
+      expect(e.startsOn).toBeInstanceOf(Date);
+      expect(e.startsOn.getTime()).toBe(Date.UTC(2026, 7, 1));             // bare date = UTC midnight
+      expect(e.at.getTime()).toBe(Date.UTC(2026, 7, 1, 10, 30, 0));        // naive wall-clock = UTC
+      expect(e.createdAt.getTime()).toBe(Date.UTC(2026, 7, 1, 10, 30, 0, 123));
+      expect(e.updatedAt.getTime()).toBe(1754994600000);                   // epoch milliseconds
+      // toJSON now emits ISO consistently, whatever the wire spelled
+      expect(JSON.parse(JSON.stringify(e))).toMatchObject({
+        startsOn: '2026-08-01T00:00:00.000Z',
+        at: '2026-08-01T10:30:00.000Z',
+      });
+    });
+  });
+
+  test('harbor-delivered Dates pass through identically; a string hydration then no-op saves', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const E = eventModel();
+      const d = new Date('2026-08-01T10:30:00Z');
+      const fromHarbor = E._hydrate(eventCols, [1, 't', d, d, d, d]);
+      expect(fromHarbor.at).toBe(d);                    // no double conversion
+      const fromStrings = E._hydrate(eventCols,
+        [2, 't', '2026-08-01', '2026-08-01 10:30:00', '2026-08-01 10:30:00', '2026-08-01 10:30:00']);
+      const before = adapter.calls.length;
+      await fromStrings.save();                         // snapshot saw the coerced value
+      expect(adapter.calls.length).toBe(before);        // no-op: no SQL
+    });
+  });
+
+  test('an unparseable value in a declared temporal column is adapter breakage, named', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const E = eventModel();
+      let err = null;
+      try {
+        E._hydrate(eventCols, [1, 't', 'not-a-date', '2026-08-01 10:30:00', null, null]);
+      } catch (e) { err = e; }
+      expect(err?.message).toMatch(/row hydration adapter invariant — column 'starts_on' is declared date/);
+      expect(err?.message).toMatch(/"not-a-date"/);
+      // The absorption path holds the same line on RETURNING rows.
+      adapter.on(/^INSERT INTO "events"/, row(['id', 'title', 'at', 'created_at', 'updated_at'],
+        [1, 't', '2026-08-01 10:30:00', 'garbage', 'garbage']));
+      err = null;
+      try { await E.create({ title: 't', startsOn: '2026-08-01', at: '2026-08-01T10:30:00Z' }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/row absorption adapter invariant — column 'created_at' is declared datetime/);
+    });
+  });
+
+  test('RETURNING absorption coerces the same way: create() lands Dates on the instance', async () => {
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      adapter.on(/^INSERT INTO "events"/, row(['id', 'title', 'starts_on', 'at', 'created_at', 'updated_at'],
+        [1, 't', '2026-08-01', '2026-08-01 10:30:00', '2026-08-01 10:30:00.123', 1754994600000]));
+      const E = eventModel();
+      const e = await E.create({ title: 't', startsOn: '2026-08-01', at: '2026-08-01T10:30:00Z' });
+      expect(e.startsOn.getTime()).toBe(Date.UTC(2026, 7, 1));
+      expect(e.at.getTime()).toBe(Date.UTC(2026, 7, 1, 10, 30, 0));
+      expect(e.createdAt.getTime()).toBe(Date.UTC(2026, 7, 1, 10, 30, 0, 123));
+      expect(e.updatedAt).toBeInstanceOf(Date);
+    });
+  });
+});
+
+describe('orm: errors speak the caller namespace', () => {
+  test('structured where()/updateAll() rejections echo the key as written over a property inventory', async () => {
+    await K4.scope(async () => {
+      K4.setAdapter(recordingAdapter());
+      const U = K4.__schema(model('User', field('firstName'), dir('timestamps')));
+      let err = null;
+      try { await U.where({ firstNme: 'x' }).all(); } catch (e) { err = e; }
+      expect(err?.message).toMatch(
+        /unknown where\(\) key 'firstNme' — known: createdAt \(column created_at\), firstName \(column first_name\), id, updatedAt \(column updated_at\)/);
+      // updateAll inventories only the caller-writable set — the
+      // managed timestamp is named nowhere because it is not writable.
+      err = null;
+      try { await U.where({}).updateAll({ createdAt: new Date() }); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/unknown updateAll\(\) key 'createdAt' — known: firstName \(column first_name\)/);
+    });
+  });
+
+  test('a duplicate canonical column names the table and both source columns', async () => {
+    await K4.scope(async () => {
+      K4.setAdapter(recordingAdapter());
+      const U = K4.__schema(model('User', field('firstName')));
+      let err = null;
+      try { U._hydrate([{ name: 'first_name' }, { name: 'firstName' }], ['a', 'b']); } catch (e) { err = e; }
+      expect(err?.message).toMatch(
+        /duplicate canonical column 'firstName' on table "users": columns 'first_name' and 'firstName' both canonicalize to it/);
+    });
+  });
+});
+
+describe('orm: once-directives (runtime layer)', () => {
+  test('@timestamps and @softDelete declared twice reject as once-directives', async () => {
+    await K4.scope(() => {
+      const T = K4.__schema(model('Stamped', field('name'), dir('timestamps'), dir('timestamps')));
+      expect(() => T._normalize()).toThrow(/duplicate '@timestamps' — declared twice; a :model declares it once/);
+      const S = K4.__schema(model('Softened', field('name'), dir('softDelete'), dir('softDelete')));
+      expect(() => S._normalize()).toThrow(/duplicate '@softDelete' — declared twice; a :model declares it once/);
     });
   });
 });
