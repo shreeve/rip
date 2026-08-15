@@ -287,14 +287,35 @@ a production database.
   column-keyed collision check) is a **prerequisite** for projection, not
   a follow-on. The first draft had this backwards.
 
-### Naming overrides — SHIPPED, see Landed
+### The mapping ledger
 
-`ignored_columns` and composite primary keys are what remain of this
-section. Composite keys wait on a real table that needs one; every read
-path assumes a scalar identity (`_snapshot[pk]`, `find(id)`,
-`WHERE pk = ?`, the relation memo's identity), so it is a genuine
-redesign rather than an override. `ignored_columns` is a projection
-question, not a naming one — it belongs to the section above.
+What a `:model` can and cannot say about a table it did not create.
+Bucket A is the set with **no workaround** — missing one disqualifies
+the table entirely; raw `query!` still reads it, you just get rows
+instead of instances.
+
+**Shipped** (23): `@table`, `@tableWas`, `@primaryKey` (property +
+column), natural keys, `@idStart`, `{column:}`, `{was:}`, nullability
+(`!`/`?`), `[default]`, `@unique` (field and composite), `@index`,
+`@timestamps`, `@softDelete`, the three relation kinds, `{foreignKey:}`,
+`{as:}`, `{through:}`, `{targetKey:}`, relation optionality, `~type` /
+`~:coercer` / literal-union coercion, `@mixin`, FK width following the
+target's key, and cross-adapter FK suppression.
+
+**Not shipped**, with what it costs:
+
+| | why it is open |
+|---|---|
+| composite primary keys | every read path assumes a scalar identity (`_snapshot[pk]`, `find(id)`, `WHERE pk = ?`, the relation memo). A redesign, not an override. **No workaround** |
+| polymorphic `belongsTo` | one FK plus a type column pointing at several models. **No workaround** |
+| single-table inheritance | one table, a discriminator column, several models. **No workaround** |
+| schema-qualified tables (`crm.accounts`) | refused with a positioned message — a dot would ride through the quoter as ONE identifier. Workaround: put the schema on the connection's search path and name the table bare |
+| explicit SQL column type (`DECIMAL(10,2)`) | types come from `__SCHEMA_SQL_TYPES`; an unrecognized field type falls through to `VARCHAR` silently. Worth a rejection of its own |
+| `CHECK` constraints | deliberately deferred: `migrate.js` does not diff CHECKs, so adding one to the column spec creates permanent undetectable drift. **Revive with:** CHECK diffing in the planner |
+| `ignored_columns` | a projection question, not a naming one — see above |
+| `dependent: :destroy` / `ON DELETE CASCADE` | behavior, not mapping. A `beforeDestroy` hook or a DB constraint covers it |
+| `belongsTo primary_key:` (FK to a non-pk column) | rare; the FK always references the target's declared key |
+| HABTM with no join model | deliberate. There is always a join table; naming it as a model is the honest form, and it is what makes `{through:}` writable |
 
 ### Correctness items that are real but dormant
 
