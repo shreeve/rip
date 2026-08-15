@@ -1,7 +1,8 @@
-// The duckdb-harbor client — the ONE way anything in Rip talks to
-// DuckDB. Harbor is not a third-party endpoint we happen to support; it
-// is the transport, so this module is the transport layer and there is
-// no second one.
+// The DuckDB substrate — the ONE way anything in Rip talks to DuckDB.
+// This is its driver section: the HTTP wire to duckdb-harbor, the
+// session lifecycle, NDJSON reading, the typed error taxonomy, and the
+// temporal codec. The module is named for what it gives upstream code
+// (the database), not for how it reaches it (the harbor wire service).
 //
 // It owns everything from the socket up to `{ columns, data, rowCount }`
 // with temporals decoded and a typed error thrown: URL and token
@@ -12,10 +13,9 @@
 //
 // Two consumers, one implementation: `src/runtime/orm.js` (the
 // `schema :model` runtime) and `packages/db/db.rip` (the Model facade,
-// CLI and MCP server). They used to carry a copy each, and the copies
-// drifted — different default ports, one blind to cancellation, one
-// discarding DuckDB's error text, one capped at harbor's one-shot size
-// ceiling. That is what this file exists to make impossible.
+// CLI and MCP server) both call into this file, so there is exactly one
+// wire client — one default port, one cancellation story, one decode
+// seam — across both tiers.
 //
 // Constraint: this is a RUNTIME module, spliced into compiled output by
 // the emitter, so it may only import siblings via the './name.js' form

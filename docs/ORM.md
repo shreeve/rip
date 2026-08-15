@@ -32,7 +32,7 @@ export User = schema :model
   fullName: ~> "#{@firstName} #{@lastName}".trim()
 
 export Order = schema :model
-  status  "draft" | "submitted" | "completed", [:draft]
+  status  "draft" | "submitted" | "completed", ["draft"]
   total!  integer, 0..
   @belongsTo User
   @timestamps
@@ -59,7 +59,7 @@ options, and markers, comma-separated:
 ```rip
 name!    string                # required — absence is a validation error, column is NOT NULL
 handle?  string, 2..24         # optional — nullable column
-status   "open" | "closed", [:open]   # unmarked, with a default
+status   "open" | "closed", ["open"]   # unmarked, with a default
 bio?     text
 tags?    string[]              # array — stored as a JSON column
 ```
@@ -125,7 +125,7 @@ app-side gate.
 ### Coercion and transforms
 
 ```rip
-count!  ~integer          # coerce the wire value ("5" → 5) before validation
+qty!    ~integer          # coerce the wire value ("5" → 5) before validation
 ssn?    ~:ssn             # named coercer, registered with schema.registerCoercer
 full!   string, -> it.first + " " + it.last   # transform: receives the whole raw input as `it`
 ```
@@ -157,6 +157,12 @@ The lifecycle hooks, in firing order:
 | `afterSave` | after either write completes |
 | `beforeDestroy` / `afterDestroy` | around `destroy` |
 | `afterCommit` / `afterRollback` | after the outermost COMMIT / ROLLBACK when a transaction is open; `afterCommit` fires immediately after the write otherwise |
+
+On `create`/`upsert`, the caller's input is canonicalized and
+field-validated once before the instance exists; `beforeValidation`
+runs after that, ahead of the validation pass that judges refinements
+(`@ensure`). The hook canonicalizes values that already parse — it
+cannot rescue input that fails field validation.
 
 `restore()` fires `beforeUpdate`/`afterUpdate`. Bulk paths —
 `updateAll`, `deleteAll`, `insertMany`, and the through-write verbs —
@@ -226,7 +232,7 @@ snake_cased and pluralized (`UserProfile` → `user_profiles`). `@table`
 overrides it:
 
 ```rip
-@table AccountEntry        # bare: a Rip name, converted → "account_entries"
+@table AccountEntry        # bare: a Rip name, snake_cased → "account_entry"
 @table "USER_MASTER"       # quoted: the database's own name, verbatim
 ```
 
@@ -525,8 +531,9 @@ Preloading fills the same per-instance memo the accessors use, so
 `user.orders!` afterwards costs no query. The strategy is one query per
 relation per nesting level (`WHERE fk IN (…)`) — never a JOIN, so there
 is no row duplication and no join-table columns leak onto target
-instances. A `through` relation preloads in three queries total (join
-rows, distinct targets, group in JS) for any number of owners.
+instances. A `through` relation preloads in two queries (the join
+rows, then the distinct targets) plus a JS grouping step, for any
+number of owners.
 
 ## Instances and persistence
 
@@ -559,13 +566,13 @@ recent save — an INSERT records `[null, value]` per written field. The
 `afterCreate`/`afterUpdate`/`afterSave` hooks read the just-completed
 diff.
 
-Dirty tracking compares values structurally, so it cannot see an
-in-place mutation of an object-valued field. `markDirty` forces the
-column into the next UPDATE:
+Snapshots are deep copies and the comparison is structural, so even an
+in-place mutation of an object-valued field (`order.items.push item`)
+is caught. `markDirty` is the override for the opposite case — it
+forces a column into the next UPDATE when its value compares clean:
 
 ```rip
-order.items.push item
-order.markDirty 'items'
+order.markDirty 'items'   # rewrite items even though nothing changed
 order.save!
 ```
 

@@ -424,7 +424,7 @@ representation the current pipeline has end to end:
   but `typeName` is `any`, so the column is **JSON** — the database
   cannot sum, index, or compare it.
 - An explicit `{type: "DECIMAL(9,2)"}` escape hatch would be a **trap**,
-  and this is the reason not to add one: `harbor.js` decodes only
+  and this is the reason not to add one: `duckdb.js` decodes only
   temporal columns off `duckdbType` (`decodeRows`, `temporalKind`), so a
   DECIMAL comes back as a plain JSON number. The DDL would be right and
   every value would silently be a float. The DDL is not the binding
@@ -492,14 +492,14 @@ change, not a type override.
   runs twice. That is an API contract needing documentation and probably
   an opt-in, not a port. Unreachable today regardless: the 11th
   concurrent `begin()` triggers it and an app can produce 2.
-- **`harbor.js` buffers instead of streaming** — `await response.text()`
+- **`duckdb.js` buffers instead of streaming** — `await response.text()`
   (`:384`) reads the whole NDJSON body then re-parses it, materializing
   large results twice and forfeiting harbor's incremental delivery.
 - **Lazy `__schemaAdapter`.** `orm.js:616` constructs at module
   evaluation, reading env at global scope. Note that laziness alone does
   not enable per-request configuration — that needs a factory or a
   request-context lookup.
-- **`ttlMs` is never sent** on session open (`harbor.js:444`), so every
+- **`ttlMs` is never sent** on session open (`duckdb.js:444`), so every
   session silently takes the 300s maximum.
 - **`import` mode bakes an absolute path** into compiled output. Harmless
   when bundled or run through the loader; broken if raw compiled `.js`
@@ -511,7 +511,7 @@ nothing in any shipped path — all use `import` (`loader.js:105`,
 (30-model app: 158 KB). Inline mode is single-file standalone and
 *cannot* ship a multi-model app — `schema.js:22-31` throws on two runtime
 copies in one process, which is what prevents 30 separate adapter and
-transaction-scope identities. `harbor.js` itself is runtime-portable (no
+transaction-scope identities. `duckdb.js` itself is runtime-portable (no
 `node:`/`Bun.` references; both `process.env` reads guarded).
 
 ## Harbor (Rust)
