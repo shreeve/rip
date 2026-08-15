@@ -204,9 +204,16 @@ test "package files ship the library, README, and example — not misc/", ->
   eq pkg.files, ['db.rip', 'README.md', 'example.rip']
   ok not pkg.files.some (f) -> String(f).includes('misc')
 
-test "db.rip does not hard-import the schema runtime", ->
+# The doorbell to the schema ORM stays soft — models may load before or
+# after this package, and it must not drag the persistence runtime in.
+# The harbor CLIENT is a different matter: both tiers speak to harbor and
+# there is exactly one implementation of that, in the core runtime.
+test "db.rip reaches the schema ORM only through the doorbell", ->
   source = readFileSync DB_RIP, 'utf8'
-  ok not /orm\.js|from ['"].*src\/runtime/.test source
+  ok not /orm\.js/.test source
+  ok /globalThis\.__ripSchema/.test source
+  imports = source.match(/from ['"][^'"]*src\/runtime\/[^'"]*['"]/g) ?? []
+  eq imports, ["from '../../src/runtime/harbor.js'"]
 
 test "db.rip is shebang'd and executable", ->
   source = readFileSync DB_RIP, 'utf8'
@@ -847,8 +854,8 @@ test! "a fast response is untouched by the deadline", ->
   eq result.rowCount, 0
 
 test "the default deadline is 30 seconds", ->
-  source = readFileSync DB_RIP, 'utf8'
-  ok /DEFAULT_TIMEOUT_MS =!? 30_000/.test source
+  source = readFileSync join(import.meta.dir, '..', '..', 'src', 'runtime', 'harbor.js'), 'utf8'
+  ok /DEFAULT_TIMEOUT_MS = 30_000/.test source
 
 p "\nAdapter — capabilities and contract"
 
