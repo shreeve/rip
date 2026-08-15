@@ -835,7 +835,9 @@ test! "each statement gets its own name", ->
 
 # However the stop was delivered — our deadline reaching harbor, this
 # caller, or another client holding the same id — it is the same event as
-# a local abort, so one catch covers a cancellation either way.
+# a local abort, so one catch covers a cancellation either way. The TYPE
+# is shared; `code` says who stopped it: harbor's own code when harbor
+# supplied one, 'ABORTED' when the stop was our caller's signal.
 test! "a 499 from harbor is a CancelledError, not a transport failure", ->
   fetch = (url, init) ->
     Promise.resolve
@@ -845,7 +847,7 @@ test! "a 499 from harbor is a CancelledError, not a transport failure", ->
       text: -> Promise.resolve JSON.stringify { type: 'error', code: 'cancelled', message: 'the statement was cancelled' }
   err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT 1')
   ok err instanceof CancelledError
-  eq err.code, 'ABORTED'
+  eq err.code, 'cancelled'
   eq err.httpStatus, 499
 
 test! "a fast response is untouched by the deadline", ->

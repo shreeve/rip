@@ -100,14 +100,22 @@ function migrateAdapter(deployed, opts = {}) {
     if (sql.includes('duckdb_constraints()')) {
       const rows = [];
       for (const t of tables) {
-        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')']);
-        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')']);
+        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')', null, null]);
+        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')', null, null]);
         for (const fk of t.foreignKeys || []) {
-          rows.push([t.name, 'FOREIGN KEY', [fk.column],
-            'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')']);
+          // Real 1.5.5 FK rows carry referenced_table /
+          // referenced_column_names beside the UNQUOTED
+          // constraint_text. A canned fk can override the text
+          // (constraintText, for replaying captured catalog rows) or
+          // withhold the metadata columns (refMeta: false) to exercise
+          // the constraint-text fallback and the fail-closed path.
+          const text = fk.constraintText !== undefined ? fk.constraintText
+            : 'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')';
+          const meta = fk.refMeta === false ? [null, null] : [fk.refTable, [fk.refColumn]];
+          rows.push([t.name, 'FOREIGN KEY', [fk.column], text, ...meta]);
         }
       }
-      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows);
+      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text', 'referenced_table', 'referenced_column_names'], rows);
     }
     if (sql.includes('duckdb_indexes()')) {
       const rows = [];
@@ -522,6 +530,313 @@ describe('migrate: the differ — step kinds and classes', () => {
   });
 });
 
+// Every pin in this block is backed by a behavior measured against
+// real DuckDB 1.5.5 (the shipped engine): the freeze surface of
+// FK-referenced and indexed tables, the ALTERs the engine still
+// permits on them, catalog constraint rendering for names that need
+// quoting, and case-insensitive identifier matching.
+describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', () => {
+  const run4 = (fn) => K4.scope(async () => {
+    const deployedRef = { value: { tables: [] } };
+    K4.setAdapter(migrateAdapter({ get tables() { return deployedRef.value.tables; } }));
+    return fn(deployedRef);
+  });
+
+  // ── the primary-key shape gate ────────────────────────────────────
+  // The skip that hides the surrogate pk's fixed shape from the column
+  // diff fires ONLY when both sides verify as agreeing surrogates; any
+  // other pk disagreement has no in-place ALTER, so it blocks.
+
+  test('a deployed pk of the wrong shape blocks: declared surrogate vs deployed VARCHAR pk with no default', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name')));
+      const t = table('users', [col('name', 'VARCHAR', { notNull: true })]);
+      t.columns[0] = { name: 'id', type: 'VARCHAR', notNull: false, unique: false, primary: true, default: null };
+      deployedRef.value = { tables: [t] };
+      return mig.plan();
+    });
+    expect(r.map((s) => [s.table, s.kind, s.class])).toEqual([['users', 'note-primary-key', 'blocked']]);
+    expect(r[0].notes.join(' ')).toContain('a surrogate primary key (INTEGER + nextval');
+    expect(r[0].notes.join(' ')).toContain('a VARCHAR primary key with no default');
+  });
+
+  test('a deployed pk whose PRIMARY KEY constraint is missing blocks', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name')));
+      const t = table('users', [col('name', 'VARCHAR', { notNull: true })]);
+      t.primaryKey = null;
+      t.columns[0] = { name: 'id', type: 'INTEGER', notNull: false, unique: false, default: "nextval('users_seq')" };
+      deployedRef.value = { tables: [t] };
+      return mig.plan();
+    });
+    expect(r.map((s) => [s.table, s.kind, s.class])).toEqual([['users', 'note-primary-key', 'blocked']]);
+    expect(r[0].notes.join(' ')).toContain('a non-primary INTEGER column');
+  });
+
+  test('a surrogate→natural posture flip on the same column name blocks', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', dir('primaryKey', { name: 'id' }), field('id', 'string'), field('name')));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(r.map((s) => [s.table, s.kind, s.class])).toEqual([['users', 'note-primary-key', 'blocked']]);
+    expect(r[0].notes.join(' ')).toMatch(/VARCHAR primary key.*surrogate primary key/);
+  });
+
+  test('the legitimate both-surrogate pair still plans nothing', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name')));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(r).toEqual([]);
+  });
+
+  // ── the dependency-aware add-column builder ───────────────────────
+
+  test('a required add with a default on an FK-referenced table withholds the SET NOT NULL; an unreferenced table keeps the composite', async () => {
+    const frozen = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), field('role', 'string', { constraints: { default: 'user' } })));
+      K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
+      deployedRef.value = { tables: [
+        table('users', [col('name', 'VARCHAR', { notNull: true })]),
+        table('orders', [col('total', 'INTEGER', { notNull: true }), col('user_id', 'INTEGER', { notNull: true })],
+          { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] }),
+      ] };
+      return mig.plan();
+    });
+    const add = frozen.find((s) => s.kind === 'add-column');
+    expect(add.class).toBe('safe');
+    expect(add.sql[0]).toBe('ALTER TABLE "users" ADD COLUMN "role" VARCHAR DEFAULT \'user\';');
+    // The withheld half is a comment, never an executable statement:
+    // the splitter yields exactly the ADD.
+    const statements = mig.splitStatements(add.sql.join('\n'));
+    expect(statements.length).toBe(1);
+    expect(statements[0].startsWith('ALTER TABLE "users" ADD COLUMN')).toBe(true);
+    expect(add.sql.some((s) => s.startsWith('--') && s.includes('SET NOT NULL'))).toBe(true);
+    expect(add.notes.some((n) => n.includes('the SET NOT NULL is withheld') && n.includes('orders.user_id'))).toBe(true);
+
+    const free = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), field('role', 'string', { constraints: { default: 'user' } })));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(free.map((s) => s.kind + ':' + s.class)).toEqual(['add-column:safe']);
+    expect(free[0].sql).toEqual([
+      'ALTER TABLE "users" ADD COLUMN "role" VARCHAR DEFAULT \'user\';',
+      'ALTER TABLE "users" ALTER COLUMN "role" SET NOT NULL;',
+    ]);
+  });
+
+  test('a required add with a default on an INDEXED table withholds the SET NOT NULL too', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('email', 'email', { unique: true }), field('role', 'string', { constraints: { default: 'user' } })));
+      const t = table('users', [col('email', 'VARCHAR', { notNull: true, unique: true })],
+        { indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }] });
+      deployedRef.value = { tables: [t] };
+      return mig.plan();
+    });
+    const add = r.find((s) => s.kind === 'add-column');
+    expect(add.sql.filter((s) => !s.startsWith('--'))).toEqual(['ALTER TABLE "users" ADD COLUMN "role" VARCHAR DEFAULT \'user\';']);
+    expect(add.notes.some((n) => n.includes('the SET NOT NULL is withheld') && n.includes('idx_users_email'))).toBe(true);
+  });
+
+  test('an added unique column WITH a default is lossy: the DEFAULT backfills duplicates under the unique index', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), field('code', 'string', { optional: true, unique: true, constraints: { default: 'x' } })));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(r.map((s) => s.kind + ':' + s.class)).toEqual(['add-column:lossy']);
+    expect(r[0].sql.some((s) => s.startsWith('CREATE UNIQUE INDEX'))).toBe(true);
+    expect(r[0].notes.some((n) => n.includes('fails if existing rows hold duplicates') && n.includes('DEFAULT backfills'))).toBe(true);
+  });
+
+  // ── default comparison: literal payloads are data ─────────────────
+
+  test("a default literal differing only in case plans alter-default; NOW() spellings still compare equal", async () => {
+    const drift = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('status', 'string', { constraints: { default: 'Active' } })));
+      deployedRef.value = { tables: [table('users', [col('status', 'VARCHAR', { notNull: true, default: "'active'" })])] };
+      return mig.plan();
+    });
+    expect(drift.map((s) => s.kind + ':' + s.class)).toEqual(['alter-default:safe']);
+    expect(drift[0].sql).toEqual(['ALTER TABLE "users" ALTER COLUMN "status" SET DEFAULT \'Active\';']);
+
+    const noise = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), dir('timestamps')));
+      deployedRef.value = { tables: [table('users', [
+        col('name', 'VARCHAR', { notNull: true }),
+        col('created_at', 'TIMESTAMP', { default: 'NOW()' }),
+        col('updated_at', 'TIMESTAMP', { default: 'now()' }),
+      ])] };
+      return mig.plan();
+    });
+    expect(noise).toEqual([]);
+  });
+
+  // ── FK-reference resolution for names that need quoting ───────────
+  // 1.5.5 emits the referenced table UNQUOTED in constraint_text
+  // (`… REFERENCES User Accounts(id)`) and carries the authoritative
+  // referenced_table column beside it.
+
+  const spacedPair = (fkExtra) => async (deployedRef) => {
+    K4.__schema(model('UserAccount', dir('table', { name: 'User Accounts' }), field('name')));
+    K4.__schema(model('OrderX', dir('table', { name: 'Orders' }), field('name', 'string', { optional: true }),
+      dir('belongsTo', { target: 'UserAccount', foreignKey: 'owner_id', optional: true })));
+    deployedRef.value = { tables: [
+      table('User Accounts', [col('name', 'VARCHAR', { notNull: true }), col('stale')]),
+      table('Orders', [col('name'), col('owner_id', 'INTEGER')],
+        { foreignKeys: [{ column: 'owner_id', refTable: 'User Accounts', refColumn: 'id', ...fkExtra }] }),
+    ] };
+    return mig.plan();
+  };
+
+  test('a spaced referenced-table name resolves through referenced_table metadata: the freeze holds', async () => {
+    const r = await run4(spacedPair({}));
+    const drop = r.find((s) => s.kind === 'drop-column');
+    expect(drop.table).toBe('User Accounts');
+    expect(drop.class).toBe('blocked');
+    expect(drop.notes.some((n) => n.includes('Orders.owner_id'))).toBe(true);
+  });
+
+  test('without the metadata columns, the verbatim constraint_text resolves by longest table-name match', async () => {
+    const r = await run4(spacedPair({
+      refMeta: false,
+      constraintText: 'FOREIGN KEY (owner_id) REFERENCES User Accounts(id)',
+    }));
+    const drop = r.find((s) => s.kind === 'drop-column');
+    expect(drop.class).toBe('blocked');
+    expect(drop.notes.some((n) => n.includes('Orders.owner_id'))).toBe(true);
+  });
+
+  test('an unresolvable FOREIGN KEY target fails CLOSED: it blocks rather than passes', async () => {
+    const r = await run4(spacedPair({ refMeta: false, constraintText: '' }));
+    const drop = r.find((s) => s.kind === 'drop-column');
+    expect(drop.class).toBe('blocked');
+    expect(drop.notes.some((n) => n.includes('could not determine') && n.includes('Orders.owner_id'))).toBe(true);
+    // The engine still permits ADD COLUMN on any table, known target or
+    // not, so exempt kinds stay unblocked.
+    expect(r.filter((s) => s.kind === 'add-column').every((s) => s.class !== 'blocked')).toBe(true);
+  });
+
+  // ── the index freeze ──────────────────────────────────────────────
+  // Any index on a table freezes every in-place ALTER regardless of
+  // which column it covers; ADD COLUMN, SET/DROP DEFAULT, and index
+  // DDL stay permitted.
+
+  test("an indexed table's column rename blocks with the index named; an index-free table's rename stays safe", async () => {
+    const indexed = await run4(async (deployedRef) => {
+      K4.__schema(model('Person', field('email', 'string', { unique: true }),
+        field('nickName', 'string', { optional: true, attrs: { was: 'nick' } })));
+      deployedRef.value = { tables: [table('people', [col('email', 'VARCHAR', { notNull: true, unique: true }), col('nick')],
+        { indexes: [{ name: 'idx_people_email', columns: ['email'], unique: true }] })] };
+      return mig.plan();
+    });
+    expect(indexed.map((s) => s.kind + ':' + s.class)).toEqual(['rename-column:blocked']);
+    expect(indexed[0].notes.some((n) => n.includes('idx_people_email') &&
+      n.includes('Drop the index(es), apply the change, then recreate'))).toBe(true);
+
+    const free = await run4(async (deployedRef) => {
+      K4.__schema(model('Person', field('nickName', 'string', { optional: true, attrs: { was: 'nick' } })));
+      deployedRef.value = { tables: [table('people', [col('nick')])] };
+      return mig.plan();
+    });
+    expect(free.map((s) => s.kind + ':' + s.class)).toEqual(['rename-column:safe']);
+  });
+
+  test("an indexed table's @tableWas rename blocks, and the recreate DDL in the note targets the NEW name", async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('Member', dir('tableWas', { name: 'users' }), field('email', 'string', { unique: true })));
+      deployedRef.value = { tables: [table('users', [col('email', 'VARCHAR', { notNull: true, unique: true })],
+        { indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }] })] };
+      return mig.plan();
+    });
+    const rename = r.find((s) => s.kind === 'rename-table');
+    expect(rename.class).toBe('blocked');
+    expect(rename.notes.some((n) => n.includes('idx_users_email') &&
+      n.includes('CREATE UNIQUE INDEX "idx_users_email" ON "members" ("email");'))).toBe(true);
+  });
+
+  test('index DDL and default DDL stay unblocked on an indexed table', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User',
+        field('email', 'email', { unique: true }),
+        field('status', 'string', { optional: true, constraints: { default: 'new' } }),
+        field('a', 'string', { optional: true }), field('b', 'string', { optional: true }),
+        dir('index', { fields: ['a', 'b'] })));
+      const t = table('users', [
+        col('email', 'VARCHAR', { notNull: true, unique: true }),
+        col('status', 'VARCHAR', { default: "'old'" }),
+        col('a'), col('b'),
+      ], { indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }] });
+      deployedRef.value = { tables: [t] };
+      return mig.plan();
+    });
+    expect(r.map((s) => s.kind + ':' + s.class).sort()).toEqual(['alter-default:safe', 'create-index:safe']);
+  });
+
+  // ── the ALTERs the engine permits on an FK-referenced table ───────
+
+  test('add-unique, drop-unique, and alter-default plan on an FK-referenced table instead of dead-ending blocked', async () => {
+    const declared = { tables: [
+      table('orders', [col('user_id', 'INTEGER')], { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] }),
+      table('users', [
+        col('name', 'VARCHAR', { unique: true, default: "'x'" }),
+        col('tag', 'VARCHAR'),
+      ]),
+    ] };
+    const deployed = { tables: [
+      table('orders', [col('user_id', 'INTEGER')], { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] }),
+      table('users', [
+        col('name', 'VARCHAR'),
+        col('tag', 'VARCHAR', { unique: true }),
+      ]),
+    ] };
+    const steps = mig.diffSchemas(declared, deployed);
+    expect(steps.map((s) => s.kind + ':' + s.class).sort()).toEqual([
+      'add-unique:lossy', 'alter-default:safe', 'drop-unique:safe',
+    ]);
+  });
+
+  // ── the adapter note on the matched-table diff path ───────────────
+
+  test('a matched table on its own adapter carries the note-adapter step beside its diff steps', async () => {
+    const r = await K4.scope(async () => {
+      const own = migrateAdapter({ tables: [] });
+      K4.setAdapter(migrateAdapter({ tables: [
+        table('metrics', [col('value', 'VARCHAR'), col('legacy_note')]),
+      ] }));
+      K4.__schema({ ...model('Metric', field('value', 'integer')), adapter: own });
+      return mig.plan();
+    });
+    expect(r.some((s) => s.kind === 'note-adapter' && s.table === 'metrics' &&
+      s.sql[0].includes('declares its own on: adapter'))).toBe(true);
+    expect(r.some((s) => s.kind !== 'note-adapter')).toBe(true);
+  });
+
+  // ── case-only column changes ──────────────────────────────────────
+
+  test('a case-only column change blocks instead of planning an add + drop the engine refuses', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name', 'string', { attrs: { column: 'NAME' } })));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    expect(r.map((s) => [s.table, s.kind, s.class])).toEqual([['users', 'note-column-case', 'blocked']]);
+    expect(r[0].notes.join(' ')).toContain('differ only by letter case');
+    expect(r.some((s) => s.kind === 'add-column' || s.kind === 'drop-column')).toBe(false);
+  });
+
+  test('a {was:} naming its own live column rejects with wording that fits the self-claim', async () => {
+    await expect(run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name', 'string', { attrs: { was: 'name' } })));
+      deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    })).rejects.toThrow(/names a column the model still declares[\s\S]*free the old name by renaming the field that declares it/);
+  });
+});
+
 describe('migrate: the differ — determinism and ordering', () => {
   const declaredOf = (...specs) => ({ tables: specs });
 
@@ -783,6 +1098,63 @@ describe('migrate: rename-signal rejections — ambiguity is loud, never a silen
       [table('users', [col('name')]), table('members', [col('name')])],
     )).rejects.toThrow(/BOTH tables exist in the database/);
   });
+
+  // Two models on one table used to fold into one map entry, so the
+  // last declaration defined the table and the other's columns read as
+  // drops — a plan whose contents changed with declaration order.
+  test('two models mapping to one table — refused in BOTH declaration orders', async () => {
+    for (const order of [['Alpha', 'Bravo'], ['Bravo', 'Alpha']]) {
+      const defs = {
+        Alpha: () => K4.__schema(model('Alpha', dir('table', { name: 'orders' }),
+          field('total', 'integer'), field('amount', 'integer'))),
+        Bravo: () => K4.__schema(model('Bravo', dir('table', { name: 'orders' }),
+          field('total', 'integer'))),
+      };
+      await expect(plan4(
+        () => { for (const n of order) defs[n](); },
+        [table('orders', [col('total', 'INTEGER', { notNull: true })])],
+      )).rejects.toThrow(/both map to table 'orders' — one table has one model/);
+    }
+  });
+
+  test('a caller-built declared set with a duplicate table is refused too', () => {
+    const dup = { tables: [table('orders', [col('total')]), table('orders', [col('total')])] };
+    expect(() => mig.diffSchemas(dup, { tables: [] }))
+      .toThrow(/table 'orders' is declared twice/);
+  });
+
+  // The column differ reads a moved primary key as one column added
+  // and another dropped. The ADD carries the sequence default, so it
+  // backfills fresh values over every row's identity — and it is
+  // classed `safe`. There is no ALTER that moves a primary key.
+  test('a primary-key rename is BLOCKED, not planned as add + drop', async () => {
+    const steps = await plan4(
+      () => K4.__schema(model('Patient', dir('primaryKey', { name: 'patientId' }), field('name'))),
+      [table('patients', [col('name', 'VARCHAR', { notNull: true })])],
+    );
+    expect(steps.map((x) => [x.table, x.kind, x.class]))
+      .toEqual([['patients', 'note-primary-key', 'blocked']]);
+    expect(steps[0].notes.join(' ')).toMatch(/deployed primary key is id and the model declares patient_id/);
+  });
+
+  // The pk-shape skip used to be unconditional, so a natural key's
+  // drift from the deployed column was the one difference the differ
+  // could not see: it reported no steps at all.
+  test('a natural key that drifted from its deployed column still diffs', async () => {
+    const steps = await plan4(
+      () => K4.__schema(model('Country', dir('primaryKey', { name: 'iso' }),
+        field('iso', 'string', { constraints: { max: 2 } }), field('name'))),
+      [{
+        name: 'countries', sequence: null, primaryKey: 'iso', indexes: [], foreignKeys: [],
+        columns: [
+          { name: 'iso', type: 'INTEGER', notNull: true, unique: false, default: null, primary: true },
+          col('name', 'VARCHAR', { notNull: true }),
+        ],
+      }],
+    );
+    expect(steps.map((x) => [x.table, x.kind, x.class]))
+      .toEqual([['countries', 'alter-type', 'lossy']]);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -931,7 +1303,10 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
       K4.__schema(model('User', field('fullName', 'string', { attrs: { was: 'name' } })));
       K4.__schema(model('Order', dir('belongsTo', { target: 'User', optional: false })));
       return mig.make('x', { dir: mdir, allowLossy: true, allowDestructive: true });
-    }))).rejects.toThrow(/cannot execute while foreign keys reference the table[\s\S]*no flag overrides this/);
+      // The refusal names dependent entries generically: a block can be
+      // FK-caused or index-caused, and the message must not claim FKs
+      // when an index is the wall.
+    }))).rejects.toThrow(/cannot execute while other entries \(foreign keys, indexes\) depend on the table[\s\S]*no flag overrides this/);
   });
 });
 

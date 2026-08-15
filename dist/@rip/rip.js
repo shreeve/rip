@@ -74,6 +74,9 @@ var syncOpsFlag = () => {
 function __schemaSnake(s) {
   return String(s).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
+function __schemaCamel(col) {
+  return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
 function __schemaIsCanonicalName(name) {
   if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
     return false;
@@ -158,6 +161,7 @@ var HOOK_NAMES = new Set([
 var MODEL_DIRECTIVES = __SCHEMA_MODEL_DIRECTIVES;
 var RELATION_DIRECTIVES = __SCHEMA_RELATION_DIRECTIVES;
 var snakeCase = __schemaSnake;
+var camelCase = __schemaCamel;
 var SCHEMA_COERCIBLE_TYPES = new Set(["integer", "number", "boolean", "date", "datetime"]);
 var SCHEMA_NAMED_COERCER_TYPES = {
   __proto__: null,
@@ -1017,12 +1021,19 @@ function finishModelBody(entries, fail) {
     return;
   const known = new Set;
   const ownerOf = new Map;
-  const claim = (col, owner, at) => {
+  const columnOf = new Map;
+  const propertyOwnerOf = new Map;
+  const claim = (property, col, owner, at) => {
     if (known.has(col)) {
       fail(`${ownerOf.get(col)} and ${owner} both own column '${col}' — every table column has exactly one owner`, at);
     }
+    if (columnOf.has(property)) {
+      fail(`${propertyOwnerOf.get(property)} and ${owner} both own property '${property}' (columns '${columnOf.get(property)}' and '${col}') — every property reads exactly one column`, at);
+    }
     known.add(col);
     ownerOf.set(col, owner);
+    columnOf.set(property, col);
+    propertyOwnerOf.set(property, owner);
   };
   const pkDirective = entries.find((e) => e.tag === "directive" && e.name === "primaryKey");
   const pkColumn = pkDirective ? pkDirective.args[0].column ?? snakeCase(pkDirective.args[0].name) : "id";
@@ -1047,35 +1058,39 @@ function finishModelBody(entries, fail) {
       fail(`@primaryKey names column '${pkDirective.args[0].column}' but field '${pkName}' reads a different one — state the column once, on the field`, pkDirective.start);
     }
   } else {
-    claim(pkColumn, "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
+    claim(pkName, pkColumn, "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
   }
-  const columnOfField = new Map;
   for (const e of entries) {
     if (e.tag !== "field")
       continue;
-    const col = e.attrs?.column ?? snakeCase(e.name);
-    columnOfField.set(e.name, col);
-    claim(col, `field '${e.name}'`, e.start);
+    claim(e.name, e.attrs?.column ?? snakeCase(e.name), `field '${e.name}'`, e.start);
   }
   for (const e of entries) {
     if (e.tag !== "directive")
       continue;
     if (e.name === "timestamps") {
-      claim("created_at", "@timestamps", e.start);
-      claim("updated_at", "@timestamps", e.start);
+      claim("createdAt", "created_at", "@timestamps", e.start);
+      claim("updatedAt", "updated_at", "@timestamps", e.start);
     } else if (e.name === "softDelete")
-      claim("deleted_at", "@softDelete", e.start);
+      claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
       const a = e.args[0];
-      claim(a.foreignKey ?? snakeCase(a.target) + "_id", `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
+      const fk = a.foreignKey ?? snakeCase(a.target) + "_id";
+      claim(camelCase(fk), fk, `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
     }
   }
   for (const e of entries) {
     if (e.tag !== "directive" || e.name !== "index" && e.name !== "unique")
       continue;
-    e.args[0].fields.forEach((c, ci) => {
-      if (!columnOfField.has(c) && !known.has(snakeCase(c))) {
-        fail(`@${e.name}: unknown column '${c}' — the table has: ${[...known].sort().join(", ")}`, e.colTokens?.[ci]?.start ?? e.start);
+    const cols = e.args[0].fields.map((c) => columnOf.get(c) ?? (known.has(c) ? c : snakeCase(c)));
+    cols.forEach((col, ci) => {
+      if (cols.indexOf(col) !== ci) {
+        fail(`@${e.name} columns must be distinct after canonicalization: ${cols.join(", ")}`, e.colTokens?.[ci]?.start ?? e.start);
+      }
+    });
+    cols.forEach((col, ci) => {
+      if (!known.has(col)) {
+        fail(`@${e.name}: unknown column '${e.args[0].fields[ci]}' — the table has: ${[...known].sort().join(", ")}`, e.colTokens?.[ci]?.start ?? e.start);
       }
     });
   }
@@ -20446,7 +20461,7 @@ class __SchemaDef {
           unionMembers.push(e.name);
       }
     }
-    this._norm = {
+    const norm = {
       fields,
       methods,
       computed,
@@ -20462,7 +20477,8 @@ class __SchemaDef {
       unionMembers
     };
     if (this.kind === "model")
-      __schemaPersistence.finishModelNorm(this, this._norm);
+      __schemaPersistence.finishModelNorm(this, norm);
+    this._norm = norm;
     return this._norm;
   }
   _unionPlan() {
