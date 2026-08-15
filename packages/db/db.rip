@@ -36,25 +36,32 @@ wireSchemaAdapter = (adapter) ->
 #
 # The error classes are re-exported rather than redefined: a caller's
 # `instanceof QueryError` and the ORM's must name the same class.
+#
+# Imported under their own names — most are used below — then re-exported
+# as a block. `export {…} from` would be shorter but binds nothing locally,
+# and five of these are thrown or called in this file.
 import {
-  harborAdapter as _harborAdapter
-  resolveUrl as _resolveUrl
-  DbError as _DbError
-  ConnectionError as _ConnectionError
-  QueryError as _QueryError
-  CancelledError as _CancelledError
-  isDbError as _isDbError
-  encodeParams as _encodeParams
+  harborAdapter
+  resolveUrl
+  DbError
+  ConnectionError
+  QueryError
+  CancelledError
+  isDbError
 } from '../../src/runtime/harbor.js'
 
-export harborAdapter = _harborAdapter
-export resolveUrl = _resolveUrl
-export DbError = _DbError
-export ConnectionError = _ConnectionError
-export QueryError = _QueryError
-export CancelledError = _CancelledError
-export isDbError = _isDbError
-encodeParams = _encodeParams
+# `encodeParams` is deliberately not among them: it is harbor's wire
+# encoder, internal to the transport, and not part of this package's
+# surface. ROOT_EXPORTS in test.rip pins that.
+export {
+  harborAdapter
+  resolveUrl
+  DbError
+  ConnectionError
+  QueryError
+  CancelledError
+  isDbError
+}
 
 # ==[ Client ]================================================================
 
