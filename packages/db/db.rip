@@ -48,7 +48,7 @@ import {
   QueryError
   CancelledError
   isDbError
-} from '../../src/runtime/harbor.js'
+} from '../../src/runtime/duckdb.js'
 
 # `encodeParams` is deliberately not among them: it is harbor's wire
 # encoder, internal to the transport, and not part of this package's

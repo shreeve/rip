@@ -14493,21 +14493,21 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsSchema(sexpr),
   },
   {
-    // The duckdb-harbor client. Binds NO user-facing name — it is
-    // delivered only as a dependency, fused into the unit of whatever
-    // requires it, so a program that declares no model carries none of
-    // it. Server-only by nature (fetch, process.env): never add it to
-    // the browser runtime surface.
-    key: 'harbor',
+    // The DuckDB substrate (wire client to duckdb-harbor). Binds NO
+    // user-facing name — it is delivered only as a dependency, fused
+    // into the unit of whatever requires it, so a program that declares
+    // no model carries none of it. Server-only by nature (fetch,
+    // process.env): never add it to the browser runtime surface.
+    key: 'duckdb',
     names: [],
-    url: new URL('./runtime/harbor.js', import.meta.url),
+    url: new URL('./runtime/duckdb.js', import.meta.url),
     triggers: () => false,
   },
   {
     key: 'orm',
     names: ['schema', '__schemaSetAdapter'],
     url: new URL('./runtime/orm.js', import.meta.url),
-    requires: ['schema', 'harbor', 'vocab'],
+    requires: ['schema', 'duckdb', 'vocab'],
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
   },
   {

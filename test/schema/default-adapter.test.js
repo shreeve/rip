@@ -8,7 +8,7 @@
 // session instead of orphaning it, and a session response missing its
 // id refuses loudly rather than running BEGIN/COMMIT as independent
 // autocommit statements on the pool. Those guarantees now come from
-// the ONE client in src/runtime/harbor.js, which packages/db uses too —
+// the ONE client in src/runtime/duckdb.js, which packages/db uses too —
 // so this file is the schema tier's half of a single implementation
 // rather than a parity check between two. Temporal columns decode to
 // real Date objects and Date params encode to ISO-Z at that one seam.
@@ -18,7 +18,7 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const orm = await import('../../src/runtime/orm.js');
-const hb = await import('../../src/runtime/harbor.js');
+const hb = await import('../../src/runtime/duckdb.js');
 
 const adapter = () => orm.__schemaConnect({ url: 'http://h' });
 
@@ -197,7 +197,7 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
   // re-runs orm.js's globalThis publishing. So pin the source, the way
   // packages/db pins DEFAULT_TIMEOUT_MS.
   test('the unconfigured default targets harbor\'s own default port', () => {
-    const src = readFileSync(new URL('../../src/runtime/harbor.js', import.meta.url), 'utf8');
+    const src = readFileSync(new URL('../../src/runtime/duckdb.js', import.meta.url), 'utf8');
     expect(src).toContain("const DEFAULT_URL = 'http://127.0.0.1:9495'");
     expect(src).not.toContain('9494');
   });

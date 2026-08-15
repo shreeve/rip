@@ -28,7 +28,7 @@
 // where the host has none.
 
 import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
-import { harborAdapter } from './harbor.js';
+import { harborAdapter } from './duckdb.js';
 import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCanonicalName, __schemaAttrValueError, __SCHEMA_MODEL_DIRECTIVES, __SCHEMA_ONCE_DIRECTIVES, __SCHEMA_RELATION_DIRECTIVES, __SCHEMA_FIELD_ATTRS, __SCHEMA_RELATION_ATTRS } from './vocab.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
@@ -913,10 +913,9 @@ function jsonSchemaModelColumns(def, properties) {
 
 // ── the adapter (Contract v2) ─────────────────────────────────────────
 
-// Temporal encode/decode used to be replicated here, because this file
-// could not reach packages/db. It lives in ./harbor.js now — one decode
-// seam, one copy of it — and this runtime no longer touches the wire at
-// all: an installed adapter owns that, per the contract above.
+// Temporal encode/decode lives in ./duckdb.js — one decode seam, one
+// copy of it — and this runtime never touches the wire at all: an
+// installed adapter owns that, per the contract above.
 
 // The default adapter, for a schema-model app that installs none: the
 // one duckdb-harbor client, configured from RIP_DB_URL / RIP_DB_TOKEN.

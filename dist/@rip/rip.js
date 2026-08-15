@@ -18914,16 +18914,16 @@ var RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsSchema(sexpr)
   },
   {
-    key: "harbor",
+    key: "duckdb",
     names: [],
-    url: new URL("./runtime/harbor.js", import.meta.url),
+    url: new URL("./runtime/duckdb.js", import.meta.url),
     triggers: () => false
   },
   {
     key: "orm",
     names: ["schema", "__schemaSetAdapter"],
     url: new URL("./runtime/orm.js", import.meta.url),
-    requires: ["schema", "harbor", "vocab"],
+    requires: ["schema", "duckdb", "vocab"],
     triggers: (sexpr, preds) => containsModelSchema(sexpr)
   },
   {
