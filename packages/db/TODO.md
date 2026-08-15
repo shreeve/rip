@@ -29,39 +29,25 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 
 ## Do now
 
-- [ ] **Set `HARBOR_STATEMENT_TIMEOUT_MS` where harbor starts.** The
-      client side landed (see below), so this is now safe to deploy and
-      is the only layer that can recover a wedged pool: harbor's reaper
-      interrupts from its own thread, while the cancel endpoint itself
-      needs a free worker. Measured: 8 concurrent runaways make `/sql`,
-      session-open, and `DELETE /sql/queries/<id>` all unanswerable;
-      restarting with `HARBOR_STATEMENT_TIMEOUT_MS=5000` and **no client
-      change** resolved it completely — each runaway returned
-      `code: "cancelled"` and the pool stayed responsive throughout.
-      Suggested `30000`. Belongs in the deployment runbook, not this repo.
-      Not urgent: the wedge needs ~6 concurrent long statements and a
-      default app can have 2 in flight (`WORKER_CONCURRENCY=1`, 2
-      workers), none of them long. It is worth doing because it is the
-      one failure with no self-recovery path.
-- [ ] **`rip schema dump`** — a checked-in file stating the current shape
-      of every table, diffed in CI. Purely additive: touches no read
-      path, changes no SQL, breaks none of the 323 schema tests.
-      `canonicalDeclared()` (`migrate.js:185`) already returns the
-      structure and `__schemaRenderCreate` already renders it.
-      **This is the highest-value item in the document** because it buys
-      *evidence*: if undeclared columns or naming drift are real, a
-      diffed dump surfaces them the day they appear; if they never
-      appear, the entire projection question is answered empirically for
-      the price of one command. Buy information before buying a rewrite.
-      It is also why `snake()` magic never bit Rails teams — `schema.rb`
-      answers "is that column `email` or `email_addr`?" by opening a file.
-- [ ] **Migrate the one demonstrated victim.**
-      `medlabs/api/routes/patients.rip:14` writes
-      `.order('last_name, first_name')` — snake_case column strings
-      against a camelCase model — and `medlabs/api/db.rip:47-50`
-      hand-rolls a second camelizer for raw-SQL rows. The first can now
-      be `.order({lastName: 'asc'}, …)`; the second still wants an
-      opt-in result projection for the raw path.
+- [ ] **Restart the running harbor.** The start command carries
+      `HARBOR_STATEMENT_TIMEOUT_MS=30000` (medlabs README — the
+      documented place harbor starts, the runbook being deferred), but
+      an already-running harbor predates it. The deadline is the pool's
+      only self-recovery path; it exists at the next restart, not before.
+- [ ] **Adopt the dump.** `rip schema dump` and `--check` exist; the
+      evidence loop closes when medlabs checks in `api/schema.sql` and
+      CI diffs it. Until a dump is committed and checked, naming drift
+      still surfaces the old way — by being hit.
+
+## Decisions parked — each needs an owner call before code
+
+- [ ] **Full composite-UNIQUE modeling in the differ.** The plan now
+      emits a loud `note-unique` step for every deployed composite
+      constraint (landed; refuse-not-guess), but the differ still cannot
+      DIFF them — the unique flag is per-column, and the model layer's
+      expressible form is a unique index. Full modeling would
+      rearchitect that for a constraint form the ORM never emits.
+      Revive if hand-written composite-constraint tables become real.
 
 ## Landed
 
@@ -515,10 +501,22 @@ transaction-scope identities. `duckdb.js` itself is runtime-portable (no
 
 ## Harbor (Rust)
 
+- [ ] **Ship v0.9.1.** The `uniqueConstraints` catalog field and the
+      version bump sit verified and uncommitted in the harbor tree;
+      the rip-side mapping already tolerates both 0.9.0 and 0.9.1
+      documents. Before any deploy to `live`: one `make check` against
+      a real v1.5.5 engine — the local suites run on the v2 alpha CLI
+      only.
 - [ ] Structured constraint errors (code, table, column, constraint), so
       the ORM stops parsing English.
 - [ ] Reserve capacity for cancel/health requests so the control plane
       cannot be starved by data workers — the root cause of the wedge,
       of which a statement deadline is only containment.
-- [ ] Multi-statement batch; cursor/chunked fetch; an Arrow content type.
-- [ ] README "Known limitations" still claims no cancellation. Stale.
+- [ ] Multi-statement batch; cursor/chunked fetch; an Arrow content type
+      (chunked fetch is what makes a true streaming `nextRow!` possible
+      client-side — the JS API can be cursor-shaped today, but delivery
+      is buffered until harbor can stream).
+- [ ] `/catalog` sequences carry no schema field; two same-named
+      sequences in different schemas are indistinguishable. Contrived
+      under the `<table>_seq` convention, recorded so it is not
+      re-discovered.

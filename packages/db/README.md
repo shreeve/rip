@@ -154,6 +154,17 @@ db.value! 'SELECT count(*) AS n FROM users'
 `ident(name)` quotes a SQL identifier (doubling embedded `"`);
 `materializeAll(result)` turns a raw adapter envelope into row objects.
 
+Row keys are the database's own spellings — raw SQL is never rewritten.
+For rows headed to camelCase-keyed consumers, pass `{ camel: true }` in
+any call's options (`query! sql, params, { camel: true }` — likewise
+`findAll` / `findOne`, every client method, transaction surfaces, and
+`materializeAll(result, { camel: true })`) to opt that result's row
+keys and reported `columns` into a snake_case → camelCase projection.
+It is the same transform the schema ORM uses for column names, and it
+is not total: only `_` before a lowercase letter folds, so `nickname_2`
+and ALL-CAPS segments stay put, and a leading underscore folds
+(`_internal` → `Internal`).
+
 Duplicate column names in a join overwrite in row objects (object keys
 are unique) — alias them in SQL (`users.id AS user_id`) or read
 positionally from the adapter's `data` arrays.
@@ -198,7 +209,8 @@ conflicts itself.
 
 Pass `{ signal }` to cancel: an already-aborted signal rejects before
 dispatch; an in-flight abort rejects with `CancelledError` and aborts
-the harbor request.
+the harbor request. Pass `{ camel: true }` to opt the result into the
+snake_case → camelCase key projection described above.
 
 ## Boot Probe
 
