@@ -29,15 +29,11 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 
 ## Do now
 
-- [ ] **Restart the running harbor.** The start command carries
-      `HARBOR_STATEMENT_TIMEOUT_MS=30000` (medlabs README — the
-      documented place harbor starts, the runbook being deferred), but
-      an already-running harbor predates it. The deadline is the pool's
-      only self-recovery path; it exists at the next restart, not before.
-- [ ] **Adopt the dump.** `rip schema dump` and `--check` exist; the
-      evidence loop closes when medlabs checks in `api/schema.sql` and
-      CI diffs it. Until a dump is committed and checked, naming drift
-      still surfaces the old way — by being hit.
+- [ ] **Commit medlabs' `api/schema.sql` and wire `--check` into its
+      CI.** The dump is written and current (162 lines, all ten
+      models); the evidence loop closes when it is checked in and
+      diffed on every change. Until then the file answers naming
+      questions locally but drift does not fail a build.
 
 ## Decisions parked — each needs an owner call before code
 
