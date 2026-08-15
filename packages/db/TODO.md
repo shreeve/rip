@@ -515,14 +515,6 @@ transaction-scope identities. `duckdb.js` itself is runtime-portable (no
 
 ## Harbor (Rust)
 
-- [ ] `GET /catalog` reports no column-level UNIQUE constraints (its
-      filter is `PRIMARY KEY`/`FOREIGN KEY`, and inline UNIQUE has no
-      index in `duckdb_indexes()`), so a hand-written
-      `CREATE TABLE … UNIQUE` column introspects as not-unique. The
-      ORM's own DDL never emits inline UNIQUE — uniqueness is always
-      the auto-named index — so this bites only hand-created tables.
-      Extend the contract (surface UNIQUE constraints), then map it in
-      `migrate.js` `introspect()`.
 - [ ] Structured constraint errors (code, table, column, constraint), so
       the ORM stops parsing English.
 - [ ] Reserve capacity for cancel/health requests so the control plane
