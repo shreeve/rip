@@ -2091,7 +2091,7 @@ describe('orm: runtime delivery', () => {
 
   test('referencing the schema namespace delivers the persistence runtime AND its validation dependency', () => {
     const { runtimes } = compile(ORM_SRC);
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...runtimes].sort()).toEqual(['harbor', 'orm', 'schema']);
   });
 
   test('a schema DECLARATION alone never delivers the persistence runtime', () => {
@@ -2130,11 +2130,12 @@ describe('orm: runtime delivery', () => {
   // program failed to load. The strip is global (a runtime may carry
   // several sibling imports) and anything it cannot reach is refused.
   test('inline delivery strips EVERY sibling import, not just the first', () => {
+    // orm.js already imports two siblings; a third must go the same way.
     const raw = readFileSync(new URL('../../src/runtime/orm.js', import.meta.url), 'utf8');
     const twoImports = raw.replace(
       /^(import \{[^}]*\} from '\.\/schema\.js';)$/m,
       "$1\nimport { __schemaNothing } from './reactive.js';");
-    expect((twoImports.match(/^import /gm) ?? []).length).toBe(2);
+    expect((twoImports.match(/^import /gm) ?? []).length).toBe(3);
     const stripped = twoImports
       .replace(/^export \{[^}]*\};\s*$/gm, '')
       .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '');
@@ -2154,7 +2155,7 @@ describe('orm: runtime delivery', () => {
 
   test('a transaction-only module (no schema declaration) still gets the fused pair', () => {
     const { code, runtimes } = compile(ORM_SRC, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...runtimes].sort()).toEqual(['harbor', 'orm', 'schema']);
     expect(code.startsWith('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter } = (() => {')).toBe(true);
   });
 
@@ -2240,7 +2241,7 @@ describe('orm: runtime delivery', () => {
   test('dual delivery with the reactive runtime: separate blocks, rows keyed by range', () => {
     const src = 'count := 1\nschema.setAdapter({query: (s) -> {columns: [], data: [], rowCount: 0}})\ncount = count + 1';
     const { code, runtimes, mappings } = compile(src, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'reactive', 'schema']);
+    expect([...runtimes].sort()).toEqual(['harbor', 'orm', 'reactive', 'schema']);
     const runtimeRows = mappings.rows.filter((r) => r.role === 'runtime');
     expect(runtimeRows.length).toBe(2);
     const [a, b] = runtimeRows.sort((x, y) => x.generatedStart - y.generatedStart);
@@ -2260,7 +2261,7 @@ describe('orm: runtime delivery', () => {
     // itself is the trigger
     for (const mode of ['none', 'import', 'inline']) {
       const { runtimes } = compile(src, { runtimeDelivery: mode });
-      expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+      expect([...runtimes].sort()).toEqual(['harbor', 'orm', 'schema']);
     }
     const imp = compile(src, { runtimeDelivery: 'import' });
     const lines = imp.code.split('\n');
@@ -2271,7 +2272,7 @@ describe('orm: runtime delivery', () => {
     // a model nested inside a function body triggers from the tree
     // walk too
     const nested = compile('f = ->\n  T = schema :model\n    b! string\n  T', { runtimeDelivery: 'import' });
-    expect([...nested.runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...nested.runtimes].sort()).toEqual(['harbor', 'orm', 'schema']);
   });
 
   test('end to end from the compiled DSL: a model declared in Rip persists through a recording adapter and round-trips', async () => {
@@ -2297,7 +2298,7 @@ describe('orm: runtime delivery', () => {
  'again = await User.find(1)',
     ].join('\n');
     const { runtimes } = compile(src, { runtimeDelivery: 'inline' });
-    expect([...runtimes].sort()).toEqual(['orm', 'schema']);
+    expect([...runtimes].sort()).toEqual(['harbor', 'orm', 'schema']);
     const { code: none } = compile(src, { runtimeDelivery: 'none' });
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     await K4.scope(async () => {

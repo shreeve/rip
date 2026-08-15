@@ -28,6 +28,7 @@
 // where the host has none.
 
 import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
+import { harborAdapter } from './harbor.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
 
@@ -563,160 +564,31 @@ function jsonSchemaModelColumns(def, properties) {
 
 // ── the adapter (Contract v2) ─────────────────────────────────────────
 
-// Temporal values cross the adapter wire as real JS `Date` objects.
-// The design is ONE decode seam at the wire, and this default adapter
-// is a wire seam exactly like packages/db's harborAdapter, so the
-// decode/encode below is replicated inline from adapter.rip (core src/
-// must not import packages/) and must stay identical to it. Rationale:
-// a naive TIMESTAMP arrives with no `Z`/offset, so `new Date(value)`
-// in app code would read it as LOCAL and shift by the host's UTC
-// offset — naive TIMESTAMP is defined as UTC wall-clock and decoded
-// here (plus DATE / TIMESTAMPTZ), keyed by the column's duckdbType.
-// Only `YYYY-MM-DD[...]`-shaped strings decode; anything else (DuckDB's
-// `infinity` sentinels, unexpected formats) passes through untouched.
-// Symmetrically an outbound `Date` parameter encodes to an explicit
-// ISO-8601 UTC string (nested Dates in array/object params included),
-// and an Invalid Date throws loudly instead of letting JSON silently
-// serialize it to `null`.
-const __SCHEMA_TEMPORAL_ISO = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})?$/;
-const __SCHEMA_TEMPORAL_ZONE = /([Zz]|[+-]\d{2}:?\d{2})$/;
+// Temporal encode/decode used to be replicated here, because this file
+// could not reach packages/db. It lives in ./harbor.js now — one decode
+// seam, one copy of it — and this runtime no longer touches the wire at
+// all: an installed adapter owns that, per the contract above.
 
-function __schemaTemporalKind(duckdbType) {
-  switch (String(duckdbType ?? '').trim().toUpperCase()) {
-    case 'TIMESTAMP': case 'TIMESTAMP_S': case 'TIMESTAMP_MS': case 'TIMESTAMP_NS': case 'DATETIME':
-      return 'utc';      // naive wall-clock we define as UTC → append `Z`, then parse
-    case 'TIMESTAMP WITH TIME ZONE': case 'TIMESTAMPTZ':
-      return 'instant';  // already carries `Z`/offset → parse as-is
-    case 'DATE':
-      return 'civil';    // date-only → parse as-is (UTC midnight)
-    default:
-      return null;       // not a type we decode (TIME, INTERVAL, scalars, nested)
-  }
-}
-
-function __schemaDecodeTemporal(value, kind) {
-  if (!kind || typeof value !== 'string' || !__SCHEMA_TEMPORAL_ISO.test(value)) return value;
-  // Canonicalize to ISO 8601 so parsing is engine-independent: ` ` →
-  // `T` date/time separator, a bare `±HHMM` offset → `±HH:MM`.
-  let iso = value.replace(' ', 'T').replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
-  if (kind === 'utc' && !__SCHEMA_TEMPORAL_ZONE.test(iso)) iso += 'Z';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? value : date;
-}
-
-// Decode every temporal cell of a harbor envelope in one pass. Fast
-// path: no temporal column, no row copy — the envelope is returned
-// untouched. `lossless` rides along and never gates the decode.
-function __schemaDecodeEnvelope(env) {
-  if (!Array.isArray(env?.columns) || !Array.isArray(env?.data)) return env;
-  const kinds = env.columns.map((c) => __schemaTemporalKind(c?.duckdbType ?? c?.type));
-  if (!kinds.some((k) => k != null)) return env;
-  const data = env.data.map((row) =>
-    row.map((v, i) => (kinds[i] ? __schemaDecodeTemporal(v, kinds[i]) : v)));
-  return { ...env, data };
-}
-
-function __schemaEncodeParam(v) {
-  if (v instanceof Date) {
-    if (Number.isNaN(v.getTime())) {
-      throw new TypeError('db: cannot bind an Invalid Date as a query parameter');
-    }
-    return v.toISOString();
-  }
-  if (Array.isArray(v)) return v.map(__schemaEncodeParam);
-  if (v != null && typeof v === 'object' &&
-      (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null)) {
-    const out = {};
-    for (const k of Object.keys(v)) out[k] = __schemaEncodeParam(v[k]);
-    return out;
-  }
-  return v;
-}
-
-// The default adapter speaks HTTP to a duckdb-harbor-shaped endpoint:
-// `query` POSTs /sql; `begin` pins a session (POST /sql/sessions/new),
-// carries its sessionId per statement, and destroys it after
-// COMMIT / ROLLBACK.
+// The default adapter, for a schema-model app that installs none: the
+// one duckdb-harbor client, configured from RIP_DB_URL / RIP_DB_TOKEN.
+// `src/cli/schema.js` advertises exactly this path.
+//
+// This used to be eighty lines of hand-rolled fetch living beside the
+// real client in packages/db — a copy that drifted until it dialled the
+// wrong port, discarded DuckDB's error text, could not read harbor's
+// NDJSON, and knew nothing of timeouts or cancellation. There is one
+// client now, and this is a call into it.
+//
+// timeoutMs: 0 keeps today's behavior exactly — schema-model apps and
+// the migration runner have never had a deadline, and a migration is
+// the one workload where a long statement is expected rather than a
+// runaway. Giving them one is a decision to make on its own.
 function __schemaDefaultAdapter(overrides) {
-  const env = (typeof process !== 'undefined' && process.env) || {};
-  const base = () => String(
-    overrides?.url || env.RIP_DB_URL || 'http://127.0.0.1:9495').replace(/\/+$/, '');
-  const headers = () => {
-    const h = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-    const token = overrides?.token || env.RIP_DB_TOKEN;
-    if (token) h['Authorization'] = 'Bearer ' + token;
-    return h;
-  };
-  async function post(path, body) {
-    const res = await fetch(base() + path, {
-      method: 'POST', headers: headers(), body: JSON.stringify(body),
-    });
-    let data;
-    try { data = await res.json(); } catch { data = {}; }
-    if (!res.ok || data.ok === false || data.error) {
-      const err = new Error(data.error || ('db request failed: ' + res.status + ' ' + (res.statusText || '')));
-      if (data.errorCode) err.code = data.errorCode;
-      if (data.errorDetails) err.details = data.errorDetails;
-      err.httpStatus = res.status;
-      throw err;
-    }
-    return data;
-  }
-  return {
-    async query(sql, params) {
-      const body = params && params.length
-        ? { sql, params: params.map(__schemaEncodeParam) }
-        : { sql };
-      return __schemaDecodeEnvelope(await post('/sql', body));
-    },
-    async begin(options) {
-      const session = await post('/sql/sessions/new', {});
-      const sessionId = session.sessionId;
-      // No session id means no isolation — refuse loudly rather than
-      // run BEGIN/COMMIT as independent autocommit statements on the
-      // pool.
-      if (sessionId == null) {
-        throw new Error('db: harbor returned no session id for the transaction');
-      }
-      const run = async (sql, params) =>
-        __schemaDecodeEnvelope(await post('/sql', params && params.length
-          ? { sql, params: params.map(__schemaEncodeParam), sessionId }
-          : { sql, sessionId }));
-      const drop = async () => {
-        // Best-effort: harbor's idle TTL reaps abandoned sessions, so
-        // a failed DELETE only delays cleanup, never leaks a
-        // transaction.
-        try {
-          await fetch(base() + '/sql/sessions/' + sessionId, { method: 'DELETE', headers: headers() });
-        } catch {}
-      };
-      // A failed BEGIN would otherwise orphan the freshly-created
-      // session with no handle for the caller to clean up — drop it
-      // here.
-      try {
-        await run('BEGIN');
-      } catch (error) {
-        await drop();
-        throw error;
-      }
-      return {
-        query: run,
-        async commit() {
-          // drop in a finally, mirroring rollback: a failed COMMIT
-          // still releases the open transaction now, not at the idle
-          // TTL.
-          try { await run('COMMIT'); } finally { await drop(); }
-        },
-        async rollback() {
-          try { await run('ROLLBACK'); } finally { await drop(); }
-        },
-      };
-    },
-    // ddlTransactional: DuckDB rolls DDL back with the transaction,
-    // so the migration runner may claim a whole-file rollback
-    // (Adapter Contract v2 — the capability governs the claim).
-    capabilities: { tx: true, ddlTransactional: true },
-  };
+  return harborAdapter({
+    url: overrides?.url,
+    token: overrides?.token,
+    timeoutMs: 0,
+  });
 }
 
 // The contract's floor, checked at every installation seam: an

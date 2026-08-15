@@ -7,13 +7,13 @@
 // now, not at the idle TTL), a failed BEGIN drops its freshly-created
 // session instead of orphaning it, and a session response missing its
 // id refuses loudly rather than running BEGIN/COMMIT as independent
-// autocommit statements on the pool. It must also carry the same
-// temporal wire behavior (owner ruling on PORT-AUDIT D2): the design
-// is ONE decode seam at the wire, and both adapters are wire seams, so
-// temporal columns decode to real Date objects and Date params encode
-// to ISO-Z identically here — pinned below against packages/db's
-// temporal suite. The adapter reads the global fetch, so each test
-// swaps in a scripted double and restores it.
+// autocommit statements on the pool. Those guarantees now come from
+// the ONE client in src/runtime/harbor.js, which packages/db uses too —
+// so this file is the schema tier's half of a single implementation
+// rather than a parity check between two. Temporal columns decode to
+// real Date objects and Date params encode to ISO-Z at that one seam.
+// The adapter reads the global fetch, so each test swaps in a scripted
+// double and restores it.
 import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
@@ -73,7 +73,11 @@ describe('default adapter transactions (session lifecycle)', () => {
       await tx.query('INSERT INTO u VALUES (?)', ['x']);
       await tx.commit();
     });
-    const bodies = fetch.calls.filter(c => c.url.endsWith('/sql')).map(c => c.body);
+    // Every statement is named so it can be cancelled; the name is fresh
+    // per request and is not what this test is about.
+    const bodies = fetch.calls.filter(c => c.url.endsWith('/sql'))
+      .map(({ body: { queryId, ...rest } }) => rest);
+    expect(fetch.calls.filter(c => c.url.endsWith('/sql')).every(c => typeof c.body.queryId === 'string')).toBe(true);
     expect(bodies[0]).toEqual({ sql: 'BEGIN', sessionId: 'sess-1' });
     expect(bodies[1]).toEqual({ sql: 'INSERT INTO u VALUES (?)', params: ['x'], sessionId: 'sess-1' });
     expect(bodies[2]).toEqual({ sql: 'COMMIT', sessionId: 'sess-1' });
@@ -192,8 +196,8 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
   // re-runs orm.js's globalThis publishing. So pin the source, the way
   // packages/db pins DEFAULT_TIMEOUT_MS.
   test('the unconfigured default targets harbor\'s own default port', () => {
-    const src = readFileSync(new URL('../../src/runtime/orm.js', import.meta.url), 'utf8');
-    expect(src).toContain("env.RIP_DB_URL || 'http://127.0.0.1:9495'");
+    const src = readFileSync(new URL('../../src/runtime/harbor.js', import.meta.url), 'utf8');
+    expect(src).toContain("const DEFAULT_URL = 'http://127.0.0.1:9495'");
     expect(src).not.toContain('9494');
   });
 });

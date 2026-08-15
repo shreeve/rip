@@ -1921,7 +1921,10 @@ describe('runtime delivery: the components runtime', () => {
   test('all FOUR runtimes in one module: table order, distinct units, every key reported', () => {
     const src = 'S = schema\n  a! integer\nn = __state(S.parse({a: 4}).a)\nsetContext2 = getContext\nx = __schemaSetAdapter';
     const { code, runtimes } = compile(src, { runtimeDelivery: 'import' });
-    expect([...runtimes].sort()).toEqual(['components', 'orm', 'reactive', 'schema']);
+    // `harbor` rides along as orm's dependency but binds no user-facing
+    // name, so it is reported yet emits no import line of its own —
+    // under import delivery orm.js resolves it through the module graph.
+    expect([...runtimes].sort()).toEqual(['components', 'harbor', 'orm', 'reactive', 'schema']);
     const lines = code.split('\n').slice(0, 4);
     expect(lines[0]).toContain('runtime/schema.js');
     expect(lines[1]).toContain('runtime/orm.js');
