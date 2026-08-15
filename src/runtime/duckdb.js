@@ -12,7 +12,7 @@
 // what a ROW becomes belong to whoever called it.
 //
 // Two consumers, one implementation: `src/runtime/orm.js` (the
-// `schema :model` runtime) and `packages/db/db.rip` (the Model facade,
+// `schema :model` runtime) and `packages/db/db.rip` (the rip/db client,
 // CLI and MCP server) both call into this file, so there is exactly one
 // wire client — one default port, one cancellation story, one decode
 // seam — across both tiers.
@@ -603,7 +603,7 @@ function harborAdapter(opts = {}) {
 }
 
 export {
-  harborAdapter, resolveUrl, toResult,
+  harborAdapter, resolveUrl, envToken, toResult,
   DbError, ConnectionError, QueryError, CancelledError, isDbError,
   temporalKind, decodeTemporal, decodeRows, encodeParam, encodeParams,
   parseNdjson, parseBody, isPlainObject, abortable,

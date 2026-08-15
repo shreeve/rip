@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "DuckDB over duckdb-harbor — connect(), module-level query/Model, MCP stdio server, and rip-db CLI",
+  "description": "DuckDB over duckdb-harbor — connect(), module-level query, MCP stdio server, and rip-db CLI",
   "exports": {
     ".": "./db.rip"
   },

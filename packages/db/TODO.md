@@ -16,9 +16,8 @@ Non-test `schema :model` declarations in the whole ecosystem:
 | `medlabs/api/models.rip` | 10 | harbor/DuckDB — the production app |
 | `packages/sites/demos/cart/api/models.rip` | 3 | `bun:sqlite` — never touches harbor |
 
-The `Model 'users'` facade has zero real call sites outside its own
-definition, docs, and tests. Anything below that serves an inherited
-database is serving a user who does not exist yet.
+An item that serves an inherited database is serving a user who does
+not exist yet.
 
 Measured ceilings that bound every performance and concurrency claim:
 `WORKER_CONCURRENCY` defaults to `1` with a hard 503 gate, not a queue
@@ -223,9 +222,9 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   (`orm.js:2057-2065`) attaches non-enumerable snake aliases, so
   `user.first_name` reads today. The only place camelCase is forced is
   `toJSON`'s enumerable key set.
-- **Raw SQL is never rewritten**, in either direction. `db.rip:349-353`
-  states the principle correctly. Drizzle's refusal to touch `sql``` is
-  the same line and it is right.
+- **Raw SQL is never rewritten**, in either direction.
+  docs/ORM.md ("Falling back to raw SQL") states the principle.
+  Drizzle's refusal to touch `sql``` is the same line and it is right.
 - [ ] **Document the O4 seam.** `docs/` contains zero mentions of
       camelCase, snake_case, or O4 — the reasoning lives in two code
       comments and a test name. An undocumented ratified decision is
@@ -483,23 +482,23 @@ change, not a type override.
   options. The adapter half works.
 - **Transaction retry divergence.** `packages/db` retries
   `no_lease_available` / `no_such_session` / conflicts honoring
-  `retryAfterMs` (`db.rip:161-175`, `:228-245`); the ORM receives
-  `retryAfterMs` and discards it. **Do not "lift" it as-is:**
-  `db.rip:228-231` puts `attempt! fn` *inside* the retry loop, so the
-  user callback is replayed. Safe for `no_lease_available` (the failure
+  `retryAfterMs` (db.rip `isRetryable` / `transaction`); the ORM
+  receives `retryAfterMs` and discards it. **Do not "lift" it as-is:**
+  the client's `transaction` puts `attempt! fn` *inside* the retry
+  loop, so the user callback is replayed. Safe for `no_lease_available` (the failure
   precedes the callback) and for DB-only work (writes roll back), but a
   non-database side effect inside the callback — a charge, an email —
   runs twice. That is an API contract needing documentation and probably
   an opt-in, not a port. Unreachable today regardless: the 11th
   concurrent `begin()` triggers it and an app can produce 2.
 - **`duckdb.js` buffers instead of streaming** — `await response.text()`
-  (`:384`) reads the whole NDJSON body then re-parses it, materializing
+  (`:447`) reads the whole NDJSON body then re-parses it, materializing
   large results twice and forfeiting harbor's incremental delivery.
 - **Lazy `__schemaAdapter`.** `orm.js:616` constructs at module
   evaluation, reading env at global scope. Note that laziness alone does
   not enable per-request configuration — that needs a factory or a
   request-context lookup.
-- **`ttlMs` is never sent** on session open (`duckdb.js:444`), so every
+- **`ttlMs` is never sent** on session open (`duckdb.js:540`), so every
   session silently takes the 300s maximum.
 - **`import` mode bakes an absolute path** into compiled output. Harmless
   when bundled or run through the loader; broken if raw compiled `.js`
