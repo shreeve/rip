@@ -293,9 +293,10 @@ rejects loudly before registration or activation.
 
 ## Edge ownership
 
-The packaged macOS edge uses a launchd-owned loopback TCP socket on
-`127.0.0.1:443`, inherited by user-owned Caddy as `fd/3`. The inherited stream
-serves HTTP/1.1 and HTTP/2. HTTP/3 is disabled on that listener because QUIC
+The packaged macOS edge uses two launchd-owned loopback TCP sockets —
+HTTP on `127.0.0.1:80` and HTTPS on `127.0.0.1:443` — inherited by
+user-owned Caddy as `fd/3` and `fd/4`. The inherited streams serve
+HTTP/1.1 and HTTP/2. HTTP/3 is disabled on those listeners because QUIC
 requires a separately inherited UDP socket.
 
 Caddy owns TLS and dispatches requests into Janus. Janus owns dynamic App

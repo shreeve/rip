@@ -33,13 +33,16 @@ def probe(str, opts = {})
   if str.charCodeAt(0) is 0xFEFF
     str = str.slice(1)
 
-  # detect sep= header (Excel convention)
+  # detect sep= header (Excel convention); an unterminated header line is
+  # the whole input, and an empty value declares no delimiter
   if str[0..3] is "sep="
     end = str.indexOf('\n')
     end = str.indexOf('\r') if end is -1
-    stop = (end > 0 and str.charCodeAt(end - 1) is CR) ? end - 1 : end
+    stop = end is -1 ? str.length : end
+    stop = end - 1 if end > 0 and str.charCodeAt(end - 1) is CR
     sep = str.slice(4, stop)
-    str = str.slice(end + 1) if end >= 0
+    sep = null unless sep
+    str = end is -1 ? '' : str.slice(end + 1)
 
   # sample first ~8KB for sniffing
   sample = str.slice(0, 8192)
@@ -87,7 +90,7 @@ def probe(str, opts = {})
   # merge with user options (user wins)
   {
     str
-    sep:            opts.sep ?? sep
+    sep:            opts.sep || sep   # || not ??: a zero-length sep cannot advance the reader
     quote:          quote
     escape:         escape
     row:            opts.row ?? row
