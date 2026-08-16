@@ -214,6 +214,20 @@ fs.writeFileSync(path.join(stage, 'package-lock.json'), JSON.stringify({
   packages: lockPackages,
 }, null, 2));
 
+// The build identity, stamped from the SOURCE trees this vsix was built
+// from — not from the staged copies, which are bundled and trimmed and
+// so would hash to something no other tool can reproduce. `rip check
+// --build` prints the same hash over the same two source trees, and the
+// server logs what is stamped here, so comparing them answers the
+// question the identity exists for: is the installed extension built
+// from this working tree? Hashing the artifact instead would make that
+// comparison permanently, uselessly false.
+const { cacheIdentityOf } = await import(path.join(pkgDir, 'src', 'hash.js'));
+fs.writeFileSync(
+  path.join(stage, 'build-identity'),
+  cacheIdentityOf(path.join(repoRoot, 'src'), path.join(pkgDir, 'src')) + '\n',
+);
+
 fs.writeFileSync(path.join(stage, '.vscodeignore'), '.vscode/**\n');
 
 const result = spawnSync('bunx', ['@vscode/vsce', 'package', '--skip-license', '--target', TARGET], {

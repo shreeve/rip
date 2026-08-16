@@ -81,6 +81,16 @@ import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfi
 // (recursive — nested runtime/ fragments included): the manifest caches
 // faces the compiler built and closure edge lists THIS code derived, so
 // either tree changing has to purge it.
+//
+// Installed, the identity is READ rather than computed, because the vsix
+// is not byte-identical to the source it was built from — packaging
+// bundles this server and trims the compiler copy. Hashing the artifact
+// would answer a different question than `rip check --build` asks of the
+// repository, and the two are meant to be COMPARED: a mismatch is how
+// "the editor and rip check disagree" gets caught. So packaging records
+// the source identity and the server reports it verbatim. Both trees
+// still feed it — the file is written by cacheIdentityOf over the same
+// pair — and a source change still changes it, so the cache purges.
 async function loadCompiler() {
   const candidates = [
     new URL('../../../src/compile.js', import.meta.url),   // in-repo
@@ -89,10 +99,13 @@ async function loadCompiler() {
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
       compilerDir = path.dirname(fileURLToPath(candidate));
-      cacheIdentity = cacheIdentityOf(
-        compilerDir,
-        path.dirname(fileURLToPath(import.meta.url)),
-      );
+      const stamped = fileURLToPath(new URL('../build-identity', import.meta.url));
+      cacheIdentity = fs.existsSync(stamped)
+        ? fs.readFileSync(stamped, 'utf8').trim()
+        : cacheIdentityOf(
+          compilerDir,
+          path.dirname(fileURLToPath(import.meta.url)),
+        );
       return (await import(candidate.href)).compile;
     }
   }
