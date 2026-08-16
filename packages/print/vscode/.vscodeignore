@@ -1,10 +1,27 @@
 **/*
 !package.json
-!src/**
-!lib/**
+!dist/**
 !icon.png
 !README.md
 !node_modules/highlight.js/package.json
-!node_modules/highlight.js/lib/**
 !node_modules/highlight.js/styles/*.css
 .vscode/**
+
+# What ships and why:
+#
+# dist/extension.js is the bundle — src/ and lib/ are inlined into it,
+# and so is highlight.js's JS, which was 389 of the 558 files this
+# extension used to carry.
+#
+# highlight.js still needs a real directory on disk for two reasons that
+# survive bundling: printer.js locates its themes with
+# `require.resolve('highlight.js/package.json')`, so that file is the
+# resolution anchor, and it then READS `styles/<theme>.css` at runtime.
+# Bundled code cannot inline a file it opens by computed path, so the
+# stylesheets ship as stylesheets.
+#
+# The styles are NOT narrowed to printer.js's themeList. An allowlist
+# here would have to be kept in step with that array by hand, and
+# loadThemes() skips a missing stylesheet silently — so drift would cost
+# a theme with no error anywhere. 160 files at 186 KB is the cheaper
+# side of that trade.
