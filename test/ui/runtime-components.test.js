@@ -916,6 +916,66 @@ describe('context: offer/accept walks', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
+// Teardown ordering: descendants before ancestors
+// ════════════════════════════════════════════════════════════════════
+
+describe('teardown ordering: descendants tear down before ancestors release', () => {
+  // The contract: _teardown unmounts _children BEFORE disposing the
+  // component's own frame, recursively, so an unmount cascade runs
+  // cleanups deepest-first — a consumer's cleanup executes while every
+  // ancestor's offered container is still live and un-released.
+  // Context values captured at init are the teardown-safe channel
+  // (context is never re-resolved during teardown).
+  test('a consumer cleanup still uses its captured provider container; cleanups run deepest-first', () => {
+    expect(both((api) => {
+      const log = [];
+      const Leaf = defineComponent(api, {
+        name: 'Leaf', props: [],
+        init(props, a) {
+          const pool = a.getContext('pool');
+          a.__effect(() => () => log.push(`leaf-cleanup pool=${pool.read()}`));
+        },
+        create() { return document.createComment('leaf'); },
+      });
+      const Mid = defineComponent(api, {
+        name: 'Mid', props: [],
+        init(props, a) {
+          a.__effect(() => () => log.push('mid-cleanup'));
+        },
+        create() {
+          const el = document.createElement('div');
+          const kid = childCreate(api, this, Leaf, {});
+          this._kid = kid.inst;
+          el.appendChild(kid.el);
+          return el;
+        },
+        setup(a) { childSetup(a, this._kid); },
+      });
+      const Root = defineComponent(api, {
+        name: 'Root', props: [],
+        init(props, a) {
+          this.pool = a.__state('open');
+          a.setContext('pool', this.pool);
+          a.__effect(() => () => { log.push('root-cleanup'); this.pool.value = 'closed'; });
+        },
+        create() {
+          const el = document.createElement('main');
+          const kid = childCreate(api, this, Mid, {});
+          this._kid = kid.inst;
+          el.appendChild(kid.el);
+          return el;
+        },
+        setup(a) { childSetup(a, this._kid); },
+      });
+      const root = new Root({});
+      root.mount(document.createElement('body'));
+      root.unmount();
+      return log;
+    })).toEqual(['leaf-cleanup pool=open', 'mid-cleanup', 'root-cleanup']);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
 // __clsx, __lis, __reconcile, __transition, emit
 // ════════════════════════════════════════════════════════════════════
 
