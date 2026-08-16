@@ -3029,6 +3029,642 @@ function rewriteRender(tokens, mintId, fail) {
   return tokens;
 }
 
+// src/implicit.js
+function applyInsertions(tokens, collect, mintId) {
+  const insertions = collect(tokens, mintId);
+  if (insertions.length === 0)
+    return tokens;
+  let read = tokens.length - 1;
+  let ins = insertions.length - 1;
+  tokens.length += insertions.length;
+  for (let write = tokens.length - 1;write >= 0; write--) {
+    if (ops.on)
+      ops.n++;
+    if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
+      tokens[write] = insertions[ins--].token;
+    } else {
+      tokens[write] = tokens[read--];
+    }
+  }
+  return tokens;
+}
+function collectBlocks(tokens, mintId) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
+  const insertions = [];
+  const pending = [];
+  const commaInImplicitCall = (start, i) => {
+    let levels = 0;
+    for (let j = i - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (CLOSERS2.has(k) || k === "OUTDENT") {
+        levels++;
+        continue;
+      }
+      if (OPENERS2.has(k) || k === "INDENT") {
+        if (k === "INDENT")
+          return false;
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (startsImplicitCall(tokens, j))
+        return true;
+    }
+    return false;
+  };
+  const commaInImplicitObject = (start, i) => {
+    let levels = 0;
+    for (let j = i - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (CLOSERS2.has(k) || k === "OUTDENT") {
+        levels++;
+        continue;
+      }
+      if (OPENERS2.has(k) || k === "INDENT") {
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (k === ":" && tokens[j - 1]?.kind === "PROPERTY")
+        return looksObjectishAt(tokens, i + 1);
+      if (k === "TERMINATOR")
+        return false;
+    }
+    return false;
+  };
+  const BODY_BLOCK_CLAIMERS = new Set(["IF", "UNLESS", "TRY", "CATCH", "FINALLY", "SWITCH", "FOR", "CLASS"]);
+  const bodyEnd = (start) => {
+    let depth = 0;
+    let inlineIfs = 0;
+    let pendingBlocks = 0;
+    for (let j = start;j < tokens.length; j++) {
+      if (ops.on)
+        ops.n++;
+      const t = tokens[j];
+      const k = t.kind;
+      if (k === "INDENT") {
+        if (depth === 0) {
+          if (pendingBlocks === 0)
+            return j;
+          pendingBlocks--;
+        }
+        depth++;
+      } else if (OPENERS2.has(k)) {
+        depth++;
+      } else if (CLOSERS2.has(k) || k === "OUTDENT") {
+        if (depth === 0)
+          return j;
+        depth--;
+      } else if (depth === 0 && (k === "IF" || k === "UNLESS")) {
+        inlineIfs++;
+        pendingBlocks++;
+      } else if (depth === 0 && BODY_BLOCK_CLAIMERS.has(k)) {
+        pendingBlocks++;
+      } else if (depth === 0 && k === "ELSE") {
+        if (inlineIfs === 0)
+          return j;
+        inlineIfs--;
+        pendingBlocks++;
+      } else if (depth === 0 && (k === "TERMINATOR" && t.value !== ";")) {
+        return j;
+      } else if (depth === 0 && (k === "." || k === "?.") && t.newLine) {
+        return j;
+      } else if (depth === 0 && k === "," && !commaInImplicitCall(start, j) && !commaInImplicitObject(start, j)) {
+        return j;
+      }
+    }
+    return tokens.length;
+  };
+  const makeBlockToken = (kind, at, origin) => ({
+    id: mintId(),
+    kind,
+    value: kind,
+    start: at,
+    end: at,
+    spaced: false,
+    newLine: false,
+    generated: true,
+    origin
+  });
+  const measureBody = (start) => {
+    const end = bodyEnd(start);
+    let firstReal = null;
+    for (let j = start;j < end; j++) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        firstReal = tokens[j];
+        break;
+      }
+    }
+    let lastReal = null;
+    for (let j = end - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        lastReal = tokens[j];
+        break;
+      }
+    }
+    let afterReal = null;
+    for (let j = end;j < tokens.length; j++) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        afterReal = tokens[j];
+        break;
+      }
+    }
+    const openAt = firstReal ? firstReal.start : tokens[start - 1]?.end ?? 0;
+    return {
+      end,
+      firstReal,
+      openAt,
+      closeAt: lastReal ? lastReal.end : openAt,
+      afterId: afterReal ? afterReal.id : null
+    };
+  };
+  let lastClosedAt = -1;
+  const closePendingAt = (i) => {
+    while (pending.length && pending[pending.length - 1].end === i) {
+      const b = pending.pop();
+      insertions.push({ at: i, token: makeBlockToken("OUTDENT", b.closeAt, b.afterId) });
+      lastClosedAt = i;
+    }
+  };
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    closePendingAt(i);
+    const t = tokens[i];
+    if ((t.kind === "->" || t.kind === "=>") && tokens[i + 1] && tokens[i + 1].kind !== "INDENT") {
+      const body = measureBody(i + 1);
+      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
+      pending.push(body);
+    } else if (t.kind === "THEN") {
+      const body = measureBody(i + 1);
+      t.kind = "INDENT";
+      t.value = "INDENT";
+      t.generated = true;
+      t.start = t.end = body.firstReal ? body.firstReal.start : t.end;
+      t.origin = body.firstReal ? body.firstReal.id : null;
+      pending.push(body);
+    } else if (t.kind === "ELSE" && tokens[i + 1] && tokens[i + 1].kind !== "INDENT" && tokens[i + 1].kind !== "IF" && (lastClosedAt === i || tokens[i - 1]?.kind === "OUTDENT")) {
+      const body = measureBody(i + 1);
+      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
+      pending.push(body);
+    }
+  }
+  closePendingAt(tokens.length);
+  return insertions;
+}
+var IMPLICIT_FUNC = new Set(["IDENTIFIER", "PROPERTY", "SUPER", ")", "CALL_END", "]", "INDEX_END", "@", "THIS", "DAMMIT", "?", "PRESENCE"]);
+var IMPLICIT_CALL_STARTERS = new Set([
+  "IDENTIFIER",
+  "PROPERTY",
+  "NUMBER",
+  "STRING",
+  "STRING_START",
+  "REGEX",
+  "HEREGEX_START",
+  "SYMBOL",
+  "MAP_START",
+  "PARAM_START",
+  "IF",
+  "TRY",
+  "SWITCH",
+  "CLASS",
+  "THIS",
+  "SUPER",
+  "UNDEFINED",
+  "NULL",
+  "BOOL",
+  "UNARY",
+  "NEW",
+  "DO",
+  "DO_IIFE",
+  "UNARY_MATH",
+  "AWAIT",
+  "YIELD",
+  "THROW",
+  "@",
+  "->",
+  "=>",
+  "[",
+  "(",
+  "{",
+  "--",
+  "++"
+]);
+var IMPLICIT_END = new Set([
+  "POST_IF",
+  "POST_UNLESS",
+  "FOR",
+  "WHILE",
+  "UNTIL",
+  "WHEN",
+  "BY",
+  "LOOP",
+  "TERMINATOR",
+  "||",
+  "&&",
+  "??"
+]);
+var CONTROL_IN_IMPLICIT = new Set(["IF", "TRY", "FINALLY", "CATCH", "SWITCH", "FOR", "CLASS"]);
+var VALUE_END = new Set([
+  "IDENTIFIER",
+  "PROPERTY",
+  "NUMBER",
+  "STRING",
+  "STRING_END",
+  "REGEX",
+  "HEREGEX_END",
+  ")",
+  "CALL_END",
+  "]",
+  "INDEX_END",
+  "}",
+  "PICK_END",
+  "BOOL",
+  "NULL",
+  "UNDEFINED",
+  "THIS",
+  "@"
+]);
+var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+var startsImplicitCall = (tokens, j) => {
+  const t = tokens[j];
+  const next = tokens[j + 1];
+  if (!t || !next || !next.spaced || !IMPLICIT_FUNC.has(t.kind))
+    return false;
+  if ((t.kind === "]" || t.kind === "}") && (next.kind === "->" || next.kind === "=>"))
+    return false;
+  if (t.kind === "IDENTIFIER" && (t.value === "Infinity" || t.value === "NaN") && (next.kind === "->" || next.kind === "=>"))
+    return false;
+  if (IMPLICIT_CALL_STARTERS.has(next.kind))
+    return true;
+  return next.kind === "..." && tokens[j + 2] != null && IMPLICIT_CALL_STARTERS.has(tokens[j + 2].kind);
+};
+var looksObjectishAt = (tokens, j) => {
+  if (!tokens[j])
+    return false;
+  const bangColon = (a) => (tokens[a]?.kind === "DAMMIT" || tokens[a]?.kind === "VOID_MARKER") && tokens[a + 1]?.kind === ":";
+  if (tokens[j].kind === "@" && (tokens[j + 2]?.kind === ":" || bangColon(j + 2)))
+    return true;
+  if (tokens[j + 1]?.kind === ":" || bangColon(j + 1))
+    return true;
+  if (PASS_OPENERS.has(tokens[j].kind)) {
+    let d = 1;
+    let k = j;
+    while (++k < tokens.length && d > 0) {
+      if (ops.on)
+        ops.n++;
+      if (PASS_OPENERS.has(tokens[k].kind))
+        d++;
+      else if (PASS_CLOSERS.has(tokens[k].kind))
+        d--;
+    }
+    if (d === 0 && tokens[k]?.kind === ":")
+      return true;
+  }
+  return false;
+};
+var BLOCK_ARG_CARRIERS = new Set(["->", "=>", "[", "(", ",", "{", "ELSE", "="]);
+var LINE_BREAK_KINDS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
+var CALL_BLOCKING_HEADS = new Set(["CLASS", "EXTENDS", "IF", "CATCH", "SWITCH", "LEADING_WHEN", "FOR", "WHILE", "UNTIL", "DEF"]);
+var controlHeadBackwards = (tokens, j) => {
+  let depth = 0;
+  for (;j >= 0; j--) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[j].kind;
+    if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
+      return true;
+    if (PASS_CLOSERS.has(k)) {
+      depth++;
+      continue;
+    }
+    if (PASS_OPENERS.has(k)) {
+      if (depth > 0) {
+        depth--;
+        continue;
+      }
+      if (!tokens[j].generated || LINE_BREAK_KINDS.has(k))
+        return false;
+      continue;
+    }
+    if (depth === 0 && LINE_BREAK_KINDS.has(k))
+      return false;
+  }
+  return false;
+};
+function collectObjects(tokens, mintId) {
+  const stack = [];
+  const insertions = [];
+  const pendingTernary = [0];
+  let lastReal = null;
+  const top = () => stack[stack.length - 1];
+  const makeBrace = (kind, at, origin, flags = {}) => ({
+    id: mintId(),
+    kind,
+    value: kind,
+    start: at,
+    end: at,
+    spaced: flags.spaced ?? false,
+    newLine: flags.newLine ?? false,
+    generated: true,
+    origin
+  });
+  const closeObject = (at) => {
+    stack.pop();
+    insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  const looksObjectish = (j) => looksObjectishAt(tokens, j);
+  const pendingIndentedObjectCallAt = (indentAt) => {
+    const before = tokens[indentAt - 1];
+    return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
+  };
+  const openCallBetween = (from, i) => {
+    let levels = 0;
+    for (let j = i - 1;j > from; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (PASS_CLOSERS.has(k)) {
+        levels++;
+        continue;
+      }
+      if (PASS_OPENERS.has(k)) {
+        if (k === "INDENT" && levels === 0) {
+          return pendingIndentedObjectCallAt(j);
+        }
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (k === "TERMINATOR")
+        return false;
+      if (startsImplicitCall(tokens, j))
+        return true;
+    }
+    return false;
+  };
+  const objectContinues = (j) => {
+    for (let d = 0;j < tokens.length; j++) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (PASS_OPENERS.has(k))
+        d++;
+      else if (PASS_CLOSERS.has(k)) {
+        if (d === 0)
+          return false;
+        d--;
+      } else if (k === "TERMINATOR" && d === 0) {
+        return looksObjectish(j + 1);
+      }
+    }
+    return false;
+  };
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const t = tokens[i];
+    const k = t.kind;
+    const prev = tokens[i - 1];
+    if (prev && !prev.generated)
+      lastReal = prev;
+    if (top()?.kind === "object" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && prev && VALUE_END.has(prev.kind))) {
+      stack.push({ kind: "CONTROL", trigger: k });
+      continue;
+    }
+    if (k === "INDENT") {
+      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
+        while (top()?.kind === "object" && prev.kind !== ":")
+          closeObject(i);
+      }
+      if (top()?.kind === "CONTROL")
+        stack.pop();
+      stack.push({ kind: "INDENT", at: i });
+      pendingTernary.push(0);
+      continue;
+    }
+    if (PASS_OPENERS.has(k)) {
+      stack.push({ kind: k, at: i });
+      pendingTernary.push(0);
+      continue;
+    }
+    if (PASS_CLOSERS.has(k)) {
+      while (top()?.kind === "object" || top()?.kind === "CONTROL") {
+        if (top().kind === "object")
+          closeObject(i);
+        else
+          stack.pop();
+      }
+      stack.pop();
+      if (pendingTernary.length > 1)
+        pendingTernary.pop();
+      if (k === "OUTDENT") {
+        for (let d = stack.length - 1;d >= 0; d--) {
+          const fr = stack[d];
+          if (fr.kind !== "object" && fr.kind !== "CONTROL")
+            break;
+          if (fr.kind === "object")
+            fr.sameLine = false;
+        }
+      }
+      continue;
+    }
+    if (k === "TERNARY")
+      pendingTernary[pendingTernary.length - 1]++;
+    if (k === ":") {
+      const pt = pendingTernary.length - 1;
+      if (pendingTernary[pt] > 0) {
+        pendingTernary[pt]--;
+        continue;
+      }
+      if (prev?.kind === "DAMMIT")
+        prev.kind = "VOID_MARKER";
+      const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
+      let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
+      if (tokens[i - 2 - bang]?.kind === "@")
+        s = i - 2 - bang;
+      const before = tokens[s - 1];
+      const callWillOpen = startsImplicitCall(tokens, s - 1);
+      const startsLine = !callWillOpen && (s <= 0 || LINE_BREAK_KINDS.has(before?.kind) || Boolean(before?.newLine));
+      const f = top();
+      const under = stack[stack.length - 2];
+      const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
+      const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
+      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
+      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
+        continue;
+      }
+      stack.push({ kind: "object", at: s, sameLine: true, startsLine });
+      insertions.push({
+        at: s,
+        token: makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine })
+      });
+      continue;
+    }
+    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
+      if (k === "||" || k === "&&" || k === "??")
+        continue;
+      if (k === "TERMINATOR") {
+        pendingTernary[pendingTernary.length - 1] = 0;
+        for (let d = stack.length - 1;d >= 0; d--) {
+          const fr = stack[d];
+          if (fr.kind !== "object" && fr.kind !== "CONTROL")
+            break;
+          if (fr.kind === "object")
+            fr.sameLine = false;
+        }
+      }
+      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL" && top()?.trigger === "CLASS") {
+        const fr = top();
+        if (fr.kind === "CONTROL") {
+          stack.pop();
+          continue;
+        }
+        if (k === "TERMINATOR") {
+          if (prev?.kind !== "," && !(fr.startsLine && looksObjectish(i + 1)))
+            closeObject(i);
+          else
+            break;
+        } else {
+          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && objectContinues(i + 1)))
+            closeObject(i);
+          else
+            break;
+        }
+      }
+      continue;
+    }
+    if (k === "," && top()?.kind === "object" && !openCallBetween(top().at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
+      const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
+      while (top()?.kind === "object")
+        closeObject(i + offset);
+    }
+  }
+  if (tokens.length && !tokens[tokens.length - 1].generated)
+    lastReal = tokens[tokens.length - 1];
+  while (top()?.kind === "object" || top()?.kind === "CONTROL") {
+    if (top().kind === "object")
+      closeObject(tokens.length);
+    else
+      stack.pop();
+  }
+  return insertions;
+}
+function collectCalls(tokens, mintId) {
+  const stack = [];
+  const insertions = [];
+  let callIndentAt = -1;
+  const makeCallToken = (kind, at, origin) => ({
+    id: mintId(),
+    kind,
+    value: kind === "CALL_START" ? "(" : ")",
+    start: at,
+    end: at,
+    spaced: false,
+    newLine: false,
+    generated: true,
+    origin
+  });
+  let lastReal = null;
+  const closeCall = (at) => {
+    stack.pop();
+    insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const t = tokens[i];
+    const next = tokens[i + 1];
+    const k = t.kind;
+    if (i > 0 && !tokens[i - 1].generated)
+      lastReal = tokens[i - 1];
+    if (stack[stack.length - 1] === "call" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
+      stack.push(k === "CLASS" ? "CONTROL_CLASS" : "CONTROL");
+      continue;
+    }
+    if (k === "INDENT") {
+      if (i === callIndentAt) {
+        stack.push("INDENT");
+        continue;
+      }
+      const prev = tokens[i - 1];
+      if (!prev || !BLOCK_ARG_CARRIERS.has(prev.kind)) {
+        while (stack[stack.length - 1] === "call")
+          closeCall(i);
+      }
+      if (stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS")
+        stack.pop();
+      stack.push("INDENT");
+      continue;
+    }
+    if (PASS_OPENERS.has(k)) {
+      stack.push(k);
+    } else if (PASS_CLOSERS.has(k)) {
+      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+        if (stack[stack.length - 1] === "call")
+          closeCall(i);
+        else
+          stack.pop();
+      }
+      stack.pop();
+    }
+    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
+      if (k === "||" || k === "&&" || k === "??")
+        continue;
+      if (tokens[i - 1]?.kind !== ",") {
+        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
+          if (stack[stack.length - 1] === "call")
+            closeCall(i);
+          else
+            stack.pop();
+        }
+      }
+      continue;
+    }
+    if (startsImplicitCall(tokens, i) || IMPLICIT_FUNC.has(k) && next && next.spaced && (next.kind === "+" || next.kind === "-") && tokens[i + 2] && !tokens[i + 2].spaced && !tokens[i + 2].newLine) {
+      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", next.start, next.generated ? next.origin : next.id) });
+      stack.push("call");
+    } else if (IMPLICIT_FUNC.has(k) && next?.kind === "INDENT" && tokens[i + 2]?.kind === "{" && tokens[i + 2].generated && !controlHeadBackwards(tokens, i)) {
+      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", tokens[i + 2].start, tokens[i + 2].origin) });
+      stack.push("call");
+      callIndentAt = i + 1;
+    }
+  }
+  if (tokens.length && !tokens[tokens.length - 1].generated)
+    lastReal = tokens[tokens.length - 1];
+  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+    if (stack[stack.length - 1] === "call")
+      closeCall(tokens.length);
+    else
+      stack.pop();
+  }
+  return insertions;
+}
+var implicitBlocks = (tokens, mintId) => applyInsertions(tokens, collectBlocks, mintId);
+var implicitObjects = (tokens, mintId) => applyInsertions(tokens, collectObjects, mintId);
+var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mintId);
+
 // src/lexer.js
 function tagParams(tokens) {
   for (let i = 1;i < tokens.length; i++) {
@@ -5939,643 +6575,12 @@ ${baseline}`).join(`
   }
   rewriteRender(tokens, mintId, fail);
   tagCompoundKeys(tokens);
-  applyInsertionPass(tokens, implicitBlocks, mintId);
+  implicitBlocks(tokens, mintId);
   tagPostfixConditionals(tokens);
-  applyInsertionPass(tokens, implicitObjects, mintId);
-  applyInsertionPass(tokens, implicitCalls, mintId);
+  implicitObjects(tokens, mintId);
+  implicitCalls(tokens, mintId);
   insertArrowCommas(tokens);
   return { tokens, trivia, source, lexDiagnostics };
-}
-function applyInsertionPass(tokens, pass, mintId) {
-  const insertions = pass(tokens, mintId);
-  if (insertions.length === 0)
-    return tokens;
-  let read = tokens.length - 1;
-  let ins = insertions.length - 1;
-  tokens.length += insertions.length;
-  for (let write = tokens.length - 1;write >= 0; write--) {
-    if (ops.on)
-      ops.n++;
-    if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
-      tokens[write] = insertions[ins--].token;
-    } else {
-      tokens[write] = tokens[read--];
-    }
-  }
-  return tokens;
-}
-function implicitBlocks(tokens, mintId) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
-  const insertions = [];
-  const pending = [];
-  const commaInImplicitCall = (start, i) => {
-    let levels = 0;
-    for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
-        levels++;
-        continue;
-      }
-      if (OPENERS2.has(k) || k === "INDENT") {
-        if (k === "INDENT")
-          return false;
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (startsImplicitCall(tokens, j))
-        return true;
-    }
-    return false;
-  };
-  const commaInImplicitObject = (start, i) => {
-    let levels = 0;
-    for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
-        levels++;
-        continue;
-      }
-      if (OPENERS2.has(k) || k === "INDENT") {
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (k === ":" && tokens[j - 1]?.kind === "PROPERTY")
-        return looksObjectishAt(tokens, i + 1);
-      if (k === "TERMINATOR")
-        return false;
-    }
-    return false;
-  };
-  const BODY_BLOCK_CLAIMERS = new Set(["IF", "UNLESS", "TRY", "CATCH", "FINALLY", "SWITCH", "FOR", "CLASS"]);
-  const bodyEnd = (start) => {
-    let depth = 0;
-    let inlineIfs = 0;
-    let pendingBlocks = 0;
-    for (let j = start;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      const t = tokens[j];
-      const k = t.kind;
-      if (k === "INDENT") {
-        if (depth === 0) {
-          if (pendingBlocks === 0)
-            return j;
-          pendingBlocks--;
-        }
-        depth++;
-      } else if (OPENERS2.has(k)) {
-        depth++;
-      } else if (CLOSERS2.has(k) || k === "OUTDENT") {
-        if (depth === 0)
-          return j;
-        depth--;
-      } else if (depth === 0 && (k === "IF" || k === "UNLESS")) {
-        inlineIfs++;
-        pendingBlocks++;
-      } else if (depth === 0 && BODY_BLOCK_CLAIMERS.has(k)) {
-        pendingBlocks++;
-      } else if (depth === 0 && k === "ELSE") {
-        if (inlineIfs === 0)
-          return j;
-        inlineIfs--;
-        pendingBlocks++;
-      } else if (depth === 0 && (k === "TERMINATOR" && t.value !== ";")) {
-        return j;
-      } else if (depth === 0 && (k === "." || k === "?.") && t.newLine) {
-        return j;
-      } else if (depth === 0 && k === "," && !commaInImplicitCall(start, j) && !commaInImplicitObject(start, j)) {
-        return j;
-      }
-    }
-    return tokens.length;
-  };
-  const makeBlockToken = (kind, at, origin) => ({
-    id: mintId(),
-    kind,
-    value: kind,
-    start: at,
-    end: at,
-    spaced: false,
-    newLine: false,
-    generated: true,
-    origin
-  });
-  const measureBody = (start) => {
-    const end = bodyEnd(start);
-    let firstReal = null;
-    for (let j = start;j < end; j++) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        firstReal = tokens[j];
-        break;
-      }
-    }
-    let lastReal = null;
-    for (let j = end - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        lastReal = tokens[j];
-        break;
-      }
-    }
-    let afterReal = null;
-    for (let j = end;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        afterReal = tokens[j];
-        break;
-      }
-    }
-    const openAt = firstReal ? firstReal.start : tokens[start - 1]?.end ?? 0;
-    return {
-      end,
-      firstReal,
-      openAt,
-      closeAt: lastReal ? lastReal.end : openAt,
-      afterId: afterReal ? afterReal.id : null
-    };
-  };
-  let lastClosedAt = -1;
-  const closePendingAt = (i) => {
-    while (pending.length && pending[pending.length - 1].end === i) {
-      const b = pending.pop();
-      insertions.push({ at: i, token: makeBlockToken("OUTDENT", b.closeAt, b.afterId) });
-      lastClosedAt = i;
-    }
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    closePendingAt(i);
-    const t = tokens[i];
-    if ((t.kind === "->" || t.kind === "=>") && tokens[i + 1] && tokens[i + 1].kind !== "INDENT") {
-      const body = measureBody(i + 1);
-      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
-      pending.push(body);
-    } else if (t.kind === "THEN") {
-      const body = measureBody(i + 1);
-      t.kind = "INDENT";
-      t.value = "INDENT";
-      t.generated = true;
-      t.start = t.end = body.firstReal ? body.firstReal.start : t.end;
-      t.origin = body.firstReal ? body.firstReal.id : null;
-      pending.push(body);
-    } else if (t.kind === "ELSE" && tokens[i + 1] && tokens[i + 1].kind !== "INDENT" && tokens[i + 1].kind !== "IF" && (lastClosedAt === i || tokens[i - 1]?.kind === "OUTDENT")) {
-      const body = measureBody(i + 1);
-      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
-      pending.push(body);
-    }
-  }
-  closePendingAt(tokens.length);
-  return insertions;
-}
-var IMPLICIT_FUNC = new Set(["IDENTIFIER", "PROPERTY", "SUPER", ")", "CALL_END", "]", "INDEX_END", "@", "THIS", "DAMMIT", "?", "PRESENCE"]);
-var IMPLICIT_CALL_STARTERS = new Set([
-  "IDENTIFIER",
-  "PROPERTY",
-  "NUMBER",
-  "STRING",
-  "STRING_START",
-  "REGEX",
-  "HEREGEX_START",
-  "SYMBOL",
-  "MAP_START",
-  "PARAM_START",
-  "IF",
-  "TRY",
-  "SWITCH",
-  "CLASS",
-  "THIS",
-  "SUPER",
-  "UNDEFINED",
-  "NULL",
-  "BOOL",
-  "UNARY",
-  "NEW",
-  "DO",
-  "DO_IIFE",
-  "UNARY_MATH",
-  "AWAIT",
-  "YIELD",
-  "THROW",
-  "@",
-  "->",
-  "=>",
-  "[",
-  "(",
-  "{",
-  "--",
-  "++"
-]);
-var IMPLICIT_END = new Set([
-  "POST_IF",
-  "POST_UNLESS",
-  "FOR",
-  "WHILE",
-  "UNTIL",
-  "WHEN",
-  "BY",
-  "LOOP",
-  "TERMINATOR",
-  "||",
-  "&&",
-  "??"
-]);
-var CONTROL_IN_IMPLICIT = new Set(["IF", "TRY", "FINALLY", "CATCH", "SWITCH", "FOR", "CLASS"]);
-var VALUE_END = new Set([
-  "IDENTIFIER",
-  "PROPERTY",
-  "NUMBER",
-  "STRING",
-  "STRING_END",
-  "REGEX",
-  "HEREGEX_END",
-  ")",
-  "CALL_END",
-  "]",
-  "INDEX_END",
-  "}",
-  "PICK_END",
-  "BOOL",
-  "NULL",
-  "UNDEFINED",
-  "THIS",
-  "@"
-]);
-var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-var startsImplicitCall = (tokens, j) => {
-  const t = tokens[j];
-  const next = tokens[j + 1];
-  if (!t || !next || !next.spaced || !IMPLICIT_FUNC.has(t.kind))
-    return false;
-  if ((t.kind === "]" || t.kind === "}") && (next.kind === "->" || next.kind === "=>"))
-    return false;
-  if (t.kind === "IDENTIFIER" && (t.value === "Infinity" || t.value === "NaN") && (next.kind === "->" || next.kind === "=>"))
-    return false;
-  if (IMPLICIT_CALL_STARTERS.has(next.kind))
-    return true;
-  return next.kind === "..." && tokens[j + 2] != null && IMPLICIT_CALL_STARTERS.has(tokens[j + 2].kind);
-};
-var looksObjectishAt = (tokens, j) => {
-  if (!tokens[j])
-    return false;
-  const bangColon = (a) => (tokens[a]?.kind === "DAMMIT" || tokens[a]?.kind === "VOID_MARKER") && tokens[a + 1]?.kind === ":";
-  if (tokens[j].kind === "@" && (tokens[j + 2]?.kind === ":" || bangColon(j + 2)))
-    return true;
-  if (tokens[j + 1]?.kind === ":" || bangColon(j + 1))
-    return true;
-  if (PASS_OPENERS.has(tokens[j].kind)) {
-    let d = 1;
-    let k = j;
-    while (++k < tokens.length && d > 0) {
-      if (ops.on)
-        ops.n++;
-      if (PASS_OPENERS.has(tokens[k].kind))
-        d++;
-      else if (PASS_CLOSERS.has(tokens[k].kind))
-        d--;
-    }
-    if (d === 0 && tokens[k]?.kind === ":")
-      return true;
-  }
-  return false;
-};
-var BLOCK_ARG_CARRIERS = new Set(["->", "=>", "[", "(", ",", "{", "ELSE", "="]);
-var LINE_BREAK_KINDS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
-var CALL_BLOCKING_HEADS = new Set(["CLASS", "EXTENDS", "IF", "CATCH", "SWITCH", "LEADING_WHEN", "FOR", "WHILE", "UNTIL", "DEF"]);
-var controlHeadBackwards = (tokens, j) => {
-  let depth = 0;
-  for (;j >= 0; j--) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[j].kind;
-    if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
-      return true;
-    if (PASS_CLOSERS.has(k)) {
-      depth++;
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      if (depth > 0) {
-        depth--;
-        continue;
-      }
-      if (!tokens[j].generated || LINE_BREAK_KINDS.has(k))
-        return false;
-      continue;
-    }
-    if (depth === 0 && LINE_BREAK_KINDS.has(k))
-      return false;
-  }
-  return false;
-};
-function implicitObjects(tokens, mintId) {
-  const stack = [];
-  const insertions = [];
-  const pendingTernary = [0];
-  let lastReal = null;
-  const top = () => stack[stack.length - 1];
-  const makeBrace = (kind, at, origin, flags = {}) => ({
-    id: mintId(),
-    kind,
-    value: kind,
-    start: at,
-    end: at,
-    spaced: flags.spaced ?? false,
-    newLine: flags.newLine ?? false,
-    generated: true,
-    origin
-  });
-  const closeObject = (at) => {
-    stack.pop();
-    insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
-  };
-  const looksObjectish = (j) => looksObjectishAt(tokens, j);
-  const pendingIndentedObjectCallAt = (indentAt) => {
-    const before = tokens[indentAt - 1];
-    return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
-  };
-  const openCallBetween = (from, i) => {
-    let levels = 0;
-    for (let j = i - 1;j > from; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (PASS_CLOSERS.has(k)) {
-        levels++;
-        continue;
-      }
-      if (PASS_OPENERS.has(k)) {
-        if (k === "INDENT" && levels === 0) {
-          return pendingIndentedObjectCallAt(j);
-        }
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (k === "TERMINATOR")
-        return false;
-      if (startsImplicitCall(tokens, j))
-        return true;
-    }
-    return false;
-  };
-  const objectContinues = (j) => {
-    for (let d = 0;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (PASS_OPENERS.has(k))
-        d++;
-      else if (PASS_CLOSERS.has(k)) {
-        if (d === 0)
-          return false;
-        d--;
-      } else if (k === "TERMINATOR" && d === 0) {
-        return looksObjectish(j + 1);
-      }
-    }
-    return false;
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const t = tokens[i];
-    const k = t.kind;
-    const prev = tokens[i - 1];
-    if (prev && !prev.generated)
-      lastReal = prev;
-    if (top()?.kind === "object" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && prev && VALUE_END.has(prev.kind))) {
-      stack.push({ kind: "CONTROL", trigger: k });
-      continue;
-    }
-    if (k === "INDENT") {
-      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
-        while (top()?.kind === "object" && prev.kind !== ":")
-          closeObject(i);
-      }
-      if (top()?.kind === "CONTROL")
-        stack.pop();
-      stack.push({ kind: "INDENT", at: i });
-      pendingTernary.push(0);
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      stack.push({ kind: k, at: i });
-      pendingTernary.push(0);
-      continue;
-    }
-    if (PASS_CLOSERS.has(k)) {
-      while (top()?.kind === "object" || top()?.kind === "CONTROL") {
-        if (top().kind === "object")
-          closeObject(i);
-        else
-          stack.pop();
-      }
-      stack.pop();
-      if (pendingTernary.length > 1)
-        pendingTernary.pop();
-      if (k === "OUTDENT") {
-        for (let d = stack.length - 1;d >= 0; d--) {
-          const fr = stack[d];
-          if (fr.kind !== "object" && fr.kind !== "CONTROL")
-            break;
-          if (fr.kind === "object")
-            fr.sameLine = false;
-        }
-      }
-      continue;
-    }
-    if (k === "TERNARY")
-      pendingTernary[pendingTernary.length - 1]++;
-    if (k === ":") {
-      const pt = pendingTernary.length - 1;
-      if (pendingTernary[pt] > 0) {
-        pendingTernary[pt]--;
-        continue;
-      }
-      if (prev?.kind === "DAMMIT")
-        prev.kind = "VOID_MARKER";
-      const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
-      let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
-      if (tokens[i - 2 - bang]?.kind === "@")
-        s = i - 2 - bang;
-      const before = tokens[s - 1];
-      const callWillOpen = startsImplicitCall(tokens, s - 1);
-      const startsLine = !callWillOpen && (s <= 0 || LINE_BREAK_KINDS.has(before?.kind) || Boolean(before?.newLine));
-      const f = top();
-      const under = stack[stack.length - 2];
-      const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
-      const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
-      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
-      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
-        continue;
-      }
-      stack.push({ kind: "object", at: s, sameLine: true, startsLine });
-      insertions.push({
-        at: s,
-        token: makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine })
-      });
-      continue;
-    }
-    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
-      if (k === "||" || k === "&&" || k === "??")
-        continue;
-      if (k === "TERMINATOR") {
-        pendingTernary[pendingTernary.length - 1] = 0;
-        for (let d = stack.length - 1;d >= 0; d--) {
-          const fr = stack[d];
-          if (fr.kind !== "object" && fr.kind !== "CONTROL")
-            break;
-          if (fr.kind === "object")
-            fr.sameLine = false;
-        }
-      }
-      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL" && top()?.trigger === "CLASS") {
-        const fr = top();
-        if (fr.kind === "CONTROL") {
-          stack.pop();
-          continue;
-        }
-        if (k === "TERMINATOR") {
-          if (prev?.kind !== "," && !(fr.startsLine && looksObjectish(i + 1)))
-            closeObject(i);
-          else
-            break;
-        } else {
-          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && objectContinues(i + 1)))
-            closeObject(i);
-          else
-            break;
-        }
-      }
-      continue;
-    }
-    if (k === "," && top()?.kind === "object" && !openCallBetween(top().at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
-      const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
-      while (top()?.kind === "object")
-        closeObject(i + offset);
-    }
-  }
-  if (tokens.length && !tokens[tokens.length - 1].generated)
-    lastReal = tokens[tokens.length - 1];
-  while (top()?.kind === "object" || top()?.kind === "CONTROL") {
-    if (top().kind === "object")
-      closeObject(tokens.length);
-    else
-      stack.pop();
-  }
-  return insertions;
-}
-function implicitCalls(tokens, mintId) {
-  const stack = [];
-  const insertions = [];
-  let callIndentAt = -1;
-  const makeCallToken = (kind, at, origin) => ({
-    id: mintId(),
-    kind,
-    value: kind === "CALL_START" ? "(" : ")",
-    start: at,
-    end: at,
-    spaced: false,
-    newLine: false,
-    generated: true,
-    origin
-  });
-  let lastReal = null;
-  const closeCall = (at) => {
-    stack.pop();
-    insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const t = tokens[i];
-    const next = tokens[i + 1];
-    const k = t.kind;
-    if (i > 0 && !tokens[i - 1].generated)
-      lastReal = tokens[i - 1];
-    if (stack[stack.length - 1] === "call" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
-      stack.push(k === "CLASS" ? "CONTROL_CLASS" : "CONTROL");
-      continue;
-    }
-    if (k === "INDENT") {
-      if (i === callIndentAt) {
-        stack.push("INDENT");
-        continue;
-      }
-      const prev = tokens[i - 1];
-      if (!prev || !BLOCK_ARG_CARRIERS.has(prev.kind)) {
-        while (stack[stack.length - 1] === "call")
-          closeCall(i);
-      }
-      if (stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS")
-        stack.pop();
-      stack.push("INDENT");
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      stack.push(k);
-    } else if (PASS_CLOSERS.has(k)) {
-      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
-        if (stack[stack.length - 1] === "call")
-          closeCall(i);
-        else
-          stack.pop();
-      }
-      stack.pop();
-    }
-    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
-      if (k === "||" || k === "&&" || k === "??")
-        continue;
-      if (tokens[i - 1]?.kind !== ",") {
-        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
-          if (stack[stack.length - 1] === "call")
-            closeCall(i);
-          else
-            stack.pop();
-        }
-      }
-      continue;
-    }
-    if (startsImplicitCall(tokens, i) || IMPLICIT_FUNC.has(k) && next && next.spaced && (next.kind === "+" || next.kind === "-") && tokens[i + 2] && !tokens[i + 2].spaced && !tokens[i + 2].newLine) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", next.start, next.generated ? next.origin : next.id) });
-      stack.push("call");
-    } else if (IMPLICIT_FUNC.has(k) && next?.kind === "INDENT" && tokens[i + 2]?.kind === "{" && tokens[i + 2].generated && !controlHeadBackwards(tokens, i)) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", tokens[i + 2].start, tokens[i + 2].origin) });
-      stack.push("call");
-      callIndentAt = i + 1;
-    }
-  }
-  if (tokens.length && !tokens[tokens.length - 1].generated)
-    lastReal = tokens[tokens.length - 1];
-  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
-    if (stack[stack.length - 1] === "call")
-      closeCall(tokens.length);
-    else
-      stack.pop();
-  }
-  return insertions;
 }
 function tagPostfixConditionals(tokens) {
   for (let i = 0;i < tokens.length; i++) {
@@ -11202,10 +11207,10 @@ class Emitter {
       throw err;
     };
     rewriteTypes(toks, mintId, source ?? "", fail);
-    applyInsertionPass(toks, implicitBlocks, mintId);
+    implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
-    applyInsertionPass(toks, implicitObjects, mintId);
-    applyInsertionPass(toks, implicitCalls, mintId);
+    implicitObjects(toks, mintId);
+    implicitCalls(toks, mintId);
     const parser2 = Parser();
     parser2.lexer = {
       tokens: toks,

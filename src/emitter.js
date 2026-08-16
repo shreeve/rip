@@ -24,7 +24,8 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './types/schematext.js';
 import { Parser } from './parser.js';
-import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
+import { tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
+import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './types/typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
 import {
@@ -4621,10 +4622,10 @@ class Emitter {
       throw err;
     };
     rewriteTypes(toks, mintId, source ?? '', fail);
-    applyInsertionPass(toks, implicitBlocks, mintId);
+    implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
-    applyInsertionPass(toks, implicitObjects, mintId);
-    applyInsertionPass(toks, implicitCalls, mintId);
+    implicitObjects(toks, mintId);
+    implicitCalls(toks, mintId);
 
     const parser = Parser();
     parser.lexer = {
