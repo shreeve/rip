@@ -434,6 +434,11 @@ export def show(result, opts = {})
     Object.keys rows[0]
   else
     []
+  # No rows, no table: a bordered husk with nothing in it says less
+  # than the words do.
+  if rows.length is 0
+    console.log '0 rows'
+    return result
   total = rows.length
   shown = if total > maxRows then rows.slice(0, maxRows) else rows
   numeric = names.map (n) ->

@@ -1531,6 +1531,20 @@ class SchemaQuery {
             this._clauses.push(col + ' IN (' + v.map(() => '?').join(', ') + ')');
             this._params.push(...v);
           }
+        } else if (v instanceof RegExp) {
+          // A regex value is a real regex match — DuckDB's
+          // regexp_matches, never a lossy LIKE translation. The JS
+          // flags that change match semantics carry over (i, m, s);
+          // the mechanics flags (g, y, u, d) do not apply to a
+          // boolean match and drop.
+          const options = [...v.flags].filter((f) => 'ims'.includes(f)).join('');
+          if (options !== '') {
+            this._clauses.push('regexp_matches(' + col + ', ?, ?)');
+            this._params.push(v.source, options);
+          } else {
+            this._clauses.push('regexp_matches(' + col + ', ?)');
+            this._params.push(v.source);
+          }
         } else if (isPlainObject(v) && !opaque) {
           const ops = Object.keys(v);
           if (ops.length === 0) {

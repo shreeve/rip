@@ -480,6 +480,7 @@ and values.
 User.where(lastName: 'Smith')                     # equality
 Order.where(status: ['draft', 'submitted'])       # IN (…); [] matches nothing
 User.where(phone: null)                           # IS NULL
+User.where(lastName: /pat/i)                      # a real regex — regexp_matches, flags carry (i, m, s)
 Order.where(total: {gte: 100, lt: 5000})          # operators — several read as AND
 User.where(firstName: {ilike: 'ada%'})
 Order.where(createdAt: {between: [monday, friday]})

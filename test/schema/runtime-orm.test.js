@@ -350,6 +350,22 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.value.notObject).toMatch(/plain object of field values/);
   });
 
+  test('a RegExp value is a real regex match: regexp_matches, semantic flags carried', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [1, 'patel']));
+      const { User } = makeWorld(k);
+      await User.where({ name: /^pat/i }).all();
+      await User.where({ name: /plain/gu }).all();   // g/u are JS mechanics — dropped
+      await User.with({ name: /^pat/i });
+      return null;
+    });
+    expect(r.calls.map((c) => ({ sql: c.sql, params: c.params }))).toEqual([
+      { sql: 'SELECT * FROM "users" WHERE regexp_matches("name", ?, ?)', params: ['^pat', 'i'] },
+      { sql: 'SELECT * FROM "users" WHERE regexp_matches("name", ?)', params: ['plain'] },
+      { sql: 'SELECT * FROM "users" WHERE regexp_matches("name", ?, ?) LIMIT 2', params: ['^pat', 'i'] },
+    ]);
+  });
+
   test('find and with reject the wrong argument shapes loudly', async () => {
     await paired(async (k) => {
       const { User } = makeWorld(k);

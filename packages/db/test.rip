@@ -898,6 +898,18 @@ test! "show prints an aligned table and returns its argument unchanged", ->
     '1 row'
   ]
 
+test! "show prints no table for zero rows — the words say it better than an empty husk", ->
+  logged = []
+  orig = console.log
+  console.log = (line) -> logged.push line
+  try
+    empty = show []
+    ok Array.isArray(empty) and empty.length is 0
+    show { rows: [], columns: ['id', 'name'], rowCount: 0 }
+  finally
+    console.log = orig
+  eq logged, ['0 rows', '0 rows']
+
 test! "show executes a query builder and awaits a promise — rows, never plumbing", ->
   logged = []
   orig = console.log
