@@ -392,6 +392,16 @@ export def materializeAll(result, opts = {})
 # head and says how many were left unshown; `maxWidth` (default 40)
 # clips runaway cells with an ellipsis.
 export def show(result, opts = {})
+  # Print what the caller MEANT, never the plumbing object they
+  # happened to hold: a promise awaits, and a query builder (anything
+  # non-array with an .all() method — a SchemaQuery chain, or a model
+  # itself: `show User` prints the table) executes first. Those paths
+  # return a promise — chain them with `show!`. Plain values stay
+  # synchronous, so `(show rows).map -> it.id` remains a pipeline.
+  if result? and typeof result.then is 'function'
+    return result.then (settled) -> show settled, opts
+  if result? and not Array.isArray(result) and typeof result.all is 'function'
+    return show result.all(), opts
   maxRows = opts.maxRows ?? 50
   maxWidth = opts.maxWidth ?? 40
   clip = (s) -> if s.length > maxWidth then s.slice(0, maxWidth - 1) + '…' else s

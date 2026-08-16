@@ -898,6 +898,31 @@ test! "show prints an aligned table and returns its argument unchanged", ->
     '1 row'
   ]
 
+test! "show executes a query builder and awaits a promise — rows, never plumbing", ->
+  logged = []
+  orig = console.log
+  console.log = (line) -> logged.push line
+  try
+    builder = { all: -> Promise.resolve [{ n: 1 }] }
+    eq show!(builder), [{ n: 1 }]
+    eq (show! Promise.resolve({ rows: [{ n: 2 }], columns: ['n'], rowCount: 1 })).rows, [{ n: 2 }]
+  finally
+    console.log = orig
+  eq logged, [
+    '+---+'
+    '| n |'
+    '+---+'
+    '| 1 |'
+    '+---+'
+    '1 row'
+    '+---+'
+    '| n |'
+    '+---+'
+    '| 2 |'
+    '+---+'
+    '1 row'
+  ]
+
 test! "show right-aligns numbers, prints a lone row as a card, flattens toJSON, and caps output", ->
   logged = []
   orig = console.log
