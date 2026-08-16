@@ -15,7 +15,7 @@ is declared done.
 ## Why this is viable for Rip
 
 Most rewrite-from-the-tests attempts fail because the tests are
-incidental. Ours are constitutional — rule 5 says tests are the
+incidental. Ours are constitutional — rule 6 says tests are the
 contract, and the corpus was built accordingly:
 
 - **The language suite** (`test/rip/*.rip`) pins syntax → JavaScript,
@@ -45,8 +45,9 @@ instantly. The decision, made here:
 - The `code` pins and corpus are renegotiable — but only one deliberate
   decision at a time. Every place the new engine emits different bytes
   is inspected, justified, and landed with its regenerated snapshot
-  (rule 6, applied at rewrite scale). An unexplained difference is a
-  stop-and-report, exactly as today.
+  (rule 7, emitted output never changes silently, applied at rewrite
+  scale). An unexplained difference is a stop-and-report, exactly as
+  today.
 
 Byte-compatibility as a blanket goal is rejected: it would force the
 new engine to inherit every formatting accident of the old one, which
@@ -96,8 +97,9 @@ dammit-on-new, run at language scale.
 ## What the suite does not capture (kept honestly in view)
 
 - **Performance.** Pins assert correctness, not speed. The rewrite
-  carries its own benchmark obligations (rule 7: a performance claim
-  lands with its measurement, construction cost included).
+  carries its own benchmark obligations (rule 8, claims are verified
+  rather than asserted: a performance change lands with its
+  measurement, construction cost included).
 - **Unpinned diagnostics.** Error messages beyond the pinned set may
   drift; drift in a message a user has learned to read is a
   regression even when no test fails.
