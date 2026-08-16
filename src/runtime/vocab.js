@@ -58,7 +58,7 @@ function camelCase(col) {
 // The three derivations every layer makes from a canonical TARGET: its
 // plural (hasMany accessors, table names), its FK column, and its
 // accessor. Same reason as the bijection above — these used to be
-// spelled once in src/runtime/orm.js and again in src/types/schematext.js,
+// spelled once in src/runtime/orm.js and again in src/ts/schematext.js,
 // where the copy carried a comment promising it mirrored the runtime
 // "byte-for-byte" and a test gated the promise. The rule lives here now,
 // so there is nothing left to drift.

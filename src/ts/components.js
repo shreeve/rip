@@ -2,7 +2,7 @@
 // renderers shared by the two typed artifacts: the TS-face emission
 // (src/emitter.js — TS-only member declares, the constructor's props
 // surface, the companion interface) and declaration emission
-// (src/types/dts.js — the component's .d.ts shape). Both render from the
+// (src/ts/dts.js — the component's .d.ts shape). Both render from the
 // SAME recorded data: the member model read off the component node's
 // statements, annotation/optionalMarker spans from the side tables
 // (side-band roles), never re-derived from generated code.

@@ -1,5 +1,5 @@
 // The schema TYPE story — one renderer, two consumers (the
-// typetext.js precedent): declaration emission (src/types/dts.js) and the
+// typetext.js precedent): declaration emission (src/ts/dts.js) and the
 // TS-face emission (src/emitter.js) both render a schema descriptor's
 // type surface through this module, so the two artifacts cannot drift
 // in declaration structure.
@@ -348,7 +348,7 @@ export function collectUserTypeNames(programSexpr) {
 // collide across files in one program (TS2451/TS2300) — false
 // diagnostics, since the loader runs every .rip file as an ES
 // module. The .d.ts gates on its own EMITTED lines instead
-// (src/types/dts.js — declaration emission can erase every module
+// (src/ts/dts.js — declaration emission can erase every module
 // indicator the source carried).
 export function isModuleShaped(programSexpr, isModuleImport) {
   if (!isNode(programSexpr) || programSexpr[0] !== 'program') return false;

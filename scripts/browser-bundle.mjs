@@ -91,13 +91,13 @@ const IDE_STUBS = new Map([
 const ideStubs = {
   name: 'rip-ide-stubs',
   setup(build) {
-    // Stub only the types/ modules. Basenames alone are not enough —
+    // Stub only the ts/ modules. Basenames alone are not enough —
     // `components.js` also names the reactive runtime module.
     build.onResolve({ filter: /(?:^|\/)(dts|schematext|typetext|components)\.js$/ }, (args) => {
       const file = args.path.split('/').pop();
       if (!IDE_STUBS.has(file)) return null;
-      const inTypes = /(?:^|\/)types\//.test(args.path)
-        || /(?:^|\/)types\//.test(args.importer || '');
+      const inTypes = /(?:^|\/)ts\//.test(args.path)
+        || /(?:^|\/)ts\//.test(args.importer || '');
       if (!inTypes) return null;
       return { path: file, namespace: 'rip-ide-stub' };
     });

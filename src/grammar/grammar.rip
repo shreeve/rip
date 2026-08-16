@@ -51,7 +51,7 @@ grammar =
   # Erased type statements — whole statements that compile to
   # NOTHING. TYPE_DECL is a `type`/`interface` declaration the lexer
   # collapsed into one token (raw text as its value — opaque to the
-  # grammar; declaration emission structures it, src/types/dts.js);
+  # grammar; declaration emission structures it, src/ts/dts.js);
   # `Assignable TYPE` is a bare typed forward
   # declaration (`r: T` alone on its line — erased completely).
   # Both construct real nodes so their spans reach

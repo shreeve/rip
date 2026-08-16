@@ -1593,7 +1593,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // ── `type Name = …` / `interface Name` — whole-statement type
     // declarations. The entire declaration collapses into ONE
     // TYPE_DECL token whose value is the raw source text (opaque to
-    // the grammar; declaration emission — src/types/dts.js — structures
+    // the grammar; declaration emission — src/ts/dts.js — structures
     // it); the grammar reduces it to an erased statement node
     // carrying the span. An `export` prefix folds in — the whole
     // exported declaration erases.

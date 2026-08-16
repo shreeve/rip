@@ -924,7 +924,7 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
 // Component classes carry TS-only member declares for every member
 // kind, the props-surface constructor, the typed _init signature, the
 // slot-namespace index signature, and the companion interface —
-// src/types/components.js renders the story for this face and the
+// src/ts/components.js renders the story for this face and the
 // .d.ts alike.
 
 describe('the component face (M12-E): TS-only member declares, the props ctor, the companion interface', () => {
