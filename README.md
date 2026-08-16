@@ -73,6 +73,24 @@ the real lexer, themes auto-detect the terminal background (`.theme`
 to override), imports resolve against the session cwd, and `-e`
 evaluates one entry. `.help` inside the session lists the commands.
 
+Two conveniences worth knowing by heart:
+
+- **A trailing `;` suppresses the echo.** The entry still evaluates
+  and still sets `_` — only the display goes quiet. The companion of
+  anything that already printed its own answer: `show User;` prints
+  the table without the REPL then dumping the returned instances.
+- **A `repl.rip` in your cwd is the project's own console.** It
+  auto-loads at startup and states only what cannot be guessed —
+  usually one line, `import './api/db.rip'`. Its exports, every
+  schema the app registered, and the rip/db toolkit (`sql`,
+  `findAll`, `findOne`, `transaction`, `show`) become your starting
+  bindings, announced by provenance:
+
+  ```
+  schemas → User, Patient, Order, … · rip/db → sql, findAll, findOne, transaction, show
+  rip> show User.where(lastName: /pat/i);
+  ```
+
 ## Sites (local HTTPS)
 
 ```sh
