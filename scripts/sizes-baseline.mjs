@@ -13,7 +13,7 @@ const files = [
   'src/runtime/components.js',
   'src/runtime/orm.js',
   'src/runtime/reactive.js',
-  'src/types/schemas.js',
+  'src/types/schematext.js',
   'src/types/components.js',
   'src/types/dts.js',
   'src/types/typetext.js',

@@ -43,7 +43,7 @@ import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
   renderParams, paramTyped, optionalReader,
 } from './typetext.js';
-import { buildSchemaTypeStory, SchemaTypeError } from './schemas.js';
+import { buildSchemaTypeStory, SchemaTypeError } from './schematext.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from '../emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,

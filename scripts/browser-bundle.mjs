@@ -47,7 +47,7 @@ const IDE_STUBS = new Map([
   ['dts.js', [
     `export const emitDeclarations = ${unavailable('declaration emission')};`,
   ].join('\n')],
-  ['schemas.js', [
+  ['schematext.js', [
     `export class SchemaTypeError extends Error {`,
     `  constructor(message, start = null, node = null) {`,
     `    super(message);`,
@@ -93,7 +93,7 @@ const ideStubs = {
   setup(build) {
     // Stub only the types/ modules. Basenames alone are not enough —
     // `components.js` also names the reactive runtime module.
-    build.onResolve({ filter: /(?:^|\/)(dts|schemas|typetext|components)\.js$/ }, (args) => {
+    build.onResolve({ filter: /(?:^|\/)(dts|schematext|typetext|components)\.js$/ }, (args) => {
       const file = args.path.split('/').pop();
       if (!IDE_STUBS.has(file)) return null;
       const inTypes = /(?:^|\/)types\//.test(args.path)

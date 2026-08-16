@@ -22,7 +22,7 @@ import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
-import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './types/schemas.js';
+import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './types/schematext.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './types/typetext.js';

@@ -17,7 +17,7 @@ import { readFileSync } from 'fs';
 import { compile } from '../compile.js';
 import { toInlineMapComment } from '../sourcemap.js';
 import { registerModuleMap, remapStack } from './stackmap.js';
-import { bareSpecifierMap } from './stdlib.js';
+import { bareSpecifierMap } from './resolve.js';
 
 // Async effect failures are report-and-continue by design (the
 // record): the runtime prints them itself, and its default printer
@@ -39,7 +39,7 @@ const installReactiveReporter = async () => {
 };
 
 // Bare-specifier resolution (the `rip/<pkg>` stdlib namespace and the
-// bun-global-install fallback) is enumerated by src/cli/stdlib.js,
+// bun-global-install fallback) is enumerated by src/cli/resolve.js,
 // shared with the sites artifact generator. Bun's runtime consults
 // plugins' onLoad but not onResolve (measured on 1.3.14: the hook
 // never fires for import statements), so here every name is registered

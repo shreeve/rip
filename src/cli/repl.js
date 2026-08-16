@@ -21,7 +21,7 @@ import { inspect } from 'node:util';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { bareSpecifierMap } from './stdlib.js';
+import { bareSpecifierMap } from './resolve.js';
 import { compile, CompileError, classifyCompleteness } from '../compile.js';
 import { tokenize, makeParserLexer, identifierRuns, isIdentifierName } from '../lexer.js';
 import { Parser } from '../parser.js';

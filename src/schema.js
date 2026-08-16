@@ -135,7 +135,7 @@ import {
 
 // Face-only behavior object name for a schema (`ReturnType<typeof …>`
 // and the JS face share this spelling). Lives here — not in
-// types/schemas.js — so the browser compile graph can take the
+// types/schematext.js — so the browser compile graph can take the
 // name without the IDE type machinery.
 export const behaviorName = (name) => `__${name}__behavior`;
 

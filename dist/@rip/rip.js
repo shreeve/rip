@@ -71,8 +71,8 @@ var syncOpsFlag = () => {
 };
 
 // src/runtime/vocab.js
-function snakeCase(s) {
-  return String(s).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+function snakeCase(name) {
+  return String(name).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
 function camelCase(col) {
   return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
@@ -89,18 +89,18 @@ function isCanonicalName(name) {
     return false;
   return true;
 }
-function isCanonicalTarget(name) {
-  if (typeof name !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(name))
+function isCanonicalTarget(target) {
+  if (typeof target !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(target))
     return false;
-  if (/[A-Z]{2,}/.test(name))
+  if (/[A-Z]{2,}/.test(target))
     return false;
   return true;
 }
-function isColumnName(name) {
-  return typeof name === "string" && /^[a-z_][a-z0-9_]*$/.test(name);
+function isColumnName(col) {
+  return typeof col === "string" && /^[a-z_][a-z0-9_]*$/.test(col);
 }
-function isLiteralColumn(name) {
-  return typeof name === "string" && name.length > 0 && !/[\u0000-\u001f\u007f".]/.test(name);
+function isLiteralColumn(col) {
+  return typeof col === "string" && col.length > 0 && !/[\u0000-\u001f\u007f".]/.test(col);
 }
 var MODEL_DIRECTIVES = {
   __proto__: null,
@@ -8156,7 +8156,7 @@ class CodeBuilder {
   }
 }
 
-// rip-ide-stub:schemas.js
+// rip-ide-stub:schematext.js
 class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
     super(message);

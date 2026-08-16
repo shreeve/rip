@@ -45,8 +45,8 @@
 // Total and reversible only on canonical names — which is what the
 // predicates below are for, and why they are not merely stylistic.
 
-function snakeCase(s) {
-  return String(s).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+function snakeCase(name) {
+  return String(name).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
 function camelCase(col) {
@@ -58,7 +58,7 @@ function camelCase(col) {
 // The three derivations every layer makes from a canonical TARGET: its
 // plural (hasMany accessors, table names), its FK column, and its
 // accessor. Same reason as the bijection above — these used to be
-// spelled once in src/runtime/orm.js and again in src/types/schemas.js,
+// spelled once in src/runtime/orm.js and again in src/types/schematext.js,
 // where the copy carried a comment promising it mirrored the runtime
 // "byte-for-byte" and a test gated the promise. The rule lives here now,
 // so there is nothing left to drift.
@@ -72,13 +72,13 @@ const UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'speci
 
 const IRREGULAR = new Map([['person', 'people'], ['man', 'men'], ['woman', 'women'], ['child', 'children'], ['tooth', 'teeth'], ['foot', 'feet'], ['mouse', 'mice']]);
 
-function pluralize(w) {
-  const lw = w.toLowerCase();
-  if (UNCOUNTABLE.has(lw)) return w;
+function pluralize(word) {
+  const lw = word.toLowerCase();
+  if (UNCOUNTABLE.has(lw)) return word;
   if (IRREGULAR.has(lw)) return IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(w)) return w.slice(0, -1) + 'ies';
-  if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
-  return w + 's';
+  if (/[^aeiouy]y$/i.test(word)) return word.slice(0, -1) + 'ies';
+  if (/(s|x|z|ch|sh)$/i.test(word)) return word + 'es';
+  return word + 's';
 }
 
 // The FK COLUMN a relation derives — snake, `_id`-suffixed. The FK
@@ -107,9 +107,9 @@ function isCanonicalName(name) {
 // A model or relation target: the same rule, uppercase-first. The FK
 // column and accessor both derive from it.
 //   ok:  User, MdmUser, Line2                   bad: user, MDMUser
-function isCanonicalTarget(name) {
-  if (typeof name !== 'string' || !/^[A-Z][a-zA-Z0-9]*$/.test(name)) return false;
-  if (/[A-Z]{2,}/.test(name)) return false;
+function isCanonicalTarget(target) {
+  if (typeof target !== 'string' || !/^[A-Z][a-zA-Z0-9]*$/.test(target)) return false;
+  if (/[A-Z]{2,}/.test(target)) return false;
   return true;
 }
 
@@ -117,8 +117,8 @@ function isCanonicalTarget(name) {
 // `{foreignKey:}` and the rename source in `{was:}`. Its property name
 // is `camelCase` of it, so it has to survive the round-trip — which
 // is why this is the strict, lowercase form.
-function isColumnName(name) {
-  return typeof name === 'string' && /^[a-z_][a-z0-9_]*$/.test(name);
+function isColumnName(col) {
+  return typeof col === 'string' && /^[a-z_][a-z0-9_]*$/.test(col);
 }
 
 // A column that ALREADY EXISTS under a name Rip did not choose —
@@ -129,9 +129,9 @@ function isColumnName(name) {
 // the wrong thing: a dot would ride through the quoter as ONE
 // identifier (`"crm.users"` is a column called that, not a qualified
 // name), and an embedded double quote is a typo every time.
-function isLiteralColumn(name) {
-  return typeof name === 'string' && name.length > 0 &&
-    !/[\u0000-\u001f\u007f".]/.test(name);
+function isLiteralColumn(col) {
+  return typeof col === 'string' && col.length > 0 &&
+    !/[\u0000-\u001f\u007f".]/.test(col);
 }
 
 // ── the `:model` directive vocabulary ────────────────────────────────
