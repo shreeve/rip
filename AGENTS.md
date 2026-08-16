@@ -210,6 +210,13 @@ strict as the emitter's.
  a style object that drops a key removes that declaration. State
  needed to compute the removal set is remembered per element, never
  rediscovered from the DOM.
+- **Descendants tear down before ancestors release.** An unmount
+ cascade unmounts `_children` before disposing the component's own
+ frame, recursively — a consumer's cleanup runs while every
+ ancestor's offered container is still live and un-released. Context
+ resolves only during initialization; the container captured at init
+ is the teardown-safe channel. Pins: the teardown-ordering suite in
+ `test/ui/runtime-components.test.js`.
 - **One reactive runtime per process.** The runtime guards against a
  second copy loading (a sentinel throws). In-process suite oracles use
  `runtimeDelivery: 'none'` plus binding-pass `new Function` against the
