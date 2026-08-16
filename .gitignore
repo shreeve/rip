@@ -1,7 +1,11 @@
 node_modules/
-# Track dist/@rip ship artifacts; ignore other dist/ scratch.
+# Track dist/@rip ship artifacts; ignore other dist/ scratch. The rule
+# above is anchored to the repo root (it contains a slash), so nested
+# build output needs its own — packages/print/vscode/dist holds the
+# bundled extension, rebuilt by its package script.
 dist/*
 !dist/@rip/
+packages/print/vscode/dist/
 
 .DS_Store
 *.log
