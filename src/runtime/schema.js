@@ -368,6 +368,7 @@ const SchemaRegistry = {
     return entry && entry.kind === kind ? entry.def : null;
   },
   has(name) { return this._entries.has(name); },
+  names() { return [...this._entries.keys()]; },
   reset() { this._entries.clear(); registryGen++; },
   // Run `fn` against a fresh, empty registry; restore afterward
   // (success, throw, or async rejection) — the test-scoping seam.
@@ -1784,3 +1785,13 @@ function __schema(descriptor) {
 
 
 export { __schema, SchemaError, SchemaRegistry, registerCoercer, SchemaDef, installPersistence };
+
+// Console doorbell: after a repl.rip loads an app, the REPL binds
+// every registered schema by name — and it must not hard-import this
+// runtime to ask (that would evaluate the runtime into every session,
+// schemas or not). Load order does not matter: the REPL reads only
+// after its preload import completes.
+if (typeof globalThis !== 'undefined') {
+  globalThis.__ripSchema = globalThis.__ripSchema || {};
+  globalThis.__ripSchema.SchemaRegistry = SchemaRegistry;
+}

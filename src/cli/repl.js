@@ -651,11 +651,22 @@ const DOT_COMMANDS = ['.help', '.clear', '.vars', '.history', '.editor', '.theme
 // ---------------------------------------------------------------------------
 // repl.rip — the zero-ceremony console. A file named `repl.rip` in the
 // session's cwd is the project's own statement of what a console here
-// holds: its exports become the session's starting bindings, loaded as
-// if the user had typed the import — the same lowering, the same
-// binding inventory, the same restore semantics. No file, no effect.
-// The import evaluates the file, so its side effects (connecting a
-// database, registering models) run exactly once, up front.
+// holds, and it only needs to state the one fact a console cannot
+// guess: which wiring to run (which database, which options — a
+// connection target must never be inferred). Everything that wiring
+// set up is then DERIVED, so the file never lists the obvious:
+//   - its exports become starting bindings, loaded through the same
+//     import lowering the user would have typed;
+//   - every schema the app registered binds by name (read from the
+//     runtime's doorbell — never a hard import of the schema runtime);
+//   - a wired db adapter brings the rip/db module toolkit along.
+// Explicit beats derived: an export always wins its name. No file, no
+// effect. The import evaluates the file once, so its side effects
+// (connecting, registering models) run exactly once, up front.
+// The common database app's whole repl.rip is one line:
+//   import './api/db.rip'
+
+const DB_TOOLKIT = ['sql', 'findAll', 'findOne', 'transaction', 'show'];
 
 export async function preloadRepl(session) {
   const file = join(session.cwd, 'repl.rip');
@@ -664,11 +675,32 @@ export async function preloadRepl(session) {
   // lowered import below a hit, not a second evaluation). `default`
   // and any non-identifier name cannot bind at a prompt; skip them.
   const mod = await import(file);
-  const names = Object.keys(mod).filter((n) => n !== 'default' && isIdentifierName(n));
-  if (names.length > 0) {
-    await session.eval(`import { ${names.join(', ')} } from './repl.rip'`);
+  const groups = [];
+  const exported = Object.keys(mod).filter((n) => n !== 'default' && isIdentifierName(n));
+  if (exported.length > 0) {
+    await session.eval(`import { ${exported.join(', ')} } from './repl.rip'`);
+    groups.push(['repl.rip', exported]);
   }
-  return { file, names };
+  const taken = new Set(session.bindings.keys());
+  const bind = (name, value) => {
+    if (taken.has(name)) return false;
+    session.ctx.vars[name] = value;
+    session.bindings.set(name, 'import');
+    taken.add(name);
+    return true;
+  };
+  const registry = globalThis.__ripSchema?.SchemaRegistry;
+  if (typeof registry?.names === 'function') {
+    const bound = registry.names()
+      .filter((name) => isIdentifierName(name) && bind(name, registry.get(name)));
+    if (bound.length > 0) groups.push(['schemas', bound]);
+  }
+  if (globalThis.__ripDbAdapter != null) {
+    const db = await import(session.ctx.resolveImport('rip/db'));
+    const bound = DB_TOOLKIT.filter((name) => typeof db[name] === 'function' && bind(name, db[name]));
+    if (bound.length > 0) groups.push(['rip/db', bound]);
+  }
+  return { file, groups, names: groups.flatMap(([, names]) => names) };
 }
 
 export class Repl {
@@ -740,7 +772,8 @@ export class Repl {
     try {
       const loaded = await preloadRepl(this.session);
       if (loaded !== null && loaded.names.length > 0) {
-        this.output.write(`${this.theme.paint('dim', `repl.rip → ${loaded.names.join(', ')}`)}\n`);
+        const line = loaded.groups.map(([label, names]) => `${label} → ${names.join(', ')}`).join(' · ');
+        this.output.write(`${this.theme.paint('dim', line)}\n`);
       }
     } catch (err) {
       this.output.write(`${this.theme.paint('error', `repl.rip failed to load: ${err?.message ?? err}`)}\n`);
@@ -1142,8 +1175,10 @@ Notes
   printed result then becomes the next \`_\`.
   Multi-line entries recall from history as single entries.
   import './file.rip' compiles through the loader, relative to your cwd.
-  A repl.rip in your cwd auto-loads at startup: its exports are your
-  starting bindings — the project's own console, zero ceremony.
+  A repl.rip in your cwd auto-loads at startup — the project's own
+  console, zero ceremony. It states only what cannot be guessed
+  (usually one line: import your app's db wiring); its exports, every
+  schema the app registered, and the rip/db toolkit bind automatically.
 `);
   }
 

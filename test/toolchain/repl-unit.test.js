@@ -577,7 +577,20 @@ describe('completion', () => {
 });
 
 describe('repl.rip preload — the zero-ceremony console', () => {
+  // The derivation seams are process globals; stash and clear them so
+  // these tests neither see nor disturb another suite's runtime.
+  const stashGlobals = () => {
+    const prior = { schema: globalThis.__ripSchema, adapter: globalThis.__ripDbAdapter };
+    delete globalThis.__ripSchema;
+    delete globalThis.__ripDbAdapter;
+    return () => {
+      if (prior.schema === undefined) delete globalThis.__ripSchema; else globalThis.__ripSchema = prior.schema;
+      if (prior.adapter === undefined) delete globalThis.__ripDbAdapter; else globalThis.__ripDbAdapter = prior.adapter;
+    };
+  };
+
   test('exports become session bindings, as if the import were typed; no file, no effect', async () => {
+    const restore = stashGlobals();
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-preload-')));
     const empty = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-empty-')));
     try {
@@ -591,17 +604,50 @@ describe('repl.rip preload — the zero-ceremony console', () => {
       expect(value).toBe('hi 42');
       expect(await preloadRepl(new Session({ cwd: empty }))).toBeNull();
     } finally {
+      restore();
       rmSync(dir, { recursive: true, force: true });
       rmSync(empty, { recursive: true, force: true });
     }
   });
 
+  test('derived bindings: registered schemas and the rip/db toolkit ride along; exports win names', async () => {
+    const restore = stashGlobals();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-derive-')));
+    try {
+      // The file exports `findAll` itself — the derived toolkit must
+      // NOT overwrite it (explicit beats derived).
+      writeFileSync(join(dir, 'repl.rip'), 'export findAll = -> "mine"\n');
+      const Widget = { fake: 'Widget' };
+      globalThis.__ripSchema = { SchemaRegistry: { names: () => ['Widget', 'not a name'], get: (n) => (n === 'Widget' ? Widget : null) } };
+      globalThis.__ripDbAdapter = {};
+      const session = new Session({ cwd: dir });
+      const loaded = await preloadRepl(session);
+      const labels = loaded.groups.map(([label]) => label);
+      expect(labels).toEqual(['repl.rip', 'schemas', 'rip/db']);
+      expect(loaded.groups[1][1]).toEqual(['Widget']);          // invalid names skipped
+      expect(session.ctx.vars['Widget']).toBe(Widget);
+      const toolkit = loaded.groups[2][1];
+      expect(toolkit).not.toContain('findAll');                 // export won the name
+      expect(toolkit).toContain('findOne');
+      expect(toolkit).toContain('transaction');
+      const { value } = await session.eval('findAll()');
+      expect(value).toBe('mine');
+      const one = await session.eval('typeof findOne');
+      expect(one.value).toBe('function');
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('a throwing repl.rip propagates, so the caller can report and still open the prompt', async () => {
+    const restore = stashGlobals();
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-throw-')));
     try {
       writeFileSync(join(dir, 'repl.rip'), "throw Error.new 'db is down'\n");
       await expect(preloadRepl(new Session({ cwd: dir }))).rejects.toThrow('db is down');
     } finally {
+      restore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

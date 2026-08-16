@@ -25,8 +25,9 @@ const HELP = `rip ${packageJson.version} — ${packageJson.description}
 
 Usage:
   rip                                Start the interactive REPL (on a terminal);
-                                     a ./repl.rip auto-loads — its exports are
-                                     your starting bindings
+                                     a ./repl.rip auto-loads — its exports, the
+                                     app's registered schemas, and the rip/db
+                                     toolkit become your starting bindings
   rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
   rip [options] dir [args...]        Run dir/index.rip
   rip [options]                      Read source from stdin (when piped)
