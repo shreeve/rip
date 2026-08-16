@@ -22,13 +22,13 @@ const brPath = resolve(root, 'dist/@rip/rip.min.js.br');
 // entry. config/loader/run own the filesystem and process; orm
 // owns persistence; migrate and the CLIs own operations.
 const FORBIDDEN = new Set([
-  'src/cli/loader.js',
+  'src/loader.js',
   'src/cli/run.js',
   'src/cli/check.js',
   'src/config.js',
   'src/cli/migrate.js',
   'src/cli/schema.js',
-  'src/cli/stackmap.js',
+  'src/stackmap.js',
   'src/runtime/orm.js',
 ]);
 

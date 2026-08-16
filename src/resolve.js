@@ -23,7 +23,7 @@ import { homedir } from 'os';
 import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-const packagesDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'packages');
+const packagesDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages');
 const globalDir = join(process.env.BUN_INSTALL ?? join(homedir(), '.bun'), 'install', 'global', 'node_modules');
 
 const packageEntries = (pkgDir, name) => {

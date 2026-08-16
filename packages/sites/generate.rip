@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 preload = process.execArgv.find((arg) -> arg.startsWith('--preload='))?.slice('--preload='.length)
 abort 'rip-site generate: the Rip loader is missing' unless preload?
 # Preload lives in src/cli/; the compiler root is one level up.
-compiler = import!(join(dirname(resolve(preload)), '..', 'compile.js')).compile
+compiler = import!(join(dirname(resolve(preload)), 'compile.js')).compile
 
 # Bare specifiers (`rip/<pkg>` stdlib, bun-global fallback) share the
 # loader's enumeration — but Bun.build never consults the runtime's

@@ -1,7 +1,7 @@
-preload = ["./src/cli/loader.js"]
+preload = ["./src/loader.js"]
 
 [test]
-preload = ["./src/cli/loader.js"]
+preload = ["./src/loader.js"]
 pathIgnorePatterns = ["packages/**", "misc/**", "test/browser/**"]
 
 [install]

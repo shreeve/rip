@@ -61,13 +61,13 @@ class SourceFile {
   }
 }
 
-// src/ops.js
-var ops = { on: false, n: 0 };
-var syncOpsFlag = () => {
-  ops.on = typeof process !== "undefined" && !!process.env.RIP_COUNT_OPS;
-  if (ops.on)
-    ops.n = 0;
-  return ops.on;
+// src/counter.js
+var counter = { on: false, n: 0 };
+var syncCounterFlag = () => {
+  counter.on = typeof process !== "undefined" && !!process.env.RIP_COUNT_OPS;
+  if (counter.on)
+    counter.n = 0;
+  return counter.on;
 };
 
 // src/runtime/vocab.js
@@ -261,8 +261,8 @@ function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   let depth = 0;
   let i = 0;
   while (i < tokens.length) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[i];
     if (t.kind === "INDENT")
       depth++;
@@ -443,8 +443,8 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     let d = 0;
     let outdentIdx = -1;
     for (let k = indentIdx;k < tokens.length; k++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (tokens[k].kind === "INDENT")
         d++;
       else if (tokens[k].kind === "OUTDENT") {
@@ -1962,11 +1962,11 @@ function foldApplyOp(map, op, byName) {
       return null;
   }
 }
-function foldProjectionDescriptor(baseDescriptor, ops2, byName) {
+function foldProjectionDescriptor(baseDescriptor, ops, byName) {
   let map = foldProjectableMap(baseDescriptor);
   if (!map)
     return null;
-  for (const op of ops2) {
+  for (const op of ops) {
     map = foldApplyOp(map, op, byName);
     if (!map)
       return null;
@@ -1974,7 +1974,7 @@ function foldProjectionDescriptor(baseDescriptor, ops2, byName) {
   return { kind: "shape", entries: [...map.values()] };
 }
 function foldParseChain(rhs) {
-  const ops2 = [];
+  const ops = [];
   let node = rhs;
   while (true) {
     if (!Array.isArray(node))
@@ -2014,7 +2014,7 @@ function foldParseChain(rhs) {
         return null;
       op = { method, keys };
     }
-    ops2.unshift(op);
+    ops.unshift(op);
     const obj = callee[1];
     if (Array.isArray(obj)) {
       node = obj;
@@ -2023,7 +2023,7 @@ function foldParseChain(rhs) {
     const base = foldStr(obj);
     if (typeof base !== "string")
       return null;
-    return { base, ops: ops2 };
+    return { base, ops };
   }
 }
 function foldLiteralKeys(argNodes) {
@@ -2682,8 +2682,8 @@ function rewriteRender(tokens, mintId, fail) {
     let depth = 1;
     let k = from;
     while (k >= 0 && depth > 0) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const kt = tokAt(arr, k, current)?.kind;
       if (kt === closer)
         depth++;
@@ -2700,8 +2700,8 @@ function rewriteRender(tokens, mintId, fail) {
       j = skipBalancedPair(out, j - 1, "OUTDENT", "INDENT", current);
     }
     while (j > 0) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const pt = out[j - 1].kind;
       if (pt === "TERMINATOR" || pt === "RENDER")
         break;
@@ -2737,8 +2737,8 @@ function rewriteRender(tokens, mintId, fail) {
   const explicitDepthAt = () => {
     let depth = 0;
     for (let k = out.length - 1;k >= 0; k--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const t = out[k].kind;
       if (CLOSERS.has(t))
         depth++;
@@ -2768,8 +2768,8 @@ function rewriteRender(tokens, mintId, fail) {
   const retagMatchingParen = (from) => {
     let depth = 1;
     for (let j = from + 1;j < tokens.length && depth > 0; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (k === "(" || k === "CALL_START")
         depth++;
@@ -2784,8 +2784,8 @@ function rewriteRender(tokens, mintId, fail) {
   const isClsxCallEnd = (current) => {
     let depth = 1;
     for (let j = out.length - 1;j >= 0 && depth > 0; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (out[j].kind === "CALL_END")
         depth++;
       else if (out[j].kind === "CALL_START") {
@@ -2822,8 +2822,8 @@ function rewriteRender(tokens, mintId, fail) {
     }
   };
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     let t = tokens[i];
     const next = tokens[i + 1] ?? null;
     if (textFrames.length > 0)
@@ -3062,8 +3062,8 @@ function applyInsertions(tokens, collect, mintId) {
   let ins = insertions.length - 1;
   tokens.length += insertions.length;
   for (let write = tokens.length - 1;write >= 0; write--) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
       tokens[write] = insertions[ins--].token;
     } else {
@@ -3080,8 +3080,8 @@ function collectBlocks(tokens, mintId) {
   const commaInImplicitCall = (start, i) => {
     let levels = 0;
     for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (CLOSERS2.has(k) || k === "OUTDENT") {
         levels++;
@@ -3105,8 +3105,8 @@ function collectBlocks(tokens, mintId) {
   const commaInImplicitObject = (start, i) => {
     let levels = 0;
     for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (CLOSERS2.has(k) || k === "OUTDENT") {
         levels++;
@@ -3133,8 +3133,8 @@ function collectBlocks(tokens, mintId) {
     let inlineIfs = 0;
     let pendingBlocks = 0;
     for (let j = start;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const t = tokens[j];
       const k = t.kind;
       if (k === "INDENT") {
@@ -3185,8 +3185,8 @@ function collectBlocks(tokens, mintId) {
     const end = bodyEnd(start);
     let firstReal = null;
     for (let j = start;j < end; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (!tokens[j].generated) {
         firstReal = tokens[j];
         break;
@@ -3194,8 +3194,8 @@ function collectBlocks(tokens, mintId) {
     }
     let lastReal = null;
     for (let j = end - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (!tokens[j].generated) {
         lastReal = tokens[j];
         break;
@@ -3203,8 +3203,8 @@ function collectBlocks(tokens, mintId) {
     }
     let afterReal = null;
     for (let j = end;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (!tokens[j].generated) {
         afterReal = tokens[j];
         break;
@@ -3228,8 +3228,8 @@ function collectBlocks(tokens, mintId) {
     }
   };
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     closePendingAt(i);
     const t = tokens[i];
     if ((t.kind === "->" || t.kind === "=>") && tokens[i + 1] && tokens[i + 1].kind !== "INDENT") {
@@ -3353,8 +3353,8 @@ var looksObjectishAt = (tokens, j) => {
     let d = 1;
     let k = j;
     while (++k < tokens.length && d > 0) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (PASS_OPENERS.has(tokens[k].kind))
         d++;
       else if (PASS_CLOSERS.has(tokens[k].kind))
@@ -3371,8 +3371,8 @@ var CALL_BLOCKING_HEADS = new Set(["CLASS", "EXTENDS", "IF", "CATCH", "SWITCH", 
 var controlHeadBackwards = (tokens, j) => {
   let depth = 0;
   for (;j >= 0; j--) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const k = tokens[j].kind;
     if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
       return true;
@@ -3423,8 +3423,8 @@ function collectObjects(tokens, mintId) {
   const openCallBetween = (from, i) => {
     let levels = 0;
     for (let j = i - 1;j > from; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (PASS_CLOSERS.has(k)) {
         levels++;
@@ -3450,8 +3450,8 @@ function collectObjects(tokens, mintId) {
   };
   const objectContinues = (j) => {
     for (let d = 0;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (PASS_OPENERS.has(k))
         d++;
@@ -3466,8 +3466,8 @@ function collectObjects(tokens, mintId) {
     return false;
   };
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[i];
     const k = t.kind;
     const prev = tokens[i - 1];
@@ -3616,8 +3616,8 @@ function collectCalls(tokens, mintId) {
     insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
   };
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[i];
     const next = tokens[i + 1];
     const k = t.kind;
@@ -3878,8 +3878,8 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       openAngle = null;
   };
   for (let j = from;j < to; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[j];
     const kd = t.kind;
     if (kd === "COMPARE" && t.value === "<") {
@@ -4013,8 +4013,8 @@ var atStatementBoundary = (tokens, k) => {
     return false;
   let depth = 0;
   for (let j = k;j >= 0; j--) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     if (kd === "OUTDENT")
       depth++;
@@ -4036,8 +4036,8 @@ var isCompleteTypeExpr = (tokens, a, b) => {
   const parInfo = [];
   let lastClosedParen = null;
   for (let j = a;j < b; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[j].kind, v = tokens[j].value;
     if (t === "=>") {
       const p = j > a ? tokens[j - 1].kind : null;
@@ -4158,8 +4158,8 @@ var collectTypeRun = (tokens, j, opts, fail) => {
   };
   outer:
     while (j < tokens.length) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const t = tokens[j];
       const kd = t.kind;
       if (opts.cast && depth === 0 && kd === "IDENTIFIER" && t.value === "as")
@@ -4266,8 +4266,8 @@ var looksLikeBareFunctionType = (tokens, a, b) => {
     return false;
   let depth = 0;
   for (let k = a;k < b; k++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const tag = tokens[k].kind;
     if (isOpen(tag))
       depth++;
@@ -4282,8 +4282,8 @@ var looksLikeBareFunctionType = (tokens, a, b) => {
     return true;
   let d = 0, pendingTernary = false;
   for (let k = a;k < b; k++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const tag = tokens[k].kind;
     if (isOpen(tag) || tag === "[" || tag === "{" || tag === "INDEX_START")
       d++;
@@ -4305,8 +4305,8 @@ var skipAngleGroup = (tokens, j) => {
     return j;
   let depth = 0;
   while (j < tokens.length) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[j];
     if (t.kind === "COMPARE" && t.value === "<")
       depth++;
@@ -4329,8 +4329,8 @@ var beforeAngleGroupBack = (tokens, k) => {
     return k;
   let depth = 0;
   while (k >= 0) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[k];
     if (t.kind === "TERMINATOR" || t.kind === "INDENT" || t.kind === "OUTDENT")
       return -1;
@@ -4347,8 +4347,8 @@ var typeAliasEq = (tokens, eqIdx) => {
     let d = 1;
     k--;
     while (k >= 0 && d > 0) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (tokens[k].kind === "COMPARE" && tokens[k].value === ">")
         d++;
       else if (tokens[k].kind === "SHIFT" && tokens[k].value === ">>")
@@ -4390,15 +4390,15 @@ var syncTypeGenericMemo = (tokens, memo) => {
     memo.level = 0;
     let from = tokens.length - 1;
     while (from >= 0 && !isLineBoundary(tokens[from])) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       from--;
     }
     memo.upTo = from + 1;
   }
   for (let j = memo.upTo;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const t = tokens[j];
     if (isLineBoundary(t)) {
       memo.answers.clear();
@@ -4438,8 +4438,8 @@ var closesTypeGeneric = (tokens, inTypeBody, memo) => {
 var typedDeclEq = (tokens, i) => {
   let depth = 0, sawFatArrow = false;
   for (let j = i + 1;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd))
       depth++;
@@ -4466,8 +4466,8 @@ var buildAssignIndex = (tokens) => {
   const stack = [{ id: 0, up: null }];
   let bracket = 0;
   for (let j = 0;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     blockIdAt[j] = stack[stack.length - 1].id;
     if (kd === "INDENT") {
@@ -4484,8 +4484,8 @@ var buildAssignIndex = (tokens) => {
       bracket--;
     } else if (bracket === 0 && (kd === "IDENTIFIER" || kd === "PROPERTY") && tokens[j + 1]?.kind === "=") {
       for (let f = stack[stack.length - 1];f; f = f.up) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         blockMaps[f.id].set(tokens[j].value, j);
       }
     }
@@ -4495,8 +4495,8 @@ var buildAssignIndex = (tokens) => {
 var methodValueAhead = (tokens, j) => {
   let depth = 0;
   for (;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd))
       depth++;
@@ -4516,8 +4516,8 @@ var methodValueAhead = (tokens, j) => {
 var bareDeclLineEnd = (tokens, i) => {
   let depth = 0;
   for (let j = i + 1;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd))
       depth++;
@@ -4538,8 +4538,8 @@ var POSTFIX_CLAUSES = new Set(["IF", "UNLESS", "WHILE", "UNTIL", "FOR"]);
 var clauseInLine = (tokens, a, b) => {
   let depth = 0;
   for (let j = a;j < b; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd))
       depth++;
@@ -4553,8 +4553,8 @@ var clauseInLine = (tokens, a, b) => {
 var matchingOutdent = (tokens, at) => {
   let depth = 0;
   for (let j = at;j < tokens.length; j++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (tokens[j].kind === "INDENT")
       depth++;
     else if (tokens[j].kind === "OUTDENT" && --depth === 0)
@@ -4649,8 +4649,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
     let allBare = true;
     let lastEnd = -1;
     for (;; ) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const end = bareDeclLineEnd(tokens, colon);
       if (end < 0) {
         if (typedDeclEq(tokens, colon) >= 0)
@@ -4712,8 +4712,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
     if (run.parts.length === 0)
       return -1;
     for (let k = runStart;k < runStart + run.consumed; k++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const t = tokens[k];
       if (t.kind === "PROPERTY" && t.value === "prototype" && text.slice(t.start, t.end) === "::") {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
@@ -4733,8 +4733,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
     if (tokens[j]?.kind === "COMPARE" && tokens[j].value === "<" && !tokens[j].spaced) {
       let depth = 0;
       while (j < tokens.length) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         const t = tokens[j];
         if (t.kind === "COMPARE" && t.value === "<")
           depth++;
@@ -4793,8 +4793,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
     return out2;
   };
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const tok = tokens[i];
     const kd = tok.kind;
     const prev = out[out.length - 1] ?? null;
@@ -4989,8 +4989,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
       if (frames.length === 0 && inClassBody() && namedColon && !methodValueAhead(tokens, i + 1)) {
         let end = -1, depth = 0;
         for (let j = i + 1;j < tokens.length; j++) {
-          if (ops.on)
-            ops.n++;
+          if (counter.on)
+            counter.n++;
           const t2 = tokens[j].kind;
           if (RUN_OPENERS.has(t2))
             depth++;
@@ -5147,8 +5147,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
   }
   tokens.length = out.length;
   for (let i = 0;i < out.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     tokens[i] = out[i];
   }
   return tokens;
@@ -5157,8 +5157,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
 // src/lexer.js
 function tagParams(tokens) {
   for (let i = 1;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kind = tokens[i].kind;
     if (kind !== "->" && kind !== "=>")
       continue;
@@ -5174,8 +5174,8 @@ function tagParams(tokens) {
       let depth2 = 0;
       let found = -1;
       for (let j = i - 1;j >= 0; j--) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         const t = tokens[j];
         const k = t.kind;
         if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
@@ -5204,8 +5204,8 @@ function tagParams(tokens) {
       let d = 0;
       let op = -1;
       for (let k = i - 1;k >= 0; k--) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         const kk = tokens[k].kind;
         if (kk === ")" || kk === "CALL_END" || kk === "PARAM_END")
           d++;
@@ -5223,8 +5223,8 @@ function tagParams(tokens) {
     }
     let depth = 0;
     for (let j = closeAt - 1;j >= 0; j--) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const t = tokens[j];
       if (t.kind === ")" || t.kind === "CALL_END" || t.kind === "INDEX_END" || t.kind === "]") {
         depth++;
@@ -5250,8 +5250,8 @@ function tagDynamicKeys(tokens) {
   const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
   const pendingTernary = [0];
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const k = tokens[i].kind;
     if (k === "TERNARY") {
       pendingTernary[pendingTernary.length - 1]++;
@@ -5265,8 +5265,8 @@ function tagDynamicKeys(tokens) {
       let depth = 1;
       let j = i;
       while (++j < tokens.length && depth > 0) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         if (OPENERS2.has(tokens[j].kind))
           depth++;
         else if (CLOSERS2.has(tokens[j].kind))
@@ -5300,8 +5300,8 @@ var ARROW_COMMA_AFTER = new Set([
 function insertArrowCommas(tokens) {
   let depth = 0;
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const k = tokens[i].kind;
     if (k === "CALL_START")
       depth++;
@@ -5320,8 +5320,8 @@ function tagCompoundKeys(tokens) {
   const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
   const pendingTernary = [0];
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const k = tokens[i].kind;
     if (k === "TERNARY") {
       pendingTernary[pendingTernary.length - 1]++;
@@ -5334,8 +5334,8 @@ function tagCompoundKeys(tokens) {
     } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
       let j = i;
       for (;; ) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         const sep = tokens[j + 1];
         const nxt = tokens[j + 2];
         if (sep === undefined || !identish(nxt))
@@ -5367,8 +5367,8 @@ function tagCompoundKeys(tokens) {
 }
 function tagVoidMarkers(tokens) {
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (tokens[i].kind !== "DAMMIT")
       continue;
     if (tokens[i + 1]?.kind === "=" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF") {
@@ -5543,7 +5543,7 @@ var REGEX_FLAGS_RE = /^\w*/;
 var VALID_FLAGS_RE = /^(?!.*(.).*\1)[gimsuy]*$/;
 var NOT_REGEX = new Set([...INDEXABLE, "++", "--"]);
 function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
-  syncOpsFlag();
+  syncCounterFlag();
   const source = new SourceFile(text, path);
   const tokens = [];
   const trivia = [];
@@ -5954,8 +5954,8 @@ ${baseline}`).join(`
     }
   };
   while (pos < text.length) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (atLineStart) {
       const lineStart = pos;
       while (pos < text.length && (text[pos] === " " || text[pos] === "\t"))
@@ -6588,16 +6588,16 @@ ${baseline}`).join(`
 }
 function tagPostfixConditionals(tokens) {
   for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     const kind = tokens[i].kind;
     if (kind !== "IF" && kind !== "UNLESS")
       continue;
     let postfix = true;
     let depth = 0;
     for (let j = i + 1;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const k = tokens[j].kind;
       if (depth === 0) {
         if (k === "TERMINATOR")
@@ -7802,8 +7802,8 @@ var buildIntervalTree = (entries) => {
   const center = entries[entries.length >> 1].start;
   const here = [], left = [], right = [];
   for (const e of entries) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (e.end <= center)
       left.push(e);
     else if (e.start > center)
@@ -7822,12 +7822,12 @@ var buildIntervalTree = (entries) => {
 var stabIntervalTree = (root, x, out) => {
   let node = root;
   while (node !== null) {
-    if (ops.on)
-      ops.n++;
+    if (counter.on)
+      counter.n++;
     if (x < node.center) {
       for (const e of node.byStart) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         if (e.start > x)
           break;
         out.push(e);
@@ -7835,8 +7835,8 @@ var stabIntervalTree = (root, x, out) => {
       node = node.left;
     } else if (x > node.center) {
       for (const e of node.byEnd) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         if (e.end <= x)
           break;
         out.push(e);
@@ -7844,8 +7844,8 @@ var stabIntervalTree = (root, x, out) => {
       node = node.right;
     } else {
       for (const e of node.byStart) {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         out.push(e);
       }
       break;
@@ -7867,8 +7867,8 @@ class Mappings {
     if ((gen ? this._genCount : this._srcCount) !== this.rows.length) {
       const entries = [];
       this.rows.forEach((r, i) => {
-        if (ops.on)
-          ops.n++;
+        if (counter.on)
+          counter.n++;
         const start = gen ? r.generatedStart : r.sourceStart;
         const end = gen ? r.generatedEnd : r.sourceEnd;
         if (start != null && start < end)
@@ -8116,8 +8116,8 @@ class CodeBuilder {
     let pos = f.generatedStart;
     let i = f.chunkStart;
     while (i < chunkEnd) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       if (skippable && pos >= m.genStart && pos < m.genEnd) {
         pos = m.genEnd;
         i = m.chunkEnd;
@@ -8151,8 +8151,8 @@ class CodeBuilder {
   bridges(m, f, delta) {
     let pos = m.genEnd;
     for (let i = m.chunkEnd;i < f.chunkStart; i++) {
-      if (ops.on)
-        ops.n++;
+      if (counter.on)
+        counter.n++;
       const chunk = this.chunks[i];
       if (!this.source.startsWith(chunk, pos + delta))
         return false;

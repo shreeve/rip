@@ -670,7 +670,7 @@ describe('the mapping query index', () => {
 
   test('scaling: an n-query batch over an n-statement program stays near-linear in index ops', async () => {
     const { compile } = await import('../../src/compile.js');
-    const { syncOpsFlag } = await import('../../src/ops.js');
+    const { syncCounterFlag } = await import('../../src/counter.js');
     expectLinearOpsDoubling({
       prepare: (n) => {
         const src = Array.from({ length: n }, (_, i) => `v${i} = w${i}.p.q + ${i}`).join('\n');
@@ -679,7 +679,7 @@ describe('the mapping query index', () => {
         return { m: r.mappings, offsets };
       },
       run: ({ m, offsets }) => {
-        syncOpsFlag(); // count index build + queries only, not the compile
+        syncCounterFlag(); // count index build + queries only, not the compile
         for (const x of offsets) m.bestAtGenerated(x);
       },
       sizes: [250, 500, 1000, 2000],

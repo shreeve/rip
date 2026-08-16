@@ -23,7 +23,7 @@
 //   their occurrence spans live here and are claimed by source containment
 //   while an enclosing node emits.
 
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 
 export class Stores {
   constructor({ nodes, roles, primitives = [], nodeIds = null }) {
@@ -130,7 +130,7 @@ const buildIntervalTree = (entries) => {
   const center = entries[entries.length >> 1].start;
   const here = [], left = [], right = [];
   for (const e of entries) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     if (e.end <= center) left.push(e);
     else if (e.start > center) right.push(e);
     else here.push(e);
@@ -149,11 +149,11 @@ const buildIntervalTree = (entries) => {
 const stabIntervalTree = (root, x, out) => {
   let node = root;
   while (node !== null) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     if (x < node.center) {
       // Every node span ends past the center (> x): match iff start <= x.
       for (const e of node.byStart) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         if (e.start > x) break;
         out.push(e);
       }
@@ -161,7 +161,7 @@ const stabIntervalTree = (root, x, out) => {
     } else if (x > node.center) {
       // Every node span starts at or before the center (< x): match iff end > x.
       for (const e of node.byEnd) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         if (e.end <= x) break;
         out.push(e);
       }
@@ -170,7 +170,7 @@ const stabIntervalTree = (root, x, out) => {
       // x IS the center: every node span matches, and neither subtree
       // can (left spans end at or before x, right spans start past it).
       for (const e of node.byStart) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         out.push(e);
       }
       break;
@@ -204,7 +204,7 @@ export class Mappings {
     if ((gen ? this._genCount : this._srcCount) !== this.rows.length) {
       const entries = [];
       this.rows.forEach((r, i) => {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         const start = gen ? r.generatedStart : r.sourceStart;
         const end = gen ? r.generatedEnd : r.sourceEnd;
         // A zero-width span can never satisfy start <= x < end; it

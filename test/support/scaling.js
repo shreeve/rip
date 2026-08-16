@@ -35,7 +35,7 @@
 // cliff), which an endpoint exponent would dilute: healthy pairs reach
 // 2.92 under load, while a quadratic's 4x fails both retry rounds.
 import { expect } from 'bun:test';
-import { ops } from '../../src/ops.js';
+import { counter } from '../../src/counter.js';
 
 // COUNT-ratio gate (deterministic): run the workload under
 // RIP_COUNT_OPS and assert each doubling's instrumented-iteration
@@ -49,8 +49,8 @@ export const expectLinearOpsDoubling = ({ prepare, run, sizes, bound = 2.6 }) =>
   try {
     const counts = sizes.map((n) => {
       run(prepare(n));
-      expect(ops.n).toBeGreaterThan(0); // the workload must actually count
-      return ops.n;
+      expect(counter.n).toBeGreaterThan(0); // the workload must actually count
+      return counter.n;
     });
     counts.forEach((c, i) => {
       if (i === 0) return;

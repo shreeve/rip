@@ -20,7 +20,7 @@
 // values. The scanner cannot answer that; type shape can. The import
 // is one-directional — nothing here reaches back into lexer.js.
 
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 
 // ── Type-annotation collapse pass ───────────────────────────────────
 // Rip types are erased annotations: a single-colon
@@ -202,7 +202,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (angle === 0) openAngle = null;
   };
   for (let j = from; j < to; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[j];
     const kd = t.kind;
     if (kd === 'COMPARE' && t.value === '<') {
@@ -351,7 +351,7 @@ export const atStatementBoundary = (tokens, k) => {
   // block's INDENT and inspect its opener.
   let depth = 0;
   for (let j = k; j >= 0; j--) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     if (kd === 'OUTDENT') depth++;
     else if (kd === 'INDENT') {
@@ -378,7 +378,7 @@ const isCompleteTypeExpr = (tokens, a, b) => {
   const parInfo = [];          // per-paren-depth: { colon, open }
   let lastClosedParen = null;  // { colon, empty } of the last closed group
   for (let j = a; j < b; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[j].kind, v = tokens[j].value;
     // A function-type arrow is valid only after a closed param group
     // that is empty `()` or typed `(x: T)`; an untyped `(e) =>` is a
@@ -461,7 +461,7 @@ const collectTypeRun = (tokens, j, opts, fail) => {
   };
 
   outer: while (j < tokens.length) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[j];
     const kd = t.kind;
 
@@ -592,7 +592,7 @@ const looksLikeBareFunctionType = (tokens, a, b) => {
   if (b - a < 2 || !isOpen(tokens[a].kind)) return false;
   let depth = 0;
   for (let k = a; k < b; k++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const tag = tokens[k].kind;
     if (isOpen(tag)) depth++;
     else if (isClose(tag)) {
@@ -606,7 +606,7 @@ const looksLikeBareFunctionType = (tokens, a, b) => {
   // `?` at the same depth and is exempt.
   let d = 0, pendingTernary = false;
   for (let k = a; k < b; k++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const tag = tokens[k].kind;
     if (isOpen(tag) || tag === '[' || tag === '{' || tag === 'INDEX_START') d++;
     else if (isClose(tag) || tag === ']' || tag === '}' || tag === 'INDEX_END') d--;
@@ -628,7 +628,7 @@ const skipAngleGroup = (tokens, j) => {
   if (!(tokens[j]?.kind === 'COMPARE' && tokens[j].value === '<' && !tokens[j].spaced)) return j;
   let depth = 0;
   while (j < tokens.length) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[j];
     if (t.kind === 'COMPARE' && t.value === '<') depth++;
     else if (t.kind === 'COMPARE' && t.value === '>') depth--;
@@ -649,7 +649,7 @@ export const beforeAngleGroupBack = (tokens, k) => {
   if (k < 0 || !tokens[k] || angleWeight(tokens[k]) >= 0) return k;
   let depth = 0;
   while (k >= 0) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[k];
     if (t.kind === 'TERMINATOR' || t.kind === 'INDENT' || t.kind === 'OUTDENT') return -1;
     depth += angleWeight(t);
@@ -668,7 +668,7 @@ export const typeAliasEq = (tokens, eqIdx) => {
     let d = 1;
     k--;
     while (k >= 0 && d > 0) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (tokens[k].kind === 'COMPARE' && tokens[k].value === '>') d++;
       else if (tokens[k].kind === 'SHIFT' && tokens[k].value === '>>') d += 2;
       else if (tokens[k].kind === 'COMPARE' && tokens[k].value === '<') d--;
@@ -768,13 +768,13 @@ const syncTypeGenericMemo = (tokens, memo) => {
     memo.level = 0;
     let from = tokens.length - 1;
     while (from >= 0 && !isLineBoundary(tokens[from])) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       from--;
     }
     memo.upTo = from + 1;
   }
   for (let j = memo.upTo; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[j];
     if (isLineBoundary(t)) {
       memo.answers.clear();
@@ -835,7 +835,7 @@ export const closesTypeGeneric = (tokens, inTypeBody, memo) => {
 const typedDeclEq = (tokens, i) => {
   let depth = 0, sawFatArrow = false;
   for (let j = i + 1; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd)) depth++;
     else if (RUN_CLOSERS.has(kd)) {
@@ -879,7 +879,7 @@ const buildAssignIndex = (tokens) => {
   const stack = [{ id: 0, up: null }];
   let bracket = 0;
   for (let j = 0; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     blockIdAt[j] = stack[stack.length - 1].id;
     if (kd === 'INDENT') {
@@ -896,7 +896,7 @@ const buildAssignIndex = (tokens) => {
     } else if (bracket === 0 && (kd === 'IDENTIFIER' || kd === 'PROPERTY') &&
         tokens[j + 1]?.kind === '=') {
       for (let f = stack[stack.length - 1]; f; f = f.up) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         blockMaps[f.id].set(tokens[j].value, j);
       }
     }
@@ -909,7 +909,7 @@ const buildAssignIndex = (tokens) => {
 const methodValueAhead = (tokens, j) => {
   let depth = 0;
   for (; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd)) depth++;
     else if (RUN_CLOSERS.has(kd)) {
@@ -930,7 +930,7 @@ const methodValueAhead = (tokens, j) => {
 const bareDeclLineEnd = (tokens, i) => {
   let depth = 0;
   for (let j = i + 1; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd)) depth++;
     else if (RUN_CLOSERS.has(kd)) {
@@ -957,7 +957,7 @@ const POSTFIX_CLAUSES = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'FOR']);
 const clauseInLine = (tokens, a, b) => {
   let depth = 0;
   for (let j = a; j < b; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kd = tokens[j].kind;
     if (RUN_OPENERS.has(kd)) depth++;
     else if (RUN_CLOSERS.has(kd)) depth--;
@@ -971,7 +971,7 @@ const clauseInLine = (tokens, a, b) => {
 const matchingOutdent = (tokens, at) => {
   let depth = 0;
   for (let j = at; j < tokens.length; j++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     if (tokens[j].kind === 'INDENT') depth++;
     else if (tokens[j].kind === 'OUTDENT' && --depth === 0) return j;
   }
@@ -1135,7 +1135,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     let allBare = true;
     let lastEnd = -1;
     for (;;) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const end = bareDeclLineEnd(tokens, colon);
       if (end < 0) {
         if (typedDeclEq(tokens, colon) >= 0) break;
@@ -1221,7 +1221,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // member chains with `.` (a REAL `.prototype.` in the source spans
     // its own nine bytes and never trips this).
     for (let k = runStart; k < runStart + run.consumed; k++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const t = tokens[k];
       if (t.kind === 'PROPERTY' && t.value === 'prototype' && text.slice(t.start, t.end) === '::') {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
@@ -1251,7 +1251,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (tokens[j]?.kind === 'COMPARE' && tokens[j].value === '<' && !tokens[j].spaced) {
       let depth = 0;
       while (j < tokens.length) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         const t = tokens[j];
         if (t.kind === 'COMPARE' && t.value === '<') depth++;
         else if (t.kind === 'COMPARE' && t.value === '>') depth--;
@@ -1323,7 +1323,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   };
 
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const tok = tokens[i];
     const kd = tok.kind;
     const prev = out[out.length - 1] ?? null;
@@ -1623,7 +1623,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           !methodValueAhead(tokens, i + 1)) {
         let end = -1, depth = 0;
         for (let j = i + 1; j < tokens.length; j++) {
-          if (ops.on) ops.n++;
+          if (counter.on) counter.n++;
           const t2 = tokens[j].kind;
           if (RUN_OPENERS.has(t2)) depth++;
           else if (RUN_CLOSERS.has(t2)) {
@@ -1822,7 +1822,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   // ARGUMENT and overflows the stack past ~1.2M tokens.
   tokens.length = out.length;
   for (let i = 0; i < out.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     tokens[i] = out[i];
   }
   return tokens;

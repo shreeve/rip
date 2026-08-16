@@ -5,17 +5,17 @@
 //
 // Each compiled module carries its source map as an inline
 // `sourceMappingURL` comment (for debuggers and map-aware tools) and
-// registers the map with src/cli/stackmap.js so the run harness can remap
+// registers the map with src/stackmap.js so the run harness can remap
 // runtime stack frames to .rip source positions — Bun itself reads the
-// module path from the plugin but not the map (src/cli/stackmap.js).
+// module path from the plugin but not the map (src/stackmap.js).
 // Compile failures throw CompileError — the message is the full
 // formatted diagnostic (path:line:col plus a source excerpt), which
 // Bun surfaces with a non-zero exit.
 
 import { plugin } from 'bun';
 import { readFileSync } from 'fs';
-import { compile } from '../compile.js';
-import { toInlineMapComment } from '../sourcemap.js';
+import { compile } from './compile.js';
+import { toInlineMapComment } from './sourcemap.js';
 import { registerModuleMap, remapStack } from './stackmap.js';
 import { bareSpecifierMap } from './resolve.js';
 
@@ -32,14 +32,14 @@ let reporterInstalled = false;
 const installReactiveReporter = async () => {
   if (reporterInstalled) return;
   reporterInstalled = true;
-  const rt = await import('../runtime/reactive.js');
+  const rt = await import('./runtime/reactive.js');
   rt.__setEffectErrorReporter((label, err) => {
     console.error(label, remapStack(err?.stack ?? String(err)));
   });
 };
 
 // Bare-specifier resolution (the `rip/<pkg>` stdlib namespace and the
-// bun-global-install fallback) is enumerated by src/cli/resolve.js,
+// bun-global-install fallback) is enumerated by src/resolve.js,
 // shared with the sites artifact generator. Bun's runtime consults
 // plugins' onLoad but not onResolve (measured on 1.3.14: the hook
 // never fires for import statements), so here every name is registered
@@ -108,7 +108,7 @@ export default __configs;
       if (runtimes.has('reactive')) await installReactiveReporter();
       // Bun ignores the inline map for runtime stack traces; the
       // registry lets the run harness remap frames at display time
-      // (src/cli/stackmap.js has the measured behavior).
+      // (src/stackmap.js has the measured behavior).
       registerModuleMap(args.path, map);
       const sep = code.endsWith('\n') ? '' : '\n';
       return {
