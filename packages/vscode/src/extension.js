@@ -4,8 +4,14 @@
 // document links included (trivia-channel-driven there).
 //
 // CommonJS on purpose: the VS Code extension host requires the main
-// module, and the dependencies resolve from this package's own
-// node_modules — no bundler in the loop.
+// module, and in development the dependencies resolve from this
+// package's own node_modules — no bundler in the loop.
+//
+// Packaging is the one exception: scripts/package.js bundles this file
+// and server.js with Bun so the vsix is self-contained (and so it ships
+// two files instead of four hundred). The bundle is CommonJS too, with
+// `vscode` external because the host injects it. Nothing about running
+// from source changes.
 
 const vscode = require('vscode');
 const path = require('path');
