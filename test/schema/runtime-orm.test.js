@@ -33,8 +33,8 @@ const K4 = {
   __schema: rt4.__schema,
   SchemaError: rt4.SchemaError,
   setAdapter: orm4.__schemaSetAdapter,
-  transaction: orm4.__schemaTransaction,
-  scope: (fn) => rt4.__SchemaRegistry.scope(fn),
+  transaction: orm4.transaction,
+  scope: (fn) => rt4.SchemaRegistry.scope(fn),
 };
 
 // ── descriptor builders (the hand-built shape both runtimes read) ────
@@ -138,7 +138,7 @@ function makeWorld(k) {
 // The paired reference tier
 // ════════════════════════════════════════════════════════════════════
 
-beforeEach(() => rt4.__SchemaRegistry.reset());
+beforeEach(() => rt4.SchemaRegistry.reset());
 
 describe('orm: paired reference — CRUD and the query builder', () => {
   test('create: INSERT shape, RETURNING absorption, savedChanges [null, v]', async () => {
@@ -2308,7 +2308,7 @@ describe('orm: a refused model stays refused', () => {
 });
 
 describe('orm: names that reach SQL as text, not as identifiers', () => {
-  // Identifiers go through __schemaQuoteIdent; the sequence name in a
+  // Identifiers go through quoteIdent; the sequence name in a
   // column DEFAULT is the one name that reaches SQL as a string
   // LITERAL, where a quote of the other kind ends the string early.
   test("a table name containing ' escapes inside nextval()", async () => {
@@ -2398,11 +2398,11 @@ describe('orm:  unit tier', () => {
   });
 
   test('schema.connect builds a NEW adapter value without installing it; a url is required', () => {
-    const a = orm4.__schemaConnect({ url: 'http://x.example:1' });
+    const a = orm4.connect({ url: 'http://x.example:1' });
     expect(typeof a.query).toBe('function');
     expect(typeof a.begin).toBe('function');
     expect(a.capabilities.tx).toBe(true);
-    expect(() => orm4.__schemaConnect({})).toThrow(/url is required/);
+    expect(() => orm4.connect({})).toThrow(/url is required/);
   });
 
   test("a per-schema `on:` adapter pins that model's SQL; the global adapter keeps the rest", async () => {
@@ -2578,7 +2578,7 @@ describe('orm: runtime delivery', () => {
   test('a schema DECLARATION alone never delivers the persistence runtime', () => {
     const { runtimes, code } = compile('S = schema\n  a! integer', { runtimeDelivery: 'inline' });
     expect([...runtimes]).toEqual(['schema', 'vocab']);
-    expect(code).not.toContain('__schemaTransaction');
+    expect(code).not.toContain('async function transaction(');
     expect(code).not.toContain('PERSISTENCE');
     // import mode: only the validation runtime's module
     const imp = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
@@ -2601,7 +2601,7 @@ describe('orm: runtime delivery', () => {
     expect((code.match(/class SchemaError/g) ?? []).length).toBe(1);
     expect(/^import /m.test(code)).toBe(false);
     // the orm body made it in, its import line stripped
-    expect(code).toContain('__schemaInstallPersistence({');
+    expect(code).toContain('installPersistence({');
     expect(code).not.toContain("from './schema.js'");
   });
 
@@ -2651,7 +2651,7 @@ describe('orm: runtime delivery', () => {
     expect(runtimeRows.length).toBe(1);
     expect(runtimeRows[0].mappingKind).toBe('synthetic');
     expect(runtimeRows[0].sourceStart).toBe(runtimeRows[0].sourceEnd);
-    expect(code.slice(runtimeRows[0].generatedStart, runtimeRows[0].generatedEnd)).toContain('__schemaInstallPersistence');
+    expect(code.slice(runtimeRows[0].generatedStart, runtimeRows[0].generatedEnd)).toContain('installPersistence');
     expect(mappings.serializableRows().some((r) => r.role === 'runtime')).toBe(false);
   });
 
@@ -2678,8 +2678,8 @@ describe('orm: runtime delivery', () => {
     const imp = compile('S = schema\n  a! integer', { runtimeDelivery: 'import' });
     expect(imp.code).not.toContain('orm.js');
     const inl = compile('S = schema\n  a! integer', { runtimeDelivery: 'inline' });
-    expect(inl.code).not.toContain('__SchemaQuery');
-    expect(inl.code).not.toContain('__schemaTransaction');
+    expect(inl.code).not.toContain('class SchemaQuery');
+    expect(inl.code).not.toContain('async function transaction(');
     expect(inl.code).not.toContain('AsyncLocalStorage');
   });
 
@@ -2732,7 +2732,7 @@ describe('orm: runtime delivery', () => {
     expect(runtimeRows.length).toBe(2);
     const [a, b] = runtimeRows.sort((x, y) => x.generatedStart - y.generatedStart);
     expect(a.generatedEnd).toBeLessThanOrEqual(b.generatedStart);
-    expect(code.slice(a.generatedStart, a.generatedEnd)).toContain('__schemaInstallPersistence');
+    expect(code.slice(a.generatedStart, a.generatedEnd)).toContain('installPersistence');
     expect(code.slice(b.generatedStart, b.generatedEnd)).toContain('__state');
   });
 
@@ -4404,7 +4404,7 @@ describe('orm: transaction integrity', () => {
           hookRuns++;
           if (hookRuns <= 2) await U.create({ name: 'cascade-' + hookRuns });
         })));
-      await orm4.__schemaAdoptTransaction(adapter, handle, async (settle) => {
+      await orm4.adoptTransaction(adapter, handle, async (settle) => {
         await U.create({ name: 'seed' });   // enrolls on the adopted handle
         committed = true;                   // the owner's COMMIT lands here
         await settle('afterCommit');

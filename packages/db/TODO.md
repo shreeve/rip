@@ -71,7 +71,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   in `finishModelNorm`, and two owners for one column is a positioned
   error in the compiler and a `SchemaError` in the runtime. And
   `norm.columnOf` / `norm.fieldOf` are now the authority on the
-  property↔column mapping; `__schemaSnake`/`__schemaCamel` survive only
+  property↔column mapping; `snakeCase`/`camelCase` survive only
   as the default for a name no map has heard of.
 
   `@hasMany X, {through: J}` is deliberately **not** a JOIN: the join
@@ -147,7 +147,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   `0`, which harbor documents as "no limit". Harbor's protocol is
   per-request, so `query(sql, params, {timeoutMs})` is the same knob
   rather than a second one. `schema.connect({url, token, timeoutMs})`
-  now forwards it — before, `__schemaDefaultAdapter` hardcoded `0` and
+  now forwards it — before, `defaultAdapter` hardcoded `0` and
   an app could not set a deadline at all.
   The migration runner opts out through one wrapper (`migrate.js`
   `runSQL`), so all 13 of its statements go through a single seam
@@ -167,7 +167,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   optional NULLS FIRST/LAST) since ORDER BY is interpolated, not bound.
   The operator reading is gated on the field's declared **type**, never
   the value's shape: `json`, `any`, and array fields render as JSON and
-  `__schemaSerialize` stringifies objects written to them, so
+  `serialize` stringifies objects written to them, so
   `where({prefs: {like: true}})` on a json column stays an equality test
   against that document. The O4 trusted-string overloads are untouched.
 
@@ -196,8 +196,8 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   `XMLPath`). Everything else is single-word lowercase where both
   conventions agree. The mapping fires on roughly 8% of field references.
 - **Both spellings already work on both doors.**
-  `__schemaCanonicalInput` (`orm.js:1636-1638`) registers `name` and
-  `__schemaSnake(name)` as writable input keys, so
+  `canonicalInput` (`orm.js:1636-1638`) registers `name` and
+  `snakeCase(name)` as writable input keys, so
   `User.create({first_name: 'x'})` succeeds today; `_hydrate`
   (`orm.js:2057-2065`) attaches non-enumerable snake aliases, so
   `user.first_name` reads today. The only place camelCase is forced is
@@ -226,7 +226,7 @@ Object shape is derived from `SELECT *` plus the database catalog
 
 - `toJSON` and `toJSONSchema` publish different vocabularies.
 - Undeclared columns ship in API responses.
-- `__schemaCamel` is not total: `nickname_2` → `nickname_2`,
+- `camelCase` is not total: `nickname_2` → `nickname_2`,
   `_internal` → `Internal`, `legacy_ISO_CODE` unchanged.
 - Eager-loaded relations never serialize (`_relMemo` is non-enumerable
   by design, `:273-281`), so `includes()` pays for the preload and
@@ -311,11 +311,11 @@ so every part must be a declared required field, and the `@idStart`
 rejection already written for natural keys carries over.
 
 **Blast radius: 83 `primaryKey` references** across `orm.js` (63),
-`schema.js` (9), `types/schemas.js` (7), `migrate.js` (4). Identity
+`schema.js` (9), `ts/schematext.js` (7), `migrate.js` (4). Identity
 stops being a value and becomes a tuple, which changes: `_snapshot`,
-`__schemaPersistedIdentity`, `find`/`findMany`, every
+`persistedIdentity`, `find`/`findMany`, every
 `WHERE pk = ?`, the relation memo's identity comparison (tuples need
-`__schemaSameValue` element-wise), the `byId` maps in preload (keyed by
+`sameValue` element-wise), the `byId` maps in preload (keyed by
 a joined tuple), the RETURNING check, `projectableFields`,
 `jsonSchemaModelColumns`, and the DDL (a table-level
 `PRIMARY KEY (a, b)` instead of an inline one).
@@ -420,7 +420,7 @@ change, not a type override.
 
 ### Correctness items that are real but dormant
 
-- **`json` fields never parse back.** `__schemaSerialize` (`:1581`)
+- **`json` fields never parse back.** `serialize` (`:1581`)
   stringifies on write; there is no `JSON.parse` in `orm.js` or
   `schema.js`. Since `create()` runs `INSERT … RETURNING *`, the field is
   already a string when `create()` returns. **Zero declared `json` fields
@@ -437,18 +437,18 @@ change, not a type override.
   rejection alongside the three at `test/schema/migrate.test.js:701,710,719`,
   not a correctness bug. Also reword the self-rename message at `:520`,
   which says "rename the other field" — wrong for that case.
-- **`CHECK` for literal-typed fields.** `__SCHEMA_SQL_TYPES` (`:2205`)
+- **`CHECK` for literal-typed fields.** `SQL_TYPES` (`:2205`)
   renders a `literals` field as bare `VARCHAR`, and raw SQL over harbor
   is a first-class path that bypasses app-side validation. **But
   `migrate.js` does not diff CHECK constraints at all**, so adding one to
   the column spec creates permanent undetectable drift against every
   already-deployed table, with no plan step that can reconcile it. Net
   negative as specified. **Revive with:** CHECK diffing in the planner.
-- **`__schemaValidateAdapterRow`'s duplicate-canonical error** (`:1471`)
+- **`validateAdapterRow`'s duplicate-canonical error** (`:1471`)
   names neither the table nor the two source columns.
-- **`__schemaQuoteIdent`'s error** (`:52`) lists *columns* when the caller
+- **`quoteIdent`'s error** (`:52`) lists *columns* when the caller
   typed *field names*.
-- **`__schemaConstraintIssue`** parses DuckDB's error *prose* for a
+- **`constraintIssue`** parses DuckDB's error *prose* for a
   column name. It now resolves that name through the model's
   `fieldOf` map when there is one, so a NOT NULL failure on a
   `{column:}`-mapped column reports the field. The unique-violation
@@ -458,7 +458,7 @@ change, not a type override.
 ### Runtime observations, unshipped paths
 
 - **No cancellation plumbing in the ORM** — `grep -c signal
-  src/runtime/orm.js` is `0`; `__schemaRunSQL` (`:703-711`) passes no
+  src/runtime/orm.js` is `0`; `runSQL` (`:703-711`) passes no
   options. The adapter half works.
 - **Transaction retry divergence.** `packages/db` retries
   `no_lease_available` / `no_such_session` / conflicts honoring
@@ -474,7 +474,7 @@ change, not a type override.
 - **`duckdb.js` buffers instead of streaming** — `await response.text()`
   (`:447`) reads the whole NDJSON body then re-parses it, materializing
   large results twice and forfeiting harbor's incremental delivery.
-- **Lazy `__schemaAdapter`.** `orm.js:616` constructs at module
+- **Lazy `currentAdapter`.** `orm.js:616` constructs at module
   evaluation, reading env at global scope. Note that laziness alone does
   not enable per-request configuration — that needs a factory or a
   request-context lookup.

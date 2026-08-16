@@ -2,7 +2,8 @@
 // synthetic-token conventions, trivia retention, and
 // call-paren disambiguation.
 import { describe, test, expect } from 'bun:test';
-import { tokenize, makeParserLexer, identifierRunAt } from '../../src/lexer.js';
+import { tokenize, makeParserLexer } from '../../src/lexer.js';
+import { identifierRunAt } from '../../src/ident.js';
 
 const kinds = (text) => tokenize(text).tokens.map(t => t.kind);
 const values = (text) => tokenize(text).tokens.map(t => t.value);
@@ -655,7 +656,7 @@ describe('large inputs', () => {
     // ALL input, type-free included. The write-back must be an indexed
     // copy. 2.5M synthetic pass-through tokens exercise exactly that
     // path without paying for a scan.
-    const { rewriteTypes } = await import('../../src/lexer.js');
+    const { rewriteTypes } = await import('../../src/types.js');
     const tokens = [];
     for (let i = 0; i < 1_250_000; i++) {
       tokens.push(

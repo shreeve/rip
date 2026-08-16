@@ -267,7 +267,7 @@ describe('object-comprehension intrinsic delivery', () => {
         expect(code).toMatch(/__defineOwnDataProperty:\s*__defineOwnDataProperty[_\d]+/);
       }
     }
-    schemaRuntime.__SchemaRegistry.reset();
+    schemaRuntime.SchemaRegistry.reset();
     const result = evalNone(source, 'return result;', {
       ...schemaRuntime,
       ...intrinsicRuntime,

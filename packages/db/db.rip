@@ -83,7 +83,7 @@ fail = (message) ->
 
 # snake_case → camelCase for one column name — the package's single
 # camelizer, behind the opt-in `camel` projection below. A faithful
-# local twin of the runtime's `__schemaCamel` (src/runtime/vocab.js) —
+# local twin of the runtime's `camelCase` (src/runtime/vocab.js) —
 # the same one-line transform, kept byte-identical so the two tiers can
 # never disagree on a spelling; local because this package imports only
 # the substrate, never the schema runtime. Deliberately not total: only
@@ -241,7 +241,7 @@ export def createClient(adapter)
 
   attempt = (fn) ->
     tx = adapter.begin!
-    adopt = globalThis.__ripSchema?.__schemaAdoptTransaction
+    adopt = globalThis.__ripSchema?.adoptTransaction
     if typeof adopt is 'function'
       adopt! adapter, tx, (settle) -> runTx fn, tx, settle
     else
@@ -274,7 +274,7 @@ export def createClient(adapter)
   # adapter, and going straight to the adapter would run autocommit on
   # a different connection and survive that transaction's rollback.
   run = (sql, params, signal) ->
-    handle = globalThis.__ripSchema?.__schemaTxHandle?(adapter)
+    handle = globalThis.__ripSchema?.txHandle?(adapter)
     if handle? then handle.query sql, params, { signal }
     else adapter.query sql, params, { signal }
 

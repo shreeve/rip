@@ -27,9 +27,9 @@
 // transactions feature-detect AsyncLocalStorage, rejecting loudly
 // where the host has none.
 
-import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
-import { harborAdapter, decodeTemporal } from './duckdb.js';
-import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCanonicalName, __schemaAttrValueError, __SCHEMA_MODEL_DIRECTIVES, __SCHEMA_ONCE_DIRECTIVES, __SCHEMA_RELATION_DIRECTIVES, __SCHEMA_FIELD_ATTRS, __SCHEMA_RELATION_ATTRS } from './vocab.js';
+import { SchemaError, SchemaRegistry, registerCoercer, SchemaDef, installPersistence } from './schema.js';
+import { harborAdapter, decodeTemporal, isPlainObject } from './duckdb.js';
+import { snakeCase, camelCase, pluralize, fkName, accessorOf, isCanonicalTarget, isCanonicalName, attrValueError, MODEL_DIRECTIVES, ONCE_DIRECTIVES, RELATION_DIRECTIVES, FIELD_ATTRS, RELATION_ATTRS } from './vocab.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
 
@@ -44,9 +44,9 @@ import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCano
 // call site names a COLUMN position and every name reaching this
 // helper IS a column — keys a caller may spell as camelCase
 // properties (where/order/updateAll) resolve and reject through
-// __schemaCallerColumn first, so the snake_case inventory below is
+// callerColumn first, so the snake_case inventory below is
 // never shown to someone who wrote property names.
-function __schemaQuoteIdent(name, allowed, what) {
+function quoteIdent(name, allowed, what) {
   if (typeof name !== 'string') {
     throw new Error('schema: ' + what + ' must be a string column name; got ' + (name === null ? 'null' : typeof name));
   }
@@ -61,9 +61,9 @@ function __schemaQuoteIdent(name, allowed, what) {
 
 // The one place a name reaches SQL as a string LITERAL rather than an
 // identifier: nextval() takes the sequence by name, in quotes of the
-// other kind. Identifiers go through __schemaQuoteIdent; this is its
+// other kind. Identifiers go through quoteIdent; this is its
 // literal twin, and both exist so no name is ever pasted raw.
-function __schemaQuoteLiteral(text, what) {
+function quoteLiteral(text, what) {
   if (typeof text !== 'string') {
     throw new Error('schema: ' + what + ' must be a string; got ' + (text === null ? 'null' : typeof text));
   }
@@ -77,7 +77,7 @@ function __schemaQuoteLiteral(text, what) {
 // integers: only an actual number that is a safe non-negative integer
 // may reach them — no coercion, no numeric strings (a request-derived
 // string is exactly the injection surface this closes).
-function __schemaPageInt(n, what) {
+function pageInt(n, what) {
   if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0) {
     throw new Error('schema: ' + what + '() requires a safe non-negative integer number; got ' + (typeof n === 'string' ? JSON.stringify(n) : String(n)));
   }
@@ -89,21 +89,16 @@ function __schemaPageInt(n, what) {
 // `where({age: {gte: 18, lt: 65}})` reads an object VALUE as a map of
 // operators. That reading is off-limits for fields whose declared type
 // is itself an object: `json`, `any`, and array fields all render as
-// JSON (__SCHEMA_SQL_TYPES) and __schemaSerialize stringifies an object
+// JSON (SQL_TYPES) and serialize stringifies an object
 // written to them — so `where({prefs: {like: true}})` on a json column
 // is a legitimate EQUALITY test against that document, not an ILIKE.
 // The field's declared TYPE decides, never the value's shape.
 
-function __schemaIsPlainObject(v) {
-  if (v === null || typeof v !== 'object') return false;
-  const p = Object.getPrototypeOf(v);
-  return p === Object.prototype || p === null;
-}
 
 // `IN ()` is a syntax error at the database, and both empty cases have
 // an exact constant answer: nothing is inside an empty set, everything
 // is outside one.
-function __schemaInFragment(col, values, params, negated, field) {
+function inFragment(col, values, params, negated, field) {
   const op = negated ? 'nin' : 'in';
   if (!Array.isArray(values)) {
     throw new Error("schema: where() " + op + " on '" + field + "' requires an array; got " +
@@ -116,7 +111,7 @@ function __schemaInFragment(col, values, params, negated, field) {
 
 // Each renders its fragment and pushes its own params, so clause order
 // and param order stay locked together however the caller nests them.
-const __SCHEMA_WHERE_OPS = new Map([
+const WHERE_OPS = new Map([
   // null is why eq/ne are operators at all: `= NULL` is never true in
   // SQL, so the comparison has to become IS [NOT] NULL.
   ['eq', (col, v, p) => { if (v === null) return col + ' IS NULL'; p.push(v); return col + ' = ?'; }],
@@ -127,8 +122,8 @@ const __SCHEMA_WHERE_OPS = new Map([
   ['lte', (col, v, p) => { p.push(v); return col + ' <= ?'; }],
   ['like', (col, v, p) => { p.push(v); return col + ' LIKE ?'; }],
   ['ilike', (col, v, p) => { p.push(v); return col + ' ILIKE ?'; }],
-  ['in', (col, v, p, f) => __schemaInFragment(col, v, p, false, f)],
-  ['nin', (col, v, p, f) => __schemaInFragment(col, v, p, true, f)],
+  ['in', (col, v, p, f) => inFragment(col, v, p, false, f)],
+  ['nin', (col, v, p, f) => inFragment(col, v, p, true, f)],
   ['between', (col, v, p, f) => {
     if (!Array.isArray(v) || v.length !== 2) {
       throw new Error("schema: where() between on '" + f + "' requires a two-element [low, high] array");
@@ -141,50 +136,39 @@ const __SCHEMA_WHERE_OPS = new Map([
 // A closed set: ORDER BY is interpolated, not parameterized, so the
 // direction is an identifier-grade decision and an open string would be
 // an injection surface.
-const __SCHEMA_ORDER_DIRS = new Set([
+const ORDER_DIRS = new Set([
   'asc', 'desc',
   'asc nulls first', 'asc nulls last',
   'desc nulls first', 'desc nulls last',
 ]);
 
-function __schemaOrderDir(dir, field) {
+function orderDir(dir, field) {
   const key = typeof dir === 'string' ? dir.trim().toLowerCase().replace(/\s+/g, ' ') : '';
-  if (!__SCHEMA_ORDER_DIRS.has(key)) {
+  if (!ORDER_DIRS.has(key)) {
     throw new Error("schema: order() direction for '" + field + "' must be one of " +
-      [...__SCHEMA_ORDER_DIRS].map((d) => JSON.stringify(d)).join(', ') + '; got ' +
+      [...ORDER_DIRS].map((d) => JSON.stringify(d)).join(', ') + '; got ' +
       (typeof dir === 'string' ? JSON.stringify(dir) : (dir === null ? 'null' : typeof dir)));
   }
   return key.toUpperCase();
 }
 
 
-const __SCHEMA_UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
-
-const __SCHEMA_IRREGULAR = new Map([['person', 'people'], ['man', 'men'], ['woman', 'women'], ['child', 'children'], ['tooth', 'teeth'], ['foot', 'feet'], ['mouse', 'mice']]);
-
-function __schemaPluralize(w) {
-  const lw = w.toLowerCase();
-  if (__SCHEMA_UNCOUNTABLE.has(lw)) return w;
-  if (__SCHEMA_IRREGULAR.has(lw)) return __SCHEMA_IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(w)) return w.slice(0, -1) + 'ies';
-  if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
-  return w + 's';
-}
-
-function __schemaTableName(model) { return __schemaPluralize(__schemaSnake(model)); }
-
-function __schemaFkName(model) { return __schemaSnake(model) + '_id'; }
+// The pluralizer, the FK column rule, and the accessor rule live in
+// ./vocab.js — the compiler's type renderer derives the same names and
+// must not import this module (that would evaluate the persistence
+// install into the compiler process).
+function tableName(model) { return pluralize(snakeCase(model)); }
 
 // Relation TARGETS must be canonical PascalCase — uppercase-first,
 // alphanumeric, no two consecutive uppercase letters — the same
 // bijection guard field names already carry: an acronym-style target
 // derives FK and accessor names the snake/camel round-trip cannot
 // reproduce.
-const __schemaCanonicalTarget = __schemaIsCanonicalTarget;
+const canonicalTarget = isCanonicalTarget;
 
 // ── reserved names ────────────────────────────────────────────────────
 
-const __SCHEMA_RESERVED_STATIC = new Set([
+const RESERVED_STATIC = new Set([
   'parse', 'array', 'safe', 'ok', 'parseAsync', 'safeAsync', 'okAsync', 'toJSONSchema',
   'find', 'findMany', 'where', 'all', 'first', 'count', 'create', 'toSQL',
   'includes', 'upsert', 'insertMany', 'updateAll', 'deleteAll', 'withDeleted', 'onlyDeleted',
@@ -192,11 +176,11 @@ const __SCHEMA_RESERVED_STATIC = new Set([
 ]);
 // Names a @scope may not take: the model statics above plus the
 // builder-only chain methods — scopes install on both surfaces.
-const __SCHEMA_SCOPE_RESERVED = new Set([
-  ...__SCHEMA_RESERVED_STATIC,
+const SCOPE_RESERVED = new Set([
+  ...RESERVED_STATIC,
   'limit', 'offset', 'order', 'orderBy',
 ]);
-const __SCHEMA_RESERVED_INSTANCE = new Set([
+const RESERVED_INSTANCE = new Set([
   'save', 'destroy', 'restore', 'reload', 'ok', 'errors', 'toJSON', 'savedChanges', 'markDirty',
   '_saving', '_relMemo',
 ]);
@@ -206,16 +190,16 @@ const __SCHEMA_RESERVED_INSTANCE = new Set([
 // them. (Mixin-included fields are exempt — declaring createdAt /
 // updatedAt through a mixin is the explicit-control alternative to
 // @timestamps.)
-const __SCHEMA_RESERVED_IMPLICIT = new Set([
+const RESERVED_IMPLICIT = new Set([
   'createdAt', 'updatedAt', 'deletedAt',
 ]);
-const __SCHEMA_RESERVED = new Set([
-  ...__SCHEMA_RESERVED_STATIC,
-  ...__SCHEMA_RESERVED_INSTANCE,
-  ...__SCHEMA_RESERVED_IMPLICIT,
+const RESERVED = new Set([
+  ...RESERVED_STATIC,
+  ...RESERVED_INSTANCE,
+  ...RESERVED_IMPLICIT,
 ]);
 
-const __SCHEMA_HOOK_NAMES = new Set([
+const HOOK_NAMES = new Set([
   'beforeValidation', 'afterValidation',
   'beforeSave', 'afterSave',
   'beforeCreate', 'afterCreate',
@@ -238,19 +222,19 @@ const __SCHEMA_HOOK_NAMES = new Set([
 // the same convention the dirty set / savedChanges / markDirty use).
 // The PK is captured so save()'s UPDATE WHERE targets the
 // originally-loaded row even if `inst[pk]` is reassigned in memory.
-function __schemaSnapshot(norm, inst) {
+function snapshot(norm, inst) {
   const snap = Object.create(null);
-  snap[norm.primaryKey] = __schemaSnapshotValue(inst[norm.primaryKey]);
-  for (const [n] of norm.fields) snap[n] = __schemaSnapshotValue(inst[n]);
+  snap[norm.primaryKey] = snapshotValue(inst[norm.primaryKey]);
+  for (const [n] of norm.fields) snap[n] = snapshotValue(inst[n]);
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    const fkCamel = __schemaFieldFor(norm, rel.foreignKey);
-    snap[fkCamel] = __schemaSnapshotValue(inst[fkCamel]);
+    const fkCamel = fieldFor(norm, rel.foreignKey);
+    snap[fkCamel] = snapshotValue(inst[fkCamel]);
   }
   return snap;
 }
 
-function __schemaPersistedIdentity(def, inst, operation) {
+function persistedIdentity(def, inst, operation) {
   const norm = def._normalize();
   const pk = norm.primaryKey;
   const snap = inst._snapshot;
@@ -271,7 +255,7 @@ function __schemaPersistedIdentity(def, inst, operation) {
 // SameValue-Zero: like ===, except NaN equals NaN (a persisted NaN
 // must not trigger a wasted UPDATE every save); +0/-0 stay equal —
 // the DB does not distinguish them.
-function __schemaSameValue(a, b) {
+function sameValue(a, b) {
   return a === b || (a !== a && b !== b);
 }
 
@@ -279,38 +263,38 @@ function __schemaSameValue(a, b) {
 // awaits cannot advance the committed snapshot. Containers retain their
 // value semantics; custom instances flatten only enumerable data, so
 // model bookkeeping and prototypes never enter persistence state.
-function __schemaSnapshotValue(value, seen = new Map()) {
+function snapshotValue(value, seen = new Map()) {
   if (value == null || typeof value !== 'object') return value;
   if (seen.has(value)) return seen.get(value);
   if (value instanceof Date) return new Date(value.getTime());
   if (Array.isArray(value)) {
     const out = [];
     seen.set(value, out);
-    for (const item of value) out.push(__schemaSnapshotValue(item, seen));
+    for (const item of value) out.push(snapshotValue(item, seen));
     return out;
   }
   if (value instanceof Map) {
     const out = new Map();
     seen.set(value, out);
     for (const [key, item] of value) {
-      out.set(__schemaSnapshotValue(key, seen), __schemaSnapshotValue(item, seen));
+      out.set(snapshotValue(key, seen), snapshotValue(item, seen));
     }
     return out;
   }
   if (value instanceof Set) {
     const out = new Set();
     seen.set(value, out);
-    for (const item of value) out.add(__schemaSnapshotValue(item, seen));
+    for (const item of value) out.add(snapshotValue(item, seen));
     return out;
   }
   const out = Object.create(Object.getPrototypeOf(value) === null ? null : Object.prototype);
   seen.set(value, out);
-  for (const key of Object.keys(value)) out[key] = __schemaSnapshotValue(value[key], seen);
+  for (const key of Object.keys(value)) out[key] = snapshotValue(value[key], seen);
   return out;
 }
 
-function __schemaSnapshotEqual(a, b, seen = new Map()) {
-  if (__schemaSameValue(a, b)) return true;
+function snapshotEqual(a, b, seen = new Map()) {
+  if (sameValue(a, b)) return true;
   if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
   let paired = seen.get(a);
   if (paired) return paired === b;
@@ -320,29 +304,29 @@ function __schemaSnapshotEqual(a, b, seen = new Map()) {
   }
   if (Array.isArray(a) || Array.isArray(b)) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
-      a.every((item, i) => __schemaSnapshotEqual(item, b[i], seen));
+      a.every((item, i) => snapshotEqual(item, b[i], seen));
   }
   if (a instanceof Map || b instanceof Map) {
     if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
     const aa = [...a], bb = [...b];
     return aa.every(([ak, av], i) =>
-      __schemaSnapshotEqual(ak, bb[i][0], seen) && __schemaSnapshotEqual(av, bb[i][1], seen));
+      snapshotEqual(ak, bb[i][0], seen) && snapshotEqual(av, bb[i][1], seen));
   }
   if (a instanceof Set || b instanceof Set) {
     if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
     const aa = [...a], bb = [...b];
-    return aa.every((item, i) => __schemaSnapshotEqual(item, bb[i], seen));
+    return aa.every((item, i) => snapshotEqual(item, bb[i], seen));
   }
   const ak = Object.keys(a), bk = Object.keys(b);
   return ak.length === bk.length && ak.every((key, i) =>
-    key === bk[i] && __schemaSnapshotEqual(a[key], b[key], seen));
+    key === bk[i] && snapshotEqual(a[key], b[key], seen));
 }
 
 // Relation memo — {identity, value} per instance and accessor,
 // non-enumerable so it never reaches Object.keys / JSON.stringify.
 // Identity is captured before resolution, including for null and []
 // values, and written uniformly by accessors and eager loading.
-function __schemaRelMemoSet(inst, acc, identity, value) {
+function relMemoSet(inst, acc, identity, value) {
   if (!inst._relMemo) {
     Object.defineProperty(inst, '_relMemo', {
       value: new Map(), enumerable: false, writable: false, configurable: true,
@@ -354,7 +338,7 @@ function __schemaRelMemoSet(inst, acc, identity, value) {
 
 // ── the persistence seam: model normalization ─────────────────────────
 
-function __schemaModelError(def, field, error, message) {
+function modelError(def, field, error, message) {
   return new SchemaError([{ field, error, message }], def.name, def.kind);
 }
 
@@ -367,15 +351,15 @@ function __schemaModelError(def, field, error, message) {
 // Callers may spell a key EITHER way (`where({firstName: …})` and
 // `where({first_name: …})` both work), so the column direction tries
 // the map, then an exact column match, then the derivation.
-function __schemaColumnFor(norm, key) {
+function columnFor(norm, key) {
   const mapped = norm.columnOf.get(key);
   if (mapped !== undefined) return mapped;
   if (norm.fieldOf.has(key)) return key;
-  return __schemaSnake(key);
+  return snakeCase(key);
 }
 
-function __schemaFieldFor(norm, column) {
-  return norm.fieldOf.get(column) ?? __schemaCamel(column);
+function fieldFor(norm, column) {
+  return norm.fieldOf.get(column) ?? camelCase(column);
 }
 
 // A structured key the CALLER wrote (where()/order()/updateAll()):
@@ -385,25 +369,25 @@ function __schemaFieldFor(norm, column) {
 // the model's property names (each with its column beside it where
 // the spellings differ), instead of echoing a snake_case derivation
 // of a name nobody wrote over a column list nobody typed.
-function __schemaCallerColumn(norm, key, allowed, what) {
-  const column = __schemaColumnFor(norm, key);
+function callerColumn(norm, key, allowed, what) {
+  const column = columnFor(norm, key);
   if (typeof column === 'string' && !/[\u0000-\u001f\u007f]/.test(column) &&
       allowed !== null && !allowed.has(column)) {
     const known = [...allowed].sort().map((col) => {
-      const prop = __schemaFieldFor(norm, col);
+      const prop = fieldFor(norm, col);
       return prop === col ? col : prop + ' (column ' + col + ')';
     }).join(', ');
     throw new Error('schema: unknown ' + what + " '" + key + "' — known: " + known);
   }
-  return __schemaQuoteIdent(column, allowed, what);
+  return quoteIdent(column, allowed, what);
 }
 
-function __schemaNormalizeDirectiveRelation(def, directive) {
+function normalizeDirectiveRelation(def, directive) {
   const name = directive.name;
-  if (!__SCHEMA_RELATION_DIRECTIVES.includes(name)) return null;
+  if (!RELATION_DIRECTIVES.includes(name)) return null;
   const a = directive.args[0];
   const target = a.target;
-  const targetLc = target[0].toLowerCase() + target.slice(1);
+  const targetLc = accessorOf(target);
   // A belongsTo's FK column derives from its ACCESSOR — the name the
   // relation goes by: `@belongsTo User` reads user_id, and
   // `{as: reviewer}` reads reviewer_id, so two relations to one model
@@ -416,7 +400,7 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
     return {
       kind: 'belongsTo', target, optional,
       accessor,
-      foreignKey: a.foreignKey ?? __schemaFkName(accessor),
+      foreignKey: a.foreignKey ?? fkName(accessor),
     };
   }
   // A `through` relation owns no column on either end — both foreign
@@ -428,7 +412,7 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
   if (a.through) {
     return {
       kind: name, target, optional, through: a.through,
-      accessor: a.as ?? (name === 'hasOne' ? targetLc : __schemaPluralize(targetLc)),
+      accessor: a.as ?? (name === 'hasOne' ? targetLc : pluralize(targetLc)),
       foreignKey: a.foreignKey ?? null,
       targetKey: a.targetKey ?? null,
     };
@@ -437,13 +421,13 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
     return {
       kind: 'hasOne', target, optional,
       accessor: a.as ?? targetLc,
-      foreignKey: a.foreignKey ?? __schemaFkName(def.name),
+      foreignKey: a.foreignKey ?? fkName(def.name),
     };
   }
   return {
     kind: 'hasMany', target, optional,
-    accessor: a.as ?? __schemaPluralize(targetLc),
-    foreignKey: a.foreignKey ?? __schemaFkName(def.name),
+    accessor: a.as ?? pluralize(targetLc),
+    foreignKey: a.foreignKey ?? fkName(def.name),
   };
 }
 
@@ -457,7 +441,7 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
 // @belongsTo to the same end (author + reviewer) has no single right
 // answer, and picking one would wire the relation to the wrong column
 // silently.
-function __schemaThroughKeys(def, rel, join) {
+function throughKeys(def, rel, join) {
   const joinNorm = join._normalize();
   if (!(joinNorm.columns instanceof Set)) {
     throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
@@ -465,7 +449,7 @@ function __schemaThroughKeys(def, rel, join) {
   }
   const side = (explicit, model, what) => {
     if (explicit) {
-      __schemaQuoteIdent(explicit, joinNorm.columns, 'through ' + what + ' key');
+      quoteIdent(explicit, joinNorm.columns, 'through ' + what + ' key');
       return explicit;
     }
     const hits = [];
@@ -478,7 +462,7 @@ function __schemaThroughKeys(def, rel, join) {
       throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
         ' reads through ' + rel.through + ', which declares no @belongsTo ' + model +
         " — add one, or name the column: {through: " + rel.through + ', ' + option + ': "' +
-        __schemaFkName(model) + '"}');
+        fkName(model) + '"}');
     }
     throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
       ' reads through ' + rel.through + ', which declares ' + hits.length + ' @belongsTo ' + model +
@@ -504,16 +488,16 @@ function __schemaThroughKeys(def, rel, join) {
 // Extra args, missing args, and wrong-typed args all reject — a
 // directive that reads only part of what the user wrote acted on a
 // different program.
-function __schemaValidateDirectiveArgs(def, d) {
-  const shape = __SCHEMA_MODEL_DIRECTIVES[d.name];
+function validateDirectiveArgs(def, d) {
+  const shape = MODEL_DIRECTIVES[d.name];
   if (shape === undefined) {
-    throw __schemaModelError(def, '', 'directive',
+    throw modelError(def, '', 'directive',
       "unknown directive '@" + d.name + "' on :model — legal: " +
-      Object.keys(__SCHEMA_MODEL_DIRECTIVES).map((n) => '@' + n).join(', '));
+      Object.keys(MODEL_DIRECTIVES).map((n) => '@' + n).join(', '));
   }
   const args = d.args || [];
   const bad = (why) => {
-    throw __schemaModelError(def, '', 'directive', '@' + d.name + ': ' + why);
+    throw modelError(def, '', 'directive', '@' + d.name + ': ' + why);
   };
   switch (shape) {
     case 'none':
@@ -525,7 +509,7 @@ function __schemaValidateDirectiveArgs(def, d) {
       }
       // Relation targets carry the FK/accessor derivation; mixin
       // targets never derive names and keep the base resolution.
-      if (d.name !== 'mixin' && !__schemaCanonicalTarget(args[0].target)) {
+      if (d.name !== 'mixin' && !canonicalTarget(args[0].target)) {
         bad("target '" + args[0].target + "' is not canonical PascalCase — use an uppercase-first, " +
           "alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); " +
           'the derived FK column and accessor names ride the snake_case bijection');
@@ -534,10 +518,10 @@ function __schemaValidateDirectiveArgs(def, d) {
       // directly (tests, generated descriptors), so the runtime holds
       // the same line rather than trusting its caller.
       if (d.name !== 'mixin') {
-        for (const [key, kind] of Object.entries(__SCHEMA_RELATION_ATTRS)) {
+        for (const [key, kind] of Object.entries(RELATION_ATTRS)) {
           const value = args[0][key];
           if (value === undefined) continue;
-          const why = __schemaAttrValueError(kind, key, value);
+          const why = attrValueError(kind, key, value);
           if (why) bad('option ' + why + "; got '" + value + "'");
         }
         if (args[0].through !== undefined && d.name === 'belongsTo') {
@@ -572,7 +556,7 @@ function __schemaValidateDirectiveArgs(def, d) {
       if (args.length !== 1 || !args[0] || typeof args[0].name !== 'string') {
         bad('takes one property name');
       }
-      if (!__schemaIsCanonicalName(args[0].name)) {
+      if (!isCanonicalName(args[0].name)) {
         bad("'" + args[0].name + "' is not canonical camelCase — lowercase-first, alphanumeric, " +
           "no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key " +
           'and the JSON key all ride the snake_case bijection');
@@ -581,7 +565,7 @@ function __schemaValidateDirectiveArgs(def, d) {
       // compiler always writes it.
       const column = args[0].column;
       if (column !== undefined) {
-        const why = __schemaAttrValueError('literal', 'column', column);
+        const why = attrValueError('literal', 'column', column);
         if (why) bad('option ' + why + "; got '" + column + "'");
       }
       break;
@@ -597,11 +581,11 @@ function __schemaValidateDirectiveArgs(def, d) {
 // plan) sees a fully-validated model.
 function finishModelNorm(def, norm) {
   if (!def.name) {
-    throw __schemaModelError(def, '', 'name', 'a :model needs a name — its table name derives from it');
+    throw modelError(def, '', 'name', 'a :model needs a name — its table name derives from it');
   }
 
   const collision = (n, where) => {
-    throw __schemaModelError(def, n, 'collision', n + ' collides with ' + where);
+    throw modelError(def, n, 'collision', n + ' collides with ' + where);
   };
 
   // Reserved ORM names guard DECLARED entries only: mixin-included
@@ -609,16 +593,16 @@ function finishModelNorm(def, norm) {
   // @timestamps).
   for (const e of def._desc.entries || []) {
     if ((e.tag === 'field' || e.tag === 'method' || e.tag === 'computed' || e.tag === 'derived') &&
-        __SCHEMA_RESERVED.has(e.name)) {
+        RESERVED.has(e.name)) {
       collision(e.name, 'reserved ORM name');
     }
-    if (e.tag === 'hook' && !__SCHEMA_HOOK_NAMES.has(e.name)) {
-      throw __schemaModelError(def, e.name, 'hook',
-        "unknown lifecycle hook '" + e.name + "' — recognized: " + [...__SCHEMA_HOOK_NAMES].join(', '));
+    if (e.tag === 'hook' && !HOOK_NAMES.has(e.name)) {
+      throw modelError(def, e.name, 'hook',
+        "unknown lifecycle hook '" + e.name + "' — recognized: " + [...HOOK_NAMES].join(', '));
     }
   }
   for (const [n] of norm.scopes) {
-    if (__SCHEMA_SCOPE_RESERVED.has(n)) collision(n, 'reserved query API name');
+    if (SCOPE_RESERVED.has(n)) collision(n, 'reserved query API name');
   }
 
   let timestamps = false;
@@ -629,14 +613,14 @@ function finishModelNorm(def, norm) {
   const relations = new Map();
   const seenOnce = new Set();
   for (const d of norm.directives) {
-    __schemaValidateDirectiveArgs(def, d);
-    if (__SCHEMA_ONCE_DIRECTIVES.includes(d.name)) {
+    validateDirectiveArgs(def, d);
+    if (ONCE_DIRECTIVES.includes(d.name)) {
       if (seenOnce.has(d.name)) {
         // Same verdict as the compiler: an argument-less once-directive
         // (@timestamps, @softDelete) has no second value to override;
         // the duplicate is still refused — it declares itself once.
-        throw __schemaModelError(def, '', 'directive',
-          __SCHEMA_MODEL_DIRECTIVES[d.name] === 'none'
+        throw modelError(def, '', 'directive',
+          MODEL_DIRECTIVES[d.name] === 'none'
             ? "duplicate '@" + d.name + "' — declared twice; a :model declares it once"
             : "duplicate '@" + d.name + "' — a :model declares it at most once " +
               '(the second would silently override the first)');
@@ -648,7 +632,7 @@ function finishModelNorm(def, norm) {
     else if (d.name === 'table') table = d.args[0].name;
     else if (d.name === 'tableWas') tableWas = d.args[0].name;
     else if (d.name === 'primaryKey') primaryKey = d.args[0];
-    const rel = __schemaNormalizeDirectiveRelation(def, d);
+    const rel = normalizeDirectiveRelation(def, d);
     if (rel) {
       if (relations.has(rel.accessor)) collision(rel.accessor, 'relation');
       if (norm.fields.has(rel.accessor)) collision(rel.accessor, 'field');
@@ -668,14 +652,14 @@ function finishModelNorm(def, norm) {
   // them differ — the same pair every declared field has.
   norm.primaryKey = primaryKey?.name ?? 'id';
   norm.primaryKeyColumn = primaryKey
-    ? (primaryKey.column ?? __schemaSnake(primaryKey.name))
+    ? (primaryKey.column ?? snakeCase(primaryKey.name))
     : 'id';
   // `@table` is a permanent override; `@tableWas` is a one-time rename
   // signal the differ consumes and the author then deletes. Both are in
   // table-name space, so they compose: @tableWas names the DEPLOYED
   // table, @table the desired one, and the pluralizer is bypassed
   // entirely when @table is present.
-  norm.tableName = table ?? __schemaTableName(def.name);
+  norm.tableName = table ?? tableName(def.name);
 
   // ── surrogate or natural: DECLARING the pk as a field is the switch ─
   //
@@ -711,17 +695,17 @@ function finishModelNorm(def, norm) {
   }
   if (pkField) {
     if (pkField.optional === true || pkField.required !== true) {
-      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primaryKey',
         "the primary key '" + norm.primaryKey + "' is declared optional — a row's " +
         'identity is never absent; declare it required (!)');
     }
     if (pkField.array === true) {
-      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primaryKey',
         "the primary key '" + norm.primaryKey + "' is declared as an array — a primary key is one value");
     }
     for (const d of norm.directives) {
       if (d.name === 'idStart') {
-        throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+        throw modelError(def, norm.primaryKey, 'primaryKey',
           "@idStart seeds the sequence behind a runtime-managed primary key, but '" +
           norm.primaryKey + "' is declared as a field, which makes it caller-supplied — " +
           'there is no sequence to seed. Drop @idStart, or drop the field declaration');
@@ -732,7 +716,7 @@ function finishModelNorm(def, norm) {
   // ── the property ↔ column mapping ───────────────────────────────────
   //
   // ONE map each way, built once, consulted everywhere. Before
-  // `{column:}` a column was always `__schemaSnake(property)` and the
+  // `{column:}` a column was always `snakeCase(property)` and the
   // derivation could be inlined at each site; now it is a lookup, and
   // the derivation survives only as the DEFAULT when a field declares
   // no column of its own.
@@ -751,7 +735,7 @@ function finishModelNorm(def, norm) {
   const ownerOf = new Map();
   const claim = (property, col, owner) => {
     if (fieldOf.has(col)) {
-      throw __schemaModelError(def, property, 'collision',
+      throw modelError(def, property, 'collision',
         ownerOf.get(col) + ' and ' + owner + " both own column '" + col +
         "' — every table column has exactly one owner");
     }
@@ -762,7 +746,7 @@ function finishModelNorm(def, norm) {
     // canonical sets.
     const prior = columnOf.get(property);
     if (prior !== undefined) {
-      throw __schemaModelError(def, property, 'collision',
+      throw modelError(def, property, 'collision',
         ownerOf.get(prior) + ' and ' + owner + " both own property '" + property +
         "' (columns '" + prior + "' and '" + col +
         "') — every property reads exactly one column");
@@ -778,20 +762,20 @@ function finishModelNorm(def, norm) {
     // The compiler checks these too; `__schema({…})` is a second
     // entry point that takes a hand-built descriptor, so the runtime
     // holds the same line rather than trusting its caller.
-    for (const [key, kind] of Object.entries(__SCHEMA_FIELD_ATTRS)) {
+    for (const [key, kind] of Object.entries(FIELD_ATTRS)) {
       const value = f.attrs?.[key];
       if (value === undefined) continue;
-      const why = __schemaAttrValueError(kind, key, value);
+      const why = attrValueError(kind, key, value);
       if (why) {
-        throw __schemaModelError(def, n, 'attr',
+        throw modelError(def, n, 'attr',
           "field '" + n + "' option " + why + "; got '" + value + "'");
       }
     }
-    claim(n, f.attrs?.column ?? __schemaSnake(n), "field '" + n + "'");
+    claim(n, f.attrs?.column ?? snakeCase(n), "field '" + n + "'");
   }
   for (const [, rel] of relations) {
     if (rel.kind !== 'belongsTo') continue;
-    claim(__schemaCamel(rel.foreignKey), rel.foreignKey,
+    claim(camelCase(rel.foreignKey), rel.foreignKey,
       'the @belongsTo ' + rel.target + ' relation');
   }
   if (timestamps) {
@@ -802,7 +786,7 @@ function finishModelNorm(def, norm) {
   norm.columnOf = columnOf;
   norm.fieldOf = fieldOf;
   // The properties whose DECLARED type is temporal — the set hydrate
-  // and row absorption coerce through __schemaCoerceTemporal. An array
+  // and row absorption coerce through coerceTemporal. An array
   // field is a JSON document whatever its element type, so it is
   // excluded; @timestamps / @softDelete columns are datetime by
   // definition.
@@ -825,7 +809,7 @@ function finishModelNorm(def, norm) {
   if (norm.naturalKey) {
     const fieldColumn = columnOf.get(norm.primaryKey);
     if (primaryKey?.column !== undefined && primaryKey.column !== fieldColumn) {
-      throw __schemaModelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primaryKey',
         "@primaryKey names column '" + primaryKey.column + "' but field '" + norm.primaryKey +
         "' reads column '" + fieldColumn + "' — state the column once, on the field");
     }
@@ -839,16 +823,16 @@ function finishModelNorm(def, norm) {
   // `name` reads.
   for (const d of norm.directives) {
     if (d.name !== 'index' && d.name !== 'unique') continue;
-    const columns = d.args[0].fields.map((c) => __schemaColumnFor(norm, c));
+    const columns = d.args[0].fields.map((c) => columnFor(norm, c));
     if (new Set(columns).size !== columns.length) {
-      throw __schemaModelError(def, '', 'index',
+      throw modelError(def, '', 'index',
         '@' + d.name + ' columns must be distinct after canonicalization: ' +
         columns.join(', '));
     }
     for (let i = 0; i < columns.length; i++) {
       const c = d.args[0].fields[i];
       if (!known.has(columns[i])) {
-        throw __schemaModelError(def, c, 'index',
+        throw modelError(def, c, 'index',
           '@' + d.name + ": unknown column '" + c + "' — the table has: " + [...known].sort().join(', '));
       }
     }
@@ -872,7 +856,7 @@ function finishModelNorm(def, norm) {
     if (f.unique === true) conflictTargets.push([columnOf.get(fname)]);
   }
   for (const d of norm.directives) {
-    if (d.name === 'unique') conflictTargets.push(d.args[0].fields.map((c) => __schemaColumnFor(norm, c)));
+    if (d.name === 'unique') conflictTargets.push(d.args[0].fields.map((c) => columnFor(norm, c)));
   }
   norm.conflictTargets = conflictTargets;
   norm.conflictColumns = new Set(conflictTargets.flat());
@@ -887,14 +871,14 @@ function finishModelNorm(def, norm) {
 // (`in` sees the chain), and normalize rejects those names anyway.
 function decorateDef(def, desc) {
   def._adapter = desc.adapter
-    ? __schemaAssertAdapter(desc.adapter, "schema :model on: (" + (desc.name || 'anon') + ')')
+    ? assertAdapter(desc.adapter, "schema :model on: (" + (desc.name || 'anon') + ')')
     : null;
   for (const e of desc.entries || []) {
     if (e.tag !== 'scope' || (e.name in def)) continue;
     const sfn = e.fn;
     Object.defineProperty(def, e.name, {
       enumerable: false, configurable: true,
-      value: function (...args) { return __schemaInvokeScope(def, null, sfn, args); },
+      value: function (...args) { return invokeScope(def, null, sfn, args); },
     });
   }
 }
@@ -905,8 +889,8 @@ function decorateDef(def, desc) {
 // — the relation's own validation says that, at query time, with a
 // better message. The convention's INTEGER surrogate is the answer
 // until the target can say otherwise.
-function __schemaRelationKeyType(rel) {
-  const target = __SchemaRegistry.get(rel.target);
+function relationKeyType(rel) {
+  const target = SchemaRegistry.get(rel.target);
   if (!target || target.kind !== 'model') return 'integer';
   let targetNorm;
   try { targetNorm = target._normalize(); } catch { return 'integer'; }
@@ -937,7 +921,7 @@ function projectableFields(def) {
   if (norm.softDelete) col('deletedAt', 'datetime', false);
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    col(__schemaFieldFor(norm, rel.foreignKey), __schemaRelationKeyType(rel), !rel.optional);
+    col(fieldFor(norm, rel.foreignKey), relationKeyType(rel), !rel.optional);
   }
   return out;
 }
@@ -947,8 +931,8 @@ function jsonSchemaModelColumns(def, properties) {
   if (!norm.naturalKey) properties[norm.primaryKey] = { type: 'integer' };
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    const t = __schemaRelationKeyType(rel) === 'integer' ? 'integer' : 'string';
-    properties[__schemaFieldFor(norm, rel.foreignKey)] = rel.optional
+    const t = relationKeyType(rel) === 'integer' ? 'integer' : 'string';
+    properties[fieldFor(norm, rel.foreignKey)] = rel.optional
       ? { type: [t, 'null'] }
       : { type: t };
   }
@@ -989,7 +973,7 @@ function jsonSchemaModelColumns(def, properties) {
 // (see migrate.js). It has to: a 200M-row CREATE INDEX is ~26s on a
 // laptop and minutes on a small cloud VM, while a request handler past
 // ~30s is already a lost request. No single number serves both.
-function __schemaDefaultAdapter(overrides) {
+function defaultAdapter(overrides) {
   return harborAdapter({
     url: overrides?.url,
     token: overrides?.token,
@@ -1007,7 +991,7 @@ function __schemaDefaultAdapter(overrides) {
 // lacks the method) is named distinctly from a non-object, so the
 // message says what to add rather than what was passed. (begin()
 // stays optional and is feature-checked at the transaction path.)
-function __schemaAssertAdapter(a, who) {
+function assertAdapter(a, who) {
   if (!a || (typeof a !== 'object' && typeof a !== 'function')) {
     throw new Error(
       who + ': an adapter must implement query(sql, params) — Adapter Contract v2; got ' +
@@ -1022,40 +1006,40 @@ function __schemaAssertAdapter(a, who) {
   return a;
 }
 
-let __schemaAdapter = __schemaDefaultAdapter();
+let currentAdapter = defaultAdapter();
 // Nothing chose this adapter — it exists so a first ORM call has
 // somewhere to route. The marker lets the SQL funnel reword its
 // connection failures as the configuration problem they are; every
 // explicitly-built adapter (setAdapter, connect, on:) lacks it.
-__schemaAdapter.__schemaImplicitDefault = true;
+currentAdapter.__schemaImplicitDefault = true;
 
 // Whether anything beyond the unconfigured default is in play — the
 // CLI's pre-flight check reads this so a `rip schema` run against
 // nothing fails naming the fix instead of surfacing a connection
 // error from the default endpoint.
-let __schemaAdapterExplicit = false;
+let adapterExplicit = false;
 
 function __schemaSetAdapter(a) {
-  __schemaAdapter = __schemaAssertAdapter(a, 'schema.setAdapter()');
-  __schemaAdapterExplicit = true;
+  currentAdapter = assertAdapter(a, 'schema.setAdapter()');
+  adapterExplicit = true;
 }
 
-function __schemaAdapterConfigured() {
+function adapterConfigured() {
   const env = (typeof process !== 'undefined' && process.env) || {};
-  return __schemaAdapterExplicit || !!env.RIP_DB_URL;
+  return adapterExplicit || !!env.RIP_DB_URL;
 }
 
 // A def's own `on:` adapter, else the process-global one.
-function __schemaAdapterFor(def) {
-  return (def && def._adapter) || __schemaAdapter;
+function adapterFor(def) {
+  return (def && def._adapter) || currentAdapter;
 }
 
 // Build a NEW adapter value without installing it globally — the
 // counterpart of `schema :model, on: analytics`.
-function __schemaConnect(opts) {
+function connect(opts) {
   const o = typeof opts === 'string' ? { url: opts } : (opts || {});
   if (!o.url) throw new Error('schema.connect({url, token?, timeoutMs?}): a url is required');
-  return __schemaDefaultAdapter({ url: o.url, token: o.token, timeoutMs: o.timeoutMs });
+  return defaultAdapter({ url: o.url, token: o.token, timeoutMs: o.timeoutMs });
 }
 
 // ── transactions ──────────────────────────────────────────────────────
@@ -1077,12 +1061,12 @@ function __schemaConnect(opts) {
 // autocommit — writes escaping the transaction with no error
 //. Hosts without node:async_hooks reject loudly
 // at every attempt (the rejected init promise is the memo).
-let __schemaTxALS = null;
-let __schemaTxALSInit = null;
+let txALS = null;
+let txALSInit = null;
 
-function __schemaTxALSGet() {
-  if (!__schemaTxALSInit) {
-    __schemaTxALSInit = (async () => {
+function txALSGet() {
+  if (!txALSInit) {
+    txALSInit = (async () => {
       let ALS = null;
       let importError = null;
       try {
@@ -1098,25 +1082,25 @@ function __schemaTxALSGet() {
         if (importError) err.cause = importError;
         throw err;
       }
-      __schemaTxALS = new ALS();
-      return __schemaTxALS;
+      txALS = new ALS();
+      return txALS;
     })();
   }
-  return __schemaTxALSInit;
+  return txALSInit;
 }
 
-function __schemaTxStore(adapter) {
-  if (!__schemaTxALS) return null;
-  const map = __schemaTxALS.getStore();
+function txStore(adapter) {
+  if (!txALS) return null;
+  const map = txALS.getStore();
   return (map && map.get(adapter)) || null;
 }
 
 // The single SQL funnel: resolves the def's adapter, routes through
 // that adapter's ambient transaction when one exists, and translates
 // DB constraint violations into structured SchemaErrors.
-async function __schemaRunSQL(def, sql, params, opts) {
-  const adapter = __schemaAdapterFor(def);
-  const tx = __schemaTxStore(adapter);
+async function runSQL(def, sql, params, opts) {
+  const adapter = adapterFor(def);
+  const tx = txStore(adapter);
   try {
     return await (tx ? tx.handle.query(sql, params, opts) : adapter.query(sql, params, opts));
   } catch (e) {
@@ -1133,7 +1117,7 @@ async function __schemaRunSQL(def, sql, params, opts) {
       err.cause = e;
       throw err;
     }
-    throw __schemaTranslateDBError(e, def);
+    throw translateDBError(e, def);
   }
 }
 
@@ -1145,22 +1129,22 @@ async function __schemaRunSQL(def, sql, params, opts) {
  * @param {Record<string, any>|Function} optsOrFn
  * @param {Function} [maybeFn]
  */
-async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
+async function transaction(optsOrFn, maybeFn = undefined) {
   const fn = typeof optsOrFn === 'function' ? optsOrFn : maybeFn;
   const opts = typeof optsOrFn === 'function' ? {} : (optsOrFn || {});
   if (typeof fn !== 'function') {
     throw new Error('schema.transaction(fn): expected a function (got ' + typeof fn + ')');
   }
-  const adapter = opts.on ? __schemaAssertAdapter(opts.on, 'schema.transaction(on:)') : __schemaAdapter;
+  const adapter = opts.on ? assertAdapter(opts.on, 'schema.transaction(on:)') : currentAdapter;
 
-  if (__schemaTxStore(adapter)) return fn();
+  if (txStore(adapter)) return fn();
 
   if (typeof adapter.begin !== 'function') {
     throw new Error(
       'schema.transaction(): the configured adapter does not support transactions ' +
       '(no begin() method; see Adapter Contract v2). Install an adapter with begin().');
   }
-  const als = await __schemaTxALSGet();
+  const als = await txALSGet();
 
   const handle = await adapter.begin(opts);
   // `after` collects {def, inst, restore} for every save/destroy/
@@ -1180,14 +1164,14 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
     // The database revoked the transaction's writes; the enqueued
     // instances go back to their recorded pre-write state BEFORE the
     // hooks run, so afterRollback observes truth.
-    __schemaRollbackTxState(store);
+    rollbackTxState(store);
     try {
-      await __schemaFlushTxHooks(store, 'afterRollback');
+      await flushTxHooks(store, 'afterRollback');
     } catch (hookErr) {
       // The block's error is the transaction's outcome; a throwing
       // afterRollback hook reports through its cause chain rather
       // than replacing it.
-      __schemaAttachCause(err, hookErr);
+      attachCause(err, hookErr);
     }
     throw err;
   }
@@ -1213,7 +1197,7 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
   // afterCommit runs OUTSIDE the transaction — exceptions here
   // propagate but cannot roll anything back: the COMMIT already
   // happened.
-  await __schemaFlushTxHooks(store, 'afterCommit');
+  await flushTxHooks(store, 'afterCommit');
   return result;
 }
 
@@ -1222,7 +1206,7 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
 // instead of running autocommit on another connection.
 //
 // This exists because a transaction opened by the other tier (rip/db's
-// `transaction`) is invisible here: `__schemaRunSQL` routes on this
+// `transaction`) is invisible here: `runSQL` routes on this
 // store alone, so a model write inside someone else's transaction used
 // to commit itself and survive that transaction's rollback.
 //
@@ -1231,7 +1215,7 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
 // it calls once the commit or rollback has actually landed, so
 // afterCommit never fires ahead of the COMMIT it reports.
 // The open handle for this adapter's ambient transaction, or null. The
-// mirror of __schemaAdoptTransaction: it lets the other tier see a
+// mirror of adoptTransaction: it lets the other tier see a
 // transaction WE opened, so a raw statement issued inside one joins it
 // rather than committing itself on another connection.
 // DuckDB answers a bulk UPDATE/DELETE with a one-row result set whose
@@ -1250,7 +1234,7 @@ async function __schemaTransaction(optsOrFn, maybeFn = undefined) {
 // Harbor sends integers past 2^53-1 as strings so they survive JSON;
 // a bulk mutation is nowhere near that, but coerce rather than hand
 // back a count whose type depends on its magnitude.
-function __schemaAffirmedRowCount(res) {
+function affirmedRowCount(res) {
   const cols = res?.columns;
   const data = res?.data;
   if (Array.isArray(cols) && cols.length === 1 && Array.isArray(data) && data.length === 1) {
@@ -1264,8 +1248,8 @@ function __schemaAffirmedRowCount(res) {
   return null;
 }
 
-function __schemaAffectedRows(res) {
-  const affirmed = __schemaAffirmedRowCount(res);
+function affectedRows(res) {
+  const affirmed = affirmedRowCount(res);
   if (affirmed !== null) return affirmed;
   return res?.rowCount ?? res?.rows ?? null;
 }
@@ -1274,7 +1258,7 @@ function __schemaAffectedRows(res) {
 // ZERO rows: the row is GONE — deleted, or re-keyed by someone else —
 // not "no change". The instance is stale; it stops claiming a
 // persisted state the database revoked.
-function __schemaStaleRowError(def, api, pk, identity) {
+function staleRowError(def, api, pk, identity) {
   return new SchemaError([{
     field: pk,
     error: 'stale',
@@ -1289,7 +1273,7 @@ function __schemaStaleRowError(def, api, pk, identity) {
 // who scoped a bulk mutation to one row mutated every matching row
 // instead. Refuse rather than widen: a scope the statement cannot
 // honor is an error, never a silently wider write.
-function __schemaAssertWhereOnly(rel, method) {
+function assertWhereOnly(rel, method) {
   const ignored = [];
   if (rel._limit != null) ignored.push('limit');
   if (rel._offset != null) ignored.push('offset');
@@ -1300,15 +1284,15 @@ function __schemaAssertWhereOnly(rel, method) {
     `Narrow the condition, or read the rows first and mutate them by primary key.`);
 }
 
-function __schemaTxHandle(adapter) {
-  const store = __schemaTxStore(adapter);
+function txHandle(adapter) {
+  const store = txStore(adapter);
   return store ? store.handle : null;
 }
 
-async function __schemaAdoptTransaction(adapter, handle, fn) {
-  const als = await __schemaTxALSGet();
+async function adoptTransaction(adapter, handle, fn) {
+  const als = await txALSGet();
   const store = { adapter, handle, after: [] };
-  // Copy-on-run, as __schemaTransaction does: other adapters' ambient
+  // Copy-on-run, as transaction does: other adapters' ambient
   // contexts stay visible; only this adapter's slot is bound.
   const next = new Map(als.getStore() || []);
   next.set(adapter, store);
@@ -1321,8 +1305,8 @@ async function __schemaAdoptTransaction(adapter, handle, fn) {
     // would route hook statements to the dead handle and let the
     // flush queue extend itself without bound.
     next.delete(adapter);
-    if (outcome === 'afterRollback') __schemaRollbackTxState(store);
-    return __schemaFlushTxHooks(store, outcome);
+    if (outcome === 'afterRollback') rollbackTxState(store);
+    return flushTxHooks(store, outcome);
   }));
 }
 
@@ -1335,7 +1319,7 @@ async function __schemaAdoptTransaction(adapter, handle, fn) {
 // row saved twice in one transaction gets one callback. One hook
 // throwing must not cancel the rest: every queued callback runs, and
 // the failures rethrow after the flush (several aggregate).
-async function __schemaFlushTxHooks(store, hookName) {
+async function flushTxHooks(store, hookName) {
   const entries = store.after.slice();
   const seen = new Set();
   const failures = [];
@@ -1343,7 +1327,7 @@ async function __schemaFlushTxHooks(store, hookName) {
     if (seen.has(entry.inst)) continue;
     seen.add(entry.inst);
     try {
-      await __schemaRunHook(entry.def, entry.inst, hookName);
+      await runHook(entry.def, entry.inst, hookName);
     } catch (e) {
       failures.push(e);
     }
@@ -1357,7 +1341,7 @@ async function __schemaFlushTxHooks(store, hookName) {
 
 // The instance state a ROLLBACK must put back, captured by each write
 // operation BEFORE it changes anything and carried on its queue entry.
-function __schemaTxRestorePoint(norm, inst) {
+function txRestorePoint(norm, inst) {
   return {
     persisted: inst._persisted,
     snapshot: inst._snapshot,
@@ -1372,7 +1356,7 @@ function __schemaTxRestorePoint(norm, inst) {
 // revoked id or snapshot. An instance created inside the transaction
 // returns to _persisted=false with no pk, so a post-rollback save()
 // takes the INSERT arm and re-creates: Active-Record semantics.
-function __schemaRollbackTxState(store) {
+function rollbackTxState(store) {
   const seen = new Set();
   for (const entry of store.after) {
     if (seen.has(entry.inst) || !entry.restore) continue;
@@ -1392,7 +1376,7 @@ function __schemaRollbackTxState(store) {
 // Append `extra` at the first free `cause` link of `err`'s chain (the
 // codebase's error idiom), bounded against pathological chains. A
 // non-Error throw carries no cause slot; the original still surfaces.
-function __schemaAttachCause(err, extra) {
+function attachCause(err, extra) {
   let node = err;
   for (let hops = 0; hops < 16 && node instanceof Error; hops++) {
     if (node.cause === undefined) {
@@ -1408,8 +1392,8 @@ function __schemaAttachCause(err, extra) {
 // Returns false when no transaction is open — the caller fires
 // afterCommit immediately (outside a transaction, the statement is
 // the commit).
-function __schemaEnqueueTxHook(def, inst, restorePoint) {
-  const tx = __schemaTxStore(__schemaAdapterFor(def));
+function enqueueTxHook(def, inst, restorePoint) {
+  const tx = txStore(adapterFor(def));
   if (!tx) return false;
   tx.after.push({ def, inst, restore: restorePoint });
   return true;
@@ -1424,7 +1408,7 @@ function __schemaEnqueueTxHook(def, inst, restorePoint) {
 // message-pattern based (DuckDB shapes). Deliberately absent:
 // pre-write uniqueness SELECTs — they race; the DB constraint is the
 // check.
-function __schemaTranslateDBError(e, def) {
+function translateDBError(e, def) {
   const msg = (e && e.message) || '';
   // The model's mapping, when there is one — a NOT NULL failure names
   // the COLUMN, and with `{column:}` that is not the field name.
@@ -1432,7 +1416,7 @@ function __schemaTranslateDBError(e, def) {
   // model that cannot normalize simply reports the derived name.
   let norm = null;
   try { norm = def && def.kind === 'model' ? def._normalize() : null; } catch { norm = null; }
-  const issue = __schemaConstraintIssue(msg, norm);
+  const issue = constraintIssue(msg, norm);
   if (!issue) return e;
   const err = new SchemaError([issue], def ? def.name : null, def ? def.kind : null);
   err.cause = e;
@@ -1442,12 +1426,12 @@ function __schemaTranslateDBError(e, def) {
 // A name out of a database error message: a column when the model
 // knows it as one, and the plain derivation otherwise — the unique
 // pattern yields an INDEX name, which no mapping covers.
-function __schemaConstraintName(raw, norm) {
-  return norm ? __schemaFieldFor(norm, raw) : __schemaCamel(raw);
+function constraintName(raw, norm) {
+  return norm ? fieldFor(norm, raw) : camelCase(raw);
 }
 
-function __schemaConstraintIssue(msg, norm) {
-  const nameOf = (raw) => __schemaConstraintName(raw, norm);
+function constraintIssue(msg, norm) {
+  const nameOf = (raw) => constraintName(raw, norm);
   let m;
   m = msg.match(/[Dd]uplicate key "([A-Za-z0-9_]+):[^"]*" violates (?:unique|primary key) constraint/);
   if (m || /violates unique constraint/i.test(msg)) {
@@ -1476,13 +1460,13 @@ function __schemaConstraintIssue(msg, norm) {
 // invoked from a model static; the existing builder when chained). A
 // body that returns something other than the builder falls back to
 // the builder so chains never break on a stray trailing expression.
-function __schemaInvokeScope(def, builder, fn, args) {
-  const q = builder || new __SchemaQuery(def);
+function invokeScope(def, builder, fn, args) {
+  const q = builder || new SchemaQuery(def);
   const out = fn.apply(q, args);
-  return out instanceof __SchemaQuery ? out : q;
+  return out instanceof SchemaQuery ? out : q;
 }
 
-class __SchemaQuery {
+class SchemaQuery {
   constructor(def) {
     this._def = def;
     this._clauses = [];
@@ -1505,7 +1489,7 @@ class __SchemaQuery {
         if (!(sname in this)) {
           Object.defineProperty(this, sname, {
             enumerable: false, configurable: true,
-            value: (...args) => __schemaInvokeScope(def, this, sfn, args),
+            value: (...args) => invokeScope(def, this, sfn, args),
           });
         }
       }
@@ -1522,11 +1506,11 @@ class __SchemaQuery {
     } else if (cond && typeof cond === 'object') {
       const norm = this._def._normalize();
       for (const [k, v] of Object.entries(cond)) {
-        const column = __schemaColumnFor(norm, k);
-        const col = __schemaCallerColumn(norm, k, norm.columns, 'where() key');
+        const column = columnFor(norm, k);
+        const col = callerColumn(norm, k, norm.columns, 'where() key');
         // Either spelling reaches the field record, the same way either
         // spelling reaches the column.
-        const field = norm.fields.get(__schemaFieldFor(norm, column));
+        const field = norm.fields.get(fieldFor(norm, column));
         const opaque = !!field &&
           (field.array === true || field.typeName === 'json' || field.typeName === 'any');
         if (v === undefined) {
@@ -1547,19 +1531,19 @@ class __SchemaQuery {
             this._clauses.push(col + ' IN (' + v.map(() => '?').join(', ') + ')');
             this._params.push(...v);
           }
-        } else if (__schemaIsPlainObject(v) && !opaque) {
+        } else if (isPlainObject(v) && !opaque) {
           const ops = Object.keys(v);
           if (ops.length === 0) {
             throw new Error("schema: where() on '" + k + "' got an empty operator object — " +
-              'name an operator (' + [...__SCHEMA_WHERE_OPS.keys()].join(', ') + ') or pass a value');
+              'name an operator (' + [...WHERE_OPS.keys()].join(', ') + ') or pass a value');
           }
           // Several operators on one field read as AND, which is what
           // {gte, lt} means to anyone writing a range.
           for (const name of ops) {
-            const op = __SCHEMA_WHERE_OPS.get(name);
+            const op = WHERE_OPS.get(name);
             if (!op) {
               throw new Error("schema: unknown where() operator '" + name + "' on '" + k +
-                "' — known operators: " + [...__SCHEMA_WHERE_OPS.keys()].join(', '));
+                "' — known operators: " + [...WHERE_OPS.keys()].join(', '));
             }
             this._clauses.push(op(col, v[name], this._params, k));
           }
@@ -1571,8 +1555,8 @@ class __SchemaQuery {
     }
     return this;
   }
-  limit(n) { this._limit = __schemaPageInt(n, 'limit'); return this; }
-  offset(n) { this._offset = __schemaPageInt(n, 'offset'); return this; }
+  limit(n) { this._limit = pageInt(n, 'limit'); return this; }
+  offset(n) { this._offset = pageInt(n, 'offset'); return this; }
   order(spec) {
     // The string form is the O4-trusted overload: caller-authored SQL,
     // spliced verbatim. The structured forms — `{createdAt: 'desc'}`, or
@@ -1587,13 +1571,13 @@ class __SchemaQuery {
     const norm = this._def._normalize();
     const parts = [];
     for (const entry of entries) {
-      if (!__schemaIsPlainObject(entry)) {
+      if (!isPlainObject(entry)) {
         throw new Error('schema: order(spec) accepts a trusted SQL string, a {field: direction} ' +
           'object, or an array of them; got ' + (entry === null ? 'null' : typeof entry));
       }
       for (const [k, dir] of Object.entries(entry)) {
-        parts.push(__schemaCallerColumn(norm, k, norm.columns, 'order() key') +
-          ' ' + __schemaOrderDir(dir, k));
+        parts.push(callerColumn(norm, k, norm.columns, 'order() key') +
+          ' ' + orderDir(dir, k));
       }
     }
     if (parts.length === 0) {
@@ -1604,7 +1588,7 @@ class __SchemaQuery {
   }
   orderBy(spec) { return this.order(spec); }
   includes(...specs) {
-    this._includes.push(...__schemaNormalizeIncludes(specs));
+    this._includes.push(...normalizeIncludes(specs));
     return this;
   }
   withDeleted() { this._deleted = 'all'; return this; }
@@ -1629,7 +1613,7 @@ class __SchemaQuery {
   }
   _buildSQL() {
     const n = this._def._normalize();
-    const parts = ['SELECT * FROM ' + __schemaQuoteIdent(n.tableName, null, 'table')];
+    const parts = ['SELECT * FROM ' + quoteIdent(n.tableName, null, 'table')];
     const where = this._whereParts(n);
     if (where.length) parts.push('WHERE ' + where.join(' AND '));
     if (this._order) parts.push('ORDER BY ' + this._order);
@@ -1639,14 +1623,14 @@ class __SchemaQuery {
   }
   async all() {
     this._applyDefaultScope();
-    if (this._includes.length) __schemaValidateIncludes(this._def, this._includes);
+    if (this._includes.length) validateIncludes(this._def, this._includes);
     const sql = this._buildSQL();
-    const res = await __schemaRunSQL(this._def, sql, this._params);
+    const res = await runSQL(this._def, sql, this._params);
     const instances = (res.data || []).map((row) => this._def._hydrate(res.columns, row));
     // Eager loading: batched second queries that fill the relation
     // memos; never changes the root result set.
     if (this._includes.length && instances.length) {
-      await __schemaPreload(this._def, instances, this._includes);
+      await preload(this._def, instances, this._includes);
     }
     return instances;
   }
@@ -1658,16 +1642,16 @@ class __SchemaQuery {
   async count() {
     this._applyDefaultScope();
     const n = this._def._normalize();
-    const parts = ['SELECT COUNT(*) FROM ' + __schemaQuoteIdent(n.tableName, null, 'table')];
+    const parts = ['SELECT COUNT(*) FROM ' + quoteIdent(n.tableName, null, 'table')];
     const where = this._whereParts(n);
     if (where.length) parts.push('WHERE ' + where.join(' AND '));
-    const res = await __schemaRunSQL(this._def, parts.join(' '), this._params);
+    const res = await runSQL(this._def, parts.join(' '), this._params);
     return res.data?.[0]?.[0] || 0;
   }
   // One UPDATE for every matching row — bypasses validation and
   // per-instance hooks (the bulk path).
   async updateAll(values) {
-    __schemaAssertWhereOnly(this, 'updateAll');
+    assertWhereOnly(this, 'updateAll');
     this._applyDefaultScope();
     const n = this._def._normalize();
     const keys = values && typeof values === 'object' ? Object.keys(values) : [];
@@ -1678,41 +1662,41 @@ class __SchemaQuery {
     const sets = [];
     const params = [];
     for (const k of keys) {
-      const column = __schemaColumnFor(n, k);
-      const field = n.fields.get(__schemaFieldFor(n, column));
-      const quoted = __schemaCallerColumn(n, k, n.callerWritableColumns, 'updateAll() key');
+      const column = columnFor(n, k);
+      const field = n.fields.get(fieldFor(n, column));
+      const quoted = callerColumn(n, k, n.callerWritableColumns, 'updateAll() key');
       sets.push(quoted + ' = ?');
-      params.push(__schemaSerialize(values[k], field));
+      params.push(serialize(values[k], field));
     }
     if (n.timestamps) {
       sets.push('"updated_at" = ?');
       params.push(new Date()); // a real Date — the adapter encodes it at the wire
     }
     const where = this._whereParts(n);
-    let sql = 'UPDATE ' + __schemaQuoteIdent(n.tableName, null, 'table') + ' SET ' + sets.join(', ');
+    let sql = 'UPDATE ' + quoteIdent(n.tableName, null, 'table') + ' SET ' + sets.join(', ');
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    const res = await __schemaRunSQL(this._def, sql, [...params, ...this._params]);
-    return __schemaAffectedRows(res);
+    const res = await runSQL(this._def, sql, [...params, ...this._params]);
+    return affectedRows(res);
   }
   // One statement for every matching row: soft-delete aware (UPDATE
   // deleted_at on a @softDelete model, real DELETE otherwise);
   // bypasses per-instance hooks (the bulk path).
   async deleteAll() {
-    __schemaAssertWhereOnly(this, 'deleteAll');
+    assertWhereOnly(this, 'deleteAll');
     this._applyDefaultScope();
     const n = this._def._normalize();
     const where = this._whereParts(n);
     let sql, params;
     if (n.softDelete && this._deleted === 'live') {
-      sql = 'UPDATE ' + __schemaQuoteIdent(n.tableName, null, 'table') + ' SET "deleted_at" = ?';
+      sql = 'UPDATE ' + quoteIdent(n.tableName, null, 'table') + ' SET "deleted_at" = ?';
       params = [new Date(), ...this._params]; // a real Date — the adapter encodes it at the wire
     } else {
-      sql = 'DELETE FROM ' + __schemaQuoteIdent(n.tableName, null, 'table');
+      sql = 'DELETE FROM ' + quoteIdent(n.tableName, null, 'table');
       params = this._params;
     }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    const res = await __schemaRunSQL(this._def, sql, params);
-    return __schemaAffectedRows(res);
+    const res = await runSQL(this._def, sql, params);
+    return affectedRows(res);
   }
 }
 
@@ -1720,23 +1704,23 @@ class __SchemaQuery {
 
 // Normalize .includes arguments into [{name, children}] trees:
 // strings, symbols, arrays, and nested maps to any depth.
-function __schemaNormalizeIncludes(specs) {
+function normalizeIncludes(specs) {
   const out = [];
   for (const s of specs) {
     if (s == null) continue;
     if (typeof s === 'symbol') out.push({ name: Symbol.keyFor(s) || s.description, children: [] });
     else if (typeof s === 'string') out.push({ name: s, children: [] });
-    else if (Array.isArray(s)) out.push(...__schemaNormalizeIncludes(s));
+    else if (Array.isArray(s)) out.push(...normalizeIncludes(s));
     else if (typeof s === 'object') {
       for (const [k, v] of Object.entries(s)) {
-        out.push({ name: k, children: __schemaNormalizeIncludes([v]) });
+        out.push({ name: k, children: normalizeIncludes([v]) });
       }
     }
   }
   return out;
 }
 
-function __schemaValidateIncludes(def, specs) {
+function validateIncludes(def, specs) {
   const norm = def._normalize();
   for (const spec of specs) {
     const rel = norm.relations.get(spec.name);
@@ -1745,14 +1729,14 @@ function __schemaValidateIncludes(def, specs) {
         "schema: includes('" + spec.name + "') — no such relation on " + (def.name || 'model') +
         '. Declared relations: ' + ([...norm.relations.keys()].join(', ') || '(none)'));
     }
-    const target = __SchemaRegistry.get(rel.target);
+    const target = SchemaRegistry.get(rel.target);
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
-    __schemaValidateRelationTarget(def, rel, target);
-    if (spec.children.length) __schemaValidateIncludes(target, spec.children);
+    validateRelationTarget(def, rel, target);
+    if (spec.children.length) validateIncludes(target, spec.children);
   }
 }
 
-function __schemaValidateRelationTarget(def, rel, target) {
+function validateRelationTarget(def, rel, target) {
   const targetNorm = target._normalize();
   if (!(targetNorm.columns instanceof Set)) {
     throw new Error(
@@ -1760,21 +1744,21 @@ function __schemaValidateRelationTarget(def, rel, target) {
       ' targets ' + rel.target + ', which is not a persisted :model');
   }
   if (rel.kind === 'belongsTo') {
-    __schemaQuoteIdent(targetNorm.primaryKeyColumn, targetNorm.columns, 'relation primary key');
+    quoteIdent(targetNorm.primaryKeyColumn, targetNorm.columns, 'relation primary key');
   } else if (rel.through) {
     // Both keys live on the join model, and resolving them is the
     // whole check — the target only has to have a primary key to be
     // looked up by.
-    __schemaQuoteIdent(targetNorm.primaryKeyColumn, targetNorm.columns, 'relation primary key');
-    __schemaThroughKeys(def, rel, __schemaJoinModel(def, rel));
+    quoteIdent(targetNorm.primaryKeyColumn, targetNorm.columns, 'relation primary key');
+    throughKeys(def, rel, joinModel(def, rel));
   } else {
-    __schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key');
+    quoteIdent(rel.foreignKey, targetNorm.columns, 'relation key');
   }
   return targetNorm;
 }
 
-function __schemaJoinModel(def, rel) {
-  const join = __SchemaRegistry.get(rel.through);
+function joinModel(def, rel) {
+  const join = SchemaRegistry.get(rel.through);
   if (!join) {
     throw new Error('schema: unknown join model "' + rel.through + '" for relation ' +
       (def.name || 'anon') + '.' + rel.accessor);
@@ -1787,24 +1771,24 @@ function __schemaJoinModel(def, rel) {
 // NOT a JOIN — the same two-query shape every other relation uses, so
 // no row duplicates and no join-table columns leak into target
 // instances.
-async function __schemaThroughPairs(def, rel, join, keys, identities) {
+async function throughPairs(def, rel, join, keys, identities) {
   if (!identities.length) return [];
   // The join model's own read filters — @defaultScope and @softDelete
   // — apply here exactly as deleteAll applies them to the unlink:
   // both halves of a set() diff must see the same rows, and a scoped
   // join model scopes its reads wherever they are issued.
-  const scoped = new __SchemaQuery(join);
+  const scoped = new SchemaQuery(join);
   scoped._applyDefaultScope();
   const where = [
-    __schemaQuoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
+    quoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
       ' IN (' + identities.map(() => '?').join(', ') + ')',
     ...scoped._whereParts(keys.joinNorm),
   ];
-  const sql = 'SELECT ' + __schemaQuoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
-    ', ' + __schemaQuoteIdent(keys.targetKey, keys.joinNorm.columns, 'through target key') +
-    ' FROM ' + __schemaQuoteIdent(keys.joinNorm.tableName, null, 'table') +
+  const sql = 'SELECT ' + quoteIdent(keys.ownerKey, keys.joinNorm.columns, 'through owner key') +
+    ', ' + quoteIdent(keys.targetKey, keys.joinNorm.columns, 'through target key') +
+    ' FROM ' + quoteIdent(keys.joinNorm.tableName, null, 'table') +
     ' WHERE ' + where.join(' AND ');
-  const res = await __schemaRunSQL(join, sql, [...identities, ...scoped._params]);
+  const res = await runSQL(join, sql, [...identities, ...scoped._params]);
   return (res.data || []).filter((row) => row[1] != null);
 }
 
@@ -1812,7 +1796,7 @@ async function __schemaThroughPairs(def, rel, join, keys, identities) {
 // IN (…)), never JOINs — no row duplication, uniform across relation
 // kinds. Results land in the relation memo, so accessors resolve from
 // cache with no query.
-async function __schemaPreload(def, instances, specs) {
+async function preload(def, instances, specs) {
   if (!instances.length || !specs.length) return;
   const norm = def._normalize();
   for (const spec of specs) {
@@ -1822,9 +1806,9 @@ async function __schemaPreload(def, instances, specs) {
         "schema: includes('" + spec.name + "') — no such relation on " + (def.name || 'model') +
         '. Declared relations: ' + ([...norm.relations.keys()].join(', ') || '(none)'));
     }
-    const target = __SchemaRegistry.get(rel.target);
+    const target = SchemaRegistry.get(rel.target);
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
-    const targetNorm = __schemaValidateRelationTarget(def, rel, target);
+    const targetNorm = validateRelationTarget(def, rel, target);
     const children = [];
     // Capture the cache request before any await. Reload/absorption bumps
     // the generation, and mutable FKs can change identity independently;
@@ -1833,12 +1817,12 @@ async function __schemaPreload(def, instances, specs) {
     for (const inst of instances) {
       requests.set(inst, {
         generation: inst._relGeneration,
-        identity: __schemaRelationIdentity(def, inst, rel),
+        identity: relationIdentity(def, inst, rel),
       });
     }
     const current = (inst, request) =>
       inst._relGeneration === request.generation &&
-      __schemaSameValue(__schemaRelationIdentity(def, inst, rel), request.identity);
+      sameValue(relationIdentity(def, inst, rel), request.identity);
     if (rel.kind === 'belongsTo') {
       const ids = [...new Set(
         [...requests.values()].map((request) => request.identity).filter((v) => v != null),
@@ -1850,16 +1834,16 @@ async function __schemaPreload(def, instances, specs) {
         const request = requests.get(inst);
         if (!current(inst, request)) continue;
         const v = request.identity != null ? (byId.get(request.identity) ?? null) : null;
-        __schemaRelMemoSet(inst, spec.name, request.identity, v);
+        relMemoSet(inst, spec.name, request.identity, v);
         if (v && !children.includes(v)) children.push(v);
       }
     } else if (rel.through) {
       // Three steps, all set-based: the join rows for every owner at
       // once, then the distinct targets in one findMany, then group.
-      const join = __schemaJoinModel(def, rel);
-      const keys = __schemaThroughKeys(def, rel, join);
+      const join = joinModel(def, rel);
+      const keys = throughKeys(def, rel, join);
       const ids = [...new Set([...requests.values()].map((r) => r.identity).filter((v) => v != null))];
-      const pairs = await __schemaThroughPairs(def, rel, join, keys, ids);
+      const pairs = await throughPairs(def, rel, join, keys, ids);
       const targetIds = [...new Set(pairs.map((p) => p[1]))];
       const rows = targetIds.length ? await target.findMany(targetIds) : [];
       const byId = new Map(rows.map((r) => [r[targetNorm.primaryKey], r]));
@@ -1875,16 +1859,16 @@ async function __schemaPreload(def, instances, specs) {
         const request = requests.get(inst);
         if (!current(inst, request)) continue;
         const g = groups.get(request.identity) || [];
-        __schemaRelMemoSet(inst, spec.name, request.identity,
+        relMemoSet(inst, spec.name, request.identity,
           rel.kind === 'hasOne' ? (g[0] ?? null) : g);
       }
     } else {
-      const fkCamel = __schemaFieldFor(targetNorm, rel.foreignKey);
+      const fkCamel = fieldFor(targetNorm, rel.foreignKey);
       const ids = [...new Set([...requests.values()].map((request) => request.identity))];
       let rows = [];
       if (ids.length) {
-        rows = await new __SchemaQuery(target)
-          .where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+        rows = await new SchemaQuery(target)
+          .where(quoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
           .all();
       }
       const groups = new Map();
@@ -1898,12 +1882,12 @@ async function __schemaPreload(def, instances, specs) {
         const request = requests.get(inst);
         if (!current(inst, request)) continue;
         const g = groups.get(request.identity) || [];
-        __schemaRelMemoSet(
+        relMemoSet(
           inst, spec.name, request.identity,
           rel.kind === 'hasOne' ? (g[0] ?? null) : g);
       }
     }
-    if (spec.children.length) await __schemaPreload(target, children, spec.children);
+    if (spec.children.length) await preload(target, children, spec.children);
   }
 }
 
@@ -1922,12 +1906,12 @@ async function __schemaPreload(def, instances, specs) {
 
 // The pieces every write needs: the join model, its two columns, the
 // owner's identity, and the target identities being named.
-function __schemaThroughPlan(def, inst, rel, acc, items, api) {
-  const join = __schemaJoinModel(def, rel);
-  const keys = __schemaThroughKeys(def, rel, join);
-  const identity = __schemaPersistedIdentity(def, inst, api);
+function throughPlan(def, inst, rel, acc, items, api) {
+  const join = joinModel(def, rel);
+  const keys = throughKeys(def, rel, join);
+  const identity = persistedIdentity(def, inst, api);
   const list = items == null ? [] : (Array.isArray(items) ? items : [items]);
-  const targetNorm = __SchemaRegistry.get(rel.target)?._normalize();
+  const targetNorm = SchemaRegistry.get(rel.target)?._normalize();
   const targetIds = list.map((item, i) => {
     // An instance names itself; a bare value is already an identity.
     if (item !== null && typeof item === 'object') {
@@ -1948,8 +1932,8 @@ function __schemaThroughPlan(def, inst, rel, acc, items, api) {
 }
 
 // The target identities this owner is already linked to.
-async function __schemaThroughLinked(def, rel, plan) {
-  const pairs = await __schemaThroughPairs(def, rel, plan.join, plan.keys, [plan.identity]);
+async function throughLinked(def, rel, plan) {
+  const pairs = await throughPairs(def, rel, plan.join, plan.keys, [plan.identity]);
   return new Set(pairs.map((p) => p[1]));
 }
 
@@ -1958,7 +1942,7 @@ async function __schemaThroughLinked(def, rel, plan) {
 // write landed in the JOIN TABLE, so every relation reading through
 // the same join model answers from the changed rows — sibling
 // accessors' memo entries clear along with the writer's own.
-function __schemaThroughInvalidate(def, inst, rel, acc) {
+function throughInvalidate(def, inst, rel, acc) {
   inst._relGeneration++;
   if (!inst._relMemo) return;
   inst._relMemo.delete(acc);
@@ -1980,17 +1964,17 @@ function __schemaThroughInvalidate(def, inst, rel, acc) {
 // wrote — usually 0. Without that index the race stands (two rows
 // land); closing it is a DDL decision the deployment owns, not
 // something a JS-side guard can reach across processes.
-async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
+async function throughAdd(def, inst, rel, acc, items, attrs) {
   const api = 'add' + acc[0].toUpperCase() + acc.slice(1) + '()';
-  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
+  const plan = throughPlan(def, inst, rel, acc, items, api);
   if (!plan.targetIds.length) return 0;
-  const linked = await __schemaThroughLinked(def, rel, plan);
+  const linked = await throughLinked(def, rel, plan);
   const fresh = plan.targetIds.filter((id) => !linked.has(id));
   if (!fresh.length) return 0;
   const joinNorm = plan.keys.joinNorm;
-  const ownerField = __schemaFieldFor(joinNorm, plan.keys.ownerKey);
-  const targetField = __schemaFieldFor(joinNorm, plan.keys.targetKey);
-  if (attrs != null && !__schemaIsPlainObject(attrs)) {
+  const ownerField = fieldFor(joinNorm, plan.keys.ownerKey);
+  const targetField = fieldFor(joinNorm, plan.keys.targetKey);
+  if (attrs != null && !isPlainObject(attrs)) {
     throw new Error('schema: ' + api + ' attrs must be a plain object of ' + rel.through +
       ' columns; got ' + (attrs === null ? 'null' : typeof attrs));
   }
@@ -2008,13 +1992,13 @@ async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
         added += toLink.length;
         break;
       } catch (e) {
-        if (!__schemaIsUniqueViolation(e)) throw e;
+        if (!isUniqueViolation(e)) throw e;
         // insertMany is one statement, so nothing landed. Re-read: a
         // shrunken missing set proves the violation was this race (the
         // tuples now exist, which is what the caller asked for); no
         // shrink means something else tripped a unique constraint (an
         // attrs column, say) — that violation rethrows untouched.
-        const nowLinked = await __schemaThroughLinked(def, rel, plan);
+        const nowLinked = await throughLinked(def, rel, plan);
         const missing = toLink.filter((id) => !nowLinked.has(id));
         if (missing.length === toLink.length) throw e;
         toLink = missing;
@@ -2023,24 +2007,24 @@ async function __schemaThroughAdd(def, inst, rel, acc, items, attrs) {
   } finally {
     // Attempted SQL always invalidates: even a raced no-op just
     // learned the join rows changed under it.
-    __schemaThroughInvalidate(def, inst, rel, acc);
+    throughInvalidate(def, inst, rel, acc);
   }
   return added;
 }
 
-// A translated DB unique violation (__schemaConstraintIssue's 'unique'
+// A translated DB unique violation (constraintIssue's 'unique'
 // classification) — the shape addX's race handling keys on.
-function __schemaIsUniqueViolation(e) {
+function isUniqueViolation(e) {
   return e instanceof SchemaError && Array.isArray(e.issues) &&
     e.issues.some((issue) => issue.error === 'unique');
 }
 
-async function __schemaThroughRemove(def, inst, rel, acc, items) {
+async function throughRemove(def, inst, rel, acc, items) {
   const api = 'remove' + acc[0].toUpperCase() + acc.slice(1) + '()';
-  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
+  const plan = throughPlan(def, inst, rel, acc, items, api);
   if (!plan.targetIds.length) return 0;
-  const removed = await __schemaThroughUnlink(def, rel, plan, plan.targetIds);
-  __schemaThroughInvalidate(def, inst, rel, acc);
+  const removed = await throughUnlink(def, rel, plan, plan.targetIds);
+  throughInvalidate(def, inst, rel, acc);
   return removed;
 }
 
@@ -2053,30 +2037,30 @@ async function __schemaThroughRemove(def, inst, rel, acc, items) {
 // failed insert after a landed delete still changed the link set, and
 // an adapter whose rowCount is untruthful for mutations must not talk
 // the accessor into keeping a stale answer).
-async function __schemaThroughSet(def, inst, rel, acc, items, attrs) {
+async function throughSet(def, inst, rel, acc, items, attrs) {
   const api = 'set' + acc[0].toUpperCase() + acc.slice(1) + '()';
-  if (attrs != null && !__schemaIsPlainObject(attrs)) {
+  if (attrs != null && !isPlainObject(attrs)) {
     throw new Error('schema: ' + api + ' attrs must be a plain object of ' + rel.through +
       ' columns; got ' + (attrs === null ? 'null' : typeof attrs));
   }
-  const plan = __schemaThroughPlan(def, inst, rel, acc, items, api);
-  const linked = await __schemaThroughLinked(def, rel, plan);
+  const plan = throughPlan(def, inst, rel, acc, items, api);
+  const linked = await throughLinked(def, rel, plan);
   const wanted = new Set(plan.targetIds);
   const stale = [...linked].filter((id) => !wanted.has(id));
   const fresh = plan.targetIds.filter((id) => !linked.has(id));
   const joinNorm = plan.keys.joinNorm;
   const freshRows = fresh.map((id) => ({
     ...(attrs || {}),
-    [__schemaFieldFor(joinNorm, plan.keys.ownerKey)]: plan.identity,
-    [__schemaFieldFor(joinNorm, plan.keys.targetKey)]: id,
+    [fieldFor(joinNorm, plan.keys.ownerKey)]: plan.identity,
+    [fieldFor(joinNorm, plan.keys.targetKey)]: id,
   }));
-  if (freshRows.length) await __schemaValidateInsertRows(plan.join, freshRows);
+  if (freshRows.length) await validateInsertRows(plan.join, freshRows);
   let removed = 0;
   try {
-    if (stale.length) removed = await __schemaThroughUnlink(def, rel, plan, stale);
+    if (stale.length) removed = await throughUnlink(def, rel, plan, stale);
     if (freshRows.length) await plan.join.insertMany(freshRows);
   } finally {
-    if (stale.length || fresh.length) __schemaThroughInvalidate(def, inst, rel, acc);
+    if (stale.length || fresh.length) throughInvalidate(def, inst, rel, acc);
   }
   return { added: fresh.length, removed };
 }
@@ -2084,31 +2068,31 @@ async function __schemaThroughSet(def, inst, rel, acc, items, attrs) {
 // Through the join model's own query builder, so a `@softDelete` join
 // soft-deletes and a plain one really deletes — one rule, stated once,
 // in `deleteAll`.
-function __schemaThroughUnlink(def, rel, plan, targetIds) {
+function throughUnlink(def, rel, plan, targetIds) {
   const { joinNorm, ownerKey, targetKey } = plan.keys;
-  const where = __schemaQuoteIdent(ownerKey, joinNorm.columns, 'through owner key') + ' = ?' +
-    ' AND ' + __schemaQuoteIdent(targetKey, joinNorm.columns, 'through target key') +
+  const where = quoteIdent(ownerKey, joinNorm.columns, 'through owner key') + ' = ?' +
+    ' AND ' + quoteIdent(targetKey, joinNorm.columns, 'through target key') +
     ' IN (' + targetIds.map(() => '?').join(', ') + ')';
-  return new __SchemaQuery(plan.join).where(where, plan.identity, ...targetIds).deleteAll();
+  return new SchemaQuery(plan.join).where(where, plan.identity, ...targetIds).deleteAll();
 }
 
-function __schemaRelationIdentity(def, inst, rel) {
-  if (rel.kind === 'belongsTo') return inst[__schemaFieldFor(def._normalize(), rel.foreignKey)];
-  return __schemaPersistedIdentity(def, inst, 'resolve relation ' + rel.accessor);
+function relationIdentity(def, inst, rel) {
+  if (rel.kind === 'belongsTo') return inst[fieldFor(def._normalize(), rel.foreignKey)];
+  return persistedIdentity(def, inst, 'resolve relation ' + rel.accessor);
 }
 
-async function __schemaResolveRelation(def, rel, identity) {
-  const target = __SchemaRegistry.get(rel.target);
+async function resolveRelation(def, rel, identity) {
+  const target = SchemaRegistry.get(rel.target);
   if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
-  const targetNorm = __schemaValidateRelationTarget(def, rel, target);
+  const targetNorm = validateRelationTarget(def, rel, target);
   if (rel.kind === 'belongsTo') {
     return identity != null ? await target.find(identity) : null;
   }
   if (rel.through) {
-    const join = __schemaJoinModel(def, rel);
-    const keys = __schemaThroughKeys(def, rel, join);
+    const join = joinModel(def, rel);
+    const keys = throughKeys(def, rel, join);
     const pairs = identity != null
-      ? await __schemaThroughPairs(def, rel, join, keys, [identity])
+      ? await throughPairs(def, rel, join, keys, [identity])
       : [];
     const targetIds = [...new Set(pairs.map((p) => p[1]))];
     const found = targetIds.length ? await target.findMany(targetIds) : [];
@@ -2124,17 +2108,17 @@ async function __schemaResolveRelation(def, rel, identity) {
     return rel.kind === 'hasOne' ? (ordered[0] ?? null) : ordered;
   }
   if (rel.kind === 'hasOne') {
-    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).first();
+    return await new SchemaQuery(target).where(quoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).first();
   }
   if (rel.kind === 'hasMany') {
-    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).all();
+    return await new SchemaQuery(target).where(quoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', identity).all();
   }
   return null;
 }
 
 // ── save / destroy ────────────────────────────────────────────────────
 
-async function __schemaRunHook(def, inst, name) {
+async function runHook(def, inst, name) {
   const fn = def._normalize().hooks.get(name);
   if (fn) await fn.call(inst);
 }
@@ -2145,15 +2129,15 @@ async function __schemaRunHook(def, inst, name) {
 // transaction is open. Only models declaring one of the two hooks pay
 // any cost here — which also scopes rollback state restoration to
 // exactly the instances with an observer.
-async function __schemaSettleTxHooks(def, inst, restorePoint) {
+async function settleTxHooks(def, inst, restorePoint) {
   const hooks = def._normalize().hooks;
   if (!hooks.has('afterCommit') && !hooks.has('afterRollback')) return;
-  if (!__schemaEnqueueTxHook(def, inst, restorePoint)) {
-    await __schemaRunHook(def, inst, 'afterCommit');
+  if (!enqueueTxHook(def, inst, restorePoint)) {
+    await runHook(def, inst, 'afterCommit');
   }
 }
 
-async function __schemaSave(def, inst) {
+async function save(def, inst) {
   // Re-entry guard: same-instance re-entry into save() — typically a
   // hook on this very instance calling save() on `this` — would race
   // the snapshot / savedChanges machinery and almost certainly loop.
@@ -2169,10 +2153,10 @@ async function __schemaSave(def, inst) {
 
   const norm = def._normalize();
   const isNew = !inst._persisted;
-  const persistedIdentity = isNew ? null : __schemaPersistedIdentity(def, inst, 'save()');
-  const restorePoint = __schemaTxRestorePoint(norm, inst);
+  const identity = isNew ? null : persistedIdentity(def, inst, 'save()');
+  const restorePoint = txRestorePoint(norm, inst);
 
-  await __schemaRunHook(def, inst, 'beforeValidation');
+  await runHook(def, inst, 'beforeValidation');
   const validated = await def._runExistingAsync(inst, {
     materialize: false,
     materializeNested: true,
@@ -2189,11 +2173,11 @@ async function __schemaSave(def, inst) {
   for (const [name] of norm.fields) {
     if (validated.value[name] !== inst[name]) inst[name] = validated.value[name];
   }
-  await __schemaRunHook(def, inst, 'afterValidation');
+  await runHook(def, inst, 'afterValidation');
 
-  await __schemaRunHook(def, inst, 'beforeSave');
-  if (isNew) await __schemaRunHook(def, inst, 'beforeCreate');
-  else       await __schemaRunHook(def, inst, 'beforeUpdate');
+  await runHook(def, inst, 'beforeSave');
+  if (isNew) await runHook(def, inst, 'beforeCreate');
+  else       await runHook(def, inst, 'beforeUpdate');
 
   // savedChanges resets at the start of every save so it always
   // reflects the most recent write; afterCreate/afterUpdate/afterSave
@@ -2211,28 +2195,28 @@ async function __schemaSave(def, inst) {
     // arm the RETURNING check below to pass on a garbage response.
     if (norm.naturalKey) {
       if (inst[norm.primaryKey] == null) {
-        throw __schemaMissingPkError(def, 'save()', norm.primaryKey);
+        throw missingPkError(def, 'save()', norm.primaryKey);
       }
     } else if (inst[norm.primaryKey] != null) {
-      throw __schemaCallerPkError(def, 'save()', norm.primaryKey);
+      throw callerPkError(def, 'save()', norm.primaryKey);
     }
     const cols = [], placeholders = [], values = [];
     const writtenColumns = [];
     for (const [n, f] of norm.fields) {
       const v = inst[n];
       if (v == null) continue;
-      cols.push(__schemaQuoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'insert column'));
+      cols.push(quoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'insert column'));
       placeholders.push('?');
-      values.push(__schemaSerialize(v, f));
+      values.push(serialize(v, f));
       writtenColumns.push([n, v]);
     }
     // belongsTo FKs live as camelCase properties on the instance.
     for (const [, rel] of norm.relations) {
       if (rel.kind !== 'belongsTo') continue;
-      const fkCamel = __schemaFieldFor(norm, rel.foreignKey);
+      const fkCamel = fieldFor(norm, rel.foreignKey);
       const v = inst[fkCamel];
       if (v != null) {
-        cols.push(__schemaQuoteIdent(rel.foreignKey, norm.callerWritableColumns, 'insert column'));
+        cols.push(quoteIdent(rel.foreignKey, norm.callerWritableColumns, 'insert column'));
         placeholders.push('?');
         values.push(v);
         writtenColumns.push([fkCamel, v]);
@@ -2243,11 +2227,11 @@ async function __schemaSave(def, inst) {
     // column defaults. Empty `(…) VALUES (…)` lists are a syntax
     // error, so the standard DEFAULT VALUES form emits instead.
     const sql = cols.length
-      ? 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
-      : 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' DEFAULT VALUES RETURNING *';
-    const res = await __schemaRunSQL(def, sql, values);
+      ? 'INSERT INTO ' + quoteIdent(norm.tableName, null, 'table') + ' (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
+      : 'INSERT INTO ' + quoteIdent(norm.tableName, null, 'table') + ' DEFAULT VALUES RETURNING *';
+    const res = await runSQL(def, sql, values);
     if (res.data?.[0] && res.columns) {
-      __schemaAbsorbRow(inst, res.columns, res.data[0], 'row absorption', norm);
+      absorbRow(inst, res.columns, res.data[0], 'row absorption', norm);
     }
     // The RETURNING row must have produced the primary key — a
     // malformed adapter response would otherwise mark this instance
@@ -2272,7 +2256,7 @@ async function __schemaSave(def, inst) {
     // "_persisted = true, _snapshot = null" (which would fall through
     // to a full-row UPDATE).
     def._applyEagerDerived(inst);
-    inst._snapshot = __schemaSnapshot(norm, inst);
+    inst._snapshot = snapshot(norm, inst);
     inst._persisted = true;
     // INSERT records [null, newValue] per written column; @timestamps
     // columns were assigned on this INSERT, so they join the diff.
@@ -2299,12 +2283,12 @@ async function __schemaSave(def, inst) {
     for (const [n, f] of norm.fields) {
       const cur = inst[n];
       const isDirty = dirty && dirty.has(n);
-      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, n) || !__schemaSnapshotEqual(snap[n], cur);
+      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, n) || !snapshotEqual(snap[n], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
-      const written = __schemaSnapshotValue(cur);
-      sets.push(__schemaQuoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'update column') + ' = ?');
-      values.push(__schemaSerialize(written, f));
+      const written = snapshotValue(cur);
+      sets.push(quoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'update column') + ' = ?');
+      values.push(serialize(written, f));
       nextSnap[n] = written;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, n) ? snap[n] : null;
       changes.set(n, [old, written]);
@@ -2314,14 +2298,14 @@ async function __schemaSave(def, inst) {
     // already snake_case and FKs are scalar IDs (no serialize).
     for (const [, rel] of norm.relations) {
       if (rel.kind !== 'belongsTo') continue;
-      const fkCamel = __schemaFieldFor(norm, rel.foreignKey);
+      const fkCamel = fieldFor(norm, rel.foreignKey);
       const cur = inst[fkCamel];
       const isDirty = dirty && dirty.has(fkCamel);
-      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, fkCamel) || !__schemaSnapshotEqual(snap[fkCamel], cur);
+      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, fkCamel) || !snapshotEqual(snap[fkCamel], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
-      const written = __schemaSnapshotValue(cur);
-      sets.push(__schemaQuoteIdent(rel.foreignKey, norm.callerWritableColumns, 'update column') + ' = ?');
+      const written = snapshotValue(cur);
+      sets.push(quoteIdent(rel.foreignKey, norm.callerWritableColumns, 'update column') + ' = ?');
       values.push(written);
       nextSnap[fkCamel] = written;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, fkCamel) ? snap[fkCamel] : null;
@@ -2347,13 +2331,13 @@ async function __schemaSave(def, inst) {
     }
     if (sets.length) {
       const pk = norm.primaryKeyColumn;
-      values.push(persistedIdentity);
-      const sql = 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+      values.push(identity);
+      const sql = 'UPDATE ' + quoteIdent(norm.tableName, null, 'table') +
         ' SET ' + sets.join(', ') + ' WHERE ' +
-        __schemaQuoteIdent(pk, norm.columns, 'primary key') + ' = ?';
+        quoteIdent(pk, norm.columns, 'primary key') + ' = ?';
       let res;
       try {
-        res = await __schemaRunSQL(def, sql, values);
+        res = await runSQL(def, sql, values);
       } catch (e) {
         // The database refused the write, so nothing changed: the
         // reported diff and the managed timestamp go back to their
@@ -2368,11 +2352,11 @@ async function __schemaSave(def, inst) {
       // database revoked. A later save() on it rejects the retained
       // pk as caller-supplied, exactly like any unsaved instance
       // carrying a surrogate id.
-      if (__schemaAffirmedRowCount(res) === 0) {
+      if (affirmedRowCount(res) === 0) {
         inst.savedChanges = priorChanges;
         if (tsBumped) inst.updatedAt = priorUpdatedAt;
         inst._persisted = false;
-        throw __schemaStaleRowError(def, 'save()', norm.primaryKey, persistedIdentity);
+        throw staleRowError(def, 'save()', norm.primaryKey, identity);
       }
       inst._snapshot = nextSnap;
       for (const [name, version] of dirtyVersions) {
@@ -2381,10 +2365,10 @@ async function __schemaSave(def, inst) {
     }
   }
 
-  if (isNew) await __schemaRunHook(def, inst, 'afterCreate');
-  else       await __schemaRunHook(def, inst, 'afterUpdate');
-  await __schemaRunHook(def, inst, 'afterSave');
-  await __schemaSettleTxHooks(def, inst, restorePoint);
+  if (isNew) await runHook(def, inst, 'afterCreate');
+  else       await runHook(def, inst, 'afterUpdate');
+  await runHook(def, inst, 'afterSave');
+  await settleTxHooks(def, inst, restorePoint);
   return inst;
 
   } finally {
@@ -2406,7 +2390,7 @@ async function __schemaSave(def, inst) {
 // breakage, not data: host-API normalization does not decide
 // validity, so it rejects naming the column and the value instead of
 // riding through as-is.
-function __schemaCoerceTemporal(value, typeName, column, operation) {
+function coerceTemporal(value, typeName, column, operation) {
   if (value == null || value instanceof Date) return value;
   if (typeof value === 'number' && Number.isFinite(value)) return new Date(value);
   if (typeof value === 'string') {
@@ -2424,7 +2408,7 @@ function __schemaCoerceTemporal(value, typeName, column, operation) {
 // Column names canonicalize through the same snake→camel boundary as
 // instances; two spellings for one canonical key would otherwise let
 // the later value silently overwrite an identity or conflict target.
-function __schemaValidateAdapterRow(columns, row, operation, norm) {
+function validateAdapterRow(columns, row, operation, norm) {
   if (!Array.isArray(columns) || !columns.length || !Array.isArray(row) ||
       row.length !== columns.length) {
     throw new Error(
@@ -2438,7 +2422,7 @@ function __schemaValidateAdapterRow(columns, row, operation, norm) {
       throw new Error(
         'schema: ' + operation + ' adapter invariant — every column needs a non-empty string name');
     }
-    const canonical = norm ? __schemaFieldFor(norm, column.name) : __schemaCamel(column.name);
+    const canonical = norm ? fieldFor(norm, column.name) : camelCase(column.name);
     if (indexes.has(canonical)) {
       // Naming the table and BOTH source columns is what makes this
       // actionable: the fix is dropping or mapping one of two real
@@ -2458,21 +2442,21 @@ function __schemaValidateAdapterRow(columns, row, operation, norm) {
 // Absorb a RETURNING row onto an instance: camelCase canonical own
 // properties plus non-enumerable snake_case aliases. Shared by the
 // INSERT path, upsert, and hydrate's column loop below.
-function __schemaAbsorbRow(inst, columns, row, operation = 'row absorption', norm = null) {
-  __schemaValidateAdapterRow(columns, row, operation, norm);
+function absorbRow(inst, columns, row, operation = 'row absorption', norm = null) {
+  validateAdapterRow(columns, row, operation, norm);
   if (typeof inst._relGeneration === 'number') {
     inst._relGeneration++;
     if (inst._relMemo) inst._relMemo.clear();
   }
   for (let i = 0; i < columns.length; i++) {
     const snake = columns[i].name;
-    const key = norm ? __schemaFieldFor(norm, snake) : __schemaCamel(snake);
+    const key = norm ? fieldFor(norm, snake) : camelCase(snake);
     let value = row[i];
     // Coerce BEFORE the value lands on the instance, so the snapshot
     // taken after absorption sees the Date — dirty tracking must never
     // diff a wire string against its own coerced self.
     const temporal = norm && norm.temporalOf.get(key);
-    if (temporal) value = __schemaCoerceTemporal(value, temporal, snake, operation);
+    if (temporal) value = coerceTemporal(value, temporal, snake, operation);
     if (!(key in inst)) {
       Object.defineProperty(inst, key, { value, enumerable: true, writable: true, configurable: true });
     } else {
@@ -2488,102 +2472,102 @@ function __schemaAbsorbRow(inst, columns, row, operation = 'row absorption', nor
   }
 }
 
-async function __schemaDestroy(def, inst, opts) {
+async function destroy(def, inst, opts) {
   if (!inst._persisted) return inst;
   const norm = def._normalize();
-  const identity = __schemaPersistedIdentity(def, inst, 'destroy()');
-  const restorePoint = __schemaTxRestorePoint(norm, inst);
+  const identity = persistedIdentity(def, inst, 'destroy()');
+  const restorePoint = txRestorePoint(norm, inst);
   const hard = opts && opts.hard === true;
-  await __schemaRunHook(def, inst, 'beforeDestroy');
+  await runHook(def, inst, 'beforeDestroy');
   if (norm.softDelete && !hard) {
     const now = new Date(); // a real Date — the adapter encodes it at the wire
-    const res = await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
-      ' SET "deleted_at" = ? WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
+    const res = await runSQL(def, 'UPDATE ' + quoteIdent(norm.tableName, null, 'table') +
+      ' SET "deleted_at" = ? WHERE ' + quoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
     [now, identity]);
     // A row soft-deleted ELSEWHERE still exists, so this UPDATE
     // matches it and re-stamps deleted_at — a write that landed, not
     // staleness. An affirmed zero means the row itself is gone.
-    if (__schemaAffirmedRowCount(res) === 0) {
+    if (affirmedRowCount(res) === 0) {
       inst._persisted = false;
-      throw __schemaStaleRowError(def, 'destroy()', norm.primaryKey, identity);
+      throw staleRowError(def, 'destroy()', norm.primaryKey, identity);
     }
     inst.deletedAt = now;
   } else {
-    const res = await __schemaRunSQL(def, 'DELETE FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
-      ' WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?', [identity]);
+    const res = await runSQL(def, 'DELETE FROM ' + quoteIdent(norm.tableName, null, 'table') +
+      ' WHERE ' + quoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?', [identity]);
     // The row was already gone: this destroy destroyed nothing, so it
     // must not run the after-destroy lifecycle a second time.
-    if (__schemaAffirmedRowCount(res) === 0) {
+    if (affirmedRowCount(res) === 0) {
       inst._persisted = false;
-      throw __schemaStaleRowError(def, 'destroy()', norm.primaryKey, identity);
+      throw staleRowError(def, 'destroy()', norm.primaryKey, identity);
     }
     inst._persisted = false;
   }
-  await __schemaRunHook(def, inst, 'afterDestroy');
-  await __schemaSettleTxHooks(def, inst, restorePoint);
+  await runHook(def, inst, 'afterDestroy');
+  await settleTxHooks(def, inst, restorePoint);
   return inst;
 }
 
 // Soft-delete recovery: deleted_at = NULL, firing the update
 // lifecycle. Loud on models without @softDelete.
-async function __schemaRestore(def, inst) {
+async function restore(def, inst) {
   const norm = def._normalize();
   if (!norm.softDelete) {
     throw new Error('schema: restore() requires @softDelete on ' + (def.name || 'model'));
   }
   if (!inst._persisted) return inst;
-  const identity = __schemaPersistedIdentity(def, inst, 'restore()');
-  const restorePoint = __schemaTxRestorePoint(norm, inst);
-  await __schemaRunHook(def, inst, 'beforeUpdate');
-  const res = await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
-    ' SET "deleted_at" = NULL WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
+  const identity = persistedIdentity(def, inst, 'restore()');
+  const restorePoint = txRestorePoint(norm, inst);
+  await runHook(def, inst, 'beforeUpdate');
+  const res = await runSQL(def, 'UPDATE ' + quoteIdent(norm.tableName, null, 'table') +
+    ' SET "deleted_at" = NULL WHERE ' + quoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?',
   [identity]);
-  if (__schemaAffirmedRowCount(res) === 0) {
+  if (affirmedRowCount(res) === 0) {
     inst._persisted = false;
-    throw __schemaStaleRowError(def, 'restore()', norm.primaryKey, identity);
+    throw staleRowError(def, 'restore()', norm.primaryKey, identity);
   }
   inst.deletedAt = null;
-  await __schemaRunHook(def, inst, 'afterUpdate');
+  await runHook(def, inst, 'afterUpdate');
   // restore() completes the update lifecycle it began: afterCommit /
   // afterRollback settle exactly as save() and destroy() settle.
-  await __schemaSettleTxHooks(def, inst, restorePoint);
+  await settleTxHooks(def, inst, restorePoint);
   return inst;
 }
 
-async function __schemaReload(def, inst) {
+async function reload(def, inst) {
   const norm = def._normalize();
-  const identity = __schemaPersistedIdentity(def, inst, 'reload()');
+  const identity = persistedIdentity(def, inst, 'reload()');
   // Invalidate every relation request that began against the old
   // instance image before the reload crosses its await boundary.
   inst._relGeneration++;
-  const sql = 'SELECT * FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
-    ' WHERE ' + __schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?';
-  const res = await __schemaRunSQL(def, sql, [identity]);
+  const sql = 'SELECT * FROM ' + quoteIdent(norm.tableName, null, 'table') +
+    ' WHERE ' + quoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' = ?';
+  const res = await runSQL(def, sql, [identity]);
   const data = Array.isArray(res?.data) ? res.data : [];
   if (!Array.isArray(res?.columns) || data.length !== 1) {
     throw new Error(
       'schema: reload() identity invariant for ' + (def.name || 'model') + ' ' +
       norm.primaryKey + '=' + String(identity) + ' expected exactly one row; got ' + data.length);
   }
-  const indexes = __schemaValidateAdapterRow(res.columns, data[0], 'reload()', norm);
+  const indexes = validateAdapterRow(res.columns, data[0], 'reload()', norm);
   const pkIndex = indexes.get(norm.primaryKey);
   const returnedIdentity = pkIndex !== undefined ? data[0][pkIndex] : undefined;
-  if (!__schemaSameValue(returnedIdentity, identity)) {
+  if (!sameValue(returnedIdentity, identity)) {
     throw new Error(
       'schema: reload() identity invariant for ' + (def.name || 'model') +
       ' requested ' + String(identity) + ' but the adapter returned ' +
       String(returnedIdentity));
   }
-  __schemaAbsorbRow(inst, res.columns, data[0], 'reload()', norm);
+  absorbRow(inst, res.columns, data[0], 'reload()', norm);
   def._applyEagerDerived(inst);
-  inst._snapshot = __schemaSnapshot(norm, inst);
+  inst._snapshot = snapshot(norm, inst);
   inst._dirty.clear();
   inst.savedChanges = new Map();
   if (inst._relMemo) inst._relMemo.clear();
   return inst;
 }
 
-function __schemaSerialize(v, field) {
+function serialize(v, field) {
   if (field && field.typeName === 'json' && v != null && typeof v === 'object') {
     return JSON.stringify(v);
   }
@@ -2594,12 +2578,12 @@ function __schemaSerialize(v, field) {
 // identity. JSON objects take the same wire representation used for
 // writes; temporal values compare by their represented instant because
 // adapters return fresh Date objects. All other values remain exact.
-function __schemaCanonicalDBValue(v, field) {
-  const serialized = __schemaSerialize(v, field);
+function canonicalDBValue(v, field) {
+  const serialized = serialize(v, field);
   return serialized instanceof Date ? serialized.getTime() : serialized;
 }
 
-function __schemaReturnedRow(res, operation, allowZero, norm) {
+function returnedRow(res, operation, allowZero, norm) {
   const data = Array.isArray(res?.data) ? res.data : null;
   if (!data) {
     throw new Error('schema: ' + operation + ' RETURNING invariant — adapter data must be an array');
@@ -2613,7 +2597,7 @@ function __schemaReturnedRow(res, operation, allowZero, norm) {
   }
   const columns = res.columns;
   const row = data[0];
-  const indexes = __schemaValidateAdapterRow(columns, row, operation + ' RETURNING', norm);
+  const indexes = validateAdapterRow(columns, row, operation + ' RETURNING', norm);
   return { columns, row, indexes };
 }
 
@@ -2625,7 +2609,7 @@ function __schemaReturnedRow(res, operation, allowZero, norm) {
 // `inst[pk] == null` pass on a garbage adapter response, arming a
 // later `UPDATE WHERE id = <caller value>`. Explicit-id workflows
 // run SQL through the adapter directly.
-function __schemaCallerPkError(def, api, pk) {
+function callerPkError(def, api, pk) {
   return new Error(
     'schema: ' + api + ' on ' + (def.name || 'model') + ' received a caller-supplied ' + pk +
     ' — the primary key is runtime-managed (the INSERT never writes it; the real ' + pk +
@@ -2638,7 +2622,7 @@ function __schemaCallerPkError(def, api, pk) {
 // one is not something the database will fill in. Caught here rather
 // than as a NOT NULL violation, because the reason is a posture the
 // model declared, not a constraint the table happens to carry.
-function __schemaMissingPkError(def, api, pk) {
+function missingPkError(def, api, pk) {
   return new SchemaError([{
     field: pk,
     error: 'required',
@@ -2648,7 +2632,7 @@ function __schemaMissingPkError(def, api, pk) {
   }], def.name, def.kind);
 }
 
-function __schemaCanonicalInput(def, data, api) {
+function canonicalInput(def, data, api) {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return data;
   const norm = def._normalize();
   const writable = new Map();
@@ -2658,7 +2642,7 @@ function __schemaCanonicalInput(def, data, api) {
   }
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    const name = __schemaFieldFor(norm, rel.foreignKey);
+    const name = fieldFor(norm, rel.foreignKey);
     writable.set(name, name);
     writable.set(rel.foreignKey, name);
   }
@@ -2681,7 +2665,7 @@ function __schemaCanonicalInput(def, data, api) {
     if (!name) {
       const managedKind = managed.get(key);
       const message = managedKind === 'primary key'
-        ? __schemaCallerPkError(def, api, norm.primaryKey).message
+        ? callerPkError(def, api, norm.primaryKey).message
         : managedKind
           ? 'schema: ' + api + ' on ' + (def.name || 'model') + " received runtime-managed key '" + key +
             "' (" + managedKind + ')'
@@ -2709,8 +2693,8 @@ function __schemaCanonicalInput(def, data, api) {
   return canonical;
 }
 
-async function __schemaNormalizePersistenceInput(def, data, opts) {
-  const canonical = __schemaCanonicalInput(def, data, opts?.api || 'create()');
+async function normalizePersistenceInput(def, data, opts) {
+  const canonical = canonicalInput(def, data, opts?.api || 'create()');
   const result = await def._runAsync(canonical, {
     materialize: false,
     materializeNested: true,
@@ -2723,7 +2707,7 @@ async function __schemaNormalizePersistenceInput(def, data, opts) {
   throw new SchemaError(result.errors, src.name, src.kind);
 }
 
-function __schemaConstructInputInstance(def, canonical) {
+function constructInputInstance(def, canonical) {
   const inst = new (def._getClass())(canonical, false);
   for (const [k, v] of Object.entries(canonical)) {
     if (!(k in inst)) {
@@ -2733,103 +2717,103 @@ function __schemaConstructInputInstance(def, canonical) {
   return inst;
 }
 
-// ── ORM statics on __SchemaDef ────────────────────────────────────────
+// ── ORM statics on SchemaDef ────────────────────────────────────────
 
-__SchemaDef.prototype._assertModel = function (api) {
+SchemaDef.prototype._assertModel = function (api) {
   if (this.kind !== 'model') {
     throw new Error('schema: .' + api + '() is :model-only (got :' + this.kind + ')');
   }
 };
 
-__SchemaDef.prototype.find = async function (id) {
+SchemaDef.prototype.find = async function (id) {
   this._assertModel('find');
   // Routed through the builder so find honors the same filters as
   // every other read: the @softDelete filter and @defaultScope.
   // `unscoped().where(id: …).first!` is the escape hatch.
   const norm = this._normalize();
-  return new __SchemaQuery(this).where({ [norm.primaryKey]: id }).first();
+  return new SchemaQuery(this).where({ [norm.primaryKey]: id }).first();
 };
 
-__SchemaDef.prototype.findMany = async function (ids) {
+SchemaDef.prototype.findMany = async function (ids) {
   this._assertModel('findMany');
   if (!Array.isArray(ids)) throw new Error('schema: findMany(ids) expects an array');
   if (!ids.length) return [];
   const norm = this._normalize();
-  return new __SchemaQuery(this)
-    .where(__schemaQuoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+  return new SchemaQuery(this)
+    .where(quoteIdent(norm.primaryKeyColumn, norm.columns, 'primary key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
     .all();
 };
 
-__SchemaDef.prototype.where = function (cond, ...params) {
+SchemaDef.prototype.where = function (cond, ...params) {
   this._assertModel('where');
-  return new __SchemaQuery(this).where(cond, ...params);
+  return new SchemaQuery(this).where(cond, ...params);
 };
 
-__SchemaDef.prototype.includes = function (...specs) {
+SchemaDef.prototype.includes = function (...specs) {
   this._assertModel('includes');
-  return new __SchemaQuery(this).includes(...specs);
+  return new SchemaQuery(this).includes(...specs);
 };
 
-__SchemaDef.prototype.withDeleted = function () {
+SchemaDef.prototype.withDeleted = function () {
   this._assertModel('withDeleted');
-  return new __SchemaQuery(this).withDeleted();
+  return new SchemaQuery(this).withDeleted();
 };
 
-__SchemaDef.prototype.onlyDeleted = function () {
+SchemaDef.prototype.onlyDeleted = function () {
   this._assertModel('onlyDeleted');
-  return new __SchemaQuery(this).onlyDeleted();
+  return new SchemaQuery(this).onlyDeleted();
 };
 
-__SchemaDef.prototype.unscoped = function () {
+SchemaDef.prototype.unscoped = function () {
   this._assertModel('unscoped');
-  return new __SchemaQuery(this).unscoped();
+  return new SchemaQuery(this).unscoped();
 };
 
-__SchemaDef.prototype.all = function () {
+SchemaDef.prototype.all = function () {
   this._assertModel('all');
-  return new __SchemaQuery(this).all();
+  return new SchemaQuery(this).all();
 };
 
-__SchemaDef.prototype.first = function () {
+SchemaDef.prototype.first = function () {
   this._assertModel('first');
-  return new __SchemaQuery(this).first();
+  return new SchemaQuery(this).first();
 };
 
-__SchemaDef.prototype.count = function () {
+SchemaDef.prototype.count = function () {
   this._assertModel('count');
-  return new __SchemaQuery(this).count();
+  return new SchemaQuery(this).count();
 };
 
 // The builder's chain starters are model statics too — a chain may
 // begin at any of them (`Post.order(…).limit(2).all()`), exactly as
 // where() starts one.
-__SchemaDef.prototype.order = function (spec) {
+SchemaDef.prototype.order = function (spec) {
   this._assertModel('order');
-  return new __SchemaQuery(this).order(spec);
+  return new SchemaQuery(this).order(spec);
 };
 
-__SchemaDef.prototype.limit = function (n) {
+SchemaDef.prototype.limit = function (n) {
   this._assertModel('limit');
-  return new __SchemaQuery(this).limit(n);
+  return new SchemaQuery(this).limit(n);
 };
 
-__SchemaDef.prototype.offset = function (n) {
+SchemaDef.prototype.offset = function (n) {
   this._assertModel('offset');
-  return new __SchemaQuery(this).offset(n);
+  return new SchemaQuery(this).offset(n);
 };
 
-__SchemaDef.prototype.create = async function (data) {
+SchemaDef.prototype.create = async function (data) {
   this._assertModel('create');
   // Normalize caller input before construction. Refinements run once
   // after beforeValidation inside save(), so hooks can still affect
   // the value they judge without transforms/coercions/defaults
   // running a second time.
-  const canonical = await __schemaNormalizePersistenceInput(this, data, {
+  const canonical = await normalizePersistenceInput(this, data, {
     skipEnsures: true,
     api: 'create()',
   });
-  const inst = __schemaConstructInputInstance(this, canonical);
-  await __schemaSave(this, inst);
+  const inst = constructInputInstance(this, canonical);
+  await save(this, inst);
   return inst;
 };
 
@@ -2839,7 +2823,7 @@ __SchemaDef.prototype.create = async function (data) {
 // authoritative row without save-completion hooks. beforeCreate /
 // beforeUpdate never fire because the runtime cannot know the
 // database branch before execution.
-__SchemaDef.prototype.upsert = async function (data, opts) {
+SchemaDef.prototype.upsert = async function (data, opts) {
   this._assertModel('upsert');
   const norm = this._normalize();
   const on = opts && (opts.on ?? opts.conflict);
@@ -2861,8 +2845,8 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     }
     // Validated against the conflict-eligible set HERE, where the
     // caller's own spelling is still in hand for the rejection.
-    __schemaCallerColumn(norm, text, norm.conflictColumns, 'upsert() conflict target');
-    return __schemaColumnFor(norm, text);
+    callerColumn(norm, text, norm.conflictColumns, 'upsert() conflict target');
+    return columnFor(norm, text);
   });
   if (new Set(targets).size !== targets.length) {
     throw new Error('schema: upsert() conflict target columns must be distinct');
@@ -2874,14 +2858,14 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
       ') must exactly match a declared primary key, unique field, or @unique tuple');
   }
 
-  const canonical = await __schemaNormalizePersistenceInput(this, data, {
+  const canonical = await normalizePersistenceInput(this, data, {
     skipEnsures: true,
     api: 'upsert()',
   });
-  const inst = __schemaConstructInputInstance(this, canonical);
-  const restorePoint = __schemaTxRestorePoint(norm, inst);
+  const inst = constructInputInstance(this, canonical);
+  const restorePoint = txRestorePoint(norm, inst);
 
-  await __schemaRunHook(this, inst, 'beforeValidation');
+  await runHook(this, inst, 'beforeValidation');
   const validated = await this._runExistingAsync(inst, {
     materialize: false,
     materializeNested: true,
@@ -2895,15 +2879,15 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   for (const [name] of norm.fields) {
     if (validated.value[name] !== inst[name]) inst[name] = validated.value[name];
   }
-  await __schemaRunHook(this, inst, 'afterValidation');
-  await __schemaRunHook(this, inst, 'beforeSave');
+  await runHook(this, inst, 'afterValidation');
+  await runHook(this, inst, 'beforeSave');
 
   if (norm.naturalKey) {
     if (inst[norm.primaryKey] == null) {
-      throw __schemaMissingPkError(this, 'upsert()', norm.primaryKey);
+      throw missingPkError(this, 'upsert()', norm.primaryKey);
     }
   } else if (inst[norm.primaryKey] != null) {
-    throw __schemaCallerPkError(this, 'upsert()', norm.primaryKey);
+    throw callerPkError(this, 'upsert()', norm.primaryKey);
   }
 
   const cols = [], placeholders = [], values = [];
@@ -2914,13 +2898,13 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     const column = norm.columnOf.get(n);
     cols.push(column);
     placeholders.push('?');
-    const serialized = __schemaSerialize(v, f);
+    const serialized = serialize(v, f);
     values.push(serialized);
     plannedValues.set(column, serialized);
   }
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    const v = inst[__schemaFieldFor(norm, rel.foreignKey)];
+    const v = inst[fieldFor(norm, rel.foreignKey)];
     if (v != null) {
       cols.push(rel.foreignKey);
       placeholders.push('?');
@@ -2938,10 +2922,10 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
     return plannedValues.get(target);
   });
   const updateCols = cols.filter((c) => !targets.includes(c));
-  let conflict = ' ON CONFLICT (' + targets.map((t) => __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target')).join(', ') + ')';
+  let conflict = ' ON CONFLICT (' + targets.map((t) => quoteIdent(t, norm.conflictColumns, 'conflict target')).join(', ') + ')';
   if (updateCols.length) {
     const sets = updateCols.map((c) => {
-      const quoted = __schemaQuoteIdent(c, norm.callerWritableColumns, 'upsert column');
+      const quoted = quoteIdent(c, norm.callerWritableColumns, 'upsert column');
       return quoted + ' = EXCLUDED.' + quoted;
     });
     if (norm.timestamps) sets.push('"updated_at" = CURRENT_TIMESTAMP');
@@ -2949,19 +2933,19 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   } else {
     conflict += ' DO NOTHING';
   }
-  const sql = 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' +
-    cols.map((c) => __schemaQuoteIdent(c, norm.callerWritableColumns, 'upsert column')).join(', ') + ')' +
+  const sql = 'INSERT INTO ' + quoteIdent(norm.tableName, null, 'table') + ' (' +
+    cols.map((c) => quoteIdent(c, norm.callerWritableColumns, 'upsert column')).join(', ') + ')' +
     ' VALUES (' + placeholders.join(', ') + ')' + conflict + ' RETURNING *';
-  const res = await __schemaRunSQL(this, sql, values);
+  const res = await runSQL(this, sql, values);
   // `norm` canonicalizes column names through the model's own map: without
   // it a {column:} field and a same-named-after-camelCase sibling look like
   // two spellings of one canonical key, and a correct RETURNING * is
   // rejected as a duplicate column.
-  const returned = __schemaReturnedRow(res, 'upsert()', updateCols.length === 0, norm);
+  const returned = returnedRow(res, 'upsert()', updateCols.length === 0, norm);
   if (returned) {
-    __schemaAbsorbRow(inst, returned.columns, returned.row, 'upsert() RETURNING', norm);
+    absorbRow(inst, returned.columns, returned.row, 'upsert() RETURNING', norm);
     this._applyEagerDerived(inst);
-    inst._snapshot = __schemaSnapshot(norm, inst);
+    inst._snapshot = snapshot(norm, inst);
     // The RETURNING row must have produced the primary key BEFORE the
     // instance is marked persisted — a malformed adapter response must
     // not manufacture a "persisted" instance with no identity.
@@ -2972,25 +2956,25 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
         'primary key (Adapter Contract v2)');
     }
     inst._persisted = true;
-    await __schemaRunHook(this, inst, 'afterSave');
-    await __schemaSettleTxHooks(this, inst, restorePoint);
+    await runHook(this, inst, 'afterSave');
+    await settleTxHooks(this, inst, restorePoint);
     return inst;
   }
-  const lookupSQL = 'SELECT * FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+  const lookupSQL = 'SELECT * FROM ' + quoteIdent(norm.tableName, null, 'table') +
     ' WHERE ' + targets.map((target) =>
-      __schemaQuoteIdent(target, norm.conflictColumns, 'conflict target') + ' = ?').join(' AND ');
-  const lookup = await __schemaRunSQL(this, lookupSQL, targetValues);
+      quoteIdent(target, norm.conflictColumns, 'conflict target') + ' = ?').join(' AND ');
+  const lookup = await runSQL(this, lookupSQL, targetValues);
   const found = Array.isArray(lookup?.data) ? lookup.data : [];
   if (!Array.isArray(lookup?.columns) || found.length !== 1) {
     throw new Error(
       'schema: upsert() conflict lookup invariant for ' + (this.name || 'model') +
       ' expected exactly one row by (' + targets.join(', ') + '); got ' + found.length);
   }
-  const canonicalIndexes = __schemaValidateAdapterRow(
+  const canonicalIndexes = validateAdapterRow(
     lookup.columns, found[0], 'upsert() conflict lookup', norm);
   const lookupColumns = new Map();
   for (const [canonical, index] of canonicalIndexes) {
-    lookupColumns.set(__schemaColumnFor(norm, canonical), index);
+    lookupColumns.set(columnFor(norm, canonical), index);
   }
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
@@ -3000,17 +2984,17 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
         "schema: upsert() conflict lookup invariant — returned row is missing target column '" +
         target + "'");
     }
-    const field = norm.fields.get(__schemaFieldFor(norm, target));
-    const requested = __schemaCanonicalDBValue(targetValues[i], field);
-    const actual = __schemaCanonicalDBValue(found[0][columnIndex], field);
-    if (!__schemaSameValue(actual, requested)) {
+    const field = norm.fields.get(fieldFor(norm, target));
+    const requested = canonicalDBValue(targetValues[i], field);
+    const actual = canonicalDBValue(found[0][columnIndex], field);
+    if (!sameValue(actual, requested)) {
       throw new Error(
         "schema: upsert() conflict lookup invariant — returned target column '" + target +
         "' does not match the requested value");
     }
   }
   const existing = this._hydrate(lookup.columns, found[0]);
-  __schemaPersistedIdentity(this, existing, 'upsert() conflict lookup');
+  persistedIdentity(this, existing, 'upsert() conflict lookup');
   return existing;
 };
 
@@ -3019,7 +3003,7 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
 // [i].field) before any SQL. setX runs it against the fresh join rows
 // BEFORE its unlink DELETE, so a set() that cannot insert has not yet
 // destroyed anything.
-async function __schemaValidateInsertRows(def, rows) {
+async function validateInsertRows(def, rows) {
   const canonicalRows = [];
   const allErrs = [];
   for (let i = 0; i < rows.length; i++) {
@@ -3027,7 +3011,7 @@ async function __schemaValidateInsertRows(def, rows) {
     const rowErrs = [];
     let canonical = null;
     try {
-      canonical = __schemaCanonicalInput(def, data, 'insertMany()');
+      canonical = canonicalInput(def, data, 'insertMany()');
       const result = await def._runAsync(canonical, {
         materialize: false,
         materializeNested: true,
@@ -3060,12 +3044,12 @@ async function __schemaValidateInsertRows(def, rows) {
 // one SchemaError, issues prefixed [i].field, before any SQL), then
 // one multi-VALUES INSERT … RETURNING *. Per-instance hooks are
 // deliberately skipped — this is the bulk path.
-__SchemaDef.prototype.insertMany = async function (rows) {
+SchemaDef.prototype.insertMany = async function (rows) {
   this._assertModel('insertMany');
   if (!Array.isArray(rows)) throw new Error('schema: insertMany(rows) expects an array');
   if (!rows.length) return [];
   const norm = this._normalize();
-  const canonicalRows = await __schemaValidateInsertRows(this, rows);
+  const canonicalRows = await validateInsertRows(this, rows);
 
   // Column set = union of written columns across rows (missing values
   // insert as NULL / column default).
@@ -3074,7 +3058,7 @@ __SchemaDef.prototype.insertMany = async function (rows) {
     for (const [n] of norm.fields) if (row[n] != null) colSet.add(n);
     for (const [, rel] of norm.relations) {
       if (rel.kind !== 'belongsTo') continue;
-      const fk = __schemaFieldFor(norm, rel.foreignKey);
+      const fk = fieldFor(norm, rel.foreignKey);
       if (row[fk] != null) colSet.add(fk);
     }
   }
@@ -3086,27 +3070,27 @@ __SchemaDef.prototype.insertMany = async function (rows) {
     const slots = [];
     for (const n of colNames) {
       slots.push('?');
-      values.push(__schemaSerialize(row[n] ?? null, norm.fields.get(n)));
+      values.push(serialize(row[n] ?? null, norm.fields.get(n)));
     }
     tuples.push('(' + slots.join(', ') + ')');
   }
-  const sql = 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' +
-    colNames.map((n) => __schemaQuoteIdent(__schemaColumnFor(norm, n), norm.callerWritableColumns, 'insertMany column')).join(', ') + ') VALUES ' +
+  const sql = 'INSERT INTO ' + quoteIdent(norm.tableName, null, 'table') + ' (' +
+    colNames.map((n) => quoteIdent(columnFor(norm, n), norm.callerWritableColumns, 'insertMany column')).join(', ') + ') VALUES ' +
     tuples.join(', ') + ' RETURNING *';
-  const res = await __schemaRunSQL(this, sql, values);
+  const res = await runSQL(this, sql, values);
   return (res.data || []).map((row) => this._hydrate(res.columns, row));
 };
 
 // ── hydration ─────────────────────────────────────────────────────────
 
-__SchemaDef.prototype._hydrate = function (columns, row) {
+SchemaDef.prototype._hydrate = function (columns, row) {
   this._assertModel('_hydrate');
   // DB rows are trusted: hydrate into a class instance without
   // transforms, defaults, constraints, or refinements. Column names
   // arrive snake_case; properties live under camelCase with
   // non-enumerable snake aliases. Values are stored as delivered by
   // the adapter, with ONE exception: a column whose DECLARED type is
-  // temporal coerces to a real `Date` (__schemaCoerceTemporal) — an
+  // temporal coerces to a real `Date` (coerceTemporal) — an
   // adapter that already decodes at the wire seam (harbor, keyed off
   // duckdbType) passes through untouched, and one that answers wire
   // text or epoch numbers hydrates the same instant.
@@ -3115,15 +3099,15 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   // one canonical key (a legacy table carrying both `MRN_NBR` and
   // `mrn`) would otherwise hydrate whichever value came last — and a
   // later save would write it back through the mapped column.
-  __schemaValidateAdapterRow(columns, row, 'row hydration', norm);
+  validateAdapterRow(columns, row, 'row hydration', norm);
   const data = {};
   for (let i = 0; i < columns.length; i++) {
-    const key = __schemaFieldFor(norm, columns[i].name);
+    const key = fieldFor(norm, columns[i].name);
     // Coerced BEFORE the snapshot below, so dirty tracking never diffs
     // a wire string against its own coerced Date.
     const temporal = norm.temporalOf.get(key);
     data[key] = temporal
-      ? __schemaCoerceTemporal(row[i], temporal, columns[i].name, 'row hydration')
+      ? coerceTemporal(row[i], temporal, columns[i].name, 'row hydration')
       : row[i];
   }
   const k = this._getClass();
@@ -3137,7 +3121,7 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   }
   for (let i = 0; i < columns.length; i++) {
     const snake = columns[i].name;
-    const camel = __schemaFieldFor(norm, snake);
+    const camel = fieldFor(norm, snake);
     if (snake !== camel && !(snake in inst)) {
       Object.defineProperty(inst, snake, {
         enumerable: false, configurable: true,
@@ -3151,20 +3135,20 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   this._applyEagerDerived(inst);
   // Capture the as-loaded values so save() emits a column-targeted
   // UPDATE touching only what the caller actually mutated.
-  inst._snapshot = __schemaSnapshot(norm, inst);
+  inst._snapshot = snapshot(norm, inst);
   return inst;
 };
 
 // ── the model class: instance wiring ──────────────────────────────────
 
-const __schemaBaseGetClass = __SchemaDef.prototype._getClass;
+const baseGetClass = SchemaDef.prototype._getClass;
 
-__SchemaDef.prototype._getClass = function () {
-  if (this.kind !== 'model') return __schemaBaseGetClass.call(this);
+SchemaDef.prototype._getClass = function () {
+  if (this.kind !== 'model') return baseGetClass.call(this);
   if (this._modelKlass) return this._modelKlass;
   const def = this;
   const norm = this._normalize();
-  const Base = __schemaBaseGetClass.call(this);
+  const Base = baseGetClass.call(this);
   const name = this.name || 'Schema';
 
   const klass = ({ [name]: class extends Base {
@@ -3192,23 +3176,23 @@ __SchemaDef.prototype._getClass = function () {
     Object.defineProperty(klass.prototype, acc, {
       enumerable: false, configurable: true,
       value: async function (opts) {
-        const reload = !!(opts && opts.reload === true);
-        const identity = __schemaRelationIdentity(def, this, rel);
+        const wantsReload = !!(opts && opts.reload === true);
+        const identity = relationIdentity(def, this, rel);
         // A reload supersedes every read already in flight: bumping
         // the generation drops their memo eligibility, while this
         // read's own post-await check keys on the bumped value — an
         // older plain read can never memoize its stale image over the
         // reload's result.
-        if (reload) {
+        if (wantsReload) {
           this._relGeneration++;
           if (this._relMemo) this._relMemo.delete(acc);
         }
         const generation = this._relGeneration;
         const memo = this._relMemo && this._relMemo.get(acc);
-        if (!reload && memo && __schemaSameValue(memo.identity, identity)) {
+        if (!wantsReload && memo && sameValue(memo.identity, identity)) {
           return memo.value;
         }
-        const v = await __schemaResolveRelation(def, rel, identity);
+        const v = await resolveRelation(def, rel, identity);
         // The re-check decides memo ELIGIBILITY only. Deriving the
         // identity can itself throw — a hard destroy landing mid-read
         // leaves no persisted identity — and that must not poison a
@@ -3217,12 +3201,12 @@ __SchemaDef.prototype._getClass = function () {
         let eligible = this._relGeneration === generation;
         if (eligible) {
           try {
-            eligible = __schemaSameValue(__schemaRelationIdentity(def, this, rel), identity);
+            eligible = sameValue(relationIdentity(def, this, rel), identity);
           } catch {
             eligible = false;
           }
         }
-        if (eligible) __schemaRelMemoSet(this, acc, identity, v);
+        if (eligible) relMemoSet(this, acc, identity, v);
         return v;
       },
     });
@@ -3240,27 +3224,27 @@ __SchemaDef.prototype._getClass = function () {
           value: async function (items, attrs) { return fn(def, this, rel, acc, items, attrs); },
         });
       };
-      verb('add', __schemaThroughAdd);
-      verb('remove', __schemaThroughRemove);
-      verb('set', __schemaThroughSet);
+      verb('add', throughAdd);
+      verb('remove', throughRemove);
+      verb('set', throughSet);
     }
   }
 
   Object.defineProperty(klass.prototype, 'save', {
     enumerable: false, configurable: true, writable: true,
-    value: async function () { return __schemaSave(def, this); },
+    value: async function () { return save(def, this); },
   });
   Object.defineProperty(klass.prototype, 'destroy', {
     enumerable: false, configurable: true, writable: true,
-    value: async function (opts) { return __schemaDestroy(def, this, opts); },
+    value: async function (opts) { return destroy(def, this, opts); },
   });
   Object.defineProperty(klass.prototype, 'restore', {
     enumerable: false, configurable: true, writable: true,
-    value: async function () { return __schemaRestore(def, this); },
+    value: async function () { return restore(def, this); },
   });
   Object.defineProperty(klass.prototype, 'reload', {
     enumerable: false, configurable: true, writable: true,
-    value: async function () { return __schemaReload(def, this); },
+    value: async function () { return reload(def, this); },
   });
   Object.defineProperty(klass.prototype, 'ok', {
     enumerable: false, configurable: true, writable: true,
@@ -3282,11 +3266,11 @@ __SchemaDef.prototype._getClass = function () {
           "schema: markDirty('" + name + "') is only valid on persisted instances; INSERT writes every set field");
       }
       const nm = def._normalize();
-      const n = __schemaFieldFor(nm, name);
+      const n = fieldFor(nm, name);
       let valid = nm.fields.has(n);
       if (!valid) {
         for (const [, rel] of nm.relations) {
-          if (rel.kind === 'belongsTo' && __schemaFieldFor(nm, rel.foreignKey) === n) {
+          if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
             valid = true;
             break;
           }
@@ -3320,7 +3304,7 @@ __SchemaDef.prototype._getClass = function () {
 
 // ── DDL ───────────────────────────────────────────────────────────────
 
-const __SCHEMA_SQL_TYPES = {
+const SQL_TYPES = {
   string: 'VARCHAR', text: 'TEXT', integer: 'INTEGER', number: 'DOUBLE',
   boolean: 'BOOLEAN', date: 'DATE', datetime: 'TIMESTAMP', email: 'VARCHAR',
   url: 'VARCHAR', uuid: 'UUID', phone: 'VARCHAR', zip: 'VARCHAR', json: 'JSON', any: 'JSON',
@@ -3335,22 +3319,22 @@ const __SCHEMA_SQL_TYPES = {
 // Resolved at DDL time, which is the moment a column type is committed
 // and the last moment the registry can be asked. `def` is the model
 // being rendered, named only so the rejection can say where.
-function __schemaColumnType(field, def) {
+function columnType(field, def) {
   // An array of anything is a JSON document, whatever the element is.
   if (field.array) return 'JSON';
-  const intrinsic = __SCHEMA_SQL_TYPES[field.typeName];
+  const intrinsic = SQL_TYPES[field.typeName];
   if (intrinsic) return intrinsic;
   // An inline literal union (`status! "draft" | "published"`)
   // materializes to its member value — the same VARCHAR a registered
   // :enum renders. It lives on the field itself, never in the
   // registry, so it answers before the registry is asked.
   if (field.typeName === 'literal-union') return 'VARCHAR';
-  const nested = __SchemaRegistry.get(field.typeName);
+  const nested = SchemaRegistry.get(field.typeName);
   const where = ' (on ' + (def?.name || 'model') + ')';
   if (!nested) {
     throw new Error("schema: unknown field type '" + field.typeName + "'" + where +
       ' — no schema declares it, and it is not one of: ' +
-      Object.keys(__SCHEMA_SQL_TYPES).sort().join(', ') +
+      Object.keys(SQL_TYPES).sort().join(', ') +
       '. A type Rip cannot map has no column it could honestly render');
   }
   switch (nested.kind) {
@@ -3370,8 +3354,8 @@ function __schemaColumnType(field, def) {
   }
 }
 
-function __schemaColumnSpec(column, field, def) {
-  let base = __schemaColumnType(field, def);
+function columnSpec(column, field, def) {
+  let base = columnType(field, def);
   if (base === 'VARCHAR' && field.constraints?.max != null) {
     // A VARCHAR width is a count of characters, so only a positive
     // integer has a rendering. `..2.5` reads fine as a validation
@@ -3391,14 +3375,14 @@ function __schemaColumnSpec(column, field, def) {
     notNull: field.required === true,
     unique: field.unique === true,
     default: field.constraints?.default !== undefined
-      ? __schemaSQLDefault(field.constraints.default) : null,
+      ? sQLDefault(field.constraints.default) : null,
     was: field.attrs?.was || null,
   };
 }
 
 // The canonical table spec — one structure for DDL rendering (and,
 // for the migration differ, its comparison shape).
-__SchemaDef.prototype._tableSpec = function (options) {
+SchemaDef.prototype._tableSpec = function (options) {
   this._assertModel('_tableSpec');
   const opts = options || {};
   const norm = this._normalize();
@@ -3422,11 +3406,11 @@ __SchemaDef.prototype._tableSpec = function (options) {
     columns.push({
       name: norm.primaryKeyColumn, type: 'INTEGER',
       notNull: true, unique: false, primary: true,
-      default: 'nextval(' + __schemaQuoteLiteral(seq, 'sequence name') + ')', was: null,
+      default: 'nextval(' + quoteLiteral(seq, 'sequence name') + ')', was: null,
     });
   }
   for (const [n, f] of norm.fields) {
-    const col = __schemaColumnSpec(norm.columnOf.get(n), f, this);
+    const col = columnSpec(norm.columnOf.get(n), f, this);
     // A natural key is an ordinary column that happens to be the
     // identity: its type, length, and default are the field's. It
     // takes PRIMARY KEY and nothing else — no sequence exists to
@@ -3443,12 +3427,12 @@ __SchemaDef.prototype._tableSpec = function (options) {
   const notes = [];
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
-    const targetDef = __SchemaRegistry.get(rel.target);
+    const targetDef = SchemaRegistry.get(rel.target);
     // An unregistered target cannot say where it lives or what it is
     // keyed by, so the convention answers — the same names and the
     // same INTEGER surrogate it would have chosen.
     const targetNorm = targetDef && targetDef.kind === 'model' ? targetDef._normalize() : null;
-    const refTable = targetNorm ? targetNorm.tableName : __schemaTableName(rel.target);
+    const refTable = targetNorm ? targetNorm.tableName : tableName(rel.target);
     const refColumn = targetNorm ? targetNorm.primaryKeyColumn : 'id';
     // An FK holds a copy of the key it points at, so it is exactly as
     // wide: a target with a natural `string` key needs a VARCHAR FK,
@@ -3456,7 +3440,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
     columns.push({
       name: rel.foreignKey,
       type: targetNorm?.primaryKeyField
-        ? __schemaColumnSpec(rel.foreignKey, targetNorm.primaryKeyField, targetDef).type
+        ? columnSpec(rel.foreignKey, targetNorm.primaryKeyField, targetDef).type
         : 'INTEGER',
       notNull: !rel.optional, unique: false, default: null, was: null,
     });
@@ -3504,7 +3488,7 @@ __SchemaDef.prototype._tableSpec = function (options) {
   }
   for (const d of norm.directives) {
     if (d.name !== 'index' && d.name !== 'unique') continue;
-    const cols = d.args[0].fields.map((c) => __schemaColumnFor(norm, c));
+    const cols = d.args[0].fields.map((c) => columnFor(norm, c));
     addIndex({ name: 'idx_' + table + '_' + cols.join('_'), columns: cols, unique: d.name === 'unique' });
   }
 
@@ -3524,14 +3508,14 @@ __SchemaDef.prototype._tableSpec = function (options) {
   const pairIndexOn = (pairKey) => indexes.find((ix) =>
     ix.columns.length === 2 && [...ix.columns].sort().join('\u0000') === pairKey);
   const derivedPairs = new Map();
-  for (const entry of __SchemaRegistry._entries.values()) {
+  for (const entry of SchemaRegistry._entries.values()) {
     if (entry.kind !== 'model') continue;
     let ownerNorm;
     try { ownerNorm = entry.def._normalize(); } catch { continue; }
     for (const [, rel] of ownerNorm.relations) {
-      if (rel.through !== this.name || __SchemaRegistry.get(rel.through) !== this) continue;
+      if (rel.through !== this.name || SchemaRegistry.get(rel.through) !== this) continue;
       let keys;
-      try { keys = __schemaThroughKeys(entry.def, rel, this); } catch { continue; }
+      try { keys = throughKeys(entry.def, rel, this); } catch { continue; }
       const pair = [keys.ownerKey, keys.targetKey].sort();
       const pairKey = pair.join('\u0000');
       const declared = pairIndexOn(pairKey);
@@ -3561,8 +3545,8 @@ __SchemaDef.prototype._tableSpec = function (options) {
   };
 };
 
-function __schemaRenderColumn(spec, col, fkByColumn) {
-  const column = __schemaQuoteIdent(col.name, null, 'column');
+function renderColumn(spec, col, fkByColumn) {
+  const column = quoteIdent(col.name, null, 'column');
   const parts = ['  ' + column + ' ' + col.type];
   if (col.primary) {
     parts[0] = '  ' + column + ' ' + col.type + ' PRIMARY KEY';
@@ -3573,37 +3557,37 @@ function __schemaRenderColumn(spec, col, fkByColumn) {
   }
   const fk = fkByColumn ? fkByColumn.get(col.name) : null;
   if (fk) {
-    parts.push('REFERENCES ' + __schemaQuoteIdent(fk.refTable, null, 'foreign-key table') +
-      '(' + __schemaQuoteIdent(fk.refColumn, null, 'foreign-key column') + ')');
+    parts.push('REFERENCES ' + quoteIdent(fk.refTable, null, 'foreign-key table') +
+      '(' + quoteIdent(fk.refColumn, null, 'foreign-key column') + ')');
   }
   if (col.default != null) parts.push('DEFAULT ' + col.default);
   return parts.join(' ');
 }
 
-function __schemaRenderIndex(spec, ix) {
+function renderIndex(spec, ix) {
   const u = ix.unique ? 'UNIQUE ' : '';
-  return 'CREATE ' + u + 'INDEX ' + __schemaQuoteIdent(ix.name, null, 'index') +
-    ' ON ' + __schemaQuoteIdent(spec.name, null, 'table') +
-    ' (' + ix.columns.map((c) => __schemaQuoteIdent(c, null, 'index column')).join(', ') + ');';
+  return 'CREATE ' + u + 'INDEX ' + quoteIdent(ix.name, null, 'index') +
+    ' ON ' + quoteIdent(spec.name, null, 'table') +
+    ' (' + ix.columns.map((c) => quoteIdent(c, null, 'index column')).join(', ') + ');';
 }
 
-function __schemaRenderCreate(spec) {
+function renderCreate(spec) {
   const blocks = [];
   const fkByColumn = new Map(spec.foreignKeys.map((fk) => [fk.column, fk]));
   if (spec.sequence) {
-    blocks.push('CREATE SEQUENCE ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') +
+    blocks.push('CREATE SEQUENCE ' + quoteIdent(spec.sequence.name, null, 'sequence') +
       ' START ' + spec.sequence.start + ';');
   }
-  const lines = spec.columns.map((c) => __schemaRenderColumn(spec, c, fkByColumn));
-  blocks.push('CREATE TABLE ' + __schemaQuoteIdent(spec.name, null, 'table') +
+  const lines = spec.columns.map((c) => renderColumn(spec, c, fkByColumn));
+  blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
-  const ix = spec.indexes.map((i) => __schemaRenderIndex(spec, i));
+  const ix = spec.indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
   if (spec.notes && spec.notes.length) blocks.push(spec.notes.join('\n'));
   return blocks;
 }
 
-function __schemaSQLDefault(v) {
+function sQLDefault(v) {
   if (v === true) return 'true';
   if (v === false) return 'false';
   if (v === null) return 'NULL';
@@ -3612,7 +3596,7 @@ function __schemaSQLDefault(v) {
   return "'" + String(v).replace(/'/g, "''") + "'";
 }
 
-__SchemaDef.prototype.toSQL = function (options) {
+SchemaDef.prototype.toSQL = function (options) {
   this._assertModel('toSQL');
   const opts = options || {};
   const { dropFirst = false, header } = opts;
@@ -3620,18 +3604,18 @@ __SchemaDef.prototype.toSQL = function (options) {
   const blocks = [];
   if (header) blocks.push(header);
   if (dropFirst) {
-    blocks.push('DROP TABLE IF EXISTS ' + __schemaQuoteIdent(spec.name, null, 'table') + ' CASCADE;' +
+    blocks.push('DROP TABLE IF EXISTS ' + quoteIdent(spec.name, null, 'table') + ' CASCADE;' +
       (spec.sequence
-        ? '\nDROP SEQUENCE IF EXISTS ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') + ';'
+        ? '\nDROP SEQUENCE IF EXISTS ' + quoteIdent(spec.sequence.name, null, 'sequence') + ';'
         : ''));
   }
-  blocks.push(...__schemaRenderCreate(spec));
+  blocks.push(...renderCreate(spec));
   return blocks.join('\n\n') + '\n';
 };
 
 // ── install + the user-facing namespace ───────────────────────────────
 
-__schemaInstallPersistence({
+installPersistence({
   finishModelNorm,
   decorateDef,
   projectableFields,
@@ -3642,7 +3626,7 @@ __schemaInstallPersistence({
 // user output) — the namespace carries loud pointers, not the
 // differ. A program calling a migration verb gets the fix named,
 // never `undefined is not a function`.
-function __schemaMigrationStub(api) {
+function migrationStub(api) {
   return function () {
     throw new Error(
       'schema.' + api + '() is CLI-only — run `rip schema ' +
@@ -3655,21 +3639,21 @@ function __schemaMigrationStub(api) {
 // `schema.setAdapter adapter` — the namespace user code references;
 // referencing it is what delivers this runtime.
 const schema = {
-  transaction: __schemaTransaction,
-  connect: __schemaConnect,
+  transaction: transaction,
+  connect: connect,
   setAdapter: __schemaSetAdapter,
   registerCoercer,
-  plan: __schemaMigrationStub('plan'),
-  status: __schemaMigrationStub('status'),
-  make: __schemaMigrationStub('make'),
-  migrate: __schemaMigrationStub('migrate'),
-  introspect: __schemaMigrationStub('introspect'),
+  plan: migrationStub('plan'),
+  status: migrationStub('status'),
+  make: migrationStub('make'),
+  migrate: migrationStub('migrate'),
+  introspect: migrationStub('introspect'),
 };
 
 // The last two are the build-an-unsaved-instance seam rip/fake's
 // Model.factory() augmentation composes with — normalize caller
 // input, construct without saving.
-export { schema, __schemaSetAdapter, __schemaTransaction, __schemaAdoptTransaction, __schemaTxHandle, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex, __schemaNormalizePersistenceInput, __schemaConstructInputInstance };
+export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, normalizePersistenceInput, constructInputInstance };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and
@@ -3682,9 +3666,9 @@ if (typeof globalThis !== 'undefined') {
   g.__ripSchema.__schemaSetAdapter = __schemaSetAdapter;
   // So a transaction opened by rip/db can enroll model statements that
   // run inside it, instead of letting them commit on their own.
-  g.__ripSchema.__schemaAdoptTransaction = __schemaAdoptTransaction;
-  g.__ripSchema.__schemaTxHandle = __schemaTxHandle;
-  if (g.__ripDbAdapter && !__schemaAdapterExplicit) {
+  g.__ripSchema.adoptTransaction = adoptTransaction;
+  g.__ripSchema.txHandle = txHandle;
+  if (g.__ripDbAdapter && !adapterExplicit) {
     try {
       __schemaSetAdapter(g.__ripDbAdapter);
     } catch {

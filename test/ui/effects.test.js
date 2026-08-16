@@ -393,7 +393,7 @@ describe('schema callable bodies propagate runtime delivery', () => {
     expect(/^import /m.test(code)).toBe(false);
     // Value pin via none+binding against shared schema + reactive modules.
     const schema = await import('../../src/runtime/schema.js');
-    schema.__SchemaRegistry.reset();
+    schema.SchemaRegistry.reset();
     const seen = [];
     const valueSrc = [
       'count := 0',

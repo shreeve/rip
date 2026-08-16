@@ -87,7 +87,8 @@ Type syntax is intentionally absent from the s-expression tree.
 
 ### Lexer
 
-`rewriteTypes` folds each annotation into one `TYPE` token and each
+`rewriteTypes` (`src/types.js`, run as a tail pass by `tokenize`) folds
+each annotation into one `TYPE` token and each
 cast into one `CAST` token. The token carries opaque source text and
 its exact span.
 
@@ -118,7 +119,7 @@ location for bytes that do not exist.
 
 ### Declarations
 
-`src/types/dts.js` renders exported/module-visible declarations. Untyped
+`src/ts/dts.js` renders exported/module-visible declarations. Untyped
 files requested as declarations produce the trivial valid surface.
 
 ### TypeScript face
@@ -127,7 +128,7 @@ The normal emitter renders annotations, casts, declarations, overloads,
 reactive containers, enum companions, schema intrinsics, and component
 types through TS-only regions.
 
-`src/types/typetext.js` owns shared type-text and signature rendering so the
+`src/ts/typetext.js` owns shared type-text and signature rendering so the
 face and declarations cannot drift structurally.
 
 ## Ownership boundary
@@ -205,7 +206,7 @@ the static contract.
 ## Components
 
 Component type rendering has one shared owner:
-`src/types/components.js`.
+`src/ts/components.js`.
 
 It produces:
 
@@ -351,13 +352,14 @@ silent until you open it.
 
 | Area | Files |
 |---|---|
-| lexer claims | `src/lexer.js` |
+| type claims | `src/types.js` |
+| lexer pipeline | `src/lexer.js` |
 | grammar span labels | `src/grammar/grammar.rip`, `src/grammar/solar.rip` |
-| shared type rendering | `src/types/typetext.js` |
-| declarations | `src/types/dts.js` |
+| shared type rendering | `src/ts/typetext.js` |
+| declarations | `src/ts/dts.js` |
 | TS face and strip | `src/emitter.js`, `src/builder.js` |
-| schema type rendering | `src/types/schemas.js` |
-| component type rendering | `src/types/components.js` |
+| schema type rendering | `src/ts/schematext.js` |
+| component type rendering | `src/ts/components.js` |
 | editor broker | `packages/vscode/src/` |
 | diagnostic gate | `packages/vscode/src/scopes.js` |
 | type gates | `test/lang/`, `test/toolchain/`, `test/audit/` |

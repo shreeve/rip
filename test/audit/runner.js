@@ -248,8 +248,9 @@ import { compile } from '../../src/compile.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';
-import { makeParserLexer, tokenize, ALIASES, identifierRuns, isIdentifierName } from '../../src/lexer.js';
-import { renderTypeDecl } from '../../src/types/typetext.js';
+import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
+import { identifierRuns, isIdentifierName } from '../../src/ident.js';
+import { renderTypeDecl } from '../../src/ts/typetext.js';
 import { judge } from './contract.js';
 import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
 

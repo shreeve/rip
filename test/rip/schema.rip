@@ -2746,7 +2746,7 @@ modelHeader = '''
       @calls.push {sql, params}
       if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
 
 '''
 
@@ -2900,7 +2900,7 @@ test ".save() persists declared fields only (not computed getters)", modelHeader
 # limitation: any UPDATE that touches an indexed column (PK / UNIQUE) on a
 # row referenced by another table's FK is rejected, even when the value
 # isn't really changing (e.g. SET mrn = mrn). Writing only changed columns
-# keeps no-op saves out of the index path entirely. See `__schemaSave` in
+# keeps no-op saves out of the index path entirely. See `save` in
 # `src/schema/runtime-orm.js`.
 
 test ".save() with no changes emits no UPDATE", modelHeader + '''
@@ -3358,7 +3358,7 @@ test "save() throws on same-instance re-entry from a hook", modelHeader + '''
     name! string
     beforeSave: ->
       # Naive recursion: hook on `@` calls @.save! which would re-enter
-      # __schemaSave on the same instance.
+      # save on the same instance.
       @save!
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
   msg = null
@@ -4184,49 +4184,49 @@ type "nested same-file schema reference resolves to its bare type", '''
 # ==============================================================================
 
 test "registry: different definition under same name throws collision", '''
-  __SchemaRegistry.reset()
-  __SchemaRegistry.replace = false
+  SchemaRegistry.reset()
+  SchemaRegistry.replace = false
   err = null
   try
     R1 = schema :input; name!
     R1 = schema :input; other! integer
   catch e
     err = e
-  __SchemaRegistry.replace = true
+  SchemaRegistry.replace = true
   [err?.name, err?.issues[0].error, err.message.includes("already registered")]
 ''', ["SchemaError", "collision", true]
 
 test "registry: identical redeclaration rebinds silently", '''
-  __SchemaRegistry.reset()
-  __SchemaRegistry.replace = false
+  SchemaRegistry.reset()
+  SchemaRegistry.replace = false
   out = null
   try
     R2 = schema :input; name!
-    first = __SchemaRegistry.get("R2")
+    first = SchemaRegistry.get("R2")
     R2 = schema :input; name!
-    second = __SchemaRegistry.get("R2")
+    second = SchemaRegistry.get("R2")
     out = [first isnt second, second.name]
   finally
-    __SchemaRegistry.replace = true
+    SchemaRegistry.replace = true
   out
 ''', [true, "R2"]
 
 test "registry: replace = true restores last-loaded-wins (dev/HMR)", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   R3 = schema :input; name!
   R3 = schema :input; other! integer
-  [...__SchemaRegistry.get("R3")._normalize().fields.keys()]
+  [...SchemaRegistry.get("R3")._normalize().fields.keys()]
 ''', ["other"]
 
 test "registry: scope() runs against a fresh registry and restores", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   S1 = schema :input; name!
   inner = null
-  __SchemaRegistry.scope ->
+  SchemaRegistry.scope ->
     S2 = schema :input; other!
-    inner = [__SchemaRegistry.has("S1"), __SchemaRegistry.has("S2")]
+    inner = [SchemaRegistry.has("S1"), SchemaRegistry.has("S2")]
     null
-  [inner[0], inner[1], __SchemaRegistry.has("S1"), __SchemaRegistry.has("S2")]
+  [inner[0], inner[1], SchemaRegistry.has("S1"), SchemaRegistry.has("S2")]
 ''', [false, true, true, false]
 
 # ==============================================================================
@@ -4270,7 +4270,7 @@ test "UNIQUE violation surfaces as SchemaError {field, error: 'unique'}", '''
     query: (sql, params) ->
       throw new Error('Constraint Error: Duplicate key "email: a@b.c" violates unique constraint.')
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   User = schema :model
     name! string
     email! email @unique
@@ -4287,7 +4287,7 @@ test "NOT NULL violation surfaces as {field, error: 'required'}", '''
     query: (sql, params) ->
       throw new Error("Constraint Error: NOT NULL constraint failed: users.name")
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   User = schema :model
     name? string
   err = null
@@ -4303,7 +4303,7 @@ test "FK violation surfaces as {field, error: 'reference'}", '''
     query: (sql, params) ->
       throw new Error('Constraint Error: Violates foreign key constraint because key "user_id: 99" does not exist in the referenced table')
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   User = schema :model
     name! string
   Order = schema :model
@@ -4321,7 +4321,7 @@ test "non-constraint DB errors propagate untouched", '''
   adapter =
     query: (sql, params) -> throw new Error("Catalog Error: table users does not exist")
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   User = schema :model
     name! string
   err = null
@@ -4803,7 +4803,7 @@ test "parseAsync works on plain sync schemas too (uniform surface)", '''
 # ==============================================================================
 
 unionHeader = '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   ClickEvent = schema :shape
     kind! "click"
     x!    integer
@@ -4854,7 +4854,7 @@ test ":union: algebra throws; ok() delegates", unionHeader + '''
 ''', [true, true, false]
 
 test ":union: duplicate discriminator values across constituents throw at first parse", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   A1 = schema :shape; kind! "x"; a! integer
   B1 = schema :shape; kind! "x"; b! integer
   U1 = schema :union
@@ -4870,7 +4870,7 @@ test ":union: duplicate discriminator values across constituents throw at first 
 ''', ["union", true]
 
 test ":union: constituent missing the discriminator literal throws at first parse", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   A2 = schema :shape; kind! "x"; a! integer
   B2 = schema :shape; name! string
   U2 = schema :union
@@ -4978,7 +4978,7 @@ test "on: routes a model's SQL to its own adapter; others use the global", '''
       {columns: [{name: "id"}], data: [[1]], rows: 1}
   }
   __schemaSetAdapter mk("a")
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   analytics = mk("b")
   User = schema :model
     name! string
@@ -4993,7 +4993,7 @@ test "on: routes a model's SQL to its own adapter; others use the global", '''
 test "cross-adapter @belongsTo: accessor works, FK DDL suppressed with a note", '''
   rows = {columns: [{name: "id"}, {name: "name"}], data: [[7, "main"]], rows: 1}
   __schemaSetAdapter { query: (sql, params) -> rows }
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   analytics = { query: (sql, params) -> {columns: [{name: "id"}, {name: "user_id"}], data: [[1, 7]], rows: 1} }
   User = schema :model
     name! string
@@ -5036,7 +5036,7 @@ test "toJSONSchema maps fields, constraints, formats, defaults, required", '''
 ''', ["SignupInput", ["email", "password"], "email", [8, 100], "user", ["integer", 18], ["array", "string", 5]]
 
 test "toJSONSchema: nested schemas become $refs; enums and unions map", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   Role = schema :enum
     :admin
     :user
@@ -5066,7 +5066,7 @@ test "toJSONSchema: nested schemas become $refs; enums and unions map", '''
 ''', ["#/$defs/Role", "#/$defs/Action", ["admin", "user"], ["#/$defs/Click", "#/$defs/Scroll"], "kind", "click"]
 
 test "toJSONSchema: models include DB-managed columns; refinements annotate", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   Org = schema :model
     name! string
   User = schema :model
@@ -5085,7 +5085,7 @@ test "toJSONSchema: models include DB-managed columns; refinements annotate", ''
 ''', ["integer", "integer", "date-time", true]
 
 test "toJSONSchema: recursive shapes are cycle-safe via $defs", '''
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   Tree = schema :shape
     value!    integer
     children? Tree[]
@@ -5117,7 +5117,7 @@ migrateHeader = '''
       else
         {columns: [], data: [], rows: 0}
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
 
 '''
 
@@ -5201,7 +5201,7 @@ txHeader = '''
       handle
     capabilities: {tx: true}
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
 
 '''
 
@@ -5273,7 +5273,7 @@ test "transaction! on an adapter without begin() throws a clear error", '''
   adapter =
     query: (sql, params) -> {columns: [], data: [], rows: 0}
   __schemaSetAdapter adapter
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   User = schema :model
     name! string
   err = null
@@ -5353,7 +5353,7 @@ test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
     adapter.capabilities = {tx: true}
     adapter
   __schemaSetAdapter mk("a")
-  __SchemaRegistry.reset()
+  SchemaRegistry.reset()
   analytics = mk("b")
   User = schema :model
     name! string
@@ -5390,7 +5390,7 @@ test 'afterRollback fires on rollback; afterCommit does not', '''
         handle
       capabilities: {tx: true}
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
       afterCommit:   -> events.push "afterCommit"
@@ -5424,7 +5424,7 @@ test 'two parallel transactions use independent handles (no cross-talk)', '''
         handle
       capabilities: {tx: true}
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
     handles = []
@@ -5458,7 +5458,7 @@ test '.includes(:orders) batches one IN query and fills the memo', '''
         @calls.push {sql, params}
         if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
       @hasMany Order
@@ -5484,7 +5484,7 @@ test '.includes(:user) on belongsTo batches via findMany; instances shared', '''
         @calls.push {sql, params}
         if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
       @hasMany Order
@@ -5509,7 +5509,7 @@ test 'nested includes: {orders: :user} preloads two levels', '''
         @calls.push {sql, params}
         if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
       @hasMany Order
@@ -5537,7 +5537,7 @@ test '.includes with unknown relation throws a helpful error', '''
         @calls.push {sql, params}
         if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     User = schema :model
       name! string
     adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
@@ -5557,7 +5557,7 @@ test '.upsert! emits ON CONFLICT DO UPDATE; branch hooks skipped', '''
         @calls.push {sql, params}
         if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
     __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
+    SchemaRegistry.reset()
     trace = []
     User = schema :model
       name! string

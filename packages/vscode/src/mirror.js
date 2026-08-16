@@ -14,13 +14,13 @@ import { fileURLToPath } from 'node:url';
 // the server dies at import time.
 const { identifierRunAt } = await (async () => {
   const candidates = [
-    new URL('../../../src/lexer.js', import.meta.url),   // in-repo
-    new URL('../compiler/src/lexer.js', import.meta.url), // staged vsix
+    new URL('../../../src/ident.js', import.meta.url),   // in-repo
+    new URL('../compiler/src/ident.js', import.meta.url), // staged vsix
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) return import(candidate.href);
   }
-  throw new Error('rip lexer not found (looked for ../../../src/lexer.js and ../compiler/src/lexer.js)');
+  throw new Error('rip identifier vocabulary not found (looked for ../../../src/ident.js and ../compiler/src/ident.js)');
 })();
 
 const stripJsonComments = (text) =>

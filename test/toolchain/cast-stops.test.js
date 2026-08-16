@@ -18,7 +18,7 @@
 // terminal actions are exactly the tokens legal in the next position.
 
 import { expect, test } from 'bun:test';
-import { CAST_STOPS, RUN_CLOSERS, RUN_STOPS } from '../../src/lexer.js';
+import { CAST_STOPS, RUN_CLOSERS, RUN_STOPS } from '../../src/types.js';
 import { parser } from '../../src/parser.js';
 
 // Terminals that legitimately CONTINUE a cast's type run at depth 0, each

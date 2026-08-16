@@ -19,7 +19,7 @@
 // with instructions. The shared module evaluates once per process
 // (module cache), so toolchain-path programs never trip it.
 
-import { __schemaIsCanonicalName } from './vocab.js';
+import { isCanonicalName } from './vocab.js';
 
 const __RIP_SCHEMA_SENTINEL = Symbol.for('rip.runtime.schema');
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
@@ -41,17 +41,17 @@ globalThis[__RIP_SCHEMA_SENTINEL] = true;
 //   decorateDef(def, desc)         — scope statics, the on: adapter
 //   projectableFields(def)         — algebra's model column set
 //   jsonSchemaModelColumns(def, p) — the wire shape's implicit columns
-let __schemaPersistence = null;
-function __schemaInstallPersistence(impl) {
-  if (__schemaPersistence && __schemaPersistence !== impl) {
+let persistence = null;
+function installPersistence(impl) {
+  if (persistence && persistence !== impl) {
     throw new Error('the Rip schema persistence runtime is already installed — two different copies met in one process');
   }
-  __schemaPersistence = impl;
+  persistence = impl;
 }
 
 class SchemaError extends Error {
   constructor(issues, schemaName, schemaKind) {
-    super(__schemaFormatIssues(issues, schemaName));
+    super(formatIssues(issues, schemaName));
     this.name = 'SchemaError';
     this.issues = issues;
     this.schemaName = schemaName || null;
@@ -59,13 +59,13 @@ class SchemaError extends Error {
   }
 }
 
-function __schemaFormatIssues(issues, name) {
+function formatIssues(issues, name) {
   if (!issues || !issues.length) return 'SchemaError';
   const head = name ? name + ': ' : '';
   return head + issues.map((i) => i.message || i.error || 'invalid').join('; ');
 }
 
-const __schemaTypes = {
+const types = {
   string:   (v) => typeof v === 'string',
   number:   (v) => typeof v === 'number' && !Number.isNaN(v),
   integer:  (v) => Number.isInteger(v),
@@ -87,7 +87,7 @@ const __schemaTypes = {
 // `~boolean` accepts exactly six tokens, `~date` accepts ISO-8601
 // strings and finite epoch numbers. A failed coercion is
 // {error: 'coerce'}, distinct from {error: 'type'}.
-const __SCHEMA_COERCERS = {
+const COERCERS = {
   integer(v) {
     if (typeof v === 'number') return Number.isInteger(v) ? { ok: true, value: v } : { ok: false };
     if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) return { ok: true, value: parseInt(v.trim(), 10) };
@@ -125,14 +125,14 @@ const __SCHEMA_COERCERS = {
     return { ok: false };
   },
 };
-__SCHEMA_COERCERS.datetime = __SCHEMA_COERCERS.date;
+COERCERS.datetime = COERCERS.date;
 
 
 // An object schema's input must BE an object — a primitive, null, or
 // an array would spread into a valid-looking empty instance when every
 // field is optional. Returns the structured issue, or null for a real
 // object.
-function __schemaObjectIssue(data) {
+function objectIssue(data) {
   if (data !== null && typeof data === 'object' && !Array.isArray(data)) return null;
   const kind = data === null ? 'null' : Array.isArray(data) ? 'an array' : 'a ' + typeof data;
   return { field: '', error: 'object', message: 'input must be an object; got ' + kind };
@@ -144,9 +144,9 @@ function __schemaObjectIssue(data) {
 // coerced value (a boolean vocabulary must produce it). `opts.raw`
 // passes the value through un-stringified (coercers over
 // arrays/objects).
-const __schemaNamedCoercers = new Map();
+const namedCoercers = new Map();
 
-function __schemaRegisterCoercer(name, fn, opts) {
+function registerCoercer(name, fn, opts) {
   if (typeof name !== 'string' || typeof fn !== 'function') {
     throw new Error('registerCoercer(name, fn, opts?): name string and fn required');
   }
@@ -155,7 +155,7 @@ function __schemaRegisterCoercer(name, fn, opts) {
     throw new Error("registerCoercer: coercer '~:" + name + "' must be a plain synchronous function");
   }
   const raw = opts?.raw === true;
-  const existing = __schemaNamedCoercers.get(name);
+  const existing = namedCoercers.get(name);
   if (existing) {
     // Same policy as schema names: a re-evaluation of the same module
     // (browser reboot, hot reload) re-registers the same definition and
@@ -165,7 +165,7 @@ function __schemaRegisterCoercer(name, fn, opts) {
     if (existing.raw === raw && String(existing.fn) === String(fn)) return fn;
     throw new Error("registerCoercer: coercer '~:" + name + "' is already registered");
   }
-  __schemaNamedCoercers.set(name, { fn, raw });
+  namedCoercers.set(name, { fn, raw });
   return fn;
 }
 
@@ -173,9 +173,9 @@ function __schemaRegisterCoercer(name, fn, opts) {
 // nested shapes, inputs, models, and unions. These validate through
 // the child's full contract and return normalized values; enums and
 // primitives validate inline.
-function __schemaNestedDef(typeName) {
-  if (__schemaTypes[typeName]) return null;
-  const d = __SchemaRegistry.get(typeName);
+function nestedDef(typeName) {
+  if (types[typeName]) return null;
+  const d = SchemaRegistry.get(typeName);
   return d && (d.kind === 'shape' || d.kind === 'input' || d.kind === 'model' || d.kind === 'union') ? d : null;
 }
 
@@ -186,12 +186,12 @@ function __schemaNestedDef(typeName) {
 // child's own schema would transform). Returns { value } on success,
 // { errors } on failure; issues arrive unprefixed and the caller
 // prefixes once at the field boundary.
-function __schemaValidateValue(v, typeName, opts) {
-  const prim = __schemaTypes[typeName];
+function validateValue(v, typeName, opts) {
+  const prim = types[typeName];
   if (prim) {
     return prim(v) ? { value: v } : { errors: [{ field: '', error: 'type', message: 'must be ' + typeName }] };
   }
-  const subDef = __SchemaRegistry.get(typeName);
+  const subDef = SchemaRegistry.get(typeName);
   if (!subDef) return { value: v };
   if (subDef.kind === 'enum') {
     const errs = subDef._validateEnum(v, true);
@@ -229,9 +229,9 @@ function __schemaValidateValue(v, typeName, opts) {
 
 // The async twin: nested children await their own async pipelines, so
 // an @ensure! at any depth is awaited, never silently accepted.
-async function __schemaValidateValueAsync(v, typeName, opts) {
-  const subDef = __schemaNestedDef(typeName);
-  if (subDef === null) return __schemaValidateValue(v, typeName, opts);
+async function validateValueAsync(v, typeName, opts) {
+  const subDef = nestedDef(typeName);
+  if (subDef === null) return validateValue(v, typeName, opts);
   if (subDef.kind === 'union') {
     const r = subDef._unionResolve(v);
     if (r.issue) return { errors: [r.issue] };
@@ -257,12 +257,12 @@ async function __schemaValidateValueAsync(v, typeName, opts) {
   return res.ok ? { value: res.value } : { errors: res.errors };
 }
 
-function __schemaJoinField(head, child) {
+function joinField(head, child) {
   if (!child) return head;
   return head + (child.startsWith('[') ? child : '.' + child);
 }
 
-function __schemaRewriteMessage(joinedField, childField, childMessage) {
+function rewriteMessage(joinedField, childField, childMessage) {
   if (!childField) return joinedField + ' ' + childMessage;
   if (childMessage.startsWith(childField)) {
     return joinedField + childMessage.slice(childField.length);
@@ -270,21 +270,21 @@ function __schemaRewriteMessage(joinedField, childField, childMessage) {
   return joinedField + ': ' + childMessage;
 }
 
-const __SCHEMA_MATERIALIZATION_ERROR = Symbol('schema.materialization-error');
+const MATERIALIZATION_ERROR = Symbol('schema.materialization-error');
 
-function __schemaMaterializationError(error, field) {
-  if (error && error[__SCHEMA_MATERIALIZATION_ERROR]) {
+function materializationError(error, field) {
+  if (error && error[MATERIALIZATION_ERROR]) {
     return {
-      [__SCHEMA_MATERIALIZATION_ERROR]: true,
+      [MATERIALIZATION_ERROR]: true,
       error: error.error,
-      field: __schemaJoinField(field, error.field),
+      field: joinField(field, error.field),
     };
   }
-  return { [__SCHEMA_MATERIALIZATION_ERROR]: true, error, field };
+  return { [MATERIALIZATION_ERROR]: true, error, field };
 }
 
-function __schemaUnwrapMaterializationError(error) {
-  return error && error[__SCHEMA_MATERIALIZATION_ERROR]
+function unwrapMaterializationError(error) {
+  return error && error[MATERIALIZATION_ERROR]
     ? { thrown: error.error, derivedField: error.field }
     : { thrown: error, derivedField: '' };
 }
@@ -295,14 +295,14 @@ function __schemaUnwrapMaterializationError(error) {
 // persistence layer loads.
 //   ok:  name, mrn, firstName, mdmId, line2      bad: ID, mdmID, foo_bar
 // The rule itself lives in ./vocab.js, with the compiler's copy of it.
-const __schemaValidateCanonicalName = __schemaIsCanonicalName;
+const validateCanonicalName = isCanonicalName;
 
 // Structural signature of a declaration — name-shape only, function
 // bodies excluded. Two registrations with the same signature are the
 // same declaration arriving twice and rebind silently; different
 // signatures under one name are a real collision and throw (unless
-// `__SchemaRegistry.replace` — dev/HMR semantics).
-function __schemaSignature(def) {
+// `SchemaRegistry.replace` — dev/HMR semantics).
+function signature(def) {
   const safe = (v) => JSON.stringify(v ?? null, (k, x) =>
     x instanceof RegExp ? String(x) : (typeof x === 'function' ? '<fn>' : x));
   const parts = [def.kind];
@@ -335,24 +335,24 @@ function __schemaSignature(def) {
 // Transitive async-status memos key on it, so a schema that becomes
 // reachable-async through a LATER registration is re-planned on next
 // use rather than trusting a stale answer.
-let __schemaRegistryGen = 0;
+let registryGen = 0;
 
-const __SchemaRegistry = {
+const SchemaRegistry = {
   _entries: new Map(),
   replace: false,
   register(def) {
     if (!def.name) return;
-    __schemaRegistryGen++;
+    registryGen++;
     const existing = this._entries.get(def.name);
     if (existing && existing.def !== def && !this.replace) {
-      if (__schemaSignature(existing.def) !== __schemaSignature(def)) {
+      if (signature(existing.def) !== signature(def)) {
         throw new SchemaError(
           [{
             field: def.name, error: 'collision',
             message: "schema name '" + def.name + "' is already registered with a different definition. " +
               'Schema names are app-global (they resolve nested field types and @mixin references), so two ' +
               'different schemas cannot share one name. Rename one — or, for dev/HMR reload semantics, set ' +
-              '__SchemaRegistry.replace = true before re-evaluating modules.',
+              'SchemaRegistry.replace = true before re-evaluating modules.',
           }],
           def.name, def.kind);
       }
@@ -368,29 +368,29 @@ const __SchemaRegistry = {
     return entry && entry.kind === kind ? entry.def : null;
   },
   has(name) { return this._entries.has(name); },
-  reset() { this._entries.clear(); __schemaRegistryGen++; },
+  reset() { this._entries.clear(); registryGen++; },
   // Run `fn` against a fresh, empty registry; restore afterward
   // (success, throw, or async rejection) — the test-scoping seam.
   scope(fn) {
     const saved = this._entries;
     this._entries = new Map();
-    __schemaRegistryGen++;
-    const restore = () => { this._entries = saved; __schemaRegistryGen++; };
+    registryGen++;
+    const restoreEntries = () => { this._entries = saved; registryGen++; };
     try {
       const r = fn();
-      if (r && typeof r.then === 'function') return r.finally(restore);
-      restore();
+      if (r && typeof r.then === 'function') return r.finally(restoreEntries);
+      restoreEntries();
       return r;
     } catch (e) {
-      restore();
+      restoreEntries();
       throw e;
     }
   },
 };
 
-class __SchemaDef {
+class SchemaDef {
   constructor(desc) {
-    if (desc.kind === 'model' && !__schemaPersistence) {
+    if (desc.kind === 'model' && !persistence) {
       throw new Error(
         "schema: kind 'model' needs the persistence runtime (src/runtime/orm.js), which is not " +
         'loaded in this process — reference a persistence name (schema.transaction, __schemaSetAdapter) ' +
@@ -404,7 +404,7 @@ class __SchemaDef {
     this._klass = null;
     this._unionPlanCache = null;
     this._sourceModel = null;
-    if (desc.kind === 'model') __schemaPersistence.decorateDef(this, desc);
+    if (desc.kind === 'model') persistence.decorateDef(this, desc);
   }
 
   _normalize() {
@@ -444,7 +444,7 @@ class __SchemaDef {
     // accept exactly their matrix.
     const baseDirectives = this.kind === 'union' ? new Set(['on']) : new Set(['mixin']);
     const requireCanonicalName = (n, kindLabel) => {
-      if (!__schemaValidateCanonicalName(n)) {
+      if (!validateCanonicalName(n)) {
         throw new SchemaError(
           [{
             field: n, error: 'invalid-name',
@@ -546,7 +546,7 @@ class __SchemaDef {
     }
 
     if (this.kind === 'shape' || this.kind === 'input' || this.kind === 'mixin' || this.kind === 'model') {
-      __schemaExpandMixins(this, fields, directives, {
+      expandMixins(this, fields, directives, {
         stack: [this.name || '<anon>'],
         seen: new Set([this.name || '<anon>']),
       });
@@ -582,7 +582,7 @@ class __SchemaDef {
     // The schema then reported NO error on every later call and failed
     // as a TypeError deep in a query instead. A rejected model must
     // keep rejecting, with the same message, forever.
-    if (this.kind === 'model') __schemaPersistence.finishModelNorm(this, norm);
+    if (this.kind === 'model') persistence.finishModelNorm(this, norm);
     this._norm = norm;
     return this._norm;
   }
@@ -590,7 +590,7 @@ class __SchemaDef {
   // ── :union dispatch (lazy plan: value → constituent map) ───────────
 
   _unionPlan() {
-    if (this._unionPlanCache && this._unionPlanCache.gen === __schemaRegistryGen) {
+    if (this._unionPlanCache && this._unionPlanCache.gen === registryGen) {
       return this._unionPlanCache.plan;
     }
     const norm = this._normalize();
@@ -601,7 +601,7 @@ class __SchemaDef {
     const map = new Map();
     const members = [];
     for (const name of norm.unionMembers) {
-      const def = __SchemaRegistry.get(name);
+      const def = SchemaRegistry.get(name);
       if (!def) {
         throw new SchemaError(
           [{ field: '', error: 'union', message: 'unknown union constituent: ' + name + ' (import the file that declares it)' }],
@@ -630,7 +630,7 @@ class __SchemaDef {
       expected: [...map.keys()].join(' | '),
       hasAsyncEnsures: members.some((d) => d._normalize().hasAsyncEnsures),
     };
-    this._unionPlanCache = { gen: __schemaRegistryGen, plan };
+    this._unionPlanCache = { gen: registryGen, plan };
     return plan;
   }
 
@@ -674,7 +674,7 @@ class __SchemaDef {
   _materializeNestedValues(working, original, existing) {
     const norm = this._normalize();
     for (const [n, f] of norm.fields) {
-      const child = __schemaNestedDef(f.typeName);
+      const child = nestedDef(f.typeName);
       if (!child) continue;
       const value = working[n];
       if (value === undefined || value === null) continue;
@@ -690,7 +690,7 @@ class __SchemaDef {
               existing,
             );
           } catch (error) {
-            throw __schemaMaterializationError(error, n + '[' + i + ']');
+            throw materializationError(error, n + '[' + i + ']');
           }
         }
         working[n] = out;
@@ -698,7 +698,7 @@ class __SchemaDef {
         try {
           working[n] = child._materializeResolvedValue(value, oldValue, existing);
         } catch (error) {
-          throw __schemaMaterializationError(error, n);
+          throw materializationError(error, n);
         }
       }
     }
@@ -788,7 +788,7 @@ class __SchemaDef {
   // generation — a later registration invalidates every memo, so a
   // schema that becomes reachable-async re-plans on next use.
   _transitiveAsync() {
-    if (this._taGen === __schemaRegistryGen) return this._taCache;
+    if (this._taGen === registryGen) return this._taCache;
     const seen = new Set();
     const walk = (def) => {
       if (seen.has(def)) return false;
@@ -797,19 +797,19 @@ class __SchemaDef {
       if (norm.hasAsyncEnsures) return true;
       if (def.kind === 'union') {
         for (const name of norm.unionMembers) {
-          const m = __SchemaRegistry.get(name);
+          const m = SchemaRegistry.get(name);
           if (m && walk(m)) return true;
         }
         return false;
       }
       for (const f of norm.fields.values()) {
-        const child = __schemaNestedDef(f.typeName);
+        const child = nestedDef(f.typeName);
         if (child && walk(child)) return true;
       }
       return false;
     };
     this._taCache = walk(this);
-    this._taGen = __schemaRegistryGen;
+    this._taGen = registryGen;
     return this._taCache;
   }
 
@@ -929,21 +929,21 @@ class __SchemaDef {
             errors.push({ field: n, error: 'max', message: n + ' must have at most ' + ac.max + ' items' });
           }
         }
-        if (opts?.deferNested && __schemaNestedDef(f.typeName)) continue;
+        if (opts?.deferNested && nestedDef(f.typeName)) continue;
         let bad = false;
         let changed = false;
         const out = new Array(v.length);
         for (let i = 0; i < v.length; i++) {
-          const res = __schemaValidateValue(v[i], f.typeName, opts);
+          const res = validateValue(v[i], f.typeName, opts);
           if (res.errors) {
             if (!collect) return false;
             const head = n + '[' + i + ']';
             for (const e of res.errors) {
-              const joined = __schemaJoinField(head, e.field);
+              const joined = joinField(head, e.field);
               errors.push({
                 field: joined,
                 error: e.error,
-                message: __schemaRewriteMessage(joined, e.field, e.message),
+                message: rewriteMessage(joined, e.field, e.message),
               });
             }
             bad = true;
@@ -961,16 +961,16 @@ class __SchemaDef {
           continue;
         }
       } else {
-        if (opts?.deferNested && __schemaNestedDef(f.typeName)) continue;
-        const res = __schemaValidateValue(v, f.typeName, opts);
+        if (opts?.deferNested && nestedDef(f.typeName)) continue;
+        const res = validateValue(v, f.typeName, opts);
         if (res.errors) {
           if (!collect) return false;
           for (const e of res.errors) {
-            const joined = __schemaJoinField(n, e.field);
+            const joined = joinField(n, e.field);
             errors.push({
               field: joined,
               error: e.error,
-              message: __schemaRewriteMessage(joined, e.field, e.message),
+              message: rewriteMessage(joined, e.field, e.message),
             });
           }
           continue;
@@ -1039,7 +1039,7 @@ class __SchemaDef {
       const v = working[n];
       if (v === undefined || v === null) continue;
       if (f.coercer) {
-        const entry = __schemaNamedCoercers.get(f.coercer);
+        const entry = namedCoercers.get(f.coercer);
         if (!entry) {
           throw new Error(
             "schema: no coercer registered for '~:" + f.coercer + "' (field '" + n + "' on " +
@@ -1056,7 +1056,7 @@ class __SchemaDef {
         }
         continue;
       }
-      const r = __SCHEMA_COERCERS[f.typeName] ? __SCHEMA_COERCERS[f.typeName](v) : { ok: false };
+      const r = COERCERS[f.typeName] ? COERCERS[f.typeName](v) : { ok: false };
       if (r.ok) {
         working[n] = r.value;
       } else {
@@ -1125,7 +1125,7 @@ class __SchemaDef {
       const errs = this._validateEnum(data, true);
       return errs.length ? { ok: false, errors: errs } : { ok: true, value: this._materializeEnum(data) };
     }
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue) return { ok: false, errors: [objIssue] };
     const raw = data;
     const working = { ...raw };
@@ -1145,13 +1145,13 @@ class __SchemaDef {
     if (opts?.materializeNested) {
       try { this._materializeNestedValues(working, null, false); }
       catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     if (!opts?.materialize) return { ok: true, value: working };
     try { return { ok: true, value: this._materializeOwnValidatedValue(working, null, false) }; }
     catch (error) {
-      return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+      return { ok: false, errors: null, ...unwrapMaterializationError(error) };
     }
   }
 
@@ -1167,7 +1167,7 @@ class __SchemaDef {
       return res.ok ? res : { ...res, from: res.from || r.def };
     }
     if (this.kind === 'enum') return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue) return { ok: false, errors: [objIssue] };
     const raw = data;
     const working = { ...raw };
@@ -1184,13 +1184,13 @@ class __SchemaDef {
     if (opts?.materializeNested) {
       try { this._materializeNestedValues(working, null, false); }
       catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     if (!opts?.materialize) return { ok: true, value: working };
     try { return { ok: true, value: this._materializeOwnValidatedValue(working, null, false) }; }
     catch (error) {
-      return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+      return { ok: false, errors: null, ...unwrapMaterializationError(error) };
     }
   }
 
@@ -1223,13 +1223,13 @@ class __SchemaDef {
         const out = new Array(v.length);
         let bad = false;
         for (let i = 0; i < v.length; i++) {
-          const res = await __schemaValidateValueAsync(v[i], f.typeName, opts);
+          const res = await validateValueAsync(v[i], f.typeName, opts);
           if (res.errors) {
             bad = true;
             const head = n + '[' + i + ']';
             for (const e of res.errors) {
-              const joined = __schemaJoinField(head, e.field);
-              errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+              const joined = joinField(head, e.field);
+              errors.push({ field: joined, error: e.error, message: rewriteMessage(joined, e.field, e.message) });
             }
           } else {
             out[i] = res.value;
@@ -1241,11 +1241,11 @@ class __SchemaDef {
           errors.push({ field: n, error: 'enum', message: n + ' must be one of ' + f.literals.map((l) => JSON.stringify(l)).join(', ') });
         }
       } else {
-        const res = await __schemaValidateValueAsync(v, f.typeName, opts);
+        const res = await validateValueAsync(v, f.typeName, opts);
         if (res.errors) {
           for (const e of res.errors) {
-            const joined = __schemaJoinField(n, e.field);
-            errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+            const joined = joinField(n, e.field);
+            errors.push({ field: joined, error: e.error, message: rewriteMessage(joined, e.field, e.message) });
           }
         } else {
           working[n] = res.value;
@@ -1278,7 +1278,7 @@ class __SchemaDef {
       return res.ok ? res : { ...res, from: res.from || r.def };
     }
     if (this.kind === 'enum') return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue) return { ok: false, errors: [objIssue] };
     const working = { ...data };
     const errs = this._validateFields(working, true, null, { ...opts, existing: true });
@@ -1288,7 +1288,7 @@ class __SchemaDef {
     if (opts?.materializeNested) {
       try { this._materializeNestedValues(working, data, true); }
       catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     return this._finishExistingValue(data, working, opts);
@@ -1302,7 +1302,7 @@ class __SchemaDef {
       return res.ok ? res : { ...res, from: res.from || r.def };
     }
     if (this.kind === 'enum') return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue) return { ok: false, errors: [objIssue] };
     const working = { ...data };
     const errs = await this._validateFieldsAsync(working, null, { ...opts, existing: true });
@@ -1312,7 +1312,7 @@ class __SchemaDef {
     if (opts?.materializeNested) {
       try { this._materializeNestedValues(working, data, true); }
       catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     return this._finishExistingValue(data, working, opts);
@@ -1483,8 +1483,8 @@ class __SchemaDef {
   // ── projection algebra ──────────────────────────────────────────────
 
   pick(...keys) {
-    return __schemaDerive(this, (src) => {
-      const names = __schemaFlatten(keys);
+    return derive(this, (src) => {
+      const names = flatten(keys);
       const out = new Map();
       for (const k of names) {
         if (!src.has(k)) throw new Error("pick: unknown field '" + k + "' on " + (this.name || 'schema'));
@@ -1495,8 +1495,8 @@ class __SchemaDef {
   }
 
   omit(...keys) {
-    return __schemaDerive(this, (src) => {
-      const drop = new Set(__schemaFlatten(keys));
+    return derive(this, (src) => {
+      const drop = new Set(flatten(keys));
       const out = new Map();
       for (const [k, v] of src) if (!drop.has(k)) out.set(k, v);
       return out;
@@ -1504,7 +1504,7 @@ class __SchemaDef {
   }
 
   partial() {
-    return __schemaDerive(this, (src) => {
+    return derive(this, (src) => {
       const out = new Map();
       for (const [k, v] of src) out.set(k, { ...v, required: false });
       return out;
@@ -1512,8 +1512,8 @@ class __SchemaDef {
   }
 
   required(...keys) {
-    return __schemaDerive(this, (src) => {
-      const req = new Set(__schemaFlatten(keys));
+    return derive(this, (src) => {
+      const req = new Set(flatten(keys));
       const out = new Map();
       for (const [k, v] of src) out.set(k, { ...v, required: req.has(k) ? true : v.required });
       return out;
@@ -1521,13 +1521,13 @@ class __SchemaDef {
   }
 
   extend(other) {
-    if (!(other instanceof __SchemaDef)) {
+    if (!(other instanceof SchemaDef)) {
       throw new Error('extend(): argument must be a schema value');
     }
     if (other.kind === 'union') {
       throw new Error('extend(): :union schemas have no fields to merge');
     }
-    return __schemaDerive(this, (src) => {
+    return derive(this, (src) => {
       const merged = new Map(src);
       const otherFields = other._normalize().fields;
       for (const [k, v] of otherFields) {
@@ -1547,7 +1547,7 @@ class __SchemaDef {
 // unions to `oneOf` + a discriminator. Transforms and refinements
 // export as `description` annotations, never silently dropped.
 
-const __SCHEMA_JSON_TYPES = {
+const JSON_TYPES = {
   string:   () => ({ type: 'string' }),
   text:     () => ({ type: 'string' }),
   email:    () => ({ type: 'string', format: 'email' }),
@@ -1564,15 +1564,15 @@ const __SCHEMA_JSON_TYPES = {
   any:      () => ({}),
 };
 
-function __schemaFieldJSONSchema(f, ctx) {
+function fieldJSONSchema(f, ctx) {
   let s;
   if (f.typeName === 'literal-union' && f.literals?.length) {
     s = f.literals.length === 1 ? { const: f.literals[0] } : { enum: [...f.literals] };
-  } else if (__SCHEMA_JSON_TYPES[f.typeName]) {
-    s = __SCHEMA_JSON_TYPES[f.typeName]();
+  } else if (JSON_TYPES[f.typeName]) {
+    s = JSON_TYPES[f.typeName]();
   } else {
-    const sub = __SchemaRegistry.get(f.typeName);
-    s = sub ? __schemaJSONSchemaRef(sub, ctx) : {};
+    const sub = SchemaRegistry.get(f.typeName);
+    s = sub ? jSONSchemaRef(sub, ctx) : {};
   }
   const c = f.constraints;
   if (c && !f.array) {
@@ -1605,18 +1605,18 @@ function __schemaFieldJSONSchema(f, ctx) {
   return s;
 }
 
-function __schemaJSONSchemaRef(def, ctx) {
+function jSONSchemaRef(def, ctx) {
   const name = def.name || 'Anon';
   if (!ctx.defs.has(name) && !ctx.expanding.has(name)) {
     ctx.expanding.add(name);
     ctx.defs.set(name, null);
-    ctx.defs.set(name, __schemaJSONSchemaBody(def, ctx));
+    ctx.defs.set(name, jSONSchemaBody(def, ctx));
     ctx.expanding.delete(name);
   }
   return { $ref: '#/$defs/' + name };
 }
 
-function __schemaJSONSchemaBody(def, ctx) {
+function jSONSchemaBody(def, ctx) {
   const norm = def._normalize();
 
   if (def.kind === 'enum') {
@@ -1626,8 +1626,8 @@ function __schemaJSONSchemaBody(def, ctx) {
   if (def.kind === 'union') {
     const plan = def._unionPlan();
     const oneOf = norm.unionMembers.map((name) => {
-      const member = __SchemaRegistry.get(name);
-      return member ? __schemaJSONSchemaRef(member, ctx) : {};
+      const member = SchemaRegistry.get(name);
+      return member ? jSONSchemaRef(member, ctx) : {};
     });
     return { oneOf, discriminator: { propertyName: plan.disc } };
   }
@@ -1637,12 +1637,12 @@ function __schemaJSONSchemaBody(def, ctx) {
   const properties = {};
   const required = [];
   for (const [n, f] of norm.fields) {
-    properties[n] = __schemaFieldJSONSchema(f, ctx);
+    properties[n] = fieldJSONSchema(f, ctx);
     if (f.required && f.constraints?.default === undefined) required.push(n);
   }
   // A model's wire shape includes the DB-managed columns toJSON()
   // carries (id, FK columns, timestamps, deletedAt).
-  if (def.kind === 'model') __schemaPersistence.jsonSchemaModelColumns(def, properties);
+  if (def.kind === 'model') persistence.jsonSchemaModelColumns(def, properties);
   const out = { type: 'object', properties };
   if (required.length) out.required = required;
   if (norm.ensures.length) {
@@ -1652,9 +1652,9 @@ function __schemaJSONSchemaBody(def, ctx) {
   return out;
 }
 
-__SchemaDef.prototype.toJSONSchema = function () {
+SchemaDef.prototype.toJSONSchema = function () {
   const ctx = { defs: new Map(), expanding: new Set() };
-  const root = __schemaJSONSchemaBody(this, ctx);
+  const root = jSONSchemaBody(this, ctx);
   root.$schema = 'https://json-schema.org/draft/2020-12/schema';
   if (this.name) root.title = this.name;
   if (ctx.defs.size) {
@@ -1664,7 +1664,7 @@ __SchemaDef.prototype.toJSONSchema = function () {
   return root;
 };
 
-function __schemaFlatten(keys) {
+function flatten(keys) {
   const out = [];
   for (const k of keys) {
     if (Array.isArray(k)) for (const kk of k) out.push(kk);
@@ -1673,7 +1673,7 @@ function __schemaFlatten(keys) {
   return out;
 }
 
-function __schemaDerive(source, transform) {
+function derive(source, transform) {
   if (source.kind === 'union') {
     throw new Error('schema algebra (.pick/.omit/.partial/.required/.extend) is not supported on :union — derive from a constituent schema instead');
   }
@@ -1685,7 +1685,7 @@ function __schemaDerive(source, transform) {
   // manages — so a client view can pick `id` or `createdAt`. The
   // derived value is always a :shape: ORM surface never carries over.
   const src = source.kind === 'model'
-    ? __schemaPersistence.projectableFields(source)
+    ? persistence.projectableFields(source)
     : source._normalize().fields;
   const derivedFields = transform(src);
   const entries = [];
@@ -1708,14 +1708,14 @@ function __schemaDerive(source, transform) {
   const name = (source.name || 'Schema') + 'Derived';
   // Derived schemas bypass the registry — their synthetic names must
   // not shadow the source.
-  const derived = new __SchemaDef({ kind: 'shape', name, entries });
+  const derived = new SchemaDef({ kind: 'shape', name, entries });
   // sourceModel propagates through chained algebra: tooling follows the
   // chain back to the original :model for projection hints.
   derived._sourceModel = source._sourceModel || (source.kind === 'model' ? source : null);
   return derived;
 }
 
-function __schemaExpandMixins(host, fields, directives, ctx) {
+function expandMixins(host, fields, directives, ctx) {
   for (const d of directives) {
     if (d.name !== 'mixin' || !d.args || !d.args[0]) continue;
     const target = d.args[0].target;
@@ -1726,7 +1726,7 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
         host.name, host.kind);
     }
     if (ctx.seen.has(target)) continue;
-    const mx = __SchemaRegistry.getKind(target, 'mixin');
+    const mx = SchemaRegistry.getKind(target, 'mixin');
     if (!mx) {
       throw new SchemaError(
         [{ field: '', error: 'mixin-missing', message: 'unknown mixin: ' + target }],
@@ -1738,7 +1738,7 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
     const childDirectives = mx._desc.entries
       .filter((e) => e.tag === 'directive' && e.name === 'mixin')
       .map((e) => ({ name: e.name, args: e.args || [] }));
-    __schemaExpandMixins(host, fields, childDirectives, ctx);
+    expandMixins(host, fields, childDirectives, ctx);
     for (const e of mx._desc.entries) {
       if (e.tag !== 'field') continue;
       if (fields.has(e.name)) {
@@ -1775,13 +1775,12 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
 }
 
 function __schema(descriptor) {
-  const def = new __SchemaDef(descriptor);
+  const def = new SchemaDef(descriptor);
   // Named schemas land in the registry so nested field types
   // (`address! Address`, `role! Role`) resolve at validate time.
-  if (def.name) __SchemaRegistry.register(def);
+  if (def.name) SchemaRegistry.register(def);
   return def;
 }
 
-const registerCoercer = __schemaRegisterCoercer;
 
-export { __schema, SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence };
+export { __schema, SchemaError, SchemaRegistry, registerCoercer, SchemaDef, installPersistence };

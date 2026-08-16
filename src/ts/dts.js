@@ -10,7 +10,7 @@
 // normalized, never re-derived from generated code and never scanned
 // out of the emitted JS (the never-list). The text machinery itself
 // (normalization, the block-body member grammar, parameter rendering)
-// is shared with the TS-face emission through src/types/typetext.js — one
+// is shared with the TS-face emission through src/ts/typetext.js — one
 // renderer, two consumers.
 //
 // What declares (the `declare`-prefix convention):
@@ -43,7 +43,7 @@ import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
   renderParams, paramTyped, optionalReader,
 } from './typetext.js';
-import { buildSchemaTypeStory, SchemaTypeError } from './schemas.js';
+import { buildSchemaTypeStory, SchemaTypeError } from './schematext.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from '../emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
@@ -322,7 +322,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // (imported reactive names never auto-unwrap — the cross-module
   // contract), so the annotation types the `.value` slot, and the
   // container carries the `read(): T` structural brand (the runtime's
-  // detection predicate — src/types/components.js has the doctrine).
+  // detection predicate — src/ts/components.js has the doctrine).
   // A computed's container is read-only from the outside; both bind
   // `const`.
   const reactiveDecl = (node, exported) => {
@@ -346,7 +346,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // uses: `interface Name { …instance surface… }` (TS's separate
   // type/value namespaces make the same-name pairing legal, and a
   // consumer's `c: Name` annotation finds a type) beside the binding's
-  // constructor type — the props surface (src/types/components.js, the
+  // constructor type — the props surface (src/ts/components.js, the
   // renderer the face marks through) plus the static mount mirror.
   const isComponentDecl = (x) => {
     if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;

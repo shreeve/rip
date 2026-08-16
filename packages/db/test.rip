@@ -16,9 +16,9 @@ import {
   makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
   createMcpServer,
 } from 'rip/db'
-import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
-import { __schemaCamel } from '../../src/runtime/vocab.js'
-import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/orm.js'
+import { __schema, SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
+import { camelCase } from '../../src/runtime/vocab.js'
+import { __schemaSetAdapter, transaction as ormTransaction } from '../../src/runtime/orm.js'
 import * as mig from '../../src/cli/migrate.js'
 
 caught = (promise) -> promise.then((-> null), ((e) -> e))
@@ -894,10 +894,10 @@ test! "the camel projection is not total — the edge cases stay put", ->
   eq result.rows, [{ nickname_2: 1, Internal: 2, legacy_ISO_CODE: 3 }]
   eq result.columns, ['nickname_2', 'Internal', 'legacy_ISO_CODE']
 
-test! "the projection agrees with the runtime's __schemaCamel, spelling for spelling", ->
+test! "the projection agrees with the runtime's camelCase, spelling for spelling", ->
   for name in ['user_id', 'first_name', 'created_at', 'nickname_2', '_internal', 'legacy_ISO_CODE', 'mdm_id', 'a_b_c', 'ALL_CAPS']
     expected = {}
-    expected[__schemaCamel name] = 1
+    expected[camelCase name] = 1
     eq materializeAll({ columns: [{ name }], data: [[1]], rowCount: 1 }, { camel: true }), [expected]
 
 test! "a transaction surface takes { camel: true } like the top-level client", ->
@@ -1671,7 +1671,7 @@ dir = (name, ...args) -> { tag: 'directive', name, args }
 model = (name, ...entries) -> { kind: 'model', name, entries }
 
 withHarbor = (rules, scenario) ->
-  __SchemaRegistry.scope! ->
+  SchemaRegistry.scope! ->
     fetch = harborDouble rules
     __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
     sqls = (-> fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.sql)
@@ -1681,12 +1681,12 @@ test "setAdapter accepts a harborAdapter", ->
   adapter = harborAdapter { url: 'http://harbor', fetch: harborDouble() }
   eq typeof adapter.query, 'function'
   eq typeof adapter.begin, 'function'
-  __SchemaRegistry.scope (-> __schemaSetAdapter adapter)
+  SchemaRegistry.scope (-> __schemaSetAdapter adapter)
 
 test! "connect installs the adapter for the schema ORM", ->
   fetch = harborDouble [[/^SELECT/, hrows(['id'], [7])]]
   connect { url: 'http://harbor', fetch }
-  __SchemaRegistry.scope! ->
+  SchemaRegistry.scope! ->
     User = __schema model 'User', field('name')
     row = User.find! 7
     eq row.id, 7
@@ -1700,7 +1700,7 @@ test! "connect installs the adapter for the schema ORM", ->
 test! "a model statement inside a rip/db transaction runs on that session", ->
   fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
   connect { url: 'http://harbor', fetch }
-  __SchemaRegistry.scope! ->
+  SchemaRegistry.scope! ->
     User = __schema model 'User', field('name')
     transaction! (tx) ->
       tx.query! 'DELETE FROM "users"'
@@ -1715,9 +1715,9 @@ test! "a model statement inside a rip/db transaction runs on that session", ->
 test! "a raw statement inside a schema transaction runs on that session", ->
   fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
   connect { url: 'http://harbor', fetch }
-  __SchemaRegistry.scope! ->
+  SchemaRegistry.scope! ->
     User = __schema model 'User', field('name')
-    __schemaTransaction! ->
+    ormTransaction! ->
       User.create! { name: 'Ada' }
       query! 'DELETE FROM "users"'
     statements = fetch.calls.filter (c) -> c.sql?
@@ -1756,7 +1756,7 @@ p "\nORM — transactions"
 test! "a committing transaction opens a session, carries it, and drops it", ->
   trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
     User = define model 'User', field('name')
-    id = __schemaTransaction! ->
+    id = ormTransaction! ->
       u = User.create! { name: 'Ada' }
       u.id
     {
@@ -1773,7 +1773,7 @@ test! "a throwing transaction rolls back and still drops the session", ->
     User = define model 'User', field('name')
     threw = false
     try
-      __schemaTransaction! ->
+      ormTransaction! ->
         User.create! { name: 'Ada' }
         throw Error.new 'boom'
     catch
@@ -1866,7 +1866,7 @@ test! "afterCommit fires after COMMIT", ->
   trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
     fired = []
     User = define model 'User', field('name'), { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
-    __schemaTransaction! -> User.create! { name: 'Ada' }
+    ormTransaction! -> User.create! { name: 'Ada' }
     { fired, committedBeforeHook: fetch.calls.some (c) -> c.sql is 'COMMIT' }
   eq trace.fired, ['afterCommit']
   eq trace.committedBeforeHook, true
@@ -1878,7 +1878,7 @@ test! "afterRollback fires when the transaction throws", ->
       { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
       { tag: 'hook', name: 'afterRollback', fn: (-> fired.push 'afterRollback') }
     try
-      __schemaTransaction! ->
+      ormTransaction! ->
         User.create! { name: 'Ada' }
         throw Error.new 'boom'
     catch
@@ -1968,7 +1968,7 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
   fetchFn
 
 withRunner = (fetch, scenario) ->
-  __SchemaRegistry.scope! ->
+  SchemaRegistry.scope! ->
     __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
     scenario { define: (m) -> __schema(m) }
 

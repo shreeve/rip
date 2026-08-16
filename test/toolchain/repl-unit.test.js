@@ -16,7 +16,7 @@ import {
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
   RecallTracker, isHistoryNavKey, Osc11Matcher,
 } from '../../src/cli/repl.js';
-import { identifierRuns } from '../../src/lexer.js';
+import { identifierRuns } from '../../src/ident.js';
 import { CompileError } from '../../src/compile.js';
 
 describe('wrapper generation', () => {

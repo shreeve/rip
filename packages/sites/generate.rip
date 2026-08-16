@@ -10,7 +10,7 @@ compiler = import!(join(dirname(resolve(preload)), '..', 'compile.js')).compile
 # loader's enumeration — but Bun.build never consults the runtime's
 # virtual modules, so the bundler needs its own onResolve over the
 # same map.
-bare = import!(join(dirname(resolve(preload)), 'stdlib.js')).bareSpecifierMap()
+bare = import!(join(dirname(resolve(preload)), 'resolve.js')).bareSpecifierMap()
 
 rewriteMeta = (code, path) ->
   return code unless code.includes 'import.meta'

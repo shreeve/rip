@@ -71,33 +71,38 @@ var syncOpsFlag = () => {
 };
 
 // src/runtime/vocab.js
-function __schemaSnake(s) {
-  return String(s).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+function snakeCase(name) {
+  return String(name).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
-function __schemaCamel(col) {
+function camelCase(col) {
   return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
-function __schemaIsCanonicalName(name) {
+var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
+var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
+function fkName(model) {
+  return snakeCase(model) + "_id";
+}
+function isCanonicalName(name) {
   if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
     return false;
   if (/[A-Z]{2,}/.test(name))
     return false;
   return true;
 }
-function __schemaIsCanonicalTarget(name) {
-  if (typeof name !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(name))
+function isCanonicalTarget(target) {
+  if (typeof target !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(target))
     return false;
-  if (/[A-Z]{2,}/.test(name))
+  if (/[A-Z]{2,}/.test(target))
     return false;
   return true;
 }
-function __schemaIsColumnName(name) {
-  return typeof name === "string" && /^[a-z_][a-z0-9_]*$/.test(name);
+function isColumnName(col) {
+  return typeof col === "string" && /^[a-z_][a-z0-9_]*$/.test(col);
 }
-function __schemaIsLiteralColumn(name) {
-  return typeof name === "string" && name.length > 0 && !/[\u0000-\u001f\u007f".]/.test(name);
+function isLiteralColumn(col) {
+  return typeof col === "string" && col.length > 0 && !/[\u0000-\u001f\u007f".]/.test(col);
 }
-var __SCHEMA_MODEL_DIRECTIVES = {
+var MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: "target",
   timestamps: "none",
@@ -112,30 +117,30 @@ var __SCHEMA_MODEL_DIRECTIVES = {
   tableWas: "name",
   primaryKey: "field"
 };
-var __SCHEMA_ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
-var __SCHEMA_RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
-var __SCHEMA_FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
-var __SCHEMA_RELATION_ATTRS = {
+var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
+var RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
+var FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
+var RELATION_ATTRS = {
   __proto__: null,
   as: "property",
   foreignKey: "column",
   through: "model",
   targetKey: "column"
 };
-function __schemaAttrValueError(kind, key, value) {
+function attrValueError(kind, key, value) {
   if (typeof value !== "string" || !value.length) {
     return "'" + key + "' requires a non-empty string";
   }
-  if (kind === "property" && !__schemaIsCanonicalName(value)) {
+  if (kind === "property" && !isCanonicalName(value)) {
     return "'" + key + "' is a property name — canonical camelCase, e.g. {" + key + ": author}";
   }
-  if (kind === "model" && !__schemaIsCanonicalTarget(value)) {
+  if (kind === "model" && !isCanonicalTarget(value)) {
     return "'" + key + "' is a model name — canonical PascalCase, e.g. {" + key + ": Membership}";
   }
-  if (kind === "column" && !__schemaIsColumnName(value)) {
+  if (kind === "column" && !isColumnName(value)) {
     return "'" + key + "' is a column name Rip generates — lowercase, digits and underscores " + "only, e.g. {" + key + ': "author_id"}';
   }
-  if (kind === "literal" && !__schemaIsLiteralColumn(value)) {
+  if (kind === "literal" && !isLiteralColumn(value)) {
     return "'" + key + "' is a database column name — any spelling the database uses, but with " + "no dots, double quotes, or control characters";
   }
   return null;
@@ -158,10 +163,6 @@ var HOOK_NAMES = new Set([
   "afterCommit",
   "afterRollback"
 ]);
-var MODEL_DIRECTIVES = __SCHEMA_MODEL_DIRECTIVES;
-var RELATION_DIRECTIVES = __SCHEMA_RELATION_DIRECTIVES;
-var snakeCase = __schemaSnake;
-var camelCase = __schemaCamel;
 var SCHEMA_COERCIBLE_TYPES = new Set(["integer", "number", "boolean", "date", "datetime"]);
 var SCHEMA_NAMED_COERCER_TYPES = {
   __proto__: null,
@@ -908,17 +909,17 @@ function parseOptionsBracket(part, vocab, what, fail) {
     if (bare) {
       if (!isWord(valTok) && !isKeywordWord(valTok)) {
         const wrote = valTok.kind === "STRING" && valTok.value.startsWith('"') ? JSON.parse(valTok.value) : null;
-        const shown = wrote && !__schemaAttrValueError(kind, key, wrote) ? wrote : kind === "model" ? "Membership" : "author";
+        const shown = wrote && !attrValueError(kind, key, wrote) ? wrote : kind === "model" ? "Membership" : "author";
         fail(`${what} option '${key}' names ${kind === "model" ? "a model" : "a property"}, ` + `so it is written BARE — '{${key}: ${shown}}', ` + `not ${valTok.kind === "STRING" ? valTok.value : `a ${valTok.kind}`}. ` + `Quoting would name a database identifier, which is a different thing`, valTok.start);
       }
       value = valTok.value;
     } else {
       if (valTok.kind !== "STRING" || !valTok.value.startsWith('"')) {
-        fail(`${what} option '${key}' names a database column, so it is QUOTED — ` + `'{${key}: "${isWord(valTok) ? __schemaSnake(valTok.value) : "author_id"}"}'. ` + `A bare name would be a Rip name, which is a different thing`, valTok.start);
+        fail(`${what} option '${key}' names a database column, so it is QUOTED — ` + `'{${key}: "${isWord(valTok) ? snakeCase(valTok.value) : "author_id"}"}'. ` + `A bare name would be a Rip name, which is a different thing`, valTok.start);
       }
       value = JSON.parse(valTok.value);
     }
-    const why = __schemaAttrValueError(kind, key, value);
+    const why = attrValueError(kind, key, value);
     if (why)
       fail(`${what} option ${why}; got '${value}'`, keyTok.start);
     attrs[key] = value;
@@ -929,10 +930,10 @@ function parseOptionsBracket(part, vocab, what, fail) {
   return attrs;
 }
 function parseAttrsTokens(part, fieldName, fail) {
-  return parseOptionsBracket(part, __SCHEMA_FIELD_ATTRS, `field '${fieldName}'`, fail);
+  return parseOptionsBracket(part, FIELD_ATTRS, `field '${fieldName}'`, fail);
 }
 function parseRelationAttrs(part, directiveName, fail) {
-  const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
+  const attrs = parseOptionsBracket(part, RELATION_ATTRS, `@${directiveName}`, fail);
   if (attrs.through && directiveName === "belongsTo") {
     fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, part[0].start);
   }
@@ -1007,7 +1008,7 @@ function finishModelBody(entries, fail) {
     if (shape === undefined) {
       fail(`unknown directive '@${e.name}' on :model — legal: ${Object.keys(MODEL_DIRECTIVES).map((n) => "@" + n).join(", ")}, @ensure, @scope, @defaultScope`, e.nameStart ?? e.start);
     }
-    if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
+    if (ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
         fail(shape === "none" ? `duplicate '@${e.name}' — declared twice; a :model declares it once` : `duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
       }
@@ -1075,7 +1076,7 @@ function finishModelBody(entries, fail) {
       claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
       const a = e.args[0];
-      const fk = a.foreignKey ?? snakeCase(a.as ?? a.target) + "_id";
+      const fk = a.foreignKey ?? fkName(a.as ?? a.target);
       claim(camelCase(fk), fk, `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
     }
   }
@@ -1122,7 +1123,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       }
       if (pos < tokens.length)
         junk(tokens[pos], `takes one target name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? "?" : ""}'`);
-      if (!__schemaIsCanonicalTarget(t0.value)) {
+      if (!isCanonicalTarget(t0.value)) {
         fail(`@${e.name}: target '${t0.value}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, t0.start);
       }
       const arg = { target: t0.value };
@@ -1248,7 +1249,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       let pos = 1;
       let attrs = null;
       if (tokens[pos]?.kind === "," && tokens[pos + 1]?.kind === "{") {
-        attrs = parseOptionsBracket(tokens.slice(pos + 1), __SCHEMA_FIELD_ATTRS, `@${e.name}`, fail);
+        attrs = parseOptionsBracket(tokens.slice(pos + 1), FIELD_ATTRS, `@${e.name}`, fail);
         pos = tokens.length;
       }
       if (pos < tokens.length)
@@ -1256,7 +1257,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (attrs?.was) {
         fail(`@${e.name} option 'was' is a field-rename annotation; a primary-key rename is not a supported migration`, e.start);
       }
-      if (!__schemaIsCanonicalName(t0.value)) {
+      if (!isCanonicalName(t0.value)) {
         fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
       }
       const arg = { name: t0.value };
@@ -1851,10 +1852,7 @@ function foldHasMixin(descriptor) {
   return descriptor.entries.some((e) => e.tag === "directive" && e.name === "mixin");
 }
 function foldFkName(arg) {
-  if (arg.foreignKey)
-    return arg.foreignKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-  const snake = (arg.as ?? arg.target).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-  return (snake + "_id").replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
 }
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor))
@@ -3031,229 +3029,667 @@ function rewriteRender(tokens, mintId, fail) {
   return tokens;
 }
 
-// src/lexer.js
-function tagParams(tokens) {
-  for (let i = 1;i < tokens.length; i++) {
+// src/ident.js
+var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
+var IDENT_PART = /[$\w\x7f-\uffff]/;
+function isIdentifierName(value) {
+  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
+    return false;
+  for (let i = 1;i < value.length; i++) {
+    if (!IDENT_PART.test(value[i]))
+      return false;
+  }
+  return true;
+}
+var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
+function identifierRunAt(text, start) {
+  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
+    return null;
+  if (!IDENT_START.test(text[start]))
+    return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end]))
+    end++;
+  return { value: text.slice(start, end), start, end };
+}
+
+// src/implicit.js
+function applyInsertions(tokens, collect, mintId) {
+  const insertions = collect(tokens, mintId);
+  if (insertions.length === 0)
+    return tokens;
+  let read = tokens.length - 1;
+  let ins = insertions.length - 1;
+  tokens.length += insertions.length;
+  for (let write = tokens.length - 1;write >= 0; write--) {
     if (ops.on)
       ops.n++;
-    const kind = tokens[i].kind;
-    if (kind !== "->" && kind !== "=>")
-      continue;
-    let closeAt = i - 1;
-    let close = tokens[closeAt];
-    if (!close)
-      continue;
-    if (close.kind === "DO") {
-      close.kind = "DO_IIFE";
-      continue;
-    }
-    if (close.kind !== ")") {
-      let depth2 = 0;
-      let found = -1;
-      for (let j = i - 1;j >= 0; j--) {
-        if (ops.on)
-          ops.n++;
-        const t = tokens[j];
-        const k = t.kind;
-        if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
-          depth2++;
-        } else if (k === "(" || k === "[" || k === "{" || k === "PICK_START" || k === "OPTPICK_START" || k === "CALL_START" || k === "PARAM_START" || k === "INDEX_START" || k === "COMPARE" && t.value === "<") {
-          depth2--;
-        } else if (k === "SHIFT" && t.value === ">>")
-          depth2 += 2;
-        else if (k === "SHIFT" && t.value === ">>>")
-          depth2 += 3;
-        else if (depth2 === 0) {
-          if (k === ":") {
-            if (tokens[j - 1]?.kind === ")")
-              found = j - 1;
-            break;
-          }
-          if (k === "TERMINATOR" || k === "INDENT" || k === "OUTDENT" || k === "=" || k === "->" || k === "=>")
-            break;
-        }
-      }
-      if (found < 0)
-        continue;
-      closeAt = found;
-      close = tokens[closeAt];
+    if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
+      tokens[write] = insertions[ins--].token;
     } else {
-      let d = 0;
-      let op = -1;
-      for (let k = i - 1;k >= 0; k--) {
-        if (ops.on)
-          ops.n++;
-        const kk = tokens[k].kind;
-        if (kk === ")" || kk === "CALL_END" || kk === "PARAM_END")
-          d++;
-        else if (kk === "(" || kk === "CALL_START" || kk === "PARAM_START") {
-          if (--d === 0) {
-            op = k;
-            break;
-          }
-        }
-      }
-      if (op > 1 && tokens[op - 1].kind === ":" && tokens[op - 2]?.kind === ")") {
-        closeAt = op - 2;
-        close = tokens[closeAt];
-      }
+      tokens[write] = tokens[read--];
     }
+  }
+  return tokens;
+}
+function collectBlocks(tokens, mintId) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
+  const insertions = [];
+  const pending = [];
+  const commaInImplicitCall = (start, i) => {
+    let levels = 0;
+    for (let j = i - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (CLOSERS2.has(k) || k === "OUTDENT") {
+        levels++;
+        continue;
+      }
+      if (OPENERS2.has(k) || k === "INDENT") {
+        if (k === "INDENT")
+          return false;
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (startsImplicitCall(tokens, j))
+        return true;
+    }
+    return false;
+  };
+  const commaInImplicitObject = (start, i) => {
+    let levels = 0;
+    for (let j = i - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (CLOSERS2.has(k) || k === "OUTDENT") {
+        levels++;
+        continue;
+      }
+      if (OPENERS2.has(k) || k === "INDENT") {
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (k === ":" && tokens[j - 1]?.kind === "PROPERTY")
+        return looksObjectishAt(tokens, i + 1);
+      if (k === "TERMINATOR")
+        return false;
+    }
+    return false;
+  };
+  const BODY_BLOCK_CLAIMERS = new Set(["IF", "UNLESS", "TRY", "CATCH", "FINALLY", "SWITCH", "FOR", "CLASS"]);
+  const bodyEnd = (start) => {
     let depth = 0;
-    for (let j = closeAt - 1;j >= 0; j--) {
+    let inlineIfs = 0;
+    let pendingBlocks = 0;
+    for (let j = start;j < tokens.length; j++) {
       if (ops.on)
         ops.n++;
       const t = tokens[j];
-      if (t.kind === ")" || t.kind === "CALL_END" || t.kind === "INDEX_END" || t.kind === "]") {
+      const k = t.kind;
+      if (k === "INDENT") {
+        if (depth === 0) {
+          if (pendingBlocks === 0)
+            return j;
+          pendingBlocks--;
+        }
         depth++;
-      } else if (t.kind === "(" || t.kind === "CALL_START" || t.kind === "INDEX_START" || t.kind === "[") {
-        if (depth > 0) {
-          depth--;
-          continue;
-        }
-        if (t.kind === "(") {
-          t.kind = "PARAM_START";
-          close.kind = "PARAM_END";
-          if (tokens[j - 1]?.kind === "DO")
-            tokens[j - 1].kind = "DO_IIFE";
-        }
+      } else if (OPENERS2.has(k)) {
+        depth++;
+      } else if (CLOSERS2.has(k) || k === "OUTDENT") {
+        if (depth === 0)
+          return j;
+        depth--;
+      } else if (depth === 0 && (k === "IF" || k === "UNLESS")) {
+        inlineIfs++;
+        pendingBlocks++;
+      } else if (depth === 0 && BODY_BLOCK_CLAIMERS.has(k)) {
+        pendingBlocks++;
+      } else if (depth === 0 && k === "ELSE") {
+        if (inlineIfs === 0)
+          return j;
+        inlineIfs--;
+        pendingBlocks++;
+      } else if (depth === 0 && (k === "TERMINATOR" && t.value !== ";")) {
+        return j;
+      } else if (depth === 0 && (k === "." || k === "?.") && t.newLine) {
+        return j;
+      } else if (depth === 0 && k === "," && !commaInImplicitCall(start, j) && !commaInImplicitObject(start, j)) {
+        return j;
+      }
+    }
+    return tokens.length;
+  };
+  const makeBlockToken = (kind, at, origin) => ({
+    id: mintId(),
+    kind,
+    value: kind,
+    start: at,
+    end: at,
+    spaced: false,
+    newLine: false,
+    generated: true,
+    origin
+  });
+  const measureBody = (start) => {
+    const end = bodyEnd(start);
+    let firstReal = null;
+    for (let j = start;j < end; j++) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        firstReal = tokens[j];
         break;
       }
     }
-  }
-  return tokens;
-}
-function tagDynamicKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const pendingTernary = [0];
+    let lastReal = null;
+    for (let j = end - 1;j >= start; j--) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        lastReal = tokens[j];
+        break;
+      }
+    }
+    let afterReal = null;
+    for (let j = end;j < tokens.length; j++) {
+      if (ops.on)
+        ops.n++;
+      if (!tokens[j].generated) {
+        afterReal = tokens[j];
+        break;
+      }
+    }
+    const openAt = firstReal ? firstReal.start : tokens[start - 1]?.end ?? 0;
+    return {
+      end,
+      firstReal,
+      openAt,
+      closeAt: lastReal ? lastReal.end : openAt,
+      afterId: afterReal ? afterReal.id : null
+    };
+  };
+  let lastClosedAt = -1;
+  const closePendingAt = (i) => {
+    while (pending.length && pending[pending.length - 1].end === i) {
+      const b = pending.pop();
+      insertions.push({ at: i, token: makeBlockToken("OUTDENT", b.closeAt, b.afterId) });
+      lastClosedAt = i;
+    }
+  };
   for (let i = 0;i < tokens.length; i++) {
     if (ops.on)
       ops.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (k === "INDEX_START" && pendingTernary[pendingTernary.length - 1] === 0) {
-      let depth = 1;
-      let j = i;
-      while (++j < tokens.length && depth > 0) {
-        if (ops.on)
-          ops.n++;
-        if (OPENERS2.has(tokens[j].kind))
-          depth++;
-        else if (CLOSERS2.has(tokens[j].kind))
-          depth--;
-      }
-      if (depth === 0 && tokens[j]?.kind === ":") {
-        tokens[i].kind = "[";
-        tokens[j - 1].kind = "]";
-      }
+    closePendingAt(i);
+    const t = tokens[i];
+    if ((t.kind === "->" || t.kind === "=>") && tokens[i + 1] && tokens[i + 1].kind !== "INDENT") {
+      const body = measureBody(i + 1);
+      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
+      pending.push(body);
+    } else if (t.kind === "THEN") {
+      const body = measureBody(i + 1);
+      t.kind = "INDENT";
+      t.value = "INDENT";
+      t.generated = true;
+      t.start = t.end = body.firstReal ? body.firstReal.start : t.end;
+      t.origin = body.firstReal ? body.firstReal.id : null;
+      pending.push(body);
+    } else if (t.kind === "ELSE" && tokens[i + 1] && tokens[i + 1].kind !== "INDENT" && tokens[i + 1].kind !== "IF" && (lastClosedAt === i || tokens[i - 1]?.kind === "OUTDENT")) {
+      const body = measureBody(i + 1);
+      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
+      pending.push(body);
     }
-    if (OPENERS2.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
-      pendingTernary.pop();
   }
-  return tokens;
+  closePendingAt(tokens.length);
+  return insertions;
 }
-var ARROW_COMMA_AFTER = new Set([
+var IMPLICIT_FUNC = new Set(["IDENTIFIER", "PROPERTY", "SUPER", ")", "CALL_END", "]", "INDEX_END", "@", "THIS", "DAMMIT", "?", "PRESENCE"]);
+var IMPLICIT_CALL_STARTERS = new Set([
+  "IDENTIFIER",
+  "PROPERTY",
+  "NUMBER",
+  "STRING",
+  "STRING_START",
+  "REGEX",
+  "HEREGEX_START",
+  "SYMBOL",
+  "MAP_START",
+  "PARAM_START",
+  "IF",
+  "TRY",
+  "SWITCH",
+  "CLASS",
+  "THIS",
+  "SUPER",
+  "UNDEFINED",
+  "NULL",
+  "BOOL",
+  "UNARY",
+  "NEW",
+  "DO",
+  "DO_IIFE",
+  "UNARY_MATH",
+  "AWAIT",
+  "YIELD",
+  "THROW",
+  "@",
+  "->",
+  "=>",
+  "[",
+  "(",
+  "{",
+  "--",
+  "++"
+]);
+var IMPLICIT_END = new Set([
+  "POST_IF",
+  "POST_UNLESS",
+  "FOR",
+  "WHILE",
+  "UNTIL",
+  "WHEN",
+  "BY",
+  "LOOP",
+  "TERMINATOR",
+  "||",
+  "&&",
+  "??"
+]);
+var CONTROL_IN_IMPLICIT = new Set(["IF", "TRY", "FINALLY", "CATCH", "SWITCH", "FOR", "CLASS"]);
+var VALUE_END = new Set([
+  "IDENTIFIER",
+  "PROPERTY",
+  "NUMBER",
   "STRING",
   "STRING_END",
   "REGEX",
   "HEREGEX_END",
-  "NUMBER",
+  ")",
+  "CALL_END",
+  "]",
+  "INDEX_END",
+  "}",
+  "PICK_END",
   "BOOL",
   "NULL",
   "UNDEFINED",
-  "]",
-  "}",
-  "SYMBOL"
+  "THIS",
+  "@"
 ]);
-function insertArrowCommas(tokens) {
+var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+var startsImplicitCall = (tokens, j) => {
+  const t = tokens[j];
+  const next = tokens[j + 1];
+  if (!t || !next || !next.spaced || !IMPLICIT_FUNC.has(t.kind))
+    return false;
+  if ((t.kind === "]" || t.kind === "}") && (next.kind === "->" || next.kind === "=>"))
+    return false;
+  if (t.kind === "IDENTIFIER" && (t.value === "Infinity" || t.value === "NaN") && (next.kind === "->" || next.kind === "=>"))
+    return false;
+  if (IMPLICIT_CALL_STARTERS.has(next.kind))
+    return true;
+  return next.kind === "..." && tokens[j + 2] != null && IMPLICIT_CALL_STARTERS.has(tokens[j + 2].kind);
+};
+var looksObjectishAt = (tokens, j) => {
+  if (!tokens[j])
+    return false;
+  const bangColon = (a) => (tokens[a]?.kind === "DAMMIT" || tokens[a]?.kind === "VOID_MARKER") && tokens[a + 1]?.kind === ":";
+  if (tokens[j].kind === "@" && (tokens[j + 2]?.kind === ":" || bangColon(j + 2)))
+    return true;
+  if (tokens[j + 1]?.kind === ":" || bangColon(j + 1))
+    return true;
+  if (PASS_OPENERS.has(tokens[j].kind)) {
+    let d = 1;
+    let k = j;
+    while (++k < tokens.length && d > 0) {
+      if (ops.on)
+        ops.n++;
+      if (PASS_OPENERS.has(tokens[k].kind))
+        d++;
+      else if (PASS_CLOSERS.has(tokens[k].kind))
+        d--;
+    }
+    if (d === 0 && tokens[k]?.kind === ":")
+      return true;
+  }
+  return false;
+};
+var BLOCK_ARG_CARRIERS = new Set(["->", "=>", "[", "(", ",", "{", "ELSE", "="]);
+var LINE_BREAK_KINDS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
+var CALL_BLOCKING_HEADS = new Set(["CLASS", "EXTENDS", "IF", "CATCH", "SWITCH", "LEADING_WHEN", "FOR", "WHILE", "UNTIL", "DEF"]);
+var controlHeadBackwards = (tokens, j) => {
   let depth = 0;
-  for (let i = 0;i < tokens.length; i++) {
+  for (;j >= 0; j--) {
     if (ops.on)
       ops.n++;
-    const k = tokens[i].kind;
-    if (k === "CALL_START")
+    const k = tokens[j].kind;
+    if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
+      return true;
+    if (PASS_CLOSERS.has(k)) {
       depth++;
-    else if (k === "CALL_END")
-      depth--;
-    else if (depth > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
-      tokens.splice(i, 0, { kind: ",", value: ",", start: tokens[i].start, end: tokens[i].start });
-      i++;
-    }
-  }
-  return tokens;
-}
-function tagCompoundKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
-  const pendingTernary = [0];
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
-      let j = i;
-      for (;; ) {
-        if (ops.on)
-          ops.n++;
-        const sep = tokens[j + 1];
-        const nxt = tokens[j + 2];
-        if (sep === undefined || !identish(nxt))
-          break;
-        if (sep.kind === ".") {
-          j += 2;
-          continue;
-        }
-        if (sep.kind === "-" && sep.start === tokens[j].end && nxt.start === sep.end) {
-          j += 2;
-          continue;
-        }
-        break;
-      }
-      if (j > i && tokens[j + 1]?.kind === ":") {
-        let buf = "";
-        for (let m = i;m <= j; m++)
-          buf += tokens[m].value;
-        const collapsed = { ...tokens[i], kind: "STRING", value: JSON.stringify(buf), end: tokens[j].end };
-        tokens.splice(i, j - i + 1, collapsed);
-      }
-    }
-    if (OPENERS2.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
-      pendingTernary.pop();
-  }
-  return tokens;
-}
-function tagVoidMarkers(tokens) {
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    if (tokens[i].kind !== "DAMMIT")
       continue;
-    if (tokens[i + 1]?.kind === "=" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF") {
-      tokens[i].kind = "VOID_MARKER";
+    }
+    if (PASS_OPENERS.has(k)) {
+      if (depth > 0) {
+        depth--;
+        continue;
+      }
+      if (!tokens[j].generated || LINE_BREAK_KINDS.has(k))
+        return false;
+      continue;
+    }
+    if (depth === 0 && LINE_BREAK_KINDS.has(k))
+      return false;
+  }
+  return false;
+};
+function collectObjects(tokens, mintId) {
+  const stack = [];
+  const insertions = [];
+  const pendingTernary = [0];
+  let lastReal = null;
+  const top = () => stack[stack.length - 1];
+  const makeBrace = (kind, at, origin, flags = {}) => ({
+    id: mintId(),
+    kind,
+    value: kind,
+    start: at,
+    end: at,
+    spaced: flags.spaced ?? false,
+    newLine: flags.newLine ?? false,
+    generated: true,
+    origin
+  });
+  const closeObject = (at) => {
+    stack.pop();
+    insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  const looksObjectish = (j) => looksObjectishAt(tokens, j);
+  const pendingIndentedObjectCallAt = (indentAt) => {
+    const before = tokens[indentAt - 1];
+    return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
+  };
+  const openCallBetween = (from, i) => {
+    let levels = 0;
+    for (let j = i - 1;j > from; j--) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (PASS_CLOSERS.has(k)) {
+        levels++;
+        continue;
+      }
+      if (PASS_OPENERS.has(k)) {
+        if (k === "INDENT" && levels === 0) {
+          return pendingIndentedObjectCallAt(j);
+        }
+        levels--;
+        if (levels < 0)
+          return false;
+        continue;
+      }
+      if (levels > 0)
+        continue;
+      if (k === "TERMINATOR")
+        return false;
+      if (startsImplicitCall(tokens, j))
+        return true;
+    }
+    return false;
+  };
+  const objectContinues = (j) => {
+    for (let d = 0;j < tokens.length; j++) {
+      if (ops.on)
+        ops.n++;
+      const k = tokens[j].kind;
+      if (PASS_OPENERS.has(k))
+        d++;
+      else if (PASS_CLOSERS.has(k)) {
+        if (d === 0)
+          return false;
+        d--;
+      } else if (k === "TERMINATOR" && d === 0) {
+        return looksObjectish(j + 1);
+      }
+    }
+    return false;
+  };
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const t = tokens[i];
+    const k = t.kind;
+    const prev = tokens[i - 1];
+    if (prev && !prev.generated)
+      lastReal = prev;
+    if (top()?.kind === "object" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && prev && VALUE_END.has(prev.kind))) {
+      stack.push({ kind: "CONTROL", trigger: k });
+      continue;
+    }
+    if (k === "INDENT") {
+      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
+        while (top()?.kind === "object" && prev.kind !== ":")
+          closeObject(i);
+      }
+      if (top()?.kind === "CONTROL")
+        stack.pop();
+      stack.push({ kind: "INDENT", at: i });
+      pendingTernary.push(0);
+      continue;
+    }
+    if (PASS_OPENERS.has(k)) {
+      stack.push({ kind: k, at: i });
+      pendingTernary.push(0);
+      continue;
+    }
+    if (PASS_CLOSERS.has(k)) {
+      while (top()?.kind === "object" || top()?.kind === "CONTROL") {
+        if (top().kind === "object")
+          closeObject(i);
+        else
+          stack.pop();
+      }
+      stack.pop();
+      if (pendingTernary.length > 1)
+        pendingTernary.pop();
+      if (k === "OUTDENT") {
+        for (let d = stack.length - 1;d >= 0; d--) {
+          const fr = stack[d];
+          if (fr.kind !== "object" && fr.kind !== "CONTROL")
+            break;
+          if (fr.kind === "object")
+            fr.sameLine = false;
+        }
+      }
+      continue;
+    }
+    if (k === "TERNARY")
+      pendingTernary[pendingTernary.length - 1]++;
+    if (k === ":") {
+      const pt = pendingTernary.length - 1;
+      if (pendingTernary[pt] > 0) {
+        pendingTernary[pt]--;
+        continue;
+      }
+      if (prev?.kind === "DAMMIT")
+        prev.kind = "VOID_MARKER";
+      const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
+      let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
+      if (tokens[i - 2 - bang]?.kind === "@")
+        s = i - 2 - bang;
+      const before = tokens[s - 1];
+      const callWillOpen = startsImplicitCall(tokens, s - 1);
+      const startsLine = !callWillOpen && (s <= 0 || LINE_BREAK_KINDS.has(before?.kind) || Boolean(before?.newLine));
+      const f = top();
+      const under = stack[stack.length - 2];
+      const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
+      const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
+      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
+      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
+        continue;
+      }
+      stack.push({ kind: "object", at: s, sameLine: true, startsLine });
+      insertions.push({
+        at: s,
+        token: makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine })
+      });
+      continue;
+    }
+    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
+      if (k === "||" || k === "&&" || k === "??")
+        continue;
+      if (k === "TERMINATOR") {
+        pendingTernary[pendingTernary.length - 1] = 0;
+        for (let d = stack.length - 1;d >= 0; d--) {
+          const fr = stack[d];
+          if (fr.kind !== "object" && fr.kind !== "CONTROL")
+            break;
+          if (fr.kind === "object")
+            fr.sameLine = false;
+        }
+      }
+      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL" && top()?.trigger === "CLASS") {
+        const fr = top();
+        if (fr.kind === "CONTROL") {
+          stack.pop();
+          continue;
+        }
+        if (k === "TERMINATOR") {
+          if (prev?.kind !== "," && !(fr.startsLine && looksObjectish(i + 1)))
+            closeObject(i);
+          else
+            break;
+        } else {
+          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && objectContinues(i + 1)))
+            closeObject(i);
+          else
+            break;
+        }
+      }
+      continue;
+    }
+    if (k === "," && top()?.kind === "object" && !openCallBetween(top().at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
+      const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
+      while (top()?.kind === "object")
+        closeObject(i + offset);
     }
   }
-  return tokens;
+  if (tokens.length && !tokens[tokens.length - 1].generated)
+    lastReal = tokens[tokens.length - 1];
+  while (top()?.kind === "object" || top()?.kind === "CONTROL") {
+    if (top().kind === "object")
+      closeObject(tokens.length);
+    else
+      stack.pop();
+  }
+  return insertions;
 }
+function collectCalls(tokens, mintId) {
+  const stack = [];
+  const insertions = [];
+  let callIndentAt = -1;
+  const makeCallToken = (kind, at, origin) => ({
+    id: mintId(),
+    kind,
+    value: kind === "CALL_START" ? "(" : ")",
+    start: at,
+    end: at,
+    spaced: false,
+    newLine: false,
+    generated: true,
+    origin
+  });
+  let lastReal = null;
+  const closeCall = (at) => {
+    stack.pop();
+    insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const t = tokens[i];
+    const next = tokens[i + 1];
+    const k = t.kind;
+    if (i > 0 && !tokens[i - 1].generated)
+      lastReal = tokens[i - 1];
+    if (stack[stack.length - 1] === "call" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
+      stack.push(k === "CLASS" ? "CONTROL_CLASS" : "CONTROL");
+      continue;
+    }
+    if (k === "INDENT") {
+      if (i === callIndentAt) {
+        stack.push("INDENT");
+        continue;
+      }
+      const prev = tokens[i - 1];
+      if (!prev || !BLOCK_ARG_CARRIERS.has(prev.kind)) {
+        while (stack[stack.length - 1] === "call")
+          closeCall(i);
+      }
+      if (stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS")
+        stack.pop();
+      stack.push("INDENT");
+      continue;
+    }
+    if (PASS_OPENERS.has(k)) {
+      stack.push(k);
+    } else if (PASS_CLOSERS.has(k)) {
+      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+        if (stack[stack.length - 1] === "call")
+          closeCall(i);
+        else
+          stack.pop();
+      }
+      stack.pop();
+    }
+    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
+      if (k === "||" || k === "&&" || k === "??")
+        continue;
+      if (tokens[i - 1]?.kind !== ",") {
+        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
+          if (stack[stack.length - 1] === "call")
+            closeCall(i);
+          else
+            stack.pop();
+        }
+      }
+      continue;
+    }
+    if (startsImplicitCall(tokens, i) || IMPLICIT_FUNC.has(k) && next && next.spaced && (next.kind === "+" || next.kind === "-") && tokens[i + 2] && !tokens[i + 2].spaced && !tokens[i + 2].newLine) {
+      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", next.start, next.generated ? next.origin : next.id) });
+      stack.push("call");
+    } else if (IMPLICIT_FUNC.has(k) && next?.kind === "INDENT" && tokens[i + 2]?.kind === "{" && tokens[i + 2].generated && !controlHeadBackwards(tokens, i)) {
+      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", tokens[i + 2].start, tokens[i + 2].origin) });
+      stack.push("call");
+      callIndentAt = i + 1;
+    }
+  }
+  if (tokens.length && !tokens[tokens.length - 1].generated)
+    lastReal = tokens[tokens.length - 1];
+  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+    if (stack[stack.length - 1] === "call")
+      closeCall(tokens.length);
+    else
+      stack.pop();
+  }
+  return insertions;
+}
+var implicitBlocks = (tokens, mintId) => applyInsertions(tokens, collectBlocks, mintId);
+var implicitObjects = (tokens, mintId) => applyInsertions(tokens, collectObjects, mintId);
+var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mintId);
+
+// src/types.js
 var CAST_LHS_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -4171,6 +4607,17 @@ var CLASS_HEAD_ENDERS = new Set([
   "INTERPOLATION_START",
   "INTERPOLATION_END"
 ]);
+var VALUE_WORDS = new Map([
+  ["yes", "true"],
+  ["no", "false"],
+  ["on", "true"],
+  ["off", "false"],
+  ["true", "true"],
+  ["false", "false"],
+  ["null", "null"],
+  ["undefined", "undefined"],
+  ["this", "this"]
+]);
 function rewriteTypes(tokens, mintId, text, fail) {
   const out = [];
   const frames = [];
@@ -4706,6 +5153,230 @@ function rewriteTypes(tokens, mintId, text, fail) {
   }
   return tokens;
 }
+
+// src/lexer.js
+function tagParams(tokens) {
+  for (let i = 1;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const kind = tokens[i].kind;
+    if (kind !== "->" && kind !== "=>")
+      continue;
+    let closeAt = i - 1;
+    let close = tokens[closeAt];
+    if (!close)
+      continue;
+    if (close.kind === "DO") {
+      close.kind = "DO_IIFE";
+      continue;
+    }
+    if (close.kind !== ")") {
+      let depth2 = 0;
+      let found = -1;
+      for (let j = i - 1;j >= 0; j--) {
+        if (ops.on)
+          ops.n++;
+        const t = tokens[j];
+        const k = t.kind;
+        if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
+          depth2++;
+        } else if (k === "(" || k === "[" || k === "{" || k === "PICK_START" || k === "OPTPICK_START" || k === "CALL_START" || k === "PARAM_START" || k === "INDEX_START" || k === "COMPARE" && t.value === "<") {
+          depth2--;
+        } else if (k === "SHIFT" && t.value === ">>")
+          depth2 += 2;
+        else if (k === "SHIFT" && t.value === ">>>")
+          depth2 += 3;
+        else if (depth2 === 0) {
+          if (k === ":") {
+            if (tokens[j - 1]?.kind === ")")
+              found = j - 1;
+            break;
+          }
+          if (k === "TERMINATOR" || k === "INDENT" || k === "OUTDENT" || k === "=" || k === "->" || k === "=>")
+            break;
+        }
+      }
+      if (found < 0)
+        continue;
+      closeAt = found;
+      close = tokens[closeAt];
+    } else {
+      let d = 0;
+      let op = -1;
+      for (let k = i - 1;k >= 0; k--) {
+        if (ops.on)
+          ops.n++;
+        const kk = tokens[k].kind;
+        if (kk === ")" || kk === "CALL_END" || kk === "PARAM_END")
+          d++;
+        else if (kk === "(" || kk === "CALL_START" || kk === "PARAM_START") {
+          if (--d === 0) {
+            op = k;
+            break;
+          }
+        }
+      }
+      if (op > 1 && tokens[op - 1].kind === ":" && tokens[op - 2]?.kind === ")") {
+        closeAt = op - 2;
+        close = tokens[closeAt];
+      }
+    }
+    let depth = 0;
+    for (let j = closeAt - 1;j >= 0; j--) {
+      if (ops.on)
+        ops.n++;
+      const t = tokens[j];
+      if (t.kind === ")" || t.kind === "CALL_END" || t.kind === "INDEX_END" || t.kind === "]") {
+        depth++;
+      } else if (t.kind === "(" || t.kind === "CALL_START" || t.kind === "INDEX_START" || t.kind === "[") {
+        if (depth > 0) {
+          depth--;
+          continue;
+        }
+        if (t.kind === "(") {
+          t.kind = "PARAM_START";
+          close.kind = "PARAM_END";
+          if (tokens[j - 1]?.kind === "DO")
+            tokens[j - 1].kind = "DO_IIFE";
+        }
+        break;
+      }
+    }
+  }
+  return tokens;
+}
+function tagDynamicKeys(tokens) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const pendingTernary = [0];
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "TERNARY") {
+      pendingTernary[pendingTernary.length - 1]++;
+    } else if (k === ":" || k === "TERMINATOR") {
+      const top = pendingTernary.length - 1;
+      if (k === "TERMINATOR")
+        pendingTernary[top] = 0;
+      else if (pendingTernary[top] > 0)
+        pendingTernary[top]--;
+    } else if (k === "INDEX_START" && pendingTernary[pendingTernary.length - 1] === 0) {
+      let depth = 1;
+      let j = i;
+      while (++j < tokens.length && depth > 0) {
+        if (ops.on)
+          ops.n++;
+        if (OPENERS2.has(tokens[j].kind))
+          depth++;
+        else if (CLOSERS2.has(tokens[j].kind))
+          depth--;
+      }
+      if (depth === 0 && tokens[j]?.kind === ":") {
+        tokens[i].kind = "[";
+        tokens[j - 1].kind = "]";
+      }
+    }
+    if (OPENERS2.has(tokens[i].kind))
+      pendingTernary.push(0);
+    else if (CLOSERS2.has(tokens[i].kind))
+      pendingTernary.pop();
+  }
+  return tokens;
+}
+var ARROW_COMMA_AFTER = new Set([
+  "STRING",
+  "STRING_END",
+  "REGEX",
+  "HEREGEX_END",
+  "NUMBER",
+  "BOOL",
+  "NULL",
+  "UNDEFINED",
+  "]",
+  "}",
+  "SYMBOL"
+]);
+function insertArrowCommas(tokens) {
+  let depth = 0;
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "CALL_START")
+      depth++;
+    else if (k === "CALL_END")
+      depth--;
+    else if (depth > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
+      tokens.splice(i, 0, { kind: ",", value: ",", start: tokens[i].start, end: tokens[i].start });
+      i++;
+    }
+  }
+  return tokens;
+}
+function tagCompoundKeys(tokens) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
+  const pendingTernary = [0];
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "TERNARY") {
+      pendingTernary[pendingTernary.length - 1]++;
+    } else if (k === ":" || k === "TERMINATOR") {
+      const top = pendingTernary.length - 1;
+      if (k === "TERMINATOR")
+        pendingTernary[top] = 0;
+      else if (pendingTernary[top] > 0)
+        pendingTernary[top]--;
+    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
+      let j = i;
+      for (;; ) {
+        if (ops.on)
+          ops.n++;
+        const sep = tokens[j + 1];
+        const nxt = tokens[j + 2];
+        if (sep === undefined || !identish(nxt))
+          break;
+        if (sep.kind === ".") {
+          j += 2;
+          continue;
+        }
+        if (sep.kind === "-" && sep.start === tokens[j].end && nxt.start === sep.end) {
+          j += 2;
+          continue;
+        }
+        break;
+      }
+      if (j > i && tokens[j + 1]?.kind === ":") {
+        let buf = "";
+        for (let m = i;m <= j; m++)
+          buf += tokens[m].value;
+        const collapsed = { ...tokens[i], kind: "STRING", value: JSON.stringify(buf), end: tokens[j].end };
+        tokens.splice(i, j - i + 1, collapsed);
+      }
+    }
+    if (OPENERS2.has(tokens[i].kind))
+      pendingTernary.push(0);
+    else if (CLOSERS2.has(tokens[i].kind))
+      pendingTernary.pop();
+  }
+  return tokens;
+}
+function tagVoidMarkers(tokens) {
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    if (tokens[i].kind !== "DAMMIT")
+      continue;
+    if (tokens[i + 1]?.kind === "=" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF") {
+      tokens[i].kind = "VOID_MARKER";
+    }
+  }
+  return tokens;
+}
 var KEYWORDS = {
   __proto__: null,
   def: "DEF",
@@ -4775,17 +5446,6 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
-var VALUE_WORDS = new Map([
-  ["yes", "true"],
-  ["no", "false"],
-  ["on", "true"],
-  ["off", "false"],
-  ["true", "true"],
-  ["false", "false"],
-  ["null", "null"],
-  ["undefined", "undefined"],
-  ["this", "this"]
-]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
@@ -4865,28 +5525,6 @@ var UNFINISHED = new Set([
 ]);
 var CALLABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "NUMBER", "STRING", "]", "INDEX_END", "SUPER", "DAMMIT", "PRESENCE", "DYNAMIC_IMPORT"]);
 var INDEXABLE = new Set([...CALLABLE, "BOOL", "NULL", "UNDEFINED", "}", "PICK_END", "STRING_END", "REGEX", "HEREGEX_END", "THIS", "@"]);
-var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
-var IDENT_PART = /[$\w\x7f-\uffff]/;
-function isIdentifierName(value) {
-  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
-    return false;
-  for (let i = 1;i < value.length; i++) {
-    if (!IDENT_PART.test(value[i]))
-      return false;
-  }
-  return true;
-}
-var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
-function identifierRunAt(text, start) {
-  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
-    return null;
-  if (!IDENT_START.test(text[start]))
-    return null;
-  let end = start + 1;
-  while (end < text.length && IDENT_PART.test(text[end]))
-    end++;
-  return { value: text.slice(start, end), start, end };
-}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end]))
@@ -5941,643 +6579,12 @@ ${baseline}`).join(`
   }
   rewriteRender(tokens, mintId, fail);
   tagCompoundKeys(tokens);
-  applyInsertionPass(tokens, implicitBlocks, mintId);
+  implicitBlocks(tokens, mintId);
   tagPostfixConditionals(tokens);
-  applyInsertionPass(tokens, implicitObjects, mintId);
-  applyInsertionPass(tokens, implicitCalls, mintId);
+  implicitObjects(tokens, mintId);
+  implicitCalls(tokens, mintId);
   insertArrowCommas(tokens);
   return { tokens, trivia, source, lexDiagnostics };
-}
-function applyInsertionPass(tokens, pass, mintId) {
-  const insertions = pass(tokens, mintId);
-  if (insertions.length === 0)
-    return tokens;
-  let read = tokens.length - 1;
-  let ins = insertions.length - 1;
-  tokens.length += insertions.length;
-  for (let write = tokens.length - 1;write >= 0; write--) {
-    if (ops.on)
-      ops.n++;
-    if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
-      tokens[write] = insertions[ins--].token;
-    } else {
-      tokens[write] = tokens[read--];
-    }
-  }
-  return tokens;
-}
-function implicitBlocks(tokens, mintId) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
-  const insertions = [];
-  const pending = [];
-  const commaInImplicitCall = (start, i) => {
-    let levels = 0;
-    for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
-        levels++;
-        continue;
-      }
-      if (OPENERS2.has(k) || k === "INDENT") {
-        if (k === "INDENT")
-          return false;
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (startsImplicitCall(tokens, j))
-        return true;
-    }
-    return false;
-  };
-  const commaInImplicitObject = (start, i) => {
-    let levels = 0;
-    for (let j = i - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
-        levels++;
-        continue;
-      }
-      if (OPENERS2.has(k) || k === "INDENT") {
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (k === ":" && tokens[j - 1]?.kind === "PROPERTY")
-        return looksObjectishAt(tokens, i + 1);
-      if (k === "TERMINATOR")
-        return false;
-    }
-    return false;
-  };
-  const BODY_BLOCK_CLAIMERS = new Set(["IF", "UNLESS", "TRY", "CATCH", "FINALLY", "SWITCH", "FOR", "CLASS"]);
-  const bodyEnd = (start) => {
-    let depth = 0;
-    let inlineIfs = 0;
-    let pendingBlocks = 0;
-    for (let j = start;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      const t = tokens[j];
-      const k = t.kind;
-      if (k === "INDENT") {
-        if (depth === 0) {
-          if (pendingBlocks === 0)
-            return j;
-          pendingBlocks--;
-        }
-        depth++;
-      } else if (OPENERS2.has(k)) {
-        depth++;
-      } else if (CLOSERS2.has(k) || k === "OUTDENT") {
-        if (depth === 0)
-          return j;
-        depth--;
-      } else if (depth === 0 && (k === "IF" || k === "UNLESS")) {
-        inlineIfs++;
-        pendingBlocks++;
-      } else if (depth === 0 && BODY_BLOCK_CLAIMERS.has(k)) {
-        pendingBlocks++;
-      } else if (depth === 0 && k === "ELSE") {
-        if (inlineIfs === 0)
-          return j;
-        inlineIfs--;
-        pendingBlocks++;
-      } else if (depth === 0 && (k === "TERMINATOR" && t.value !== ";")) {
-        return j;
-      } else if (depth === 0 && (k === "." || k === "?.") && t.newLine) {
-        return j;
-      } else if (depth === 0 && k === "," && !commaInImplicitCall(start, j) && !commaInImplicitObject(start, j)) {
-        return j;
-      }
-    }
-    return tokens.length;
-  };
-  const makeBlockToken = (kind, at, origin) => ({
-    id: mintId(),
-    kind,
-    value: kind,
-    start: at,
-    end: at,
-    spaced: false,
-    newLine: false,
-    generated: true,
-    origin
-  });
-  const measureBody = (start) => {
-    const end = bodyEnd(start);
-    let firstReal = null;
-    for (let j = start;j < end; j++) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        firstReal = tokens[j];
-        break;
-      }
-    }
-    let lastReal = null;
-    for (let j = end - 1;j >= start; j--) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        lastReal = tokens[j];
-        break;
-      }
-    }
-    let afterReal = null;
-    for (let j = end;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      if (!tokens[j].generated) {
-        afterReal = tokens[j];
-        break;
-      }
-    }
-    const openAt = firstReal ? firstReal.start : tokens[start - 1]?.end ?? 0;
-    return {
-      end,
-      firstReal,
-      openAt,
-      closeAt: lastReal ? lastReal.end : openAt,
-      afterId: afterReal ? afterReal.id : null
-    };
-  };
-  let lastClosedAt = -1;
-  const closePendingAt = (i) => {
-    while (pending.length && pending[pending.length - 1].end === i) {
-      const b = pending.pop();
-      insertions.push({ at: i, token: makeBlockToken("OUTDENT", b.closeAt, b.afterId) });
-      lastClosedAt = i;
-    }
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    closePendingAt(i);
-    const t = tokens[i];
-    if ((t.kind === "->" || t.kind === "=>") && tokens[i + 1] && tokens[i + 1].kind !== "INDENT") {
-      const body = measureBody(i + 1);
-      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
-      pending.push(body);
-    } else if (t.kind === "THEN") {
-      const body = measureBody(i + 1);
-      t.kind = "INDENT";
-      t.value = "INDENT";
-      t.generated = true;
-      t.start = t.end = body.firstReal ? body.firstReal.start : t.end;
-      t.origin = body.firstReal ? body.firstReal.id : null;
-      pending.push(body);
-    } else if (t.kind === "ELSE" && tokens[i + 1] && tokens[i + 1].kind !== "INDENT" && tokens[i + 1].kind !== "IF" && (lastClosedAt === i || tokens[i - 1]?.kind === "OUTDENT")) {
-      const body = measureBody(i + 1);
-      insertions.push({ at: i + 1, token: makeBlockToken("INDENT", body.openAt, body.firstReal ? body.firstReal.id : null) });
-      pending.push(body);
-    }
-  }
-  closePendingAt(tokens.length);
-  return insertions;
-}
-var IMPLICIT_FUNC = new Set(["IDENTIFIER", "PROPERTY", "SUPER", ")", "CALL_END", "]", "INDEX_END", "@", "THIS", "DAMMIT", "?", "PRESENCE"]);
-var IMPLICIT_CALL_STARTERS = new Set([
-  "IDENTIFIER",
-  "PROPERTY",
-  "NUMBER",
-  "STRING",
-  "STRING_START",
-  "REGEX",
-  "HEREGEX_START",
-  "SYMBOL",
-  "MAP_START",
-  "PARAM_START",
-  "IF",
-  "TRY",
-  "SWITCH",
-  "CLASS",
-  "THIS",
-  "SUPER",
-  "UNDEFINED",
-  "NULL",
-  "BOOL",
-  "UNARY",
-  "NEW",
-  "DO",
-  "DO_IIFE",
-  "UNARY_MATH",
-  "AWAIT",
-  "YIELD",
-  "THROW",
-  "@",
-  "->",
-  "=>",
-  "[",
-  "(",
-  "{",
-  "--",
-  "++"
-]);
-var IMPLICIT_END = new Set([
-  "POST_IF",
-  "POST_UNLESS",
-  "FOR",
-  "WHILE",
-  "UNTIL",
-  "WHEN",
-  "BY",
-  "LOOP",
-  "TERMINATOR",
-  "||",
-  "&&",
-  "??"
-]);
-var CONTROL_IN_IMPLICIT = new Set(["IF", "TRY", "FINALLY", "CATCH", "SWITCH", "FOR", "CLASS"]);
-var VALUE_END = new Set([
-  "IDENTIFIER",
-  "PROPERTY",
-  "NUMBER",
-  "STRING",
-  "STRING_END",
-  "REGEX",
-  "HEREGEX_END",
-  ")",
-  "CALL_END",
-  "]",
-  "INDEX_END",
-  "}",
-  "PICK_END",
-  "BOOL",
-  "NULL",
-  "UNDEFINED",
-  "THIS",
-  "@"
-]);
-var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-var startsImplicitCall = (tokens, j) => {
-  const t = tokens[j];
-  const next = tokens[j + 1];
-  if (!t || !next || !next.spaced || !IMPLICIT_FUNC.has(t.kind))
-    return false;
-  if ((t.kind === "]" || t.kind === "}") && (next.kind === "->" || next.kind === "=>"))
-    return false;
-  if (t.kind === "IDENTIFIER" && (t.value === "Infinity" || t.value === "NaN") && (next.kind === "->" || next.kind === "=>"))
-    return false;
-  if (IMPLICIT_CALL_STARTERS.has(next.kind))
-    return true;
-  return next.kind === "..." && tokens[j + 2] != null && IMPLICIT_CALL_STARTERS.has(tokens[j + 2].kind);
-};
-var looksObjectishAt = (tokens, j) => {
-  if (!tokens[j])
-    return false;
-  const bangColon = (a) => (tokens[a]?.kind === "DAMMIT" || tokens[a]?.kind === "VOID_MARKER") && tokens[a + 1]?.kind === ":";
-  if (tokens[j].kind === "@" && (tokens[j + 2]?.kind === ":" || bangColon(j + 2)))
-    return true;
-  if (tokens[j + 1]?.kind === ":" || bangColon(j + 1))
-    return true;
-  if (PASS_OPENERS.has(tokens[j].kind)) {
-    let d = 1;
-    let k = j;
-    while (++k < tokens.length && d > 0) {
-      if (ops.on)
-        ops.n++;
-      if (PASS_OPENERS.has(tokens[k].kind))
-        d++;
-      else if (PASS_CLOSERS.has(tokens[k].kind))
-        d--;
-    }
-    if (d === 0 && tokens[k]?.kind === ":")
-      return true;
-  }
-  return false;
-};
-var BLOCK_ARG_CARRIERS = new Set(["->", "=>", "[", "(", ",", "{", "ELSE", "="]);
-var LINE_BREAK_KINDS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
-var CALL_BLOCKING_HEADS = new Set(["CLASS", "EXTENDS", "IF", "CATCH", "SWITCH", "LEADING_WHEN", "FOR", "WHILE", "UNTIL", "DEF"]);
-var controlHeadBackwards = (tokens, j) => {
-  let depth = 0;
-  for (;j >= 0; j--) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[j].kind;
-    if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
-      return true;
-    if (PASS_CLOSERS.has(k)) {
-      depth++;
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      if (depth > 0) {
-        depth--;
-        continue;
-      }
-      if (!tokens[j].generated || LINE_BREAK_KINDS.has(k))
-        return false;
-      continue;
-    }
-    if (depth === 0 && LINE_BREAK_KINDS.has(k))
-      return false;
-  }
-  return false;
-};
-function implicitObjects(tokens, mintId) {
-  const stack = [];
-  const insertions = [];
-  const pendingTernary = [0];
-  let lastReal = null;
-  const top = () => stack[stack.length - 1];
-  const makeBrace = (kind, at, origin, flags = {}) => ({
-    id: mintId(),
-    kind,
-    value: kind,
-    start: at,
-    end: at,
-    spaced: flags.spaced ?? false,
-    newLine: flags.newLine ?? false,
-    generated: true,
-    origin
-  });
-  const closeObject = (at) => {
-    stack.pop();
-    insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
-  };
-  const looksObjectish = (j) => looksObjectishAt(tokens, j);
-  const pendingIndentedObjectCallAt = (indentAt) => {
-    const before = tokens[indentAt - 1];
-    return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
-  };
-  const openCallBetween = (from, i) => {
-    let levels = 0;
-    for (let j = i - 1;j > from; j--) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (PASS_CLOSERS.has(k)) {
-        levels++;
-        continue;
-      }
-      if (PASS_OPENERS.has(k)) {
-        if (k === "INDENT" && levels === 0) {
-          return pendingIndentedObjectCallAt(j);
-        }
-        levels--;
-        if (levels < 0)
-          return false;
-        continue;
-      }
-      if (levels > 0)
-        continue;
-      if (k === "TERMINATOR")
-        return false;
-      if (startsImplicitCall(tokens, j))
-        return true;
-    }
-    return false;
-  };
-  const objectContinues = (j) => {
-    for (let d = 0;j < tokens.length; j++) {
-      if (ops.on)
-        ops.n++;
-      const k = tokens[j].kind;
-      if (PASS_OPENERS.has(k))
-        d++;
-      else if (PASS_CLOSERS.has(k)) {
-        if (d === 0)
-          return false;
-        d--;
-      } else if (k === "TERMINATOR" && d === 0) {
-        return looksObjectish(j + 1);
-      }
-    }
-    return false;
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const t = tokens[i];
-    const k = t.kind;
-    const prev = tokens[i - 1];
-    if (prev && !prev.generated)
-      lastReal = prev;
-    if (top()?.kind === "object" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && prev && VALUE_END.has(prev.kind))) {
-      stack.push({ kind: "CONTROL", trigger: k });
-      continue;
-    }
-    if (k === "INDENT") {
-      if (prev && !BLOCK_ARG_CARRIERS.has(prev.kind) && !pendingIndentedObjectCallAt(i)) {
-        while (top()?.kind === "object" && prev.kind !== ":")
-          closeObject(i);
-      }
-      if (top()?.kind === "CONTROL")
-        stack.pop();
-      stack.push({ kind: "INDENT", at: i });
-      pendingTernary.push(0);
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      stack.push({ kind: k, at: i });
-      pendingTernary.push(0);
-      continue;
-    }
-    if (PASS_CLOSERS.has(k)) {
-      while (top()?.kind === "object" || top()?.kind === "CONTROL") {
-        if (top().kind === "object")
-          closeObject(i);
-        else
-          stack.pop();
-      }
-      stack.pop();
-      if (pendingTernary.length > 1)
-        pendingTernary.pop();
-      if (k === "OUTDENT") {
-        for (let d = stack.length - 1;d >= 0; d--) {
-          const fr = stack[d];
-          if (fr.kind !== "object" && fr.kind !== "CONTROL")
-            break;
-          if (fr.kind === "object")
-            fr.sameLine = false;
-        }
-      }
-      continue;
-    }
-    if (k === "TERNARY")
-      pendingTernary[pendingTernary.length - 1]++;
-    if (k === ":") {
-      const pt = pendingTernary.length - 1;
-      if (pendingTernary[pt] > 0) {
-        pendingTernary[pt]--;
-        continue;
-      }
-      if (prev?.kind === "DAMMIT")
-        prev.kind = "VOID_MARKER";
-      const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
-      let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
-      if (tokens[i - 2 - bang]?.kind === "@")
-        s = i - 2 - bang;
-      const before = tokens[s - 1];
-      const callWillOpen = startsImplicitCall(tokens, s - 1);
-      const startsLine = !callWillOpen && (s <= 0 || LINE_BREAK_KINDS.has(before?.kind) || Boolean(before?.newLine));
-      const f = top();
-      const under = stack[stack.length - 2];
-      const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
-      const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
-      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
-      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
-        continue;
-      }
-      stack.push({ kind: "object", at: s, sameLine: true, startsLine });
-      insertions.push({
-        at: s,
-        token: makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine })
-      });
-      continue;
-    }
-    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
-      if (k === "||" || k === "&&" || k === "??")
-        continue;
-      if (k === "TERMINATOR") {
-        pendingTernary[pendingTernary.length - 1] = 0;
-        for (let d = stack.length - 1;d >= 0; d--) {
-          const fr = stack[d];
-          if (fr.kind !== "object" && fr.kind !== "CONTROL")
-            break;
-          if (fr.kind === "object")
-            fr.sameLine = false;
-        }
-      }
-      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL" && top()?.trigger === "CLASS") {
-        const fr = top();
-        if (fr.kind === "CONTROL") {
-          stack.pop();
-          continue;
-        }
-        if (k === "TERMINATOR") {
-          if (prev?.kind !== "," && !(fr.startsLine && looksObjectish(i + 1)))
-            closeObject(i);
-          else
-            break;
-        } else {
-          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && objectContinues(i + 1)))
-            closeObject(i);
-          else
-            break;
-        }
-      }
-      continue;
-    }
-    if (k === "," && top()?.kind === "object" && !openCallBetween(top().at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
-      const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
-      while (top()?.kind === "object")
-        closeObject(i + offset);
-    }
-  }
-  if (tokens.length && !tokens[tokens.length - 1].generated)
-    lastReal = tokens[tokens.length - 1];
-  while (top()?.kind === "object" || top()?.kind === "CONTROL") {
-    if (top().kind === "object")
-      closeObject(tokens.length);
-    else
-      stack.pop();
-  }
-  return insertions;
-}
-function implicitCalls(tokens, mintId) {
-  const stack = [];
-  const insertions = [];
-  let callIndentAt = -1;
-  const makeCallToken = (kind, at, origin) => ({
-    id: mintId(),
-    kind,
-    value: kind === "CALL_START" ? "(" : ")",
-    start: at,
-    end: at,
-    spaced: false,
-    newLine: false,
-    generated: true,
-    origin
-  });
-  let lastReal = null;
-  const closeCall = (at) => {
-    stack.pop();
-    insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
-  };
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const t = tokens[i];
-    const next = tokens[i + 1];
-    const k = t.kind;
-    if (i > 0 && !tokens[i - 1].generated)
-      lastReal = tokens[i - 1];
-    if (stack[stack.length - 1] === "call" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
-      stack.push(k === "CLASS" ? "CONTROL_CLASS" : "CONTROL");
-      continue;
-    }
-    if (k === "INDENT") {
-      if (i === callIndentAt) {
-        stack.push("INDENT");
-        continue;
-      }
-      const prev = tokens[i - 1];
-      if (!prev || !BLOCK_ARG_CARRIERS.has(prev.kind)) {
-        while (stack[stack.length - 1] === "call")
-          closeCall(i);
-      }
-      if (stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS")
-        stack.pop();
-      stack.push("INDENT");
-      continue;
-    }
-    if (PASS_OPENERS.has(k)) {
-      stack.push(k);
-    } else if (PASS_CLOSERS.has(k)) {
-      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
-        if (stack[stack.length - 1] === "call")
-          closeCall(i);
-        else
-          stack.pop();
-      }
-      stack.pop();
-    }
-    if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
-      if (k === "||" || k === "&&" || k === "??")
-        continue;
-      if (tokens[i - 1]?.kind !== ",") {
-        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
-          if (stack[stack.length - 1] === "call")
-            closeCall(i);
-          else
-            stack.pop();
-        }
-      }
-      continue;
-    }
-    if (startsImplicitCall(tokens, i) || IMPLICIT_FUNC.has(k) && next && next.spaced && (next.kind === "+" || next.kind === "-") && tokens[i + 2] && !tokens[i + 2].spaced && !tokens[i + 2].newLine) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", next.start, next.generated ? next.origin : next.id) });
-      stack.push("call");
-    } else if (IMPLICIT_FUNC.has(k) && next?.kind === "INDENT" && tokens[i + 2]?.kind === "{" && tokens[i + 2].generated && !controlHeadBackwards(tokens, i)) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", tokens[i + 2].start, tokens[i + 2].origin) });
-      stack.push("call");
-      callIndentAt = i + 1;
-    }
-  }
-  if (tokens.length && !tokens[tokens.length - 1].generated)
-    lastReal = tokens[tokens.length - 1];
-  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
-    if (stack[stack.length - 1] === "call")
-      closeCall(tokens.length);
-    else
-      stack.pop();
-  }
-  return insertions;
 }
 function tagPostfixConditionals(tokens) {
   for (let i = 0;i < tokens.length; i++) {
@@ -8158,7 +8165,7 @@ class CodeBuilder {
   }
 }
 
-// rip-ide-stub:schemas.js
+// rip-ide-stub:schematext.js
 class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
     super(message);
@@ -11204,10 +11211,10 @@ class Emitter {
       throw err;
     };
     rewriteTypes(toks, mintId, source ?? "", fail);
-    applyInsertionPass(toks, implicitBlocks, mintId);
+    implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
-    applyInsertionPass(toks, implicitObjects, mintId);
-    applyInsertionPass(toks, implicitCalls, mintId);
+    implicitObjects(toks, mintId);
+    implicitCalls(toks, mintId);
     const parser2 = Parser();
     parser2.lexer = {
       tokens: toks,
@@ -20011,41 +20018,41 @@ var toMatchable = (v) => {
 var exports_schema = {};
 __export(exports_schema, {
   registerCoercer: () => registerCoercer,
-  __schemaInstallPersistence: () => __schemaInstallPersistence,
+  installPersistence: () => installPersistence,
   __schema: () => __schema,
-  __SchemaRegistry: () => __SchemaRegistry,
-  __SchemaDef: () => __SchemaDef,
-  SchemaError: () => SchemaError
+  SchemaRegistry: () => SchemaRegistry,
+  SchemaError: () => SchemaError,
+  SchemaDef: () => SchemaDef
 });
 var __RIP_SCHEMA_SENTINEL = Symbol.for("rip.runtime.schema");
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
   throw new Error("two copies of the Rip schema runtime loaded in one process — schemas from different copies " + "cannot see each other (separate registries, distinct SchemaError classes). Run .rip sources " + "through the rip CLI/loader (one shared runtime module per process), or load only one " + "standalone-compiled file per process.");
 }
 globalThis[__RIP_SCHEMA_SENTINEL] = true;
-var __schemaPersistence = null;
-function __schemaInstallPersistence(impl) {
-  if (__schemaPersistence && __schemaPersistence !== impl) {
+var persistence = null;
+function installPersistence(impl) {
+  if (persistence && persistence !== impl) {
     throw new Error("the Rip schema persistence runtime is already installed — two different copies met in one process");
   }
-  __schemaPersistence = impl;
+  persistence = impl;
 }
 
 class SchemaError extends Error {
   constructor(issues, schemaName, schemaKind) {
-    super(__schemaFormatIssues(issues, schemaName));
+    super(formatIssues(issues, schemaName));
     this.name = "SchemaError";
     this.issues = issues;
     this.schemaName = schemaName || null;
     this.schemaKind = schemaKind || null;
   }
 }
-function __schemaFormatIssues(issues, name) {
+function formatIssues(issues, name) {
   if (!issues || !issues.length)
     return "SchemaError";
   const head = name ? name + ": " : "";
   return head + issues.map((i) => i.message || i.error || "invalid").join("; ");
 }
-var __schemaTypes = {
+var types = {
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
   integer: (v) => Number.isInteger(v),
@@ -20061,7 +20068,7 @@ var __schemaTypes = {
   json: (v) => v !== undefined,
   any: () => true
 };
-var __SCHEMA_COERCERS = {
+var COERCERS = {
   integer(v) {
     if (typeof v === "number")
       return Number.isInteger(v) ? { ok: true, value: v } : { ok: false };
@@ -20104,15 +20111,15 @@ var __SCHEMA_COERCERS = {
     return { ok: false };
   }
 };
-__SCHEMA_COERCERS.datetime = __SCHEMA_COERCERS.date;
-function __schemaObjectIssue(data) {
+COERCERS.datetime = COERCERS.date;
+function objectIssue(data) {
   if (data !== null && typeof data === "object" && !Array.isArray(data))
     return null;
   const kind2 = data === null ? "null" : Array.isArray(data) ? "an array" : "a " + typeof data;
   return { field: "", error: "object", message: "input must be an object; got " + kind2 };
 }
-var __schemaNamedCoercers = new Map;
-function __schemaRegisterCoercer(name, fn, opts) {
+var namedCoercers = new Map;
+function registerCoercer(name, fn, opts) {
   if (typeof name !== "string" || typeof fn !== "function") {
     throw new Error("registerCoercer(name, fn, opts?): name string and fn required");
   }
@@ -20121,27 +20128,27 @@ function __schemaRegisterCoercer(name, fn, opts) {
     throw new Error("registerCoercer: coercer '~:" + name + "' must be a plain synchronous function");
   }
   const raw = opts?.raw === true;
-  const existing = __schemaNamedCoercers.get(name);
+  const existing = namedCoercers.get(name);
   if (existing) {
     if (existing.raw === raw && String(existing.fn) === String(fn))
       return fn;
     throw new Error("registerCoercer: coercer '~:" + name + "' is already registered");
   }
-  __schemaNamedCoercers.set(name, { fn, raw });
+  namedCoercers.set(name, { fn, raw });
   return fn;
 }
-function __schemaNestedDef(typeName) {
-  if (__schemaTypes[typeName])
+function nestedDef(typeName) {
+  if (types[typeName])
     return null;
-  const d = __SchemaRegistry.get(typeName);
+  const d = SchemaRegistry.get(typeName);
   return d && (d.kind === "shape" || d.kind === "input" || d.kind === "model" || d.kind === "union") ? d : null;
 }
-function __schemaValidateValue(v, typeName, opts) {
-  const prim = __schemaTypes[typeName];
+function validateValue(v, typeName, opts) {
+  const prim = types[typeName];
   if (prim) {
     return prim(v) ? { value: v } : { errors: [{ field: "", error: "type", message: "must be " + typeName }] };
   }
-  const subDef = __SchemaRegistry.get(typeName);
+  const subDef = SchemaRegistry.get(typeName);
   if (!subDef)
     return { value: v };
   if (subDef.kind === "enum") {
@@ -20174,10 +20181,10 @@ function __schemaValidateValue(v, typeName, opts) {
   }
   return res.ok ? { value: res.value } : { errors: res.errors };
 }
-async function __schemaValidateValueAsync(v, typeName, opts) {
-  const subDef = __schemaNestedDef(typeName);
+async function validateValueAsync(v, typeName, opts) {
+  const subDef = nestedDef(typeName);
   if (subDef === null)
-    return __schemaValidateValue(v, typeName, opts);
+    return validateValue(v, typeName, opts);
   if (subDef.kind === "union") {
     const r = subDef._unionResolve(v);
     if (r.issue)
@@ -20201,12 +20208,12 @@ async function __schemaValidateValueAsync(v, typeName, opts) {
   }
   return res.ok ? { value: res.value } : { errors: res.errors };
 }
-function __schemaJoinField(head, child) {
+function joinField(head, child) {
   if (!child)
     return head;
   return head + (child.startsWith("[") ? child : "." + child);
 }
-function __schemaRewriteMessage(joinedField, childField, childMessage) {
+function rewriteMessage(joinedField, childField, childMessage) {
   if (!childField)
     return joinedField + " " + childMessage;
   if (childMessage.startsWith(childField)) {
@@ -20214,22 +20221,22 @@ function __schemaRewriteMessage(joinedField, childField, childMessage) {
   }
   return joinedField + ": " + childMessage;
 }
-var __SCHEMA_MATERIALIZATION_ERROR = Symbol("schema.materialization-error");
-function __schemaMaterializationError(error, field) {
-  if (error && error[__SCHEMA_MATERIALIZATION_ERROR]) {
+var MATERIALIZATION_ERROR = Symbol("schema.materialization-error");
+function materializationError(error, field) {
+  if (error && error[MATERIALIZATION_ERROR]) {
     return {
-      [__SCHEMA_MATERIALIZATION_ERROR]: true,
+      [MATERIALIZATION_ERROR]: true,
       error: error.error,
-      field: __schemaJoinField(field, error.field)
+      field: joinField(field, error.field)
     };
   }
-  return { [__SCHEMA_MATERIALIZATION_ERROR]: true, error, field };
+  return { [MATERIALIZATION_ERROR]: true, error, field };
 }
-function __schemaUnwrapMaterializationError(error) {
-  return error && error[__SCHEMA_MATERIALIZATION_ERROR] ? { thrown: error.error, derivedField: error.field } : { thrown: error, derivedField: "" };
+function unwrapMaterializationError(error) {
+  return error && error[MATERIALIZATION_ERROR] ? { thrown: error.error, derivedField: error.field } : { thrown: error, derivedField: "" };
 }
-var __schemaValidateCanonicalName = __schemaIsCanonicalName;
-function __schemaSignature(def) {
+var validateCanonicalName = isCanonicalName;
+function signature(def) {
   const safe = (v) => JSON.stringify(v ?? null, (k, x) => x instanceof RegExp ? String(x) : typeof x === "function" ? "<fn>" : x);
   const parts = [def.kind];
   for (const e of def._desc.entries || []) {
@@ -20252,21 +20259,21 @@ function __schemaSignature(def) {
   }
   return parts.join("|");
 }
-var __schemaRegistryGen = 0;
-var __SchemaRegistry = {
+var registryGen = 0;
+var SchemaRegistry = {
   _entries: new Map,
   replace: false,
   register(def) {
     if (!def.name)
       return;
-    __schemaRegistryGen++;
+    registryGen++;
     const existing = this._entries.get(def.name);
     if (existing && existing.def !== def && !this.replace) {
-      if (__schemaSignature(existing.def) !== __schemaSignature(def)) {
+      if (signature(existing.def) !== signature(def)) {
         throw new SchemaError([{
           field: def.name,
           error: "collision",
-          message: "schema name '" + def.name + "' is already registered with a different definition. " + "Schema names are app-global (they resolve nested field types and @mixin references), so two " + "different schemas cannot share one name. Rename one — or, for dev/HMR reload semantics, set " + "__SchemaRegistry.replace = true before re-evaluating modules."
+          message: "schema name '" + def.name + "' is already registered with a different definition. " + "Schema names are app-global (they resolve nested field types and @mixin references), so two " + "different schemas cannot share one name. Rename one — or, for dev/HMR reload semantics, set " + "SchemaRegistry.replace = true before re-evaluating modules."
         }], def.name, def.kind);
       }
     }
@@ -20285,32 +20292,32 @@ var __SchemaRegistry = {
   },
   reset() {
     this._entries.clear();
-    __schemaRegistryGen++;
+    registryGen++;
   },
   scope(fn) {
     const saved = this._entries;
     this._entries = new Map;
-    __schemaRegistryGen++;
-    const restore = () => {
+    registryGen++;
+    const restoreEntries = () => {
       this._entries = saved;
-      __schemaRegistryGen++;
+      registryGen++;
     };
     try {
       const r = fn();
       if (r && typeof r.then === "function")
-        return r.finally(restore);
-      restore();
+        return r.finally(restoreEntries);
+      restoreEntries();
       return r;
     } catch (e) {
-      restore();
+      restoreEntries();
       throw e;
     }
   }
 };
 
-class __SchemaDef {
+class SchemaDef {
   constructor(desc) {
-    if (desc.kind === "model" && !__schemaPersistence) {
+    if (desc.kind === "model" && !persistence) {
       throw new Error("schema: kind 'model' needs the persistence runtime (src/runtime/orm.js), which is not " + "loaded in this process — reference a persistence name (schema.transaction, __schemaSetAdapter) " + "or import the module directly");
     }
     this._desc = desc;
@@ -20321,7 +20328,7 @@ class __SchemaDef {
     this._unionPlanCache = null;
     this._sourceModel = null;
     if (desc.kind === "model")
-      __schemaPersistence.decorateDef(this, desc);
+      persistence.decorateDef(this, desc);
   }
   _normalize() {
     if (this._norm)
@@ -20356,7 +20363,7 @@ class __SchemaDef {
     };
     const baseDirectives = this.kind === "union" ? new Set(["on"]) : new Set(["mixin"]);
     const requireCanonicalName = (n, kindLabel) => {
-      if (!__schemaValidateCanonicalName(n)) {
+      if (!validateCanonicalName(n)) {
         throw new SchemaError([{
           field: n,
           error: "invalid-name",
@@ -20446,7 +20453,7 @@ class __SchemaDef {
       }
     }
     if (this.kind === "shape" || this.kind === "input" || this.kind === "mixin" || this.kind === "model") {
-      __schemaExpandMixins(this, fields, directives, {
+      expandMixins(this, fields, directives, {
         stack: [this.name || "<anon>"],
         seen: new Set([this.name || "<anon>"])
       });
@@ -20479,12 +20486,12 @@ class __SchemaDef {
       unionMembers
     };
     if (this.kind === "model")
-      __schemaPersistence.finishModelNorm(this, norm);
+      persistence.finishModelNorm(this, norm);
     this._norm = norm;
     return this._norm;
   }
   _unionPlan() {
-    if (this._unionPlanCache && this._unionPlanCache.gen === __schemaRegistryGen) {
+    if (this._unionPlanCache && this._unionPlanCache.gen === registryGen) {
       return this._unionPlanCache.plan;
     }
     const norm = this._normalize();
@@ -20495,7 +20502,7 @@ class __SchemaDef {
     const map = new Map;
     const members = [];
     for (const name of norm.unionMembers) {
-      const def = __SchemaRegistry.get(name);
+      const def = SchemaRegistry.get(name);
       if (!def) {
         throw new SchemaError([{ field: "", error: "union", message: "unknown union constituent: " + name + " (import the file that declares it)" }], this.name, this.kind);
       }
@@ -20517,7 +20524,7 @@ class __SchemaDef {
       expected: [...map.keys()].join(" | "),
       hasAsyncEnsures: members.some((d) => d._normalize().hasAsyncEnsures)
     };
-    this._unionPlanCache = { gen: __schemaRegistryGen, plan };
+    this._unionPlanCache = { gen: registryGen, plan };
     return plan;
   }
   _unionResolve(data) {
@@ -20552,7 +20559,7 @@ class __SchemaDef {
   _materializeNestedValues(working, original, existing) {
     const norm = this._normalize();
     for (const [n, f] of norm.fields) {
-      const child = __schemaNestedDef(f.typeName);
+      const child = nestedDef(f.typeName);
       if (!child)
         continue;
       const value = working[n];
@@ -20567,7 +20574,7 @@ class __SchemaDef {
           try {
             out[i] = child._materializeResolvedValue(value[i], Array.isArray(oldValue) ? oldValue[i] : undefined, existing);
           } catch (error) {
-            throw __schemaMaterializationError(error, n + "[" + i + "]");
+            throw materializationError(error, n + "[" + i + "]");
           }
         }
         working[n] = out;
@@ -20575,7 +20582,7 @@ class __SchemaDef {
         try {
           working[n] = child._materializeResolvedValue(value, oldValue, existing);
         } catch (error) {
-          throw __schemaMaterializationError(error, n);
+          throw materializationError(error, n);
         }
       }
     }
@@ -20662,7 +20669,7 @@ class __SchemaDef {
     return results.map((r) => r.issue);
   }
   _transitiveAsync() {
-    if (this._taGen === __schemaRegistryGen)
+    if (this._taGen === registryGen)
       return this._taCache;
     const seen = new Set;
     const walk = (def) => {
@@ -20674,21 +20681,21 @@ class __SchemaDef {
         return true;
       if (def.kind === "union") {
         for (const name of norm.unionMembers) {
-          const m = __SchemaRegistry.get(name);
+          const m = SchemaRegistry.get(name);
           if (m && walk(m))
             return true;
         }
         return false;
       }
       for (const f of norm.fields.values()) {
-        const child = __schemaNestedDef(f.typeName);
+        const child = nestedDef(f.typeName);
         if (child && walk(child))
           return true;
       }
       return false;
     };
     this._taCache = walk(this);
-    this._taGen = __schemaRegistryGen;
+    this._taGen = registryGen;
     return this._taCache;
   }
   _assertSyncValidatable(api) {
@@ -20791,23 +20798,23 @@ class __SchemaDef {
             errors.push({ field: n, error: "max", message: n + " must have at most " + ac.max + " items" });
           }
         }
-        if (opts?.deferNested && __schemaNestedDef(f.typeName))
+        if (opts?.deferNested && nestedDef(f.typeName))
           continue;
         let bad = false;
         let changed = false;
         const out = new Array(v.length);
         for (let i = 0;i < v.length; i++) {
-          const res = __schemaValidateValue(v[i], f.typeName, opts);
+          const res = validateValue(v[i], f.typeName, opts);
           if (res.errors) {
             if (!collect)
               return false;
             const head = n + "[" + i + "]";
             for (const e of res.errors) {
-              const joined = __schemaJoinField(head, e.field);
+              const joined = joinField(head, e.field);
               errors.push({
                 field: joined,
                 error: e.error,
-                message: __schemaRewriteMessage(joined, e.field, e.message)
+                message: rewriteMessage(joined, e.field, e.message)
               });
             }
             bad = true;
@@ -20829,18 +20836,18 @@ class __SchemaDef {
           continue;
         }
       } else {
-        if (opts?.deferNested && __schemaNestedDef(f.typeName))
+        if (opts?.deferNested && nestedDef(f.typeName))
           continue;
-        const res = __schemaValidateValue(v, f.typeName, opts);
+        const res = validateValue(v, f.typeName, opts);
         if (res.errors) {
           if (!collect)
             return false;
           for (const e of res.errors) {
-            const joined = __schemaJoinField(n, e.field);
+            const joined = joinField(n, e.field);
             errors.push({
               field: joined,
               error: e.error,
-              message: __schemaRewriteMessage(joined, e.field, e.message)
+              message: rewriteMessage(joined, e.field, e.message)
             });
           }
           continue;
@@ -20920,7 +20927,7 @@ class __SchemaDef {
       if (v === undefined || v === null)
         continue;
       if (f.coercer) {
-        const entry = __schemaNamedCoercers.get(f.coercer);
+        const entry = namedCoercers.get(f.coercer);
         if (!entry) {
           throw new Error("schema: no coercer registered for '~:" + f.coercer + "' (field '" + n + "' on " + (this.name || "anon") + "). Register it with registerCoercer('" + f.coercer + "', fn).");
         }
@@ -20939,7 +20946,7 @@ class __SchemaDef {
         }
         continue;
       }
-      const r = __SCHEMA_COERCERS[f.typeName] ? __SCHEMA_COERCERS[f.typeName](v) : { ok: false };
+      const r = COERCERS[f.typeName] ? COERCERS[f.typeName](v) : { ok: false };
       if (r.ok) {
         working[n] = r.value;
       } else {
@@ -20990,7 +20997,7 @@ class __SchemaDef {
       const errs2 = this._validateEnum(data, true);
       return errs2.length ? { ok: false, errors: errs2 } : { ok: true, value: this._materializeEnum(data) };
     }
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue)
       return { ok: false, errors: [objIssue] };
     const raw = data;
@@ -21010,7 +21017,7 @@ class __SchemaDef {
       try {
         this._materializeNestedValues(working, null, false);
       } catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     if (!opts?.materialize)
@@ -21018,7 +21025,7 @@ class __SchemaDef {
     try {
       return { ok: true, value: this._materializeOwnValidatedValue(working, null, false) };
     } catch (error) {
-      return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+      return { ok: false, errors: null, ...unwrapMaterializationError(error) };
     }
   }
   async _runAsync(data, opts) {
@@ -21031,7 +21038,7 @@ class __SchemaDef {
     }
     if (this.kind === "enum")
       return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue)
       return { ok: false, errors: [objIssue] };
     const raw = data;
@@ -21052,7 +21059,7 @@ class __SchemaDef {
       try {
         this._materializeNestedValues(working, null, false);
       } catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     if (!opts?.materialize)
@@ -21060,7 +21067,7 @@ class __SchemaDef {
     try {
       return { ok: true, value: this._materializeOwnValidatedValue(working, null, false) };
     } catch (error) {
-      return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+      return { ok: false, errors: null, ...unwrapMaterializationError(error) };
     }
   }
   async _validateFieldsAsync(working, failed, opts) {
@@ -21090,13 +21097,13 @@ class __SchemaDef {
         const out = new Array(v.length);
         let bad = false;
         for (let i = 0;i < v.length; i++) {
-          const res = await __schemaValidateValueAsync(v[i], f.typeName, opts);
+          const res = await validateValueAsync(v[i], f.typeName, opts);
           if (res.errors) {
             bad = true;
             const head = n + "[" + i + "]";
             for (const e of res.errors) {
-              const joined = __schemaJoinField(head, e.field);
-              errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+              const joined = joinField(head, e.field);
+              errors.push({ field: joined, error: e.error, message: rewriteMessage(joined, e.field, e.message) });
             }
           } else {
             out[i] = res.value;
@@ -21109,11 +21116,11 @@ class __SchemaDef {
           errors.push({ field: n, error: "enum", message: n + " must be one of " + f.literals.map((l) => JSON.stringify(l)).join(", ") });
         }
       } else {
-        const res = await __schemaValidateValueAsync(v, f.typeName, opts);
+        const res = await validateValueAsync(v, f.typeName, opts);
         if (res.errors) {
           for (const e of res.errors) {
-            const joined = __schemaJoinField(n, e.field);
-            errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+            const joined = joinField(n, e.field);
+            errors.push({ field: joined, error: e.error, message: rewriteMessage(joined, e.field, e.message) });
           }
         } else {
           working[n] = res.value;
@@ -21153,7 +21160,7 @@ class __SchemaDef {
     }
     if (this.kind === "enum")
       return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue)
       return { ok: false, errors: [objIssue] };
     const working = { ...data };
@@ -21167,7 +21174,7 @@ class __SchemaDef {
       try {
         this._materializeNestedValues(working, data, true);
       } catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     return this._finishExistingValue(data, working, opts);
@@ -21182,7 +21189,7 @@ class __SchemaDef {
     }
     if (this.kind === "enum")
       return this._runSync(data, opts);
-    const objIssue = __schemaObjectIssue(data);
+    const objIssue = objectIssue(data);
     if (objIssue)
       return { ok: false, errors: [objIssue] };
     const working = { ...data };
@@ -21196,7 +21203,7 @@ class __SchemaDef {
       try {
         this._materializeNestedValues(working, data, true);
       } catch (error) {
-        return { ok: false, errors: null, ...__schemaUnwrapMaterializationError(error) };
+        return { ok: false, errors: null, ...unwrapMaterializationError(error) };
       }
     }
     return this._finishExistingValue(data, working, opts);
@@ -21375,8 +21382,8 @@ class __SchemaDef {
     return (await this._runAsync(data, { materialize: false, materializeNested: false, derived: "issue" })).ok;
   }
   pick(...keys) {
-    return __schemaDerive(this, (src) => {
-      const names = __schemaFlatten(keys);
+    return derive(this, (src) => {
+      const names = flatten(keys);
       const out = new Map;
       for (const k of names) {
         if (!src.has(k))
@@ -21387,8 +21394,8 @@ class __SchemaDef {
     });
   }
   omit(...keys) {
-    return __schemaDerive(this, (src) => {
-      const drop = new Set(__schemaFlatten(keys));
+    return derive(this, (src) => {
+      const drop = new Set(flatten(keys));
       const out = new Map;
       for (const [k, v] of src)
         if (!drop.has(k))
@@ -21397,7 +21404,7 @@ class __SchemaDef {
     });
   }
   partial() {
-    return __schemaDerive(this, (src) => {
+    return derive(this, (src) => {
       const out = new Map;
       for (const [k, v] of src)
         out.set(k, { ...v, required: false });
@@ -21405,8 +21412,8 @@ class __SchemaDef {
     });
   }
   required(...keys) {
-    return __schemaDerive(this, (src) => {
-      const req = new Set(__schemaFlatten(keys));
+    return derive(this, (src) => {
+      const req = new Set(flatten(keys));
       const out = new Map;
       for (const [k, v] of src)
         out.set(k, { ...v, required: req.has(k) ? true : v.required });
@@ -21414,13 +21421,13 @@ class __SchemaDef {
     });
   }
   extend(other) {
-    if (!(other instanceof __SchemaDef)) {
+    if (!(other instanceof SchemaDef)) {
       throw new Error("extend(): argument must be a schema value");
     }
     if (other.kind === "union") {
       throw new Error("extend(): :union schemas have no fields to merge");
     }
-    return __schemaDerive(this, (src) => {
+    return derive(this, (src) => {
       const merged = new Map(src);
       const otherFields = other._normalize().fields;
       for (const [k, v] of otherFields) {
@@ -21433,7 +21440,7 @@ class __SchemaDef {
     });
   }
 }
-var __SCHEMA_JSON_TYPES = {
+var JSON_TYPES = {
   string: () => ({ type: "string" }),
   text: () => ({ type: "string" }),
   email: () => ({ type: "string", format: "email" }),
@@ -21449,15 +21456,15 @@ var __SCHEMA_JSON_TYPES = {
   json: () => ({}),
   any: () => ({})
 };
-function __schemaFieldJSONSchema(f, ctx) {
+function fieldJSONSchema(f, ctx) {
   let s;
   if (f.typeName === "literal-union" && f.literals?.length) {
     s = f.literals.length === 1 ? { const: f.literals[0] } : { enum: [...f.literals] };
-  } else if (__SCHEMA_JSON_TYPES[f.typeName]) {
-    s = __SCHEMA_JSON_TYPES[f.typeName]();
+  } else if (JSON_TYPES[f.typeName]) {
+    s = JSON_TYPES[f.typeName]();
   } else {
-    const sub = __SchemaRegistry.get(f.typeName);
-    s = sub ? __schemaJSONSchemaRef(sub, ctx) : {};
+    const sub = SchemaRegistry.get(f.typeName);
+    s = sub ? jSONSchemaRef(sub, ctx) : {};
   }
   const c = f.constraints;
   if (c && !f.array) {
@@ -21495,17 +21502,17 @@ function __schemaFieldJSONSchema(f, ctx) {
   }
   return s;
 }
-function __schemaJSONSchemaRef(def, ctx) {
+function jSONSchemaRef(def, ctx) {
   const name = def.name || "Anon";
   if (!ctx.defs.has(name) && !ctx.expanding.has(name)) {
     ctx.expanding.add(name);
     ctx.defs.set(name, null);
-    ctx.defs.set(name, __schemaJSONSchemaBody(def, ctx));
+    ctx.defs.set(name, jSONSchemaBody(def, ctx));
     ctx.expanding.delete(name);
   }
   return { $ref: "#/$defs/" + name };
 }
-function __schemaJSONSchemaBody(def, ctx) {
+function jSONSchemaBody(def, ctx) {
   const norm = def._normalize();
   if (def.kind === "enum") {
     return { enum: [...new Set(norm.enumMembers.values())] };
@@ -21513,20 +21520,20 @@ function __schemaJSONSchemaBody(def, ctx) {
   if (def.kind === "union") {
     const plan = def._unionPlan();
     const oneOf = norm.unionMembers.map((name) => {
-      const member = __SchemaRegistry.get(name);
-      return member ? __schemaJSONSchemaRef(member, ctx) : {};
+      const member = SchemaRegistry.get(name);
+      return member ? jSONSchemaRef(member, ctx) : {};
     });
     return { oneOf, discriminator: { propertyName: plan.disc } };
   }
   const properties = {};
   const required = [];
   for (const [n, f] of norm.fields) {
-    properties[n] = __schemaFieldJSONSchema(f, ctx);
+    properties[n] = fieldJSONSchema(f, ctx);
     if (f.required && f.constraints?.default === undefined)
       required.push(n);
   }
   if (def.kind === "model")
-    __schemaPersistence.jsonSchemaModelColumns(def, properties);
+    persistence.jsonSchemaModelColumns(def, properties);
   const out = { type: "object", properties };
   if (required.length)
     out.required = required;
@@ -21535,9 +21542,9 @@ function __schemaJSONSchemaBody(def, ctx) {
   }
   return out;
 }
-__SchemaDef.prototype.toJSONSchema = function() {
+SchemaDef.prototype.toJSONSchema = function() {
   const ctx = { defs: new Map, expanding: new Set };
-  const root = __schemaJSONSchemaBody(this, ctx);
+  const root = jSONSchemaBody(this, ctx);
   root.$schema = "https://json-schema.org/draft/2020-12/schema";
   if (this.name)
     root.title = this.name;
@@ -21548,7 +21555,7 @@ __SchemaDef.prototype.toJSONSchema = function() {
   }
   return root;
 };
-function __schemaFlatten(keys) {
+function flatten(keys) {
   const out = [];
   for (const k of keys) {
     if (Array.isArray(k))
@@ -21559,14 +21566,14 @@ function __schemaFlatten(keys) {
   }
   return out;
 }
-function __schemaDerive(source, transform) {
+function derive(source, transform) {
   if (source.kind === "union") {
     throw new Error("schema algebra (.pick/.omit/.partial/.required/.extend) is not supported on :union — derive from a constituent schema instead");
   }
   if (source.kind === "enum") {
     throw new Error("schema algebra is not supported on :enum — an enum has no field set");
   }
-  const src = source.kind === "model" ? __schemaPersistence.projectableFields(source) : source._normalize().fields;
+  const src = source.kind === "model" ? persistence.projectableFields(source) : source._normalize().fields;
   const derivedFields = transform(src);
   const entries = [];
   for (const [, f] of derivedFields) {
@@ -21591,11 +21598,11 @@ function __schemaDerive(source, transform) {
     });
   }
   const name = (source.name || "Schema") + "Derived";
-  const derived = new __SchemaDef({ kind: "shape", name, entries });
+  const derived = new SchemaDef({ kind: "shape", name, entries });
   derived._sourceModel = source._sourceModel || (source.kind === "model" ? source : null);
   return derived;
 }
-function __schemaExpandMixins(host, fields, directives, ctx) {
+function expandMixins(host, fields, directives, ctx) {
   for (const d of directives) {
     if (d.name !== "mixin" || !d.args || !d.args[0])
       continue;
@@ -21607,14 +21614,14 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
     }
     if (ctx.seen.has(target))
       continue;
-    const mx = __SchemaRegistry.getKind(target, "mixin");
+    const mx = SchemaRegistry.getKind(target, "mixin");
     if (!mx) {
       throw new SchemaError([{ field: "", error: "mixin-missing", message: "unknown mixin: " + target }], host.name, host.kind);
     }
     ctx.seen.add(target);
     ctx.stack.push(target);
     const childDirectives = mx._desc.entries.filter((e) => e.tag === "directive" && e.name === "mixin").map((e) => ({ name: e.name, args: e.args || [] }));
-    __schemaExpandMixins(host, fields, childDirectives, ctx);
+    expandMixins(host, fields, childDirectives, ctx);
     for (const e of mx._desc.entries) {
       if (e.tag !== "field")
         continue;
@@ -21647,12 +21654,11 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
   }
 }
 function __schema(descriptor) {
-  const def = new __SchemaDef(descriptor);
+  const def = new SchemaDef(descriptor);
   if (def.name)
-    __SchemaRegistry.register(def);
+    SchemaRegistry.register(def);
   return def;
 }
-var registerCoercer = __schemaRegisterCoercer;
 
 // src/runtime/reactive.js
 var exports_reactive = {};

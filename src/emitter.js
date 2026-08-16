@@ -22,10 +22,13 @@ import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
-import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './types/schemas.js';
+import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schematext.js';
 import { Parser } from './parser.js';
-import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, identifierRunAt, isIdentifierName } from './lexer.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './types/typetext.js';
+import { tagPostfixConditionals } from './lexer.js';
+import { rewriteTypes } from './types.js';
+import { identifierRunAt, isIdentifierName } from './ident.js';
+import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
+import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
 import {
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
@@ -33,10 +36,10 @@ import {
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
-} from './types/components.js';
+} from './ts/components.js';
 
 // Component member vocabulary — emission owns these sets. The type story
-// in types/components.js carries the same spellings for categorization;
+// in ts/components.js carries the same spellings for categorization;
 // keep both lists identical.
 const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
 const COMPONENT_RUNTIME_FIELDS = new Set([
@@ -65,7 +68,7 @@ const RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 const JS_OP = { '==': '===', '!=': '!==' };
 
 // What a value word has already become by the time a pattern is walked.
-// The scanner's own table (lexer.js VALUE_WORDS) maps the SOURCE spellings
+// The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
 // — `yes`/`no`/`on`/`off` and the literal keywords — onto these; only the
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
@@ -1977,7 +1980,7 @@ class Emitter {
     }
   }
 
-  // Shared-renderer rejections (src/types/typetext.js), positioned on the
+  // Shared-renderer rejections (src/ts/typetext.js), positioned on the
   // offending statement: a malformed alias body fails the TS-face
   // compile from the declaration's own span (rule 5), with the same
   // message class the dts consumer raises.
@@ -2052,7 +2055,7 @@ class Emitter {
   }
 
   // ── The component face ──────────────────────────────────────
-  // Segment lists from src/types/components.js: named pieces re-mark
+  // Segment lists from src/ts/components.js: named pieces re-mark
   // their recorded store rows (the builder decides exact vs cover by
   // verbatim comparison; mark() no-ops where a role has no row — the
   // span-less optional glyphs), plain pieces emit bare.
@@ -4621,10 +4624,10 @@ class Emitter {
       throw err;
     };
     rewriteTypes(toks, mintId, source ?? '', fail);
-    applyInsertionPass(toks, implicitBlocks, mintId);
+    implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
-    applyInsertionPass(toks, implicitObjects, mintId);
-    applyInsertionPass(toks, implicitCalls, mintId);
+    implicitObjects(toks, mintId);
+    implicitCalls(toks, mintId);
 
     const parser = Parser();
     parser.lexer = {
@@ -7350,7 +7353,7 @@ class Emitter {
       // the annotation names the `.value` slot (the dts convention;
       // a computed's container is read-only from the outside), and
       // the container carries the `read(): T` structural brand (the
-      // runtime's detection predicate — src/types/components.js has
+      // runtime's detection predicate — src/ts/components.js has
       // the doctrine): a plain `{ value: … }` literal must never
       // satisfy a container position the runtime would double-wrap.
       if (this.ts && this.annotationText(node) !== null) {

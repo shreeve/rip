@@ -46,7 +46,7 @@ const KIND_DEFAULT = 'input';
 // Lifecycle hook names — a `name: -> body` callable on a :model whose
 // name is in this set binds as a hook (exact match; anything else is
 // a plain method — a working reading, so no fuzzy near-miss guard).
-// Mirrors the runtime's __SCHEMA_HOOK_NAMES.
+// Mirrors the runtime's HOOK_NAMES.
 const HOOK_NAMES = new Set([
   'beforeValidation', 'afterValidation',
   'beforeSave', 'afterSave',
@@ -57,21 +57,13 @@ const HOOK_NAMES = new Set([
 ]);
 
 // The :model directive vocabulary with each name's argument shape —
-// the parse-time mirror of the runtime's __SCHEMA_MODEL_DIRECTIVES.
+// the parse-time mirror of the runtime's MODEL_DIRECTIVES.
 // An unknown name, or a known one with junk-bearing args, rejects
 // positioned; relation targets must be canonical PascalCase.
 // The vocabulary itself lives in src/runtime/vocab.js, which the ORM
 // runtime imports too — one definition, three consumers. Aliased here
 // to this file's local spellings.
-const MODEL_DIRECTIVES = __SCHEMA_MODEL_DIRECTIVES;
 
-const RELATION_DIRECTIVES = __SCHEMA_RELATION_DIRECTIVES;
-
-// The two halves of the runtime's naming bijection — the column
-// check compares declared names in column space, and the ownership
-// gate derives each claimant's property exactly as the runtime does.
-const snakeCase = __schemaSnake;
-const camelCase = __schemaCamel;
 
 // Wire-friendly built-ins the `~type` coercion marker accepts (each
 // has a strict coercion table in the runtime).
@@ -132,16 +124,18 @@ import { ops } from './ops.js';
 // declared names, src/runtime/orm.js validates hand-built descriptors).
 // It is a leaf module with no imports of its own, so the compiler
 // importing a runtime file creates no bootstrap cycle.
+//
 import {
-  __schemaSnake, __schemaCamel, __schemaIsCanonicalName, __schemaIsCanonicalTarget,
-  __schemaAttrValueError,
-  __SCHEMA_MODEL_DIRECTIVES, __SCHEMA_ONCE_DIRECTIVES, __SCHEMA_RELATION_DIRECTIVES,
-  __SCHEMA_FIELD_ATTRS, __SCHEMA_RELATION_ATTRS,
+  snakeCase, camelCase, fkName,
+  isCanonicalName, isCanonicalTarget,
+  attrValueError,
+  MODEL_DIRECTIVES, ONCE_DIRECTIVES, RELATION_DIRECTIVES,
+  FIELD_ATTRS, RELATION_ATTRS,
 } from './runtime/vocab.js';
 
 // Face-only behavior object name for a schema (`ReturnType<typeof …>`
 // and the JS face share this spelling). Lives here — not in
-// types/schemas.js — so the browser compile graph can take the
+// ts/schematext.js — so the browser compile graph can take the
 // name without the IDE type machinery.
 export const behaviorName = (name) => `__${name}__behavior`;
 
@@ -758,7 +752,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       } else if (head.kind === '{') {
         // Persistence metadata may also ride a :mixin field — it takes
         // effect when a :model includes the mixin; inclusion into any
-        // other kind rejects at expansion (__schemaExpandMixins).
+        // other kind rejects at expansion (expandMixins).
         if (kind !== 'model' && kind !== 'mixin') {
           fail(`field attrs ('{…}') are persistence metadata — :model/:mixin-only ('{was: "old_column"}' annotates a column rename)`, head.start);
         }
@@ -871,7 +865,7 @@ function parseOptionsBracket(part, vocab, what, fail) {
         // that would fail its own namespace check.
         const wrote = valTok.kind === 'STRING' && valTok.value.startsWith('"')
           ? JSON.parse(valTok.value) : null;
-        const shown = wrote && !__schemaAttrValueError(kind, key, wrote)
+        const shown = wrote && !attrValueError(kind, key, wrote)
           ? wrote : (kind === 'model' ? 'Membership' : 'author');
         fail(`${what} option '${key}' names ${kind === 'model' ? 'a model' : 'a property'}, ` +
           `so it is written BARE — '{${key}: ${shown}}', ` +
@@ -882,12 +876,12 @@ function parseOptionsBracket(part, vocab, what, fail) {
     } else {
       if (valTok.kind !== 'STRING' || !valTok.value.startsWith('"')) {
         fail(`${what} option '${key}' names a database column, so it is QUOTED — ` +
-          `'{${key}: "${isWord(valTok) ? __schemaSnake(valTok.value) : 'author_id'}"}'. ` +
+          `'{${key}: "${isWord(valTok) ? snakeCase(valTok.value) : 'author_id'}"}'. ` +
           `A bare name would be a Rip name, which is a different thing`, valTok.start);
       }
       value = JSON.parse(valTok.value);
     }
-    const why = __schemaAttrValueError(kind, key, value);
+    const why = attrValueError(kind, key, value);
     if (why) fail(`${what} option ${why}; got '${value}'`, keyTok.start);
     attrs[key] = value;
   }
@@ -898,11 +892,11 @@ function parseOptionsBracket(part, vocab, what, fail) {
 }
 
 function parseAttrsTokens(part, fieldName, fail) {
-  return parseOptionsBracket(part, __SCHEMA_FIELD_ATTRS, `field '${fieldName}'`, fail);
+  return parseOptionsBracket(part, FIELD_ATTRS, `field '${fieldName}'`, fail);
 }
 
 function parseRelationAttrs(part, directiveName, fail) {
-  const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
+  const attrs = parseOptionsBracket(part, RELATION_ATTRS, `@${directiveName}`, fail);
   // `through:` names a hop the OWNER does not store, which is what
   // @hasMany and @hasOne both are. @belongsTo stores its key in its own
   // row, so a `through` on it is not a relation, it is a query.
@@ -994,7 +988,7 @@ function finishModelBody(entries, fail) {
     if (shape === undefined) {
       fail(`unknown directive '@${e.name}' on :model — legal: ${Object.keys(MODEL_DIRECTIVES).map((n) => '@' + n).join(', ')}, @ensure, @scope, @defaultScope`, e.nameStart ?? e.start);
     }
-    if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
+    if (ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
         // Argument-less once-directives (@timestamps, @softDelete) have
         // no second value to override; the duplicate is still refused —
@@ -1092,7 +1086,7 @@ function finishModelBody(entries, fail) {
     // keys live on the join model.
     else if (e.name === 'belongsTo') {
       const a = e.args[0];
-      const fk = a.foreignKey ?? snakeCase(a.as ?? a.target) + '_id';
+      const fk = a.foreignKey ?? fkName(a.as ?? a.target);
       claim(camelCase(fk), fk,
         `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ''} relation`, e.start);
     }
@@ -1100,7 +1094,7 @@ function finishModelBody(entries, fail) {
   for (const e of entries) {
     if (e.tag !== 'directive' || (e.name !== 'index' && e.name !== 'unique')) continue;
     // Written in field space, resolved exactly as the runtime's
-    // __schemaColumnFor resolves it: the property map first (the
+    // columnFor resolves it: the property map first (the
     // surrogate primary key lives there like any field), then a
     // column's own name, then the snake_case derivation. A column's
     // own name is accepted because `known` is exactly the set the
@@ -1150,7 +1144,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (pos < tokens.length) junk(tokens[pos], `takes one target name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? '?' : ''}'`);
       // The FK/accessor derivation rides the snake_case
       // bijection, which acronym-style names break.
-      if (!__schemaIsCanonicalTarget(t0.value)) {
+      if (!isCanonicalTarget(t0.value)) {
         fail(`@${e.name}: target '${t0.value}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, t0.start);
       }
       const arg = { target: t0.value };
@@ -1247,7 +1241,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (name === null || !name.length) {
         fail(`@${e.name} requires ${want}`, (t0 ?? { start: e.start }).start);
       }
-      // A dot would ride through __schemaQuoteIdent as ONE quoted
+      // A dot would ride through quoteIdent as ONE quoted
       // identifier — `"crm.accounts"` names a table literally called
       // that, not `accounts` in schema `crm`. Refuse rather than
       // silently target the wrong thing; qualified names need their own
@@ -1291,7 +1285,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       let pos = 1;
       let attrs = null;
       if (tokens[pos]?.kind === ',' && tokens[pos + 1]?.kind === '{') {
-        attrs = parseOptionsBracket(tokens.slice(pos + 1), __SCHEMA_FIELD_ATTRS, `@${e.name}`, fail);
+        attrs = parseOptionsBracket(tokens.slice(pos + 1), FIELD_ATTRS, `@${e.name}`, fail);
         pos = tokens.length;
       }
       if (pos < tokens.length) junk(tokens[pos], `takes one property name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}'`);
@@ -1300,7 +1294,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       }
       // The property is read back off every instance and every JSON
       // body, so it rides the same bijection every other property does.
-      if (!__schemaIsCanonicalName(t0.value)) {
+      if (!isCanonicalName(t0.value)) {
         fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
       }
       // `column` is emitted only when the author WROTE one. The
@@ -1979,13 +1973,11 @@ function foldHasMixin(descriptor) {
 }
 
 // The `@belongsTo` FK property name, computed exactly as the runtime
-// does (`__schemaCamel(rel.foreignKey)` in orm.js): an explicit
+// does (`camelCase(rel.foreignKey)` in orm.js): an explicit
 // foreignKey camelizes verbatim; otherwise the column derives from
 // the ACCESSOR (`as:` if present, else the target).
 function foldFkName(arg) {
-  if (arg.foreignKey) return arg.foreignKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-  const snake = (arg.as ?? arg.target).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-  return (snake + '_id').replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
 }
 
 // The projectable columns of a descriptor as an ordered Map(name → field

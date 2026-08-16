@@ -30,23 +30,66 @@
 //
 // TWO RULES FOR EDITING, both enforced by how inline delivery works:
 //   1. No imports. This is a leaf, and it must stay one.
-//   2. Every name is `__schema`-prefixed and globally unique. Fused
-//      units share ONE scope, and the emitter STRIPS the import — so a
-//      consumer must import each name unaliased, under exactly the name
-//      declared here.
+//   2. Every name must be unique across the RUNTIME modules, which is a
+//      smaller claim than it sounds. Inline delivery splices the fused
+//      bodies into one IIFE and destructures each runtime's `names:`
+//      list out of it; user code lives OUTSIDE that closure, and this
+//      module has no `names:` list at all. So nothing here can collide
+//      with anything a user writes — only with a sibling runtime. Names
+//      that DO escape into user scope (`__schema`, `__schemaSetAdapter`)
+//      carry a prefix for that reason; these do not need one, the same
+//      way reactive.js and components.js do not.
 
 // ── the snake_case ↔ camelCase bijection ─────────────────────────────
 //
 // Total and reversible only on canonical names — which is what the
 // predicates below are for, and why they are not merely stylistic.
 
-function __schemaSnake(s) {
-  return String(s).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+function snakeCase(name) {
+  return String(name).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
-function __schemaCamel(col) {
+function camelCase(col) {
   return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
+
+// ── derived names ────────────────────────────────────────────────────
+//
+// The three derivations every layer makes from a canonical TARGET: its
+// plural (hasMany accessors, table names), its FK column, and its
+// accessor. Same reason as the bijection above — these used to be
+// spelled once in src/runtime/orm.js and again in src/ts/schematext.js,
+// where the copy carried a comment promising it mirrored the runtime
+// "byte-for-byte" and a test gated the promise. The rule lives here now,
+// so there is nothing left to drift.
+//
+// The renderer's original concern still holds and is why this is the
+// right home: importing orm.js into the compiler would evaluate the
+// persistence install. This file is a leaf with no side effects, which
+// is already why src/schema.js imports it.
+
+const UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
+
+const IRREGULAR = new Map([['person', 'people'], ['man', 'men'], ['woman', 'women'], ['child', 'children'], ['tooth', 'teeth'], ['foot', 'feet'], ['mouse', 'mice']]);
+
+function pluralize(word) {
+  const lw = word.toLowerCase();
+  if (UNCOUNTABLE.has(lw)) return word;
+  if (IRREGULAR.has(lw)) return IRREGULAR.get(lw);
+  if (/[^aeiouy]y$/i.test(word)) return word.slice(0, -1) + 'ies';
+  if (/(s|x|z|ch|sh)$/i.test(word)) return word + 'es';
+  return word + 's';
+}
+
+// The FK COLUMN a relation derives — snake, `_id`-suffixed. The FK
+// PROPERTY is `camelCase` of it; the two spellings are one
+// derivation, which is why they are not separate rules.
+function fkName(model) { return snakeCase(model) + '_id'; }
+
+// The accessor a relation derives from its target: lowercase-first,
+// otherwise untouched. hasMany pluralizes this; hasOne/belongsTo take
+// it as-is. `{as:}` overrides it everywhere.
+function accessorOf(target) { return target[0].toLowerCase() + target.slice(1); }
 
 // ── name rules ───────────────────────────────────────────────────────
 
@@ -55,7 +98,7 @@ function __schemaCamel(col) {
 // `mdm_id` and camels back to `mdmId`, which is a different name — so
 // they are refused wherever a name is DERIVED rather than stated.
 //   ok:  name, mrn, firstName, mdmId, line2     bad: ID, mdmID, foo_bar
-function __schemaIsCanonicalName(name) {
+function isCanonicalName(name) {
   if (typeof name !== 'string' || !/^[a-z][a-zA-Z0-9]*$/.test(name)) return false;
   if (/[A-Z]{2,}/.test(name)) return false;
   return true;
@@ -64,18 +107,18 @@ function __schemaIsCanonicalName(name) {
 // A model or relation target: the same rule, uppercase-first. The FK
 // column and accessor both derive from it.
 //   ok:  User, MdmUser, Line2                   bad: user, MDMUser
-function __schemaIsCanonicalTarget(name) {
-  if (typeof name !== 'string' || !/^[A-Z][a-zA-Z0-9]*$/.test(name)) return false;
-  if (/[A-Z]{2,}/.test(name)) return false;
+function isCanonicalTarget(target) {
+  if (typeof target !== 'string' || !/^[A-Z][a-zA-Z0-9]*$/.test(target)) return false;
+  if (/[A-Z]{2,}/.test(target)) return false;
   return true;
 }
 
 // A column Rip GENERATES and then reads back as a property: the FK in
 // `{foreignKey:}` and the rename source in `{was:}`. Its property name
-// is `__schemaCamel` of it, so it has to survive the round-trip — which
+// is `camelCase` of it, so it has to survive the round-trip — which
 // is why this is the strict, lowercase form.
-function __schemaIsColumnName(name) {
-  return typeof name === 'string' && /^[a-z_][a-z0-9_]*$/.test(name);
+function isColumnName(col) {
+  return typeof col === 'string' && /^[a-z_][a-z0-9_]*$/.test(col);
 }
 
 // A column that ALREADY EXISTS under a name Rip did not choose —
@@ -86,9 +129,9 @@ function __schemaIsColumnName(name) {
 // the wrong thing: a dot would ride through the quoter as ONE
 // identifier (`"crm.users"` is a column called that, not a qualified
 // name), and an embedded double quote is a typo every time.
-function __schemaIsLiteralColumn(name) {
-  return typeof name === 'string' && name.length > 0 &&
-    !/[\u0000-\u001f\u007f".]/.test(name);
+function isLiteralColumn(col) {
+  return typeof col === 'string' && col.length > 0 &&
+    !/[\u0000-\u001f\u007f".]/.test(col);
 }
 
 // ── the `:model` directive vocabulary ────────────────────────────────
@@ -108,7 +151,7 @@ function __schemaIsLiteralColumn(name) {
 //   'field'   @primaryKey patientId       a camelCase property name and
 //             …, {column: "PATIENT_ID"}   the column it reads, same pair
 //                                         a declared field spells
-const __SCHEMA_MODEL_DIRECTIVES = {
+const MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: 'target',
   timestamps: 'none',
@@ -129,7 +172,7 @@ const __SCHEMA_MODEL_DIRECTIVES = {
 // read loops; for the argument-less pair (@timestamps, @softDelete) a
 // second occurrence is a duplicate declaration of a once-thing — both
 // layers reject it rather than tolerating it idempotently.
-const __SCHEMA_ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 'timestamps', 'softDelete'];
+const ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 'timestamps', 'softDelete'];
 
 // Plain arrays, not Sets: at this size `includes` beats a hash lookup
 // and the error messages below `.join(', ')` them directly instead of
@@ -137,7 +180,7 @@ const __SCHEMA_ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 
 //
 // The subset of the above that declares a relation. `mixin` shares the
 // 'target' shape but derives no names, so it is deliberately absent.
-const __SCHEMA_RELATION_DIRECTIVES = ['belongsTo', 'hasOne', 'hasMany'];
+const RELATION_DIRECTIVES = ['belongsTo', 'hasOne', 'hasMany'];
 
 // ── the `{key: value}` option vocabularies ───────────────────────────
 //
@@ -159,7 +202,7 @@ const __SCHEMA_RELATION_DIRECTIVES = ['belongsTo', 'hasOne', 'hasMany'];
 //   column: the column this field reads and writes. Without it the
 //           column is the field name snake_cased.
 //   was:    the column-rename annotation the migration differ consumes
-const __SCHEMA_FIELD_ATTRS = { __proto__: null, column: 'literal', was: 'column' };
+const FIELD_ATTRS = { __proto__: null, column: 'literal', was: 'column' };
 
 // A relation's options.
 //   as:         the accessor name. Without it the accessor derives from
@@ -173,7 +216,7 @@ const __SCHEMA_FIELD_ATTRS = { __proto__: null, column: 'literal', was: 'column'
 //   through:    the JOIN MODEL a @hasMany/@hasOne reads through.
 //   targetKey:  the join model's column pointing at the TARGET. `through`
 //               only; without it, the join model's own @belongsTo says.
-const __SCHEMA_RELATION_ATTRS = {
+const RELATION_ATTRS = {
   __proto__: null,
   as: 'property',
   foreignKey: 'column',
@@ -189,21 +232,21 @@ const __SCHEMA_RELATION_ATTRS = {
 // Shape only. Whether the author wrote it bare or quoted is a TOKEN
 // fact, so the compiler enforces that half; a descriptor reaching
 // `__schema({…})` directly has no such evidence to check.
-function __schemaAttrValueError(kind, key, value) {
+function attrValueError(kind, key, value) {
   if (typeof value !== 'string' || !value.length) {
     return "'" + key + "' requires a non-empty string";
   }
-  if (kind === 'property' && !__schemaIsCanonicalName(value)) {
+  if (kind === 'property' && !isCanonicalName(value)) {
     return "'" + key + "' is a property name — canonical camelCase, e.g. {" + key + ': author}';
   }
-  if (kind === 'model' && !__schemaIsCanonicalTarget(value)) {
+  if (kind === 'model' && !isCanonicalTarget(value)) {
     return "'" + key + "' is a model name — canonical PascalCase, e.g. {" + key + ': Membership}';
   }
-  if (kind === 'column' && !__schemaIsColumnName(value)) {
+  if (kind === 'column' && !isColumnName(value)) {
     return "'" + key + "' is a column name Rip generates — lowercase, digits and underscores " +
       'only, e.g. {' + key + ': "author_id"}';
   }
-  if (kind === 'literal' && !__schemaIsLiteralColumn(value)) {
+  if (kind === 'literal' && !isLiteralColumn(value)) {
     return "'" + key + "' is a database column name — any spelling the database uses, but with " +
       'no dots, double quotes, or control characters';
   }
@@ -211,16 +254,19 @@ function __schemaAttrValueError(kind, key, value) {
 }
 
 export {
-  __schemaSnake,
-  __schemaCamel,
-  __schemaIsCanonicalName,
-  __schemaIsCanonicalTarget,
-  __schemaIsColumnName,
-  __schemaIsLiteralColumn,
-  __schemaAttrValueError,
-  __SCHEMA_MODEL_DIRECTIVES,
-  __SCHEMA_ONCE_DIRECTIVES,
-  __SCHEMA_RELATION_DIRECTIVES,
-  __SCHEMA_FIELD_ATTRS,
-  __SCHEMA_RELATION_ATTRS,
+  snakeCase,
+  camelCase,
+  pluralize,
+  fkName,
+  accessorOf,
+  isCanonicalName,
+  isCanonicalTarget,
+  isColumnName,
+  isLiteralColumn,
+  attrValueError,
+  MODEL_DIRECTIVES,
+  ONCE_DIRECTIVES,
+  RELATION_DIRECTIVES,
+  FIELD_ATTRS,
+  RELATION_ATTRS,
 };

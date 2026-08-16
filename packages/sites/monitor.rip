@@ -1,4 +1,4 @@
-import { identifierRuns, isIdentifierName } from '../../src/lexer.js'
+import { identifierRuns, isIdentifierName } from '../../src/ident.js'
 
 export DEFAULT_ACCESS_PICTURE =! '{local_time} {local_timezone} {duration_seconds:@s} │ {status} {mime_abbrev:<4} {response_bytes:@B} │ {method} {path} │ {mark}'
 export MAX_ACCESS_LINE_BYTES =! 8192

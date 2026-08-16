@@ -3,7 +3,7 @@
 // nothing there is reachable from a test, and this function now decides which
 // bytes count as reads for a gated contract invariant.
 
-import { identifierRunAt } from '../../src/lexer.js';
+import { identifierRunAt } from '../../src/ident.js';
 
 // Whole-source code mask for the occurrence scan: blank STRING-LITERAL bytes
 // but KEEP `#{…}` interpolation expressions (a read inside an interpolation is
