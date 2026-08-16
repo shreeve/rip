@@ -3,7 +3,10 @@ import { basename, dirname, join, resolve } from 'node:path'
 
 preload = process.execArgv.find((arg) -> arg.startsWith('--preload='))?.slice('--preload='.length)
 abort 'rip-site generate: the Rip loader is missing' unless preload?
-# Preload lives in src/cli/; the compiler root is one level up.
+# This runs as a SPAWNED child, so it must load the compiler that is
+# actually running us — the one the parent passed as --preload — not a
+# fixed relative path that could resolve to a different installation.
+# The loader sits beside compile.js and resolve.js in src/.
 compiler = import!(join(dirname(resolve(preload)), 'compile.js')).compile
 
 # Bare specifiers (`rip/<pkg>` stdlib, bun-global fallback) share the
