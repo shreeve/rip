@@ -600,7 +600,12 @@ export assertEmptyDatabase = (sql) ->
 #   tar: { create(archive, dir), extract(archive, dir), list(archive) }
 
 # dump: EXPORT DATABASE to a staging dir, verify harbor wrote it here,
-# tidy the SQL for readability, tar it up. Fails closed on overwrite.
+# tar it up. Fails closed on overwrite. The SQL ships VERBATIM as
+# DuckDB wrote it — fully explicit (every sequence attribute spelled,
+# defaults and all) on purpose: a backup artifact must restore exactly
+# whatever existed even if a future version changes a default, so
+# fidelity beats prettiness here. Terse SQL is for human-authored
+# files, not this one.
 export dump = (arg, deps) ->
   { sql, fs, tar, now } = deps
   staging = deps.tmp()
