@@ -43,11 +43,13 @@ const nodeStubs = {
 const unavailable = (surface) =>
   `() => { throw new Error('rip: ${surface} is unavailable in the browser'); }`;
 
+const TS_DIR = resolve(root, 'src', 'ts');
+
 const IDE_STUBS = new Map([
   ['dts.js', [
     `export const emitDeclarations = ${unavailable('declaration emission')};`,
   ].join('\n')],
-  ['schematext.js', [
+  ['schema.js', [
     `export class SchemaTypeError extends Error {`,
     `  constructor(message, start = null, node = null) {`,
     `    super(message);`,
@@ -59,7 +61,7 @@ const IDE_STUBS = new Map([
     `export const buildSchemaTypeStory = ${unavailable('schema type story')};`,
     `export const isModuleShaped = () => false;`,
   ].join('\n')],
-  ['typetext.js', [
+  ['types.js', [
     `export class TypeTextError extends Error {`,
     `  constructor(message) { super(message); this.name = 'TypeTextError'; }`,
     `}`,
@@ -91,14 +93,20 @@ const IDE_STUBS = new Map([
 const ideStubs = {
   name: 'rip-ide-stubs',
   setup(build) {
-    // Stub only the ts/ modules. Basenames alone are not enough —
-    // `components.js` also names the reactive runtime module.
-    build.onResolve({ filter: /(?:^|\/)(dts|schematext|typetext|components)\.js$/ }, (args) => {
-      const file = args.path.split('/').pop();
+    // Stub only the src/ts/ modules. Every basename here is also a
+    // module somewhere else — components.js names the reactive runtime,
+    // schema.js and types.js name the compile-time passes — so the
+    // decision is made on the RESOLVED location, never on the basename
+    // and never on the importer. Testing the importer is what makes
+    // `import '../schema.js'` FROM src/ts/ look like a ts/ module, which
+    // would stub the real compiler out of the bundle.
+    build.onResolve({ filter: /(?:^|\/)(dts|schema|types|components)\.js$/ }, (args) => {
+      const target = args.path.startsWith('.')
+        ? resolve(dirname(args.importer || ''), args.path)
+        : args.path;
+      if (dirname(target) !== TS_DIR) return null;
+      const file = target.split('/').pop();
       if (!IDE_STUBS.has(file)) return null;
-      const inTypes = /(?:^|\/)ts\//.test(args.path)
-        || /(?:^|\/)ts\//.test(args.importer || '');
-      if (!inTypes) return null;
       return { path: file, namespace: 'rip-ide-stub' };
     });
     build.onLoad({ filter: /.*/, namespace: 'rip-ide-stub' }, (args) => ({

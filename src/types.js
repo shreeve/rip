@@ -7,7 +7,7 @@
 // That is the whole symmetry with schema.js. Both files are a rewrite
 // pass plus the compile-time surface of one construct, and both sit
 // beside the renderer that turns their result into TypeScript text
-// (ts/typetext.js here, ts/schematext.js there). The difference is what
+// (ts/types.js here, ts/schema.js there). The difference is what
 // the construct becomes: a schema becomes CODE, so schema.js carries a
 // serializer; a type becomes NOTHING, so this file does not.
 //

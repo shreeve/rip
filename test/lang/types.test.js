@@ -1430,7 +1430,7 @@ describe('nested array types across the annotation surface', () => {
   // The schema DSL rejects nested array field types (`tags! string[][]`)
   // by design — one `[]` validates element-wise. The TYPE-ANNOTATION
   // surface has no such gap: `T[][]` renders through the shared
-  // typetext renderer in every position — pinned here so the two
+  // types renderer in every position — pinned here so the two
   // records never blur.
   test('typed declarations and forwards erase byte-identically with nested array types', () => {
     expect(compile('x: string[][] = []').code).toBe(compile('x = []').code);

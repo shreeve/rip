@@ -8165,7 +8165,7 @@ class CodeBuilder {
   }
 }
 
-// rip-ide-stub:schematext.js
+// rip-ide-stub:schema.js
 class SchemaTypeError extends Error {
   constructor(message, start = null, node = null) {
     super(message);
@@ -8179,7 +8179,7 @@ var buildSchemaTypeStory = () => {
 };
 var isModuleShaped = () => false;
 
-// rip-ide-stub:typetext.js
+// rip-ide-stub:types.js
 class TypeTextError extends Error {
   constructor(message) {
     super(message);

@@ -34,7 +34,7 @@
 // joins the same segments as plain text — one assembly, two
 // consumers, no drift.
 
-import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typetext.js';
+import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor } from '../dom.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
