@@ -60,6 +60,21 @@ test "semicolon delimiter", ->
 test "explicit separator", ->
   eq CSV.read("a:b:c\n1:2:3\n", sep: ':'), [['a','b','c'],['1','2','3']]
 
+test "sep= header", ->
+  eq CSV.read("sep=;\na;b\n1;2\n"), [['a','b'],['1','2']]
+
+test "sep= header with CRLF", ->
+  eq CSV.read("sep=;\r\na;b\r\n"), [['a','b']]
+
+test "unterminated sep= header is the whole input", ->
+  eq CSV.read("sep=;"), []
+
+test "empty sep= value falls back to detection", ->
+  eq CSV.read("sep=\na,b\n"), [['a','b']]
+
+test "empty explicit separator is unspecified", ->
+  eq CSV.read("a,b\n1,2\n", sep: ''), [['a','b'],['1','2']]
+
 # ==[ Reading: Quoted ]==
 
 console.log "\nReading — quoted fields"
