@@ -1,6 +1,6 @@
 // The core runtime's built-in harbor adapter — the default that
 // schema-model apps get with no adapter installed (reached here via
-// schema.connect / __schemaConnect). It must carry the same
+// schema.connect / connect). It must carry the same
 // session-lifecycle guarantees PR #107 pinned on packages/db's
 // harborAdapter: the session is dropped in a finally on the COMMIT
 // and ROLLBACK paths (a failed COMMIT releases the open transaction
@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 const orm = await import('../../src/runtime/orm.js');
 const hb = await import('../../src/runtime/duckdb.js');
 
-const adapter = () => orm.__schemaConnect({ url: 'http://h' });
+const adapter = () => orm.connect({ url: 'http://h' });
 
 // Run a scenario under a scripted global fetch, always restoring.
 const withFetch = async (double, fn) => {
@@ -341,7 +341,7 @@ describe('statement deadline: absent vs explicit zero', () => {
   const sent = async (adapterOpts, queryOpts) => {
     const fetch = fetchDouble(ok);
     await withFetch(fetch, () =>
-      orm.__schemaConnect({ url: 'http://h', ...adapterOpts }).query('SELECT 1', null, queryOpts));
+      orm.connect({ url: 'http://h', ...adapterOpts }).query('SELECT 1', null, queryOpts));
     return fetch.calls.find(c => c.url.endsWith('/sql')).body;
   };
 
@@ -374,8 +374,8 @@ describe('statement deadline: absent vs explicit zero', () => {
     expect(migrateSrc).toContain('const UNBOUNDED = { timeoutMs: null }');
     // Every statement goes through the one wrapper; the wrapper's own
     // definition is the single permitted mention of the raw funnel.
-    const raw = migrateSrc.match(/__schemaRunSQL\(null,/g) ?? [];
+    const raw = migrateSrc.match(/rawSQL\(null,/g) ?? [];
     expect(raw.length).toBe(1);
-    expect(migrateSrc).toContain('const runSQL = (sql, params = []) => __schemaRunSQL(null, sql, params, UNBOUNDED)');
+    expect(migrateSrc).toContain('const runSQL = (sql, params = []) => rawSQL(null, sql, params, UNBOUNDED)');
   });
 });

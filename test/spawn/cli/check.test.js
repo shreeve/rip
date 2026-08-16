@@ -654,7 +654,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   }, 90_000);
 
   // The mixin face promises exactly what the runtime serves, in both
-  // directions. The projection algebra works on a mixin — __schemaDerive
+  // directions. The projection algebra works on a mixin — derive
   // refuses only :union/:enum, and a mixin derivation is an instantiable
   // :shape — so every algebra call checks clean, INCLUDING Schema.extend
   // taking a mixin argument. The parse surface is refused on the mixin

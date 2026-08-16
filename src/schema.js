@@ -46,7 +46,7 @@ const KIND_DEFAULT = 'input';
 // Lifecycle hook names — a `name: -> body` callable on a :model whose
 // name is in this set binds as a hook (exact match; anything else is
 // a plain method — a working reading, so no fuzzy near-miss guard).
-// Mirrors the runtime's __SCHEMA_HOOK_NAMES.
+// Mirrors the runtime's HOOK_NAMES.
 const HOOK_NAMES = new Set([
   'beforeValidation', 'afterValidation',
   'beforeSave', 'afterSave',
@@ -752,7 +752,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       } else if (head.kind === '{') {
         // Persistence metadata may also ride a :mixin field — it takes
         // effect when a :model includes the mixin; inclusion into any
-        // other kind rejects at expansion (__schemaExpandMixins).
+        // other kind rejects at expansion (expandMixins).
         if (kind !== 'model' && kind !== 'mixin') {
           fail(`field attrs ('{…}') are persistence metadata — :model/:mixin-only ('{was: "old_column"}' annotates a column rename)`, head.start);
         }
@@ -1094,7 +1094,7 @@ function finishModelBody(entries, fail) {
   for (const e of entries) {
     if (e.tag !== 'directive' || (e.name !== 'index' && e.name !== 'unique')) continue;
     // Written in field space, resolved exactly as the runtime's
-    // __schemaColumnFor resolves it: the property map first (the
+    // columnFor resolves it: the property map first (the
     // surrogate primary key lives there like any field), then a
     // column's own name, then the snake_case derivation. A column's
     // own name is accepted because `known` is exactly the set the
@@ -1241,7 +1241,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (name === null || !name.length) {
         fail(`@${e.name} requires ${want}`, (t0 ?? { start: e.start }).start);
       }
-      // A dot would ride through __schemaQuoteIdent as ONE quoted
+      // A dot would ride through quoteIdent as ONE quoted
       // identifier — `"crm.accounts"` names a table literally called
       // that, not `accounts` in schema `crm`. Refuse rather than
       // silently target the wrong thing; qualified names need their own

@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { extractClientProjections } from '../../src/projections.js';
 import { compile } from '../../src/compile.js';
-import { __schema, __SchemaRegistry } from '../../src/runtime/schema.js';
+import { __schema, SchemaRegistry } from '../../src/runtime/schema.js';
 // Models in the parity fixture need the persistence runtime loaded.
 import '../../src/runtime/orm.js';
 
@@ -35,7 +35,7 @@ const loadFromSynthetic = (syntheticSource, name) => {
 };
 
 describe('extractClientProjections', () => {
-  beforeEach(() => __SchemaRegistry.reset());
+  beforeEach(() => SchemaRegistry.reset());
 
   test('folded projection is shippable and round-trips validation', () => {
     const r = extractClientProjections(MODELS, ['UserView'], { path: 'api/models.rip' });
@@ -45,7 +45,7 @@ describe('extractClientProjections', () => {
     const View = loadFromSynthetic(r.source, 'UserView');
     expect(View.kind).toBe('shape');
 
-    __SchemaRegistry.reset();
+    SchemaRegistry.reset();
     const runtimeJs = compile(MODELS, { runtimeDelivery: 'none', path: 'api/models.rip' })
       .code.replace(/export const /g, 'const ');
     // eslint-disable-next-line no-new-func

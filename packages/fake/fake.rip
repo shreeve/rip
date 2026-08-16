@@ -16,8 +16,8 @@
 # plausible values straight from the schema declarations.
 # ==============================================================================
 
-import { __SchemaDef } from '../../src/runtime/schema.js'
-import { __schemaNormalizePersistenceInput, __schemaConstructInputInstance } from '../../src/runtime/orm.js'
+import { SchemaDef } from '../../src/runtime/schema.js'
+import { normalizePersistenceInput, constructInputInstance } from '../../src/runtime/orm.js'
 
 # ==[ Randomness ]==
 
@@ -360,7 +360,7 @@ __factoryTableRows = (norm, text) ->
         else v
     row
 
-__SchemaDef.prototype.factory = (num = 0, ...args) ->
+SchemaDef.prototype.factory = (num = 0, ...args) ->
   @_assertModel 'factory'
   norm = @_normalize()
 
@@ -386,8 +386,8 @@ __SchemaDef.prototype.factory = (num = 0, ...args) ->
       if persist and not data[fk]?
         throw Error.new "fake: #{@name}.factory() — required foreign key #{fk} is not invented; pass it explicitly (e.g. factory(n, {#{fk}: parent.id}))"
     return @create!(data) if persist
-    canonical = __schemaNormalizePersistenceInput!(this, data, { skipEnsures: true, api: 'factory()' })
-    __schemaConstructInputInstance this, canonical
+    canonical = normalizePersistenceInput!(this, data, { skipEnsures: true, api: 'factory()' })
+    constructInputInstance this, canonical
 
   return make() unless many
   out = []

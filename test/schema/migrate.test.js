@@ -28,7 +28,7 @@ const K4 = {
   name: 'rip',
   __schema: rt4.__schema,
   setAdapter: orm4.__schemaSetAdapter,
-  scope: (fn) => rt4.__SchemaRegistry.scope(fn),
+  scope: (fn) => rt4.SchemaRegistry.scope(fn),
   plan: () => mig.plan(),
   status: (o) => mig.status(o),
   make: (n, o) => mig.make(n, o),
@@ -996,7 +996,7 @@ describe('migrate: the declared-schema dump', () => {
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}|\d{2}:\d{2}/);
   });
 
-  test('content: the generated header, then every table NAME-SORTED with its sequence/create/index shapes exactly as __schemaRenderCreate emits them', async () => {
+  test('content: the generated header, then every table NAME-SORTED with its sequence/create/index shapes exactly as renderCreate emits them', async () => {
     const text = await K4.scope(() => {
       declare();
       return mig.dump();
@@ -1006,9 +1006,9 @@ describe('migrate: the declared-schema dump', () => {
       return mig.canonicalDeclared();
     });
     // The file IS: header + one section per name-sorted table, each
-    // '-- name' plus the __schemaRenderCreate blocks, blank-line
+    // '-- name' plus the renderCreate blocks, blank-line
     // separated, trailing newline.
-    const sections = declared.tables.map((t) => ['-- ' + t.name, ...orm4.__schemaRenderCreate(t)].join('\n'));
+    const sections = declared.tables.map((t) => ['-- ' + t.name, ...orm4.renderCreate(t)].join('\n'));
     const header = text.slice(0, text.indexOf('\n\n'));
     expect(header).toContain('rip schema dump');
     expect(header).toContain('--check');
@@ -1066,7 +1066,7 @@ describe('migrate: identifier ownership', () => {
       notes: [],
       tableWas: null,
     };
-    const sql = orm4.__schemaRenderCreate(spec).join('\n');
+    const sql = orm4.renderCreate(spec).join('\n');
     expect(sql).toContain('CREATE SEQUENCE "odd"" sequence" START 4;');
     expect(sql).toContain('CREATE TABLE "odd"" table"');
     expect(sql).toContain('"value""name" VARCHAR');
@@ -1090,7 +1090,7 @@ describe('migrate: identifier ownership', () => {
     ]);
 
     const badCreate = { ...declared.tables[0], name: 'bad\nname', tableWas: null };
-    expect(() => orm4.__schemaRenderCreate(badCreate)).toThrow(/control characters/);
+    expect(() => orm4.renderCreate(badCreate)).toThrow(/control characters/);
     const badRename = {
       tables: [{ ...declared.tables[0], tableWas: 'bad\u0000name' }],
     };
@@ -1921,7 +1921,7 @@ describe('migrate: the CLI-only boundary — no migration bytes in delivered out
   test('an inline model program carries the CLI-pointing stubs and NONE of the differ/runner', async () => {
     const { compile } = await import('../../src/compile.js');
     const { code } = compile('export User = schema :model\n  name! string\n', { path: 'm.rip', runtimeDelivery: 'inline' });
-    expect(code).toContain('__schemaMigrationStub');
+    expect(code).toContain('migrationStub');
     expect(code).toContain('CLI-only');
     // Markers that exist ONLY in src/cli/migrate.js — any of them in
     // delivered output means the machinery leaked past the boundary.

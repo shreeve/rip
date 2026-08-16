@@ -319,7 +319,7 @@ async function evaluate(compiled) {
   // of rows in one process — replace semantics apply DURING a battery
   // evaluation only (the collision rejection itself is pinned by the
   // inherited suite, whose registry state this must never leak into).
-  const registry = schemaRuntime.__SchemaRegistry;
+  const registry = schemaRuntime.SchemaRegistry;
   const prior = registry?.replace;
   if (registry) registry.replace = true;
   try {

@@ -48,7 +48,7 @@ describe('orm runtime: process pins', () => {
     const ormPath = new URL('../../../src/runtime/orm.js', import.meta.url).pathname;
     const script = `
 import { __schema } from ${JSON.stringify(schemaPath)};
-import { __schemaTransaction } from ${JSON.stringify(ormPath)};
+import { transaction } from ${JSON.stringify(ormPath)};
 const mk = () => {
   const calls = [];
   const answer = { columns: [{ name: 'id' }], data: [[1]], rowCount: 1 };
@@ -71,8 +71,8 @@ const fieldEntry = { tag: 'field', name: 'name', modifiers: ['!'], typeName: 'st
 const U = __schema({ kind: 'model', name: 'User', entries: [fieldEntry], adapter: a1 });
 const V = __schema({ kind: 'model', name: 'Wing', entries: [fieldEntry], adapter: a2 });
 await Promise.all([
-  __schemaTransaction({ on: a1 }, async () => { await U.create({ name: 'a' }); }),
-  Promise.resolve().then(() => __schemaTransaction({ on: a2 }, async () => { await V.create({ name: 'b' }); })),
+  transaction({ on: a1 }, async () => { await U.create({ name: 'a' }); }),
+  Promise.resolve().then(() => transaction({ on: a2 }, async () => { await V.create({ name: 'b' }); })),
 ]);
 const all = [...a1.calls, ...a2.calls];
 const escaped = all.filter((c) => c.tx === false);

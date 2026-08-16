@@ -26,7 +26,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { pathToFileURL } from 'url';
 import { CompileError } from '../compile.js';
-import { __schemaAdapterFor } from '../runtime/orm.js';
+import { adapterFor } from '../runtime/orm.js';
 import * as migration from './migrate.js';
 
 const ENTRY_CANDIDATES = [
@@ -250,7 +250,7 @@ try {
     }
 
   } else if (cmd === 'migrate') {
-    const adapter = __schemaAdapterFor(null);
+    const adapter = adapterFor(null);
     if (typeof adapter.begin !== 'function') {
       console.error(
         'rip schema: warning — the adapter has no begin(): migrations apply WITHOUT transactions, ' +

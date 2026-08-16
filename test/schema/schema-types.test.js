@@ -66,7 +66,7 @@ describe('schema declarations: the per-kind shapes', () => {
     // Two rules, both the runtime's. The parse surface is ABSENT — a
     // mixin is not instantiable (`parse` throws, `safe` fails, `ok` is
     // false), so the checker refuses those instead of the runtime
-    // throwing. The projection algebra is PRESENT — `__schemaDerive`
+    // throwing. The projection algebra is PRESENT — `derive`
     // refuses only :union and :enum, and a mixin derivation is a plain
     // instantiable :shape — so pick/omit/partial/required/extend answer,
     // and the merged Schema declaration lets `extend` take a mixin.
@@ -289,7 +289,7 @@ describe('schema type story on the TS face', () => {
     const f = face('T = schema :mixin\n  a! string');
     expect(f.code).toContain('type T = { a: string };');
     // On the BINDING's own line — the row this closes is that the mixin
-    // binding was the one kind left uncast, falling to `__SchemaDef`, the
+    // binding was the one kind left uncast, falling to `SchemaDef`, the
     // schema runtime's own class, at a user declaration.
     const binding = f.code.split('\n').find((l) => l.startsWith('let T = __schema('));
     expect(binding).toBeDefined();
@@ -543,7 +543,7 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
   const TARGETS = ['Person', 'Box', 'City', 'Bus', 'Sheep', 'Order', 'MdmUser', 'Series'];
 
   test('hasMany accessors: pluralize() matches the runtime accessor for every rule class', () => {
-    rt4.__SchemaRegistry.scope(() => {
+    rt4.SchemaRegistry.scope(() => {
       for (const target of TARGETS) {
         const def = rt4.__schema({
           kind: 'model', name: 'Holder' + target,
@@ -560,7 +560,7 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
   });
 
   test('belongsTo FK property names: the shared camel(fkName(target)) matches markDirty\'s set', () => {
-    rt4.__SchemaRegistry.scope(() => {
+    rt4.SchemaRegistry.scope(() => {
       const def = rt4.__schema({
         kind: 'model', name: 'Fk',
         entries: [
@@ -578,7 +578,7 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
   });
 
   test('the timestamp columns the renderer types as Date ARE Dates at the runtime', async () => {
-    await rt4.__SchemaRegistry.scope(async () => {
+    await rt4.SchemaRegistry.scope(async () => {
       const orm = await import('../../src/runtime/orm.js');
       const calls = [];
       orm.__schemaSetAdapter({

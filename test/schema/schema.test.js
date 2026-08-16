@@ -36,7 +36,7 @@ const emitFails = (src, pattern) => {
 // permits exactly one copy per process; the standalone-copy tests run
 // in subprocesses).
 const rt = await import('../../src/runtime/schema.js');
-const { __schema, SchemaError, __SchemaRegistry, registerCoercer } = rt;
+const { __schema, SchemaError, SchemaRegistry, registerCoercer } = rt;
 
 // Compile with delivery 'none' and evaluate against the imported
 // runtime — the binding-passing form.
@@ -45,7 +45,7 @@ const run = (src, tail) => {
   return new Function('__schema', 'SchemaError', 'registerCoercer', `${code}\n${tail}`)(__schema, SchemaError, registerCoercer);
 };
 
-beforeEach(() => __SchemaRegistry.reset());
+beforeEach(() => SchemaRegistry.reset());
 
 // ════════════════════════════════════════════════════════════════════
 // The compiled schemas VALIDATE through the runtime
@@ -339,7 +339,7 @@ describe('schema DSL: loud rejections', () => {
   // A surrogate primary key is a property↔column pair like any
   // field's, so `@primaryKey pid, {column: "PID"}` puts 'pid' in
   // property space and `@index [pid]` resolves to column 'PID' —
-  // exactly as the runtime's __schemaColumnFor resolves it.
+  // exactly as the runtime's columnFor resolves it.
   test('@index/@unique resolve the surrogate primary key through its {column:}', () => {
     const pk = 'U = schema :model\n  name! string\n  @primaryKey pid, {column: "PID"}\n  ';
     expect(() => tokenize(pk + '@index [pid]')).not.toThrow();
@@ -918,7 +918,7 @@ describe('runtime delivery: injection machinery', () => {
     // and `requires: ['vocab']` fuses the dependency ahead of it.
     const imports = text.match(/^import .*$/gm) ?? [];
     expect(imports).toEqual([`import { isCanonicalName } from './vocab.js';`]);
-    expect(text).toMatch(/^export \{ __schema, SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence \};$/m);
+    expect(text).toMatch(/^export \{ __schema, SchemaError, SchemaRegistry, registerCoercer, SchemaDef, installPersistence \};$/m);
   });
 });
 
@@ -1275,8 +1275,8 @@ describe('schema pipeline: defensive async and materialization parity', () => {
       ],
     });
     expect(Event.parse({ kind: 'click', x: 8 }).x).toBe(8);
-    __SchemaRegistry.replace = true;
-    try { shape(5, true); } finally { __SchemaRegistry.replace = false; }
+    SchemaRegistry.replace = true;
+    try { shape(5, true); } finally { SchemaRegistry.replace = false; }
     const input = { kind: 'click', x: 7 };
     expect(() => Event.parse(input)).toThrow(/async refinements/);
     expect(() => Event.safe(input)).toThrow(/async refinements/);

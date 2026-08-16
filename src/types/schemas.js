@@ -190,7 +190,7 @@ const VALIDATION_INTRINSICS = [
 // src/runtime/schema.js (2026-08-03), `parse` throws, `safe` always
 // fails, `ok` is always false — so the parse surface stays absent and
 // the checker refuses what the runtime would throw on. The projection
-// algebra is a different story: `__schemaDerive` refuses only `:union`
+// algebra is a different story: `derive` refuses only `:union`
 // and `:enum`, and a derivation from a mixin is a plain `:shape`,
 // instantiable like any other — so pick/omit/partial/required/extend
 // answer here, each returning `Schema` over the projected shape.

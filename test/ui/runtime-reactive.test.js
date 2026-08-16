@@ -1204,7 +1204,7 @@ describe('runtime delivery: the reactive runtime', () => {
     expect(inl.code.startsWith('const { __schema')).toBe(true);
     // Value pin via none+binding against the shared modules.
     const schema = await import('../../src/runtime/schema.js');
-    schema.__SchemaRegistry.reset();
+    schema.SchemaRegistry.reset();
     const { code: none } = compile(
       'S = schema\n  a! integer\nn = __state(S.parse({a: 4}).a)',
       { runtimeDelivery: 'none' },

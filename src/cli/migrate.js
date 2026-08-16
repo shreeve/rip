@@ -39,10 +39,10 @@
 // signal the differ cannot consume coherently REJECTS loudly
 //.
 
-import { __SchemaRegistry } from '../runtime/schema.js';
+import { SchemaRegistry } from '../runtime/schema.js';
 import {
-  __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured,
-  __schemaTransaction, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex,
+  runSQL as rawSQL, adapterFor, adapterConfigured,
+  transaction, quoteIdent, renderCreate, renderIndex,
 } from '../runtime/orm.js';
 
 const MIGRATIONS_TABLE = '_rip_migrations';
@@ -54,7 +54,7 @@ const OPERATIONS_TABLE = '_rip_migration_operations';
 // "not declared" would read as drop-table).
 const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE, OPERATIONS_TABLE]);
 
-export { __schemaAdapterConfigured as adapterConfigured };
+export { adapterConfigured as adapterConfigured };
 
 // Every statement the runner issues opts out of harbor's deployment-wide
 // statement deadline (HARBOR_STATEMENT_TIMEOUT_MS). `timeoutMs: null`
@@ -65,7 +65,7 @@ export { __schemaAdapterConfigured as adapterConfigured };
 // cloud VM, so a deadline sized for request handlers would kill it with
 // no escape. The app path keeps the default and stays protected.
 const UNBOUNDED = { timeoutMs: null };
-const runSQL = (sql, params = []) => __schemaRunSQL(null, sql, params, UNBOUNDED);
+const runSQL = (sql, params = []) => rawSQL(null, sql, params, UNBOUNDED);
 
 // ── row materializer ──────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ function migrateRows(res) {
 // ("verify with `rip schema status`") is dead on an adapter that
 // cannot answer status. The refusal names the fix.
 function requireCatalog(who) {
-  const adapter = __schemaAdapterFor(null);
+  const adapter = adapterFor(null);
   if (typeof adapter?.catalog !== 'function') {
     throw new Error(
       who + ': the configured adapter has no catalog() — the deployed schema is read in one ' +
@@ -212,7 +212,7 @@ export function canonicalDeclared() {
   // would define the table and the other's columns would read as
   // drops — a plan that changes with declaration order.
   const claimedBy = new Map();
-  for (const [, entry] of __SchemaRegistry._entries) {
+  for (const [, entry] of SchemaRegistry._entries) {
     if (entry.kind !== 'model') continue;
     const spec = entry.def._tableSpec();
     if (claimedBy.has(spec.name)) {
@@ -289,40 +289,40 @@ function foldSpec(spec) {
 
 function validateSchemaIdentifiers(schema, side) {
   for (const table of schema.tables || []) {
-    __schemaQuoteIdent(table.name, null, side + ' table');
+    quoteIdent(table.name, null, side + ' table');
     if (table.primaryKey != null) {
-      __schemaQuoteIdent(table.primaryKey, null, side + ' primary key');
+      quoteIdent(table.primaryKey, null, side + ' primary key');
     }
     if (table.tableWas != null) {
-      __schemaQuoteIdent(table.tableWas, null, side + ' previous table');
+      quoteIdent(table.tableWas, null, side + ' previous table');
     }
     if (table.sequence?.name != null) {
-      __schemaQuoteIdent(table.sequence.name, null, side + ' sequence');
+      quoteIdent(table.sequence.name, null, side + ' sequence');
     }
     for (const column of table.columns || []) {
-      __schemaQuoteIdent(column.name, null, side + ' column');
+      quoteIdent(column.name, null, side + ' column');
       if (column.was != null) {
-        __schemaQuoteIdent(column.was, null, side + ' previous column');
+        quoteIdent(column.was, null, side + ' previous column');
       }
     }
     for (const index of table.indexes || []) {
-      __schemaQuoteIdent(index.name, null, side + ' index');
+      quoteIdent(index.name, null, side + ' index');
       for (const column of index.columns || []) {
-        __schemaQuoteIdent(column, null, side + ' index column');
+        quoteIdent(column, null, side + ' index column');
       }
     }
     for (const constraint of table.compositeUniques || []) {
       for (const column of constraint) {
-        __schemaQuoteIdent(column, null, side + ' unique-constraint column');
+        quoteIdent(column, null, side + ' unique-constraint column');
       }
     }
     for (const fk of table.foreignKeys || []) {
-      __schemaQuoteIdent(fk.column, null, side + ' foreign-key column');
+      quoteIdent(fk.column, null, side + ' foreign-key column');
       if (fk.refTable != null) {
-        __schemaQuoteIdent(fk.refTable, null, side + ' foreign-key table');
+        quoteIdent(fk.refTable, null, side + ' foreign-key table');
       }
       if (fk.refColumn != null) {
-        __schemaQuoteIdent(fk.refColumn, null, side + ' foreign-key target column');
+        quoteIdent(fk.refColumn, null, side + ' foreign-key target column');
       }
     }
   }
@@ -454,7 +454,7 @@ function applyIndexBlocks(steps, deployed) {
     s.notes.push(
       'DuckDB refuses this ALTER while index(es) ' + ixs.map((ix) => ix.name).join(', ') + ' exist on this ' +
       'table ("Dependency Error"). Drop the index(es), apply the change, then recreate: ' +
-      ixs.map((ix) => __schemaRenderIndex({ name: s.table }, ix)).join(' '));
+      ixs.map((ix) => renderIndex({ name: s.table }, ix)).join(' '));
   }
   return steps;
 }
@@ -575,8 +575,8 @@ export function diffSchemas(declared, deployed) {
     if (old) {
       steps.push({
         table: name, kind: 'rename-table', class: 'safe', oldName: d.tableWas,
-        sql: ['ALTER TABLE ' + __schemaQuoteIdent(d.tableWas, null, 'rename source table') +
-          ' RENAME TO ' + __schemaQuoteIdent(name, null, 'rename target table') + ';'],
+        sql: ['ALTER TABLE ' + quoteIdent(d.tableWas, null, 'rename source table') +
+          ' RENAME TO ' + quoteIdent(name, null, 'rename target table') + ';'],
         notes: ['@tableWas ' + d.tableWas + ' can be removed once this migration lands'],
       });
       pTables.delete(d.tableWas);
@@ -624,7 +624,7 @@ export function diffSchemas(declared, deployed) {
     const d = dTables.get(name);
     steps.push({
       table: name, kind: 'create-table', class: 'safe',
-      sql: __schemaRenderCreate(dRaw.get(name)),
+      sql: renderCreate(dRaw.get(name)),
       notes: [],
     });
     if (d.ownAdapter) steps.push(adapterNote(name, d.ownAdapter));
@@ -645,8 +645,8 @@ export function diffSchemas(declared, deployed) {
   }, 'drop-table');
   for (const name of orderedDrops) {
     const p = pTables.get(name);
-    const sql = ['DROP TABLE ' + __schemaQuoteIdent(name, null, 'table') + ';'];
-    if (p.sequence) sql.push('DROP SEQUENCE ' + __schemaQuoteIdent(p.sequence.name, null, 'sequence') + ';');
+    const sql = ['DROP TABLE ' + quoteIdent(name, null, 'table') + ';'];
+    if (p.sequence) sql.push('DROP SEQUENCE ' + quoteIdent(p.sequence.name, null, 'sequence') + ';');
     steps.push({ table: name, kind: 'drop-table', class: 'destructive', sql, notes: [] });
   }
 
@@ -722,9 +722,9 @@ function diffTable(d, p, steps, deps) {
     if (old) {
       steps.push({
         table: t, kind: 'rename-column', class: 'safe',
-        sql: ['ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-          ' RENAME COLUMN ' + __schemaQuoteIdent(col.was, null, 'rename source column') +
-          ' TO ' + __schemaQuoteIdent(name, null, 'rename target column') + ';'],
+        sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+          ' RENAME COLUMN ' + quoteIdent(col.was, null, 'rename source column') +
+          ' TO ' + quoteIdent(name, null, 'rename target column') + ';'],
         notes: ['{was: "' + col.was + '"} on ' + name + ' can be removed once this migration lands'],
       });
       pCols.delete(col.was);
@@ -771,8 +771,8 @@ function diffTable(d, p, steps, deps) {
     // DuckDB: ADD COLUMN cannot carry constraints. DEFAULT is allowed
     // (and backfills existing rows), so add with the default when one
     // is declared, then tighten with SET NOT NULL.
-    let add = 'ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-      ' ADD COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' ' + col.type;
+    let add = 'ALTER TABLE ' + quoteIdent(t, null, 'table') +
+      ' ADD COLUMN ' + quoteIdent(name, null, 'column') + ' ' + col.type;
     if (col.default != null) add += ' DEFAULT ' + col.default;
     sql.push(add + ';');
     if (col.notNull) {
@@ -802,8 +802,8 @@ function diffTable(d, p, steps, deps) {
         notes.push('the SET NOT NULL is withheld — DuckDB refuses it ("Dependency Error") while ' +
           holds.join(' and ') + ' depend(s) on ' + t + '; the next plan emits it as its own step');
       } else {
-        sql.push('ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-          ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' SET NOT NULL;');
+        sql.push('ALTER TABLE ' + quoteIdent(t, null, 'table') +
+          ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' SET NOT NULL;');
       }
     }
     if (col.unique) {
@@ -815,9 +815,9 @@ function diffTable(d, p, steps, deps) {
         notes.push('fails if existing rows hold duplicates — and the DEFAULT backfills every existing ' +
           'row with the same value, so any table holding 2+ rows fails the CREATE UNIQUE INDEX');
       }
-      sql.push('CREATE UNIQUE INDEX ' + __schemaQuoteIdent('idx_' + t + '_' + name, null, 'index') +
-        ' ON ' + __schemaQuoteIdent(t, null, 'table') +
-        ' (' + __schemaQuoteIdent(name, null, 'index column') + ');');
+      sql.push('CREATE UNIQUE INDEX ' + quoteIdent('idx_' + t + '_' + name, null, 'index') +
+        ' ON ' + quoteIdent(t, null, 'table') +
+        ' (' + quoteIdent(name, null, 'index column') + ');');
     }
     const fk = d.foreignKeys.find((f) => f.column === name);
     if (fk) {
@@ -832,8 +832,8 @@ function diffTable(d, p, steps, deps) {
     if (dCols.has(name)) continue;
     steps.push({
       table: t, kind: 'drop-column', class: 'destructive',
-      sql: ['ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-        ' DROP COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ';'],
+      sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+        ' DROP COLUMN ' + quoteIdent(name, null, 'column') + ';'],
       notes: [],
     });
   }
@@ -879,8 +879,8 @@ function diffTable(d, p, steps, deps) {
     if (typeKey(dc.type) !== typeKey(pc.type)) {
       steps.push({
         table: t, kind: 'alter-type', class: 'lossy',
-        sql: ['ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-          ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' TYPE ' + dc.type + ';'],
+        sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+          ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' TYPE ' + dc.type + ';'],
         notes: [pc.type + ' -> ' + dc.type + ' casts existing values; rows that cannot cast will fail the migration'],
       });
     }
@@ -888,15 +888,15 @@ function diffTable(d, p, steps, deps) {
       if (dc.notNull) {
         steps.push({
           table: t, kind: 'set-not-null', class: 'lossy',
-          sql: ['ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-            ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' SET NOT NULL;'],
+          sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+            ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' SET NOT NULL;'],
           notes: ['fails if existing rows hold NULLs — backfill first'],
         });
       } else {
         steps.push({
           table: t, kind: 'drop-not-null', class: 'safe',
-          sql: ['ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-            ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' DROP NOT NULL;'],
+          sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+            ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' DROP NOT NULL;'],
           notes: [],
         });
       }
@@ -905,10 +905,10 @@ function diffTable(d, p, steps, deps) {
       steps.push({
         table: t, kind: 'alter-default', class: 'safe',
         sql: [dc.default != null
-          ? 'ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-            ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' SET DEFAULT ' + dc.default + ';'
-          : 'ALTER TABLE ' + __schemaQuoteIdent(t, null, 'table') +
-            ' ALTER COLUMN ' + __schemaQuoteIdent(name, null, 'column') + ' DROP DEFAULT;'],
+          ? 'ALTER TABLE ' + quoteIdent(t, null, 'table') +
+            ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' SET DEFAULT ' + dc.default + ';'
+          : 'ALTER TABLE ' + quoteIdent(t, null, 'table') +
+            ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' DROP DEFAULT;'],
         notes: [],
       });
     }
@@ -916,15 +916,15 @@ function diffTable(d, p, steps, deps) {
       if (dc.unique) {
         steps.push({
           table: t, kind: 'add-unique', class: 'lossy',
-          sql: ['CREATE UNIQUE INDEX ' + __schemaQuoteIdent('idx_' + t + '_' + name, null, 'index') +
-            ' ON ' + __schemaQuoteIdent(t, null, 'table') +
-            ' (' + __schemaQuoteIdent(name, null, 'index column') + ');'],
+          sql: ['CREATE UNIQUE INDEX ' + quoteIdent('idx_' + t + '_' + name, null, 'index') +
+            ' ON ' + quoteIdent(t, null, 'table') +
+            ' (' + quoteIdent(name, null, 'index column') + ');'],
           notes: ['fails if existing rows hold duplicates'],
         });
       } else {
         steps.push({
           table: t, kind: 'drop-unique', class: 'safe',
-          sql: ['DROP INDEX IF EXISTS ' + __schemaQuoteIdent('idx_' + t + '_' + name, null, 'index') + ';'],
+          sql: ['DROP INDEX IF EXISTS ' + quoteIdent('idx_' + t + '_' + name, null, 'index') + ';'],
           notes: ['a UNIQUE declared inline in CREATE TABLE cannot be dropped by index name; recreate the table if this fails'],
         });
       }
@@ -940,8 +940,8 @@ function diffTable(d, p, steps, deps) {
     if (ex && ex.unique === ix.unique &&
         ex.columns.join(',') === ix.columns.join(',')) continue;
     const sql = [];
-    if (ex) sql.push('DROP INDEX ' + __schemaQuoteIdent(name, null, 'index') + ';');
-    sql.push(__schemaRenderIndex(d, ix));
+    if (ex) sql.push('DROP INDEX ' + quoteIdent(name, null, 'index') + ';');
+    sql.push(renderIndex(d, ix));
     steps.push({
       table: t, kind: 'create-index', class: ix.unique ? 'lossy' : 'safe',
       sql,
@@ -952,7 +952,7 @@ function diffTable(d, p, steps, deps) {
     if (dIdx.has(name)) continue;
     steps.push({
       table: t, kind: 'drop-index', class: 'safe',
-      sql: ['DROP INDEX ' + __schemaQuoteIdent(name, null, 'index') + ';'],
+      sql: ['DROP INDEX ' + quoteIdent(name, null, 'index') + ';'],
       notes: [],
     });
   }
@@ -1042,7 +1042,7 @@ function diffTable(d, p, steps, deps) {
 export function renderPlan(steps) {
   const lines = [];
   for (const s of steps) {
-    __schemaQuoteIdent(s.table, null, 'plan table');
+    quoteIdent(s.table, null, 'plan table');
     lines.push('-- [' + s.class + '] ' + s.kind + ' ' + s.table);
     for (const n of s.notes) lines.push('--   ' + n);
     lines.push(...s.sql);
@@ -1093,7 +1093,7 @@ export function renderDump(declared) {
       lines.push('-- NOTE: ' + t.ownAdapter +
         ' declares its own on: adapter — this table lives in that adapter\'s database, not the default one');
     }
-    lines.push(...__schemaRenderCreate(t));
+    lines.push(...renderCreate(t));
     sections.push(lines.join('\n'));
   }
   return sections.join('\n\n') + '\n';
@@ -1475,7 +1475,7 @@ async function migrateApply(opts, files) {
     }
   }
 
-  const adapter = __schemaAdapterFor(null);
+  const adapter = adapterFor(null);
   const transactional = typeof adapter.begin === 'function';
   // The ROLLED-BACK-whole CLAIM is made only where the adapter
   // declares it true (Adapter Contract v2: capabilities.
@@ -1502,7 +1502,7 @@ async function migrateApply(opts, files) {
     // interrupted run must be recoverable from its report, never a
     // bare DB error.
     try {
-      if (transactional) await __schemaTransaction(apply);
+      if (transactional) await transaction(apply);
       else await apply();
     } catch (e) {
       const label = f.version + '_' + f.name;

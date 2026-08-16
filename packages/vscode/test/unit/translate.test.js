@@ -310,7 +310,7 @@ describe('generated → source (the diagnostics direction)', () => {
 describe('TS-face artifact filters', () => {
   test('scaffolding labels: the __ runtime namespace and the _ref temp family, nothing else', () => {
     expect(isScaffoldingLabel('__state')).toBe(true);
-    expect(isScaffoldingLabel('__schemaTypes')).toBe(true);
+    expect(isScaffoldingLabel('__schema')).toBe(true);
     expect(isScaffoldingLabel('_ref')).toBe(true);
     expect(isScaffoldingLabel('_ref12')).toBe(true);
     expect(isScaffoldingLabel('_refx')).toBe(false);
