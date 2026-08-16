@@ -14,7 +14,7 @@ import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
-  RecallTracker, isHistoryNavKey, Osc11Matcher,
+  RecallTracker, isHistoryNavKey, Osc11Matcher, preloadRepl,
 } from '../../src/cli/repl.js';
 import { identifierRuns } from '../../src/ident.js';
 import { CompileError } from '../../src/compile.js';
@@ -573,5 +573,105 @@ describe('completion', () => {
     // offers nothing (completion is bindings-only, never members).
     expect(repl.complete('.he')).toEqual([['.help'], '.he']);
     expect(repl.complete('obj.π')[0]).toEqual([]);
+  });
+});
+
+describe('repl.rip preload — the zero-ceremony console', () => {
+  // The derivation seams are process globals; stash and clear them so
+  // these tests neither see nor disturb another suite's runtime.
+  const stashGlobals = () => {
+    const prior = { schema: globalThis.__ripSchema, adapter: globalThis.__ripDbAdapter };
+    delete globalThis.__ripSchema;
+    delete globalThis.__ripDbAdapter;
+    return () => {
+      if (prior.schema === undefined) delete globalThis.__ripSchema; else globalThis.__ripSchema = prior.schema;
+      if (prior.adapter === undefined) delete globalThis.__ripDbAdapter; else globalThis.__ripDbAdapter = prior.adapter;
+    };
+  };
+
+  test('exports become session bindings, as if the import were typed; no file, no effect', async () => {
+    const restore = stashGlobals();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-preload-')));
+    const empty = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-empty-')));
+    try {
+      writeFileSync(join(dir, 'repl.rip'),
+        'export answer = 42\nexport greet = (name) -> "hi #{name}"\nexport default 7\n');
+      const session = new Session({ cwd: dir });
+      const loaded = await preloadRepl(session);
+      expect(loaded.names.sort()).toEqual(['answer', 'greet']);
+      expect([...session.bindings.keys()].sort()).toEqual(['answer', 'greet']);
+      const { value } = await session.eval('greet answer');
+      expect(value).toBe('hi 42');
+      expect(await preloadRepl(new Session({ cwd: empty }))).toBeNull();
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  test('derived bindings: registered schemas and the rip/db toolkit ride along; exports win names', async () => {
+    const restore = stashGlobals();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-derive-')));
+    try {
+      // The file exports `findAll` itself — the derived toolkit must
+      // NOT overwrite it (explicit beats derived).
+      writeFileSync(join(dir, 'repl.rip'), 'export findAll = -> "mine"\n');
+      const Widget = { fake: 'Widget' };
+      globalThis.__ripSchema = { SchemaRegistry: { names: () => ['Widget', 'not a name'], get: (n) => (n === 'Widget' ? Widget : null) } };
+      globalThis.__ripDbAdapter = {};
+      const session = new Session({ cwd: dir });
+      const loaded = await preloadRepl(session);
+      const labels = loaded.groups.map(([label]) => label);
+      expect(labels).toEqual(['repl.rip', 'schemas', 'rip/db']);
+      expect(loaded.groups[1][1]).toEqual(['Widget']);          // invalid names skipped
+      expect(session.ctx.vars['Widget']).toBe(Widget);
+      const toolkit = loaded.groups[2][1];
+      expect(toolkit).not.toContain('findAll');                 // export won the name
+      expect(toolkit).toContain('findOne');
+      expect(toolkit).toContain('transaction');
+      const { value } = await session.eval('findAll()');
+      expect(value).toBe('mine');
+      const one = await session.eval('typeof findOne');
+      expect(one.value).toBe('function');
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a throwing repl.rip propagates, so the caller can report and still open the prompt', async () => {
+    const restore = stashGlobals();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-throw-')));
+    try {
+      writeFileSync(join(dir, 'repl.rip'), "throw Error.new 'db is down'\n");
+      await expect(preloadRepl(new Session({ cwd: dir }))).rejects.toThrow('db is down');
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('trailing-semicolon echo suppression', () => {
+  const drive = async (source) => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const repl = new Repl({ input, output, env: { NO_COLOR: '1' } });
+    await repl.execute(source);
+    return { repl, text: output.read()?.toString() ?? '' };
+  };
+
+  test('a trailing ; evaluates quietly but still sets _; without it the value echoes', async () => {
+    const loud = await drive('1 + 1');
+    expect(loud.text).toContain('→ 2');
+    const quiet = await drive('1 + 1;');
+    expect(quiet.text).not.toContain('→');
+    expect(quiet.repl.session.ctx.vars['_']).toBe(2);
+  });
+
+  test('a semicolon inside the entry does not suppress — only a trailing one', async () => {
+    const mid = await drive('a = 1; a + 1');
+    expect(mid.text).toContain('→ 2');
   });
 });

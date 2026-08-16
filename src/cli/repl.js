@@ -648,6 +648,61 @@ const KIND_INDICATOR = {
 
 const DOT_COMMANDS = ['.help', '.clear', '.vars', '.history', '.editor', '.theme', '.color', '.tokens', '.sexp', '.js', '.exit'];
 
+// ---------------------------------------------------------------------------
+// repl.rip — the zero-ceremony console. A file named `repl.rip` in the
+// session's cwd is the project's own statement of what a console here
+// holds, and it only needs to state the one fact a console cannot
+// guess: which wiring to run (which database, which options — a
+// connection target must never be inferred). Everything that wiring
+// set up is then DERIVED, so the file never lists the obvious:
+//   - its exports become starting bindings, loaded through the same
+//     import lowering the user would have typed;
+//   - every schema the app registered binds by name (read from the
+//     runtime's doorbell — never a hard import of the schema runtime);
+//   - a wired db adapter brings the rip/db module toolkit along.
+// Explicit beats derived: an export always wins its name. No file, no
+// effect. The import evaluates the file once, so its side effects
+// (connecting, registering models) run exactly once, up front.
+// The common database app's whole repl.rip is one line:
+//   import './api/db.rip'
+
+const DB_TOOLKIT = ['sql', 'findAll', 'findOne', 'transaction', 'show'];
+
+export async function preloadRepl(session) {
+  const file = join(session.cwd, 'repl.rip');
+  if (!existsSync(file)) return null;
+  // Import once to learn the export names (the module cache makes the
+  // lowered import below a hit, not a second evaluation). `default`
+  // and any non-identifier name cannot bind at a prompt; skip them.
+  const mod = await import(file);
+  const groups = [];
+  const exported = Object.keys(mod).filter((n) => n !== 'default' && isIdentifierName(n));
+  if (exported.length > 0) {
+    await session.eval(`import { ${exported.join(', ')} } from './repl.rip'`);
+    groups.push(['repl.rip', exported]);
+  }
+  const taken = new Set(session.bindings.keys());
+  const bind = (name, value) => {
+    if (taken.has(name)) return false;
+    session.ctx.vars[name] = value;
+    session.bindings.set(name, 'import');
+    taken.add(name);
+    return true;
+  };
+  const registry = globalThis.__ripSchema?.SchemaRegistry;
+  if (typeof registry?.names === 'function') {
+    const bound = registry.names()
+      .filter((name) => isIdentifierName(name) && bind(name, registry.get(name)));
+    if (bound.length > 0) groups.push(['schemas', bound]);
+  }
+  if (globalThis.__ripDbAdapter != null) {
+    const db = await import(session.ctx.resolveImport('rip/db'));
+    const bound = DB_TOOLKIT.filter((name) => typeof db[name] === 'function' && bind(name, db[name]));
+    if (bound.length > 0) groups.push(['rip/db', bound]);
+  }
+  return { file, groups, names: groups.flatMap(([, names]) => names) };
+}
+
 export class Repl {
   constructor({ input = process.stdin, output = process.stdout, cwd = process.cwd(), env = process.env } = {}) {
     this.input = input;
@@ -710,6 +765,18 @@ export class Repl {
     }
     if (this.terminal) {
       this.output.write(`${this.theme.paint('dim', `Rip ${packageJson.version} — type .help for commands, Ctrl+D to exit`)}\n`);
+    }
+    // A broken repl.rip reports loudly but never blocks the prompt: a
+    // console that refuses to open because the database is down cannot
+    // be used to diagnose the database being down.
+    try {
+      const loaded = await preloadRepl(this.session);
+      if (loaded !== null && loaded.names.length > 0) {
+        const line = loaded.groups.map(([label, names]) => `${label} → ${names.join(', ')}`).join(' · ');
+        this.output.write(`${this.theme.paint('dim', line)}\n`);
+      }
+    } catch (err) {
+      this.output.write(`${this.theme.paint('error', `repl.rip failed to load: ${err?.message ?? err}`)}\n`);
     }
     this.loadHistory();
     this.makeInterface();
@@ -931,7 +998,12 @@ export class Repl {
       const { value, captured } = await this.session.eval(source, {
         onCompiled: (result) => this.showStages(source, result),
       });
-      if (captured && value !== undefined) {
+      // A trailing semicolon suppresses the echo (the MATLAB/Julia
+      // convention): the entry still evaluates and still sets `_` —
+      // only the display is quiet. The companion of anything that
+      // already printed its own answer: `show User;`.
+      const silent = /;\s*$/.test(source);
+      if (captured && value !== undefined && !silent) {
         this.output.write(`${this.theme.paint('arrow', '→')} ${formatValue(value, this.theme, this.colorsActive)}\n`);
       }
     } catch (err) {
@@ -1108,6 +1180,12 @@ Notes
   printed result then becomes the next \`_\`.
   Multi-line entries recall from history as single entries.
   import './file.rip' compiles through the loader, relative to your cwd.
+  A trailing semicolon suppresses the echo: \`show User;\` prints the
+  table without the value dump. The entry still runs and still sets _.
+  A repl.rip in your cwd auto-loads at startup — the project's own
+  console, zero ceremony. It states only what cannot be guessed
+  (usually one line: import your app's db wiring); its exports, every
+  schema the app registered, and the rip/db toolkit bind automatically.
 `);
   }
 
@@ -1165,6 +1243,14 @@ if (import.meta.main) {
       process.exit(2);
     }
     const session = new Session({ cwd: process.cwd() });
+    // -e evaluates one entry "as if typed at the prompt", and the
+    // prompt would have repl.rip loaded — so -e gets it too. Loud but
+    // non-fatal on failure, the same as the interactive banner.
+    try {
+      await preloadRepl(session);
+    } catch (err) {
+      console.error(`rip: repl.rip failed to load: ${err?.message ?? err}`);
+    }
     const verdict = classifyCompleteness(code);
     if (verdict.status === 'incomplete') {
       console.error('rip: --eval input is incomplete');
@@ -1176,7 +1262,9 @@ if (import.meta.main) {
     }
     try {
       const { value, captured } = await session.eval(code);
-      if (captured && value !== undefined) {
+      // The same trailing-semicolon echo suppression the prompt has:
+      // -e evaluates one entry "as if typed".
+      if (captured && value !== undefined && !/;\s*$/.test(code)) {
         console.log(inspect(value, { colors: false, depth: 4, maxArrayLength: 100 }));
       }
       process.exit(0);
