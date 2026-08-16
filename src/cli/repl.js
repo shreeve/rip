@@ -998,7 +998,12 @@ export class Repl {
       const { value, captured } = await this.session.eval(source, {
         onCompiled: (result) => this.showStages(source, result),
       });
-      if (captured && value !== undefined) {
+      // A trailing semicolon suppresses the echo (the MATLAB/Julia
+      // convention): the entry still evaluates and still sets `_` —
+      // only the display is quiet. The companion of anything that
+      // already printed its own answer: `show User;`.
+      const silent = /;\s*$/.test(source);
+      if (captured && value !== undefined && !silent) {
         this.output.write(`${this.theme.paint('arrow', '→')} ${formatValue(value, this.theme, this.colorsActive)}\n`);
       }
     } catch (err) {
@@ -1175,6 +1180,8 @@ Notes
   printed result then becomes the next \`_\`.
   Multi-line entries recall from history as single entries.
   import './file.rip' compiles through the loader, relative to your cwd.
+  A trailing semicolon suppresses the echo: \`show User;\` prints the
+  table without the value dump. The entry still runs and still sets _.
   A repl.rip in your cwd auto-loads at startup — the project's own
   console, zero ceremony. It states only what cannot be guessed
   (usually one line: import your app's db wiring); its exports, every
@@ -1255,7 +1262,9 @@ if (import.meta.main) {
     }
     try {
       const { value, captured } = await session.eval(code);
-      if (captured && value !== undefined) {
+      // The same trailing-semicolon echo suppression the prompt has:
+      // -e evaluates one entry "as if typed".
+      if (captured && value !== undefined && !/;\s*$/.test(code)) {
         console.log(inspect(value, { colors: false, depth: 4, maxArrayLength: 100 }));
       }
       process.exit(0);

@@ -652,3 +652,26 @@ describe('repl.rip preload — the zero-ceremony console', () => {
     }
   });
 });
+
+describe('trailing-semicolon echo suppression', () => {
+  const drive = async (source) => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const repl = new Repl({ input, output, env: { NO_COLOR: '1' } });
+    await repl.execute(source);
+    return { repl, text: output.read()?.toString() ?? '' };
+  };
+
+  test('a trailing ; evaluates quietly but still sets _; without it the value echoes', async () => {
+    const loud = await drive('1 + 1');
+    expect(loud.text).toContain('→ 2');
+    const quiet = await drive('1 + 1;');
+    expect(quiet.text).not.toContain('→');
+    expect(quiet.repl.session.ctx.vars['_']).toBe(2);
+  });
+
+  test('a semicolon inside the entry does not suppress — only a trailing one', async () => {
+    const mid = await drive('a = 1; a + 1');
+    expect(mid.text).toContain('→ 2');
+  });
+});
