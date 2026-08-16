@@ -150,10 +150,21 @@ controlFetch = (target, method, path, body = null) ->
     options.unix = target
     fetch "http://janus#{path}", options
 
+# The rip installation RUNNING US, not the package this file ships in —
+# they are the same tree in-repo and need not be once @rip/sites is a
+# dependency, so compiler assets (packages/, dist/, bin/) resolve from
+# the loader Bun was preloaded with. `import.meta.dir` answers the other
+# question, "where am I", and is what the sibling .rip files below use.
+#
+# This returns the ROOT, not the loader's directory: the offset from the
+# loader up to it belongs in ONE place. Spelling it at each call site is
+# what silently broke all three when the loader moved up a level.
 loaderDir = ->
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-site: the Rip loader is missing' unless preload?
   dirname resolve(preload.slice('--preload='.length))
+
+ripRoot = -> join loaderDir(), '..'
 
 generate = (entry, artifact, reportPath, taskId) ->
   preload = "--preload=#{join(loaderDir(), 'loader.js')}"
@@ -665,7 +676,7 @@ appDocuments = (project, graph) ->
     moduleFiles: graph.moduleFiles
     appDir: project.root
     appRoot: project.appRoot
-    packagesDir: join(loaderDir(), '..', 'packages')
+    packagesDir: join(ripRoot(), 'packages')
   list = assembled.list
   identities = Map.new graph.entries.map (entry) -> [entry.id, entry]
   encoder = TextEncoder.new()
@@ -760,7 +771,7 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
   else if documents?
     commitAppDocuments project, documents
     publication = documents
-  shipDir = join(loaderDir(), '..', 'dist', '@rip')
+  shipDir = join(ripRoot(), 'dist', '@rip')
   for name in ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br']
     source = join shipDir, name
     abort "rip-site: browser ship artifact missing at #{source}" unless existsSync source
@@ -1597,7 +1608,7 @@ export main = (argv) ->
       { outcome: 'unknown', error: 'migration child produced a malformed outcome report' }
 
   runMigrationChild = (body) ->
-    bin = join loaderDir(), '..', 'bin', 'rip'
+    bin = join ripRoot(), 'bin', 'rip'
     childArgs = [process.execPath, bin, 'schema', 'migrate']
     childArgs.push body.entry if body.entry?
     childArgs.push '--dir', body.dir if body.dir?

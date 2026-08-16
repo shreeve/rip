@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { cacheIdentityOf } from '../../packages/vscode/src/hash.js';
 import { compile } from '../compile.js';
 import { readProjectConfig } from '../config.js';
@@ -34,6 +34,12 @@ import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vsco
 import { tokenize } from '../lexer.js';
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
+
+// The two trees whose build identity the editor and this CLI must agree
+// on. Computed once: they were spelled twice, and a hash that disagrees
+// with itself is the exact failure this identity exists to detect.
+const compilerDir = path.resolve(import.meta.dir, '..');
+const serverDir = path.resolve(compilerDir, '..', 'packages', 'vscode', 'src');
 
 // Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
 // undefined and every diagnostic publishes. An empty annotation set would
@@ -86,8 +92,6 @@ if (argv.includes('-h') || argv.includes('--help')) { console.log(HELP); process
 // two hashes differ, the installed extension is running different code
 // than this CLI — the skew behind "the editor and rip check disagree".
 if (argv.includes('--build')) {
-  const compilerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const serverDir = path.join(compilerDir, '..', 'packages', 'vscode', 'src');
   const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? '~' + p.slice(os.homedir().length) : p);
   console.log(`rip check build ${cacheIdentityOf(compilerDir, serverDir)}`);
   console.log(`  compiler  ${tilde(compilerDir)}`);
@@ -205,9 +209,8 @@ try {
   fs.rmSync(mirrorRoot, { recursive: true, force: true });
   fs.mkdirSync(mirrorRoot, { recursive: true });
   fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
-  const compilerDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   fs.writeFileSync(path.join(mirrorRoot, '.build'),
-    cacheIdentityOf(compilerDir, path.join(compilerDir, '..', 'packages', 'vscode', 'src')) + '\n');
+    cacheIdentityOf(compilerDir, serverDir) + '\n');
 } catch (err) {
   // Degraded, never silent: the fallback re-roots tsgo outside the
   // workspace, so per-project wrappers stop applying and @types
