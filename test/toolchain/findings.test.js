@@ -143,6 +143,16 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
     .map((rel) => rel.split(sep)[2]));
   const known = new Set([...dims, ...invariants, ...testFiles, ...auditFiles]);
 
+  // Both sets above are a sweep narrowed by a hard-coded directory prefix, so
+  // moving `test/audit/` or the test trees empties one and EVERY gate stops
+  // resolving — a rename detector defeated by a rename, reporting it as a
+  // ledger full of rot. Probe for a member each set must contain (this file;
+  // the runner beside the ledger) so that failure names itself. Specific
+  // members, not a count: a bare count cannot tell 125 test files from 125 of
+  // the wrong files.
+  expect(testFiles.has('findings'), 'the test-file sweep never reached this file — the prefix filter is stale').toBe(true);
+  expect(auditFiles.has('runner.js'), 'the audit-file sweep never reached runner.js — the prefix filter is stale').toBe(true);
+
   // A table row's LAST cell is its Gate. Inside it, a backticked token is a
   // gate name — that is the convention this assertion enforces, so prose in a
   // Gate cell must not wear backticks.
