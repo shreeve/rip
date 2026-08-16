@@ -87,7 +87,8 @@ Type syntax is intentionally absent from the s-expression tree.
 
 ### Lexer
 
-`rewriteTypes` folds each annotation into one `TYPE` token and each
+`rewriteTypes` (`src/types.js`, run as a tail pass by `tokenize`) folds
+each annotation into one `TYPE` token and each
 cast into one `CAST` token. The token carries opaque source text and
 its exact span.
 
@@ -351,7 +352,8 @@ silent until you open it.
 
 | Area | Files |
 |---|---|
-| lexer claims | `src/lexer.js` |
+| type claims | `src/types.js` |
+| lexer pipeline | `src/lexer.js` |
 | grammar span labels | `src/grammar/grammar.rip`, `src/grammar/solar.rip` |
 | shared type rendering | `src/ts/typetext.js` |
 | declarations | `src/ts/dts.js` |

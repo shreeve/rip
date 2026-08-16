@@ -656,7 +656,7 @@ describe('large inputs', () => {
     // ALL input, type-free included. The write-back must be an indexed
     // copy. 2.5M synthetic pass-through tokens exercise exactly that
     // path without paying for a scan.
-    const { rewriteTypes } = await import('../../src/lexer.js');
+    const { rewriteTypes } = await import('../../src/types.js');
     const tokens = [];
     for (let i = 0; i < 1_250_000; i++) {
       tokens.push(

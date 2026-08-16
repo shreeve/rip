@@ -24,7 +24,8 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schematext.js';
 import { Parser } from './parser.js';
-import { tagPostfixConditionals, rewriteTypes } from './lexer.js';
+import { tagPostfixConditionals } from './lexer.js';
+import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/typetext.js';
@@ -67,7 +68,7 @@ const RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 const JS_OP = { '==': '===', '!=': '!==' };
 
 // What a value word has already become by the time a pattern is walked.
-// The scanner's own table (lexer.js VALUE_WORDS) maps the SOURCE spellings
+// The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
 // — `yes`/`no`/`on`/`off` and the literal keywords — onto these; only the
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.

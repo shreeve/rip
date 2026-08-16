@@ -3689,229 +3689,7 @@ var implicitBlocks = (tokens, mintId) => applyInsertions(tokens, collectBlocks, 
 var implicitObjects = (tokens, mintId) => applyInsertions(tokens, collectObjects, mintId);
 var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mintId);
 
-// src/lexer.js
-function tagParams(tokens) {
-  for (let i = 1;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const kind = tokens[i].kind;
-    if (kind !== "->" && kind !== "=>")
-      continue;
-    let closeAt = i - 1;
-    let close = tokens[closeAt];
-    if (!close)
-      continue;
-    if (close.kind === "DO") {
-      close.kind = "DO_IIFE";
-      continue;
-    }
-    if (close.kind !== ")") {
-      let depth2 = 0;
-      let found = -1;
-      for (let j = i - 1;j >= 0; j--) {
-        if (ops.on)
-          ops.n++;
-        const t = tokens[j];
-        const k = t.kind;
-        if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
-          depth2++;
-        } else if (k === "(" || k === "[" || k === "{" || k === "PICK_START" || k === "OPTPICK_START" || k === "CALL_START" || k === "PARAM_START" || k === "INDEX_START" || k === "COMPARE" && t.value === "<") {
-          depth2--;
-        } else if (k === "SHIFT" && t.value === ">>")
-          depth2 += 2;
-        else if (k === "SHIFT" && t.value === ">>>")
-          depth2 += 3;
-        else if (depth2 === 0) {
-          if (k === ":") {
-            if (tokens[j - 1]?.kind === ")")
-              found = j - 1;
-            break;
-          }
-          if (k === "TERMINATOR" || k === "INDENT" || k === "OUTDENT" || k === "=" || k === "->" || k === "=>")
-            break;
-        }
-      }
-      if (found < 0)
-        continue;
-      closeAt = found;
-      close = tokens[closeAt];
-    } else {
-      let d = 0;
-      let op = -1;
-      for (let k = i - 1;k >= 0; k--) {
-        if (ops.on)
-          ops.n++;
-        const kk = tokens[k].kind;
-        if (kk === ")" || kk === "CALL_END" || kk === "PARAM_END")
-          d++;
-        else if (kk === "(" || kk === "CALL_START" || kk === "PARAM_START") {
-          if (--d === 0) {
-            op = k;
-            break;
-          }
-        }
-      }
-      if (op > 1 && tokens[op - 1].kind === ":" && tokens[op - 2]?.kind === ")") {
-        closeAt = op - 2;
-        close = tokens[closeAt];
-      }
-    }
-    let depth = 0;
-    for (let j = closeAt - 1;j >= 0; j--) {
-      if (ops.on)
-        ops.n++;
-      const t = tokens[j];
-      if (t.kind === ")" || t.kind === "CALL_END" || t.kind === "INDEX_END" || t.kind === "]") {
-        depth++;
-      } else if (t.kind === "(" || t.kind === "CALL_START" || t.kind === "INDEX_START" || t.kind === "[") {
-        if (depth > 0) {
-          depth--;
-          continue;
-        }
-        if (t.kind === "(") {
-          t.kind = "PARAM_START";
-          close.kind = "PARAM_END";
-          if (tokens[j - 1]?.kind === "DO")
-            tokens[j - 1].kind = "DO_IIFE";
-        }
-        break;
-      }
-    }
-  }
-  return tokens;
-}
-function tagDynamicKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const pendingTernary = [0];
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (k === "INDEX_START" && pendingTernary[pendingTernary.length - 1] === 0) {
-      let depth = 1;
-      let j = i;
-      while (++j < tokens.length && depth > 0) {
-        if (ops.on)
-          ops.n++;
-        if (OPENERS2.has(tokens[j].kind))
-          depth++;
-        else if (CLOSERS2.has(tokens[j].kind))
-          depth--;
-      }
-      if (depth === 0 && tokens[j]?.kind === ":") {
-        tokens[i].kind = "[";
-        tokens[j - 1].kind = "]";
-      }
-    }
-    if (OPENERS2.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
-      pendingTernary.pop();
-  }
-  return tokens;
-}
-var ARROW_COMMA_AFTER = new Set([
-  "STRING",
-  "STRING_END",
-  "REGEX",
-  "HEREGEX_END",
-  "NUMBER",
-  "BOOL",
-  "NULL",
-  "UNDEFINED",
-  "]",
-  "}",
-  "SYMBOL"
-]);
-function insertArrowCommas(tokens) {
-  let depth = 0;
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[i].kind;
-    if (k === "CALL_START")
-      depth++;
-    else if (k === "CALL_END")
-      depth--;
-    else if (depth > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
-      tokens.splice(i, 0, { kind: ",", value: ",", start: tokens[i].start, end: tokens[i].start });
-      i++;
-    }
-  }
-  return tokens;
-}
-function tagCompoundKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
-  const pendingTernary = [0];
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
-      let j = i;
-      for (;; ) {
-        if (ops.on)
-          ops.n++;
-        const sep = tokens[j + 1];
-        const nxt = tokens[j + 2];
-        if (sep === undefined || !identish(nxt))
-          break;
-        if (sep.kind === ".") {
-          j += 2;
-          continue;
-        }
-        if (sep.kind === "-" && sep.start === tokens[j].end && nxt.start === sep.end) {
-          j += 2;
-          continue;
-        }
-        break;
-      }
-      if (j > i && tokens[j + 1]?.kind === ":") {
-        let buf = "";
-        for (let m = i;m <= j; m++)
-          buf += tokens[m].value;
-        const collapsed = { ...tokens[i], kind: "STRING", value: JSON.stringify(buf), end: tokens[j].end };
-        tokens.splice(i, j - i + 1, collapsed);
-      }
-    }
-    if (OPENERS2.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
-      pendingTernary.pop();
-  }
-  return tokens;
-}
-function tagVoidMarkers(tokens) {
-  for (let i = 0;i < tokens.length; i++) {
-    if (ops.on)
-      ops.n++;
-    if (tokens[i].kind !== "DAMMIT")
-      continue;
-    if (tokens[i + 1]?.kind === "=" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF") {
-      tokens[i].kind = "VOID_MARKER";
-    }
-  }
-  return tokens;
-}
+// src/types.js
 var CAST_LHS_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -4829,6 +4607,17 @@ var CLASS_HEAD_ENDERS = new Set([
   "INTERPOLATION_START",
   "INTERPOLATION_END"
 ]);
+var VALUE_WORDS = new Map([
+  ["yes", "true"],
+  ["no", "false"],
+  ["on", "true"],
+  ["off", "false"],
+  ["true", "true"],
+  ["false", "false"],
+  ["null", "null"],
+  ["undefined", "undefined"],
+  ["this", "this"]
+]);
 function rewriteTypes(tokens, mintId, text, fail) {
   const out = [];
   const frames = [];
@@ -5364,6 +5153,230 @@ function rewriteTypes(tokens, mintId, text, fail) {
   }
   return tokens;
 }
+
+// src/lexer.js
+function tagParams(tokens) {
+  for (let i = 1;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const kind = tokens[i].kind;
+    if (kind !== "->" && kind !== "=>")
+      continue;
+    let closeAt = i - 1;
+    let close = tokens[closeAt];
+    if (!close)
+      continue;
+    if (close.kind === "DO") {
+      close.kind = "DO_IIFE";
+      continue;
+    }
+    if (close.kind !== ")") {
+      let depth2 = 0;
+      let found = -1;
+      for (let j = i - 1;j >= 0; j--) {
+        if (ops.on)
+          ops.n++;
+        const t = tokens[j];
+        const k = t.kind;
+        if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
+          depth2++;
+        } else if (k === "(" || k === "[" || k === "{" || k === "PICK_START" || k === "OPTPICK_START" || k === "CALL_START" || k === "PARAM_START" || k === "INDEX_START" || k === "COMPARE" && t.value === "<") {
+          depth2--;
+        } else if (k === "SHIFT" && t.value === ">>")
+          depth2 += 2;
+        else if (k === "SHIFT" && t.value === ">>>")
+          depth2 += 3;
+        else if (depth2 === 0) {
+          if (k === ":") {
+            if (tokens[j - 1]?.kind === ")")
+              found = j - 1;
+            break;
+          }
+          if (k === "TERMINATOR" || k === "INDENT" || k === "OUTDENT" || k === "=" || k === "->" || k === "=>")
+            break;
+        }
+      }
+      if (found < 0)
+        continue;
+      closeAt = found;
+      close = tokens[closeAt];
+    } else {
+      let d = 0;
+      let op = -1;
+      for (let k = i - 1;k >= 0; k--) {
+        if (ops.on)
+          ops.n++;
+        const kk = tokens[k].kind;
+        if (kk === ")" || kk === "CALL_END" || kk === "PARAM_END")
+          d++;
+        else if (kk === "(" || kk === "CALL_START" || kk === "PARAM_START") {
+          if (--d === 0) {
+            op = k;
+            break;
+          }
+        }
+      }
+      if (op > 1 && tokens[op - 1].kind === ":" && tokens[op - 2]?.kind === ")") {
+        closeAt = op - 2;
+        close = tokens[closeAt];
+      }
+    }
+    let depth = 0;
+    for (let j = closeAt - 1;j >= 0; j--) {
+      if (ops.on)
+        ops.n++;
+      const t = tokens[j];
+      if (t.kind === ")" || t.kind === "CALL_END" || t.kind === "INDEX_END" || t.kind === "]") {
+        depth++;
+      } else if (t.kind === "(" || t.kind === "CALL_START" || t.kind === "INDEX_START" || t.kind === "[") {
+        if (depth > 0) {
+          depth--;
+          continue;
+        }
+        if (t.kind === "(") {
+          t.kind = "PARAM_START";
+          close.kind = "PARAM_END";
+          if (tokens[j - 1]?.kind === "DO")
+            tokens[j - 1].kind = "DO_IIFE";
+        }
+        break;
+      }
+    }
+  }
+  return tokens;
+}
+function tagDynamicKeys(tokens) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const pendingTernary = [0];
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "TERNARY") {
+      pendingTernary[pendingTernary.length - 1]++;
+    } else if (k === ":" || k === "TERMINATOR") {
+      const top = pendingTernary.length - 1;
+      if (k === "TERMINATOR")
+        pendingTernary[top] = 0;
+      else if (pendingTernary[top] > 0)
+        pendingTernary[top]--;
+    } else if (k === "INDEX_START" && pendingTernary[pendingTernary.length - 1] === 0) {
+      let depth = 1;
+      let j = i;
+      while (++j < tokens.length && depth > 0) {
+        if (ops.on)
+          ops.n++;
+        if (OPENERS2.has(tokens[j].kind))
+          depth++;
+        else if (CLOSERS2.has(tokens[j].kind))
+          depth--;
+      }
+      if (depth === 0 && tokens[j]?.kind === ":") {
+        tokens[i].kind = "[";
+        tokens[j - 1].kind = "]";
+      }
+    }
+    if (OPENERS2.has(tokens[i].kind))
+      pendingTernary.push(0);
+    else if (CLOSERS2.has(tokens[i].kind))
+      pendingTernary.pop();
+  }
+  return tokens;
+}
+var ARROW_COMMA_AFTER = new Set([
+  "STRING",
+  "STRING_END",
+  "REGEX",
+  "HEREGEX_END",
+  "NUMBER",
+  "BOOL",
+  "NULL",
+  "UNDEFINED",
+  "]",
+  "}",
+  "SYMBOL"
+]);
+function insertArrowCommas(tokens) {
+  let depth = 0;
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "CALL_START")
+      depth++;
+    else if (k === "CALL_END")
+      depth--;
+    else if (depth > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
+      tokens.splice(i, 0, { kind: ",", value: ",", start: tokens[i].start, end: tokens[i].start });
+      i++;
+    }
+  }
+  return tokens;
+}
+function tagCompoundKeys(tokens) {
+  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
+  const pendingTernary = [0];
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    const k = tokens[i].kind;
+    if (k === "TERNARY") {
+      pendingTernary[pendingTernary.length - 1]++;
+    } else if (k === ":" || k === "TERMINATOR") {
+      const top = pendingTernary.length - 1;
+      if (k === "TERMINATOR")
+        pendingTernary[top] = 0;
+      else if (pendingTernary[top] > 0)
+        pendingTernary[top]--;
+    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
+      let j = i;
+      for (;; ) {
+        if (ops.on)
+          ops.n++;
+        const sep = tokens[j + 1];
+        const nxt = tokens[j + 2];
+        if (sep === undefined || !identish(nxt))
+          break;
+        if (sep.kind === ".") {
+          j += 2;
+          continue;
+        }
+        if (sep.kind === "-" && sep.start === tokens[j].end && nxt.start === sep.end) {
+          j += 2;
+          continue;
+        }
+        break;
+      }
+      if (j > i && tokens[j + 1]?.kind === ":") {
+        let buf = "";
+        for (let m = i;m <= j; m++)
+          buf += tokens[m].value;
+        const collapsed = { ...tokens[i], kind: "STRING", value: JSON.stringify(buf), end: tokens[j].end };
+        tokens.splice(i, j - i + 1, collapsed);
+      }
+    }
+    if (OPENERS2.has(tokens[i].kind))
+      pendingTernary.push(0);
+    else if (CLOSERS2.has(tokens[i].kind))
+      pendingTernary.pop();
+  }
+  return tokens;
+}
+function tagVoidMarkers(tokens) {
+  for (let i = 0;i < tokens.length; i++) {
+    if (ops.on)
+      ops.n++;
+    if (tokens[i].kind !== "DAMMIT")
+      continue;
+    if (tokens[i + 1]?.kind === "=" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF") {
+      tokens[i].kind = "VOID_MARKER";
+    }
+  }
+  return tokens;
+}
 var KEYWORDS = {
   __proto__: null,
   def: "DEF",
@@ -5433,17 +5446,6 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
-var VALUE_WORDS = new Map([
-  ["yes", "true"],
-  ["no", "false"],
-  ["on", "true"],
-  ["off", "false"],
-  ["true", "true"],
-  ["false", "false"],
-  ["null", "null"],
-  ["undefined", "undefined"],
-  ["this", "this"]
-]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
