@@ -917,7 +917,7 @@ describe('runtime delivery: injection machinery', () => {
     // because the emitter strips single-line relative sibling imports
     // and `requires: ['vocab']` fuses the dependency ahead of it.
     const imports = text.match(/^import .*$/gm) ?? [];
-    expect(imports).toEqual([`import { __schemaIsCanonicalName } from './vocab.js';`]);
+    expect(imports).toEqual([`import { isCanonicalName } from './vocab.js';`]);
     expect(text).toMatch(/^export \{ __schema, SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence \};$/m);
   });
 });

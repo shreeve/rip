@@ -17,7 +17,7 @@ import {
   createMcpServer,
 } from 'rip/db'
 import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
-import { __schemaCamel } from '../../src/runtime/vocab.js'
+import { camelCase } from '../../src/runtime/vocab.js'
 import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/orm.js'
 import * as mig from '../../src/cli/migrate.js'
 
@@ -894,10 +894,10 @@ test! "the camel projection is not total — the edge cases stay put", ->
   eq result.rows, [{ nickname_2: 1, Internal: 2, legacy_ISO_CODE: 3 }]
   eq result.columns, ['nickname_2', 'Internal', 'legacy_ISO_CODE']
 
-test! "the projection agrees with the runtime's __schemaCamel, spelling for spelling", ->
+test! "the projection agrees with the runtime's camelCase, spelling for spelling", ->
   for name in ['user_id', 'first_name', 'created_at', 'nickname_2', '_internal', 'legacy_ISO_CODE', 'mdm_id', 'a_b_c', 'ALL_CAPS']
     expected = {}
-    expected[__schemaCamel name] = 1
+    expected[camelCase name] = 1
     eq materializeAll({ columns: [{ name }], data: [[1]], rowCount: 1 }, { camel: true }), [expected]
 
 test! "a transaction surface takes { camel: true } like the top-level client", ->

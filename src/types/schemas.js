@@ -52,6 +52,13 @@
 // positioned emitter diagnostic.
 
 import { derivedSchemaDescriptors, behaviorName } from '../schema.js';
+// The naming rules, under readable local spellings. One definition —
+// the runtime derives its INSTALLED names from the same file, so the
+// renderer cannot drift from it. src/runtime/orm.js is still never
+// imported here (that would evaluate the persistence install into the
+// compiler process); vocab.js is a side-effect-free leaf, the same
+// reason src/schema.js imports it.
+import { camelCase, pluralize, fkName, accessorOf } from '../runtime/vocab.js';
 export { behaviorName } from '../schema.js';
 
 export class SchemaTypeError extends Error {
@@ -66,33 +73,12 @@ export class SchemaTypeError extends Error {
   }
 }
 
-// ── naming (mirrors src/runtime/orm.js byte-for-byte) ─────────
-// The runtime module is never imported here (importing it would
-// evaluate the persistence install into the compiler process); the
-// copies are drift-gated by test/schema-types.test.js against the
-// runtime's own exports.
+// ── naming ───────────────────────────────────────────────────────────
 
-const snakeCase = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-const camelCase = (col) => String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-
-const UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
-const IRREGULAR = new Map([['person', 'people'], ['man', 'men'], ['woman', 'women'], ['child', 'children'], ['tooth', 'teeth'], ['foot', 'feet'], ['mouse', 'mice']]);
-
-export const pluralize = (w) => {
-  const lw = w.toLowerCase();
-  if (UNCOUNTABLE.has(lw)) return w;
-  if (IRREGULAR.has(lw)) return IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(w)) return w.slice(0, -1) + 'ies';
-  if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
-  return w + 's';
-};
-
-const fkCamel = (target) => camelCase(snakeCase(target) + '_id');
-const accessorOf = (target) => target[0].toLowerCase() + target.slice(1);
 // The FK property a belongsTo puts on the instance — `{foreignKey:}`
 // names the COLUMN, and the property is the camel of it, the same
 // derivation the runtime makes.
-const fkProp = (rel) => (rel.foreignKey ? camelCase(rel.foreignKey) : fkCamel(rel.target));
+const fkProp = (rel) => camelCase(rel.foreignKey ?? fkName(rel.target));
 
 // The primary key, and which of the two postures it is in. Declaring
 // the pk as a field alongside an explicit @primaryKey is what makes it

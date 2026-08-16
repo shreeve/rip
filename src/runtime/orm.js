@@ -29,7 +29,7 @@
 
 import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaInstallPersistence } from './schema.js';
 import { harborAdapter, decodeTemporal } from './duckdb.js';
-import { __schemaSnake, __schemaCamel, __schemaIsCanonicalTarget, __schemaIsCanonicalName, __schemaAttrValueError, __SCHEMA_MODEL_DIRECTIVES, __SCHEMA_ONCE_DIRECTIVES, __SCHEMA_RELATION_DIRECTIVES, __SCHEMA_FIELD_ATTRS, __SCHEMA_RELATION_ATTRS } from './vocab.js';
+import { snakeCase, camelCase, pluralize, fkName, accessorOf, isCanonicalTarget, isCanonicalName, attrValueError, MODEL_DIRECTIVES, ONCE_DIRECTIVES, RELATION_DIRECTIVES, FIELD_ATTRS, RELATION_ATTRS } from './vocab.js';
 
 // ── naming: the snake_case ↔ camelCase bijection ─────────────────────
 
@@ -158,29 +158,18 @@ function __schemaOrderDir(dir, field) {
 }
 
 
-const __SCHEMA_UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
-
-const __SCHEMA_IRREGULAR = new Map([['person', 'people'], ['man', 'men'], ['woman', 'women'], ['child', 'children'], ['tooth', 'teeth'], ['foot', 'feet'], ['mouse', 'mice']]);
-
-function __schemaPluralize(w) {
-  const lw = w.toLowerCase();
-  if (__SCHEMA_UNCOUNTABLE.has(lw)) return w;
-  if (__SCHEMA_IRREGULAR.has(lw)) return __SCHEMA_IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(w)) return w.slice(0, -1) + 'ies';
-  if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
-  return w + 's';
-}
-
-function __schemaTableName(model) { return __schemaPluralize(__schemaSnake(model)); }
-
-function __schemaFkName(model) { return __schemaSnake(model) + '_id'; }
+// The pluralizer, the FK column rule, and the accessor rule live in
+// ./vocab.js — the compiler's type renderer derives the same names and
+// must not import this module (that would evaluate the persistence
+// install into the compiler process).
+function __schemaTableName(model) { return pluralize(snakeCase(model)); }
 
 // Relation TARGETS must be canonical PascalCase — uppercase-first,
 // alphanumeric, no two consecutive uppercase letters — the same
 // bijection guard field names already carry: an acronym-style target
 // derives FK and accessor names the snake/camel round-trip cannot
 // reproduce.
-const __schemaCanonicalTarget = __schemaIsCanonicalTarget;
+const __schemaCanonicalTarget = isCanonicalTarget;
 
 // ── reserved names ────────────────────────────────────────────────────
 
@@ -371,11 +360,11 @@ function __schemaColumnFor(norm, key) {
   const mapped = norm.columnOf.get(key);
   if (mapped !== undefined) return mapped;
   if (norm.fieldOf.has(key)) return key;
-  return __schemaSnake(key);
+  return snakeCase(key);
 }
 
 function __schemaFieldFor(norm, column) {
-  return norm.fieldOf.get(column) ?? __schemaCamel(column);
+  return norm.fieldOf.get(column) ?? camelCase(column);
 }
 
 // A structured key the CALLER wrote (where()/order()/updateAll()):
@@ -400,10 +389,10 @@ function __schemaCallerColumn(norm, key, allowed, what) {
 
 function __schemaNormalizeDirectiveRelation(def, directive) {
   const name = directive.name;
-  if (!__SCHEMA_RELATION_DIRECTIVES.includes(name)) return null;
+  if (!RELATION_DIRECTIVES.includes(name)) return null;
   const a = directive.args[0];
   const target = a.target;
-  const targetLc = target[0].toLowerCase() + target.slice(1);
+  const targetLc = accessorOf(target);
   // A belongsTo's FK column derives from its ACCESSOR — the name the
   // relation goes by: `@belongsTo User` reads user_id, and
   // `{as: reviewer}` reads reviewer_id, so two relations to one model
@@ -416,7 +405,7 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
     return {
       kind: 'belongsTo', target, optional,
       accessor,
-      foreignKey: a.foreignKey ?? __schemaFkName(accessor),
+      foreignKey: a.foreignKey ?? fkName(accessor),
     };
   }
   // A `through` relation owns no column on either end — both foreign
@@ -428,7 +417,7 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
   if (a.through) {
     return {
       kind: name, target, optional, through: a.through,
-      accessor: a.as ?? (name === 'hasOne' ? targetLc : __schemaPluralize(targetLc)),
+      accessor: a.as ?? (name === 'hasOne' ? targetLc : pluralize(targetLc)),
       foreignKey: a.foreignKey ?? null,
       targetKey: a.targetKey ?? null,
     };
@@ -437,13 +426,13 @@ function __schemaNormalizeDirectiveRelation(def, directive) {
     return {
       kind: 'hasOne', target, optional,
       accessor: a.as ?? targetLc,
-      foreignKey: a.foreignKey ?? __schemaFkName(def.name),
+      foreignKey: a.foreignKey ?? fkName(def.name),
     };
   }
   return {
     kind: 'hasMany', target, optional,
-    accessor: a.as ?? __schemaPluralize(targetLc),
-    foreignKey: a.foreignKey ?? __schemaFkName(def.name),
+    accessor: a.as ?? pluralize(targetLc),
+    foreignKey: a.foreignKey ?? fkName(def.name),
   };
 }
 
@@ -478,7 +467,7 @@ function __schemaThroughKeys(def, rel, join) {
       throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
         ' reads through ' + rel.through + ', which declares no @belongsTo ' + model +
         " — add one, or name the column: {through: " + rel.through + ', ' + option + ': "' +
-        __schemaFkName(model) + '"}');
+        fkName(model) + '"}');
     }
     throw new Error('schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
       ' reads through ' + rel.through + ', which declares ' + hits.length + ' @belongsTo ' + model +
@@ -505,11 +494,11 @@ function __schemaThroughKeys(def, rel, join) {
 // directive that reads only part of what the user wrote acted on a
 // different program.
 function __schemaValidateDirectiveArgs(def, d) {
-  const shape = __SCHEMA_MODEL_DIRECTIVES[d.name];
+  const shape = MODEL_DIRECTIVES[d.name];
   if (shape === undefined) {
     throw __schemaModelError(def, '', 'directive',
       "unknown directive '@" + d.name + "' on :model — legal: " +
-      Object.keys(__SCHEMA_MODEL_DIRECTIVES).map((n) => '@' + n).join(', '));
+      Object.keys(MODEL_DIRECTIVES).map((n) => '@' + n).join(', '));
   }
   const args = d.args || [];
   const bad = (why) => {
@@ -534,10 +523,10 @@ function __schemaValidateDirectiveArgs(def, d) {
       // directly (tests, generated descriptors), so the runtime holds
       // the same line rather than trusting its caller.
       if (d.name !== 'mixin') {
-        for (const [key, kind] of Object.entries(__SCHEMA_RELATION_ATTRS)) {
+        for (const [key, kind] of Object.entries(RELATION_ATTRS)) {
           const value = args[0][key];
           if (value === undefined) continue;
-          const why = __schemaAttrValueError(kind, key, value);
+          const why = attrValueError(kind, key, value);
           if (why) bad('option ' + why + "; got '" + value + "'");
         }
         if (args[0].through !== undefined && d.name === 'belongsTo') {
@@ -572,7 +561,7 @@ function __schemaValidateDirectiveArgs(def, d) {
       if (args.length !== 1 || !args[0] || typeof args[0].name !== 'string') {
         bad('takes one property name');
       }
-      if (!__schemaIsCanonicalName(args[0].name)) {
+      if (!isCanonicalName(args[0].name)) {
         bad("'" + args[0].name + "' is not canonical camelCase — lowercase-first, alphanumeric, " +
           "no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key " +
           'and the JSON key all ride the snake_case bijection');
@@ -581,7 +570,7 @@ function __schemaValidateDirectiveArgs(def, d) {
       // compiler always writes it.
       const column = args[0].column;
       if (column !== undefined) {
-        const why = __schemaAttrValueError('literal', 'column', column);
+        const why = attrValueError('literal', 'column', column);
         if (why) bad('option ' + why + "; got '" + column + "'");
       }
       break;
@@ -630,13 +619,13 @@ function finishModelNorm(def, norm) {
   const seenOnce = new Set();
   for (const d of norm.directives) {
     __schemaValidateDirectiveArgs(def, d);
-    if (__SCHEMA_ONCE_DIRECTIVES.includes(d.name)) {
+    if (ONCE_DIRECTIVES.includes(d.name)) {
       if (seenOnce.has(d.name)) {
         // Same verdict as the compiler: an argument-less once-directive
         // (@timestamps, @softDelete) has no second value to override;
         // the duplicate is still refused — it declares itself once.
         throw __schemaModelError(def, '', 'directive',
-          __SCHEMA_MODEL_DIRECTIVES[d.name] === 'none'
+          MODEL_DIRECTIVES[d.name] === 'none'
             ? "duplicate '@" + d.name + "' — declared twice; a :model declares it once"
             : "duplicate '@" + d.name + "' — a :model declares it at most once " +
               '(the second would silently override the first)');
@@ -668,7 +657,7 @@ function finishModelNorm(def, norm) {
   // them differ — the same pair every declared field has.
   norm.primaryKey = primaryKey?.name ?? 'id';
   norm.primaryKeyColumn = primaryKey
-    ? (primaryKey.column ?? __schemaSnake(primaryKey.name))
+    ? (primaryKey.column ?? snakeCase(primaryKey.name))
     : 'id';
   // `@table` is a permanent override; `@tableWas` is a one-time rename
   // signal the differ consumes and the author then deletes. Both are in
@@ -732,7 +721,7 @@ function finishModelNorm(def, norm) {
   // ── the property ↔ column mapping ───────────────────────────────────
   //
   // ONE map each way, built once, consulted everywhere. Before
-  // `{column:}` a column was always `__schemaSnake(property)` and the
+  // `{column:}` a column was always `snakeCase(property)` and the
   // derivation could be inlined at each site; now it is a lookup, and
   // the derivation survives only as the DEFAULT when a field declares
   // no column of its own.
@@ -778,20 +767,20 @@ function finishModelNorm(def, norm) {
     // The compiler checks these too; `__schema({…})` is a second
     // entry point that takes a hand-built descriptor, so the runtime
     // holds the same line rather than trusting its caller.
-    for (const [key, kind] of Object.entries(__SCHEMA_FIELD_ATTRS)) {
+    for (const [key, kind] of Object.entries(FIELD_ATTRS)) {
       const value = f.attrs?.[key];
       if (value === undefined) continue;
-      const why = __schemaAttrValueError(kind, key, value);
+      const why = attrValueError(kind, key, value);
       if (why) {
         throw __schemaModelError(def, n, 'attr',
           "field '" + n + "' option " + why + "; got '" + value + "'");
       }
     }
-    claim(n, f.attrs?.column ?? __schemaSnake(n), "field '" + n + "'");
+    claim(n, f.attrs?.column ?? snakeCase(n), "field '" + n + "'");
   }
   for (const [, rel] of relations) {
     if (rel.kind !== 'belongsTo') continue;
-    claim(__schemaCamel(rel.foreignKey), rel.foreignKey,
+    claim(camelCase(rel.foreignKey), rel.foreignKey,
       'the @belongsTo ' + rel.target + ' relation');
   }
   if (timestamps) {
@@ -1443,7 +1432,7 @@ function __schemaTranslateDBError(e, def) {
 // knows it as one, and the plain derivation otherwise — the unique
 // pattern yields an INDEX name, which no mapping covers.
 function __schemaConstraintName(raw, norm) {
-  return norm ? __schemaFieldFor(norm, raw) : __schemaCamel(raw);
+  return norm ? __schemaFieldFor(norm, raw) : camelCase(raw);
 }
 
 function __schemaConstraintIssue(msg, norm) {
@@ -2438,7 +2427,7 @@ function __schemaValidateAdapterRow(columns, row, operation, norm) {
       throw new Error(
         'schema: ' + operation + ' adapter invariant — every column needs a non-empty string name');
     }
-    const canonical = norm ? __schemaFieldFor(norm, column.name) : __schemaCamel(column.name);
+    const canonical = norm ? __schemaFieldFor(norm, column.name) : camelCase(column.name);
     if (indexes.has(canonical)) {
       // Naming the table and BOTH source columns is what makes this
       // actionable: the fix is dropping or mapping one of two real
@@ -2466,7 +2455,7 @@ function __schemaAbsorbRow(inst, columns, row, operation = 'row absorption', nor
   }
   for (let i = 0; i < columns.length; i++) {
     const snake = columns[i].name;
-    const key = norm ? __schemaFieldFor(norm, snake) : __schemaCamel(snake);
+    const key = norm ? __schemaFieldFor(norm, snake) : camelCase(snake);
     let value = row[i];
     // Coerce BEFORE the value lands on the instance, so the snapshot
     // taken after absorption sees the Date — dirty tracking must never

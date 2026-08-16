@@ -71,33 +71,38 @@ var syncOpsFlag = () => {
 };
 
 // src/runtime/vocab.js
-function __schemaSnake(s) {
+function snakeCase(s) {
   return String(s).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
-function __schemaCamel(col) {
+function camelCase(col) {
   return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
-function __schemaIsCanonicalName(name) {
+var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
+var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
+function fkName(model) {
+  return snakeCase(model) + "_id";
+}
+function isCanonicalName(name) {
   if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
     return false;
   if (/[A-Z]{2,}/.test(name))
     return false;
   return true;
 }
-function __schemaIsCanonicalTarget(name) {
+function isCanonicalTarget(name) {
   if (typeof name !== "string" || !/^[A-Z][a-zA-Z0-9]*$/.test(name))
     return false;
   if (/[A-Z]{2,}/.test(name))
     return false;
   return true;
 }
-function __schemaIsColumnName(name) {
+function isColumnName(name) {
   return typeof name === "string" && /^[a-z_][a-z0-9_]*$/.test(name);
 }
-function __schemaIsLiteralColumn(name) {
+function isLiteralColumn(name) {
   return typeof name === "string" && name.length > 0 && !/[\u0000-\u001f\u007f".]/.test(name);
 }
-var __SCHEMA_MODEL_DIRECTIVES = {
+var MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: "target",
   timestamps: "none",
@@ -112,30 +117,30 @@ var __SCHEMA_MODEL_DIRECTIVES = {
   tableWas: "name",
   primaryKey: "field"
 };
-var __SCHEMA_ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
-var __SCHEMA_RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
-var __SCHEMA_FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
-var __SCHEMA_RELATION_ATTRS = {
+var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
+var RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
+var FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
+var RELATION_ATTRS = {
   __proto__: null,
   as: "property",
   foreignKey: "column",
   through: "model",
   targetKey: "column"
 };
-function __schemaAttrValueError(kind, key, value) {
+function attrValueError(kind, key, value) {
   if (typeof value !== "string" || !value.length) {
     return "'" + key + "' requires a non-empty string";
   }
-  if (kind === "property" && !__schemaIsCanonicalName(value)) {
+  if (kind === "property" && !isCanonicalName(value)) {
     return "'" + key + "' is a property name — canonical camelCase, e.g. {" + key + ": author}";
   }
-  if (kind === "model" && !__schemaIsCanonicalTarget(value)) {
+  if (kind === "model" && !isCanonicalTarget(value)) {
     return "'" + key + "' is a model name — canonical PascalCase, e.g. {" + key + ": Membership}";
   }
-  if (kind === "column" && !__schemaIsColumnName(value)) {
+  if (kind === "column" && !isColumnName(value)) {
     return "'" + key + "' is a column name Rip generates — lowercase, digits and underscores " + "only, e.g. {" + key + ': "author_id"}';
   }
-  if (kind === "literal" && !__schemaIsLiteralColumn(value)) {
+  if (kind === "literal" && !isLiteralColumn(value)) {
     return "'" + key + "' is a database column name — any spelling the database uses, but with " + "no dots, double quotes, or control characters";
   }
   return null;
@@ -158,10 +163,6 @@ var HOOK_NAMES = new Set([
   "afterCommit",
   "afterRollback"
 ]);
-var MODEL_DIRECTIVES = __SCHEMA_MODEL_DIRECTIVES;
-var RELATION_DIRECTIVES = __SCHEMA_RELATION_DIRECTIVES;
-var snakeCase = __schemaSnake;
-var camelCase = __schemaCamel;
 var SCHEMA_COERCIBLE_TYPES = new Set(["integer", "number", "boolean", "date", "datetime"]);
 var SCHEMA_NAMED_COERCER_TYPES = {
   __proto__: null,
@@ -908,17 +909,17 @@ function parseOptionsBracket(part, vocab, what, fail) {
     if (bare) {
       if (!isWord(valTok) && !isKeywordWord(valTok)) {
         const wrote = valTok.kind === "STRING" && valTok.value.startsWith('"') ? JSON.parse(valTok.value) : null;
-        const shown = wrote && !__schemaAttrValueError(kind, key, wrote) ? wrote : kind === "model" ? "Membership" : "author";
+        const shown = wrote && !attrValueError(kind, key, wrote) ? wrote : kind === "model" ? "Membership" : "author";
         fail(`${what} option '${key}' names ${kind === "model" ? "a model" : "a property"}, ` + `so it is written BARE — '{${key}: ${shown}}', ` + `not ${valTok.kind === "STRING" ? valTok.value : `a ${valTok.kind}`}. ` + `Quoting would name a database identifier, which is a different thing`, valTok.start);
       }
       value = valTok.value;
     } else {
       if (valTok.kind !== "STRING" || !valTok.value.startsWith('"')) {
-        fail(`${what} option '${key}' names a database column, so it is QUOTED — ` + `'{${key}: "${isWord(valTok) ? __schemaSnake(valTok.value) : "author_id"}"}'. ` + `A bare name would be a Rip name, which is a different thing`, valTok.start);
+        fail(`${what} option '${key}' names a database column, so it is QUOTED — ` + `'{${key}: "${isWord(valTok) ? snakeCase(valTok.value) : "author_id"}"}'. ` + `A bare name would be a Rip name, which is a different thing`, valTok.start);
       }
       value = JSON.parse(valTok.value);
     }
-    const why = __schemaAttrValueError(kind, key, value);
+    const why = attrValueError(kind, key, value);
     if (why)
       fail(`${what} option ${why}; got '${value}'`, keyTok.start);
     attrs[key] = value;
@@ -929,10 +930,10 @@ function parseOptionsBracket(part, vocab, what, fail) {
   return attrs;
 }
 function parseAttrsTokens(part, fieldName, fail) {
-  return parseOptionsBracket(part, __SCHEMA_FIELD_ATTRS, `field '${fieldName}'`, fail);
+  return parseOptionsBracket(part, FIELD_ATTRS, `field '${fieldName}'`, fail);
 }
 function parseRelationAttrs(part, directiveName, fail) {
-  const attrs = parseOptionsBracket(part, __SCHEMA_RELATION_ATTRS, `@${directiveName}`, fail);
+  const attrs = parseOptionsBracket(part, RELATION_ATTRS, `@${directiveName}`, fail);
   if (attrs.through && directiveName === "belongsTo") {
     fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, part[0].start);
   }
@@ -1007,7 +1008,7 @@ function finishModelBody(entries, fail) {
     if (shape === undefined) {
       fail(`unknown directive '@${e.name}' on :model — legal: ${Object.keys(MODEL_DIRECTIVES).map((n) => "@" + n).join(", ")}, @ensure, @scope, @defaultScope`, e.nameStart ?? e.start);
     }
-    if (__SCHEMA_ONCE_DIRECTIVES.includes(e.name)) {
+    if (ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
         fail(shape === "none" ? `duplicate '@${e.name}' — declared twice; a :model declares it once` : `duplicate '@${e.name}' — a :model declares it at most once (the second would silently override the first)`, e.nameStart ?? e.start);
       }
@@ -1075,7 +1076,7 @@ function finishModelBody(entries, fail) {
       claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
       const a = e.args[0];
-      const fk = a.foreignKey ?? snakeCase(a.as ?? a.target) + "_id";
+      const fk = a.foreignKey ?? fkName(a.as ?? a.target);
       claim(camelCase(fk), fk, `the @belongsTo ${a.target}${a.as ? ` (as ${a.as})` : ""} relation`, e.start);
     }
   }
@@ -1122,7 +1123,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       }
       if (pos < tokens.length)
         junk(tokens[pos], `takes one target name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? "?" : ""}'`);
-      if (!__schemaIsCanonicalTarget(t0.value)) {
+      if (!isCanonicalTarget(t0.value)) {
         fail(`@${e.name}: target '${t0.value}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, t0.start);
       }
       const arg = { target: t0.value };
@@ -1248,7 +1249,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       let pos = 1;
       let attrs = null;
       if (tokens[pos]?.kind === "," && tokens[pos + 1]?.kind === "{") {
-        attrs = parseOptionsBracket(tokens.slice(pos + 1), __SCHEMA_FIELD_ATTRS, `@${e.name}`, fail);
+        attrs = parseOptionsBracket(tokens.slice(pos + 1), FIELD_ATTRS, `@${e.name}`, fail);
         pos = tokens.length;
       }
       if (pos < tokens.length)
@@ -1256,7 +1257,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (attrs?.was) {
         fail(`@${e.name} option 'was' is a field-rename annotation; a primary-key rename is not a supported migration`, e.start);
       }
-      if (!__schemaIsCanonicalName(t0.value)) {
+      if (!isCanonicalName(t0.value)) {
         fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
       }
       const arg = { name: t0.value };
@@ -1851,10 +1852,7 @@ function foldHasMixin(descriptor) {
   return descriptor.entries.some((e) => e.tag === "directive" && e.name === "mixin");
 }
 function foldFkName(arg) {
-  if (arg.foreignKey)
-    return arg.foreignKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-  const snake = (arg.as ?? arg.target).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-  return (snake + "_id").replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+  return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
 }
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor))
@@ -20228,7 +20226,7 @@ function __schemaMaterializationError(error, field) {
 function __schemaUnwrapMaterializationError(error) {
   return error && error[__SCHEMA_MATERIALIZATION_ERROR] ? { thrown: error.error, derivedField: error.field } : { thrown: error, derivedField: "" };
 }
-var __schemaValidateCanonicalName = __schemaIsCanonicalName;
+var __schemaValidateCanonicalName = isCanonicalName;
 function __schemaSignature(def) {
   const safe = (v) => JSON.stringify(v ?? null, (k, x) => x instanceof RegExp ? String(x) : typeof x === "function" ? "<fn>" : x);
   const parts = [def.kind];

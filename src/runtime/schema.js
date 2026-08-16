@@ -19,7 +19,7 @@
 // with instructions. The shared module evaluates once per process
 // (module cache), so toolchain-path programs never trip it.
 
-import { __schemaIsCanonicalName } from './vocab.js';
+import { isCanonicalName } from './vocab.js';
 
 const __RIP_SCHEMA_SENTINEL = Symbol.for('rip.runtime.schema');
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
@@ -295,7 +295,7 @@ function __schemaUnwrapMaterializationError(error) {
 // persistence layer loads.
 //   ok:  name, mrn, firstName, mdmId, line2      bad: ID, mdmID, foo_bar
 // The rule itself lives in ./vocab.js, with the compiler's copy of it.
-const __schemaValidateCanonicalName = __schemaIsCanonicalName;
+const __schemaValidateCanonicalName = isCanonicalName;
 
 // Structural signature of a declaration — name-shape only, function
 // bodies excluded. Two registrations with the same signature are the

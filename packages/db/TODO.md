@@ -71,7 +71,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   in `finishModelNorm`, and two owners for one column is a positioned
   error in the compiler and a `SchemaError` in the runtime. And
   `norm.columnOf` / `norm.fieldOf` are now the authority on the
-  property↔column mapping; `__schemaSnake`/`__schemaCamel` survive only
+  property↔column mapping; `snakeCase`/`camelCase` survive only
   as the default for a name no map has heard of.
 
   `@hasMany X, {through: J}` is deliberately **not** a JOIN: the join
@@ -197,7 +197,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   conventions agree. The mapping fires on roughly 8% of field references.
 - **Both spellings already work on both doors.**
   `__schemaCanonicalInput` (`orm.js:1636-1638`) registers `name` and
-  `__schemaSnake(name)` as writable input keys, so
+  `snakeCase(name)` as writable input keys, so
   `User.create({first_name: 'x'})` succeeds today; `_hydrate`
   (`orm.js:2057-2065`) attaches non-enumerable snake aliases, so
   `user.first_name` reads today. The only place camelCase is forced is
@@ -226,7 +226,7 @@ Object shape is derived from `SELECT *` plus the database catalog
 
 - `toJSON` and `toJSONSchema` publish different vocabularies.
 - Undeclared columns ship in API responses.
-- `__schemaCamel` is not total: `nickname_2` → `nickname_2`,
+- `camelCase` is not total: `nickname_2` → `nickname_2`,
   `_internal` → `Internal`, `legacy_ISO_CODE` unchanged.
 - Eager-loaded relations never serialize (`_relMemo` is non-enumerable
   by design, `:273-281`), so `includes()` pays for the preload and

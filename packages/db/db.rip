@@ -83,7 +83,7 @@ fail = (message) ->
 
 # snake_case → camelCase for one column name — the package's single
 # camelizer, behind the opt-in `camel` projection below. A faithful
-# local twin of the runtime's `__schemaCamel` (src/runtime/vocab.js) —
+# local twin of the runtime's `camelCase` (src/runtime/vocab.js) —
 # the same one-line transform, kept byte-identical so the two tiers can
 # never disagree on a spelling; local because this package imports only
 # the substrate, never the schema runtime. Deliberately not total: only

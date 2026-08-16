@@ -14,10 +14,12 @@
 //   3. COLLISION rejections ): intrinsic names, alias-vs-
 //      alias, user type declarations — loud in both artifacts, JS
 //      shipping output untouched.
-//   4. NAMING DRIFT gates: the renderer's snake/camel/pluralize
-//      copies match the runtime's INSTALLED accessor names (the
-//      runtime module is never imported by the compiler — these
-//      gates are what license the copies).
+//   4. NAMING DRIFT gates: the shared snake/camel/pluralize rules in
+//      src/runtime/vocab.js derive the runtime's INSTALLED accessor
+//      names. The renderer and the ORM both read vocab, so there are
+//      no copies to license — these gates hold the shared rule to what
+//      the ORM actually installs, which is the half a single
+//      definition cannot prove on its own.
 import { describe, test, expect } from 'bun:test';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -25,7 +27,7 @@ import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { compile, CompileError } from '../../src/compile.js';
 import { stripFace } from '../../src/emitter.js';
-import { pluralize } from '../../src/types/schemas.js';
+import { pluralize } from '../../src/runtime/vocab.js';
 
 const rt4 = await import('../../src/runtime/schema.js');
 await import('../../src/runtime/orm.js');
@@ -532,12 +534,12 @@ describe('the module marker', () => {
 
 // ── 4. naming drift gates ────────────────────────────────────────────
 
-// The renderer's naming copies (snake/camel/pluralize) must derive
-// EXACTLY the accessor and FK names the runtime installs — checked
-// through the runtime's public surface (prototype accessor names,
-// markDirty's FK validation), so a rule added to one side without the
-// other fails here by name.
-describe('naming drift gates: renderer copies vs the runtime\'s installed names', () => {
+// The shared naming rules (snake/camel/pluralize, src/runtime/vocab.js)
+// must derive EXACTLY the accessor and FK names the runtime installs —
+// checked through the runtime's public surface (prototype accessor
+// names, markDirty's FK validation), so a rule changed in vocab without
+// the ORM's use of it fails here by name.
+describe('naming drift gates: the shared rules vs the runtime\'s installed names', () => {
   const TARGETS = ['Person', 'Box', 'City', 'Bus', 'Sheep', 'Order', 'MdmUser', 'Series'];
 
   test('hasMany accessors: pluralize() matches the runtime accessor for every rule class', () => {
@@ -557,7 +559,7 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
     });
   });
 
-  test('belongsTo FK property names: the renderer\'s camel(snake(target)+_id) matches markDirty\'s set', () => {
+  test('belongsTo FK property names: the shared camel(fkName(target)) matches markDirty\'s set', () => {
     rt4.__SchemaRegistry.scope(() => {
       const def = rt4.__schema({
         kind: 'model', name: 'Fk',
