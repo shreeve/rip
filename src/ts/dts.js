@@ -10,7 +10,7 @@
 // normalized, never re-derived from generated code and never scanned
 // out of the emitted JS (the never-list). The text machinery itself
 // (normalization, the block-body member grammar, parameter rendering)
-// is shared with the TS-face emission through src/ts/typetext.js — one
+// is shared with the TS-face emission through src/ts/types.js — one
 // renderer, two consumers.
 //
 // What declares (the `declare`-prefix convention):
@@ -42,8 +42,8 @@
 import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
   renderParams, paramTyped, optionalReader,
-} from './typetext.js';
-import { buildSchemaTypeStory, SchemaTypeError } from './schematext.js';
+} from './types.js';
+import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from '../emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
@@ -125,7 +125,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   };
 
   // The SHARED optionality reader — the same one the TS face uses, so
-  // the declaration and the face cannot drift on `?` (see typetext.js).
+  // the declaration and the face cannot drift on `?` (see types.js).
   const isOptionalParam = optionalReader(stores);
 
   // ── declaring statements ───────────────────────────────────────────

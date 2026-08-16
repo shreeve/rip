@@ -118,7 +118,7 @@ const isKeywordWord = (t) =>
   t && typeof t.value === 'string' && /^[a-z]+$/.test(t.value) &&
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
 // runtimes that also need them (src/runtime/schema.js validates
 // declared names, src/runtime/orm.js validates hand-built descriptors).
@@ -135,7 +135,7 @@ import {
 
 // Face-only behavior object name for a schema (`ReturnType<typeof …>`
 // and the JS face share this spelling). Lives here — not in
-// ts/schematext.js — so the browser compile graph can take the
+// ts/schema.js — so the browser compile graph can take the
 // name without the IDE type machinery.
 export const behaviorName = (name) => `__${name}__behavior`;
 
@@ -173,7 +173,7 @@ export function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
   let depth = 0;
   let i = 0;
   while (i < tokens.length) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[i];
     if (t.kind === 'INDENT') depth++;
     else if (t.kind === 'OUTDENT') depth--;
@@ -369,7 +369,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     let d = 0;
     let outdentIdx = -1;
     for (let k = indentIdx; k < tokens.length; k++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (tokens[k].kind === 'INDENT') d++;
       else if (tokens[k].kind === 'OUTDENT') {
         d--;

@@ -22,13 +22,13 @@ import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
-import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schematext.js';
+import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/typetext.js';
+import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
 import {
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
@@ -1980,7 +1980,7 @@ class Emitter {
     }
   }
 
-  // Shared-renderer rejections (src/ts/typetext.js), positioned on the
+  // Shared-renderer rejections (src/ts/types.js), positioned on the
   // offending statement: a malformed alias body fails the TS-face
   // compile from the declaration's own span (rule 5), with the same
   // message class the dts consumer raises.

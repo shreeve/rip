@@ -52,7 +52,7 @@ const COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDENTIFIER', 'PROPERTY', '@', '(', '[', '{']);
 
 import { TEMPLATE_TAGS } from './dom.js';
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
 const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
@@ -102,7 +102,7 @@ export function rewriteRender(tokens, mintId, fail) {
     let depth = 1;
     let k = from;
     while (k >= 0 && depth > 0) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const kt = tokAt(arr, k, current)?.kind;
       if (kt === closer) depth++;
       else if (kt === opener) depth--;
@@ -119,7 +119,7 @@ export function rewriteRender(tokens, mintId, fail) {
       j = skipBalancedPair(out, j - 1, 'OUTDENT', 'INDENT', current);
     }
     while (j > 0) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const pt = out[j - 1].kind;
       if (pt === 'TERMINATOR' || pt === 'RENDER') break;
       if (pt === 'OUTDENT') {
@@ -161,7 +161,7 @@ export function rewriteRender(tokens, mintId, fail) {
   const explicitDepthAt = () => {
     let depth = 0;
     for (let k = out.length - 1; k >= 0; k--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const t = out[k].kind;
       if (CLOSERS.has(t)) depth++;
       else if (OPENERS.has(t)) {
@@ -192,7 +192,7 @@ export function rewriteRender(tokens, mintId, fail) {
   const retagMatchingParen = (from) => {
     let depth = 1;
     for (let j = from + 1; j < tokens.length && depth > 0; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (k === '(' || k === 'CALL_START') depth++;
       else if (k === ')') {
@@ -208,7 +208,7 @@ export function rewriteRender(tokens, mintId, fail) {
   const isClsxCallEnd = (current) => {
     let depth = 1;
     for (let j = out.length - 1; j >= 0 && depth > 0; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (out[j].kind === 'CALL_END') depth++;
       else if (out[j].kind === 'CALL_START') {
         depth--;
@@ -246,7 +246,7 @@ export function rewriteRender(tokens, mintId, fail) {
   };
 
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     let t = tokens[i];
     const next = tokens[i + 1] ?? null;
 

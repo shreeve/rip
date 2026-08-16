@@ -128,7 +128,7 @@ The normal emitter renders annotations, casts, declarations, overloads,
 reactive containers, enum companions, schema intrinsics, and component
 types through TS-only regions.
 
-`src/ts/typetext.js` owns shared type-text and signature rendering so the
+`src/ts/types.js` owns shared type-text and signature rendering so the
 face and declarations cannot drift structurally.
 
 ## Ownership boundary
@@ -355,10 +355,10 @@ silent until you open it.
 | type claims | `src/types.js` |
 | lexer pipeline | `src/lexer.js` |
 | grammar span labels | `src/grammar/grammar.rip`, `src/grammar/solar.rip` |
-| shared type rendering | `src/ts/typetext.js` |
+| shared type rendering | `src/ts/types.js` |
 | declarations | `src/ts/dts.js` |
 | TS face and strip | `src/emitter.js`, `src/builder.js` |
-| schema type rendering | `src/ts/schematext.js` |
+| schema type rendering | `src/ts/schema.js` |
 | component type rendering | `src/ts/components.js` |
 | editor broker | `packages/vscode/src/` |
 | diagnostic gate | `packages/vscode/src/scopes.js` |

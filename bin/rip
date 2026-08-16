@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 // The Rip CLI: compile .rip files to JavaScript, or run them directly
-// through the Bun loader plugin (src/cli/loader.js) so .rip imports compile
+// through the Bun loader plugin (src/loader.js) so .rip imports compile
 // transitively. Diagnostics print as path:line:col with a source excerpt
 // (CompileError's formatted message) and exit non-zero.
 
@@ -17,7 +17,7 @@ import { Parser } from '../src/parser.js';
 import { toInlineMapComment } from '../src/sourcemap.js';
 import packageJson from '../package.json' with { type: 'json' };
 
-const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/loader.js');
+const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
 const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/run.js');
 const replPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/repl.js');
 
@@ -489,7 +489,7 @@ if (showTsFace) {
 // the loader plugin compiles it like any import, and uncaught errors
 // print with stack frames remapped to .rip source positions (Bun's own
 // reporter shows generated-JS coordinates for plugin-loaded modules;
-// src/cli/stackmap.js). The child's exit status is ours.
+// src/stackmap.js). The child's exit status is ours.
 const run = (path, argv) => {
   const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',

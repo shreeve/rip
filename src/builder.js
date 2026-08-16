@@ -24,7 +24,7 @@
 // of the chunks appended during its fn() — O(marked region), never a
 // flatten of the whole growing buffer.
 
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 
 export class CodeBuilder {
   constructor(stores, { source = null, primitives = false } = {}) {
@@ -324,7 +324,7 @@ export class CodeBuilder {
     let pos = f.generatedStart;
     let i = f.chunkStart;
     while (i < chunkEnd) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (skippable && pos >= m.genStart && pos < m.genEnd) {
         pos = m.genEnd;
         i = m.chunkEnd;
@@ -367,7 +367,7 @@ export class CodeBuilder {
   bridges(m, f, delta) {
     let pos = m.genEnd;
     for (let i = m.chunkEnd; i < f.chunkStart; i++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const chunk = this.chunks[i];
       if (!this.source.startsWith(chunk, pos + delta)) return false;
       pos += chunk.length;

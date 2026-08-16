@@ -311,7 +311,7 @@ so every part must be a declared required field, and the `@idStart`
 rejection already written for natural keys carries over.
 
 **Blast radius: 83 `primaryKey` references** across `orm.js` (63),
-`schema.js` (9), `ts/schematext.js` (7), `migrate.js` (4). Identity
+`schema.js` (9), `ts/schema.js` (7), `migrate.js` (4). Identity
 stops being a value and becomes a tuple, which changes: `_snapshot`,
 `persistedIdentity`, `find`/`findMany`, every
 `WHERE pk = ?`, the relation memo's identity comparison (tuples need

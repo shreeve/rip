@@ -16,7 +16,7 @@
 // on generated lines that carry no mapping segment (nothing to claim
 // about them; inventing a position would be worse than showing none).
 
-import { decodeMappings } from '../sourcemap.js';
+import { decodeMappings } from './sourcemap.js';
 
 const registry = new Map();
 

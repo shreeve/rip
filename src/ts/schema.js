@@ -1,5 +1,5 @@
 // The schema TYPE story — one renderer, two consumers (the
-// typetext.js precedent): declaration emission (src/ts/dts.js) and the
+// types.js precedent): declaration emission (src/ts/dts.js) and the
 // TS-face emission (src/emitter.js) both render a schema descriptor's
 // type surface through this module, so the two artifacts cannot drift
 // in declaration structure.

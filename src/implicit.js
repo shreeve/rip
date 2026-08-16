@@ -13,7 +13,7 @@
 // subsequent `at` — but it is an implementation detail, so the runner
 // and the collectors are module-private and callers just run the pass.
 
-import { ops } from './ops.js';
+import { counter } from './counter.js';
 
 // The insertion-pass runner — the ONE place the pipeline mutates the
 // tape's structure. Insertion passes are COLLECTORS: they walk the
@@ -34,7 +34,7 @@ function applyInsertions(tokens, collect, mintId) {
   let ins = insertions.length - 1;
   tokens.length += insertions.length;
   for (let write = tokens.length - 1; write >= 0; write--) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     if (ins >= 0 && (read < 0 || insertions[ins].at > read)) {
       tokens[write] = insertions[ins--].token;
     } else {
@@ -84,7 +84,7 @@ function collectBlocks(tokens, mintId) {
   const commaInImplicitCall = (start, i) => {
     let levels = 0;
     for (let j = i - 1; j >= start; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (CLOSERS.has(k) || k === 'OUTDENT') { levels++; continue; }
       if (OPENERS.has(k) || k === 'INDENT') {
@@ -102,7 +102,7 @@ function collectBlocks(tokens, mintId) {
   const commaInImplicitObject = (start, i) => {
     let levels = 0;
     for (let j = i - 1; j >= start; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (CLOSERS.has(k) || k === 'OUTDENT') { levels++; continue; }
       if (OPENERS.has(k) || k === 'INDENT') {
@@ -139,7 +139,7 @@ function collectBlocks(tokens, mintId) {
     let inlineIfs = 0;
     let pendingBlocks = 0;
     for (let j = start; j < tokens.length; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const t = tokens[j];
       const k = t.kind;
       if (k === 'INDENT') {
@@ -188,19 +188,19 @@ function collectBlocks(tokens, mintId) {
     const end = bodyEnd(start);
     let firstReal = null;
     for (let j = start; j < end; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (!tokens[j].generated) { firstReal = tokens[j]; break; }
     }
     let lastReal = null;
     for (let j = end - 1; j >= start; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (!tokens[j].generated) { lastReal = tokens[j]; break; }
     }
     // The first real token after the body — the OUTDENT's origin. Bounded
     // scan: a whole-tail slice here is O(tape) per body, quadratic overall.
     let afterReal = null;
     for (let j = end; j < tokens.length; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (!tokens[j].generated) { afterReal = tokens[j]; break; }
     }
     const openAt = firstReal ? firstReal.start : (tokens[start - 1]?.end ?? 0);
@@ -223,7 +223,7 @@ function collectBlocks(tokens, mintId) {
   };
 
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     closePendingAt(i);
     const t = tokens[i];
     if ((t.kind === '->' || t.kind === '=>') && tokens[i + 1] && tokens[i + 1].kind !== 'INDENT') {
@@ -352,7 +352,7 @@ const looksObjectishAt = (tokens, j) => {
     let d = 1;
     let k = j;
     while (++k < tokens.length && d > 0) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       if (PASS_OPENERS.has(tokens[k].kind)) d++;
       else if (PASS_CLOSERS.has(tokens[k].kind)) d--;
     }
@@ -379,7 +379,7 @@ const CALL_BLOCKING_HEADS = new Set(['CLASS', 'EXTENDS', 'IF', 'CATCH', 'SWITCH'
 const controlHeadBackwards = (tokens, j) => {
   let depth = 0;
   for (; j >= 0; j--) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const k = tokens[j].kind;
     if (depth === 0 && CALL_BLOCKING_HEADS.has(k)) return true;
     if (PASS_CLOSERS.has(k)) {
@@ -494,7 +494,7 @@ function collectObjects(tokens, mintId) {
   const openCallBetween = (from, i) => {
     let levels = 0;
     for (let j = i - 1; j > from; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (PASS_CLOSERS.has(k)) { levels++; continue; }
       if (PASS_OPENERS.has(k)) {
@@ -519,7 +519,7 @@ function collectObjects(tokens, mintId) {
   // multi-line object continues past this point)?
   const objectContinues = (j) => {
     for (let d = 0; j < tokens.length; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (PASS_OPENERS.has(k)) d++;
       else if (PASS_CLOSERS.has(k)) {
@@ -533,7 +533,7 @@ function collectObjects(tokens, mintId) {
   };
 
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[i];
     const k = t.kind;
     const prev = tokens[i - 1];
@@ -733,7 +733,7 @@ function collectCalls(tokens, mintId) {
   };
 
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const t = tokens[i];
     const next = tokens[i + 1];
     const k = t.kind;

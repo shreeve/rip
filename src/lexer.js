@@ -32,7 +32,7 @@ import { SourceFile } from './source.js';
 import { rewriteSchema } from './schema.js';
 import { rewriteRender } from './render.js';
 import { TEMPLATE_TAGS } from './dom.js';
-import { ops, syncOpsFlag } from './ops.js';
+import { counter, syncCounterFlag } from './counter.js';
 // The identifier character classes; the scanner walks characters, so it
 // takes the classes rather than the helpers built on them.
 import { IDENT_START, IDENT_PART } from './ident.js';
@@ -67,7 +67,7 @@ import {
 // DO_IIFE — `do ->` and `do (x) ->` are the immediate-invocation forms.
 export function tagParams(tokens) {
   for (let i = 1; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kind = tokens[i].kind;
     if (kind !== '->' && kind !== '=>') continue;
     let closeAt = i - 1;
@@ -86,7 +86,7 @@ export function tagParams(tokens) {
       let depth = 0;
       let found = -1;
       for (let j = i - 1; j >= 0; j--) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         const t = tokens[j];
         const k = t.kind;
         if (k === ')' || k === ']' || k === '}' || k === 'PICK_END' || k === 'CALL_END' || k === 'PARAM_END' || k === 'INDEX_END' ||
@@ -115,7 +115,7 @@ export function tagParams(tokens) {
       let d = 0;
       let op = -1;
       for (let k = i - 1; k >= 0; k--) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         const kk = tokens[k].kind;
         if (kk === ')' || kk === 'CALL_END' || kk === 'PARAM_END') d++;
         else if (kk === '(' || kk === 'CALL_START' || kk === 'PARAM_START') {
@@ -132,7 +132,7 @@ export function tagParams(tokens) {
     }
     let depth = 0;
     for (let j = closeAt - 1; j >= 0; j--) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const t = tokens[j];
       if (t.kind === ')' || t.kind === 'CALL_END' || t.kind === 'INDEX_END' || t.kind === ']') {
         depth++;
@@ -167,7 +167,7 @@ export function tagDynamicKeys(tokens) {
   const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
   const pendingTernary = [0]; // per bracket depth
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const k = tokens[i].kind;
     if (k === 'TERNARY') {
       pendingTernary[pendingTernary.length - 1]++;
@@ -181,7 +181,7 @@ export function tagDynamicKeys(tokens) {
       let depth = 1;
       let j = i;
       while (++j < tokens.length && depth > 0) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         if (OPENERS.has(tokens[j].kind)) depth++;
         else if (CLOSERS.has(tokens[j].kind)) depth--;
       }
@@ -211,7 +211,7 @@ const ARROW_COMMA_AFTER = new Set([
 export function insertArrowCommas(tokens) {
   let depth = 0;
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const k = tokens[i].kind;
     if (k === 'CALL_START') depth++;
     else if (k === 'CALL_END') depth--;
@@ -241,7 +241,7 @@ export function tagCompoundKeys(tokens) {
   const identish = (x) => x !== undefined && (x.kind === 'IDENTIFIER' || x.kind === 'PROPERTY');
   const pendingTernary = [0];
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const k = tokens[i].kind;
     if (k === 'TERNARY') {
       pendingTernary[pendingTernary.length - 1]++;
@@ -254,7 +254,7 @@ export function tagCompoundKeys(tokens) {
                tokens[i - 1]?.kind !== '@') {
       let j = i;
       for (;;) {
-        if (ops.on) ops.n++;
+        if (counter.on) counter.n++;
         const sep = tokens[j + 1];
         const nxt = tokens[j + 2];
         if (sep === undefined || !identish(nxt)) break;
@@ -292,7 +292,7 @@ export function tagCompoundKeys(tokens) {
 // ternary's (`c ? f!: g` keeps the dammit) or a pair's.
 export function tagVoidMarkers(tokens) {
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     if (tokens[i].kind !== 'DAMMIT') continue;
     if (tokens[i + 1]?.kind === '=' ||
         (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF')) {
@@ -515,7 +515,7 @@ const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) {
   // The RIP_COUNT_OPS flag re-reads per call (and resets the count) so
   // a COUNT-ratio gate measures exactly one tokenize run.
-  syncOpsFlag();
+  syncCounterFlag();
   const source = new SourceFile(text, path);
   const tokens = [];
   const trivia = [];
@@ -1079,7 +1079,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   };
 
   while (pos < text.length) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     // ── Logical line starts: read the indentation prefix, synthesize block tokens ──
     if (atLineStart) {
       const lineStart = pos;
@@ -2014,7 +2014,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 // per the retag-pass contract.
 export function tagPostfixConditionals(tokens) {
   for (let i = 0; i < tokens.length; i++) {
-    if (ops.on) ops.n++;
+    if (counter.on) counter.n++;
     const kind = tokens[i].kind;
     if (kind !== 'IF' && kind !== 'UNLESS') continue;
     let postfix = true;
@@ -2031,7 +2031,7 @@ export function tagPostfixConditionals(tokens) {
     // (`a if b if c if …` with no newline), which is valid input;
     // linear for every program with normal lines.
     for (let j = i + 1; j < tokens.length; j++) {
-      if (ops.on) ops.n++;
+      if (counter.on) counter.n++;
       const k = tokens[j].kind;
       if (depth === 0) {
         if (k === 'TERMINATOR') break; // line end — postfix

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 const cartSrc = join(root, 'packages/sites/demos/cart');
-const loaderPath = join(root, 'src/cli/loader.js');
+const loaderPath = join(root, 'src/loader.js');
 // Manager entry — `site.rip` is the Sites framework library (not a CLI).
 const serverBin = join(root, 'packages/sites/manager.rip');
 const PORT = Number(process.env.CART_HARNESS_PORT || 4174);

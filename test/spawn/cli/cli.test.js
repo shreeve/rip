@@ -12,7 +12,7 @@ import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 import { compile, CompileError } from '../../../src/compile.js';
 import { decodeMappings } from '../../../src/sourcemap.js';
-import { registerModuleMap, remapStack } from '../../../src/cli/stackmap.js';
+import { registerModuleMap, remapStack } from '../../../src/stackmap.js';
 
 const BIN = resolve(import.meta.dir, '../../../bin/rip');
 

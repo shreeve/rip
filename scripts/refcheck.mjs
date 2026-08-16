@@ -15,7 +15,7 @@
 // inside a string literal is the one that breaks silently.
 //
 //   bun scripts/refcheck.mjs rewriteTypes VALUE_WORDS
-//   bun scripts/refcheck.mjs --exclude src/lexer.js -- types/schematext
+//   bun scripts/refcheck.mjs --exclude src/lexer.js -- types/schema
 //
 // Exit code is 1 when any string-literal hit is found outside the
 // excluded files — those are the ones that need a decision.
