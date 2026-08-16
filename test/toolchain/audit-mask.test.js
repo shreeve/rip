@@ -12,7 +12,8 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { codeMask, specifierSpans } from '../audit/mask.js';
-import { identifierRuns, tokenize } from '../../src/lexer.js';
+import { tokenize } from '../../src/lexer.js';
+import { identifierRuns } from '../../src/ident.js';
 
 const names = (src) => identifierRuns(codeMask(src));
 

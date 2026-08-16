@@ -2,7 +2,8 @@
 // synthetic-token conventions, trivia retention, and
 // call-paren disambiguation.
 import { describe, test, expect } from 'bun:test';
-import { tokenize, makeParserLexer, identifierRunAt } from '../../src/lexer.js';
+import { tokenize, makeParserLexer } from '../../src/lexer.js';
+import { identifierRunAt } from '../../src/ident.js';
 
 const kinds = (text) => tokenize(text).tokens.map(t => t.kind);
 const values = (text) => tokenize(text).tokens.map(t => t.value);

@@ -9,6 +9,7 @@ const files = [
   'src/parser.js',
   'src/lexer.js',
   'src/implicit.js',
+  'src/ident.js',
   'src/schema.js',
   'src/runtime/schema.js',
   'src/runtime/components.js',

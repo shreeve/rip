@@ -19,7 +19,7 @@
 // prefix); dts wraps them as DtsError ("declaration emission: …") and
 // the TS face as a positioned emitter diagnostic ("emitter: …").
 
-import { identifierRuns } from '../lexer.js';
+import { identifierRuns } from '../ident.js';
 
 export class TypeTextError extends Error {
   constructor(message) {

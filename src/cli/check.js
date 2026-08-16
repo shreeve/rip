@@ -25,7 +25,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { cacheIdentityOf } from '../../packages/vscode/src/hash.js';
 import { compile } from '../compile.js';
 import { readProjectConfig } from '../config.js';
-import { identifierRunAt } from '../lexer.js';
+import { identifierRunAt } from '../ident.js';
 import { startTsgo } from '../../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';

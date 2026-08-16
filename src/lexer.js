@@ -33,6 +33,9 @@ import { rewriteSchema } from './schema.js';
 import { rewriteRender } from './render.js';
 import { TEMPLATE_TAGS } from './dom.js';
 import { ops, syncOpsFlag } from './ops.js';
+// The identifier character classes; the scanner walks characters, so it
+// takes the classes rather than the helpers built on them.
+import { IDENT_START, IDENT_PART } from './ident.js';
 // The three insertion passes; each applies itself. The retag passes
 // (tagParams, tagDynamicKeys, tagVoidMarkers, tagCompoundKeys,
 // tagPostfixConditionals) stay here — they never add tokens.
@@ -2282,37 +2285,6 @@ const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', '
 // be a dynamic KEY retags to plain brackets in tagDynamicKeys.
 const INDEXABLE = new Set([...CALLABLE, 'BOOL', 'NULL', 'UNDEFINED', '}', 'PICK_END', 'STRING_END', 'REGEX', 'HEREGEX_END', 'THIS', '@']);
 
-// Identifier characters ([$\w\x7f-\uffff]):
-// Unicode BMP letters and astral surrogate pairs are identifier text.
-const IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
-const IDENT_PART = /[$\w\x7f-\uffff]/;
-
-// The scanner's identifier vocabulary, exposed for compiler passes
-// that must distinguish identifier atoms from literal spellings.
-export function isIdentifierName(value) {
-  if (typeof value !== 'string' || value.length === 0 || !IDENT_START.test(value[0])) return false;
-  for (let i = 1; i < value.length; i++) {
-    if (!IDENT_PART.test(value[i])) return false;
-  }
-  return true;
-}
-
-// Every identifier-shaped run in a text — built from the SAME
-// IDENT_START/IDENT_PART classes (one identifier vocabulary in the
-// repository), for consumers that mint scaffold names against
-// everything a source spells. String.match with /g resets lastIndex
-// itself, so the shared regex stays stateless across calls.
-const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g');
-export function identifierRuns(text) {
-  return text.match(IDENT_RUN_RE) ?? [];
-}
-export function identifierRunAt(text, start) {
-  if (typeof text !== 'string' || !Number.isInteger(start) || start < 0 || start >= text.length) return null;
-  if (!IDENT_START.test(text[start])) return null;
-  let end = start + 1;
-  while (end < text.length && IDENT_PART.test(text[end])) end++;
-  return { value: text.slice(start, end), start, end };
-}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end])) end++;

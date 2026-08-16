@@ -3029,6 +3029,30 @@ function rewriteRender(tokens, mintId, fail) {
   return tokens;
 }
 
+// src/ident.js
+var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
+var IDENT_PART = /[$\w\x7f-\uffff]/;
+function isIdentifierName(value) {
+  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
+    return false;
+  for (let i = 1;i < value.length; i++) {
+    if (!IDENT_PART.test(value[i]))
+      return false;
+  }
+  return true;
+}
+var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
+function identifierRunAt(text, start) {
+  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
+    return null;
+  if (!IDENT_START.test(text[start]))
+    return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end]))
+    end++;
+  return { value: text.slice(start, end), start, end };
+}
+
 // src/implicit.js
 function applyInsertions(tokens, collect, mintId) {
   const insertions = collect(tokens, mintId);
@@ -5499,28 +5523,6 @@ var UNFINISHED = new Set([
 ]);
 var CALLABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "NUMBER", "STRING", "]", "INDEX_END", "SUPER", "DAMMIT", "PRESENCE", "DYNAMIC_IMPORT"]);
 var INDEXABLE = new Set([...CALLABLE, "BOOL", "NULL", "UNDEFINED", "}", "PICK_END", "STRING_END", "REGEX", "HEREGEX_END", "THIS", "@"]);
-var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
-var IDENT_PART = /[$\w\x7f-\uffff]/;
-function isIdentifierName(value) {
-  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
-    return false;
-  for (let i = 1;i < value.length; i++) {
-    if (!IDENT_PART.test(value[i]))
-      return false;
-  }
-  return true;
-}
-var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
-function identifierRunAt(text, start) {
-  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
-    return null;
-  if (!IDENT_START.test(text[start]))
-    return null;
-  let end = start + 1;
-  while (end < text.length && IDENT_PART.test(text[end]))
-    end++;
-  return { value: text.slice(start, end), start, end };
-}
 function symbolNameEnd(text, start) {
   let end = start;
   while (end < text.length && IDENT_PART.test(text[end]))
