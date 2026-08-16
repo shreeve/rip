@@ -587,6 +587,14 @@ index reports `{field: 'email', error: 'unique', message: 'email
 already taken'}` in `error.issues`, with the raw database error as
 `error.cause`.
 
+A `save`, `destroy`, or `restore` whose row has vanished — the
+statement targeted the instance's primary key and the database
+affirmed zero rows — throws the same structured `SchemaError` with
+`{error: 'stale'}`, and the instance drops its persisted state: it
+stops claiming a row the database revoked. (Only an affirmative
+zero triggers this — a bare `rowCount: 0` from an adapter means "the
+adapter did not say", not "zero rows".)
+
 ### `upsert`
 
 ```rip
@@ -739,6 +747,14 @@ the transaction's.
   transaction, so they can no longer roll anything back;
   `afterRollback` runs after a ROLLBACK. A row saved twice in one
   transaction gets one callback.
+- A ROLLBACK first restores each written instance (on models declaring
+  `afterCommit`/`afterRollback`) to its pre-write state, so the hooks
+  observe what the database now holds — an instance created inside the
+  transaction returns to unpersisted with no id, and a later `save!`
+  re-creates it.
+- A COMMIT that itself fails is **indeterminate**: the writes may or
+  may not be durable, so neither hook family runs and instance state
+  is not restored — the error says to verify the rows before retrying.
 - The adapter must implement `begin()` (see the contract below);
   `schema.transaction` is loud when it does not.
 
@@ -818,21 +834,27 @@ Optional, feature-detected:
 - `catalog()` → the deployed schema as one document —
   `{harborVersion, duckdbVersion, tables, sequences}`, the
   duckdb-harbor `GET /catalog` contract (harbor ≥ 0.9.0): tables with
-  columns, primary keys, genuine `CREATE INDEX` indexes, and
-  structural foreign keys. The migration verbs (`plan` / `status` /
+  columns, primary keys, genuine `CREATE INDEX` indexes, structural
+  foreign keys, and (harbor ≥ 0.9.1) unique constraints — a document
+  without that field reads as none. The migration verbs (`plan` / `status` /
   `make` / `migrate`) require it and refuse loudly without it; the
   ORM's runtime read/write path never calls it.
 - `capabilities` — a truthful object; harbor declares
   `{tx: true, ddlTransactional: true}` (DuckDB rolls DDL back with the
   transaction, so the migration runner may claim whole-file rollback).
 
-**The adapter owns value decoding.** The ORM stores whatever the
-adapter returns, verbatim: the harbor adapter decodes temporal columns
-to real `Date`s keyed off each column's `duckdbType` (and encodes
-`Date` params to ISO-8601 UTC on the way out); an adapter that skips
-that hands back strings, and instances will carry strings. The same
-goes for JSON columns — the ORM stringifies objects written to `json`
-fields but never parses on read.
+**The adapter owns value decoding — with one temporal backstop.** The
+harbor adapter decodes temporal columns to real `Date`s keyed off each
+column's `duckdbType` (and encodes `Date` params to ISO-8601 UTC on
+the way out). For an adapter that skips that, the ORM coerces the
+columns whose *declared* type is temporal (`date`/`datetime` fields,
+plus the `@timestamps`/`@softDelete` columns) through the same codec
+on hydrate: `Date`s pass through untouched, ISO-8601 / SQL-timestamp
+text and epoch-millisecond numbers become the same instant, and a
+value that cannot be read as an instant rejects loudly naming the
+column. Every other column stores whatever the adapter returned,
+verbatim. The same goes for JSON columns — the ORM stringifies objects
+written to `json` fields but never parses on read.
 
 The worked example is the cart demo's adapter, condensed from
 `packages/sites/demos/cart/api/db.rip`, including that json-decode
@@ -903,6 +925,9 @@ against the live database and manages numbered SQL files:
 ```
 rip schema status                 applied / pending / drift + the current plan
 rip schema plan                   print the classified diff (no files touched)
+rip schema dump                   write schema.sql — the declared shape of every
+                                  table (no database touched; --check verifies
+                                  instead of writing, the CI seam)
 rip schema make add_partners      write migrations/NNNN_add_partners.sql from the diff
 rip schema migrate                apply pending files in order
 ```

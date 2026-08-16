@@ -470,7 +470,7 @@ the affected final gates again.
   loader's `rip/<pkg>` stdlib namespace resolves from whichever
   checkout owns the `rip` bin.
 - `rip` on a TTY (or `rip -r`) — the interactive REPL; `rip -e <code>`
- evaluates one entry; `rip schema`/`rip site`/`rip test` dispatch
+ evaluates one entry; `rip schema`/`rip sites`/`rip test` dispatch
  their surfaces (`--help` on each).
 
 ## When Blocked

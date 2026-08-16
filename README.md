@@ -76,7 +76,7 @@ evaluates one entry. `.help` inside the session lists the commands.
 ## Sites (local HTTPS)
 
 ```sh
-rip edge start
+rip sites start edge
 rip sites add packages/sites/demos/hello
 rip sites start hello
 # https://hello.ripdev.io/
