@@ -170,7 +170,7 @@ const canonicalTarget = isCanonicalTarget;
 
 const RESERVED_STATIC = new Set([
   'parse', 'array', 'safe', 'ok', 'parseAsync', 'safeAsync', 'okAsync', 'toJSONSchema',
-  'find', 'findMany', 'where', 'all', 'first', 'count', 'create', 'toSQL',
+  'find', 'findMany', 'with', 'where', 'all', 'first', 'count', 'create', 'toSQL',
   'includes', 'upsert', 'insertMany', 'updateAll', 'deleteAll', 'withDeleted', 'onlyDeleted',
   'unscoped', 'factory',
 ]);
@@ -181,7 +181,7 @@ const SCOPE_RESERVED = new Set([
   'limit', 'offset', 'order', 'orderBy',
 ]);
 const RESERVED_INSTANCE = new Set([
-  'save', 'destroy', 'restore', 'reload', 'ok', 'errors', 'toJSON', 'savedChanges', 'markDirty',
+  'save', 'set', 'destroy', 'restore', 'reload', 'ok', 'errors', 'toJSON', 'savedChanges', 'markDirty',
   '_saving', '_relMemo',
 ]);
 // Implicit columns owned by directive-driven runtime behavior:
@@ -1531,6 +1531,20 @@ class SchemaQuery {
             this._clauses.push(col + ' IN (' + v.map(() => '?').join(', ') + ')');
             this._params.push(...v);
           }
+        } else if (v instanceof RegExp) {
+          // A regex value is a real regex match — DuckDB's
+          // regexp_matches, never a lossy LIKE translation. The JS
+          // flags that change match semantics carry over (i, m, s);
+          // the mechanics flags (g, y, u, d) do not apply to a
+          // boolean match and drop.
+          const options = [...v.flags].filter((f) => 'ims'.includes(f)).join('');
+          if (options !== '') {
+            this._clauses.push('regexp_matches(' + col + ', ?, ?)');
+            this._params.push(v.source, options);
+          } else {
+            this._clauses.push('regexp_matches(' + col + ', ?)');
+            this._params.push(v.source);
+          }
         } else if (isPlainObject(v) && !opaque) {
           const ops = Object.keys(v);
           if (ops.length === 0) {
@@ -2725,13 +2739,62 @@ SchemaDef.prototype._assertModel = function (api) {
   }
 };
 
+// find(pk) — primary-key lookup only. PKs are unique by construction,
+// so find needs no ambiguity story; a conditions lookup is with()'s
+// job, which enforces exactly-one. Routed through the builder so find
+// honors the same filters as every other read: the @softDelete filter
+// and @defaultScope. `unscoped().where(id: …).first!` is the escape
+// hatch.
 SchemaDef.prototype.find = async function (id) {
   this._assertModel('find');
-  // Routed through the builder so find honors the same filters as
-  // every other read: the @softDelete filter and @defaultScope.
-  // `unscoped().where(id: …).first!` is the escape hatch.
+  if (id === null || id === undefined) {
+    // A missing route param or a failed lookup feeding find() should
+    // be loud here, not a silent `WHERE pk IS NULL` miss downstream.
+    throw new Error('schema: find() got ' + (id === null ? 'null' : 'undefined') +
+      ' — pass a primary key; a conditions lookup is with(cond)');
+  }
+  const t = typeof id;
+  if (t !== 'number' && t !== 'bigint' && t !== 'string') {
+    throw new Error('schema: find(pk) takes a primary key (number or string); ' +
+      (Array.isArray(id) ? 'findMany(ids) is the batch lookup' : 'a conditions lookup is with(cond)') +
+      ' — got ' + t);
+  }
   const norm = this._normalize();
   return new SchemaQuery(this).where({ [norm.primaryKey]: id }).first();
+};
+
+// with(cond) — the exactly-one conditions lookup. cond is anything
+// where() accepts: a conditions object, or caller-authored SQL text
+// with its params. LIMIT 2 makes the uniqueness check free: zero rows
+// is a normal miss (null), one is the answer, and two means the
+// condition the caller assumed unique is not — a broken invariant,
+// thrown loudly rather than silently picking a winner.
+// `where(cond).first!` is the explicit "whichever comes first" read.
+// Routed through the builder, so @softDelete and @defaultScope apply.
+SchemaDef.prototype.with = async function (cond, ...params) {
+  this._assertModel('with');
+  if (cond === null || cond === undefined) {
+    throw new Error('schema: with() got ' + (cond === null ? 'null' : 'undefined') +
+      ' — pass a conditions object or SQL text with params');
+  }
+  const t = typeof cond;
+  if (t !== 'string' && !isPlainObject(cond)) {
+    throw new Error('schema: with(cond) takes a conditions object or SQL text; ' +
+      (t === 'number' || t === 'bigint' ? 'a primary-key lookup is find(pk)' : 'got ' + t));
+  }
+  if (t !== 'string' && params.length) {
+    throw new Error('schema: with(cond) with a conditions object takes no extra params — ' +
+      'values belong inside the object');
+  }
+  const found = await new SchemaQuery(this).where(cond, ...params).limit(2).all();
+  if (found.length > 1) {
+    // Keys only, never values: conditions often carry PII (emails,
+    // phone numbers) and this message ends up in logs.
+    const shape = t === 'string' ? JSON.stringify(cond) : '{' + Object.keys(cond).join(', ') + '}';
+    throw new Error('schema: with() matched more than one ' + (this.name || 'row') + ' for ' + shape +
+      ' — the condition was assumed unique. Fix the data, or use where(...).first() to accept ambiguity');
+  }
+  return found[0] ?? null;
 };
 
 SchemaDef.prototype.findMany = async function (ids) {
@@ -3233,6 +3296,39 @@ SchemaDef.prototype._getClass = function () {
   Object.defineProperty(klass.prototype, 'save', {
     enumerable: false, configurable: true, writable: true,
     value: async function () { return save(def, this); },
+  });
+  // set(attrs) — assign-and-save in one call (Ruby's update). Every
+  // key must name a declared field or belongsTo FK (either spelling);
+  // an unknown key throws rather than silently assigning a property
+  // save() would never write. Assignment goes through the instance's
+  // own accessors, so dirty tracking sees exactly what manual
+  // assignments followed by save() would.
+  Object.defineProperty(klass.prototype, 'set', {
+    enumerable: false, configurable: true, writable: true,
+    value: async function (attrs) {
+      if (!isPlainObject(attrs)) {
+        throw new Error('schema: set(attrs) takes a plain object of field values');
+      }
+      const nm = def._normalize();
+      for (const key of Object.keys(attrs)) {
+        const n = fieldFor(nm, key);
+        let valid = nm.fields.has(n);
+        if (!valid) {
+          for (const [, rel] of nm.relations) {
+            if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
+              valid = true;
+              break;
+            }
+          }
+        }
+        if (!valid) {
+          throw new Error("schema: set() — '" + key + "' is not a declared field or belongsTo FK on " +
+            (def.name || 'anon'));
+        }
+      }
+      for (const [key, value] of Object.entries(attrs)) this[key] = value;
+      return save(def, this);
+    },
   });
   Object.defineProperty(klass.prototype, 'destroy', {
     enumerable: false, configurable: true, writable: true,

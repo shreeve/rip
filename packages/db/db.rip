@@ -3,7 +3,7 @@
 # rip/db — DuckDB over duckdb-harbor: client tier, boot probe,
 # MCP stdio server, and the rip-db operational CLI in one file.
 #
-# Library: connect (global default), module-level query/find*/transaction,
+# Library: connect (global default), module-level sql/find*/transaction,
 # harborAdapter, createClient, assertReachable, …
 # CLI (import.meta.main): rip-db dump | load | checkpoint | mcp
 # ==============================================================================
@@ -130,24 +130,42 @@ raceAbort = (signal, run) ->
     run().then settle(resolve), settle(reject)
     return
 
+# Positional params are always an array (or absent), so a plain object
+# in the params slot is unambiguously the two-argument call and shifts
+# into opts. Objects in BOTH slots are one malformed call — loud, never
+# merged. Anything else in the params slot passes through untouched.
+isPlainObject = (v) ->
+  return false unless v? and typeof v is 'object'
+  proto = Object.getPrototypeOf v
+  proto is Object.prototype or proto is null
+
 # One executor over a `run(sql, params, signal) → Promise<rawResult>` —
 # the top-level client binds it to adapter.query, a transaction binds it
 # to the session's query, and both get identical materialization and
 # projection. The caller's signal rides along so the adapter can abort
 # the underlying request. `opts.camel` opts the result into the
-# snake_case → camelCase key projection (see `camelName`).
-makeSurface = (run, beginTx) ->
-  query = (sql, params = null, opts = {}) ->
-    raw = raceAbort! opts.signal, -> run(sql, params, opts.signal)
-    materialize raw, opts.camel ?? false
-  rows = (sql, params = null, opts = {}) ->
-    (query!(sql, params, opts)).rows
-  one = (sql, params = null, opts = {}) ->
-    (query!(sql, params, opts)).rows[0] ?? null
-  value = (sql, params = null, opts = {}) ->
-    row = (query!(sql, params, opts)).rows[0]
+# snake_case → camelCase key projection (see `camelName`); `defaults`
+# carries the client-level opts a `connect`/`createClient` established,
+# and a per-call opt always wins over its default.
+makeSurface = (run, beginTx, defaults = {}) ->
+  sql = (text, params = null, opts = {}) ->
+    if isPlainObject params
+      fail 'db: options were given in both the params slot and the opts slot — params must be an array of positional values' if Object.keys(opts).length
+      opts = params
+      params = null
+    raw = raceAbort! opts.signal, -> run(text, params, opts.signal)
+    materialize raw, opts.camel ?? defaults.camel ?? false
+  rows = (text, params = null, opts = {}) ->
+    (sql!(text, params, opts)).rows
+  one = (text, params = null, opts = {}) ->
+    (sql!(text, params, opts)).rows[0] ?? null
+  value = (text, params = null, opts = {}) ->
+    row = (sql!(text, params, opts)).rows[0]
     if row? then (Object.values(row)[0] ?? null) else null
-  { query, rows, one, value, transaction: beginTx }
+  values = (text, params = null, opts = {}) ->
+    row = (sql!(text, params, opts)).rows[0]
+    if row? then Object.values(row) else null
+  { sql, rows, one, value, values, transaction: beginTx }
 
 # ── Retrying a transaction ───────────────────────────────────────────
 #
@@ -198,7 +216,7 @@ export def isRetryable(error)
   return true if RETRYABLE_CODES.includes error.code
   error instanceof QueryError and CONFLICT_SHAPE.test(String(error.message ?? ''))
 
-export def createClient(adapter)
+export def createClient(adapter, defaults = {})
   fail 'createClient requires an adapter with a query() method' unless typeof adapter?.query is 'function'
 
   # A transaction: begin a session, hand the callback a surface bound
@@ -212,7 +230,7 @@ export def createClient(adapter)
   runTx = (fn, tx, settle) ->
     joined = null
     join = (inner) -> inner joined
-    joined = makeSurface(((sql, params, signal) -> tx.query sql, params, { signal }), join)
+    joined = makeSurface(((sql, params, signal) -> tx.query sql, params, { signal }), join, defaults)
     result = null
     try
       result = fn! joined
@@ -278,12 +296,12 @@ export def createClient(adapter)
     if handle? then handle.query sql, params, { signal }
     else adapter.query sql, params, { signal }
 
-  makeSurface(run, transaction)
+  makeSurface(run, transaction, defaults)
 
-# ==[ Module default — connect / query ]======================================
+# ==[ Module default — connect / sql ]======================================
 #
 # One process-wide default adapter+client. `connect(...)` installs (and
-# rewires) it; module-level `query` / `findOne` / `findAll` /
+# rewires) it; module-level `sql` / `findOne` / `findAll` /
 # `transaction` read it on every call. Omit `connect` and the first
 # module-level call lazy-installs from RIP_DB_URL / RIP_DB_TOKEN. Power
 # users still build `harborAdapter` + `createClient` by hand; schema
@@ -303,13 +321,15 @@ defaultPair = ->
   _default
 
 # Install (or rewire) the process default. Accepts `connect()`,
-# `connect(url)`, or `connect({ url, token, fetch, timeoutMs, adapter })`.
-# Pass `adapter` to skip harbor (tests / custom wires). Returns the client;
+# `connect(url)`, or `connect({ url, token, fetch, timeoutMs, adapter,
+# camel })`. Pass `adapter` to skip harbor (tests / custom wires);
+# `camel: true` makes the camelCase key projection this client's
+# default (a per-call `camel:` still wins). Returns the client;
 # `.adapter` is the same handle the schema ORM uses.
 #
-#   import { connect, query, findOne, ensureRunning } from 'rip/db'
+#   import { connect, sql, findOne, ensureRunning } from 'rip/db'
 #   ensureRunning!
-#   connect!                              # or connect! 'http://…'
+#   connect! camel: true                  # or connect! 'http://…'
 #   findOne! 'SELECT * FROM users WHERE id = ?', [1]
 export def connect(urlOrOpts = null, opts = {})
   o = if urlOrOpts? and typeof urlOrOpts is 'object' and not Array.isArray(urlOrOpts)
@@ -324,19 +344,21 @@ export def connect(urlOrOpts = null, opts = {})
       token: o.token
       fetch: o.fetch
       timeoutMs: o.timeoutMs
-  installDefault adapter, createClient(adapter)
+  installDefault adapter, createClient(adapter, { camel: o.camel ?? false })
 
 # Module-level surface over the process default. (The client object still
-# exposes rows/one/value; those names are too common as locals to also
-# export at module scope.)
-export def query(sql, params = null, opts = {})
-  defaultPair!.client.query! sql, params, opts
+# exposes rows/one/value/values; those names are too common as locals to
+# also export at module scope.) `sql` runs any statement and returns the
+# full envelope — rows, columns, rowCount — for callers who want to deal
+# with the result themselves; findAll/findOne project it.
+export def sql(text, params = null, opts = {})
+  defaultPair!.client.sql! text, params, opts
 
-export def findAll(sql, params = null, opts = {})
-  defaultPair!.client.rows! sql, params, opts
+export def findAll(text, params = null, opts = {})
+  defaultPair!.client.rows! text, params, opts
 
-export def findOne(sql, params = null, opts = {})
-  defaultPair!.client.one! sql, params, opts
+export def findOne(text, params = null, opts = {})
+  defaultPair!.client.one! text, params, opts
 
 export def transaction(fn)
   defaultPair!.client.transaction! fn
@@ -356,6 +378,86 @@ export ident = (name) ->
 # opts into the snake_case → camelCase key projection (see `camelName`).
 export def materializeAll(result, opts = {})
   (materialize result, opts.camel ?? false).rows
+
+# Print a result as an aligned text table and return it unchanged, so
+# it wraps any read without disturbing the value: `show findAll! text`.
+# Accepts the envelope `sql` returns (column order preserved), the
+# plain rows array `findAll` returns (order from the first row's
+# keys), or a lone row — a `findOne` result or a model instance —
+# which prints as a vertical key/value card. Model instances flatten
+# through their own toJSON, so columns are fields, not internals.
+# Numeric columns right-align; NULL prints as empty, not the string
+# "null" — a table full of nulls should look sparse, not noisy. Two
+# REPL guardrails, both overridable: `maxRows` (default 50) prints the
+# head and says how many were left unshown; `maxWidth` (default 40)
+# clips runaway cells with an ellipsis.
+export def show(result, opts = {})
+  # Print what the caller MEANT, never the plumbing object they
+  # happened to hold: a promise awaits, and a query builder (anything
+  # non-array with an .all() method — a SchemaQuery chain, or a model
+  # itself: `show User` prints the table) executes first. Those paths
+  # return a promise — chain them with `show!`. Plain values stay
+  # synchronous, so `(show rows).map -> it.id` remains a pipeline.
+  if result? and typeof result.then is 'function'
+    return result.then (settled) -> show settled, opts
+  if result? and not Array.isArray(result) and typeof result.all is 'function'
+    return show result.all(), opts
+  maxRows = opts.maxRows ?? 50
+  maxWidth = opts.maxWidth ?? 40
+  clip = (s) -> if s.length > maxWidth then s.slice(0, maxWidth - 1) + '…' else s
+  # Dates print as ISO — compact, unambiguous, and column-sortable by
+  # eye, unlike the paragraph Date#toString produces.
+  cell = (v) ->
+    return '' unless v?
+    clip (if v instanceof Date then v.toISOString() else String(v))
+  asRow = (row) -> if typeof row?.toJSON is 'function' then row.toJSON() else row
+
+  # A lone row prints as a card: field names down the left, values
+  # down the right, no header and no row count — it is one record.
+  isEnvelope = result? and Array.isArray(result.rows)
+  if not isEnvelope and not Array.isArray(result) and result? and typeof result is 'object'
+    obj = asRow result
+    keys = Object.keys obj
+    vals = keys.map (k) -> cell obj[k]
+    kw = Math.max 0, ...keys.map((k) -> k.length)
+    vw = Math.max 0, ...vals.map((v) -> v.length)
+    line = '+' + '-'.repeat(kw + 2) + '+' + '-'.repeat(vw + 2) + '+'
+    console.log line
+    console.log "| #{k.padEnd(kw)} | #{vals[i].padEnd(vw)} |" for k, i in keys
+    console.log line
+    return result
+
+  rows = if isEnvelope then result.rows else (result ?? []).map asRow
+  names = if isEnvelope and result.columns?.length
+    result.columns
+  else if rows.length
+    Object.keys rows[0]
+  else
+    []
+  # No rows, no table: a bordered husk with nothing in it says less
+  # than the words do.
+  if rows.length is 0
+    console.log '0 rows'
+    return result
+  total = rows.length
+  shown = if total > maxRows then rows.slice(0, maxRows) else rows
+  numeric = names.map (n) ->
+    shown.length > 0 and shown.every (row) -> not row[n]? or typeof row[n] is 'number' or typeof row[n] is 'bigint'
+  cells = shown.map (row) -> names.map (n) -> cell row[n]
+  head = names.map (n) -> String(n)
+  widths = head.map (h, i) -> Math.max h.length, ...cells.map((r) -> r[i].length)
+  pad = (c, i) -> if numeric[i] then c.padStart(widths[i]) else c.padEnd(widths[i])
+  line = '+' + widths.map((w) -> '-'.repeat(w + 2)).join('+') + '+'
+  fmt = (cols) -> '| ' + cols.map(pad).join(' | ') + ' |'
+  console.log line
+  console.log fmt(head)
+  console.log line
+  console.log fmt(r) for r in cells
+  console.log line
+  footer = "#{total} #{if total is 1 then 'row' else 'rows'}"
+  footer += " (first #{maxRows} shown)" if total > maxRows
+  console.log footer
+  result
 
 # ==[ Boot probe ]============================================================
 
