@@ -431,21 +431,38 @@ derived — the snake/camel round-trip cannot reproduce them; spell them
 
 ## Reading: the query surface
 
-Reads start on the model — `find`, `findMany`, `where`, `order`,
-`limit`, `offset`, `includes`, `withDeleted`, `onlyDeleted`,
+Reads start on the model — `find`, `with`, `findMany`, `where`,
+`order`, `limit`, `offset`, `includes`, `withDeleted`, `onlyDeleted`,
 `unscoped`, any `@scope` — and chain until a terminal executes:
 
 ```rip
 user   = User.find! 7                       # by primary key → instance or null
+user   = User.with! email: e                # by conditions → THE match (null if none, 2+ throws)
+user   = User.with! 'phone IS NULL AND name = ?', name    # SQL text + params, same contract
 users  = User.findMany! [1, 2, 3]           # by primary keys → array
-one    = User.where(email: e).first!        # → instance or null
+one    = User.where(email: e).first!        # → whichever row sorts first — ambiguity tolerated
 all    = Order.where(status: 'draft').all!  # → array of instances
 n      = Order.where(status: 'draft').count!
 page   = Order.order(createdAt: 'desc').limit(20).offset(40).all!
 ```
 
-`find` routes through the builder, so it honors `@defaultScope` and the
-soft-delete filter; `Model.unscoped().where(id: n).first!` is the
+The three lookups split by what the caller means, one meaning per name:
+
+- **`find(pk)`** — primary keys only. Unique by construction, so it
+  needs no ambiguity story. `null`/`undefined` are loud errors, not a
+  silent `WHERE pk IS NULL` miss.
+- **`with(cond)`** — the exactly-one conditions lookup, in either
+  `where` dialect (a conditions object, or SQL text with params). It
+  fetches with `LIMIT 2`, so the uniqueness check is free: zero rows
+  is a normal miss (`null`), one is the answer, and two means the
+  condition the caller assumed unique is not — a broken invariant,
+  thrown loudly (keys only in the message, never values) instead of
+  silently picking a winner.
+- **`where(cond).first!`** — the explicit "whichever comes first"
+  read, for when ambiguity is genuinely acceptable.
+
+All three route through the builder, so they honor `@defaultScope` and
+the soft-delete filter; `Model.unscoped().where(id: n).first!` is the
 escape hatch.
 
 ### `where` — two dialects, by design
@@ -564,6 +581,16 @@ u.firstName = 'Grace'
 u.save!            # UPDATE "users" SET "first_name" = ?, "updated_at" = ? WHERE "id" = ?
 u.save!            # nothing changed — no SQL
 u.savedChanges     # Map { 'firstName' → ['Ada', 'Grace'], 'updatedAt' → […] }
+```
+
+`set` is assign-and-save in one call — the same dirty tracking, hooks,
+and validation as the assignments-then-`save!` spelling, just fused.
+Every key must name a declared field or belongsTo FK (either
+spelling); an unknown key throws before anything is assigned, so a
+typo can never become a silently-unsaved property:
+
+```rip
+u.set! firstName: 'Grace', phone: null    # one UPDATE
 ```
 
 `savedChanges` is a `Map` of `property → [before, after]` for the most
@@ -896,23 +923,26 @@ spell — belong in raw SQL, which is a first-class path, never rewritten
 in either direction:
 
 ```rip
-import { query } from 'rip/db'
+import { sql } from 'rip/db'
 
-result = query! 'SELECT partner_id, COUNT(*) AS n FROM orders GROUP BY partner_id'
+result = sql! 'SELECT partner_id, COUNT(*) AS n FROM orders GROUP BY partner_id'
 result.rows    # [{partner_id: 3, n: 17}, …]
 ```
 
 Raw rows are the database's own spellings — snake_case keys, plain
 objects, not instances: no hooks, no dirty tracking, no accessors.
 Rows headed straight for a camelCase frontend can opt into a projection
-per call — `query! sql, params, {camel: true}` camelizes row keys and
-the `columns` list together (opt-in only; the transform matches the
-runtime's own camelizer, with the same non-total edges: `nickname_2`
-and `ALL_CAPS` stay put). Bridge back to instances by primary key when
-you need them:
+— per call with `sql! text, params, {camel: true}`, or once for the
+whole client with `connect {url, camel: true}` (a per-call `camel:`
+still wins). Either way it camelizes row keys and the `columns` list
+together (opt-in only; the transform matches the runtime's own
+camelizer, with the same non-total edges: `nickname_2` and `ALL_CAPS`
+stay put). Positional params are always an array, so a call with no
+params may pass options second: `sql! text, {camel: true}`. Bridge
+back to instances by primary key when you need them:
 
 ```rip
-ids = (query! 'SELECT id FROM orders WHERE total > ? ORDER BY total DESC LIMIT 10', floor)
+ids = (sql! 'SELECT id FROM orders WHERE total > ? ORDER BY total DESC LIMIT 10', floor)
   .rows.map (r) -> r.id
 top = Order.findMany! ids
 ```

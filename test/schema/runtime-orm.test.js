@@ -292,6 +292,78 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.value.n).toBe(7);
   });
 
+  test('with: exactly-one conditions lookup — LIMIT 2, both where dialects, string pks stay with find', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [5, 'E']));
+      const { User } = makeWorld(k);
+      await User.with({ name: 'E' });
+      await User.with('name = ?', 'E');
+      await User.find('u-5');
+      return null;
+    });
+    expect(r.calls.map((c) => ({ sql: c.sql, params: c.params }))).toEqual([
+      { sql: 'SELECT * FROM "users" WHERE "name" = ? LIMIT 2', params: ['E'] },
+      { sql: 'SELECT * FROM "users" WHERE name = ? LIMIT 2', params: ['E'] },
+      { sql: 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1', params: ['u-5'] },
+    ]);
+  });
+
+  test('with: two matches throw with keys only (no values); zero matches are a null miss', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/LIMIT 2$/, rows(['id', 'name'], [1, 'Ada'], [2, 'Ada']));
+      const { User } = makeWorld(k);
+      let ambiguous = null;
+      try { await User.with({ name: 'Ada' }); } catch (e) { ambiguous = e.message; }
+      return { ambiguous };
+    });
+    expect(r.value.ambiguous).toMatch(/matched more than one User for \{name\}/);
+    expect(r.value.ambiguous).not.toContain('Ada');
+    const miss = await paired(async (k, adapter) => {
+      adapter.on(/LIMIT 2$/, { columns: [{ name: 'id' }], data: [], rowCount: 0 });
+      const { User } = makeWorld(k);
+      return { got: await User.with({ name: 'Zed' }) };
+    });
+    expect(miss.value.got).toBeNull();
+  });
+
+  test('set assigns and saves in one call; unknown keys throw before any assignment', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "users"/, row(['id', 'name', 'email', 'created_at', 'updated_at'],
+        [1, 'A', 'a@b.c', '2024-01-01T00:00:00', '2024-01-01T00:00:00']));
+      adapter.on(/^UPDATE "users"/, row(['id', 'name', 'email', 'created_at', 'updated_at'],
+        [1, 'B', 'b@b.c', '2024-01-01T00:00:00', '2024-01-02T00:00:00']));
+      const { User } = makeWorld(k);
+      const u = await User.create({ name: 'A', email: 'a@b.c' });
+      const back = await u.set({ name: 'B', email: 'b@b.c' });
+      let bad = null;
+      try { await u.set({ nope: 1 }); } catch (e) { bad = e.message; }
+      let notObject = null;
+      try { await u.set('name'); } catch (e) { notObject = e.message; }
+      return { same: back === u, name: u.name, bad, notObject };
+    });
+    const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
+    expect(update.sql).toContain('"name" = ?');
+    expect(update.sql).toContain('"email" = ?');
+    expect(r.value.same).toBe(true);
+    expect(r.value.name).toBe('B');
+    expect(r.value.bad).toMatch(/'nope' is not a declared field or belongsTo FK/);
+    expect(r.value.notObject).toMatch(/plain object of field values/);
+  });
+
+  test('find and with reject the wrong argument shapes loudly', async () => {
+    await paired(async (k) => {
+      const { User } = makeWorld(k);
+      await expect(User.find(null)).rejects.toThrow(/find\(\) got null/);
+      await expect(User.find(undefined)).rejects.toThrow(/find\(\) got undefined/);
+      await expect(User.find([1, 2])).rejects.toThrow(/findMany\(ids\) is the batch lookup/);
+      await expect(User.find({ name: 'E' })).rejects.toThrow(/a conditions lookup is with\(cond\)/);
+      await expect(User.with(5)).rejects.toThrow(/a primary-key lookup is find\(pk\)/);
+      await expect(User.with(null)).rejects.toThrow(/with\(\) got null/);
+      await expect(User.with({ name: 'E' }, 7)).rejects.toThrow(/values belong inside the object/);
+      return null;
+    });
+  });
+
   test('hydrate: snake→camel canonical properties with snake aliases; ok()/errors() on hydrated rows', async () => {
     await paired(async (k, adapter) => {
       adapter.on(/^SELECT/, rows(['id', 'name', 'email', 'user_org_id'], [3, 'C', 'c@d.e', 9]));

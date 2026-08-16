@@ -10,7 +10,7 @@ import { join } from 'path'
 import * as db from 'rip/db'
 import {
   harborAdapter, createClient, connect, isDbError, isRetryable, DbError, ConnectionError, QueryError, CancelledError,
-  query, findOne, findAll, transaction, begin, ident, materializeAll,
+  findOne, findAll, transaction, begin, ident, materializeAll, show,
   ping, assertReachable, ensureRunning,
   resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
   makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
@@ -40,7 +40,7 @@ ROOT_EXPORTS = [
   'createMcpServer', 'currentDatabase', 'dump', 'ensureRunning', 'findAll', 'findOne',
   'harborAdapter', 'humanSize', 'ident', 'isDbError', 'isRetryable', 'load', 'makeMcpSql',
   'makeSql',
-  'materializeAll', 'ping', 'query', 'resolveUrl', 'safeFileStem', 'sqlString', 'stamp',
+  'materializeAll', 'ping', 'resolveUrl', 'safeFileStem', 'show', 'sql', 'sqlString', 'stamp',
   'startStdio', 'transaction', 'unsafeTarPath',
 ]
 
@@ -239,7 +239,7 @@ p "\nconnect — app entry"
 test! "connect returns a client wired to harbor and exposes .adapter", ->
   fetch = fetchDouble { '/sql': { json: { columns: [{ name: 'n', duckdbType: 'INTEGER' }], data: [[1]], rowCount: 1 } } }
   client = connect { url: 'http://h:9494/', token: 'secret', fetch }
-  eq typeof client.query, 'function'
+  eq typeof client.sql, 'function'
   eq typeof client.one, 'function'
   eq typeof client.adapter.query, 'function'
   row = client.one! 'SELECT 1 AS n'
@@ -249,23 +249,23 @@ test! "connect returns a client wired to harbor and exposes .adapter", ->
 
 test! "connect(url) string form and connect() env form resolve the same way", ->
   fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
-  connect('http://from-arg:9494', { fetch }).query! 'SELECT 1'
+  connect('http://from-arg:9494', { fetch }).sql! 'SELECT 1'
   eq fetch.calls[0].url, 'http://from-arg:9494/sql'
   prev = process.env.RIP_DB_URL
   try
     process.env.RIP_DB_URL = 'http://from-env:9494'
-    connect(null, { fetch }).query! 'SELECT 1'
+    connect(null, { fetch }).sql! 'SELECT 1'
     eq fetch.calls[1].url, 'http://from-env:9494/sql'
   finally
     if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
 
 p "\nconnect — module-level default"
 
-test! "module-level query/findOne/findAll ride the connect() default", ->
+test! "module-level sql/findOne/findAll ride the connect() default", ->
   fetch = fetchDouble
     '/sql': { json: { columns: [{ name: 'id', duckdbType: 'INTEGER' }, { name: 'name', duckdbType: 'VARCHAR' }], data: [[1, 'Ada']], rowCount: 1 } }
   connect { url: 'http://h', fetch }
-  result = query! 'SELECT id, name FROM u'
+  result = db.sql! 'SELECT id, name FROM u'
   eq result.rows, [{ id: 1, name: 'Ada' }]
   eq findOne!('SELECT id, name FROM u'), { id: 1, name: 'Ada' }
   eq findAll!('SELECT id, name FROM u'), [{ id: 1, name: 'Ada' }]
@@ -280,7 +280,7 @@ test! "a later connect() rewires module-level calls", ->
   eq a.calls.length, 1
   eq b.calls.length, 1
 
-test! "connect({ adapter }) installs a non-harbor wire for module-level query", ->
+test! "connect({ adapter }) installs a non-harbor wire for module-level sql", ->
   adapter = fakeAdapter [
     { columns: [{ name: 'id' }, { name: 'name' }], data: [[7, 'Bo']], rowCount: 1 }
   ]
@@ -837,9 +837,9 @@ test "naive TIMESTAMP decodes off-UTC without host-offset shift (subprocess)", -
 
 p "\nClient — materialization"
 
-test! "query returns rows as objects keyed by column, with metadata", ->
+test! "sql returns rows as objects keyed by column, with metadata", ->
   adapter = fakeAdapter [{ columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada'], [2, 'Bo']], rowCount: 2 }]
-  result = createClient!(adapter).query! 'SELECT id, name FROM u'
+  result = createClient!(adapter).sql! 'SELECT id, name FROM u'
   eq result.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
   eq result.columns, ['id', 'name']
   eq result.rowCount, 2
@@ -863,16 +863,95 @@ test! "value returns null when there is no scalar", ->
   eq client.value!('SELECT'), null
   eq client.value!('SELECT WHERE 0'), null
 
+test! "values gives the first row's values as an array; no rows is null", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'first_name' }], data: [[5, 'Ada'], [6, 'Bo']], rowCount: 2 }
+    { columns: [{ name: 'id' }], data: [], rowCount: 0 }
+  ]
+  client = createClient adapter
+  eq client.values!('SELECT id, first_name FROM u'), [5, 'Ada']
+  eq client.values!('SELECT id FROM u WHERE 0'), null
+
+test! "show prints an aligned table and returns its argument unchanged", ->
+  logged = []
+  orig = console.log
+  console.log = (line) -> logged.push line
+  try
+    envelope = { rows: [{ id: 5, name: 'Ada' }, { id: 6, name: null }], columns: ['id', 'name'], rowCount: 2 }
+    ok show(envelope) is envelope
+    ok show([{ n: 1 }]).length is 1
+  finally
+    console.log = orig
+  eq logged, [
+    '+----+------+'
+    '| id | name |'
+    '+----+------+'
+    '|  5 | Ada  |'
+    '|  6 |      |'
+    '+----+------+'
+    '2 rows'
+    '+---+'
+    '| n |'
+    '+---+'
+    '| 1 |'
+    '+---+'
+    '1 row'
+  ]
+
+test! "show right-aligns numbers, prints a lone row as a card, flattens toJSON, and caps output", ->
+  logged = []
+  orig = console.log
+  console.log = (line) -> logged.push line
+  try
+    show { id: 7, name: 'Ada' }
+    show [{ n: 1 }, { n: 2 }, { n: 3 }], { maxRows: 2 }
+    show [{ s: 'abcdefghij' }], { maxWidth: 8 }
+    show [{ toJSON: -> { a: 1 } }]
+    show [{ t: Date.new(UTC) }]
+  finally
+    console.log = orig
+  eq logged, [
+    '+------+-----+'
+    '| id   | 7   |'
+    '| name | Ada |'
+    '+------+-----+'
+    '+---+'
+    '| n |'
+    '+---+'
+    '| 1 |'
+    '| 2 |'
+    '+---+'
+    '3 rows (first 2 shown)'
+    '+----------+'
+    '| s        |'
+    '+----------+'
+    '| abcdefg… |'
+    '+----------+'
+    '1 row'
+    '+---+'
+    '| a |'
+    '+---+'
+    '| 1 |'
+    '+---+'
+    '1 row'
+    '+--------------------------+'
+    '| t                        |'
+    '+--------------------------+'
+    '| 2024-03-15T10:30:00.000Z |'
+    '+--------------------------+'
+    '1 row'
+  ]
+
 test! "parameters pass straight through to the adapter", ->
   adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
-  createClient!(adapter).query! 'SELECT * FROM u WHERE id = ?', [42]
+  createClient!(adapter).sql! 'SELECT * FROM u WHERE id = ?', [42]
   eq adapter.log[0], { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
 
 p "\nClient — the opt-in camel projection"
 
 test! "{ camel: true } projects snake_case keys and columns to camelCase", ->
   adapter = fakeAdapter [{ columns: [{ name: 'user_id' }, { name: 'first_name' }, { name: 'created_at' }], data: [[1, 'Ada', 'now']], rowCount: 1 }]
-  result = createClient!(adapter).query! 'SELECT user_id, first_name, created_at FROM u', null, { camel: true }
+  result = createClient!(adapter).sql! 'SELECT user_id, first_name, created_at FROM u', null, { camel: true }
   eq result.rows, [{ userId: 1, firstName: 'Ada', createdAt: 'now' }]
   eq result.columns, ['userId', 'firstName', 'createdAt']
   eq result.rowCount, 1
@@ -883,14 +962,14 @@ test! "without the option the keys stay the database's own — never automatic",
     { columns: [{ name: 'user_id' }, { name: 'first_name' }], data: [[1, 'Ada']], rowCount: 1 }
   ]
   client = createClient adapter
-  eq client.query!('SELECT user_id, first_name FROM u'),
+  eq client.sql!('SELECT user_id, first_name FROM u'),
     { rows: [{ user_id: 1, first_name: 'Ada' }], columns: ['user_id', 'first_name'], rowCount: 1 }
-  eq client.query!('SELECT user_id, first_name FROM u', null, {}),
+  eq client.sql!('SELECT user_id, first_name FROM u', null, {}),
     { rows: [{ user_id: 1, first_name: 'Ada' }], columns: ['user_id', 'first_name'], rowCount: 1 }
 
 test! "the camel projection is not total — the edge cases stay put", ->
   adapter = fakeAdapter [{ columns: [{ name: 'nickname_2' }, { name: '_internal' }, { name: 'legacy_ISO_CODE' }], data: [[1, 2, 3]], rowCount: 1 }]
-  result = createClient!(adapter).query! 'SELECT * FROM t', null, { camel: true }
+  result = createClient!(adapter).sql! 'SELECT * FROM t', null, { camel: true }
   eq result.rows, [{ nickname_2: 1, Internal: 2, legacy_ISO_CODE: 3 }]
   eq result.columns, ['nickname_2', 'Internal', 'legacy_ISO_CODE']
 
@@ -904,6 +983,53 @@ test! "a transaction surface takes { camel: true } like the top-level client", -
   adapter = fakeAdapter [{ columns: [{ name: 'order_id' }], data: [[5]], rowCount: 1 }]
   camelled = createClient!(adapter).transaction! (tx) -> tx.rows! 'SELECT order_id FROM o', null, { camel: true }
   eq camelled, [{ orderId: 5 }]
+
+p "\nClient — opts in the params slot"
+
+test! "a plain object in the params slot is the two-argument call: it shifts into opts, params dispatch as null", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'user_id' }], data: [[1]], rowCount: 1 }]
+  result = createClient!(adapter).sql! 'SELECT user_id FROM u', { camel: true }
+  eq result.rows, [{ userId: 1 }]
+  eq adapter.log[0], { sql: 'SELECT user_id FROM u', params: null }
+
+test! "the shift covers the projections too (rows/one/value delegate to sql)", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'user_id' }], data: [[1], [2]], rowCount: 2 }]
+  eq createClient!(adapter).rows!('SELECT user_id FROM u', { camel: true }), [{ userId: 1 }, { userId: 2 }]
+
+test! "objects in BOTH slots are one malformed call — loud, never merged", ->
+  adapter = fakeAdapter []
+  error = trap! (-> createClient!(adapter).sql! 'SELECT 1', { camel: true }, { signal: null })
+  ok error?
+  ok /params slot and the opts slot/.test String(error.message)
+  eq adapter.log.length, 0
+
+test! "an array in the params slot never shifts — three-argument calls are untouched", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'user_id' }], data: [[1]], rowCount: 1 }]
+  result = createClient!(adapter).sql! 'SELECT user_id FROM u WHERE id = ?', [1], { camel: true }
+  eq result.rows, [{ userId: 1 }]
+  eq adapter.log[0], { sql: 'SELECT user_id FROM u WHERE id = ?', params: [1] }
+
+p "\nClient — the connect-level camel default"
+
+test! "createClient(adapter, { camel: true }) makes the projection the default; a per-call camel: false wins", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'user_id' }], data: [[1]], rowCount: 1 }
+    { columns: [{ name: 'user_id' }], data: [[1]], rowCount: 1 }
+  ]
+  client = createClient adapter, { camel: true }
+  eq client.sql!('SELECT user_id FROM u').rows, [{ userId: 1 }]
+  eq client.sql!('SELECT user_id FROM u', { camel: false }).rows, [{ user_id: 1 }]
+
+test! "the client default reaches the transaction surface", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'order_id' }], data: [[5]], rowCount: 1 }]
+  camelled = createClient!(adapter, { camel: true }).transaction! (tx) -> tx.rows! 'SELECT order_id FROM o'
+  eq camelled, [{ orderId: 5 }]
+
+test! "connect({ adapter, camel: true }) sets the module-level default", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'first_name' }], data: [['Ada']], rowCount: 1 }]
+  connect { adapter, camel: true }
+  eq (db.sql! 'SELECT first_name FROM u').rows, [{ firstName: 'Ada' }]
+  connect { adapter: fakeAdapter([]) }   # restore an uncamelled default for later tests
 
 p "\nClient — retrying a transaction"
 
@@ -935,14 +1061,14 @@ flaky = (failures, make) ->
 test! "a conflict is retried and the second attempt stands", ->
   adapter = flaky 1, conflict
   result = createClient!(adapter).transaction! (tx) ->
-    tx.query! 'UPDATE t SET n = 1'
+    tx.sql! 'UPDATE t SET n = 1'
     'done'
   eq result, 'done'
   eq adapter.attempts.count, 2
 
 test! "a conflict that never clears surfaces after the last attempt", ->
   adapter = flaky 99, conflict
-  err = trap! (-> createClient(adapter).transaction (tx) -> tx.query 'UPDATE t SET n = 1')
+  err = trap! (-> createClient(adapter).transaction (tx) -> tx.sql 'UPDATE t SET n = 1')
   ok /Conflict on update/.test err.message
   # The first attempt plus the default five retries.
   eq adapter.attempts.count, 6
@@ -955,7 +1081,7 @@ test! "retries: 0 runs the callback exactly once", ->
   runs = 0
   body = (tx) ->
     runs += 1
-    tx.query 'UPDATE t SET n = 1'
+    tx.sql 'UPDATE t SET n = 1'
   client = createClient! adapter
   err = trap! -> client.transaction body, { retries: 0 }
   ok /Conflict on update/.test err.message
@@ -968,7 +1094,7 @@ test! "a bad statement is not retried — it would fail identically", ->
     e.code = 'sql_error'
     e
   adapter = flaky 99, broken
-  err = trap! (-> createClient(adapter).transaction (tx) -> tx.query 'SELECT * FROM nope')
+  err = trap! (-> createClient(adapter).transaction (tx) -> tx.sql 'SELECT * FROM nope')
   ok /does not exist/.test err.message
   eq adapter.attempts.count, 1
 
@@ -980,7 +1106,7 @@ test! "a pool with no free connection is retried", ->
     e.code = 'no_lease_available'
     e
   adapter = flaky 2, busy
-  createClient!(adapter).transaction! (tx) -> tx.query! 'UPDATE t SET n = 1'
+  createClient!(adapter).transaction! (tx) -> tx.sql! 'UPDATE t SET n = 1'
   eq adapter.attempts.count, 3
 
 test! "a lease that expired mid-flight is retried", ->
@@ -989,7 +1115,7 @@ test! "a lease that expired mid-flight is retried", ->
     e.code = 'no_such_session'
     e
   adapter = flaky 1, gone
-  createClient!(adapter).transaction! (tx) -> tx.query! 'UPDATE t SET n = 1'
+  createClient!(adapter).transaction! (tx) -> tx.sql! 'UPDATE t SET n = 1'
   eq adapter.attempts.count, 2
 
 test "isRetryable names the cases, and only those", ->
@@ -1024,7 +1150,7 @@ test! "a throwing callback rolls back and rethrows", ->
 
 test! "a failed statement inside the transaction rolls back", ->
   adapter = fakeAdapter [Object.assign(Error.new('constraint'), {})]
-  err = trap! (-> createClient(adapter).transaction! (tx) -> tx.query! 'INSERT ...')
+  err = trap! (-> createClient(adapter).transaction! (tx) -> tx.sql! 'INSERT ...')
   ok /constraint/.test err.message
   eq adapter.state.rolledBack, true
 
@@ -1070,7 +1196,7 @@ test! "a nested transaction joins the outer one — no second begin", ->
       beginCount += 1
       origBegin.call adapter
   createClient!(wrapped).transaction! (tx) ->
-    tx.transaction! (inner) -> inner.query! 'SELECT 1'
+    tx.transaction! (inner) -> inner.sql! 'SELECT 1'
   eq beginCount, 1
 
 p "\nClient — cancellation"
@@ -1079,14 +1205,14 @@ test! "an already-aborted signal rejects before the query runs", ->
   adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
   controller = AbortController.new()
   controller.abort()
-  err = trap! (-> createClient(adapter).query! 'SELECT 1', [], { signal: controller.signal })
+  err = trap! (-> createClient(adapter).sql! 'SELECT 1', [], { signal: controller.signal })
   ok err instanceof CancelledError
   eq adapter.log.length, 0
 
 test! "an abort while in flight rejects with CancelledError", ->
   controller = AbortController.new()
   adapter = { query: (-> Promise.new (->)), capabilities: {} }
-  pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
+  pending = createClient(adapter).sql 'SELECT pg_sleep(10)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
   ok err instanceof CancelledError
@@ -1097,7 +1223,7 @@ test! "an abort mid-flight hands the signal to the adapter", ->
     query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; Promise.new (->)
     capabilities: {}
   controller = AbortController.new()
-  pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
+  pending = createClient(adapter).sql 'SELECT pg_sleep(10)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
   ok err instanceof CancelledError
@@ -1111,7 +1237,7 @@ test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
     fetchSignal = init?.signal ?? null
     Promise.new (->)
   controller = AbortController.new()
-  pending = createClient(harborAdapter { url: 'http://h', fetch }).query 'SELECT 1', [], { signal: controller.signal }
+  pending = createClient(harborAdapter { url: 'http://h', fetch }).sql 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
   ok err instanceof CancelledError
@@ -1120,7 +1246,7 @@ test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
 test! "a completed query is unaffected by a later abort", ->
   adapter = fakeAdapter [{ columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }]
   controller = AbortController.new()
-  result = createClient!(adapter).query! 'SELECT 1', [], { signal: controller.signal }
+  result = createClient!(adapter).sql! 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
   eq result.rowCount, 1
 
@@ -1633,7 +1759,7 @@ test! "a transport failure surfaces as a typed DbError", ->
 test! "an in-flight cancellation rejects with CancelledError", ->
   controller = AbortController.new()
   adapter = { query: (-> Promise.new (->)), capabilities: {} }
-  pending = createClient(adapter).query 'SELECT pg_sleep(9)', [], { signal: controller.signal }
+  pending = createClient(adapter).sql 'SELECT pg_sleep(9)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
   ok err instanceof CancelledError
@@ -1703,7 +1829,7 @@ test! "a model statement inside a rip/db transaction runs on that session", ->
   SchemaRegistry.scope! ->
     User = __schema model 'User', field('name')
     transaction! (tx) ->
-      tx.query! 'DELETE FROM "users"'
+      tx.sql! 'DELETE FROM "users"'
       User.create! { name: 'Ada' }
     statements = fetch.calls.filter (c) -> c.sql?
     opened = statements.find (c) -> c.sql is 'BEGIN'
@@ -1719,7 +1845,7 @@ test! "a raw statement inside a schema transaction runs on that session", ->
     User = __schema model 'User', field('name')
     ormTransaction! ->
       User.create! { name: 'Ada' }
-      query! 'DELETE FROM "users"'
+      db.sql! 'DELETE FROM "users"'
     statements = fetch.calls.filter (c) -> c.sql?
     opened = statements.find (c) -> c.sql is 'BEGIN'
     raw = statements.find (c) -> c.sql is 'DELETE FROM "users"'
@@ -1892,7 +2018,7 @@ p "\nORM — createClient stack"
 test! "createClient materializes harbor object-columns by name", ->
   fetch = harborDouble [[/^SELECT/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]]
   client = createClient harborAdapter { url: 'http://harbor', fetch }
-  result = client.query! 'SELECT id, name FROM users'
+  result = client.sql! 'SELECT id, name FROM users'
   eq result.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
   eq result.columns, ['id', 'name']
   eq client.value!('SELECT count(*) FROM users'), 1

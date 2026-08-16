@@ -2010,6 +2010,7 @@ INTRINSICS = '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2349,6 +2350,7 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2365,11 +2367,11 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
   }
   type OrgData = { name: string } & { id: number };
   type OrgCreate = { name: string };
-  type Org = OrgData & { save(): Promise<Org>; destroy(opts?: { hard?: boolean }): Promise<Org>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): Org; savedChanges: Map<string, [unknown, unknown]>; toJSON(): OrgData };
+  type Org = OrgData & { save(): Promise<Org>; set(attrs: Partial<OrgData>): Promise<Org>; destroy(opts?: { hard?: boolean }): Promise<Org>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): Org; savedChanges: Map<string, [unknown, unknown]>; toJSON(): OrgData };
   declare const Org: ModelSchema<Org, OrgData, number, OrgCreate>;
   type UserData = { name: string } & { id: number; orgId: number };
   type UserCreate = { name: string; orgId: number };
-  type User = UserData & { org(opts?: { reload?: boolean }): Promise<Org | null>; save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { org(opts?: { reload?: boolean }): Promise<Org | null>; save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   export {};
   '''
@@ -2437,6 +2439,7 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2453,7 +2456,7 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
   }
   type UserData = { name: string } & Timestamps & { id: number };
   type UserCreate = { name: string } & Timestamps;
-  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   type Timestamps = { createdAt: Date; updatedAt: Date };
   declare const Timestamps: MixinSchema<Timestamps>;
@@ -2510,6 +2513,7 @@ type "cross-file relation target degrades to unknown", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2526,7 +2530,7 @@ type "cross-file relation target degrades to unknown", '''
   }
   type UserData = { name: string } & { id: number; organizationId: number };
   type UserCreate = { name: string; organizationId: number };
-  type User = UserData & { organization(opts?: { reload?: boolean }): Promise<unknown>; orders(opts?: { reload?: boolean }): Promise<unknown[]>; save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { organization(opts?: { reload?: boolean }): Promise<unknown>; orders(opts?: { reload?: boolean }): Promise<unknown[]>; save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   export {};
   '''
@@ -2590,6 +2594,7 @@ type "derived schema emits a bare projection type", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2606,7 +2611,7 @@ type "derived schema emits a bare projection type", '''
   }
   type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
-  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   type UserView = { id: number; firstName: string };
   declare const UserView: Schema<UserView, UserView>;
@@ -2667,6 +2672,7 @@ type "chained + exported derived schema emits one bare type each", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -2683,7 +2689,7 @@ type "chained + exported derived schema emits one bare type each", '''
   }
   type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
-  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
   export type UserView = { id: number; firstName: string };
   export declare const UserView: Schema<UserView, UserView>;
@@ -4243,6 +4249,43 @@ test "findMany issues one IN query; [] short-circuits with no SQL", modelHeader 
   [list.length, none.length, adapter.calls.length, list[0].name]
 ''', [3, 0, 1, "A"]
 
+test "find is pk-only; with is the exactly-one conditions lookup (LIMIT 2)", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[5, "E"]], rows: 1}
+  byPk      = User.find! 5
+  byCond    = User.with! name: "E"
+  bySql     = User.with! "name = ?", "E"
+  missing   = try
+    User.find! null
+  catch e
+    e.message
+  wrongFind = try
+    User.find! name: "E"
+  catch e
+    e.message
+  sqls = adapter.calls.map (c) -> c.sql
+  [...sqls, byPk.id, byCond.name, bySql.name, missing.includes("got null"), wrongFind.includes("with(cond)")]
+''', [
+  'SELECT * FROM "users" WHERE "id" = ? LIMIT 1',
+  'SELECT * FROM "users" WHERE "name" = ? LIMIT 2',
+  'SELECT * FROM "users" WHERE name = ? LIMIT 2',
+  5, "E", "E", true, true,
+]
+
+test "with refuses ambiguity — two matches throw, zero is a null miss", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Ada"], [2, "Ada"]], rows: 2}
+  two = try
+    User.with! name: "Ada"
+  catch e
+    e.message
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [], rows: 0}
+  none = User.with! name: "Zed"
+  [two.includes("matched more than one"), two.includes("{name}"), two.includes("Ada"), none]
+''', [true, true, false, null]
+
 test "relation accessor memoizes; {reload: true} busts the memo", modelHeader + '''
   User = schema :model
     name! string
@@ -4630,6 +4673,7 @@ type "@scope emits typed statics and a per-model query alias", '''
   }
   interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
+    with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
     includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
@@ -4646,7 +4690,7 @@ type "@scope emits typed statics and a per-model query alias", '''
   }
   type UserData = { name: string; active?: boolean } & { id: number };
   type UserCreate = { name: string; active?: boolean };
-  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   type UserQuery = SchemaQuery<User, UserData> & { active(...args: any[]): UserQuery };
   declare const User: ModelSchema<User, UserData, number, UserCreate> & { active(...args: any[]): UserQuery };
   export {};
