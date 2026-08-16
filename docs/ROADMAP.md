@@ -3,7 +3,7 @@
 This document lists current open work only. Completed behavior belongs
 in tests and permanent reference documentation
 ([WORKSPACE.md](WORKSPACE.md), [HMR.md](HMR.md), [SERVER.md](SERVER.md),
-[TYPES.md](TYPES.md), package READMEs).
+[ORM.md](ORM.md), [TYPES.md](TYPES.md), package READMEs).
 
 No item here authorizes a silent design choice. Product decisions are
 resolved before implementation depends on them.
@@ -173,12 +173,6 @@ literals, leaving no typed position for the language service. Editor
 intelligence for render blocks returns through typed attribute
 positions in the face, so completion and checking are tsgo-native.
 Scheduled with the UI stage.
-
-### Derived schema declarations
-
-Bindings produced by schema algebra can type through the TypeScript
-face, but shipping `.d.ts` declarations require an explicit,
-mapping-safe representation of argument literals.
 
 ## Rip-native hypermedia
 

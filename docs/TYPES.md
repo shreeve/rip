@@ -13,7 +13,7 @@ Type-free programs pay no runtime or output cost.
 
 **Status:** this architecture is the shipping contract. Open product
 directions (optional-parameter strictness, workspace-wide editor
-features, render-DSL face positions, derived-schema `.d.ts`) live in
+features, render-DSL face positions) live in
 [ROADMAP.md](ROADMAP.md), not as missing milestones in this file.
 
 ## Two consumers, one program
@@ -64,14 +64,16 @@ Examples:
 
 ```rip
 x: number = 5
-name?: string
 def parse(input: string): Result
+  Result.new input
+
 value = raw as User
 
 type Pair<T> = [T, T]
 
 interface Named
   name: string
+  nick?: string
 
 class Box
   value: number = 0

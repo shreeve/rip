@@ -209,10 +209,11 @@ These are the defaults. Hidden paths are excluded. Explicit arrays replace a
 default; `[]` disables that category. `.rip` and `.css` files belong to their
 specific categories and do not fall through to `reload` when excluded.
 
-Manager privately hashes only watcher-reported candidate files. Identical
-bytes stop before publication. Ambiguous pathless or directory events trigger
-a complete managed-tree reconciliation because no exact candidate is
-available.
+Watcher events are invalidations, not mutations: the event's filename decides
+only whether to wake reconciliation at all — hidden paths and unmanaged
+suffixes are ignored. Reconciliation re-reads and privately hashes the
+complete managed tree, so identical bytes stop before publication and a lost
+or misattributed notification can never strand one file.
 
 ## Watch-off and production
 
