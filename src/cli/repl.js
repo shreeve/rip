@@ -648,6 +648,29 @@ const KIND_INDICATOR = {
 
 const DOT_COMMANDS = ['.help', '.clear', '.vars', '.history', '.editor', '.theme', '.color', '.tokens', '.sexp', '.js', '.exit'];
 
+// ---------------------------------------------------------------------------
+// repl.rip — the zero-ceremony console. A file named `repl.rip` in the
+// session's cwd is the project's own statement of what a console here
+// holds: its exports become the session's starting bindings, loaded as
+// if the user had typed the import — the same lowering, the same
+// binding inventory, the same restore semantics. No file, no effect.
+// The import evaluates the file, so its side effects (connecting a
+// database, registering models) run exactly once, up front.
+
+export async function preloadRepl(session) {
+  const file = join(session.cwd, 'repl.rip');
+  if (!existsSync(file)) return null;
+  // Import once to learn the export names (the module cache makes the
+  // lowered import below a hit, not a second evaluation). `default`
+  // and any non-identifier name cannot bind at a prompt; skip them.
+  const mod = await import(file);
+  const names = Object.keys(mod).filter((n) => n !== 'default' && isIdentifierName(n));
+  if (names.length > 0) {
+    await session.eval(`import { ${names.join(', ')} } from './repl.rip'`);
+  }
+  return { file, names };
+}
+
 export class Repl {
   constructor({ input = process.stdin, output = process.stdout, cwd = process.cwd(), env = process.env } = {}) {
     this.input = input;
@@ -710,6 +733,17 @@ export class Repl {
     }
     if (this.terminal) {
       this.output.write(`${this.theme.paint('dim', `Rip ${packageJson.version} — type .help for commands, Ctrl+D to exit`)}\n`);
+    }
+    // A broken repl.rip reports loudly but never blocks the prompt: a
+    // console that refuses to open because the database is down cannot
+    // be used to diagnose the database being down.
+    try {
+      const loaded = await preloadRepl(this.session);
+      if (loaded !== null && loaded.names.length > 0) {
+        this.output.write(`${this.theme.paint('dim', `repl.rip → ${loaded.names.join(', ')}`)}\n`);
+      }
+    } catch (err) {
+      this.output.write(`${this.theme.paint('error', `repl.rip failed to load: ${err?.message ?? err}`)}\n`);
     }
     this.loadHistory();
     this.makeInterface();
@@ -1108,6 +1142,8 @@ Notes
   printed result then becomes the next \`_\`.
   Multi-line entries recall from history as single entries.
   import './file.rip' compiles through the loader, relative to your cwd.
+  A repl.rip in your cwd auto-loads at startup: its exports are your
+  starting bindings — the project's own console, zero ceremony.
 `);
   }
 
@@ -1165,6 +1201,14 @@ if (import.meta.main) {
       process.exit(2);
     }
     const session = new Session({ cwd: process.cwd() });
+    // -e evaluates one entry "as if typed at the prompt", and the
+    // prompt would have repl.rip loaded — so -e gets it too. Loud but
+    // non-fatal on failure, the same as the interactive banner.
+    try {
+      await preloadRepl(session);
+    } catch (err) {
+      console.error(`rip: repl.rip failed to load: ${err?.message ?? err}`);
+    }
     const verdict = classifyCompleteness(code);
     if (verdict.status === 'incomplete') {
       console.error('rip: --eval input is incomplete');

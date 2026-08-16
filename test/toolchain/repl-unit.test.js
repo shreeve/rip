@@ -14,7 +14,7 @@ import {
   mintFresh, buildWrapper, resolveThemeName, buildTheme, ansiFor,
   colorizeLastLine, stripAnsi, encodeEntry, decodeEntry, displayWidth,
   makeImportResolver, describeError, Session, Repl, THEME_NAMES,
-  RecallTracker, isHistoryNavKey, Osc11Matcher,
+  RecallTracker, isHistoryNavKey, Osc11Matcher, preloadRepl,
 } from '../../src/cli/repl.js';
 import { identifierRuns } from '../../src/ident.js';
 import { CompileError } from '../../src/compile.js';
@@ -573,5 +573,36 @@ describe('completion', () => {
     // offers nothing (completion is bindings-only, never members).
     expect(repl.complete('.he')).toEqual([['.help'], '.he']);
     expect(repl.complete('obj.π')[0]).toEqual([]);
+  });
+});
+
+describe('repl.rip preload — the zero-ceremony console', () => {
+  test('exports become session bindings, as if the import were typed; no file, no effect', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-preload-')));
+    const empty = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-empty-')));
+    try {
+      writeFileSync(join(dir, 'repl.rip'),
+        'export answer = 42\nexport greet = (name) -> "hi #{name}"\nexport default 7\n');
+      const session = new Session({ cwd: dir });
+      const loaded = await preloadRepl(session);
+      expect(loaded.names.sort()).toEqual(['answer', 'greet']);
+      expect([...session.bindings.keys()].sort()).toEqual(['answer', 'greet']);
+      const { value } = await session.eval('greet answer');
+      expect(value).toBe('hi 42');
+      expect(await preloadRepl(new Session({ cwd: empty }))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  test('a throwing repl.rip propagates, so the caller can report and still open the prompt', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'rip-repl-throw-')));
+    try {
+      writeFileSync(join(dir, 'repl.rip'), "throw Error.new 'db is down'\n");
+      await expect(preloadRepl(new Session({ cwd: dir }))).rejects.toThrow('db is down');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
