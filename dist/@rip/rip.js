@@ -20290,6 +20290,9 @@ var SchemaRegistry = {
   has(name) {
     return this._entries.has(name);
   },
+  names() {
+    return [...this._entries.keys()];
+  },
   reset() {
     this._entries.clear();
     registryGen++;
@@ -21658,6 +21661,10 @@ function __schema(descriptor) {
   if (def.name)
     SchemaRegistry.register(def);
   return def;
+}
+if (typeof globalThis !== "undefined") {
+  globalThis.__ripSchema = globalThis.__ripSchema || {};
+  globalThis.__ripSchema.SchemaRegistry = SchemaRegistry;
 }
 
 // src/runtime/reactive.js

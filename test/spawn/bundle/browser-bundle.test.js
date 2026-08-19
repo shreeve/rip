@@ -239,9 +239,19 @@ describeExtended('browser bundle freshness', () => {
     const afterJs = readFileSync(artifactPath);
     const afterMin = readFileSync(minPath);
     const afterBr = readFileSync(brPath);
-    expect(afterJs.equals(beforeJs)).toBeTrue();
-    expect(afterMin.equals(beforeMin)).toBeTrue();
-    expect(afterBr.equals(beforeBr)).toBeTrue();
+    // A mismatch means a src/ change shipped without a bundle regen.
+    // The spawn above has ALREADY refreshed dist/@rip — so the remedy
+    // is to review and commit those files, and the message says so.
+    const fresh = (name, before, after) => {
+      if (!after.equals(before)) {
+        throw new Error(
+          `${name} was stale (a src/ change without a bundle regen) — ` +
+          'this test has already refreshed dist/@rip; review and commit those files');
+      }
+    };
+    fresh('rip.js', beforeJs, afterJs);
+    fresh('rip.min.js', beforeMin, afterMin);
+    fresh('rip.min.js.br', beforeBr, afterBr);
     expect(brotliDecompressSync(afterBr).equals(afterMin)).toBeTrue();
   });
 });
