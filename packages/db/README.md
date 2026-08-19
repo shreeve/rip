@@ -121,6 +121,25 @@ URL resolution is one rule everywhere (adapter, probe, CLI, MCP):
 explicit argument → `RIP_DB_URL` → default. Trailing slashes are
 trimmed.
 
+Three URL spellings dial two transports:
+
+| Spelling | Transport |
+|---|---|
+| `http://host:port` | TCP |
+| `unix:///path/to.sock` | unix domain socket (Bun's fetch `unix` option) |
+| `harbor:<name>` | resolution sugar — never a third transport |
+
+`harbor:<name>` reads the berth registry `harbor serve` maintains
+(`$HARBOR_HOME/<name>.json`, default `~/.harbor`) and desugars to
+whichever spelling the berth registered — socket preferred, TCP port
+otherwise. It also resolves the bearer token from `<name>.token`, the
+one thing a raw spelling cannot carry, so `RIP_DB_URL=harbor:medlabs`
+replaces both the URL and `RIP_DB_TOKEN` and the transport stays the
+berth's business. Token precedence: explicit option → registry →
+`RIP_DB_TOKEN`. The raw spellings remain for registry-less worlds
+(containers, CI, custom `--socket` paths); `resolveTarget(url)` is the
+resolver, exported for callers that need the same answer.
+
 ```coffee
 connect!                                    # env / default
 connect! 'http://127.0.0.1:9495'            # string URL

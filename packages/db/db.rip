@@ -40,6 +40,7 @@ wireSchemaAdapter = (adapter) ->
 import {
   harborAdapter
   resolveUrl
+  resolveTarget
   envToken
   DbError
   ConnectionError
@@ -56,6 +57,7 @@ import {
 export {
   harborAdapter
   resolveUrl
+  resolveTarget
   DbError
   ConnectionError
   QueryError
@@ -477,15 +479,22 @@ PROBE_TIMEOUT_MS =! 5000
 # or a timeout -- reads as not reachable. The timeout keeps a half-open
 # TCP from hanging boot forever, and it covers both probes together, so
 # the fallback cannot double it.
-reachable = (url, fetchFn) ->
+# Takes a resolved TARGET ({base, unix, shown} from resolveTarget), not
+# a bare url — the probe dials both transports, wrapping its fetch for
+# unix targets the same way harborAdapter does.
+reachable = (target, fetchFn) ->
+  f = if target.unix
+    (u, init) -> fetchFn u, { ...(init or {}), unix: target.unix }
+  else
+    fetchFn
   ctrl = AbortController.new()
   timer = setTimeout (-> ctrl.abort()), PROBE_TIMEOUT_MS
   affirmative = (data) ->
     data?.status is 'ready' or data?.status is 'ok' or data?.ok is true
   try
-    res = fetchFn! "#{url}/ready", { signal: ctrl.signal }
+    res = f! "#{target.base}/ready", { signal: ctrl.signal }
     if res?.status is 404
-      res = fetchFn! "#{url}/health", { signal: ctrl.signal }
+      res = f! "#{target.base}/health", { signal: ctrl.signal }
     return false unless res?.ok
     affirmative res.json!
   catch
@@ -498,9 +507,9 @@ reachable = (url, fetchFn) ->
 # same check (apps still import that spelling).
 export def assertReachable(url = null, opts = {})
   fetchFn = opts.fetch ?? fetch
-  resolved = resolveUrl url
-  return 'running' if reachable!(resolved, fetchFn)
-  throw Error.new "harbor not reachable at #{resolved} — start your duckdb-harbor instance and try again"
+  target = resolveTarget url
+  return 'running' if reachable!(target, fetchFn)
+  throw Error.new "harbor not reachable at #{target.shown} — start your harbor instance and try again"
 
 export def ensureRunning(url = null, opts = {})
   assertReachable url, opts
@@ -511,17 +520,20 @@ export def ensureRunning(url = null, opts = {})
 # is too common as a local / HTTP field name).
 export def ping(opts = {})
   o = if opts? and typeof opts is 'object' and not Array.isArray(opts) then opts else {}
-  url = resolveUrl o.url
+  target = resolveTarget o.url
   fetchFn = o.fetch ?? fetch
-  unless reachable!(url, fetchFn)
-    throw ConnectionError.new "db: harbor not reachable at #{url}"
+  unless reachable!(target, fetchFn)
+    throw ConnectionError.new "db: harbor not reachable at #{target.shown}"
+  # The ORIGINAL spelling goes to makeSql, not the resolved base — the
+  # adapter re-resolves it, which is what carries a harbor:<name>'s
+  # registry token through (o.token still wins when given).
   sql = makeSql
-    url: url
+    url: o.url
     token: o.token
     fetch: fetchFn
     timeoutMs: o.timeoutMs
   database = currentDatabase! sql
-  { ok: true, url, database }
+  { ok: true, url: target.shown, database }
 
 # ==[ CLI logic ]=============================================================
 

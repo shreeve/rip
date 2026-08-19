@@ -39,6 +39,24 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 
 ## Landed
 
+- **Unix-socket and `harbor:<name>` targets** (2026-08-19). Two
+  transports, both public — `http://host:port` (TCP) and
+  `unix:///path.sock` (Bun's fetch `unix` option) — with `harbor:<name>`
+  as pure resolution sugar, never a third transport: it reads
+  `$HARBOR_HOME/<name>.json` (default `~/.harbor`), desugars to
+  whichever spelling the berth registered (socket preferred, port
+  otherwise), and resolves the bearer token from `<name>.token`.
+  Precedence: explicit option → registry → `RIP_DB_TOKEN`. One resolver
+  (`resolveTarget`, exported) feeds `harborAdapter` and the boot probe;
+  the unix wrap happens ONCE per constructor so all call sites stay
+  transport-blind. Registry reads go through `process.getBuiltinModule`
+  — guarded, so the module stays runtime-portable and a runtime without
+  fs fails `harbor:` names with the reason while raw spellings keep
+  working. Scheme named for the system dialed (like
+  `postgres:`/`redis:`), not harbor's internal "berth" vocabulary.
+  medlabs runs on `RIP_DB_URL=harbor:medlabs` (socket-only berth, no
+  `RIP_DB_TOKEN`) as the live proof.
+
 - **medlabs' schema dump is checked in and diffed on every run.**
   `api/schema.sql` is committed, and `test/api/schema.test.rip` runs
   `rip schema dump --check` as the first case of the suite — medlabs

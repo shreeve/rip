@@ -12,7 +12,7 @@ import {
   harborAdapter, createClient, connect, isDbError, isRetryable, DbError, ConnectionError, QueryError, CancelledError,
   findOne, findAll, transaction, begin, ident, materializeAll, show,
   ping, assertReachable, ensureRunning,
-  resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
+  resolveTarget, resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
   makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
   createMcpServer,
 } from 'rip/db'
@@ -40,7 +40,7 @@ ROOT_EXPORTS = [
   'createMcpServer', 'currentDatabase', 'dump', 'ensureRunning', 'findAll', 'findOne',
   'harborAdapter', 'humanSize', 'ident', 'isDbError', 'isRetryable', 'load', 'makeMcpSql',
   'makeSql',
-  'materializeAll', 'ping', 'resolveUrl', 'safeFileStem', 'show', 'sql', 'sqlString', 'stamp',
+  'materializeAll', 'ping', 'resolveTarget', 'resolveUrl', 'safeFileStem', 'show', 'sql', 'sqlString', 'stamp',
   'startStdio', 'transaction', 'unsafeTarPath',
 ]
 
@@ -1309,6 +1309,55 @@ test "resolveUrl: explicit wins, then env, then default", ->
   eq resolveUrl('http://h:9494/', {}), 'http://h:9494'
   eq resolveUrl(null, { RIP_DB_URL: 'http://env:9494///' }), 'http://env:9494'
   eq resolveUrl(null, {}), 'http://127.0.0.1:9495'
+
+test "resolveTarget: http URLs resolve exactly as resolveUrl (no unix, no token)", ->
+  eq resolveTarget('http://h:9494/', {}), { base: 'http://h:9494', unix: null, token: null, shown: 'http://h:9494' }
+  eq resolveTarget(null, { RIP_DB_URL: 'http://env:9494' }).base, 'http://env:9494'
+  eq resolveTarget(null, {}).base, 'http://127.0.0.1:9495'
+
+test "resolveTarget: unix:// spelling carries the socket path, dummy base", ->
+  t = resolveTarget 'unix:///run/harbor/x.sock', {}
+  eq t, { base: 'http://harbor', unix: '/run/harbor/x.sock', token: null, shown: 'unix:///run/harbor/x.sock' }
+
+test "resolveTarget: harbor:<name> desugars from the registry — socket preferred, token read", ->
+  home = mkdtempSync join(tmpdir(), 'rip-harbor-')
+  try
+    writeFileSync join(home, 'demo.json'), JSON.stringify { socket: '/tmp/demo.sock', port: null }
+    writeFileSync join(home, 'demo.token'), "sekret\n"
+    t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
+    eq t, { base: 'http://harbor', unix: '/tmp/demo.sock', token: 'sekret', shown: 'harbor:demo (unix:///tmp/demo.sock)' }
+  finally
+    rmSync home, recursive: true, force: true
+
+test "resolveTarget: harbor:<name> falls back to the registered TCP port", ->
+  home = mkdtempSync join(tmpdir(), 'rip-harbor-')
+  try
+    writeFileSync join(home, 'demo.json'), JSON.stringify { socket: null, port: 9500, bind: null }
+    t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
+    eq t, { base: 'http://127.0.0.1:9500', unix: null, token: null, shown: 'harbor:demo (http://127.0.0.1:9500)' }
+  finally
+    rmSync home, recursive: true, force: true
+
+test "resolveTarget: harbor:<name> with no registry throws ConnectionError naming the path", ->
+  home = mkdtempSync join(tmpdir(), 'rip-harbor-')
+  try
+    err = trap!(-> resolveTarget 'harbor:ghost', { HARBOR_HOME: home })
+    ok err instanceof ConnectionError
+    ok err.message.includes 'ghost.json'
+  finally
+    rmSync home, recursive: true, force: true
+
+test! "harborAdapter: a unix target rides Bun's unix fetch option on every request", ->
+  inits = []
+  fetchFn = (url, init) ->
+    inits.push { url, init }
+    Promise.resolve
+      ok: true, status: 200, statusText: ''
+      text: -> Promise.resolve JSON.stringify { columns: [], data: [], rowCount: 0 }
+  adapter = harborAdapter { url: 'unix:///tmp/demo.sock', token: 't', fetch: fetchFn }
+  adapter.query! 'SELECT 1'
+  eq inits[0].url, 'http://harbor/sql'
+  eq inits[0].init.unix, '/tmp/demo.sock'
 
 test "sqlString: quotes and rejects NUL", ->
   eq sqlString('/tmp/x'), "'/tmp/x'"

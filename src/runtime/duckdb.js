@@ -47,6 +47,72 @@ function envToken() {
   return (typeof process !== 'undefined' && process.env) ? process.env.RIP_DB_TOKEN : null;
 }
 
+// ── Target resolution: two transports plus one resolver ─────────────
+//
+// `http(s)://host:port` dials TCP. `unix:///path/to.sock` dials a unix
+// domain socket — Bun's fetch `unix` option; the dummy hostname in the
+// URL is never resolved. `harbor:<name>` is resolution sugar, never a
+// third transport: it reads the berth registry `harbor serve` maintains
+// ($HARBOR_HOME/<name>.json, default ~/.harbor) and desugars to
+// whichever spelling the berth registered — socket preferred, TCP port
+// otherwise. It also resolves the bearer token from <name>.token, the
+// one thing a raw spelling cannot carry; precedence stays caller's
+// option → registry → RIP_DB_TOKEN.
+//
+// Reading the registry needs a filesystem, which this otherwise
+// runtime-portable module must not import unconditionally.
+// `process.getBuiltinModule` (Bun, Node ≥ 22.3) is the guarded door: in
+// a runtime without it, `harbor:` names fail naming the reason while
+// both raw spellings keep working.
+
+function builtinFs() {
+  try { return process.getBuiltinModule('node:fs'); } catch { return null; }
+}
+
+function resolveHarborName(name, env) {
+  const fs = builtinFs();
+  if (!fs) {
+    throw new ConnectionError(
+      `db: harbor:${name} needs filesystem access to read the berth registry — ` +
+      'use an http:// or unix:// url in this runtime');
+  }
+  const home = env.HARBOR_HOME || `${env.HOME || ''}/.harbor`;
+  const registryPath = `${home}/${name}.json`;
+  let berth;
+  try {
+    berth = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  } catch (cause) {
+    const error = new ConnectionError(
+      `db: harbor:${name} — no readable berth registry at ${registryPath} (is the berth running?)`);
+    error.cause = cause;
+    throw error;
+  }
+  let token = null;
+  try { token = fs.readFileSync(`${home}/${name}.token`, 'utf8').trim() || null; } catch { /* unauthenticated berth */ }
+  if (berth.socket) {
+    return { base: 'http://harbor', unix: berth.socket, token, shown: `harbor:${name} (unix://${berth.socket})` };
+  }
+  if (berth.port) {
+    const host = berth.bind || '127.0.0.1';
+    return { base: `http://${host}:${berth.port}`, unix: null, token, shown: `harbor:${name} (http://${host}:${berth.port})` };
+  }
+  throw new ConnectionError(
+    `db: harbor:${name} — the registry at ${registryPath} names neither a socket nor a port`);
+}
+
+// The one resolver every dialer uses. For plain http(s) URLs this is
+// exactly resolveUrl + displayUrl, so TCP callers see no change.
+function resolveTarget(url, env) {
+  if (arguments.length < 2) env = (typeof process !== 'undefined' && process.env) || {};
+  const raw = String(url || (env || {}).RIP_DB_URL || DEFAULT_URL).trim();
+  const harbor = raw.match(/^harbor:(?:\/\/)?([\w.-]+)$/);
+  if (harbor) return resolveHarborName(harbor[1], env);
+  const unix = raw.match(/^unix:\/\/(\/.+)$/);
+  if (unix) return { base: 'http://harbor', unix: unix[1], token: null, shown: raw };
+  const base = raw.replace(/\/+$/, '');
+  return { base, unix: null, token: null, shown: displayUrl(base) };
+}
+
 // ── The typed error hierarchy ────────────────────────────────────────
 //
 // Extra fields — httpStatus on any DbError, and code/details/sql on a
@@ -327,11 +393,17 @@ function toResult(env) {
  *   per-request, so this is the same knob, not a second one.
  */
 function harborAdapter(opts = {}) {
-  const base = resolveUrl(opts.url);
+  const target = resolveTarget(opts.url);
+  const base = target.base;
   // What error messages may say — never the credentials in the URL.
-  const shown = displayUrl(base);
-  const token = opts.token ?? envToken();
-  const fetchFn = opts.fetch ?? ((...a) => globalThis.fetch(...a));
+  const shown = target.shown;
+  const token = opts.token ?? target.token ?? envToken();
+  const rawFetch = opts.fetch ?? ((...a) => globalThis.fetch(...a));
+  // Unix targets ride Bun's `unix` fetch option. Wrapped once here so
+  // the dispatch, cancel, and session call sites stay transport-blind.
+  const fetchFn = target.unix
+    ? (url, init) => rawFetch(url, { ...(init || {}), unix: target.unix })
+    : rawFetch;
   // `??` would fold `null` into the default, and `null` is meaningful
   // here — it is the opt-out. Only an absent option takes the default.
   const timeoutMs = opts.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
@@ -603,7 +675,7 @@ function harborAdapter(opts = {}) {
 }
 
 export {
-  harborAdapter, resolveUrl, envToken, toResult,
+  harborAdapter, resolveUrl, resolveTarget, envToken, toResult,
   DbError, ConnectionError, QueryError, CancelledError, isDbError,
   temporalKind, decodeTemporal, decodeRows, encodeParam, encodeParams,
   parseNdjson, parseBody, isPlainObject, abortable,
