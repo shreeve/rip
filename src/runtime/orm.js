@@ -2991,7 +2991,12 @@ SchemaDef.prototype.upsert = async function (data, opts) {
       const quoted = quoteIdent(c, norm.callerWritableColumns, 'upsert column');
       return quoted + ' = EXCLUDED.' + quoted;
     });
-    if (norm.timestamps) sets.push('"updated_at" = CURRENT_TIMESTAMP');
+    // now(), not CURRENT_TIMESTAMP: DuckDB resolves a bare keyword in a
+    // DO UPDATE SET target list as a COLUMN reference, so the standard
+    // spelling fails here with "table has no column named
+    // CURRENT_TIMESTAMP" — while remaining correct as a column DEFAULT,
+    // which is why the DDL below still emits it.
+    if (norm.timestamps) sets.push('"updated_at" = now()');
     conflict += ' DO UPDATE SET ' + sets.join(', ');
   } else {
     conflict += ' DO NOTHING';

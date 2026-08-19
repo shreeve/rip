@@ -1294,7 +1294,7 @@ describe('orm: paired reference — upsert and insertMany', () => {
     });
     expect(r.calls[0].sql).toBe(
  'INSERT INTO "users" ("name", "email") VALUES (?, ?) ON CONFLICT ("email") ' +
- 'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = CURRENT_TIMESTAMP RETURNING *');
+ 'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = now() RETURNING *');
     expect(r.value.hooks).toEqual(['afterSave', 'afterCommit']);
     expect(r.value.persisted).toBe(true);
     expect([...r.value.saved]).toEqual([]);
