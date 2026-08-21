@@ -4,11 +4,7 @@
 # rip/tray and drives menus only through the unified `rip sites` CLI
 # (`edge` / `all` / `tray` are reserved nouns).
 
-import { dirname, join } from 'node:path'
-import { action, directory, label, link, quit, separator, serve, submenu, svgFile, tray } from 'rip/tray'
-
-trayDir = dirname(Bun.resolveSync('rip/tray', import.meta.dir))
-asset = (name, options = {}) -> svgFile(join(trayDir, 'assets', name), options)
+import { action, asset, directory, label, link, quit, separator, serve, submenu, tray } from 'rip/tray'
 
 rip = process.env.RIP_TRAY_RIP or 'rip'
 

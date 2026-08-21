@@ -52,6 +52,13 @@ export svgFile = (path, options = {}) ->
   fail 'svgFile path must be a non-empty string' unless typeof path is 'string' and path.length
   svg readFileSync(resolve(path), 'utf8'), options
 
+# Bundled tray artwork by name. Providers must reach these through this
+# helper — `rip/tray` is a loader virtual module, so Bun.resolveSync
+# cannot locate this package's directory from the outside.
+export asset = (name, options = {}) ->
+  fail 'asset name must be a non-empty string' unless typeof name is 'string' and name.length
+  svgFile join(import.meta.dir, 'assets', name), options
+
 export label = (title, options = {}) ->
   rejectUnknown options, ['icon', 'subtitle', 'rowHeight'], 'label'
   validateTitle title, 'label'

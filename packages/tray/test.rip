@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 console.log '\nPackage'
 
 test 'exports the complete Rip-authored tray vocabulary', ->
-  eq Object.keys(mod).sort(), ['action', 'directory', 'label', 'link', 'quit', 'resolveHost', 'resolveProvider', 'separator', 'serve', 'snapshot', 'submenu', 'svg', 'svgFile', 'toggle', 'tray']
+  eq Object.keys(mod).sort(), ['action', 'asset', 'directory', 'label', 'link', 'quit', 'resolveHost', 'resolveProvider', 'separator', 'serve', 'snapshot', 'submenu', 'svg', 'svgFile', 'toggle', 'tray']
 
 test 'has no runtime dependencies and keeps the native host in the package', ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
