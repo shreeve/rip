@@ -28,14 +28,17 @@ const ctlSock = join(fixtureRoot, 'janus.sock');
 const calls = [];
 const hubClients = new Set();
 const hubFrames = [];
+const reloadFrames = [];
 let registration = null;
 
+// Janus forwards what Manager publishes: change lists and reload frames.
+// /__test/frames is the change log the specs read; reloads are kept apart.
 const fanoutChange = (body) => {
   const items = Array.isArray(body) ? body : [body];
   for (const item of items) {
-    if (!item?.change) continue;
-    const frame = JSON.stringify({ change: item.change });
-    hubFrames.push(frame);
+    if (!item?.change && !item?.reload) continue;
+    const frame = JSON.stringify(item.change ? { change: item.change } : { reload: item.reload });
+    (item.change ? hubFrames : reloadFrames).push(frame);
     for (const socket of hubClients) {
       try { socket.send(frame); } catch { /* closed */ }
     }
@@ -220,6 +223,9 @@ const server = Bun.serve({
     }
     if (url.pathname === '/__test/frames') {
       return Response.json(hubFrames);
+    }
+    if (url.pathname === '/__test/reloads') {
+      return Response.json(reloadFrames);
     }
     if (url.pathname === '/__test/cart-root') {
       return Response.json({ cartDir, fixtureRoot });

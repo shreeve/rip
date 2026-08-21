@@ -152,6 +152,8 @@ from a failed candidate. A stash change or deletion of the mounted route or
 layout requests a document reload and activates the complete bundle through
 normal HTTP.
 
+The browser runtime the site serves under `/@rip/*` (`rip.min.js`, `tailwind.min.js`, and their Brotli sidecars) is part of what the browser was sent, so the plain files' identity contributes to the complete App hash; a sidecar must decompress to its sibling but is not itself identity. Manager writes that set into the site from the exact bytes it hashed, before the documents that name it. A regenerated runtime is never published as a change list — the page that would apply the list is the runtime being replaced — it is published as a `reload` frame, and the complete publication is already on disk when the frame is sent. A set whose Brotli sidecar does not decompress to its sibling (mid-regeneration) is refused and retried until it is coherent; the previously served set stays in place meanwhile, and App edits keep publishing against it.
+
 The path determines the basic apply verdict:
 
 | Managed path | Verdict |
@@ -190,6 +192,8 @@ subscription or enter the publication stream.
 
 `latest.json` is a cache-revalidated probe containing only the latest complete
 App hash. It is not a manifest and carries no source or file inventory.
+
+Because the served runtime is part of the App hash, a tab that missed a runtime `reload` frame while disconnected sees a differing `latest.json` hash on reconnect and reloads by the rule above; no separate runtime version check exists.
 
 ## Watch policy
 

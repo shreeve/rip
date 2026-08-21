@@ -2,7 +2,7 @@ import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync,
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { brotliCompressSync, constants as zlib } from 'node:zlib'
+import { brotliCompressSync, brotliDecompressSync, constants as zlib } from 'node:zlib'
 import { rash, check } from 'rip/app/rash'
 import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
@@ -669,7 +669,106 @@ appModules = (appRoot, changes) ->
 sourceHashes = (paths) ->
   paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
 
-appDocuments = (project, graph) ->
+# The browser runtime ship set: the artifacts the site serves under
+# /@rip, from the rip checkout's dist/@rip (RIP_SHIP_DIR points a test at
+# a copy it may rewrite). The runtime is part of what the browser was
+# sent, so its plain files are inputs of the App publication like any
+# assembled source — hashed as consumed, compared by the sweep — and
+# their identity rides in the App hash. The Brotli sidecars are not
+# identity: each must decompress to its sibling, and a set that does not
+# (mid-regeneration) is torn and refused, never served to half the clients.
+SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js']
+SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br']
+SHIP_ID = '/@rip'
+SHIP_SETTLE_MS = positiveEnv 'RIP_SHIP_SETTLE_MS', 2000
+
+shipDir = -> process.env.RIP_SHIP_DIR or join(ripRoot(), 'dist', '@rip')
+shipPath = (name) -> join shipDir(), name
+shipInput = (path) -> SHIP_PLAIN.some (name) -> path is shipPath(name)
+
+shipIdentity = (inputHashes) ->
+  check inputHashes.map (entry) -> { id: entry.path, hash: entry.hash ?? 'missing' }
+
+# Identity of the plain files on disk, without reading the sidecars.
+diskShipIdentity = -> shipIdentity sourceHashes(SHIP_PLAIN.map(shipPath))
+
+shipError = (message, kind) ->
+  error = Error.new message
+  error.shipSet = kind
+  error
+
+# Read the ship set as the bytes to publish: every file, the sidecars
+# verified against their siblings. Throws `shipSet: 'missing'` or 'torn'.
+readShipSet = ->
+  files = []
+  for name in SHIP_FILES
+    path = shipPath name
+    throw shipError("browser ship artifact missing at #{path}", 'missing') unless existsSync path
+    files.push { name, bytes: readFileSync(path) }
+  byName = Map.new files.map (file) -> [file.name, file.bytes]
+  for name in SHIP_FILES when name.endsWith '.br'
+    plain = byName.get name.slice(0, -3)
+    decompressed = try brotliDecompressSync(byName.get(name)) catch then null
+    throw shipError("browser ship artifact #{name} does not decompress to #{name.slice(0, -3)}", 'torn') unless decompressed? and decompressed.equals(plain)
+  inputHashes = files.filter((file) -> SHIP_PLAIN.includes file.name).map (file) -> { path: shipPath(file.name), hash: rash(file.bytes) }
+  { files, inputHashes, check: shipIdentity(inputHashes) }
+
+# Read the set, waiting out a torn one: the bundle script writes a
+# sidecar moments after its plain file, and a boot, release, or
+# activation that lands in that gap should come up, not fail. A missing
+# file is an error at once; a set still torn past the budget is too.
+settleShipSet = ->
+  deadline = Date.now() + SHIP_SETTLE_MS
+  loop
+    try
+      return readShipSet()
+    catch error
+      throw error unless error.shipSet is 'torn' and Date.now() < deadline
+      sleep! 50
+
+# The watch reconciler's read: the published set is reused while the
+# plain files on disk still hash to it — an App edit never re-reads a
+# megabyte — and read whole only when the runtime moved.
+currentShipSet = (prior) ->
+  return prior if prior?.files?.length and diskShipIdentity() is prior.check
+  readShipSet()
+
+# The ship set's plain files take their place among the assembled inputs
+# (any stale ship entries inherited from a prior publication replaced).
+withShipInputs = (inputHashes, ship) ->
+  [...inputHashes.filter((entry) -> not shipInput(entry.path)), ...ship.inputHashes]
+    .sort (a, b) -> if a.path < b.path then -1 else if a.path > b.path then 1 else 0
+
+# The complete App hash: every graph entry and list source by id, plus
+# the runtime under an id no App path can take.
+appHash = (entries, list, ship) ->
+  identities = Map.new (entries or []).map (entry) -> [entry.id, entry]
+  encoder = TextEncoder.new()
+  for [id, source] in list
+    identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id
+  identities.set SHIP_ID, { id: SHIP_ID, hash: ship.check }
+  complete = [...identities.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
+  check complete
+
+# One publication shape for every builder: the hash and the documents
+# derived from it, with the ship set spliced into the inputs.
+appPublicationDocuments = (graph, list, ship, inputHashes, inventories, watchRoots) ->
+  hash = appHash graph.entries, list, ship
+  inputHashes = withShipInputs inputHashes, ship
+  {
+    graph
+    hash
+    list
+    ship
+    inputs: inputHashes.map (entry) -> entry.path
+    inputHashes
+    inventories
+    watchRoots
+    bundle: JSON.stringify({ hash, list })
+    latest: JSON.stringify({ hash })
+  }
+
+appDocuments = (project, graph, ship) ->
   { assembleRipPublication } = import!(join(import.meta.dir, 'bundle.rip'))
   assembled = assembleRipPublication
     modules: graph.modules
@@ -677,30 +776,13 @@ appDocuments = (project, graph) ->
     appDir: project.root
     appRoot: project.appRoot
     packagesDir: join(ripRoot(), 'packages')
-  list = assembled.list
-  identities = Map.new graph.entries.map (entry) -> [entry.id, entry]
-  encoder = TextEncoder.new()
-  for [id, source] in list
-    identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id
-  complete = [...identities.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
-  hash = check complete
-  {
-    graph
-    hash
-    list
-    inputs: assembled.inputs
-    inputHashes: assembled.inputHashes
-    inventories: assembled.inventories
-    watchRoots: assembled.watchRoots
-    bundle: JSON.stringify({ hash, list })
-    latest: JSON.stringify({ hash })
-  }
+  appPublicationDocuments graph, assembled.list, ship, assembled.inputHashes, assembled.inventories, [...assembled.watchRoots, shipDir()]
 
 # Watch-mode fallback when assemble/compile fails: publish the raw App
 # module snapshot (plus any prior package modules) so the browser can
 # quarantine and show the compile overlay. Coherent bytes, not validity.
 # Hash covers graph.entries (Rip + CSS + assets), matching appDocuments.
-publicationFromRawGraph = (graph, prior = null) ->
+publicationFromRawGraph = (graph, prior, ship) ->
   sources = Map.new()
   if prior?.list?
     for [id, source] in prior.list
@@ -708,31 +790,21 @@ publicationFromRawGraph = (graph, prior = null) ->
   for own id, source of graph.modules
     sources.set id, source if typeof source is 'string'
   list = [...sources.entries()].sort (a, b) -> if a[0] < b[0] then -1 else if a[0] > b[0] then 1 else 0
-  identities = Map.new (graph.entries or []).map (entry) -> [entry.id, entry]
-  encoder = TextEncoder.new()
-  for [id, source] in list
-    identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id
-  complete = [...identities.values()].sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
-  hash = check complete
-  {
-    graph
-    hash
-    list
-    inputs: prior?.inputs ?? []
-    inputHashes: prior?.inputHashes ?? []
-    inventories: prior?.inventories ?? []
-    watchRoots: prior?.watchRoots ?? []
-    bundle: JSON.stringify({ hash, list })
-    latest: JSON.stringify({ hash })
-  }
+  appPublicationDocuments graph, list, ship, (prior?.inputHashes ?? []), (prior?.inventories ?? []), (prior?.watchRoots ?? [])
 
-buildAppDocuments = (project) ->
+# Reads the ship set itself — waiting out a torn one — unless the caller
+# already holds the set to publish with.
+buildAppDocuments = (project, ship = null) ->
   graph = appModules project.appRoot, project.appChanges
-  appDocuments! project, graph
+  appDocuments! project, graph, (ship ?? settleShipSet!)
 
 commitAppDocuments = (project, documents) ->
   dist = join project.root, 'dist'
   mkdirSync dist, { recursive: true }
+  # The runtime lands before the documents that name it: a tab that
+  # reloads against the new hash must find the new runtime, while one
+  # that loads the new runtime under the old hash reloads on reconnect.
+  commitShipSet dist, documents.ship
   bundlePath = join dist, 'bundle.json'
   compressedPath = join dist, 'bundle.json.br'
   token = randomBytes(8).toString 'hex'
@@ -756,26 +828,39 @@ commitAppDocuments = (project, documents) ->
   manifestPath = join dist, 'manifest.json'
   unlinkSync manifestPath if existsSync manifestPath
 
+# The ship set the site serves is written from the exact bytes the
+# publication hashed — never re-read from the source dir — and only when
+# the published identity moves: a fresh process always writes (the dist
+# may hold a prior run's runtime), an App edit never rewrites a megabyte.
+shippedRuntimeCheck = null
+commitShipSet = (dist, ship) ->
+  return unless ship?.files?.length
+  return if shippedRuntimeCheck is ship.check
+  mkdirSync join(dist, '@rip'), { recursive: true }
+  for file in ship.files
+    path = join dist, '@rip', file.name
+    tmp = "#{path}.tmp"
+    writeFileSync tmp, file.bytes
+    renameSync tmp, path
+  shippedRuntimeCheck = ship.check
+  return
+
 writeAppDocuments = (project) ->
-  documents = buildAppDocuments! project
+  ship = try settleShipSet! catch error then abort "rip-site: #{error.message}"
+  documents = buildAppDocuments! project, ship
   commitAppDocuments project, documents
   documents
 
 publishApp = (project, name, watch, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
   dist = join project.root, 'dist'
-  mkdirSync join(dist, '@rip'), { recursive: true }
+  mkdirSync dist, { recursive: true }
   publication = null
   if documents is undefined
     publication = writeAppDocuments! project
   else if documents?
     commitAppDocuments project, documents
     publication = documents
-  shipDir = join(ripRoot(), 'dist', '@rip')
-  for name in ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br']
-    source = join shipDir, name
-    abort "rip-site: browser ship artifact missing at #{source}" unless existsSync source
-    copyFileSync source, join(dist, '@rip', name)
 
   authoredShell = join project.appRoot, 'index.html'
   shell = declaredShell or authoredShell
@@ -1270,6 +1355,12 @@ export main = (argv) ->
   #   5. A slow sweep re-checks disk without any event and retries owed
   #      work after a failed publication — recovery from total
   #      notification loss (FSEvents drops, inotify overflow).
+  #   6. The browser runtime ship set (dist/@rip) is an input like the
+  #      sources: its plain files ride in inputs/inputHashes from the
+  #      exact bytes it is published as, so the sweep and the dependency
+  #      watcher cover it, and a change is delivered as a document reload
+  #      — the page that would apply a change list is the runtime being
+  #      replaced. The set is written before the documents that name it.
   # Every OS watcher eventually says "something changed, rescan"; this
   # pipeline never asks more of it than that.
   #
@@ -1356,12 +1447,16 @@ export main = (argv) ->
   watchAppDependencies = (documents) ->
     return 0 unless args.watchApp
     added = 0
+    shipRoot = resolve shipDir()
     for root in documents.watchRoots or []
       root = resolve root
       continue if appDependencyWatchers.has root
       try
-        watcher = watch root, { recursive: true }, ->
+        watcher = watch root, { recursive: true }, (_event, filename) ->
           return if stopping
+          # The ship root holds files the set never ships (rip.js, write
+          # temporaries); only the set's own files are a runtime event.
+          return if root is shipRoot and filename? and not SHIP_FILES.includes(basename(String(filename)))
           if not appWatchReady or operation isnt 'Active'
             appReconcile = true
             return
@@ -1378,21 +1473,32 @@ export main = (argv) ->
       # The first read discovered the dependency root. Watching before the
       # next read closes the discovery gap: an edit is either in this rebuild
       # or schedules a following reconciliation through the installed watch.
-      documents = buildAppDocuments! project
+      documents = buildAppDocuments! project, documents.ship
       rebuilt = true
     { documents, rebuilt }
 
-  # Returns true when this round published (or kept) a quarantine — the
-  # sources do not assemble — so the caller retries on the sweep cadence
-  # instead of fixpoint-looping.
+  # Returns true when this round left work owed — it published (or kept)
+  # a quarantine because the sources do not assemble, or the browser
+  # runtime ship set on disk is torn or missing and the App published
+  # against the set it last shipped — so the caller retries on the sweep
+  # cadence instead of fixpoint-looping.
   refreshApp = ->
+    owed = false
+    ship = null
+    try
+      ship = currentShipSet appPublication?.ship
+    catch error
+      warn "rip-site: #{error.message}; retrying on the sweep"
+      ship = appPublication?.ship
+      return true unless ship?.files?.length
+      owed = true
     assembleError = null
     try
-      documents = buildAppDocuments! project
+      documents = buildAppDocuments! project, ship
     catch error
       assembleError = error
       graph = appModules project.appRoot, project.appChanges
-      documents = publicationFromRawGraph graph, appPublication
+      documents = publicationFromRawGraph graph, appPublication, ship
     ids = changedAppIds appPublication, documents
     unless assembleError?
       stabilized = stabilizeAppDocuments! documents
@@ -1407,16 +1513,21 @@ export main = (argv) ->
       # the quarantine fallback — its inherited inputs describe the PRIOR
       # successful assembly, not the state that just failed.
       setAppPublication documents unless assembleError?
-      return assembleError?
+      return assembleError? or owed
     priorShell = appPublication.graph.entries.some (entry) -> entry.id is 'index.html'
     nextShell = documents.graph.entries.some (entry) -> entry.id is 'index.html'
     if priorShell isnt nextShell
       throw Error.new 'App index.html cannot be created or deleted while Manager is running; restart to change shell ownership'
+    runtimeChanged = ship.check isnt appPublication.ship?.check
     change = appChange appPublication, documents, ids
     commitAppDocuments project, documents
     setAppPublication documents
-    publishChange! change
-    assembleError?
+    # A changed runtime cannot ride a change list — the page that would
+    # apply it IS the old runtime. The complete publication is on disk; a
+    # document reload activates it, and a tab that misses the frame sees
+    # the new hash in latest.json on reconnect.
+    if runtimeChanged then publishReload! else publishChange! change
+    assembleError? or owed
 
   startAppWatcher = ->
     return unless args.watchApp and project.appRoot?
@@ -1594,9 +1705,15 @@ export main = (argv) ->
       try unlinkSync path if path?
     try fsyncDirectory join(project.root, '.rip', 'generations')
 
+  # The candidate records the App (graph, list, inputs), never runtime
+  # bytes: it publishes under the ship set on disk at activation, rehashed
+  # — a runtime regenerated while Held is delivered with the candidate,
+  # not after it.
   readAppCandidate = (path) ->
     return null unless path?
-    JSON.parse readFileSync(path, 'utf8')
+    documents = JSON.parse readFileSync(path, 'utf8')
+    ship = settleShipSet!
+    appPublicationDocuments documents.graph, documents.list, ship, (documents.inputHashes or []), (documents.inventories or []), (documents.watchRoots or [])
 
   migrationOutcome = (text) ->
     lines = String(text).split('\n').filter (line) -> line.startsWith('RIP_MIGRATION_OUTCOME=')
@@ -1664,7 +1781,7 @@ export main = (argv) ->
       copyFileSync record.targetArtifact, activeArtifact
       candidateWorkers = bootArtifact! activeArtifact
       startDoorbell() unless doorbell?
-      documents = readAppCandidate record.appCandidate
+      documents = readAppCandidate! record.appCandidate
       watchAppDependencies documents if documents?
       commitAppDocuments project, documents if documents?
       if documents?
@@ -1750,7 +1867,7 @@ export main = (argv) ->
       appCandidate = if documents? then join(generations, "#{body.id}-app.json") else null
       durableWrite targetArtifact, readFileSync(candidateArtifact)
       durableWrite oldArtifact, readFileSync(appArtifact)
-      durableWrite appCandidate, JSON.stringify(documents) if appCandidate?
+      durableWrite appCandidate, JSON.stringify({ graph: documents.graph, list: documents.list, inputHashes: documents.inputHashes, inventories: documents.inventories, watchRoots: documents.watchRoots }) if appCandidate?
       fsyncDirectory generations
       record =
         version: 1

@@ -2,7 +2,7 @@ import { test, eq, ok } from 'rip/testing'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { brotliDecompressSync } from 'node:zlib'
+import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'node:zlib'
 import { appChangeKind, appEventRelevant } from '../../manager.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
@@ -261,6 +261,101 @@ test! 'watch publication commits one App hash then batches confirmed changes', -
     eq (await proc.exited), 143
   finally
     registrationHeld = false
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a regenerated browser runtime ship set is delivered as a reload, never torn', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hello-ship-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'app'), join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    app:
+      root: 'app'
+  """
+  project = realpathSync project
+  # The manager ships from a copy, never the checkout's dist/@rip.
+  shipDir = join dir, 'ship'
+  cpSync join(import.meta.dir, '..', '..', '..', '..', 'dist', '@rip'), shipDir, { recursive: true }
+  original = readFileSync join(shipDir, 'rip.min.js')
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  batches = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'ship-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/ship-registration/hub/publish'
+        batches.push request.json!
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--host', 'ship.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+      env: { ...process.env, RIP_SHIP_DIR: shipDir, RIP_APP_SWEEP_MS: '200' }
+    waitFor! -> registration?
+    dist = join project, 'dist'
+    served = join dist, '@rip', 'rip.min.js'
+    ok readFileSync(served).equals(original)
+    bundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    eq JSON.parse(readFileSync(join(dist, 'latest.json'), 'utf8')).hash, bundle.hash
+
+    # A coherent regeneration: the runtime is what the browser was sent, so
+    # the App hash moves and the page is told to reload — a change list
+    # would be applied by the runtime it replaces.
+    regenerated = Buffer.concat [original, Buffer.from('\n// v2\n')]
+    writeFileSync join(shipDir, 'rip.min.js'), regenerated
+    writeFileSync join(shipDir, 'rip.min.js.br'), brotliCompressSync(regenerated)
+    waitFor! -> batches.length > 0
+    eq batches[0].length, 1
+    eq batches[0][0]['@'], ['/hub']
+    ok batches[0][0].reload?
+    ok not batches[0][0].change?
+    ok readFileSync(served).equals(regenerated)
+    ok brotliDecompressSync(readFileSync(join(dist, '@rip', 'rip.min.js.br'))).equals(regenerated)
+    nextBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
+    nextLatest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    ok nextBundle.hash isnt bundle.hash
+    eq nextLatest.hash, nextBundle.hash
+    eq nextBundle.list, bundle.list
+
+    # A sidecar re-encoded from the same plain bytes is not a runtime
+    # change: the identity is the plain files, and nothing is published.
+    servedSidecar = readFileSync join(dist, '@rip', 'rip.min.js.br')
+    reencoded = brotliCompressSync regenerated, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 } }
+    ok not reencoded.equals(readFileSync(join(shipDir, 'rip.min.js.br')))
+    writeFileSync join(shipDir, 'rip.min.js.br'), reencoded
+    sleep! 300
+    eq batches.length, 1
+    ok readFileSync(join(dist, '@rip', 'rip.min.js.br')).equals(servedSidecar)
+
+    # A torn set — the plain file rewritten, its .br sidecar not yet — is
+    # refused: nothing is published and the served copy is untouched until
+    # the sidecar matches again.
+    torn = Buffer.concat [regenerated, Buffer.from('// v3\n')]
+    writeFileSync join(shipDir, 'rip.min.js'), torn
+    sleep! 300
+    eq batches.length, 1
+    ok readFileSync(served).equals(regenerated)
+    writeFileSync join(shipDir, 'rip.min.js.br'), brotliCompressSync(torn)
+    waitFor! -> batches.length is 2
+    ok batches[1][0].reload?
+    ok readFileSync(served).equals(torn)
+    tornLatest = JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')
+    ok tornLatest.hash isnt nextLatest.hash
+    eq tornLatest.hash, JSON.parse(readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
     control.stop true
