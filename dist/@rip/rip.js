@@ -22246,16 +22246,79 @@ function __hmrPreserveState(oldInstance, newInstance) {
   __hmrEmit("migrate", { id, ...diff, copied });
   return { ...diff, copied };
 }
+var __HMR_IDENTITY_PROPS = ["name", "type", "placeholder"];
+function __hmrIdentityOf(el) {
+  const prop = (key) => typeof el[key] === "string" && el[key] ? el[key] : null;
+  const identity = { tag: el.tagName ?? null };
+  for (const key of __HMR_IDENTITY_PROPS)
+    identity[key] = prop(key);
+  identity.label = typeof el.getAttribute === "function" ? el.getAttribute("aria-label") : null;
+  identity.value = typeof el.value === "string" ? el.value : null;
+  return identity;
+}
+function __hmrSameIdentity(el, identity, withValue) {
+  if (!el || !identity)
+    return false;
+  const candidate = __hmrIdentityOf(el);
+  for (const key of ["tag", ...__HMR_IDENTITY_PROPS, "label"]) {
+    if (candidate[key] !== identity[key])
+      return false;
+  }
+  return !withValue || identity.value == null || candidate.value === identity.value;
+}
+function __hmrLocateActive(el) {
+  const identity = __hmrIdentityOf(el);
+  const id = typeof el.id === "string" && el.id ? el.id : null;
+  const path = [];
+  let node = el;
+  while (node && node !== document.body) {
+    const parent = node.parentElement ?? node.parentNode ?? null;
+    if (!parent || !parent.children)
+      return { identity, id, path: null };
+    path.unshift(Array.prototype.indexOf.call(parent.children, node));
+    node = parent;
+  }
+  return { identity, id, path: node === document.body ? path : null };
+}
+function __hmrResolveActive(snap) {
+  const el = snap.active;
+  if (el && el.isConnected !== false && typeof document.contains === "function" && document.contains(el))
+    return el;
+  const locator = snap.locator;
+  if (!locator)
+    return null;
+  if (locator.id && typeof document.getElementById === "function") {
+    const byId = document.getElementById(locator.id);
+    if (__hmrSameIdentity(byId, locator.identity, false))
+      return byId;
+  }
+  if (!Array.isArray(locator.path) || locator.path.length === 0)
+    return null;
+  let parent = document.body;
+  for (const index of locator.path.slice(0, -1)) {
+    parent = parent?.children?.[index] ?? null;
+    if (!parent)
+      return null;
+  }
+  const siblings = Array.from(parent.children ?? []);
+  const atPath = siblings[locator.path[locator.path.length - 1]] ?? null;
+  if (__hmrSameIdentity(atPath, locator.identity, true))
+    return atPath;
+  const matching = siblings.filter((node) => __hmrSameIdentity(node, locator.identity, true));
+  return matching.length === 1 ? matching[0] : null;
+}
 function __hmrSnapshotUi() {
   if (typeof document === "undefined")
     return null;
   const active = document.activeElement;
+  const focused = active && active !== document.body && active !== document.documentElement ? active : null;
   let selection = null;
-  if (active && typeof active.selectionStart === "number") {
-    selection = { start: active.selectionStart, end: active.selectionEnd };
+  if (focused && typeof focused.selectionStart === "number") {
+    selection = { start: focused.selectionStart, end: focused.selectionEnd, direction: focused.selectionDirection };
   }
   return {
-    active: active && active !== document.body && active !== document.documentElement ? active : null,
+    active: focused,
+    locator: focused ? __hmrLocateActive(focused) : null,
     selection,
     scrollX: typeof window !== "undefined" ? window.scrollX : 0,
     scrollY: typeof window !== "undefined" ? window.scrollY : 0
@@ -22266,13 +22329,13 @@ function __hmrRestoreUi(snap) {
     return;
   if (typeof window !== "undefined")
     window.scrollTo(snap.scrollX ?? 0, snap.scrollY ?? 0);
-  const el = snap.active;
-  if (!el || !document.contains(el) || typeof el.focus !== "function")
+  const el = __hmrResolveActive(snap);
+  if (!el || typeof el.focus !== "function")
     return;
   try {
-    el.focus();
+    el.focus({ preventScroll: true });
     if (snap.selection && typeof el.setSelectionRange === "function") {
-      el.setSelectionRange(snap.selection.start, snap.selection.end);
+      el.setSelectionRange(snap.selection.start, snap.selection.end, snap.selection.direction ?? "none");
     }
   } catch {}
 }
@@ -25500,6 +25563,38 @@ function createRenderer(opts) {
       return root != null;
     }) ?? fallback;
   };
+  let childList = function(node) {
+    return node?.childNodes ?? node?.children ?? [];
+  };
+  let claimSlot = function(entry, slot) {
+    entry.slot = slot;
+    entry.slotOwned = childList(slot).length;
+    return;
+  };
+  let reseatChain = function() {
+    let instance, owned;
+    let slot = target;
+    for (let index = 0;index < mountedEntries.length; index++) {
+      let entry = mountedEntries[index];
+      instance = entry.instance;
+      if (!(instance != null))
+        break;
+      if (index > 0 && entry.slot != null && entry.slot !== slot) {
+        owned = Array.from(childList(entry.slot)).slice(entry.slotOwned ?? 0);
+        claimSlot(entry, slot);
+        for (let node of owned) {
+          slot.appendChild(node);
+        }
+        instance._target = slot;
+      }
+      if (index === mountedEntries.length - 1)
+        break;
+      slot = layoutMountPoint(instance, slot);
+    }
+    if (mountedEntries.length > 1)
+      pageMountPoint = slot;
+    return;
+  };
   let mountBoundary = function(prefixEntries, failure, mine) {
     let handler, instance, parent;
     if (!prefixEntries.some(function(entry) {
@@ -25516,6 +25611,8 @@ function createRenderer(opts) {
         instance = construct(entry, parent);
         built.push(instance);
         entry.instance = instance;
+        if (index > 0)
+          claimSlot(entry, mountPoint);
         instance.mount?.(mountPoint);
         if (instance._state === "failed") {
           cleanup(built);
@@ -25586,7 +25683,7 @@ function createRenderer(opts) {
     return true;
   };
   let performMount = async function(info, mine, componentRegistry = components) {
-    let boundaryIndex, failure, handled, instance, keepPrefix, parent, ready;
+    let boundaryIndex, failure, handled, instance, parent, ready;
     let route = info?.route;
     if (!route?.file) {
       throw new Error("Rip App: renderer route state requires route.file");
@@ -25654,6 +25751,8 @@ function createRenderer(opts) {
     let mountPoint = staging;
     let built = [];
     let keptParent = firstNew > 0 ? entries[firstNew - 1].instance : null;
+    let keepPrefix = firstNew > 0;
+    let into = keepPrefix ? layoutMountPoint(keptParent, target) : target;
     try {
       for (let _ref = entries.slice(firstNew), index = 0;index < _ref.length; index++) {
         let entry = _ref[index];
@@ -25661,6 +25760,8 @@ function createRenderer(opts) {
         instance = construct(entry, parent);
         built.push(instance);
         entry.instance = instance;
+        if (index > 0)
+          claimSlot(entry, mountPoint);
         instance.mount?.(mountPoint);
         if (instance._state === "failed") {
           throw new Error(`Rip App: component '${entry.file}' failed during mount`);
@@ -25673,8 +25774,9 @@ function createRenderer(opts) {
         cleanup(built);
         return null;
       }
-      keepPrefix = firstNew > 0;
-      commitStaging(staging, keepPrefix ? pageMountPoint ?? target : target);
+      if (keepPrefix)
+        claimSlot(entries[firstNew], into);
+      commitStaging(staging, into);
       for (let instance2 of built) {
         if (instance2._target?.nodeType === 11)
           instance2._target = null;
@@ -25683,14 +25785,11 @@ function createRenderer(opts) {
       cleanup(built);
       throw error;
     }
-    keepPrefix = firstNew > 0;
     let oldInstances = keepPrefix ? instances.slice(firstNew) : instances;
     let keptInstances = keepPrefix ? instances.slice(0, firstNew) : [];
     instances = [...keptInstances, ...built];
     current = built[built.length - 1] ?? null;
-    if (!keepPrefix) {
-      pageMountPoint = entries.length > 1 ? mountPoint : null;
-    }
+    pageMountPoint = entries.length === 1 ? null : built.length > 1 ? mountPoint : into;
     mountedEntries = entries;
     lastRoute = { file: route.file, params, query };
     let teardownErrors = cleanup(oldInstances);
@@ -25760,8 +25859,32 @@ function createRenderer(opts) {
     }
     return null;
   };
+  let livingFor = function(path) {
+    let prefix = path + "#";
+    let found = [];
+    for (let entry of mountedEntries) {
+      if (entry.file === path && entry.instance != null) {
+        found.push(entry.instance);
+      }
+    }
+    for (let [id, reg] of __hmrEntries()) {
+      if (typeof id === "string" && id.startsWith(prefix)) {
+        for (let instance of reg.instances) {
+          if (!found.includes(instance))
+            found.push(instance);
+        }
+      }
+    }
+    const _result = [];
+    for (let instance of found) {
+      _result.push({ instance, entry: mountedEntries.find(function(entry) {
+        return entry.instance === instance;
+      }) ?? null });
+    }
+    return _result;
+  };
   let tryHmrPatch = function(paths, candidate) {
-    let NewCtor, id, module, prefix;
+    let NewCtor, id, living, module;
     let dirty = (() => {
       const result1 = [];
       for (let path of paths) {
@@ -25772,50 +25895,51 @@ function createRenderer(opts) {
       return result1;
     })();
     if (!(dirty.length > 0))
-      return "empty";
+      return "unknown";
     let patched = 0;
+    let unknown = false;
     let seen = new Set;
     for (let path of dirty) {
       module = candidate.getCompiled(path);
-      if (!(module != null))
-        continue;
-      prefix = path + "#";
-      for (let entry of mountedEntries) {
-        if (entry.file === path && entry.instance != null) {
-          id = entry.instance.constructor?.__hmrId;
-          if (!(typeof id === "string" && id.startsWith(prefix)))
-            continue;
-          NewCtor = hmrCtorFor(module, id);
-          if (!(NewCtor != null))
-            continue;
-          __hmrRegisterDefinition(NewCtor);
-          if (!(__hmrClassify(entry.instance.constructor, NewCtor) === "patch"))
+      living = livingFor(path);
+      if (!(module != null)) {
+        if (typeof candidate.exists === "function" && !candidate.exists(path)) {
+          if (living.some(function(item) {
+            return item.instance._state !== "unmounted";
+          }))
             return "fallback";
-          __hmrPatch(entry.instance, NewCtor);
-          entry.cls = NewCtor;
-          seen.add(entry.instance);
-          patched += 1;
+        } else {
+          unknown = true;
         }
+        continue;
       }
-      for (let [id2, reg] of __hmrEntries()) {
-        if (!(typeof id2 === "string" && id2.startsWith(prefix)))
+      for (let { instance, entry } of living) {
+        if (seen.has(instance))
           continue;
-        NewCtor = hmrCtorFor(module, id2);
+        if (instance._state === "unmounted")
+          continue;
+        if (!(instance._state === "mounted"))
+          return "fallback";
+        id = instance.constructor?.__hmrId;
+        NewCtor = typeof id === "string" ? hmrCtorFor(module, id) : null;
         if (!(NewCtor != null))
-          continue;
+          return "fallback";
         __hmrRegisterDefinition(NewCtor);
-        for (let instance of [...reg.instances]) {
-          if (seen.has(instance))
-            continue;
-          if (!(__hmrClassify(instance.constructor, NewCtor) === "patch"))
-            return "fallback";
-          __hmrPatch(instance, NewCtor);
-          seen.add(instance);
-          patched += 1;
+        if (!(__hmrClassify(instance.constructor, NewCtor) === "patch"))
+          return "fallback";
+        __hmrPatch(instance, NewCtor);
+        seen.add(instance);
+        patched += 1;
+        if (entry != null) {
+          entry.cls = NewCtor;
+          if (!(entry === mountedEntries[mountedEntries.length - 1]))
+            reseatChain();
         }
       }
     }
-    return patched > 0 ? "done" : "empty";
+    if (patched > 0)
+      return "done";
+    return unknown ? "unknown" : "idle";
   };
   let remountDirty = async function(paths, candidate = components) {
     let NewCtor, entry, id, next, verdict;
@@ -25828,6 +25952,11 @@ function createRenderer(opts) {
     let info = router.current;
     if (!(info?.route?.file && lastRoute != null))
       return "noop";
+    let layoutFiles = info.layouts ?? info.route.layouts ?? [];
+    let chain = [...layoutFiles, info.route.file];
+    let routeMounted = sameChain(chain, mountedEntries.map(function(entry2) {
+      return entry2.file;
+    }));
     let snap = __hmrSnapshotUi();
     try {
       verdict = tryHmrPatch(paths, candidate);
@@ -25835,13 +25964,15 @@ function createRenderer(opts) {
         __hmrRestoreUi(snap);
         return "narrow";
       }
+      if (verdict === "idle" && routeMounted) {
+        __hmrEmit("noop", { paths: [...paths] });
+        return "noop";
+      }
     } catch (error) {
       console.error("[Rip] HMR patch failed; falling back to remount:", error);
       __hmrEmit("reject", { reason: "patch-failed", paths: [...paths], message: error?.message ? String(error.message) : String(error) });
     }
     let dirty = new Set(paths);
-    let layoutFiles = info.layouts ?? info.route.layouts ?? [];
-    let chain = [...layoutFiles, info.route.file];
     let firstDirty = -1;
     for (let index = 0;index < chain.length; index++) {
       let file = chain[index];
@@ -26723,9 +26854,14 @@ function createWorkspace() {
         return;
       };
       return {
-        components: { getCompiled(path) {
-          return next.compiled.get(validPath2(path));
-        } },
+        components: {
+          getCompiled(path) {
+            return next.compiled.get(validPath2(path));
+          },
+          exists(path) {
+            return next.sources.has(validPath2(path));
+          }
+        },
         commit() {
           return finish(true);
         },
@@ -27174,13 +27310,7 @@ function createApply(opts) {
         return "css";
       return "ignore";
     }
-    let verdict = "escape";
-    try {
-      verdict = await opts.renderer.remountDirty(rip, candidate);
-    } catch (error) {
-      report("[Rip] update failed", error);
-      throw error;
-    }
+    let verdict = await opts.renderer.remountDirty(rip, candidate);
     if (verdict === "narrow") {
       report(`[Rip] applied ${rip.join(", ")} — update`);
       return "update";
@@ -27957,9 +28087,10 @@ async function bootApp(opts = {}) {
   let destroyed = false;
   const handle = {};
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  const notice = opts.feed?.report ?? ((...args) => console.info(...args));
   const reload = (reason) => {
     clearHmrOverlay();
-    report(`[Rip] reloading${reason ? ` — ${reason}` : ""}`);
+    notice(`[Rip] reloading${reason ? ` — ${reason}` : ""}`);
     if (typeof opts.reload === "function")
       opts.reload(reason);
     else if (typeof location !== "undefined")
@@ -28005,7 +28136,7 @@ async function bootApp(opts = {}) {
   const apply = createApply({
     renderer: { remountDirty: (paths, candidate) => current.renderer.remountDirty(paths, candidate) },
     escape: async () => "reload",
-    report
+    report: notice
   });
   const rejected = new Set;
   const applyChange = async (wire) => {
@@ -28082,7 +28213,7 @@ async function bootApp(opts = {}) {
       }
       clearHmrOverlay();
       if (verdict === "reload") {
-        report("[Rip] committed App update requires a document reload");
+        notice("[Rip] committed App update requires a document reload");
         return "reload";
       }
       return true;

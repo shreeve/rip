@@ -798,10 +798,15 @@ export async function bootApp(opts = {}) {
   let feed = null;
   let destroyed = false;
   const handle = {};
+  // Two channels, one host seam: a host-supplied feed.report receives
+  // everything; without one, failures are errors and progress notices
+  // (applied, reloading) are informational — a successful update must
+  // not read as an error in the console.
   const report = opts.feed?.report ?? ((...args) => console.error(...args));
+  const notice = opts.feed?.report ?? ((...args) => console.info(...args));
   const reload = reason => {
     clearHmrOverlay();
-    report(`[Rip] reloading${reason ? ` — ${reason}` : ''}`);
+    notice(`[Rip] reloading${reason ? ` — ${reason}` : ''}`);
     if (typeof opts.reload === 'function') opts.reload(reason);
     else if (typeof location !== 'undefined') location.reload();
   };
@@ -844,7 +849,9 @@ export async function bootApp(opts = {}) {
   const apply = app.createApply({
     renderer: { remountDirty: (paths, candidate) => current.renderer.remountDirty(paths, candidate) },
     escape: async () => 'reload',
-    report,
+    // Apply logs progress only; a failed update propagates and is
+    // reported as an activation failure below.
+    report: notice,
   });
 
   // Candidate App hashes that failed compile/activation. Manager may still
@@ -931,7 +938,7 @@ export async function bootApp(opts = {}) {
       }
       clearHmrOverlay();
       if (verdict === 'reload') {
-        report('[Rip] committed App update requires a document reload');
+        notice('[Rip] committed App update requires a document reload');
         return 'reload';
       }
       return true;

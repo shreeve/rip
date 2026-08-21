@@ -48,7 +48,10 @@ On a compatible edit the runtime:
 5. rebuilds the view through `_create` / `_setup`;
 6. reinserts into a **connected** parent (never a spent staging
    `DocumentFragment`);
-7. restores focus, selection, and scroll when recorded.
+7. restores focus, selection, and scroll when recorded — focus by
+   **locator** (the element's id, else its element path from
+   `document.body`), never by node identity, because the rebuilt view
+   replaced the focused node.
 
 This matches the competitive bar set by React Fast Refresh: keep state,
 swap implementation, re-render. It is **not** surgical DOM morph
@@ -166,7 +169,23 @@ definition, signature, living instances.
 
 Every tier is chosen from signatures. No incompatible shape is silently
 accepted. Tooling sees thin events: `rip:hmr` / `__hmrEvents()` for
-`patch` | `migrate` | `remount` | `reject`.
+`patch` | `migrate` | `remount` | `reject` | `noop` — `noop` names a
+publication whose dirty modules have no living instance, so nothing on
+the page was touched.
+
+A dirty module accounts for itself through its living instances: the
+ones in the mounted chain plus every registered instance under its id
+prefix. Mounted instances patch, or fall to the floor when no patch can
+carry them — incompatible signature, vanished definition, or an instance
+that is not mounted (failed, or constructed and never mounted). A module
+with no living instance contributes nothing — a helper reaches the page
+only through importers, and the dirty set carries those — and a dirty
+set that contributes nothing while the current route is the mounted one
+is a `noop` (the Workspace commit still carries the source to the next
+mount). When the current route is not mounted (its navigation failed and
+the previous screen is up), nothing is idle: the floor mounts it. A path
+the candidate still holds but did not compile is unaccounted for and
+takes the floor.
 
 ### Couplings that must stay true
 
@@ -186,6 +205,27 @@ These are load-bearing invariants, not folklore:
    rebinds. Effects never survive without their cleanup owner.
 4. **Mode flags are zero-effect when off.** `hmr: false` production
    bytes omit HMR helpers and metadata.
+5. **A patched layout reseats its descendants.** The layout's view is
+   rebuilt with a fresh page slot, but the route below it is not the
+   layout's child — its nodes still hang from the old, detached slot.
+   Each chain entry records the slot it mounted into and how many
+   children that slot already held; everything past that count is the
+   entry's (its create-phase nodes and whatever its blocks mount —
+   a top-level `for` puts rows *before* its anchor, so the entry's own
+   nodes do not bound the range). After a chain patch the renderer
+   re-resolves every slot from the chain root, moves each descendant's
+   owned range into the live slot, and records that slot as the page
+   mount point the next navigation commits into. The page keeps its
+   instance, DOM, and state. A forced remount from a middle layout
+   commits into the kept parent's outlet for the same reason.
+6. **Focus restore is by locator, gated by identity.** The snapshot
+   records how to find the focused element's successor (id, else
+   element path from `document.body`) because the refresh replaces the
+   node itself; a node-identity restore silently no-ops on every patch.
+   The successor must carry the same tag, name, type, placeholder,
+   aria-label, and (by path) the same value — otherwise a sibling that
+   alone matches is taken, and nothing is focused when that is
+   ambiguous. A wrong field is worse than a lost caret.
 
 ---
 
@@ -254,13 +294,18 @@ Automated coverage includes:
 9. CSS update without JavaScript remount;
 10. explicit full-reload fallback;
 11. **Gate A** — confirmation survives render-only `cart.rip` edit via patch;
-12. **Gate B** — LKG on confirmation; recover stamped heading in place.
+12. **Gate B** — LKG on confirmation; recover stamped heading in place;
+13. a layout patch keeps the mounted route visible and the next
+    navigation renders into the live slot;
+14. focus and caret survive a render-only edit of the focused page;
+15. an edit to an unmounted route is a `noop` — confirmation stays, and
+    the route shows the new source when it mounts.
 
 Browser behavior requires a real browser harness
 (`test/browser`). Signature and registry decisions stay
 deterministic unit tests (`test/ui/hmr-patch.test.js`,
-`test/toolchain/browser-boot.test.js`, `packages/app` remount/apply
-suites).
+`test/ui/hmr-ui-restore.test.js`, `test/toolchain/browser-boot.test.js`,
+`packages/app` remount/apply/hmr-chain suites).
 
 ---
 

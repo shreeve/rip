@@ -25,10 +25,12 @@ export type GateFailure =
 export type Renderer =
   mount: (info: Record<string, any>) => Promise<any>
   preload: (info: Record<string, any>) => void
-  # Remount the current route chain from the first dirty module down,
-  # keeping ancestor layouts and the live stash.
-  # Returns 'narrow' when it remounted, 'noop' when nothing was mounted,
-  # 'escape' when the caller should fall back to whole-launch remount.
+  # Patch or remount the current route chain from the first dirty module
+  # down, keeping ancestor layouts and the live stash.
+  # Returns 'narrow' when it patched or remounted, 'noop' when nothing is
+  # mounted or the dirty modules have no living instance, 'escape' when
+  # the caller should fall back to whole-launch remount, 'reload' when
+  # the committed tree is no longer coherent.
   remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
   start: () => Renderer
   stop: () => void
@@ -302,6 +304,43 @@ export def createRenderer(opts: RendererOpts): Renderer
       return slot if slot
     roots.find((root) -> root?) ?? fallback
 
+  # The child list of a slot on any host the renderer runs against: DOM
+  # nodes expose childNodes, the renderer's own non-DOM targets children.
+  childList = (node) -> node?.childNodes ?? node?.children ?? []
+
+  # What a chain entry owns inside its slot is everything past the
+  # children the slot already held when the entry mounted: mount appends
+  # the entry last, and its blocks insert at anchors inside that range
+  # (a top-level `for` puts its rows BEFORE its anchor, so the entry's
+  # own create-phase nodes do not bound the range — the slot does). The
+  # slot and that count are recorded at mount and re-recorded whenever
+  # the entry is reseated.
+  claimSlot = (entry, slot) ->
+    entry.slot = slot
+    entry.slotOwned = childList(slot).length
+    return
+
+  # A patched layout rebuilt its view, so its page slot is a new element
+  # while the entries below it still hang from the old, detached one.
+  # Re-resolve every slot from the chain root and move each descendant's
+  # owned range into the live slot: the descendants keep their
+  # instances, DOM, and state, and the page slot the next navigation
+  # commits into is the live one.
+  reseatChain = ->
+    slot = target
+    for entry, index in mountedEntries
+      instance = entry.instance
+      break unless instance?
+      if index > 0 and entry.slot? and entry.slot isnt slot
+        owned = Array.from(childList(entry.slot)).slice(entry.slotOwned ?? 0)
+        claimSlot entry, slot
+        slot.appendChild node for node in owned
+        instance._target = slot
+      break if index is mountedEntries.length - 1
+      slot = layoutMountPoint instance, slot
+    pageMountPoint = slot if mountedEntries.length > 1
+    return
+
   # A gate failure below the chain root routes to the nearest already
   # gated ancestor that defines onError — the boundary chain mounts and
   # the failure becomes control flow. Without a boundary the previous
@@ -317,6 +356,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         instance = construct entry, parent
         built.push instance
         entry.instance = instance
+        claimSlot entry, mountPoint if index > 0
         instance.mount? mountPoint
         if instance._state is 'failed'
           cleanup built
@@ -449,12 +489,22 @@ export def createRenderer(opts: RendererOpts): Renderer
     mountPoint = staging
     built = []
     keptParent = if firstNew > 0 then entries[firstNew - 1].instance else null
+    keepPrefix = firstNew > 0
+    # A forced dirty remount (apply) keeps the same prefix rule as layout
+    # reuse: the rebuilt suffix commits into the KEPT parent's slot — the
+    # innermost living layout's outlet when only the page rebuilds, an
+    # outer layout's outlet when a layout rebuilds too. (The previous
+    # page slot belongs to the subtree being replaced.)
+    into = if keepPrefix then layoutMountPoint(keptParent, target) else target
     try
       for entry, index in entries.slice(firstNew)
         parent = built[built.length - 1] ?? keptParent
         instance = construct entry, parent
         built.push instance
         entry.instance = instance
+        # The first rebuilt entry mounts into staging and claims its real
+        # slot at commit; the ones below mount straight into live slots.
+        claimSlot entry, mountPoint if index > 0
         instance.mount? mountPoint
         if instance._state is 'failed'
           throw Error.new "Rip App: component '#{entry.file}' failed during mount"
@@ -463,10 +513,8 @@ export def createRenderer(opts: RendererOpts): Renderer
       if mine isnt generation
         cleanup built
         return null
-      # A forced dirty remount (apply) keeps the same prefix rule as
-      # layout reuse: commit into the living layout's page slot.
-      keepPrefix = firstNew > 0
-      commitStaging staging, (if keepPrefix then pageMountPoint ?? target else target)
+      claimSlot entries[firstNew], into if keepPrefix
+      commitStaging staging, into
       # Staging fragments are empty after commit — drop them as `_target`
       # so HMR patch reinserts into the live parent, not the husk.
       for instance in built
@@ -475,13 +523,13 @@ export def createRenderer(opts: RendererOpts): Renderer
       cleanup built
       throw error
 
-    keepPrefix = firstNew > 0
     oldInstances = if keepPrefix then instances.slice(firstNew) else instances
     keptInstances = if keepPrefix then instances.slice(0, firstNew) else []
     instances = [...keptInstances, ...built]
     current = built[built.length - 1] ?? null
-    unless keepPrefix
-      pageMountPoint = if entries.length > 1 then mountPoint else null
+    # The page slot is the innermost layout's outlet: the last rebuilt
+    # layout's when one was rebuilt, else the kept parent's.
+    pageMountPoint = if entries.length is 1 then null else if built.length > 1 then mountPoint else into
     mountedEntries = entries
     lastRoute = { file: route.file, params, query }
     teardownErrors = cleanup oldInstances
@@ -534,58 +582,106 @@ export def createRenderer(opts: RendererOpts): Renderer
       return value if isComponent value
     null
 
+  # Every living instance a dirty module must account for: its entries in
+  # the mounted chain and every registered instance under its id prefix.
+  # Each instance is paired with its chain entry when it has one — found
+  # by identity, so a layout whose route file re-exports a component
+  # defined elsewhere still reseats its descendants after a patch.
+  # Snapshotted before any patch runs — patching mutates the registry.
+  livingFor = (path) ->
+    prefix = path + '#'
+    found = []
+    for entry in mountedEntries when entry.file is path and entry.instance?
+      found.push entry.instance
+    for [id, reg] in __hmrEntries() when typeof id is 'string' and id.startsWith(prefix)
+      for instance in reg.instances
+        found.push instance unless found.includes instance
+    for instance in found
+      { instance, entry: mountedEntries.find((entry) -> entry.instance is instance) ?? null }
+
   # Signature-aware refresh: patch living instances when the compiler
-  # signatures allow. Migrate/remount tiers fall back to the narrow
-  # remount floor below (with UI focus/scroll restore around it).
+  # signatures allow. The verdict names what the dirty set contained:
+  #   'done'     — living instances were patched (layouts reseat their
+  #                descendants; see reseatChain)
+  #   'fallback' — a living instance exists that no patch can carry
+  #                (incompatible signature, vanished or deleted
+  #                definition, an instance that is not mounted): the
+  #                remount floor below takes over
+  #   'idle'     — every dirty module is accounted for and none has a
+  #                living instance: a module that exports no
+  #                HMR-identified component reaches the page only
+  #                through importers, which the dirty set carries
+  #   'unknown'  — a dirty module the candidate cannot account for (a
+  #                path it still holds but did not compile): the floor
+  #                is the honest tier
   tryHmrPatch = (paths, candidate) ->
     dirty = (path for path in paths when typeof path is 'string' and path.endsWith('.rip'))
-    return 'empty' unless dirty.length > 0
+    return 'unknown' unless dirty.length > 0
     patched = 0
+    unknown = false
     seen = Set.new()
     for path in dirty
       module = candidate.getCompiled path
-      continue unless module?
-      prefix = path + '#'
-      for entry in mountedEntries when entry.file is path and entry.instance?
-        id = entry.instance.constructor?.__hmrId
-        continue unless typeof id is 'string' and id.startsWith(prefix)
-        NewCtor = hmrCtorFor module, id
-        continue unless NewCtor?
+      living = livingFor path
+      unless module?
+        # A deleted path has no view to patch into: its living instances
+        # fall to the floor, and none at all is nothing to do. A path the
+        # candidate still holds but did not compile is unaccounted for.
+        if typeof candidate.exists is 'function' and not candidate.exists(path)
+          return 'fallback' if living.some (item) -> item.instance._state isnt 'unmounted'
+        else
+          unknown = true
+        continue
+      for { instance, entry } in living
+        continue if seen.has instance
+        # Torn down earlier in this round (a parent and its child exported
+        # by one module): nothing left to patch. Any other state that is
+        # not mounted — failed, or constructed and never mounted — is a
+        # living instance no patch can carry.
+        continue if instance._state is 'unmounted'
+        return 'fallback' unless instance._state is 'mounted'
+        id = instance.constructor?.__hmrId
+        NewCtor = if typeof id is 'string' then hmrCtorFor(module, id) else null
+        return 'fallback' unless NewCtor?
         __hmrRegisterDefinition NewCtor
-        return 'fallback' unless __hmrClassify(entry.instance.constructor, NewCtor) is 'patch'
-        __hmrPatch entry.instance, NewCtor
-        entry.cls = NewCtor
-        seen.add entry.instance
+        return 'fallback' unless __hmrClassify(instance.constructor, NewCtor) is 'patch'
+        __hmrPatch instance, NewCtor
+        seen.add instance
         patched += 1
-      for [id, reg] in __hmrEntries()
-        continue unless typeof id is 'string' and id.startsWith(prefix)
-        NewCtor = hmrCtorFor module, id
-        continue unless NewCtor?
-        __hmrRegisterDefinition NewCtor
-        for instance in [...reg.instances]
-          continue if seen.has instance
-          return 'fallback' unless __hmrClassify(instance.constructor, NewCtor) is 'patch'
-          __hmrPatch instance, NewCtor
-          seen.add instance
-          patched += 1
-    if patched > 0 then 'done' else 'empty'
+        if entry?
+          entry.cls = NewCtor
+          reseatChain() unless entry is mountedEntries[mountedEntries.length - 1]
+    return 'done' if patched > 0
+    if unknown then 'unknown' else 'idle'
 
   # Publication apply seam: signature patch when possible, otherwise
   # remount living route/layout instances from the first dirty module
   # down, keeping ancestor layouts and the live stash. Stash-module
-  # edits escape to document reload (rare definition change).
+  # edits escape to document reload (rare definition change). A dirty
+  # set with no living instance is a noop while the current route is the
+  # mounted one: the Workspace commit carries the new source to the next
+  # navigation that mounts it.
   remountDirty = (paths, candidate = components) ->
     return 'noop' unless Array.isArray(paths) and paths.length > 0
     for path in paths
       return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'data.rip'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
+    layoutFiles = info.layouts ?? info.route.layouts ?? []
+    chain = [...layoutFiles, info.route.file]
+    # After a navigation whose mount failed, the previous screen is still
+    # up and the current route's modules have no living instance: that is
+    # not idle — the floor mounts the route once its modules are fixed.
+    routeMounted = sameChain chain, mountedEntries.map((entry) -> entry.file)
     snap = __hmrSnapshotUi()
     try
       verdict = tryHmrPatch paths, candidate
       if verdict is 'done'
         __hmrRestoreUi snap
         return 'narrow'
+      if verdict is 'idle' and routeMounted
+        __hmrEmit 'noop', paths: [...paths]
+        return 'noop'
     catch error
       # A failed patch falls through to remount — never leave a half-patched tree.
       console.error '[Rip] HMR patch failed; falling back to remount:', error
@@ -594,8 +690,6 @@ export def createRenderer(opts: RendererOpts): Renderer
         paths: [...paths]
         message: error?.message ? String(error.message) : String(error)
     dirty = Set.new paths
-    layoutFiles = info.layouts ?? info.route.layouts ?? []
-    chain = [...layoutFiles, info.route.file]
     firstDirty = -1
     for file, index in chain
       if dirty.has file
