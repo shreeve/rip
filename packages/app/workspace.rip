@@ -28,7 +28,7 @@ export type Workspace =
   setCompiled: (path: string, module: Record<string, unknown>) => void
   hash: () => string | null
   activate: (state: PreparedWorkspace) => void
-  stage: (from: string, state: PreparedWorkspace, changed: string[]) => { components: { getCompiled: (path: string) => Record<string, unknown> | undefined }, commit: () => void, rollback: () => void }
+  stage: (from: string, state: PreparedWorkspace, changed: string[]) => { components: { getCompiled: (path: string) => Record<string, unknown> | undefined, exists: (path: string) => boolean }, commit: () => void, rollback: () => void }
   commit: (from: string, state: PreparedWorkspace, changed: string[]) => void
 
 validPath = (path) ->
@@ -210,7 +210,12 @@ export def createWorkspace(): Workspace
           notify event, path
         return
       {
-        components: { getCompiled: (path) -> next.compiled.get validPath(path) }
+        # The staged registry the apply seam reads: a path the candidate
+        # no longer holds reads as absent, so a deleted module is told
+        # apart from one the candidate did not compile.
+        components:
+          getCompiled: (path) -> next.compiled.get validPath(path)
+          exists: (path) -> next.sources.has validPath(path)
         commit: -> finish true
         rollback: -> finish false
       }

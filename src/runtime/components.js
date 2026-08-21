@@ -231,15 +231,86 @@ function __hmrPreserveState(oldInstance, newInstance) {
   return { ...diff, copied };
 }
 
+// Focus survives a refresh by LOCATOR, never by node identity: the
+// refresh replaces the focused element, so the snapshot records how to
+// find its successor in the rebuilt tree — the element's id when it has
+// one, else its element path down from document.body — together with
+// the identity the successor must carry (tag, name, type, placeholder,
+// aria-label, and the value the focused element held). Identity is what
+// keeps a restore from landing on a different field of the same kind
+// when the edit inserted or removed an element ahead of the focused one.
+const __HMR_IDENTITY_PROPS = ['name', 'type', 'placeholder'];
+
+function __hmrIdentityOf(el) {
+  const prop = (key) => (typeof el[key] === 'string' && el[key] ? el[key] : null);
+  const identity = { tag: el.tagName ?? null };
+  for (const key of __HMR_IDENTITY_PROPS) identity[key] = prop(key);
+  identity.label = typeof el.getAttribute === 'function' ? el.getAttribute('aria-label') : null;
+  identity.value = typeof el.value === 'string' ? el.value : null;
+  return identity;
+}
+
+function __hmrSameIdentity(el, identity, withValue) {
+  if (!el || !identity) return false;
+  const candidate = __hmrIdentityOf(el);
+  for (const key of ['tag', ...__HMR_IDENTITY_PROPS, 'label']) {
+    if (candidate[key] !== identity[key]) return false;
+  }
+  return !withValue || identity.value == null || candidate.value === identity.value;
+}
+
+function __hmrLocateActive(el) {
+  const identity = __hmrIdentityOf(el);
+  const id = typeof el.id === 'string' && el.id ? el.id : null;
+  const path = [];
+  let node = el;
+  while (node && node !== document.body) {
+    const parent = node.parentElement ?? node.parentNode ?? null;
+    if (!parent || !parent.children) return { identity, id, path: null };
+    path.unshift(Array.prototype.indexOf.call(parent.children, node));
+    node = parent;
+  }
+  return { identity, id, path: node === document.body ? path : null };
+}
+
+// The successor: the still-connected element itself; else the element
+// with the same id when it carries the same identity; else the element
+// at the recorded path when it carries the same identity and value; else
+// the one sibling at that level that does — and nothing when that is
+// ambiguous, because a wrong field is worse than a lost caret.
+function __hmrResolveActive(snap) {
+  const el = snap.active;
+  if (el && el.isConnected !== false && typeof document.contains === 'function' && document.contains(el)) return el;
+  const locator = snap.locator;
+  if (!locator) return null;
+  if (locator.id && typeof document.getElementById === 'function') {
+    const byId = document.getElementById(locator.id);
+    if (__hmrSameIdentity(byId, locator.identity, false)) return byId;
+  }
+  if (!Array.isArray(locator.path) || locator.path.length === 0) return null;
+  let parent = document.body;
+  for (const index of locator.path.slice(0, -1)) {
+    parent = parent?.children?.[index] ?? null;
+    if (!parent) return null;
+  }
+  const siblings = Array.from(parent.children ?? []);
+  const atPath = siblings[locator.path[locator.path.length - 1]] ?? null;
+  if (__hmrSameIdentity(atPath, locator.identity, true)) return atPath;
+  const matching = siblings.filter((node) => __hmrSameIdentity(node, locator.identity, true));
+  return matching.length === 1 ? matching[0] : null;
+}
+
 function __hmrSnapshotUi() {
   if (typeof document === 'undefined') return null;
   const active = document.activeElement;
+  const focused = active && active !== document.body && active !== document.documentElement ? active : null;
   let selection = null;
-  if (active && typeof active.selectionStart === 'number') {
-    selection = { start: active.selectionStart, end: active.selectionEnd };
+  if (focused && typeof focused.selectionStart === 'number') {
+    selection = { start: focused.selectionStart, end: focused.selectionEnd, direction: focused.selectionDirection };
   }
   return {
-    active: active && active !== document.body && active !== document.documentElement ? active : null,
+    active: focused,
+    locator: focused ? __hmrLocateActive(focused) : null,
     selection,
     scrollX: typeof window !== 'undefined' ? window.scrollX : 0,
     scrollY: typeof window !== 'undefined' ? window.scrollY : 0,
@@ -249,12 +320,13 @@ function __hmrSnapshotUi() {
 function __hmrRestoreUi(snap) {
   if (!snap || typeof document === 'undefined') return;
   if (typeof window !== 'undefined') window.scrollTo(snap.scrollX ?? 0, snap.scrollY ?? 0);
-  const el = snap.active;
-  if (!el || !document.contains(el) || typeof el.focus !== 'function') return;
+  const el = __hmrResolveActive(snap);
+  if (!el || typeof el.focus !== 'function') return;
   try {
-    el.focus();
+    // The scroll position was just restored; focusing must not move it.
+    el.focus({ preventScroll: true });
     if (snap.selection && typeof el.setSelectionRange === 'function') {
-      el.setSelectionRange(snap.selection.start, snap.selection.end);
+      el.setSelectionRange(snap.selection.start, snap.selection.end, snap.selection.direction ?? 'none');
     }
   } catch { /* focus/selection can reject on non-focusable nodes */ }
 }

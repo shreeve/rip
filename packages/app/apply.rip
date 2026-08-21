@@ -44,12 +44,9 @@ export def createApply(opts: ApplyOpts): Apply
       return 'css' if css.length > 0
       return 'ignore'
 
-    verdict = 'escape'
-    try
-      verdict = opts.renderer.remountDirty! rip, candidate
-    catch error
-      report '[Rip] update failed', error
-      throw error
+    # A failed narrow update propagates to the caller, which owns the
+    # failure report; absorb reports progress only.
+    verdict = opts.renderer.remountDirty! rip, candidate
 
     if verdict is 'narrow'
       report "[Rip] applied #{rip.join ', '} — update"

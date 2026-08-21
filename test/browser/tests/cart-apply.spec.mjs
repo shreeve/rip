@@ -314,4 +314,107 @@ test.describe('cart publication apply', () => {
       edit.restore();
     }
   });
+
+  // A layout patch rebuilds the layout's view and reseats the route below
+  // it: the page stays visible in the live slot, and the next navigation
+  // renders there too.
+  test('layout markup edit keeps the mounted route visible and navigable', async ({ page }) => {
+    await bootCart(page);
+    const cards = page.locator('#content article');
+    await expect(cards.first()).toBeVisible({ timeout: 15000 });
+    const cardCount = await cards.count();
+    expect(cardCount).toBeGreaterThan(0);
+    await listenHmr(page);
+
+    const stamp = Date.now().toString(36).slice(-4);
+    const edit = await editFile('app/routes/_layout.rip', (src) =>
+      src.replace(/strong 'Shop[^']*'/, `strong 'Shop ${stamp}'`));
+
+    try {
+      await expect(page.locator('nav')).toContainText(`Shop ${stamp}`, { timeout: 15000 });
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
+      { timeout: 10000 }).toBe(true);
+      expect(await page.evaluate(() =>
+        globalThis.__ripHmr.some((e) => e?.type === 'remount'))).toBe(false);
+      // The whole page is still on screen, inside the live slot — the
+      // product grid too, which a top-level block mounted outside the
+      // page's own create-phase nodes.
+      await expect(page.locator('#content h1')).toHaveText('Products');
+      await expect(cards).toHaveCount(cardCount);
+      await expect(cards.first()).toBeVisible();
+      // Navigation renders into the live slot.
+      await page.locator('nav').getByRole('link', { name: /Cart/ }).click();
+      await expect(page.locator('#content h1')).toHaveText('Cart', { timeout: 15000 });
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+    } finally {
+      edit.restore();
+      await expect(page.locator('nav')).not.toContainText(stamp, { timeout: 20000 });
+    }
+  });
+
+  // Focus and caret come back by locator after the view is rebuilt.
+  test('focus and caret survive a render-only edit', async ({ page }) => {
+    await bootCart(page);
+    await page.goto('/profile');
+    await expect(page.locator('h1')).toHaveText('Profile', { timeout: 20000 });
+
+    const first = page.locator('input').first();
+    const value = await first.inputValue();
+    expect(value.length).toBeGreaterThan(2);
+    await first.click();
+    await page.evaluate(() => document.activeElement.setSelectionRange(2, 2));
+    expect(await page.evaluate(() => document.activeElement === document.querySelector('input'))).toBe(true);
+    await listenHmr(page);
+
+    const stamp = Date.now().toString(36).slice(-4);
+    const edit = await editFile('app/routes/profile.rip', (src) =>
+      src.replace("h1 'Profile'", `h1 'Profile ${stamp}'`));
+
+    try {
+      await expect(page.locator('h1')).toContainText(stamp, { timeout: 15000 });
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) => e?.type === 'patch')),
+      { timeout: 10000 }).toBe(true);
+      expect(await page.evaluate(() => ({
+        focused: document.activeElement === document.querySelector('input'),
+        caret: document.activeElement?.selectionStart,
+      }))).toEqual({ focused: true, caret: 2 });
+      // Typing lands in the field, at the caret.
+      await page.keyboard.type('X');
+      await expect(first).toHaveValue(`${value.slice(0, 2)}X${value.slice(2)}`);
+    } finally {
+      await edit.restoreAndSettle(page, 'Profile');
+    }
+  });
+
+  // A dirty set with no living instance is a noop: the current page keeps
+  // its state, and the committed source reaches the route when it mounts.
+  test('an edit to an unmounted route leaves the current page alone', async ({ page }) => {
+    await reachOrderPlaced(page);
+    await listenHmr(page);
+
+    const stamp = Date.now().toString(36).slice(-4);
+    const edit = await editFile('app/routes/orders/index.rip', (src) =>
+      src.replace("h1 'Orders'", `h1 'Orders ${stamp}'`));
+
+    try {
+      await expect.poll(async () =>
+        page.evaluate(() => globalThis.__ripHmr.some((e) =>
+          e?.type === 'noop' && e.paths?.includes('routes/orders/index.rip'))),
+      { timeout: 15000 }).toBe(true);
+      expect(await page.evaluate(() =>
+        globalThis.__ripHmr.some((e) => e?.type === 'remount'))).toBe(false);
+      await expect(page.locator('h1')).toHaveText('Order Placed!');
+      await expect(page.getByRole('button', { name: 'Continue Shopping' })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Your cart is empty');
+      expect(await page.evaluate(() => globalThis.__wsSentinel)).toBe('alive');
+
+      await page.locator('nav summary').click();
+      await page.locator('nav').getByRole('link', { name: 'Orders' }).click();
+      await expect(page.locator('h1')).toHaveText(`Orders ${stamp}`, { timeout: 15000 });
+    } finally {
+      await edit.restoreAndSettle(page, 'Orders');
+    }
+  });
 });
