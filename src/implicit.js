@@ -424,7 +424,15 @@ const controlHeadBackwards = (tokens, j) => {
 // (sameLine) close at IMPLICIT_END boundaries except logical operators
 // (`a: 1 && 2` binds the value) and except a POST_IF/POST_UNLESS whose
 // property list continues (the guard binds the first line's value —
-// objectContinues below); multi-line objects (startsLine) stay open
+// objectContinues below). That exception is gated on startsLine for the
+// same reason the TERMINATOR rule below is: objectContinues looks PAST a
+// line break, and only a line-starting object may span one. A key that
+// opens an implicit call is never line-starting, so in `f a: 1 if c` the
+// guard belongs to the STATEMENT — without the gate, a following
+// `x: 1` line (an implicit-return object, say) made the pair look like a
+// continuing property list and the guard collapsed into the argument as
+// `f({a: c ? 1 : undefined})`, calling f unconditionally with undefined;
+// multi-line objects (startsLine) stay open
 // across TERMINATOR while the next line looks objectish; a comma whose
 // next element is not objectish closes (`x = a: 1, b` is an object
 // then a syntax error); enclosing closers and INDENT (unless
@@ -679,7 +687,7 @@ function collectObjects(tokens, mintId) {
           else break;
         } else {
           if (fr.sameLine && prev?.kind !== ':' &&
-              !((k === 'POST_IF' || k === 'POST_UNLESS') && objectContinues(i + 1))) closeObject(i);
+              !((k === 'POST_IF' || k === 'POST_UNLESS') && fr.startsLine && objectContinues(i + 1))) closeObject(i);
           else break;
         }
       }

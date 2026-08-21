@@ -3571,7 +3571,7 @@ function collectObjects(tokens, mintId) {
           else
             break;
         } else {
-          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && objectContinues(i + 1)))
+          if (fr.sameLine && prev?.kind !== ":" && !((k === "POST_IF" || k === "POST_UNLESS") && fr.startsLine && objectContinues(i + 1)))
             closeObject(i);
           else
             break;

@@ -443,3 +443,44 @@ describe('match reads deliver the stdlib runtime', () => {
       .toEqual(['42', 'x42', '7', 'shadow']);
   });
 });
+
+describe("a postfix guard on a call's named arguments binds the CALL", () => {
+  // The guard used to migrate into the argument when an implicit-return
+  // object followed, emitting `f({a: cond ? v : undefined})` — so the
+  // call fired unconditionally, with undefined, on the branch where
+  // there was nothing to do. objectContinues looks PAST a line break, so
+  // it is gated on startsLine exactly as the TERMINATOR rule is; a key
+  // that opens an implicit call is never line-starting.
+  test('the guard stays on the statement when an object literal follows', () => {
+    const src = ['f = (p, r) ->', '  p.set a: r.v if p.a isnt r.v', '', '  m: 1', '  n: 2'].join('\n');
+    expect(compile(src)).toBe([
+      'let f = function(p, r) {',
+      '  if (p.a !== r.v) p.set({a: r.v});',
+      '  return {m: 1, n: 2};',
+      '};',
+    ].join('\n'));
+  });
+
+  test('the call really does not fire when the guard is false', () => {
+    const src = [
+      'calls = []',
+      'p = { set: (o) -> calls.push o }',
+      'f = (v) ->',
+      '  p.set a: v if v',
+      '',
+      '  done: true',
+      'f null',
+      'f 7',
+      'calls',
+    ].join('\n');
+    expect(eval(compile(src))).toEqual([{ a: 7 }]);
+  });
+
+  test('a line-starting object still lets the guard bind the VALUE', () => {
+    expect(compile('x =\n  a: 1 if c\n  b: 2')).toBe('let x = {a: (c ? 1 : undefined), b: 2};');
+  });
+
+  test('with no continuation the guard already bound the statement', () => {
+    expect(compile('y = f a: 1 if c')).toBe('let y;\n\nif (c) y = f({a: 1});');
+  });
+});
