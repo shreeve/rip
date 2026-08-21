@@ -228,14 +228,22 @@ public final class TrayProvider: ObservableObject {
     environment["PATH"] = bin + ":" + environment["PATH", default: ""]
     process.environment = environment
 
+    // Empty availableData means EOF; the handle stays readable forever after,
+    // so the handler must be removed or GCD re-invokes it in a busy loop.
     stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
       let data = handle.availableData
-      guard !data.isEmpty else { return }
+      guard !data.isEmpty else {
+        handle.readabilityHandler = nil
+        return
+      }
       Task { @MainActor in self?.receive(data) }
     }
     stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
       let data = handle.availableData
-      guard !data.isEmpty else { return }
+      guard !data.isEmpty else {
+        handle.readabilityHandler = nil
+        return
+      }
       Task { @MainActor in self?.receiveError(data) }
     }
     process.terminationHandler = { [weak self] process in
