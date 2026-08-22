@@ -43,8 +43,8 @@ type RouteRecord =
   _chainEpoch?: number
 
 _: RegExpMatchArray | null            = null  # Match capture holder for Rip's =~
-_errorHandler: Function | null        = null  # Custom error handler
-_notFoundHandler: Function | null     = null  # Custom 404 handler
+_errorHandler: ErrorHandler | null    = null  # Custom error handler
+_notFoundHandler: RouteHandler | null = null  # Custom 404 handler
 _rawFilter: Function | null           = null  # Raw request filter (before body parsing)
 _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
@@ -215,6 +215,13 @@ export type Ctx =
   mark?: string                  # the request's correlation id, set by the handler
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
+
+# The leading options slot a verb accepts before its handlers: `input:` wires
+# schema validation and the OpenAPI contract.
+export type RouteOptions = { input?: Record<string, any> }
+
+# The custom error handler: the thrown value, then the request context.
+export type ErrorHandler = (this: Ctx, error: any, c: Ctx) => any
 
 # Duration units for @cache. Every accepted spelling is listed — plurals
 # included — so nothing is inferred: `m` is minutes, a month is spelled
@@ -485,12 +492,12 @@ addRoute = (method, path, ...handlers) ->
       inputSchema: null,
     }
 
-export get:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
-export post:  (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
-export put:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
-export patch: (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
-export del:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
-export all:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
+export get:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
+export post:  (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
+export put:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
+export patch: (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
+export del:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
+export all:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
 
 # ==============================================================================
 # OpenAPI generation
@@ -578,7 +585,7 @@ export prefix = (base, fn) ->
   finally
     _prefix = old
 
-export onError:  (handler: RouteHandler) => void = (handler) -> _errorHandler = handler
+export onError:  (handler: ErrorHandler) => void = (handler) -> _errorHandler = handler
 export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler = handler
 
 export raw: (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn

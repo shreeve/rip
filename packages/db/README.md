@@ -2,7 +2,7 @@
 
 # Rip DB
 
-> **DuckDB over duckdb-harbor — connect(), module-level query, MCP stdio server, and rip-db CLI.**
+> **DuckDB over duckdb-harbor — connect(), module-level sql, MCP stdio server, and rip-db CLI.**
 
 The client tier for a running
 [duckdb-harbor](https://github.com/shreeve/duckdb-harbor) instance. The
@@ -11,7 +11,7 @@ taxonomy, temporal encode/decode, timeouts, and cancellation — is the
 core runtime's DuckDB substrate (`src/runtime/duckdb.js`), shared with
 the `schema :model` ORM; this package re-exports that adapter and layers
 the client ergonomics on top: a process-wide default (`connect` +
-module-level `query` / `findOne` / `findAll` / `transaction`), a
+module-level `sql` / `findOne` / `findAll` / `transaction`), a
 materializing client (`createClient`) with a retrying transaction
 runner, a boot-time reachability probe, an MCP stdio server for
 assistants, and the `rip-db` dump/load/checkpoint CLI. Harbor is never
@@ -57,7 +57,7 @@ export RIP_DB_TOKEN=rip-token   # omit only if harbor_serve(..., token := NULL)
 Use Rip's dammit operator (`!`) to call and await in one step.
 
 ```coffee
-import { connect, ensureRunning, findOne, findAll, query, transaction } from 'rip/db'
+import { connect, ensureRunning, findOne, findAll, sql, transaction } from 'rip/db'
 
 ensureRunning!    # fail fast if harbor is down
 connect!          # process default from env (or connect! url)
@@ -65,14 +65,14 @@ connect!          # process default from env (or connect! url)
 # Positional ? params — never interpolate values into SQL strings
 user  = findOne! 'SELECT * FROM users WHERE id = ?', [1]
 list  = findAll! 'SELECT * FROM users WHERE active = ?', [true]
-count = (query! 'SELECT count(*) AS n FROM users').rows[0].n
+count = (sql! 'SELECT count(*) AS n FROM users').rows[0].n
 
 newId = transaction! (tx) ->
   (tx.one! 'INSERT INTO users (name) VALUES (?) RETURNING id', ['Grace']).id
 ```
 
 `connect` installs a process-wide default and rewires it on later
-calls. Skip it and the first `query!` call lazy-connects from env.
+calls. Skip it and the first `sql!` call lazy-connects from env.
 Power users can still build `harborAdapter` + `createClient` by hand.
 
 ### 3. Ops CLI (same env)
@@ -95,7 +95,7 @@ rip packages/db/example.rip
 
 - **`connect()`** — installs the process default (harbor adapter +
   client); soft-wires schema `:model` when that runtime is loaded
-- **Module-level API** — `query` / `findOne` / `findAll` /
+- **Module-level API** — `sql` / `findOne` / `findAll` /
   `transaction` / `begin` over that default
 - **Client surface** — materialize to row objects, `rows` / `one` /
   `value` on the client, nested-joining transactions with a retry
@@ -156,8 +156,8 @@ file (`duckdb -init ~/.duckdb-harbor.rc my.duckdb`).
 |---|---|
 | One row object (or `null`) | `findOne! sql, params` |
 | Array of row objects | `findAll! sql, params` |
-| Rows + column names + count | `query! sql, params` → `{ rows, columns, rowCount }` |
-| First scalar | `(query! 'SELECT count(*) AS n FROM t').rows[0].n` — or `db.value!` on the client |
+| Rows + column names + count | `sql! text, params` → `{ rows, columns, rowCount }` |
+| First scalar | `(sql! 'SELECT count(*) AS n FROM t').rows[0].n` — or `db.value!` on the client |
 
 Module-level names are `findOne` / `findAll` so you can write
 `rows = findAll! …` without shadowing an import. The client object from
@@ -175,7 +175,7 @@ db.value! 'SELECT count(*) AS n FROM users'
 
 Row keys are the database's own spellings — raw SQL is never rewritten.
 For rows headed to camelCase-keyed consumers, pass `{ camel: true }` in
-any call's options (`query! sql, params, { camel: true }` — likewise
+any call's options (`sql! text, params, { camel: true }` — likewise
 `findAll` / `findOne`, every client method, transaction surfaces, and
 `materializeAll(result, { camel: true })`) to opt that result's row
 keys and reported `columns` into a snake_case → camelCase projection.
@@ -195,16 +195,16 @@ objects and projects them:
 
 | Client method | Module-level | Returns |
 |---|---|---|
-| `query` | `query` | `{ rows, columns, rowCount }` |
+| `sql` | `sql` | `{ rows, columns, rowCount }` |
 | `rows` | `findAll` | array of row objects |
 | `one` | `findOne` | first row or `null` |
-| `value` | — (use `client.value` or read `query!.rows`) | first scalar or `null` |
+| `value` | — (use `client.value` or read `sql!.rows`) | first scalar or `null` |
 
 ```coffee
 db = connect!
 
 db.transaction! (tx) ->
-  tx.query! 'INSERT INTO users (name) VALUES (?)', ['Ada']
+  tx.sql! 'INSERT INTO users (name) VALUES (?)', ['Ada']
   tx.one! 'SELECT * FROM users WHERE name = ?', ['Ada']
 ```
 
