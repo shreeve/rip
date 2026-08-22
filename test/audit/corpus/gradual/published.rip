@@ -24,3 +24,20 @@ Coupon = schema :model
   code! string
   @scope :active, -> @where(active: true)
 console.log(Coupon)
+
+# reach, flow through a call: a binding assigned from a typed call is typed
+# — a call is a value, unlike a function literal (TS2339)
+sized = (n: number): number -> n * 2
+doubled = sized(21)
+console.log(doubled.length)
+
+# reach, annotated lambda header: the header types the name and checks the
+# body (TS2339)
+shout = (word: string) -> word.size
+console.log(shout('hi'))
+
+# reach, annotation standing in a value: a typed method inside an object
+# literal types the object, so the method's caller is checked (TS2339)
+api =
+  fetch: (): number -> 42
+console.log(api.fetch().length)

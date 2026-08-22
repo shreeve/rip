@@ -69,6 +69,76 @@
       "code": 2339,
       "token": "count",
       "why": "the same method's member read against the literal type strict gives `this`"
+    },
+    {
+      "line": 61,
+      "character": 16,
+      "code": 2339,
+      "token": "factor",
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — the bare literal"
+    },
+    {
+      "line": 65,
+      "character": 16,
+      "code": 2339,
+      "token": "amount",
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a paramless `->`"
+    },
+    {
+      "line": 68,
+      "character": 15,
+      "code": 2339,
+      "token": "width",
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a parenthesized literal"
+    },
+    {
+      "line": 70,
+      "character": 8,
+      "code": 7006,
+      "token": "fn",
+      "why": "the implicit-any family on the wrapper's parameter: code-suppressed in gradual, published in strict"
+    },
+    {
+      "line": 72,
+      "character": 15,
+      "code": 2339,
+      "token": "depth",
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a literal passed as a call argument"
+    },
+    {
+      "line": 76,
+      "character": 17,
+      "code": 2339,
+      "token": "speed",
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a method inside an object literal"
+    },
+    {
+      "line": 86,
+      "character": 6,
+      "code": 2339,
+      "token": "status",
+      "why": "property seeding: `.new` on a typed line is a member name, not a binding — `Error.new` types nothing, so the expando write is held; strict publishes it"
+    },
+    {
+      "line": 95,
+      "character": 10,
+      "code": 7006,
+      "token": "side",
+      "why": "the implicit-any family on the lambda's parameter: code-suppressed in gradual, published in strict"
+    },
+    {
+      "line": 97,
+      "character": 9,
+      "code": 2339,
+      "token": "top",
+      "why": "property match: the object key `position` is text, not a reference to the annotated function, so the literal's shape is never reached; strict publishes the closed-literal write"
+    },
+    {
+      "line": 109,
+      "character": 0,
+      "code": 2322,
+      "token": "box",
+      "why": "inferred receiver: the field annotation sits on the class and nothing annotated reaches `box`, so the write is held — inference alone never publishes; strict checks it"
     }
   ],
   "published.rip": [
@@ -113,6 +183,27 @@
       "code": 2353,
       "token": ":model",
       "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared — anchored on the schema head"
+    },
+    {
+      "line": 32,
+      "character": 20,
+      "code": 2339,
+      "token": "length",
+      "why": "reach by flow through a CALL: a binding assigned from a typed call is typed — a call is a value, unlike a function body"
+    },
+    {
+      "line": 36,
+      "character": 31,
+      "code": 2339,
+      "token": "size",
+      "why": "reach by an annotated lambda HEADER: the header types the name and checks the body"
+    },
+    {
+      "line": 43,
+      "character": 24,
+      "code": 2339,
+      "token": "length",
+      "why": "reach by an annotation standing in a value: the typed method types the object literal it sits in, so the method's caller is checked"
     }
   ]
 }

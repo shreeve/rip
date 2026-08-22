@@ -817,6 +817,55 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // The gate reads BINDINGS, not text — the CLI's own check over a bare
+  // workspace; the corpus carries the same shapes with their rationale
+  // (test/audit/corpus/gradual/held.rip and published.rip, the `gate, …`
+  // and `reach, …` sections).
+  test('the gate reads bindings, not text: function bodies, member names, and object keys open nothing; calls and standing annotations flow', () => {
+    const dir = workspace({
+      'gate.rip': [
+        'export ratio: number = 0.5',
+        'scaled = (opts = {}) ->',
+        '  factor = opts.factor',          // held: a body reading `ratio` types nothing
+        '  factor * ratio',
+        'bare = ->',
+        '  opts = {}',
+        '  amount = opts.amount',          // held: a paramless lambda is a function too
+        '  amount * ratio',
+        'memo = (fn) -> fn',
+        'passed = memo((opts = {}) ->',
+        '  depth = opts.depth',            // held: a body inside a call argument
+        '  depth * ratio)',
+        'handlers =',
+        '  run: (opts = {}) ->',
+        '    speed = opts.speed',          // held: a body inside an object literal
+        '    speed * ratio',
+        'registry: Map<string, number> = Map.new()',
+        'failure = ->',
+        "  err = Error.new 'nope'",
+        '  err.status = 400',              // held: `new` is a member name, not a binding
+        '  err',
+        'export def position(el: string): void',
+        '  console.log(el)',
+        'layout = (side) ->',
+        "  styles = { position: 'fixed' }",
+        '  styles.top = side',             // held: the key `position` is not the function `position`
+        '  styles',
+        'sized = (n: number): number -> n * 2',
+        'doubled = sized(21)',
+        'console.log(doubled.length)',     // published: a call is a value
+        'api =',
+        '  fetch: (): number -> 42',
+        'console.log(api.fetch().length)', // published: an annotation standing in the value types `api`
+        'console.log scaled(), bare(), passed(), handlers.run(), registry, failure(), layout(1)',
+      ].join('\n') + '\n',
+    });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[2339, 30], [2339, 33]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A NESTED node_modules resolves through the mirror the way bun
   // resolves it at runtime: the face's ancestor walk lives in the mirror
   // tree, so a source-tree install (a quarantined bench dir with its own

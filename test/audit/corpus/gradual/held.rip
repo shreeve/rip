@@ -51,3 +51,60 @@ export label: (job: () => void) => void = (job) ->
 counter =
   bump: -> (@count or 0) + 1
 console.log(counter.bump())
+
+# gate, function bodies: a function's type is its header; a typed binding
+# read INSIDE a body types neither the name nor the untyped parameter's
+# member read on its own line — whatever wraps the literal (strict: TS2339
+# on each `{}` default)
+export ratio: number = 0.5
+scaled = (opts = {}) ->
+  factor = opts.factor
+  factor * ratio
+bare = ->
+  opts = {}
+  amount = opts.amount
+  amount * ratio
+wrapped = ((opts = {}) ->
+  width = opts.width
+  width * ratio)
+memo = (fn) -> fn
+passed = memo((opts = {}) ->
+  depth = opts.depth
+  depth * ratio)
+handlers =
+  run: (opts = {}) ->
+    speed = opts.speed
+    speed * ratio
+console.log(scaled(), bare(), wrapped(), passed(), handlers.run())
+
+# gate, property seeding: `.new` on a typed line is a member name, not a
+# binding; an `Error.new` elsewhere types nothing (strict: TS2339 on the
+# expando)
+registry: Map<string, number> = Map.new()
+failure = ->
+  err = Error.new 'nope'
+  err.status = 400
+  err
+console.log(registry, failure())
+
+# gate, property match: an object KEY spelling an annotated function's name
+# is text, not a reference — the literal's shape stays held (strict: TS2339
+# on the later key)
+export def position(el: string): void
+  console.log(el)
+layout = (side) ->
+  styles = { position: 'fixed' }
+  styles.top = side
+  styles
+console.log(layout('bottom'))
+
+# gate, inferred receiver: a typed class field written through a receiver
+# that only INFERENCE types is held — the annotation sits on the class, and
+# nothing annotated reaches `box` (strict: TS2322)
+class Box
+  count: number = 1
+def make()
+  Box.new()
+box = make()
+box.count = 'str'
+console.log(box)
