@@ -12,8 +12,9 @@
 # options on a runtime call — nothing binds their `this`; use `=>` to
 # capture a component lexically.
 
+# The action itself, carrying its reactive flags.
 export type Mutation<R> =
-  (...args: any[]) => Promise<R | undefined>
+  ((...args: any[]) => Promise<R | undefined>) & { readonly pending: boolean, readonly succeeded: boolean, readonly error: unknown }
 
 export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R>
   unless typeof fn is 'function'
@@ -23,8 +24,6 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
   _error     = __state(null as any)
   generation = 0
 
-  # `any` because the callable + reactive-flags intersection is
-  # assembled at runtime — TS cannot see the flags on the function.
   mutation = (...args) ->
     me = ++generation
     __batch ->
@@ -64,4 +63,6 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
   Object.defineProperty mutation, 'pending',   { get: -> _pending.value }
   Object.defineProperty mutation, 'succeeded', { get: -> _succeeded.value }
   Object.defineProperty mutation, 'error',     { get: -> _error.value }
-  mutation
+  # The flags are the accessors defined above; a recovering onError's
+  # return flows through as the result, untyped.
+  mutation as Mutation<R>

@@ -32,6 +32,9 @@ export type SourceCell<T> =
 
 export type SourceFamily<T, K> = ((key: K) => T | null) & { cellFor: (key: K) => SourceCell<T>, reset: () => void }
 export type SourceValue<T, A extends SourceArgs> = A extends [] ? T | null : A extends [infer K] ? SourceFamily<T, K> : never
+# A declaration is a phantom brand over the runtime cell or family — the
+# stash reads the value/args types off it and never the brand itself, which
+# is why the family (a callable) is re-branded through `unknown`.
 export type SourceDeclaration<T, A extends SourceArgs> = { readonly __ripSource: { value: T, args: A } }
 
 SOURCE =! :rip.source
@@ -263,8 +266,8 @@ export def source<T extends NonNullSourceValue, A extends SourceArgs>(opts: Sour
       return makeSourceCell(opts.fetch, staleTime) as SourceDeclaration<T, A>
     if opts.fetch.length < 1 or opts.fetch.length > 2
       throw TypeError.new "Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter"
-    return makeSourceFamily(opts.fetch, staleTime) as SourceDeclaration<T, A>
+    return makeSourceFamily(opts.fetch, staleTime) as unknown as SourceDeclaration<T, A>
 
   if opts.fetch.length > 1
     throw TypeError.new 'Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family'
-  if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) as SourceDeclaration<T, A> else makeSourceCell(opts.fetch, staleTime) as SourceDeclaration<T, A>
+  if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) as unknown as SourceDeclaration<T, A> else makeSourceCell(opts.fetch, staleTime) as SourceDeclaration<T, A>

@@ -23,7 +23,10 @@ resolveStorage = (opts) ->
     throw Error.new 'Rip App: persistStash requires a browser or an injected storage'
   if opts.local then window.localStorage else window.sessionStorage
 
-export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: number, storage?: any } = {}): () => void
+# What persistence needs of a storage: the three Web Storage calls it makes.
+export type StashStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
   target = unwrapStash(app) or app
   return (-> null) if target[PERSISTED]
   target[PERSISTED] = true

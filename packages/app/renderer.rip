@@ -1,5 +1,5 @@
 import { unwrapStash } from './stash.rip'
-import { _isSourceCell, _isSourceFamily } from './source.rip'
+import { _isSourceCell, _isSourceFamily, SourceCell } from './source.rip'
 import {
   __claimGateConstructor
   __hmrClassify
@@ -34,7 +34,7 @@ export type Renderer =
   remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
   start: () => Renderer
   stop: () => void
-  readonly current: any
+  readonly current: Record<string, any> | null
 
 export type RendererOpts =
   router: Record<string, any>
@@ -43,9 +43,37 @@ export type RendererOpts =
   target: Record<string, any>
   onError?: (failure: GateFailure) => void
 
+# One mounted component in the route chain: its file, class, living
+# instance, resolved gate bindings, and the slot it mounted into.
+type MountedEntry =
+  file: string
+  cls: Record<string, any>
+  instance?: Record<string, any> | null
+  bindings?: MountBinding[]
+  slot?: Record<string, any> | null
+  slotOwned?: number
+
+# A component class as HMR sees it: stamped with an identity.
+type HmrCtor = Function & { __hmrId?: string }
+
+type MountBinding =
+  path: string
+  file: string
+  tail: string[]
+  cell: SourceCell<unknown>
+  value?: unknown
+
+# The node showFatalCard appends when there is no DOM: a test target keeps
+# plain `children` arrays, so the stand-in removes itself by splicing.
+type FatalStub =
+  nodeName: string
+  textContent: string
+  parentNode: { children: FatalStub[] } | null
+  remove: () => void
+
 failureFor = (path: string, file: string, error, message: string | null = null): GateFailure ->
   text = message ?? error?.message ?? String(error)
-  failure = Error.new text
+  failure = Error.new(text) as GateFailure
   failure.name = 'GateFailure'
   failure.status = error?.status ?? error?.response?.status ?? 500
   failure.path = path
@@ -88,7 +116,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   current = null
   generation = 0
   disposeRoute = null
-  mountedEntries: any[] = []
+  mountedEntries: MountedEntry[] = []
   pageMountPoint = null
   lastRoute = null
   forceFrom = null
@@ -182,7 +210,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     # entry decides the boundary, and every entry below it still gets its
     # binding values populated so a boundary chain constructs against the
     # full render-gate contract.
-    failing = null
+    failing: (GateFailure & { entryIndex: number }) | null = null
     consider = (failure, entryIndex) ->
       failure.entryIndex = entryIndex
       failing = failure if not failing? or entryIndex < failing.entryIndex
@@ -265,14 +293,17 @@ export def createRenderer(opts: RendererOpts): Renderer
       card.textContent = text
       card
     else
-      card = { nodeName: 'PRE', textContent: text }
-      card.remove = ->
-        siblings = card.parentNode?.children
-        index = siblings?.indexOf(card) ?? -1
-        siblings.splice index, 1 if index >= 0
-        card.parentNode = null
-        return
-      card
+      stub: FatalStub =
+        nodeName: 'PRE'
+        textContent: text
+        parentNode: null
+        remove: ->
+          siblings = stub.parentNode?.children
+          index = siblings?.indexOf(stub) ?? -1
+          siblings.splice index, 1 if index >= 0
+          stub.parentNode = null
+          return
+      stub
     target.appendChild fatalCard
     return
 
@@ -461,7 +492,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       unless mountedEntries.length is chainFiles.length and sameChain(chainFiles.slice(0, firstNew), mountedFiles.slice(0, firstNew))
         firstNew = 0
 
-    entries = []
+    entries: MountedEntry[] = []
     for file, index in chainFiles
       if index < firstNew
         entries.push mountedEntries[index]
@@ -703,7 +734,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     for index in [firstDirty...chain.length]
       entry = mountedEntries[index]
       continue unless entry?.instance? and entry.file?
-      id = entry.instance.constructor?.__hmrId
+      id = (entry.instance.constructor as HmrCtor)?.__hmrId
       continue unless typeof id is 'string'
       NewCtor = hmrCtorFor candidate.getCompiled(entry.file), id
       continue unless NewCtor?
@@ -717,7 +748,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       for keep in migrateKeep
         next = mountedEntries.find (entry) -> entry.file is keep.file and entry.instance?
         continue unless next?.instance?
-        continue unless next.instance.constructor?.__hmrId is keep.id
+        continue unless (next.instance.constructor as HmrCtor)?.__hmrId is keep.id
         __hmrPreserveState keep.instance, next.instance
       __hmrEmit 'remount',
         paths: [...dirty]

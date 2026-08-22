@@ -4,6 +4,7 @@
 # into pure functions (parsePlacement, computePlacement, belowPosition) that
 # take plain rects and a viewport, so it is testable without a real DOM.
 
+import { AriaPositionOptions } from './core.rip'
 
 # parsePlacement -- translate a friendly `"<side> <align>"` placement into a
 # VALID CSS `position-area` grid keyword plus the matching self-alignment.
@@ -105,7 +106,7 @@ _resetStyles = (el): void ->
 # `opts.matchWidth`. Uses CSS anchor positioning when the browser both
 # supports it and accepts the translated `position-area`; otherwise falls
 # through to the manual fallback (computePlacement).
-export def position(trigger, floating, opts = {}): void
+export def position(trigger, floating, opts: AriaPositionOptions = {}): void
   return unless trigger and floating
   fl = floating
   tr = trigger

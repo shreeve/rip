@@ -1,4 +1,4 @@
-export joinStyles = (...styles: any[]): string ->
+export joinStyles = (...styles: Array<string | false | null | undefined>): string ->
   declarations: string[] = []
   for style in styles
     declarations.push String(style) if style

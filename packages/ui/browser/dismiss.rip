@@ -1,12 +1,16 @@
 # Popup dismissal -- outside-click and scroll dismissal, plus the pointer
 # reopen guard.
 
-import { getRef } from './core.rip'
+import { getRef, AriaEl, AriaElRef } from './core.rip'
+
+# The popup element with the disposer a prior popupDismiss stored on it, so
+# a re-invocation tears that pair down before attaching.
+type DismissBoundEl = HTMLElement & { __ariaPopupDismiss?: (() => void) | null }
 
 # outsideElements -- true when `target` is contained by none of `els`. Pure
 # predicate behind `popupDismiss`'s outside-click test; a null/absent
 # element in the list simply never contains the target.
-export def outsideElements(target, els: any[]): boolean
+export def outsideElements(target, els: AriaEl[]): boolean
   not els.some (el) -> el?.contains?(target)
 
 # popupDismiss -- dismiss a popup on an outside mousedown, and reposition
@@ -24,8 +28,8 @@ export def outsideElements(target, els: any[]): boolean
 # two leak vectors from v3: (1) a `~>` effect compiles its implicit-return
 # cleanup to void, dropping the returned disposer, and (2) a stale
 # open=true pair would otherwise survive an open->false->true cycle.
-export def popupDismiss(open: boolean, popup, close: () => void, els: any[] = [], repos: (() => void) | null = null)
-  pop = getRef(popup)
+export def popupDismiss(open: boolean, popup: AriaElRef, close: () => void, els: AriaElRef[] = [], repos: (() => void) | null = null)
+  pop: DismissBoundEl | null | undefined = getRef(popup)
   if pop and pop.__ariaPopupDismiss
     pop.__ariaPopupDismiss()
     pop.__ariaPopupDismiss = null

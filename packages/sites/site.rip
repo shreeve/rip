@@ -29,13 +29,26 @@ import { posix, resolve } from 'node:path'
 # Module State
 # ==============================================================================
 
+# One registered route: its compiled pattern, the handler after smart()
+# wrapping, and the input schema that drives validation and OpenAPI.
+type RouteRecord =
+  method: string
+  regex: RegExp
+  keys: string[]
+  staticPath: string | null
+  handler: Function
+  path: string
+  inputSchema: Record<string, any> | null
+  _chain?: Function              # the composed middleware chain, cached per epoch
+  _chainEpoch?: number
+
 _: RegExpMatchArray | null            = null  # Match capture holder for Rip's =~
 _errorHandler: Function | null        = null  # Custom error handler
 _notFoundHandler: Function | null     = null  # Custom 404 handler
 _rawFilter: Function | null           = null  # Raw request filter (before body parsing)
 _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
-_routes: any[]                        = []    # Route definitions
+_routes: RouteRecord[]                        = []    # Route definitions
 _middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
 SESSION = :rip.server.session
 _prefix: string                       = ''    # Current route prefix for grouping
@@ -58,8 +71,9 @@ export resetGlobals = ->
   _routeIndex          = null
   _composeEpoch++
 
-# AsyncLocalStorage for request context (enables sync read() in handlers)
-export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = AsyncLocalStorage.new()
+# AsyncLocalStorage for request context (enables sync read() in handlers):
+# the request's Ctx and its merged body/query/params.
+export requestContext: AsyncLocalStorage<{ env?: Ctx, data: Record<string, any> }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -198,6 +212,7 @@ export type Ctx =
   cache: (duration: number | string | false) => void
   session: Record<string, any>
   req: CtxReq
+  mark?: string                  # the request's correlation id, set by the handler
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
 

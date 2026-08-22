@@ -24,7 +24,7 @@ export inlineEmailTree = (root, config: Record<string, unknown> = {}): InlineEma
 export registerEmailTailwindRoot = (rootComponent, config: Record<string, unknown> = {}): void ->
   inline.registerEmailTailwindRoot rootComponent, config
 
-export takeEmailTailwindRoots = (): Array<{ root: any, config: Record<string, unknown> }> ->
+export takeEmailTailwindRoots = (): Array<{ root: unknown, config: Record<string, unknown> }> ->
   inline.takeEmailTailwindRoots()
 
 export generateBrowserCss = (classes: string[] = [], config: Record<string, unknown> = {}): string ->

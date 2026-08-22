@@ -165,7 +165,7 @@ export interface Element
   className: string
   innerHTML: string
   innerText: string
-  value: any
+  value: string | undefined
   checked: boolean
 
 Object.defineProperty Element.prototype, 'id',
