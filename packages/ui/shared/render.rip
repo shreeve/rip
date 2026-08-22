@@ -2,20 +2,20 @@ import { Node, Document } from '../email/dom.rip'
 
 class SVGElementStub extends Node
 
-restoreGlobal = (host: any, key: string, descriptor: any) ->
+restoreGlobal = (host, key: string, descriptor) ->
   if descriptor
     Object.defineProperty host, key, descriptor
   else
     delete host[key]
 
-installGlobal = (host: any, key: string, value: any) ->
+installGlobal = (host, key: string, value) ->
   Object.defineProperty host, key,
     configurable: true
     enumerable: true
     writable: true
     value: value
 
-export _renderComponent = (ComponentClass: any, props: Record<string, any>, consume: any, after: any = null): any ->
+export _renderComponent = (ComponentClass, props: Record<string, any>, consume, after = null) ->
   host = globalThis as any
   if host.document?.__ripRenderActive
     throw Error.new 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
@@ -23,7 +23,7 @@ export _renderComponent = (ComponentClass: any, props: Record<string, any>, cons
   documentDescriptor = Object.getOwnPropertyDescriptor host, 'document'
   nodeDescriptor = Object.getOwnPropertyDescriptor host, 'Node'
   svgDescriptor = Object.getOwnPropertyDescriptor host, 'SVGElement'
-  instance: any = null
+  instance = null
   try
     document = Document.new()
     document.__ripRenderActive = true
@@ -44,7 +44,7 @@ export _renderComponent = (ComponentClass: any, props: Record<string, any>, cons
       throw Error.new 'Rip SSR consumers must be synchronous'
     output
   finally
-    cleanupError: any = null
+    cleanupError = null
     try
       instance.unmount(removeDOM: false) if instance? and instance._state is 'mounted'
     catch error

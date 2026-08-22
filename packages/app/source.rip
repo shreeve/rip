@@ -40,14 +40,14 @@ SOURCE_FAMILY_CAP =! 64
 PRELOAD_FRESH_MS =! 30_000
 DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i
 
-export def _isSourceCell(value: any): boolean
+export def _isSourceCell(value): boolean
   value? and (typeof value is 'object' or typeof value is 'function') and
     (value[SOURCE] is true or value[SOURCE_FAMILY] is true)
 
-export def _isSourceFamily(value: any): boolean
+export def _isSourceFamily(value): boolean
   value? and typeof value is 'function' and value[SOURCE_FAMILY] is true
 
-parseStaleTime = (value: any) ->
+parseStaleTime = (value) ->
   return 0 unless value?
   if typeof value is 'number'
     unless Number.isFinite(value) and value >= 0
@@ -237,7 +237,7 @@ makeSourceFamily = (fetchFn, staleTime) ->
     prune normalized
     cell
 
-  family: any = (key) -> cellFor(key).read()
+  family = (key) -> cellFor(key).read()
   family[SOURCE_FAMILY] = true
   family.cellFor = cellFor
   family.reset = ->

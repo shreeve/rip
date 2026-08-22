@@ -25,7 +25,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
 
   # `any` because the callable + reactive-flags intersection is
   # assembled at runtime — TS cannot see the flags on the function.
-  mutation: any = (...args) ->
+  mutation = (...args) ->
     me = ++generation
     __batch ->
       _pending.value = true

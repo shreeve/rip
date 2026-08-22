@@ -84,7 +84,7 @@ export def createRouter(opts: RouterOpts): Router
 
   activeManifest = if typeof routes is 'function' then validManifest routes() else validManifest routes
   callbacks: Set<any> = Set.new()
-  unlisten: any = null
+  unlisten = null
 
   _path = __state null
   _route = __state null
@@ -99,7 +99,7 @@ export def createRouter(opts: RouterOpts): Router
   # The hash is deliberately absent: a fragment-only navigation must not
   # look like a route change to the renderer. `router.hash` tracks it.
   _current = __computed ->
-    route: any = _route.value
+    route = _route.value
     return null unless route
     { route, layouts: route.layouts, params: _params.value, query: _query.value }
 
@@ -181,22 +181,22 @@ export def createRouter(opts: RouterOpts): Router
   # departures the router cannot intercept (back/forward) still find
   # where the user was. Push-time saves stay exact; this covers the
   # traversal case.
-  saveTimer: any = null
-  unwatchScroll: any = null
+  saveTimer = null
+  unwatchScroll = null
   saveScrollNow = ->
     saveTimer = null
-    state: any = adapter.readState?() ?? {}
+    state = adapter.readState?() ?? {}
     adapter.replace adapter.read(), { ...state, __ripScroll: adapter.scroll?.save?() ?? null }
   saveScroll = ->
     saveTimer = setTimeout saveScrollNow, 100 unless saveTimer
 
-  router: any =
+  router =
     init: ->
       return router if unlisten
       handleExternal()
       unlisten = adapter.listen ->
         return unless handleExternal()
-        state: any = adapter.readState?()
+        state = adapter.readState?()
         adapter.scroll?.restore?(state?.__ripScroll ?? null)
       unwatchScroll = adapter.scroll?.watch?(saveScroll) ?? null
       router
@@ -207,7 +207,7 @@ export def createRouter(opts: RouterOpts): Router
       hit = attempt path
       return miss path unless hit
       position = adapter.scroll?.save?() ?? null
-      state: any = adapter.readState?() ?? {}
+      state = adapter.readState?() ?? {}
       adapter.replace adapter.read(), { ...state, __ripScroll: position }
       adapter.push externalFor(url), null
       commit hit, path, query, hash
@@ -219,7 +219,7 @@ export def createRouter(opts: RouterOpts): Router
       { path, query, hash } = splitUrl url
       hit = attempt path
       return miss path unless hit
-      state: any = adapter.readState?() ?? {}
+      state = adapter.readState?() ?? {}
       adapter.replace externalFor(url), { ...state, __ripScroll: null }
       commit hit, path, query, hash
       adapter.scroll?.top?() unless opts.noScroll
@@ -342,7 +342,7 @@ export def browserAdapter(): RouterAdapter
     # asynchronously, so on arrival the page can still be too short to
     # reach `y` — retry across frames until the document accommodates it,
     # giving up after 20. A newer restore or top() supersedes the loop.
-    restore: (position: any) ->
+    restore: (position) ->
       return unless position?
       ticket = ++restoring
       x = position.x or 0

@@ -43,9 +43,9 @@ export type RendererOpts =
   target: Record<string, any>
   onError?: (failure: GateFailure) => void
 
-failureFor = (path: string, file: string, error: any, message: string | null = null): GateFailure ->
+failureFor = (path: string, file: string, error, message: string | null = null): GateFailure ->
   text = message ?? error?.message ?? String(error)
-  failure: any = Error.new text
+  failure = Error.new text
   failure.name = 'GateFailure'
   failure.status = error?.status ?? error?.response?.status ?? 500
   failure.path = path
@@ -89,8 +89,8 @@ export def createRenderer(opts: RendererOpts): Renderer
   generation = 0
   disposeRoute = null
   mountedEntries: any[] = []
-  pageMountPoint: any = null
-  lastRoute: any = null
+  pageMountPoint = null
+  lastRoute = null
   forceFrom = null
   lastCommitTeardownFailed = false
 
@@ -111,7 +111,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         return { cell: value, tail: segments.slice(index + 1) }
     null
 
-  gateFailure = (path: string, file: string, message: string, error: any = null): GateFailure ->
+  gateFailure = (path: string, file: string, message: string, error = null): GateFailure ->
     cause = error ?? Error.new(message)
     failureFor path, file, cause, message
 
@@ -182,8 +182,8 @@ export def createRenderer(opts: RendererOpts): Renderer
     # entry decides the boundary, and every entry below it still gets its
     # binding values populated so a boundary chain constructs against the
     # full render-gate contract.
-    failing: any = null
-    consider = (failure: any, entryIndex) ->
+    failing = null
+    consider = (failure, entryIndex) ->
       failure.entryIndex = entryIndex
       failing = failure if not failing? or entryIndex < failing.entryIndex
       return
@@ -249,7 +249,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   # is the fallback for when the app itself is broken, so it depends on
   # no app CSS. It shows the failure's stack or message, and the next
   # successful commit clears it.
-  fatalCard: any = null
+  fatalCard = null
 
   clearFatalCard = ->
     fatalCard?.remove?.()
@@ -265,7 +265,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       card.textContent = text
       card
     else
-      card: any = { nodeName: 'PRE', textContent: text }
+      card = { nodeName: 'PRE', textContent: text }
       card.remove = ->
         siblings = card.parentNode?.children
         index = siblings?.indexOf(card) ?? -1
@@ -473,7 +473,7 @@ export def createRenderer(opts: RendererOpts): Renderer
       ready = ensureGates! fresh, params, query, mine
       return null unless ready
     catch caught
-      failure: any = caught
+      failure = caught
       return null if mine isnt generation
       if failure?.name is 'GateFailure' and typeof failure.entryIndex is 'number'
         boundaryIndex = failure.entryIndex + firstNew

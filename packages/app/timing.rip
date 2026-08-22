@@ -26,8 +26,8 @@ toFn = (source) ->
 # writes through to the source, while reads see the timed output. A
 # function source has no write path, so its wrapper is getter-only.
 wrap = (out, source, disposer) ->
-  obj: any = { read: -> out.read() }
-  descriptor: any = { get: -> out.value }
+  obj = { read: -> out.read() }
+  descriptor = { get: -> out.value }
   descriptor.set = ((v) -> source.value = v) if typeof source isnt 'function'
   Object.defineProperty obj, 'value', descriptor
   obj.dispose = -> disposer?()

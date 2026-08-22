@@ -41,7 +41,7 @@ SESSION = :rip.server.session
 _prefix: string                       = ''    # Current route prefix for grouping
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
 _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
-_routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
+_routeIndex                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
 _composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
 export resetGlobals = ->
@@ -378,7 +378,7 @@ export type ApiError = { message?: string, notice?: string, issues?: unknown[] }
 # throws (no/invalid status) are masked to a generic status message so internal
 # details never leak. Exported so a custom `onError` can reuse the same shape.
 # (`err` is an arbitrary thrown value — untyped by nature, like a catch binding.)
-export errorEnvelope = (err: any): { status: number, error: ApiError } ->
+export errorEnvelope = (err): { status: number, error: ApiError } ->
   raw = err?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
   error =
@@ -605,7 +605,7 @@ dispatchRequest = (req) ->
   _rawFilter?.(req) if method in ['POST', 'PUT', 'PATCH']
 
   # Pre-parse body and query for sync read() — baked in, zero ceremony
-  data: any = {}
+  data = {}
   try
     ct = req.headers.get('content-type') or ''
     if method in ['POST', 'PUT', 'PATCH']
@@ -828,7 +828,7 @@ export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator,
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
-export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?: any) ->
+export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper

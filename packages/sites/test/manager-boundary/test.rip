@@ -14,7 +14,7 @@ waitFor = (name, fn, timeout = 7000) ->
     throw Error.new("manager boundary test timed out waiting for #{name}") if Date.now() >= deadline
     sleep! 10
 
-startControl = (socket, calls, handlers: any = {}) ->
+startControl = (socket, calls, handlers = {}) ->
   serial = 0
   heartbeatSerial = 0
   Bun.serve

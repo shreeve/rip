@@ -90,7 +90,7 @@ Object.defineProperty Node.prototype, 'previousSibling',
 
 Object.defineProperty Node.prototype, 'textContent',
   get: -> (@childNodes.map (child: Node) -> _textContent(child)).join('')
-  set: (value: any) ->
+  set: (value) ->
     @_innerHTML = null if this instanceof Element
     for child in @childNodes
       child.parentNode = null
@@ -112,7 +112,7 @@ export class Element extends Node
     throw Error.new "email DOM invalid element name '#{tag}'" unless VALID_ELEMENT_NAME.test tag
     @tag = tag
 
-  setAttribute!: (key: string, value: any) ->
+  setAttribute!: (key: string, value) ->
     throw Error.new "email DOM invalid attribute name '#{key}'" unless VALID_ATTRIBUTE_NAME.test key
     if value is null or value is undefined or value is false
       @removeAttribute key
@@ -170,18 +170,18 @@ export interface Element
 
 Object.defineProperty Element.prototype, 'id',
   get: -> @attributes.get('id') ?? ''
-  set: (value: any) -> @attributes.set('id', String(value))
+  set: (value) -> @attributes.set('id', String(value))
   enumerable: true
 
 Object.defineProperty Element.prototype, 'className',
   get: -> @attributes.get('class') ?? ''
-  set: (value: any) ->
+  set: (value) ->
     if value then @attributes.set('class', String(value)) else @attributes.delete('class')
   enumerable: true
 
 Object.defineProperty Element.prototype, 'innerHTML',
   get: -> @_innerHTML
-  set: (value: any) ->
+  set: (value) ->
     for child in @childNodes
       child.parentNode = null
       child._previous = null
@@ -192,17 +192,17 @@ Object.defineProperty Element.prototype, 'innerHTML',
 
 Object.defineProperty Element.prototype, 'innerText',
   get: -> @textContent
-  set: (value: any) -> @textContent = value
+  set: (value) -> @textContent = value
   enumerable: true
 
 Object.defineProperty Element.prototype, 'value',
   get: -> @attributes.get('value')
-  set: (value: any) -> @attributes.set('value', String(value))
+  set: (value) -> @attributes.set('value', String(value))
   enumerable: true
 
 Object.defineProperty Element.prototype, 'checked',
   get: -> @attributes.has('checked')
-  set: (value: any) ->
+  set: (value) ->
     if value then @attributes.set('checked', '') else @attributes.delete('checked')
   enumerable: true
 
@@ -216,7 +216,7 @@ export class Text extends Node
 
 Object.defineProperty Text.prototype, 'textContent',
   get: -> @data
-  set: (value: any) -> @data = String(value)
+  set: (value) -> @data = String(value)
   enumerable: true
 
 export class Comment extends Node
@@ -241,8 +241,8 @@ export class Document
 
   createElement: (tag: string): Element -> Element.new tag
   createElementNS: (_namespace: string, tag: string): Element -> Element.new tag
-  createTextNode: (value: any): Text -> Text.new String(value)
-  createComment: (value: any): Comment -> Comment.new String(value)
+  createTextNode: (value): Text -> Text.new String(value)
+  createComment: (value): Comment -> Comment.new String(value)
   createDocumentFragment: (): Fragment -> Fragment.new()
 
 VOID_TAGS: Set<string> =! Set.new %w[area base br col embed hr img input link meta source track wbr]
@@ -256,14 +256,14 @@ BLOCK_TAGS: Set<string> =! Set.new %w[p div td li dt dd blockquote figcaption ad
 HEADING_TAGS: Set<string> =! Set.new %w[h1 h2 h3 h4 h5 h6]
 SKIP_TEXT_TAGS: Set<string> =! Set.new %w[style script head]
 
-escapeText = (value: any): string ->
+escapeText = (value): string ->
   String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 
-escapeAttribute = (value: any): string ->
+escapeAttribute = (value): string ->
   String(value)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')

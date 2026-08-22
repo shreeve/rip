@@ -11,7 +11,7 @@ _FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([d
 # whether to preventDefault. A wrap only happens at an edge: Tab off the
 # last returns to the first, Shift+Tab off the first goes to the last; every
 # interior move is left to the browser. Pure; no DOM.
-export def focusTrapMove(focusables: any[], active: any, shiftKey: boolean): any
+export def focusTrapMove(focusables: any[], active, shiftKey: boolean)
   return { focus: null, prevent: false } unless focusables.length
   first = focusables[0]
   last = focusables[focusables.length - 1]
@@ -23,11 +23,11 @@ export def focusTrapMove(focusables: any[], active: any, shiftKey: boolean): any
 # trapFocus -- keep Tab focus cycling inside `panel` (wraps first<->last).
 # Returns a disposer; call it when the panel closes. Only currently visible
 # focusables (non-null offsetParent) participate.
-export def trapFocus(panel: Element): any
-  handler = (e: any) ->
+export def trapFocus(panel: Element)
+  handler = (e) ->
     return unless e.key is 'Tab'
     nodes = panel.querySelectorAll(_FOCUSABLE)
-    list = Array.from(nodes).filter (f: any) -> f.offsetParent isnt null
+    list = Array.from(nodes).filter (f) -> f.offsetParent isnt null
     { focus, prevent } = focusTrapMove(list, document.activeElement, e.shiftKey)
     if prevent
       e.preventDefault()
@@ -39,9 +39,9 @@ export def trapFocus(panel: Element): any
 # wireAria -- auto-label a panel from its first heading (aria-labelledby)
 # and first paragraph (aria-describedby), assigning ids as needed. A panel
 # that already carries the attribute is left as-is.
-export def wireAria(panel: any, id: string): void
+export def wireAria(panel, id: string): void
   return unless panel
-  el: any = panel
+  el = panel
   heading = el.querySelector('h1,h2,h3,h4,h5,h6')
   if heading
     heading.id ??= "#{id}-title"

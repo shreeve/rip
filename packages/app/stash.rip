@@ -266,7 +266,7 @@ snapshotDefaults = (value) ->
 # Stamp a stash with its current plain-value shape so reset() can
 # restore it. launch() stamps after seeding, so reset returns to the
 # server-seeded baseline, never to persisted user state.
-export def _stampDefaults(stash: any): void
+export def _stampDefaults(stash): void
   raw = if stash?[RAW] then stash[RAW] else stash
   return unless raw? and typeof raw is 'object'
   Object.defineProperty raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true }
@@ -277,7 +277,7 @@ export def _stampDefaults(stash: any): void
 # from a shared declaration (a module's `stash` export) never lets
 # one session's writes leak into the next launch's baseline. Keys land
 # as own data properties so a '__proto__' key stays inert.
-export def _cloneSeed(value: any): any
+export def _cloneSeed(value)
   return value if _isSourceCell value
   return value unless plainObject value
   raw = if value[RAW] then value[RAW] else value
@@ -294,10 +294,10 @@ export def _cloneSeed(value: any): any
 # array whose live value holds a cell is left alone. Values clone on
 # the way in so no caller-owned object aliases into the stash. Both
 # seeding and persistence restore are this one walk.
-export def _mergePlain(proxy: any, values: any): void
+export def _mergePlain(proxy, values): void
   return unless proxy? and typeof proxy is 'object'
   return unless values? and typeof values is 'object'
-  raw: any = if proxy[RAW] then proxy[RAW] else proxy
+  raw = if proxy[RAW] then proxy[RAW] else proxy
   for own key, value of values
     # An own read only: '__proto__' and friends must never walk the
     # prototype chain into a mergeable-looking host object.
