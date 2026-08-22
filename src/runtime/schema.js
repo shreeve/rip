@@ -65,7 +65,10 @@ function formatIssues(issues, name) {
   return head + issues.map((i) => i.message || i.error || 'invalid').join('; ');
 }
 
+// Null-prototype: indexed by the user's field type name, so an
+// inherited Object.prototype member must never satisfy the lookup.
 const types = {
+  __proto__: null,
   string:   (v) => typeof v === 'string',
   number:   (v) => typeof v === 'number' && !Number.isNaN(v),
   integer:  (v) => Number.isInteger(v),
@@ -1548,7 +1551,9 @@ class SchemaDef {
 // unions to `oneOf` + a discriminator. Transforms and refinements
 // export as `description` annotations, never silently dropped.
 
+// Null-prototype: indexed by the user's field type name (see `types`).
 const JSON_TYPES = {
+  __proto__: null,
   string:   () => ({ type: 'string' }),
   text:     () => ({ type: 'string' }),
   email:    () => ({ type: 'string', format: 'email' }),

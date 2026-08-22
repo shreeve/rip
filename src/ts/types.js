@@ -19,7 +19,7 @@
 // prefix); dts wraps them as DtsError ("declaration emission: …") and
 // the TS face as a positioned emitter diagnostic ("emitter: …").
 
-import { identifierRuns } from '../ident.js';
+import { identifierRunAt } from '../ident.js';
 
 export class TypeTextError extends Error {
   constructor(message) {
@@ -71,6 +71,43 @@ export const isArrayShapedType = (t) => {
   return t.endsWith('[]') || t.startsWith('[') || /^(Array|ReadonlyArray)\s*</.test(t);
 };
 
+// The rip boolean spellings a TYPE position lowers to TS's (the
+// lexer's BOOL aliases, src/lexer.js ALIASES). Null-prototype: the
+// table is indexed by USER identifier text, so an inherited
+// Object.prototype member (`constructor`, `toString`, `hasOwnProperty`,
+// …) must never satisfy the lookup — a member NAMED `constructor` is
+// a legal TS member and keeps its spelling.
+const BOOLEAN_WORDS = { __proto__: null, yes: 'true', on: 'true', no: 'false', off: 'false' };
+
+// Is the identifier run at [start, end) of `raw` a NAME rather than a
+// type — a position the boolean lowering must leave alone? Mirrors
+// the lexer's key rule (a word directly keyed by `:` is a property
+// before it is anything else; a word after `.` is a member), applied
+// to the type-text grammar: an object member key (`{ on: T }`,
+// `{ on?: T }`, `readonly on: T`), a parameter or index-signature
+// name (`(on: T) => U`, `[on: K]: T`), a mapped-type or predicate
+// name (`[on in K]`, `on is T`), an `infer` binding, and a qualified
+// segment (`Colors.on`) all keep their spelling. The conditional
+// type's true branch (`T extends U ? on : off`) is the one colon-
+// headed TYPE position — the lexer's TERNARY guard — and lowers.
+// `outBefore` is the normalized text emitted so far (its tail is the
+// preceding significant character).
+const isNamePosition = (raw, start, end, outBefore) => {
+  const before = outBefore.trimEnd();
+  const prev = before[before.length - 1];
+  if (prev === '.') return true;
+  if (/\binfer$/.test(before)) return true;
+  let j = end;
+  while (j < raw.length && /\s/.test(raw[j])) j++;
+  if (raw[j] === '?') {
+    j++;
+    while (j < raw.length && /\s/.test(raw[j])) j++;
+  }
+  if (raw[j] === ':') return prev !== '?';
+  const next = identifierRunAt(raw, j)?.value;
+  return next === 'is' || next === 'in';
+};
+
 // ── type-text normalization ──────────────────────────────────────────
 // Annotation roles carry SPANS; the type text is the source slice with
 // its layout collapsed: comments dropped, whitespace runs (wrapped
@@ -106,10 +143,11 @@ export const normalizeTypeText = (raw) => {
       while (i < raw.length && raw[i] !== '\n') i++;
       continue;
     }
-    const word = identifierRuns(raw.slice(i))[0];
-    if (word && raw.startsWith(word, i)) {
-      out += ({ yes: 'true', on: 'true', no: 'false', off: 'false' })[word] ?? word;
-      i += word.length;
+    const run = identifierRunAt(raw, i);
+    if (run) {
+      const lowered = BOOLEAN_WORDS[run.value];
+      out += lowered !== undefined && !isNamePosition(raw, run.start, run.end, out) ? lowered : run.value;
+      i = run.end;
       continue;
     }
     if (ch === '{') { brace++; out += ch; i++; continue; }

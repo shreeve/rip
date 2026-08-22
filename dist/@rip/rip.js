@@ -8297,6 +8297,7 @@ var isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
 var isRubyNew = (x) => isNode(x) && x[0] === "." && x.length === 3 && x[2] === "new";
 var PROTO_GENERIC_PARAMS = {
+  __proto__: null,
   Array: "<T>",
   ReadonlyArray: "<T>",
   Map: "<K, V>",
@@ -20053,6 +20054,7 @@ function formatIssues(issues, name) {
   return head + issues.map((i) => i.message || i.error || "invalid").join("; ");
 }
 var types = {
+  __proto__: null,
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
   integer: (v) => Number.isInteger(v),
@@ -21444,6 +21446,7 @@ class SchemaDef {
   }
 }
 var JSON_TYPES = {
+  __proto__: null,
   string: () => ({ type: "string" }),
   text: () => ({ type: "string" }),
   email: () => ({ type: "string", format: "email" }),

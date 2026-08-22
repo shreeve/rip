@@ -3405,7 +3405,11 @@ SchemaDef.prototype._getClass = function () {
 
 // ── DDL ───────────────────────────────────────────────────────────────
 
+// Null-prototype: indexed by the user's field type name, so an inherited
+// Object.prototype member never passes for an intrinsic and the unknown-
+// type rejection below stays reachable.
 const SQL_TYPES = {
+  __proto__: null,
   string: 'VARCHAR', text: 'TEXT', integer: 'INTEGER', number: 'DOUBLE',
   boolean: 'BOOLEAN', date: 'DATE', datetime: 'TIMESTAMP', email: 'VARCHAR',
   url: 'VARCHAR', uuid: 'UUID', phone: 'VARCHAR', zip: 'VARCHAR', json: 'JSON', any: 'JSON',
