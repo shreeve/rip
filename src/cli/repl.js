@@ -35,7 +35,10 @@ import packageJson from '../../package.json' with { type: 'json' };
 // literal appears outside this section. `mono` is the empty theme:
 // every class paints as plain text (NO_COLOR / non-TTY force it).
 
+// Null-prototype: keyed by user config text, so an inherited
+// Object.prototype member must never satisfy the lookup.
 const ANSI_NAMES = {
+  __proto__: null,
   black: 30, red: 31, green: 32, yellow: 33, blue: 34, magenta: 35,
   cyan: 36, white: 37, gray: 90, grey: 90,
   brightred: 91, brightgreen: 92, brightyellow: 93, brightblue: 94,
@@ -69,7 +72,9 @@ const THEME_CLASSES = [
   'prompt', 'continuation', 'arrow', 'error', 'info', 'dim',
 ];
 
+// Null-prototype: keyed by user config text (see ANSI_NAMES).
 const THEME_TABLE = {
+  __proto__: null,
   dark: {
     keyword: 'magenta', literal: 'yellow', builtin: 'cyan',
     string: 'green', regexp: 'red', number: 'yellow',

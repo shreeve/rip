@@ -191,6 +191,70 @@ describe('declarations: the typed surface, row by row', () => {
   }
 });
 
+// Object.prototype's names are legal TS member names. The type-text
+// normalizer rewrites rip's boolean words (`yes`/`no`/`on`/`off`)
+// through a table indexed by USER identifier text, and a prototype
+// member annotation looks its head up the same way — so a table that
+// inherits from Object.prototype answers `constructor`/`toString`/… with
+// the inherited function, which prints as its source text (`function
+// Object() { [native code] }`) in BOTH artifacts. Exact member spelling,
+// face and declaration, in every position that reads a user name out
+// of type text.
+describe('members named after Object.prototype keep their spelling in both artifacts', () => {
+  const face = (src) => compile(src, { path: 'proto.rip', face: 'ts' }).code;
+  const CASES = [
+    // the inline alias body (a mixed intersection, the shape HMR-aware code declares)
+    ['type A = Record<string, any> & { constructor: Function & { __hmrId?: string } }\nx: A = {}',
+      'type A = Record<string, any> & { constructor: Function & { __hmrId?: string } };'],
+    // the block alias body, the accessor-shaped names included
+    ['type B =\n  hasOwnProperty: number\n  toString: string\n  valueOf: boolean\n  __proto__: any\nz = 1',
+      'type B = {\n  hasOwnProperty: number;\n  toString: string;\n  valueOf: boolean;\n  __proto__: any;\n};'],
+    // the interface body
+    ['interface C\n  constructor: Function\n  isPrototypeOf: boolean\nz = 1',
+      'interface C {\n  constructor: Function;\n  isPrototypeOf: boolean;\n}'],
+    // annotation spans: a binding's type, a signature's param and return
+    ['y: { toString: string; constructor: any } = v', 'y: { toString: string; constructor: any }'],
+    ['def f(o: { valueOf: number }): { constructor: Function }\n  o', 'f(o: { valueOf: number }): { constructor: Function }'],
+    // a prototype-member annotation whose HEAD is a prototype name (the
+    // generic-params table): the augmentation names the head bare
+    ['constructor::second: () => number = -> 1', 'declare global { interface constructor { second: () => number } }'],
+  ];
+  for (const [src, expected] of CASES) {
+    test(JSON.stringify(src), () => {
+      expect(face(src)).toContain(expected);
+      expect(compile(src).declarations).toContain(expected);
+    });
+  }
+});
+
+// The boolean words (`yes`/`no`/`on`/`off`) lower to `true`/`false`
+// in TYPE position only. A member key, a parameter or index-signature
+// name, a mapped-type or predicate name, and a qualified segment are
+// NAMES — the value side keeps them verbatim (`{ yes: 1 }` is a legal
+// key), so the type side must too, or a correct program draws a
+// TS2353 against its own literal. The conditional type's true branch
+// is the one colon-headed type position and still lowers.
+describe('boolean words keep their spelling in name positions, lower in type positions', () => {
+  const face = (src) => compile(src, { path: 'words.rip', face: 'ts' }).code;
+  const CASES = [
+    ['type Prefs =\n  yes: number\n  no: string\nx: Prefs = { yes: 1, no: "a" }',
+      'type Prefs = {\n  yes: number;\n  no: string;\n};'],
+    ['type F = { on?: boolean; readonly off: string; a: yes | no }\nz = 1',
+      'type F = { on?: boolean; readonly off: string; a: true | false };'],
+    ['interface Cfg\n  on: boolean\n  off?: string\nz = 1', 'interface Cfg {\n  on: boolean;\n  off?: string;\n}'],
+    ['type Q = { a: Colors.on; b: (yes: number) => void }\nz = 1', 'type Q = { a: Colors.on; b: (yes: number) => void };'],
+    ['type C = T extends U ? yes : no\nz = 1', 'type C = T extends U ? true : false;'],
+    ['y: { yes: number } = { yes: 1 }', 'y: { yes: number }'],
+    ['def f(o: { off: number }): { yes: string }\n  o', 'f(o: { off: number }): { yes: string }'],
+  ];
+  for (const [src, expected] of CASES) {
+    test(JSON.stringify(src), () => {
+      expect(face(src)).toContain(expected);
+      expect(compile(src).declarations).toContain(expected);
+    });
+  }
+});
+
 describe('the compile() surface', () => {
   test('declarations is lazy and memoized; reading it changes nothing else', () => {
     const r = compile('x: number = 5');

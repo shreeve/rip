@@ -127,6 +127,17 @@ describe('theme resolution', () => {
     expect(resolveThemeName({ override: 'bogus' })).toBe('dark');
   });
 
+  // The theme and color tables are keyed by user config text, so an
+  // Object.prototype name must be as unknown as any other bogus name:
+  // the theme falls back to dark, and an unknown color spec paints
+  // plain instead of emitting the inherited function's source text
+  // inside an escape.
+  test('an Object.prototype name is an unknown theme and an unknown color', () => {
+    expect(resolveThemeName({ configTheme: 'constructor' })).toBe('dark');
+    expect(buildTheme('constructor').name).toBe('dark');
+    expect(ansiFor('constructor')).toBe('');
+  });
+
   test('mono paints plain; dark paints', () => {
     const mono = buildTheme('mono');
     expect(mono.paint('keyword', 'if')).toBe('if');
