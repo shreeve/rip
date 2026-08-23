@@ -7627,7 +7627,7 @@ var parserInstance = {
         if (expected.length)
           message += ` — expected ${expected.join(", ")}`;
         diagnostics.push({ message, start, end, expected, got });
-        return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null };
+        return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
       }
       if (action > 0) {
         if (tolerant && !lexer.token?.hole)
@@ -7714,7 +7714,7 @@ var parserInstance = {
           primitiveLocs.push(carriedPrimitives);
         stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
-        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null };
+        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
     }
   },
   ctx: {}
@@ -19809,6 +19809,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     code: emitted.code,
     map,
     stores: emitted.stores,
+    tokens: result.tokens ?? null,
     mappings: new Mappings(emitted.mappings),
     vocabulary: emitted.vocabulary ?? [],
     silences: emitted.silences ?? [],

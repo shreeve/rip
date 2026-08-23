@@ -2175,4 +2175,38 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(at('pkg/a.rip').length, 'the nested file stays loose under its own config').toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
+
+  test('a file that does not parse reports its CompileError beside the type errors of the rest, exits 1, and says nothing on stderr', () => {
+    const dir = workspace({
+      'lib.rip': 'export ratio: number = 0.5\nexport def scale(n: number): number\n  n * ratio\n',
+      'app.rip': "import { scale } from './lib.rip'\nlabel: string = scale(2)\nconsole.log label\n",
+      'bad.rip': 'zz = (1\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('app.rip:2:1 - error');
+      expect(r.stdout).toContain("bad.rip:1:6 - error: unclosed '('");
+      expect(r.stderr).toBe('');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  test('a __DATA__ payload is not code: it seeds no binding, it is never lexed, and the advisories do not read it', () => {
+    // The gate reads the compile's own token tape — the text before the
+    // marker — so a payload the lexer would refuse still leaves the file
+    // gated, and an annotation spelled inside the payload types nothing.
+    const dir = workspace({
+      'held.rip': "x = 1\ny = x.bar.baz\nconsole.log y\n__DATA__\nit's payload\nn: number = 1\n# @ts-ignore\n",
+      'shown.rip': "z: number = 'oops'\nconsole.log z\n__DATA__\nit's payload\n",
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('shown.rip:1:1 - error');
+      expect(r.stdout).not.toContain('held.rip:');
+      expect(r.stdout).toContain('1 diagnostic hidden in unannotated code');
+      expect(r.stdout).not.toContain('@ts-ignore');
+      expect(r.stderr).toBe('');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
 });

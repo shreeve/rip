@@ -219,6 +219,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     code: emitted.code,
     map,
     stores: emitted.stores,
+    // The lexer's token tape, as the parse consumed it (beside `trivia`, the
+    // lexer's other channel): the checker's gate and advisories read these
+    // tokens rather than lexing the source again.
+    tokens: result.tokens ?? null,
     mappings: new Mappings(emitted.mappings),
     // Source spans the compiler consumed as its OWN vocabulary — words that are
     // syntax in their position and reach no face entity, each tagged with the

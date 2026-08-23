@@ -31,7 +31,6 @@ import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { tokenize } from '../lexer.js';
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 
@@ -41,16 +40,13 @@ import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource
 const compilerDir = path.resolve(import.meta.dir, '..');
 const serverDir = path.resolve(compilerDir, '..', 'packages', 'vscode', 'src');
 
-// The token stream, or null for a source the lexer refuses.
-const tokensOf = (source, fsPath) => {
-  try { return tokenize(source, fsPath).tokens; } catch { return null; }
-};
-
-// Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
-// undefined and every diagnostic publishes. An empty annotation set would
-// silence the whole file, and a silent file reads as a clean one.
+// Fails OPEN, like the editor's: a gate scopes.js cannot build leaves the
+// gate undefined and every diagnostic publishes. An empty annotation set
+// would silence the whole file, and a silent file reads as a clean one. A
+// compiled entry always carries its token tape — a result without one is
+// a compiler-contract break, refused loudly rather than gated around.
 const scopeGate = (tokens, source, face, typedImports) => {
-  if (tokens === null) return undefined;
+  if (!tokens) throw new Error('compile result carries no token tape');
   try { return scopeGateOf(tokens, source, face, typedImports); }
   catch { return undefined; }
 };
@@ -78,15 +74,19 @@ const escapeHatchesOf = (tokens, source, srcLineStarts) => {
     if (t.kind === 'TYPE') out.any.push(offsetToPosition(srcLineStarts, t.start).line + 1);
     else if (t.kind === 'CAST') out.casts.push(offsetToPosition(srcLineStarts, t.start).line + 1);
   }
+  // Code only, like the tape: a `__DATA__` payload is not code.
   const ignore = /^[ \t]*#[ \t]*@ts-ignore(\s|$)/;
-  source.split('\n').forEach((line, i) => { if (ignore.test(line)) out.ignores.push(i + 1); });
+  for (const [i, line] of source.split('\n').entries()) {
+    if (line === '__DATA__') break;
+    if (ignore.test(line)) out.ignores.push(i + 1);
+  }
   return out;
 };
 
-// A module's ANNOTATED exports — file-local, so a lexer refusal costs this
+// A module's ANNOTATED exports — file-local, so a failure here costs this
 // module's importers their cross-file checking and nothing else.
-const moduleTypedExports = (source, fsPath, face) => {
-  try { return typedExportsOf(tokenize(source, fsPath).tokens, source, face); }
+const moduleTypedExports = (source, face) => {
+  try { return typedExportsOf(face.tokens, source, face); }
   catch { return new Set(); }
 };
 
@@ -152,6 +152,24 @@ process.on('exit', () => {
   if (fallbackToClean === null) return;
   try { fs.rmSync(fallbackToClean, { recursive: true, force: true }); } catch { /* best effort */ }
 });
+
+// At most `width` tasks started at once, in call order; the next starts
+// as one settles. The FIRST task runs alone: until it settles the width
+// is one, so whatever the first request pays for (the cold program build
+// behind the first tsgo request) is paid by exactly one request's budget.
+// Each call returns the task's own promise.
+function pacer(width) {
+  let running = 0, settled = 0;
+  const queue = [];
+  const next = () => {
+    while (running < (settled === 0 ? 1 : width) && queue.length) {
+      const { task, resolve, reject } = queue.shift();
+      running++;
+      Promise.resolve().then(task).then(resolve, reject).finally(() => { running--; settled++; next(); });
+    }
+  };
+  return (task) => new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); next(); });
+}
 
 // ── target collection ───────────────────────────────────────────────
 function* walkRip(dir) {
@@ -369,10 +387,10 @@ while (queue.length) {
 // its own and an import cycle cannot recur through it.
 const typedExports = new Map();
 for (const [fsPath, entry] of compiled) {
-  typedExports.set(fsPath, moduleTypedExports(entry.source, fsPath, entry.result));
+  typedExports.set(fsPath, moduleTypedExports(entry.source, entry.result));
 }
 for (const [fsPath, entry] of compiled) {
-  const tokens = tokensOf(entry.source, fsPath);
+  const tokens = entry.result.tokens;
   entry.good.checkedLines = scopeGate(
     tokens, entry.source, entry.result,
     typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
@@ -507,13 +525,39 @@ if (compiled.size > 0) {
     tsgoUnavailable = true;
   } else {
     const tsgo = session.client;
+    // Requests to tsgo go out a bounded number at a time, in issue order.
+    // tsgo drains its queue serially, and a request's timeout runs from
+    // the moment it is SENT (tsgo.js): a request's budget covers what is
+    // in flight ahead of it — at most the window, never the whole batch —
+    // and the first request of the session goes alone, so the cold
+    // program build is charged to one request, not a window of them.
+    // Wide enough that the round-trips still overlap.
+    const paced = pacer(16);
     try {
       // ── PIN PASS ── Tier-3 pins, per file: splice probe declarations
       // that tsgo can type NATIVELY (not evolving-`any`), hover them, and
       // feed the answers back into a recompile — so a hoisted binding
       // read across a closure resolves to its real type, as in the editor.
-      for (const [fsPath, entry] of compiled) {
-        if (!entry.pinnables.length) continue;
+      // Files are probed ONE AT A TIME, in `compiled` order (a file's
+      // hovers overlap with each other, paced). A pinned file recompiles,
+      // rewrites, and OPENS its face as a document before the next file
+      // is probed: tsgo resolves an import against an open document's
+      // text, not the disk (which it re-reads only at its own pace), so
+      // every later probe sees every face the pass has pinned so far —
+      // deterministically. Probing files concurrently would race an
+      // importer's queued hovers against its dependency's didOpen, and
+      // which pinnables land would then depend on timing, not source.
+      const repin = (fsPath, entry, pins) => {
+        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins });
+        entry.good.code = r.code;
+        entry.good.mappings = r.mappings;
+        entry.good.echoSpans = r.echoSpans ?? [];
+        entry.good.genLineStarts = lineStartsOf(r.code);
+        fs.writeFileSync(entry.mirrorPath, r.code);
+        tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });
+        entry.opened = true;
+      };
+      const probeOne = async ([fsPath, entry]) => {
         const probePath = entry.mirrorPath.replace(/\.ts$/, '.__rip_probe__.ts');
         const probeUri = pathToFileURL(probePath).href;
         const { text, positions } = buildProbe(entry.good.code, entry.pinnables);
@@ -521,28 +565,20 @@ if (compiled.size > 0) {
         try {
           fs.writeFileSync(probePath, text);
           tsgo.notify('textDocument/didOpen', { textDocument: { uri: probeUri, languageId: 'typescript', version: 1, text } });
-          for (let i = 0; i < entry.pinnables.length; i++) {
-            if (!positions[i]) continue;
-            let type = null;
-            try {
-              const hover = await tsgo.request('textDocument/hover', { textDocument: { uri: probeUri }, position: positions[i] });
-              type = parseProbeHover(hover);
-            } catch { /* dead tsgo / timeout: no pin, status quo */ }
-            if (type !== null) pins.set(entry.pinnables[i].key, type);
-          }
+          // The probe's hovers are in flight together (paced — see
+          // `paced`), so the round-trips overlap instead of queuing. A
+          // dead tsgo or a timeout answers null — no pin, status quo.
+          const hovers = await Promise.all(entry.pinnables.map((_, i) => (positions[i]
+            ? paced(() => tsgo.request('textDocument/hover', { textDocument: { uri: probeUri }, position: positions[i] })).then(parseProbeHover, () => null)
+            : Promise.resolve(null))));
+          hovers.forEach((type, i) => { if (type !== null) pins.set(entry.pinnables[i].key, type); });
           tsgo.notify('textDocument/didClose', { textDocument: { uri: probeUri } });
         } finally {
           try { fs.unlinkSync(probePath); } catch { /* already gone */ }
         }
-        if (pins.size) {
-          const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins });
-          entry.good.code = r.code;
-          entry.good.mappings = r.mappings;
-          entry.good.echoSpans = r.echoSpans ?? [];
-          entry.good.genLineStarts = lineStartsOf(r.code);
-          fs.writeFileSync(entry.mirrorPath, r.code);
-        }
-      }
+        if (pins.size) repin(fsPath, entry, pins);
+      };
+      for (const item of compiled) if (item[1].pinnables.length) await probeOne(item);
 
       // Index every mirror face by its URI so a diagnostic's secondary
       // locations — which may point into a different file — map back to
@@ -580,18 +616,28 @@ if (compiled.size > 0) {
       };
 
       // ── OPEN ALL FINAL FACES ── so cross-file imports resolve to the
-      // pinned faces before any diagnostics are pulled.
+      // pinned faces before any diagnostics are pulled. A pinned face is
+      // already open (its pin pass opened the final text).
       for (const [, entry] of compiled) {
+        if (entry.opened) continue;
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: entry.good.code } });
       }
 
       // ── PULL + MAP ── one request per file (tsgo answers when the
       // program is ready — deterministic, no settle). Map back, apply the
       // @ts-expect-error semantics, silence rip.noCheck paths.
+      // The pulls are issued together (paced — see `paced`; the first
+      // answers when the program is ready, the rest are queued behind it)
+      // and consumed in file order, so the report keeps its order.
+      const pulls = new Map();
+      for (const [fsPath, entry] of compiled) {
+        if (isNoCheckPath(fsPath, entry.cfg._configDir, entry.cfg.noCheck)) continue;
+        pulls.set(fsPath, paced(() => tsgo.request('textDocument/diagnostic', { textDocument: { uri: entry.mirrorUri } })).then((r) => ({ ok: true, r }), (err) => ({ ok: false, err })));
+      }
       for (const [fsPath, entry] of compiled) {
         if (isNoCheckPath(fsPath, entry.cfg._configDir, entry.cfg.noCheck)) continue;
         let pulled;
-        try { pulled = await tsgo.request('textDocument/diagnostic', { textDocument: { uri: entry.mirrorUri } }); }
+        try { const got = await pulls.get(fsPath); if (!got.ok) throw got.err; pulled = got.r; }
         catch (err) {
           // A pull can reject (the cold first pull warms the whole program
           // and may hit the request timeout, or tsgo dies mid-run). That

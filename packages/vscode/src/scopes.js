@@ -420,17 +420,40 @@ export function assignmentFlowsOf(stores, source) {
   return flows;
 }
 
-// True when a span reads some binding that is typed where the read sits.
-//
 // Reads and mentions are IDENTIFIER tokens alone, the mirror of seeding: a
 // PROPERTY token spells a member name or an object key, and a name is not a
 // reference. `styles = { position: 'fixed' }` reads no binding called
 // `position`, whatever annotated function of that name the file declares.
-function readsTyped(tokens, bindings, [start, end], holes = []) {
-  for (const t of tokens ?? []) {
-    if (t.kind !== 'IDENTIFIER') continue;
-    if (typeof t.start !== 'number' || t.start < start || t.start >= end) continue;
+//
+// The file's identifier tokens, ordered by offset — the tape itself is not
+// promised to be (a synthesized identifier can follow a token it precedes
+// in the text), and the span lookup below is a binary search over this.
+function identifierIndexOf(tokens) {
+  const out = [];
+  for (const t of tokens ?? []) if (t.kind === 'IDENTIFIER' && typeof t.start === 'number') out.push(t);
+  return out.sort((a, b) => a.start - b.start);
+}
+
+// The identifier tokens a value span reads — the span's tokens minus its
+// holes — collected ONCE per flow. The fixpoint asks the same question of
+// the same span every round while only the bindings change, so the reads
+// are indexed up front and each round tests those few tokens alone.
+function readerTokensOf(identifiers, [start, end], holes = []) {
+  const out = [];
+  let lo = 0, hi = identifiers.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (identifiers[mid].start < start) lo = mid + 1; else hi = mid; }
+  for (let i = lo; i < identifiers.length; i++) {
+    const t = identifiers[i];
+    if (t.start >= end) break;
     if (holes.some(([s, e]) => t.start >= s && t.start < e)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+// True when one of the reader tokens names a binding typed where it sits.
+function readsTyped(readers, bindings) {
+  for (const t of readers) {
     if (!bindings.has(t.value)) continue;
     const spans = bindings.get(t.value);
     if (!spans || spans.some((s) => t.start >= s.start && t.start < s.end)) return true;
@@ -645,12 +668,13 @@ export function scopeGateOf(tokens, source, face, typedImports = null) {
   for (const t of tokens ?? []) if (t.kind === 'TYPE' && typeof t.start === 'number') typeOffsets.push(t.start);
   const annotatedWithin = (flow) => typeOffsets.some((o) =>
     o >= flow.value[0] && o < flow.value[1] && !flow.holes.some(([s, e]) => o >= s && o < e));
-  for (const flow of flows) flow.pending = true;
+  const identifiers = identifierIndexOf(tokens);
+  for (const flow of flows) { flow.pending = true; flow.readers = readerTokensOf(identifiers, flow.value, flow.holes); }
   for (;;) {
     let grew = false;
     for (const flow of flows) {
       if (!flow.pending) continue;
-      if (!annotatedWithin(flow) && !readsTyped(tokens, bindings, flow.value, flow.holes)) continue;
+      if (!annotatedWithin(flow) && !readsTyped(flow.readers, bindings)) continue;
       flow.pending = false;
       grew = true;
       const scope = scopeAt(regions, flow.at);

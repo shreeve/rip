@@ -112,35 +112,24 @@ async function loadCompiler() {
   throw new Error('rip compiler not found (looked for ../../../src/compile.js and ../compiler/src/compile.js)');
 }
 
-// The lexer rides the same dual-path resolution as compile. It backs the
-// declaration-scope gate (scopes.js), which needs TYPE tokens: a text scan
-// cannot tell the annotation `x: T = v` from the object literal `{ x: T }`,
-// and reading the wrong one would gate the wrong declarations. Absent (older
-// staged compiler): no tokenizer, so `checkedLines` stays undefined and
-// mapTsDiagnostic leaves every diagnostic ungated — the pre-gate behaviour,
-// never a silent over-suppression.
-// Fails OPEN. No tokenizer (older staged compiler) or a source the lexer
-// refuses leaves the gate undefined, and an undefined gate publishes
-// everything. Failing CLOSED would be an empty annotation set — which reads
-// as "no declaration is annotated", silencing the entire file, and a silent
-// file is indistinguishable from a clean one.
-function scopeGateFor(source, fsPath, face, typedImports) {
-  if (!tokenize) return undefined;
-  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+// The declaration-scope gate (scopes.js) reads the compile's own token tape
+// — the tokens the parse consumed, which is exactly the code the face
+// carries — so the gate and the face describe one text, and the editor
+// and `rip check` gate the same text. Two consequences of "the same
+// compile": a `__DATA__` payload is not code (it seeds no binding and
+// holds no annotation), and an open buffer's TOLERANT compile gates its
+// recovered face — mid-edit, an unclosed bracket leaves the file gated
+// like any other, not thrown open. The gate needs TYPE tokens: a text
+// scan cannot tell the annotation `x: T = v` from the object literal
+// `{ x: T }`, and reading the wrong one would gate the wrong declarations.
+// Fails OPEN: a gate scopes.js cannot build leaves it undefined, and an
+// undefined gate publishes everything. Failing CLOSED would be an empty
+// annotation set — which reads as "no declaration is annotated",
+// silencing the entire file, and a silent file is indistinguishable from
+// a clean one.
+function scopeGateFor(source, face, typedImports) {
+  try { return scopeGateOf(face.tokens, source, face, typedImports); }
   catch { return undefined; }
-}
-
-async function loadTokenizer() {
-  const candidates = [
-    new URL('../../../src/lexer.js', import.meta.url),
-    new URL('../compiler/src/lexer.js', import.meta.url),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(fileURLToPath(candidate))) {
-      return (await import(candidate.href)).tokenize;
-    }
-  }
-  return null;
 }
 
 // readProjectConfig rides the same dual-path resolution as compile
@@ -164,7 +153,6 @@ const documents = new TextDocuments(TextDocument);
 
 let compile = null;
 let readProjectConfig = null;
-let tokenize = null;
 let tsgo = null;
 let tsgoReady = null;
 let tsgoLaunches = 0;
@@ -706,8 +694,10 @@ function mirrorBytesOf(fsPath) {
 // memo that is two full compiles of every direct dependency (+57% on the
 // average importing file of this repo's packages/, +131 ms on the worst).
 //
-// Holds full results, so it is BOUNDED — recency-evicted well above the
-// widest direct-import fan-out measured here (16). The open buffer's own
+// Holds full results — token tape included, the largest part of one, and
+// read again whenever a face or typed-export memo misses on a hit here —
+// so it is BOUNDED: recency-evicted well above the widest direct-import
+// fan-out measured here (16). The open buffer's own
 // compile never lands here: it rides pins/tolerant/strict options, which
 // are a different compile. Every consumer receives the SAME result
 // object — nothing mutates compile results today, and a consumer that
@@ -738,7 +728,6 @@ function rawCompile(fsPath, source, sourceHash) {
 // at, not the one they last saved.
 const typedExportCache = new Map(); // fsPath → { sourceHash, names }
 function typedExportsFor(fsPath) {
-  if (!tokenize) return null;
   const open = documents.get('file://' + fsPath);
   let source;
   if (open) source = open.getText();
@@ -749,7 +738,7 @@ function typedExportsFor(fsPath) {
   let names;
   try {
     const result = rawCompile(fsPath, source, sourceHash);
-    names = typedExportsOf(tokenize(source, fsPath).tokens, source, result);
+    names = typedExportsOf(result.tokens, source, result);
   } catch {
     names = new Set(); // a source that will not compile types none of its importers
   }
@@ -821,7 +810,7 @@ function faceOf(fsPath) {
     // The declaration-scope gate, computed once per face and cached with it
     // — the face is keyed by sourceHash, so an edit that changes which
     // declarations carry annotations rebuilds this alongside the mappings.
-    checkedLines: scopeGateFor(source, fsPath, result,
+    checkedLines: scopeGateFor(source, result,
       typedImportsFor(result.stores, source, path.dirname(fsPath))),
   };
   faceCache.set(fsPath, face);
@@ -1418,7 +1407,6 @@ let semanticTokensLegend = FALLBACK_LEGEND;
 connection.onInitialize(async (params) => {
   compile = await loadCompiler();
   readProjectConfig = await loadProjectConfigReader();
-  tokenize = await loadTokenizer();
   workspaceRoot = detectWorkspaceRoot(params);
   planMirrorRoot();
   loadCache();
@@ -1733,7 +1721,7 @@ async function refresh(document) {
     // this reads it back rather than deriving the path a second way.
     checkedLines: (() => {
       const dir = (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })();
-      return scopeGateFor(text, document.uri, result, typedImportsFor(result.stores, text, dir));
+      return scopeGateFor(text, result, typedImportsFor(result.stores, text, dir));
     })(),
   };
 

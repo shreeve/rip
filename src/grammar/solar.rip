@@ -1403,7 +1403,7 @@ class Generator
         message = "Unexpected #{got}"
         message += " — expected #{expected.join(', ')}" if expected.length
         diagnostics.push {message, start, end, expected, got}
-        return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null}
+        return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
 
       if action > 0  # SHIFT or GOTO
         repairedHere.clear() if tolerant and not lexer.token?.hole
@@ -1522,7 +1522,7 @@ class Generator
         stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
 
 # ==============================================================================
 # Exports

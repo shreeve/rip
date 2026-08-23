@@ -391,7 +391,7 @@ const parserInstance = {
         if (expected.length)
           message += ` \u2014 expected ${expected.join(", ")}`;
         diagnostics.push({ message, start, end, expected, got });
-        return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null };
+        return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
       }
       if (action > 0) {
         if (tolerant && !lexer.token?.hole)
@@ -478,7 +478,7 @@ const parserInstance = {
           primitiveLocs.push(carriedPrimitives);
         stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
-        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null };
+        return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
     }
   },
   ctx: {},
