@@ -710,12 +710,11 @@ export function typeImportSpecifiers(text) {
   return specs;
 }
 
-// The `.rip` file a manifest serves for `subpath` ('.', './x'), or
-// null. `exports` beats `main`; a conditions object reads in bun's
-// runtime order (import → default → first string). Only `.rip` targets
-// answer; glob subpaths are not expanded — a miss errs toward the
-// TS2307, never a silent wrong file.
-function ripManifestTarget(manifest, subpath) {
+// The entry a manifest serves for `subpath` ('.', './x'), or null.
+// `exports` beats `main`; a conditions object reads in bun's runtime
+// order (import → default → first string). Glob subpaths are not
+// expanded — a miss errs toward the TS2307, never a silent wrong file.
+function manifestTarget(manifest, subpath) {
   const pick = (entry) => {
     if (typeof entry === 'string') return entry;
     if (entry && typeof entry === 'object') {
@@ -736,7 +735,36 @@ function ripManifestTarget(manifest, subpath) {
   } else if (subpath === '.' && typeof manifest?.main === 'string') {
     target = manifest.main;
   }
+  return target;
+}
+// The same entry when it is a `.rip` — the one the mirror builds a face
+// for. Anything else answers null here.
+function ripManifestTarget(manifest, subpath) {
+  const target = manifestTarget(manifest, subpath);
   return target !== null && target.endsWith('.rip') ? target : null;
+}
+
+// The declaration a package serving JAVASCRIPT carries for its entry. A
+// `.rip` entry has a face and needs none; a `.js` entry has no face, and
+// without its declaration the bare name is unresolvable (TS2307) — with
+// it, the name resolves to the declaration, absolute because the file
+// lives in the source tree, not the mirror. The declaration is what the
+// manifest NAMES — the `types` condition of the entry, or top-level
+// `types`/`typings` for '.' — and otherwise the conventional sibling:
+// `x.js` → `x.d.ts`, `x.mjs` → `x.d.mts`, `x.cjs` → `x.d.cts`.
+function declarationTarget(manifest, subpath, dir) {
+  const target = manifestTarget(manifest, subpath);
+  if (target === null || !/\.[cm]?js$/.test(target)) return null;
+  const candidates = [];
+  const exp = manifest?.exports;
+  const entry = exp && typeof exp === 'object' ? (Object.keys(exp).some((k) => k === '.' || k.startsWith('./')) ? exp[subpath] : (subpath === '.' ? exp : null)) : null;
+  if (entry && typeof entry === 'object' && typeof entry.types === 'string') candidates.push(entry.types);
+  if (subpath === '.') for (const named of [manifest?.types, manifest?.typings]) if (typeof named === 'string') candidates.push(named);
+  candidates.push(target.replace(/\.([cm]?)js$/, '.d.$1ts'));
+  for (const candidate of candidates) {
+    try { return fs.realpathSync(path.resolve(dir, candidate)); } catch { /* next */ }
+  }
+  return null;
 }
 
 // The `.rip` file a BARE specifier lands on, resolved the way bun will:
@@ -771,7 +799,8 @@ export function bareRipSpecifierTarget(spec, fromDir) {
 // as `rip/<pkg>` with no node_modules
 // anywhere. Checking resolves the same names: bare-specifier targets
 // fall back here when no node_modules provides the package, and
-// tsconfig paths point each name at the entry's mirror face.
+// tsconfig paths point each name at the entry's mirror face — or, for an
+// entry that is JavaScript, at its declaration.
 //
 // Finding the checkout follows the runtime's ownership rule: the
 // stdlib lives in whichever checkout owns the `rip` bin. In-repo, this
@@ -812,9 +841,10 @@ function stdlibRipTarget(spec) {
 }
 
 // tsconfig `paths` for the stdlib namespace: `rip/<pkg>` (plus
-// manifest export subpaths) → the mirror face of each package entry.
-// Merged UNDER workspaceRipPaths, so a workspace's own copy of a name
-// wins — the same local-first rule the runtime loader applies.
+// manifest export subpaths) → the mirror face of each package entry, or
+// the declaration of a JavaScript entry. Merged UNDER workspaceRipPaths,
+// so a workspace's own copy of a name wins — the same local-first rule
+// the runtime loader applies.
 export function stdlibRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
   const paths = {};
   let entries;
@@ -829,23 +859,28 @@ export function stdlibRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
       for (const k of Object.keys(manifest.exports)) if (k.startsWith('./') && !k.includes('*')) subpaths.push(k);
     }
     for (const sub of subpaths) {
+      const name = sub === '.' ? `rip/${e.name}` : `rip/${e.name}` + sub.slice(1);
       const target = ripManifestTarget(manifest, sub);
-      if (target === null) continue;
+      if (target === null) {
+        const dts = declarationTarget(manifest, sub, dir);
+        if (dts !== null) paths[name] ??= [dts];
+        continue;
+      }
       let real;
       try { real = fs.realpathSync(path.resolve(dir, target)); } catch { continue; }
       const face = mirrorRelForFsPath(real, workspaceRoot) + '.ts';
-      const name = sub === '.' ? `rip/${e.name}` : `rip/${e.name}` + sub.slice(1);
       paths[name] ??= [posix(path.join(fromConfigDirToMirrorRoot, face))];
     }
   }
   return paths;
 }
 
-// tsconfig `paths` for every workspace package serving `.rip`:
-// bare-name → mirror face, enumerated from the root's `workspaces`
-// globs (`<dir>/*` form; members without `.rip` exports contribute
-// nothing). Paths are relative to the CONFIG carrying them — the mirror
-// root passes '', a wrapper passes its reach-up.
+// tsconfig `paths` for every workspace package serving `.rip` (or
+// JavaScript with a declaration beside it): bare-name → mirror face, or
+// the declaration, enumerated from the root's `workspaces` globs
+// (`<dir>/*` form; members serving neither contribute nothing). Face
+// paths are relative to the CONFIG carrying them — the mirror root passes
+// '', a wrapper passes its reach-up — and declarations are absolute.
 export function workspaceRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
   const paths = {};
   if (!workspaceRoot) return paths;
@@ -873,10 +908,14 @@ export function workspaceRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '')
       for (const k of Object.keys(manifest.exports)) if (k.startsWith('./')) subpaths.push(k);
     }
     for (const sub of subpaths) {
-      const target = ripManifestTarget(manifest, sub);
-      if (target === null) continue;
-      const face = path.relative(workspaceRoot, path.resolve(dir, target)) + '.ts';
       const name = sub === '.' ? manifest.name : manifest.name + sub.slice(1);
+      const target = ripManifestTarget(manifest, sub);
+      if (target === null) {
+        const dts = declarationTarget(manifest, sub, dir);
+        if (dts !== null) paths[name] = [dts];
+        continue;
+      }
+      const face = path.relative(workspaceRoot, path.resolve(dir, target)) + '.ts';
       paths[name] = [posix(path.join(fromConfigDirToMirrorRoot, face))];
     }
   }

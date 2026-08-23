@@ -250,6 +250,14 @@ const MODEL_INTRINSICS = [
   '  upsert(data: Create, opts: { on: unknown }): Promise<Instance>;',
   '  insertMany(rows: Create[]): Promise<Instance[]>;',
   '  toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;',
+  // Installed on every model by `rip/fake` when it is imported — absent
+  // otherwise, which is why it is optional. A LITERAL count of 0, 1, or
+  // -1 makes one instance (built, created, built); any other count, and a
+  // pipe-table string, make an array. A count the types see only as
+  // `number` answers the array form — spell the literal where one
+  // instance is meant.
+  '  factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;',
+  '  factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;',
   '}',
 ];
 

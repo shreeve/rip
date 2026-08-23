@@ -866,6 +866,43 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A package that serves JAVASCRIPT has no face; its bare name resolves
+  // to the declaration beside the entry through the mirror's `paths`, and
+  // that declaration's types carry like an annotated export's. No
+  // node_modules link here: the stdlib alias `rip/<name>` never has one, so
+  // the resolution must come from the mirror, not from the filesystem walk.
+  test('a bare specifier landing on a .js entry resolves through its sibling .d.ts', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-jsdts-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'packages', 'gram'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'gram', 'package.json'),
+        JSON.stringify({ name: '@rip/gram', exports: { '.': './gram.js' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'gram', 'gram.js'), 'export const answer = 42;\n');
+      fs.writeFileSync(path.join(dir, 'packages', 'gram', 'gram.d.ts'), 'export declare const answer: number;\n');
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'), [
+        "import { answer } from '@rip/gram'",
+        'bad: string = answer',        // the declaration's type reaches the annotated line
+        'console.log bad',
+      ].join('\n') + '\n');
+      const diags = JSON.parse(check(dir, ['--json', path.join('packages', 'app')]).stdout);
+      expect(diags.map((d) => d.code)).not.toContain(2307);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    // The stdlib case itself: `rip/highlight` serves hljs-rip.js with its
+    // declaration beside it, resolved from any workspace — the alias has
+    // no node_modules entry anywhere, so only the mirror's `paths` can
+    // answer for it.
+    const stdlib = workspace({ 'grammar.rip': "import ripLanguage from 'rip/highlight'\nbad: number = ripLanguage\nconsole.log bad\n" });
+    try {
+      const diags = JSON.parse(check(stdlib, ['--json']).stdout);
+      expect(diags.map((d) => d.code)).not.toContain(2307);
+      expect(diags.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
+    } finally { fs.rmSync(stdlib, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A NESTED node_modules resolves through the mirror the way bun
   // resolves it at runtime: the face's ancestor walk lives in the mirror
   // tree, so a source-tree install (a quarantined bench dir with its own

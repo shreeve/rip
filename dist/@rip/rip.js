@@ -25498,7 +25498,7 @@ function createRenderer(opts) {
     return;
   };
   let showFatalCard = function(failure) {
-    let card;
+    let card, stub;
     clearFatalCard();
     let text = failure.error?.stack ?? failure.stack ?? failure.message ?? String(failure);
     fatalCard = (() => {
@@ -25508,16 +25508,20 @@ function createRenderer(opts) {
         card.textContent = text;
         return card;
       } else {
-        card = { nodeName: "PRE", textContent: text };
-        card.remove = function() {
-          let siblings = card.parentNode?.children;
-          let index = siblings?.indexOf(card) ?? -1;
-          if (index >= 0)
-            siblings.splice(index, 1);
-          card.parentNode = null;
-          return;
+        stub = {
+          nodeName: "PRE",
+          textContent: text,
+          parentNode: null,
+          remove() {
+            let siblings = stub.parentNode?.children;
+            let index = siblings?.indexOf(stub) ?? -1;
+            if (index >= 0)
+              siblings.splice(index, 1);
+            stub.parentNode = null;
+            return;
+          }
         };
-        return card;
+        return stub;
       }
     })();
     target.appendChild(fatalCard);
