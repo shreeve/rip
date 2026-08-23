@@ -271,10 +271,11 @@ it was built with; a Bun API is unknown for want of `@types/bun`. Those
 land exactly where the author declined to annotate, and no edit but an
 annotation answers them. The case the other side would catch —
 `answer = 42` later misused as a string — is genuine but was not found
-anywhere in this repository. The gate lives in
-`packages/vscode/src/scopes.js`, shared verbatim by the editor and
-`rip check`, and it fails OPEN: a source the lexer refuses publishes
-everything.
+anywhere in this repository.
+
+Type information reaches along BINDINGS, never text. Three rules follow. A function body is a hole in whatever value contains it: a body that reads a typed binding types one local inside it, never the name the function lands in nor the rest of the body — `f = (x) -> …`, `memo((x) -> …)`, and the method in `handlers = run: (x) -> …` all lose their bodies and keep their headers, so a long `main = -> …` is not typed whole because one line of it calls a typed helper. A member name or an object key is not a read — `styles = { position: 'fixed' }` reads no binding called `position`, whatever annotated function of that name the file declares. And what remains of a value outside its bodies is what it reads: `r = typedFn(x)` types `r`, and an annotation left standing in the value — `f = (x: T) -> …`, `api = fetch: (): number -> 42` — is type information the author wrote into it and types the name.
+
+The gate lives in `packages/vscode/src/scopes.js`, shared verbatim by the editor and `rip check`, and both read the token tape the compile itself consumed — so the two gate one text, a `__DATA__` payload is not code (it seeds no binding and holds no annotation), and an open buffer's tolerant compile gates its recovered face rather than throwing it open mid-edit. The gate fails OPEN: a gate scopes.js cannot build publishes everything, since an empty annotation set would read as "nothing is annotated" and silence the file.
 
 Names and modules that do not resolve, and definition cycles, publish
 in every mode — defects no annotation answers. One exception spells the
