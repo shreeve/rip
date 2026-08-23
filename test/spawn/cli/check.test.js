@@ -2209,4 +2209,39 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(r.stderr).toBe('');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
+
+  test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
+    // Both postures are exercised: per file (an unannotated read the gate
+    // would hold, an implicit-any parameter) and per program (a null the
+    // loosened posture admits, a host name the floor would declare `any`),
+    // and across a package boundary (a nested package with its own
+    // rip.strict beside a gradual root — the mode flip that earns its own
+    // program). Rows compare whole: file, position, severity, code,
+    // message, related.
+    const files = {
+      'a.rip': "x = 1\ny = x.bar.baz\ndef f(n)\n  n\nz: string = null\nconsole.log y, f(1), z, process.argv\n",
+      'pkg/b.rip': "w: string = null\nconsole.log w\n",
+    };
+    const gradual = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) });
+    const strict = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) }, { strict: true });
+    try {
+      const plain = check(gradual, ['--json']);
+      const forced = check(gradual, ['--strict', '--json']);
+      const real = check(strict, ['--json']);
+      const rows = (r) => JSON.parse(r.stdout);
+      expect(plain.status).toBe(1);                       // the nested strict package reports on its own
+      expect(rows(plain).map((d) => d.file)).toEqual(['pkg/b.rip']);
+      expect(forced.status).toBe(1);
+      expect(rows(forced)).toEqual(rows(real));           // --strict ≡ rip.strict, row for row
+      expect(rows(forced).map((d) => d.code)).toEqual(expect.arrayContaining([2339, 7006, 2322, 2580]));
+      expect(fs.readFileSync(path.join(gradual, 'package.json'), 'utf8')).toBe('{}');
+      expect(forced.stderr).toBe('');
+      // The text report says the posture was forced; the plain one does not.
+      expect(check(gradual, ['--strict']).stdout).toContain('checked under --strict');
+      expect(check(gradual).stdout).not.toContain('checked under --strict');
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

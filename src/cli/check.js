@@ -100,6 +100,11 @@ Options:
   --json                   Emit diagnostics as a JSON array instead of the
                            human-readable text report
   --no-frame               Suppress the source code-frame under each error
+  --strict                 Check the workspace as if every package in it set
+                           rip.strict — what strict would report, with no
+                           package.json edited: the preview before flipping.
+                           Dependencies outside the workspace keep their own
+                           posture, as they would after the flip
   --build                  Print the build identity (a content hash over the
                            compiler and editor-server trees) and exit — the
                            editor logs the same hash in its ready line, so a
@@ -109,7 +114,8 @@ Options:
 Exit status is 0 when no error-severity diagnostic survives, 1 otherwise.
 Directories are walked for *.rip (node_modules and dot-directories are
 skipped). Config — package.json#rip (strict / noCheck) and the project
-tsconfig — governs exactly as it does in the editor. The generated TS
+tsconfig — governs exactly as it does in the editor (--strict overrides
+strict for the workspace's own packages; noCheck still governs). The generated TS
 mirror stays at <root>/.rip/check after the run — the exact TypeScript
 the LAST run type-checked (only the files that run covered), wiped and
 rebuilt at the start of every run; .build inside it names the compiler
@@ -134,7 +140,16 @@ if (argv.includes('--build')) {
 }
 const asJson = argv.includes('--json');
 const showFrames = !argv.includes('--no-frame') && !asJson;
-const KNOWN = new Set(['--json', '--no-frame', '--build']);
+// `--strict`: every package under the workspace root reads as if it set
+// `rip.strict` — the posture is overridden, the config on disk is read as
+// written, and what strict means stays where it is defined (diagnostics.js
+// per file, mirror.js per program). A dependency outside the workspace
+// keeps its own posture: flipping the workspace would not change it
+// either, and the preview reports what the flip would. The escape-hatch
+// advisories read the posture ON DISK — they are the pre-flip cleanup
+// list, and the run that previews the flip is where it is wanted.
+const forceStrict = argv.includes('--strict');
+const KNOWN = new Set(['--json', '--no-frame', '--build', '--strict']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
@@ -280,11 +295,23 @@ try {
 // failure is reported directly (no face) — its importers then see a
 // cannot-find-module, exactly as a broken file behaves in the editor.
 const configCache = new Map();
-const projectConfig = (dir) => {
-  // readProjectConfig never throws — it returns its own defaults on any
-  // unreadable/malformed package.json — so no fallback wrapper is needed.
+// The config as WRITTEN, by directory. readProjectConfig never throws — it
+// returns its own defaults on any unreadable/malformed package.json — so
+// no fallback wrapper is needed.
+const diskConfig = (dir) => {
   if (!configCache.has(dir)) configCache.set(dir, readProjectConfig(dir));
   return configCache.get(dir);
+};
+// The config as CHECKED: the disk config, with `--strict` forcing the
+// strict posture on every package under the workspace root.
+const postureCache = new Map();
+const projectConfig = (dir) => {
+  if (!postureCache.has(dir)) {
+    const cfg = diskConfig(dir);
+    const inWorkspace = dir === workspaceRoot || dir.startsWith(workspaceRoot + path.sep);
+    postureCache.set(dir, forceStrict && inWorkspace && cfg.strict !== true ? { ...cfg, strict: true } : cfg);
+  }
+  return postureCache.get(dir);
 };
 
 const compiled = new Map();   // fsPath → { source, cfg, good, pinnables }
@@ -395,7 +422,7 @@ for (const [fsPath, entry] of compiled) {
     tokens, entry.source, entry.result,
     typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
   );
-  if (explicitTargets.has(fsPath) && entry.cfg.strict !== true) {
+  if (explicitTargets.has(fsPath) && diskConfig(path.dirname(fsPath)).strict !== true) {
     const found = escapeHatchesOf(tokens, entry.source, entry.good.srcLineStarts);
     for (const kind of ['any', 'casts', 'ignores']) for (const line of found[kind]) escapes[kind].push({ file: fsPath, line });
   }
@@ -445,7 +472,7 @@ if (compiled.size > 0) {
       let pkgDir = null;
       const cfgDir = entry.cfg._configDir;
       if (cfgDir && cfgDir !== workspaceRoot
-          && (entry.cfg.strict === true) !== (readProjectConfig(path.dirname(cfgDir)).strict === true)) {
+          && (entry.cfg.strict === true) !== (projectConfig(path.dirname(cfgDir)).strict === true)) {
         pkgDir = cfgDir;
       } else if (entry.result.globalDecls?.length) {
         for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {
@@ -463,7 +490,7 @@ if (compiled.size > 0) {
     }
   }
   const mirror = generatedMirror({
-    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels],
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels], strict: forceStrict,
   });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
@@ -471,7 +498,7 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
-      workspaceRoot, mirrorRoot,
+      workspaceRoot, mirrorRoot, strict: forceStrict,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
@@ -481,7 +508,7 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: null, sourceDir: path.join(workspaceRoot, rel),
-      workspaceRoot, mirrorRoot,
+      workspaceRoot, mirrorRoot, strict: forceStrict,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
@@ -871,11 +898,11 @@ if (asJson) {
   }
   if (hiddenScope > 0) {
     console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
-      + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json`));
+      + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json (preview it with \`rip check --strict\`)`));
   }
   if (hiddenAnnotations > 0) {
     console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
-      + `— set \`rip.strict\` in package.json to see where annotations are missing`));
+      + `— set \`rip.strict\` in package.json to see where annotations are missing (preview it with \`rip check --strict\`)`));
   }
   if (hiddenUninstalled > 0) {
     const dirs = [...hiddenUninstalledDirs].sort();
@@ -891,6 +918,9 @@ if (asJson) {
     console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden`
       + `${about} (try \`bun add -d @types/bun\`)`));
   }
+  // A forced posture says so: a `--strict` report is otherwise
+  // indistinguishable from a package failing its own gate.
+  if (forceStrict) console.log(gray('checked under --strict — every package in the workspace read as if it set `rip.strict`; the posture on disk was not applied'));
 }
 
 // Exit: 1 on type errors; 2 when the run could not cover what was asked —

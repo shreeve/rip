@@ -324,6 +324,7 @@ Configuration changes refresh open editor documents without a window
 reload. `rip check [paths...]` applies the same project configuration,
 materializes the same TypeScript faces and import closure, and translates
 diagnostics through the same mapping seam without starting an editor.
+`rip check --strict` is the preview before flipping: every package in the workspace checks as if it set `rip.strict`, nothing on disk is edited, and dependencies outside the workspace keep their own posture — as they would after the flip.
 
 A check answers for the paths it was given. The closure is compiled and
 checked whole — a target's types cannot resolve otherwise — but a
