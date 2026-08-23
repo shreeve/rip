@@ -41,12 +41,46 @@ import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource
 const compilerDir = path.resolve(import.meta.dir, '..');
 const serverDir = path.resolve(compilerDir, '..', 'packages', 'vscode', 'src');
 
+// The token stream, or null for a source the lexer refuses.
+const tokensOf = (source, fsPath) => {
+  try { return tokenize(source, fsPath).tokens; } catch { return null; }
+};
+
 // Fails OPEN, like the editor's: a source the lexer refuses leaves the gate
 // undefined and every diagnostic publishes. An empty annotation set would
 // silence the whole file, and a silent file reads as a clean one.
-const scopeGate = (source, fsPath, face, typedImports) => {
-  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+const scopeGate = (tokens, source, face, typedImports) => {
+  if (tokens === null) return undefined;
+  try { return scopeGateOf(tokens, source, face, typedImports); }
   catch { return undefined; }
+};
+
+// The ESCAPE HATCHES a gradual target spells — each asks for checking and
+// withholds it, or switches it off where it was asked for:
+//
+//   any      a TYPE token that is exactly `any`. Under gradual an
+//            unannotated binding is already `any`, so the annotation opens
+//            its scope for checking and gives the checker nothing to check
+//            against. Composites (`any[]`, `Record<string, any>`) are shape
+//            decisions, not counted.
+//   casts    a CAST token that is exactly `any` (`x as any`): inside a
+//            scope already being checked, one expression opted out.
+//   ignores  a `# @ts-ignore` line: it suppresses the next line with no
+//            check that the suppression is still needed — `@ts-expect-error`
+//            is the form that says when it is not (TS2578).
+//
+// A strict project is different: there `any` is a stated decision against
+// implicit-any, and nothing here is advice. Lines are 1-based.
+const escapeHatchesOf = (tokens, source, srcLineStarts) => {
+  const out = { any: [], casts: [], ignores: [] };
+  for (const t of tokens ?? []) {
+    if (t.value !== 'any' || typeof t.start !== 'number') continue;
+    if (t.kind === 'TYPE') out.any.push(offsetToPosition(srcLineStarts, t.start).line + 1);
+    else if (t.kind === 'CAST') out.casts.push(offsetToPosition(srcLineStarts, t.start).line + 1);
+  }
+  const ignore = /^[ \t]*#[ \t]*@ts-ignore(\s|$)/;
+  source.split('\n').forEach((line, i) => { if (ignore.test(line)) out.ignores.push(i + 1); });
+  return out;
 };
 
 // A module's ANNOTATED exports — file-local, so a lexer refusal costs this
@@ -251,6 +285,8 @@ let incompleteCheck = false;
 // turn on, the other is a package you can install. A single total would
 // point everyone at the wrong one.
 let hiddenAnnotations = 0;
+// Escape hatches in gradual targets, as `{ file, line }` in source order.
+const escapes = { any: [], casts: [], ignores: [] };
 let hiddenMissingTypes = 0;
 let hiddenScope = 0;
 // The NAMES the missing-types advisories are about (`describe`, `require`
@@ -336,10 +372,15 @@ for (const [fsPath, entry] of compiled) {
   typedExports.set(fsPath, moduleTypedExports(entry.source, fsPath, entry.result));
 }
 for (const [fsPath, entry] of compiled) {
+  const tokens = tokensOf(entry.source, fsPath);
   entry.good.checkedLines = scopeGate(
-    entry.source, fsPath, entry.result,
+    tokens, entry.source, entry.result,
     typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
   );
+  if (explicitTargets.has(fsPath) && entry.cfg.strict !== true) {
+    const found = escapeHatchesOf(tokens, entry.source, entry.good.srcLineStarts);
+    for (const kind of ['any', 'casts', 'ignores']) for (const line of found[kind]) escapes[kind].push({ file: fsPath, line });
+  }
 }
 
 // ── materialize the mirror + drive one tsgo session ─────────────────
@@ -667,6 +708,7 @@ if (asJson) {
   const gray = (s) => paint('90', s);     // the TSxxxx code + summary :line
   const invert = (s) => paint('7', s);    // the gutter "box"
   const sevPaint = (sev, s) => paint(sev === 1 ? '91' : '93', s); // error red / warning yellow
+  const advise = (s) => paint('33', s);   // the `any` advisory: yellow
   const rel = (f) => path.relative(process.cwd(), f);
   const sourceLines = new Map();
   const linesOf = (fsPath) => {
@@ -756,6 +798,22 @@ if (asJson) {
     if (!named.length) return '';
     return ` (${named.slice(0, 3).join(', ')}${named.length > 3 ? ` and ${named.length - 3} more` : ''})`;
   };
+  // The escape-hatch advisories are not ledger: each names code that asks
+  // for checking and withholds it, with the sites, so the remedy is one edit
+  // away. Yellow, apart from the gray ledger below; they never move the exit
+  // status.
+  const advisory = (sites, head) => {
+    if (sites.length === 0) return;
+    console.log('');
+    console.log(advise(head(sites.length)));
+    for (const a of sites) console.log(`  ${rel(a.file)}${gray(':' + a.line)}`);
+  };
+  advisory(escapes.any, (n) => `${n} \`any\` annotation${plural(n)} — an \`any\` annotation switches checking on for its scope `
+    + 'and tells the checker nothing; under gradual an unannotated binding is already `any`, so write the real type or drop the annotation');
+  advisory(escapes.casts, (n) => `${n} \`as any\` cast${plural(n)} — \`as any\` exempts one expression from a scope that is otherwise checked; `
+    + 'cast to the type it really is, or fix the value');
+  advisory(escapes.ignores, (n) => `${n} \`@ts-ignore\` directive${plural(n)} — \`@ts-ignore\` keeps silencing the next line after the error it hid is gone; `
+    + '`@ts-expect-error` reports when the suppression is no longer needed');
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
   if (dependencyDiags > 0) {
     // Every directory names itself here — unlike the `rip.strict`

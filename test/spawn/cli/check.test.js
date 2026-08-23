@@ -730,6 +730,42 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // The escape-hatch advisories: an exact `any` annotation, an `as any`
+  // cast, and a `# @ts-ignore` line in a gradual target each ask for
+  // checking and withhold it, so the run names every site under its own
+  // heading. Composites are shape decisions and a strict project's `any` is
+  // a stated one — neither is counted. Advisories never move the exit
+  // status.
+  test('the escape-hatch advisories name each `any` annotation, `as any` cast, and `@ts-ignore` in gradual targets', () => {
+    const src = [
+      'x: any = 1',                 // annotation: counted
+      'ys: any[] = []',             // composite: not counted
+      'bag: Record<string, any> = {}',
+      'go = (e: any) -> e',         // annotation: counted
+      'z = (1 as any)',             // cast: counted
+      '# @ts-ignore',               // directive: counted
+      'w = 2',
+      'console.log x, ys, bag, go, z, w',
+    ].join('\n') + '\n';
+    const gradual = workspace({ 'a.rip': src });
+    const strict = workspace({ 'a.rip': src }, { strict: true });
+    try {
+      const r = check(gradual);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('2 `any` annotations');
+      expect(r.stdout).toMatch(/\n  a\.rip:1\n  a\.rip:4\n/);
+      expect(r.stdout).toContain('1 `as any` cast');
+      expect(r.stdout).toMatch(/cast[^\n]*\n  a\.rip:5\n/);
+      expect(r.stdout).toContain('1 `@ts-ignore` directive');
+      expect(r.stdout).toMatch(/directive[^\n]*\n  a\.rip:6\n/);
+      const s = check(strict).stdout;
+      expect(s).not.toContain('`any` annotation'); expect(s).not.toContain('`as any` cast'); expect(s).not.toContain('`@ts-ignore`');
+    } finally {
+      fs.rmSync(gradual, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // The hidden-diagnostics summary is the mode's ledger: three lines,
   // one per family, because the remedies differ — annotate a
   // declaration, flip `rip.strict`, install declarations. The lines
