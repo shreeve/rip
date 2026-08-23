@@ -21,7 +21,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
     throw TypeError.new 'Rip App: createMutation expects a function'
   _pending   = __state false
   _succeeded = __state false
-  _error     = __state(null as any)
+  _error     = __state null
   generation = 0
 
   mutation = (...args) ->

@@ -19,7 +19,8 @@ export type StashMethods =
   reset: () => void
   source: (path: string, key?: unknown) => SourceHandle
 
-export type Stash<D extends Record<string, any> = Record<string, any>> = D & StashMethods
+# The proxy answers its raw store under RAW; unwrapStash reads it back.
+export type Stash<D extends Record<string, any> = Record<string, any>> = D & StashMethods & { readonly [RAW]?: D }
 
 RAW =! Symbol 'rip.app.stash.raw'
 SIGNALS =! Symbol 'rip.app.stash.signals'
@@ -457,4 +458,4 @@ export def createStash<D extends Record<string, any>>(data: D = {} as D): Stash<
   makeProxy data
 
 export def unwrapStash<D extends Record<string, any>>(stash: Stash<D>): D
-  (stash as any)?[RAW] or stash
+  stash?[RAW] or stash

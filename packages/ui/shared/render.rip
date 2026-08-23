@@ -16,7 +16,7 @@ installGlobal = (host, key: string, value) ->
     value: value
 
 export _renderComponent = (ComponentClass, props: Record<string, any>, consume, after = null) ->
-  host = globalThis as any
+  host = globalThis as typeof globalThis & { document?: { __ripRenderActive?: boolean } }
   if host.document?.__ripRenderActive
     throw Error.new 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
 
