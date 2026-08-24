@@ -8302,6 +8302,7 @@ var isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
 var isRubyNew = (x) => isNode(x) && x[0] === "." && x.length === 3 && x[2] === "new";
 var PROTO_GENERIC_PARAMS = {
+  __proto__: null,
   Array: "<T>",
   ReadonlyArray: "<T>",
   Map: "<K, V>",
@@ -19988,8 +19989,8 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
 // src/runtime/intrinsics.js
 var exports_intrinsics = {};
 __export(exports_intrinsics, {
-  __toPropertyKey: () => __toPropertyKey,
-  __defineOwnDataProperty: () => __defineOwnDataProperty
+  __defineOwnDataProperty: () => __defineOwnDataProperty,
+  __toPropertyKey: () => __toPropertyKey
 });
 var {
   defineProperty: __definePropertyIntrinsic,
@@ -20011,22 +20012,22 @@ var __defineOwnDataProperty = (target, key, value) => __definePropertyIntrinsic(
 // src/runtime/stdlib.js
 var exports_stdlib = {};
 __export(exports_stdlib, {
-  zip: () => zip,
-  warn: () => warn,
-  todo: () => todo,
-  toMatchable: () => toMatchable,
-  sleep: () => sleep,
-  rand: () => rand,
-  raise: () => raise,
-  pr: () => pr,
-  pp: () => pp,
-  pj: () => pj,
-  p: () => p,
-  noop: () => noop,
-  kind: () => kind,
-  exit: () => exit,
+  abort: () => abort,
   assert: () => assert,
-  abort: () => abort
+  exit: () => exit,
+  kind: () => kind,
+  noop: () => noop,
+  p: () => p,
+  pj: () => pj,
+  pp: () => pp,
+  pr: () => pr,
+  raise: () => raise,
+  rand: () => rand,
+  sleep: () => sleep,
+  toMatchable: () => toMatchable,
+  todo: () => todo,
+  warn: () => warn,
+  zip: () => zip
 });
 var abort = (msg) => {
   if (msg)
@@ -20159,12 +20160,12 @@ var toMatchable = (v) => {
 // src/runtime/schema.js
 var exports_schema = {};
 __export(exports_schema, {
-  registerCoercer: () => registerCoercer,
-  installPersistence: () => installPersistence,
-  __schema: () => __schema,
-  SchemaRegistry: () => SchemaRegistry,
+  SchemaDef: () => SchemaDef,
   SchemaError: () => SchemaError,
-  SchemaDef: () => SchemaDef
+  SchemaRegistry: () => SchemaRegistry,
+  __schema: () => __schema,
+  installPersistence: () => installPersistence,
+  registerCoercer: () => registerCoercer
 });
 var __RIP_SCHEMA_SENTINEL = Symbol.for("rip.runtime.schema");
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
@@ -20195,6 +20196,7 @@ function formatIssues(issues, name) {
   return head + issues.map((i) => i.message || i.error || "invalid").join("; ");
 }
 var types = {
+  __proto__: null,
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
   integer: (v) => Number.isInteger(v),
@@ -21586,6 +21588,7 @@ class SchemaDef {
   }
 }
 var JSON_TYPES = {
+  __proto__: null,
   string: () => ({ type: "string" }),
   text: () => ({ type: "string" }),
   email: () => ({ type: "string", format: "email" }),
@@ -21812,20 +21815,20 @@ if (typeof globalThis !== "undefined") {
 // src/runtime/reactive.js
 var exports_reactive = {};
 __export(exports_reactive, {
-  getEffectSignal: () => getEffectSignal,
-  __state: () => __state,
-  __setErrorHandler: () => __setErrorHandler,
-  __setEffectErrorReporter: () => __setEffectErrorReporter,
-  __readonly: () => __readonly,
-  __pushOwner: () => __pushOwner,
-  __popOwner: () => __popOwner,
-  __ownerFrame: () => __ownerFrame,
-  __handleError: () => __handleError,
-  __effect: () => __effect,
-  __detachRef: () => __detachRef,
-  __computed: () => __computed,
+  __batch: () => __batch,
   __catchErrors: () => __catchErrors,
-  __batch: () => __batch
+  __computed: () => __computed,
+  __detachRef: () => __detachRef,
+  __effect: () => __effect,
+  __handleError: () => __handleError,
+  __ownerFrame: () => __ownerFrame,
+  __popOwner: () => __popOwner,
+  __pushOwner: () => __pushOwner,
+  __readonly: () => __readonly,
+  __setEffectErrorReporter: () => __setEffectErrorReporter,
+  __setErrorHandler: () => __setErrorHandler,
+  __state: () => __state,
+  getEffectSignal: () => getEffectSignal
 });
 var __RIP_REACTIVE_SENTINEL = Symbol.for("rip.runtime.reactive");
 if (globalThis[__RIP_REACTIVE_SENTINEL]) {
@@ -22234,37 +22237,37 @@ function __catchErrors(fn) {
 // src/runtime/components.js
 var exports_components = {};
 __export(exports_components, {
-  setContext: () => setContext,
-  hasContext: () => hasContext,
-  getContext: () => getContext,
-  __transition: () => __transition,
-  __reconcile: () => __reconcile,
-  __pushOwner: () => __pushOwner,
-  __pushComponent: () => __pushComponent,
-  __popOwner: () => __popOwner,
-  __popComponent: () => __popComponent,
-  __ownerFrame: () => __ownerFrame,
-  __lis: () => __lis,
-  __hmrSnapshotUi: () => __hmrSnapshotUi,
-  __hmrRestoreUi: () => __hmrRestoreUi,
-  __hmrRegistry: () => __hmrRegistry,
-  __hmrRegisterDefinition: () => __hmrRegisterDefinition,
-  __hmrPreserveState: () => __hmrPreserveState,
-  __hmrPatch: () => __hmrPatch,
-  __hmrMigrateRemount: () => __hmrMigrateRemount,
-  __hmrMigrateDiff: () => __hmrMigrateDiff,
-  __hmrLookup: () => __hmrLookup,
-  __hmrEvents: () => __hmrEvents,
-  __hmrEntries: () => __hmrEntries,
-  __hmrEmit: () => __hmrEmit,
-  __hmrClassify: () => __hmrClassify,
-  __handleComponentError: () => __handleComponentError,
-  __gateBind: () => __gateBind,
-  __detachRef: () => __detachRef,
-  __detach: () => __detach,
-  __clsx: () => __clsx,
+  __Component: () => __Component,
   __claimGateConstructor: () => __claimGateConstructor,
-  __Component: () => __Component
+  __clsx: () => __clsx,
+  __detach: () => __detach,
+  __detachRef: () => __detachRef,
+  __gateBind: () => __gateBind,
+  __handleComponentError: () => __handleComponentError,
+  __hmrClassify: () => __hmrClassify,
+  __hmrEmit: () => __hmrEmit,
+  __hmrEntries: () => __hmrEntries,
+  __hmrEvents: () => __hmrEvents,
+  __hmrLookup: () => __hmrLookup,
+  __hmrMigrateDiff: () => __hmrMigrateDiff,
+  __hmrMigrateRemount: () => __hmrMigrateRemount,
+  __hmrPatch: () => __hmrPatch,
+  __hmrPreserveState: () => __hmrPreserveState,
+  __hmrRegisterDefinition: () => __hmrRegisterDefinition,
+  __hmrRegistry: () => __hmrRegistry,
+  __hmrRestoreUi: () => __hmrRestoreUi,
+  __hmrSnapshotUi: () => __hmrSnapshotUi,
+  __lis: () => __lis,
+  __ownerFrame: () => __ownerFrame,
+  __popComponent: () => __popComponent,
+  __popOwner: () => __popOwner,
+  __pushComponent: () => __pushComponent,
+  __pushOwner: () => __pushOwner,
+  __reconcile: () => __reconcile,
+  __transition: () => __transition,
+  getContext: () => getContext,
+  hasContext: () => hasContext,
+  setContext: () => setContext
 });
 var __RIP_COMPONENTS_SENTINEL = Symbol.for("rip.runtime.components");
 if (globalThis[__RIP_COMPONENTS_SENTINEL]) {
@@ -23460,32 +23463,32 @@ class __Component {
 // packages/app/index.rip
 var exports_app = {};
 __export(exports_app, {
-  validatePrepared: () => validatePrepared,
-  unwrapStash: () => unwrapStash,
-  throttle: () => throttle,
-  source: () => source,
-  rash: () => rash,
-  preloadLinks: () => preloadLinks,
-  persistStash: () => persistStash,
-  parseQuery: () => parseQuery,
-  ownsAnchor: () => ownsAnchor,
-  launch: () => launch,
-  interceptClicks: () => interceptClicks,
-  hold: () => hold,
-  delay: () => delay,
-  debounce: () => debounce,
-  createWorkspace: () => createWorkspace,
-  createStash: () => createStash,
-  createRouter: () => createRouter,
-  createRenderer: () => createRenderer,
-  createMutation: () => createMutation,
-  createComponents: () => createComponents,
-  createApply: () => createApply,
-  connectFeed: () => connectFeed,
-  check: () => check,
-  buildRoutes: () => buildRoutes,
+  ariaCurrent: () => ariaCurrent,
   browserAdapter: () => browserAdapter,
-  ariaCurrent: () => ariaCurrent
+  buildRoutes: () => buildRoutes,
+  check: () => check,
+  connectFeed: () => connectFeed,
+  createApply: () => createApply,
+  createComponents: () => createComponents,
+  createMutation: () => createMutation,
+  createRenderer: () => createRenderer,
+  createRouter: () => createRouter,
+  createStash: () => createStash,
+  createWorkspace: () => createWorkspace,
+  debounce: () => debounce,
+  delay: () => delay,
+  hold: () => hold,
+  interceptClicks: () => interceptClicks,
+  launch: () => launch,
+  ownsAnchor: () => ownsAnchor,
+  parseQuery: () => parseQuery,
+  persistStash: () => persistStash,
+  preloadLinks: () => preloadLinks,
+  rash: () => rash,
+  source: () => source,
+  throttle: () => throttle,
+  unwrapStash: () => unwrapStash,
+  validatePrepared: () => validatePrepared
 });
 
 // packages/app/source.rip
@@ -28422,16 +28425,16 @@ function compileToJS(source2, options = {}) {
   return compile3(source2, { ...options, runtimeDelivery: "none" });
 }
 export {
-  showHmrOverlay,
-  runtimes,
-  processRipScripts,
-  hmrOverlayElement,
-  fetchBundle,
-  embeddedPackages,
-  createModuleLoader,
-  compileToJS,
-  compile3 as compile,
-  clearHmrOverlay,
+  exports_app as app,
   bootApp,
-  exports_app as app
+  clearHmrOverlay,
+  compile3 as compile,
+  compileToJS,
+  createModuleLoader,
+  embeddedPackages,
+  fetchBundle,
+  hmrOverlayElement,
+  processRipScripts,
+  runtimes,
+  showHmrOverlay
 };

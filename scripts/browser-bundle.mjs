@@ -2,14 +2,21 @@
 // in CI, so the toolchain version is load-bearing: regeneration under
 // a different Bun refuses instead of producing unexplained drift.
 // Upgrading Bun is a deliberate change — regenerate, inspect the diff,
-// and bump REQUIRED_BUN in the same commit.
+// and bump `.bun-version` in the same commit.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import { compile } from '../src/compile.js';
 
-const REQUIRED_BUN = '1.3.14';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outDir = resolve(root, 'dist/@rip');
+
+// `.bun-version` is the repo's only Bun pin: the CI setup-bun steps read
+// the same file through `bun-version-file`, and test/toolchain/bun-pin.test.js
+// holds them to it. Bun itself never reads it, so a mismatched runtime is
+// caught here rather than refused at startup.
+const REQUIRED_BUN = readFileSync(resolve(root, '.bun-version'), 'utf8').trim();
 if (Bun.version !== REQUIRED_BUN) {
   console.error(
     `browser: Bun ${REQUIRED_BUN} required, found ${Bun.version}; ` +
@@ -17,9 +24,6 @@ if (Bun.version !== REQUIRED_BUN) {
   );
   process.exit(2);
 }
-
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = resolve(root, 'dist/@rip');
 
 // The emitter imports fs for inline runtime delivery, which the
 // browser never uses (runtimes arrive by scope). The stub keeps the

@@ -381,7 +381,7 @@ alters surface syntax updates ALL THREE in the same change.
  encodings by construction.
 - `bunfig.toml` carries TWO preload entries — top-level (for
  `bun <file>`) and `[test]` (for `bun test`) — and BOTH are
- load-bearing: on Bun 1.3.14 the test runner does not inherit the
+ load-bearing: on Bun 1.4.0 the test runner does not inherit the
  top-level list. Removing either breaks its half of the world.
 - `packages/vscode` tests never ride the compiler's fast loop; the
   extension suite is its own boundary. Edit loop is `bun run test:unit`
@@ -438,7 +438,7 @@ the affected final gates again.
   builds Caddy from the PUBLISHED Janus module and rejects a local
   module replacement; the binary is cached after the first build.
   `JANUS_CADDY=<path>` supplies a janus-enabled binary instead.
-  Without either, the lane is fail-fast at `janus` and the six
+  Without either, the lane is fail-fast at `janus` and the seven
   epochs sorted after it do not run.
 - `bun run test` FROM a package (`packages/vscode`, `packages/sites`,
   `packages/app`, …) — that package's own suite, and the inner loop

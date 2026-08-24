@@ -4,7 +4,7 @@ First rung of the [demos ladder](../README.md): a minimal App whose **page
 states the Workspace publication + watch contract** — Rip source `update`,
 CSS refresh, asset invalidate. `app/` plus a tiny Hub-admit API (`index.rip`)
 so live watch works on the packaged bridge-mode edge. Permanent details:
-[`docs/SERVER.md`](../../docs/SERVER.md), [`docs/WORKSPACE.md`](../../docs/WORKSPACE.md).
+[`docs/SERVER.md`](../../../../docs/SERVER.md), [`docs/WORKSPACE.md`](../../../../docs/WORKSPACE.md).
 
 Edge TLS/Janus is system-wide (`rip sites start edge`); this demo does not
 ship a Caddyfile.
@@ -32,7 +32,7 @@ loopback, `hello.local` for LAN after `rip sites expose local`), conventional
 ## LAN / phone
 
 ```sh
-rip sites stop hello          # mode flips refuse while sites run
+rip sites stop hello
 rip sites trust edge
 rip sites expose local
 rip sites start hello
@@ -51,6 +51,8 @@ Manager writes these files under `dist/`:
 ```text
 @rip/rip.min.js
 @rip/rip.min.js.br
+@rip/tailwind.min.js
+@rip/tailwind.min.js.br
 bundle.json
 bundle.json.br
 latest.json

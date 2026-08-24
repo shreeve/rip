@@ -2,7 +2,8 @@
 
 These fixtures earn the Rip Sites implementation one observable capability at
 a time. Each directory is independent: it owns its source, state, and
-acceptance surface, and must not depend on a more advanced fixture.
+acceptance surface, and must not depend on a more advanced fixture (`janus`
+and `operations` reuse the `reloads/project` fixture as their App source).
 
 Order:
 
@@ -10,14 +11,15 @@ Order:
 2. `hello-api` — one API artifact, worker, route, and clean shutdown.
 3. `workers` — readiness, concurrency, draining, failure, and recycling.
 4. `hello-app` — one browser App with no API workers.
-5. `reloads` — App updates and API pool replacement.
-6. `operations` — hold, release, migration, and recovery.
-7. `manager-boundary` — declaration, finite file policy, and standalone browse.
-8. `middleware` — application-owned request policy.
-9. `monitor` — Janus access protocol, framing, formatting, and foreground output.
-10. `appliance` — `sites.json` catalog, edge-scoped control, unified
+5. `publication` — canonical browser Rip bundle assembly.
+6. `reloads` — App updates and API pool replacement.
+7. `operations` — hold, release, migration, and recovery.
+8. `manager-boundary` — declaration, finite file policy, and standalone browse.
+9. `middleware` — application-owned request policy.
+10. `monitor` — Janus access protocol, framing, formatting, and foreground output.
+11. `appliance` — `sites.json` catalog, edge-scoped control, unified
     `rip sites` lifecycle (no separate edge/site CLIs).
-11. `janus` — the released Janus data plane and control plane.
+12. `janus` — the released Janus data plane and control plane.
 
 Code enters `rip/sites` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.

@@ -194,6 +194,22 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // A member NAMED `constructor` (or any other Object.prototype name) is
+  // legal TS, and the face must spell it as written: a name-keyed table
+  // that inherits from Object.prototype would print the inherited
+  // function's source text in its place, and the face stops parsing. The
+  // real checker is the only judge of whether the face is valid TS.
+  test('a type member named `constructor` checks clean — the face keeps the name', () => {
+    const dir = workspace({
+      'ci.rip': 'type A = Record<string, any> & { constructor: Function & { __hmrId?: string } }\nx: A = {}\nconsole.log x, Object.keys({})\n',
+    });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('No type errors');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('an unresolved Unicode type name maps to its exact identifier span', () => {
     const dir = workspace({ 'unicode.rip': 'type Ω = Ξ\nx: Ω = 1\n' });
     try {

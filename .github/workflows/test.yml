@@ -27,7 +27,7 @@ jobs:
       - name: Set up Bun (pinned — the browser bundle is byte-gated against this exact toolchain)
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version-file: .bun-version
 
       # Single frozen-lockfile gate. Bun workspaces + linker=hoisted mean
       # `bun install` from a package directory still resolves against the
@@ -50,7 +50,7 @@ jobs:
       - name: Set up Bun (pinned)
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version-file: .bun-version
 
       - name: Install (workspace root — provisions @playwright/test through the root lock)
         run: bun install --frozen-lockfile

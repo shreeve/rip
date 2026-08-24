@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 
-const REQUIRED = '4.3.2';
+const REQUIRED = '4.3.3';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = resolve(root, 'dist/@rip');
 const require = createRequire(import.meta.url);

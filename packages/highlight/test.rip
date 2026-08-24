@@ -29,7 +29,7 @@ test "no runtime deps; highlight.js is the test oracle only", ->
   pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { 'highlight.js': '11.11.1' }
+  eq pkg.devDependencies, { 'highlight.js': '11.12.0' }
 
 test "declares browser safety and earns it", ->
   pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))

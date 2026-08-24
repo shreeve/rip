@@ -96,9 +96,10 @@ rip packages/db/example.rip
 - **`connect()`** — installs the process default (harbor adapter +
   client); soft-wires schema `:model` when that runtime is loaded
 - **Module-level API** — `sql` / `findOne` / `findAll` /
-  `transaction` / `begin` over that default
-- **Client surface** — materialize to row objects, `rows` / `one` /
-  `value` on the client, nested-joining transactions with a retry
+  `transaction` / `begin` over that default, plus `show` — pretty-prints
+  an envelope / rows array / row / promise / query builder
+- **Client surface** — materialize to row objects, `sql` / `rows` /
+  `one` / `value` / `values` on the client, nested-joining transactions with a retry
   loop for optimistic-concurrency conflicts, AbortSignal cancellation
 - **`ping`** — `/ready` + `current_database()` health check (`rip-db
   status` is the CLI alias)
@@ -199,6 +200,7 @@ objects and projects them:
 | `rows` | `findAll` | array of row objects |
 | `one` | `findOne` | first row or `null` |
 | `value` | — (use `client.value` or read `sql!.rows`) | first scalar or `null` |
+| `values` | — (client only) | all scalars of the first row, or `null` |
 
 ```coffee
 db = connect!

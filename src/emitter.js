@@ -124,7 +124,11 @@ const isRubyNew = (x) => isNode(x) && x[0] === '.' && x.length === 3 && x[2] ===
 // interface must repeat its parameter list (`interface Array<T>`), and
 // repeating it lets a member's annotation NAME the parameter
 // (`Array::second: () => T`). Heads outside this table augment bare.
+// Null-prototype: the head is USER identifier text, so an inherited
+// Object.prototype member (`constructor::m`) must never satisfy the
+// lookup.
 export const PROTO_GENERIC_PARAMS = {
+  __proto__: null,
   Array: '<T>', ReadonlyArray: '<T>', Map: '<K, V>', Set: '<T>',
   WeakMap: '<K, V>', WeakSet: '<T>', Promise: '<T>', WeakRef: '<T>',
 };

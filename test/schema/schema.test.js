@@ -228,6 +228,22 @@ describe('schema runtime: the validation pipeline', () => {
     expect(out.properties.age.minimum).toBe(18);
   });
 
+  // The primitive-validator and JSON-type tables are keyed by the
+  // user's type name, so an Object.prototype name must MISS them
+  // exactly as any unknown name does — never resolve to the inherited
+  // function (an unbound `valueOf` throws from the validator; `Object`
+  // validates nothing) nor be CALLED to put a bare string where a
+  // subschema belongs.
+  test('a field type named after an Object.prototype member is an unknown type, not a primitive', () => {
+    const out = run(
+      'S = schema\n  a? constructor\n  b? valueOf\n  c? toString',
+      `return [S.ok({a: 1, b: 1, c: 1}), S.toJSONSchema().properties];`,
+    );
+    const unknown = run('U = schema\n  a? stirng', `return [U.ok({a: 1}), U.toJSONSchema().properties.a];`);
+    expect(out[0]).toBe(unknown[0]);
+    expect(out[1]).toEqual({ a: unknown[1], b: unknown[1], c: unknown[1] });
+  });
+
   test('SchemaError carries structured issues', () => {
     const out = run(
       'S = schema\n  n! integer',

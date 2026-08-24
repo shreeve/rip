@@ -3505,6 +3505,12 @@ describe('orm: runtime delivery', () => {
       // the typo: nothing declares it, and it is not intrinsic
       expect(ddl(field('a', 'stirng')))
         .toMatch(/unknown field type 'stirng'.*no schema declares it, and it is not one of: any, boolean/s);
+      // an Object.prototype name is not an intrinsic either: the column
+      // table is keyed by the user's type name, so an inherited member
+      // must never pass for one (a `constructor` column would otherwise
+      // render the function's source text as its type)
+      expect(ddl(field('a', 'constructor'))).toMatch(/unknown field type 'constructor'/);
+      expect(ddl(field('a', 'toString'))).toMatch(/unknown field type 'toString'/);
       // a nested schema is an object, so it is a JSON document — the
       // same answer the array form has always given
       expect(ddl(field('a', 'Point'))).toContain('"a" JSON');

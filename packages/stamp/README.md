@@ -205,7 +205,8 @@ Handlers resolve in this order, first match wins:
 4. **npm** — `@stamp/<name>` or `stamp-<name>`
 5. **Remote** — fetched via a `use` line in the Stampfile
 
-Drop a file in `./directives/` beside your Stampfile to override any built-in.
+Drop a file in `./directives/` beside your Stampfile to add new directive
+types; built-ins resolve first and cannot be overridden.
 
 ## CLI
 

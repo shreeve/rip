@@ -2,8 +2,10 @@
 
 Worker-runtime shape:
 
-- readiness before admission;
-- configured per-worker concurrency;
+- readiness before admission; workers that miss the readiness deadline are
+  killed by the manager;
+- configured per-worker concurrency; invalid worker concurrency rejects
+  before binding;
 - busy and draining markers consumed by Janus;
 - graceful completion on shutdown;
 - boot-failure reporting;

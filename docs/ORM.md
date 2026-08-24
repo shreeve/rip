@@ -846,7 +846,8 @@ query(sql, params) → { columns, data, rowCount }
   reports 1 for everything makes every bulk operation claim one row.
   DuckDB itself answers a bulk UPDATE/DELETE with a one-row result
   whose single `Count` column carries the number — the ORM reads that
-  shape first and falls back to `rowCount`.
+  shape first and falls back to `rowCount`. On write results, `rows` is
+  accepted as an alias for `rowCount`.
 
 The database must support `INSERT … RETURNING` — `create`, `save`,
 `upsert`, and `insertMany` require the returned row (the create path
@@ -913,7 +914,7 @@ globalThis.__ripSchema.__schemaSetAdapter
     {
       columns:  names.map((n) -> { name: n })
       data:     data.map((row) -> row.map(decode))
-      rowCount: data.length
+      rows:     data.length
     }
 ```
 

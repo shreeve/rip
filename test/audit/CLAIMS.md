@@ -64,7 +64,7 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 
 ### Modules
 
-Neither module behavior is a row, and one constraint explains both: no error fixture here imports anything, and none can. The two judges resolve different workspaces — the editor side sees only the flat fixture copies, the twin side only its own `errors/` twins — so no specifier resolves for both at once ([10-modules.errors.rip](corpus/errors/10-modules.errors.rip) states the constraint at the lane). That rules out a missing-specifier negative and a wrong-use-of-an-import negative alike.
+Neither module behavior is a row, and one constraint explains both: no error fixture here imports anything that resolves, and none can. The two judges resolve different workspaces — the editor side sees only the flat fixture copies, the twin side only its own `errors/` twins — so no specifier resolves for both at once ([10-modules.errors.rip](corpus/errors/10-modules.errors.rip) states the constraint at the lane). That rules out a missing-specifier negative and a wrong-use-of-an-import negative alike.
 
 What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across every specifier form and `verdict` holds it, so the corpus does show that imports resolve and type-check. It cannot show that an imported type is ENFORCED: driven 2026-07-28, retyping the lib's `port` export to `any` leaves all five dimensions green on all four module fixtures, because a positive demands zero published diagnostics and `any` publishes none. An enforcement claim is only ever held by a negative, so these stay notes — a carried row here would count toward the corpus's coverage while proving nothing.
 

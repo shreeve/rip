@@ -27,7 +27,7 @@ describe('tailwind bundle artifact', () => {
   test('ship copy is the Tailwind browser IIFE', () => {
     const code = readFileSync(minPath, 'utf8');
     expect(code.startsWith('"use strict"') || code.includes('(()=>{')).toBeTrue();
-    expect(code).toContain('4.3.2');
+    expect(code).toContain('4.3.3');
   });
 });
 

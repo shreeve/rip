@@ -68,7 +68,7 @@ function loadExtension() {
 
 describe('the extension activation contract', () => {
   test('activation is auto-generated from the language contribution — no redundant onLanguage:rip', () => {
-    // VS Code (>= 1.74; we require ^1.80) generates the `onLanguage:rip`
+    // VS Code (>= 1.74; we require ^1.91) generates the `onLanguage:rip`
     // activation event from the `contributes.languages` entry below, so an
     // explicit `onLanguage:rip` in `activationEvents` is redundant and the
     // manifest linter flags it. This guards that specific entry from creeping

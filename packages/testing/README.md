@@ -2,10 +2,11 @@
 
 # Rip Testing
 
-> **Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws).**
+> **Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws, plainEnv).**
 
-Four helpers and nothing else: run a named case, assert structural
-equality, assert truthiness, assert a throw. The tally prints once on
+Four assertion helpers plus `plainEnv` and nothing else: run a named
+case, assert structural equality, assert truthiness, assert a throw,
+and hand a subprocess a color-free env. The tally prints once on
 process exit, a failed case sets `process.exitCode = 1` so CI sees it,
 and the whole harness is one deliberately small file that grows only
 when a concrete test cannot be written without it. This is **not** the
@@ -13,7 +14,9 @@ language battery harness (`test` / `code` / `fail` / `type` in
 `test/support/testing.js`) — packages ignore those compiler verbs.
 
 **Runtime:** not browser-safe — it owns `process` exit hooks and
-writes to stdout. One `.rip` file.
+writes to stdout. Two `.rip` files: the core harness (`rip/testing`)
+and the app-testing harness (`rip/testing/app` — `scratchDb`,
+`bootApp`, `appClient`).
 
 ## Quick Start
 
@@ -44,7 +47,7 @@ test "bad input rejects loudly", ->
   `FORCE_COLOR` / CI. `test:all` gives lanes a PTY so paint works
   without forcing `FORCE_COLOR`
 
-## The four helpers
+## The five exports
 
 | Helper | Contract |
 | --- | --- |

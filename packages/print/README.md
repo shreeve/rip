@@ -2,7 +2,7 @@
 
 # Rip Print
 
-> **Syntax-highlighted source code printer — 190+ languages via highlight.js, served once to your browser, print-ready.**
+> **Syntax-highlighted source code printer — highlight.js under the hood, 40+ file extensions routed to their grammars, served once to your browser, print-ready.**
 
 `rip-print` highlights the files you point it at, serves the result
 once on `http://localhost:9111/`, opens your browser, and exits — no

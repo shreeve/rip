@@ -53,7 +53,6 @@ provider (`tray-sites.rip`). Repo `bin/` holds only the `rip` compiler CLI.
 ## Quick Start
 
 ```bash
-bun add rip/tray
 cd packages/tray
 bun run demo
 ```
@@ -187,13 +186,13 @@ ships [`rip-color.svg`](assets/rip-color.svg) and
 ## Rip Sites (separate package)
 
 Full instructions:
-[packages/sites/README.md — Menu-bar tray](../sites/README.md#menu-bar-tray).
+[packages/sites/README.md — Tray, menubar host](../sites/README.md#tray--menubar-host).
 
 | Piece | Location |
 | --- | --- |
 | Provider | [`packages/sites/tray-sites.rip`](../sites/tray-sites.rip) |
 | LaunchAgent | [`packages/sites/bin/rip-tray-agent`](../sites/bin/rip-tray-agent) |
-| CLIs used | `rip sites`, `rip edge` only |
+| CLIs used | `rip sites` only |
 
 ```bash
 cd packages/sites && rip tray

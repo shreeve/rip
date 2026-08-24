@@ -68,7 +68,7 @@ You pass it an array. It processes each element by type:
 Spawn a local process with a real pseudo-terminal:
 
 ```coffee
-chat = Script.spawn! 'mumps -dir'           # MUMPS console
+chat = Script.spawn! 'mumps', ['-dir']      # MUMPS console
 chat = Script.spawn! 'bash'                 # local shell
 chat = Script.spawn! 'python3', ['-i']      # interactive Python
 ```
