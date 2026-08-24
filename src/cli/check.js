@@ -343,6 +343,63 @@ let hiddenScope = 0;
 // "install the @types package" without a noun sends the user hunting
 // through their imports for which declaration is absent.
 const missingTypeNames = new Set();
+// The `@types/bun` a project resolves: the package.json that DECLARES it
+// (the file an upgrade edits) and the version actually installed. Walks
+// like node resolution — nearest declaration, nearest node_modules.
+// Host types describe the RUNTIME's own globals, so a version apart from
+// the running Bun describes a runtime the code will not meet; the
+// advisory below reports the divergence, never the absence (that is the
+// missing-types family's).
+//
+// The walk ALWAYS has a ceiling inside the project: the workspace root
+// when startDir is under one, else startDir's own nearest package root,
+// else startDir. Running to the FILESYSTEM root instead would let a
+// `@types/bun` declared or installed anywhere above — a checkout's
+// parent, a home directory — answer for a project that never asked, and
+// the advisory names the directory it found.
+const hostTypesFor = (startDir) => {
+  let bound = startDir;
+  if (workspaceRoot && (startDir === workspaceRoot || startDir.startsWith(workspaceRoot + path.sep))) {
+    bound = workspaceRoot;
+  } else {
+    for (let d = startDir; path.dirname(d) !== d; d = path.dirname(d)) {
+      if (fs.existsSync(path.join(d, 'package.json'))) { bound = d; break; }
+    }
+  }
+  // The two sites are found INDEPENDENTLY and both are kept. Under a
+  // hoisted linker they routinely differ — a member declares the
+  // dependency while the install lands in the workspace root — and
+  // naming only one of them misdirects in the other's case: report the
+  // declaring site and a stale root install sends the reader to a
+  // package.json that already reads correctly; report the install site
+  // and a stale member declaration sends them to a directory that
+  // declares nothing. Whoever reads the advisory needs whichever it is,
+  // so the caller says both when they are not the same place.
+  let declaredAt = null;
+  let installedAt = null;
+  let installed = null;
+  for (let d = startDir; ; d = path.dirname(d)) {
+    if (declaredAt === null) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8'));
+        if ((pkg?.devDependencies?.['@types/bun'] ?? pkg?.dependencies?.['@types/bun']) != null) declaredAt = d;
+      } catch { /* no package.json here, or unreadable — keep walking */ }
+    }
+    if (installed === null) {
+      try {
+        installed = JSON.parse(
+          fs.readFileSync(path.join(d, 'node_modules', '@types', 'bun', 'package.json'), 'utf8'),
+        ).version ?? null;
+        if (installed !== null) installedAt = d;
+      } catch { /* not installed at this level — keep walking */ }
+    }
+    if (d === bound || path.dirname(d) === d) break;
+  }
+  // A declaration is the GATE, never the report: without one the copy is
+  // some dependency's, and the project was never asked to hold a version.
+  return declaredAt === null || installed === null
+    ? null : { declaredAt, installedAt, installed };
+};
 // The PROJECTS the hidden diagnostics belong to (config-dir, cwd-relative),
 // per family — named in the summary so the `rip.strict` remedy points at
 // the right package.json. The home project ('.') stays unnamed.
@@ -897,6 +954,46 @@ if (asJson) {
     + 'cast to the type it really is, or fix the value');
   advisory(escapes.ignores, (n) => `${n} \`@ts-ignore\` directive${plural(n)} — \`@ts-ignore\` keeps silencing the next line after the error it hid is gone; `
     + '`@ts-expect-error` reports when the suppression is no longer needed');
+  // Host types that describe a DIFFERENT runtime than the one this ran
+  // under, per declaring project — once, regardless of how many files
+  // reached it. An ADVISORY, not ledger: the package is the target's own
+  // and the remedy is a single `bun add`, where the gray families below
+  // are counts a consumer often cannot act on at all (a dependency's
+  // diagnostics belong to the dependency). Never gated on a diagnostic
+  // either — types NEWER than the runtime answer for APIs absent at run
+  // time, which is exactly the case no check can see, so this fires on a
+  // wholly clean run. `bun` is absent under a non-Bun host; with nothing
+  // to compare it stays silent.
+  const runtimeBun = typeof Bun === 'undefined' ? null : Bun.version;
+  const hostMismatches = new Map();             // sites → { where, installed }
+  if (runtimeBun !== null) {
+    const relOf = (d) => path.relative(process.cwd(), d) || '.';
+    for (const fsPath of explicitTargets) {
+      const cfgDir = compiled.get(fsPath)?.cfg?._configDir ?? path.dirname(fsPath);
+      const host = hostTypesFor(cfgDir);
+      if (host === null || host.installed === runtimeBun) continue;
+      const at = relOf(host.installedAt);
+      const from = relOf(host.declaredAt);
+      // One place, one name; two places, both — the reader cannot act on
+      // a location that is only half the story.
+      const where = at === from ? (at === '.' ? '' : ` in ${at}`)
+        : ` (installed in ${at}, declared in ${from})`;
+      hostMismatches.set(`${at} ${from}`, { where, installed: host.installed });
+    }
+  }
+  if (hostMismatches.size > 0) {
+    const sites = [...hostMismatches.keys()].sort();
+    const shown = sites.slice(0, 3)
+      .map((s) => `${hostMismatches.get(s).installed}${hostMismatches.get(s).where}`).join(', ');
+    const more = sites.length > 3 ? ` and ${sites.length - 3} more` : '';
+    // `there` only when every mismatch names somewhere to go.
+    const wholly = [...hostMismatches.values()].every((m) => m.where !== '');
+    console.log('');
+    console.log(advise(`\`@types/bun\` ${shown}${more} `
+      + `${hostMismatches.size === 1 ? 'does' : 'do'} not match the running Bun ${runtimeBun} `
+      + `— \`Bun\`, \`process\`, and the rest are typed from the wrong version `
+      + `(try \`bun add -d @types/bun@${runtimeBun}\`${wholly ? ' there' : ''})`));
+  }
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
   if (dependencyDiags > 0) {
     // Every directory names itself here — unlike the `rip.strict`

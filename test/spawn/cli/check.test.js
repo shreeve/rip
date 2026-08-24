@@ -812,6 +812,79 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // Host types describe the RUNTIME's globals, so a version apart from
+  // the running Bun describes a runtime the code will not meet. Two
+  // properties, both load-bearing: the advisory is never gated on a
+  // diagnostic (types NEWER than the runtime answer for APIs absent at
+  // run time — precisely the case no check can see, so it must fire on a
+  // wholly clean run), and it sits in the ADVISORY tier ABOVE the gray
+  // ledger. The tier is the reader's cue to act: the package is theirs
+  // and the remedy is one `bun add`, where a ledger line often counts a
+  // dependency's diagnostics they cannot touch. Colour is TTY-only, so
+  // the tier is pinned by ORDER, which is what it means on the page.
+  test('host types apart from the running Bun advise above the ledger; a matching version is silent', () => {
+    // The installed version is read from the package's own
+    // node_modules — written directly here, so the row needs no network
+    // and pins nothing about what npm happens to publish.
+    const withTypes = (version) => ({
+      // A held diagnostic, so a LEDGER line exists to sit below.
+      'index.rip': 'n = 42\nbad = n.toUpperCase()\nconsole.log bad\n',
+      'node_modules/@types/bun/package.json': JSON.stringify({ name: '@types/bun', version }) + '\n',
+    });
+    const stale = workspace(withTypes('0.0.1'));
+    fs.writeFileSync(path.join(stale, 'package.json'),
+      JSON.stringify({ name: 'stale', devDependencies: { '@types/bun': '0.0.1' } }, null, 2));
+    const matched = workspace(withTypes(Bun.version));
+    fs.writeFileSync(path.join(matched, 'package.json'),
+      JSON.stringify({ name: 'matched', devDependencies: { '@types/bun': Bun.version } }, null, 2));
+    try {
+      const out = check(stale).stdout;
+      expect(out).toContain('No type errors');          // fires with nothing else reported
+      // Both versions named, and which is which — the line is read by
+      // someone who does not yet know the two can differ.
+      expect(out).toContain(`\`@types/bun\` 0.0.1 does not match the running Bun ${Bun.version}`);
+      expect(out).toContain(`bun add -d @types/bun@${Bun.version}`);
+      // Above the ledger, not among it.
+      const ledger = out.indexOf('hidden in unannotated code');
+      expect(ledger).toBeGreaterThan(-1);
+      expect(out.indexOf('does not match the running Bun')).toBeLessThan(ledger);
+      // The control: same shape, version agreeing, nothing said.
+      expect(check(matched).stdout).not.toContain('match the running Bun');
+    } finally {
+      fs.rmSync(stale, { recursive: true, force: true });
+      fs.rmSync(matched, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Bun's default linker HOISTS: a member declares the dependency while
+  // the copy lands in the workspace root. Naming one site alone
+  // contradicts the other — point at the declaration and a stale root
+  // install sends the reader to a package.json that already reads
+  // correctly; point at the install and a stale member declaration sends
+  // them somewhere that declares nothing. Both, whenever they differ.
+  test('a hoisted install and the member that declared it are both named', () => {
+    const dir = workspace({
+      // The root holds the copy and declares nothing…
+      'node_modules/@types/bun/package.json': JSON.stringify({ name: '@types/bun', version: '0.0.1' }) + '\n',
+      // …while the member's own declaration is already correct.
+      'app/package.json': JSON.stringify({ name: 'app', devDependencies: { '@types/bun': Bun.version } }, null, 2) + '\n',
+      'app/index.rip': 'x: number = 1\nconsole.log x\n',
+    });
+    // The `workspaces` key is what makes this shape REAL rather than
+    // contrived: it is what hoists the install to the root in the first
+    // place, and it is what puts the workspace root above the member so
+    // the walk can see both sites. Without it the root is not the
+    // workspace, the walk stops at the member, and the split cannot arise.
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'mono', workspaces: ['app'] }, null, 2));
+    try {
+      const out = check(dir).stdout;
+      expect(out).toContain(
+        `\`@types/bun\` 0.0.1 (installed in ., declared in app) does not match the running Bun ${Bun.version}`,
+      );
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // A top-level `globalThis.NAME ??= expr` DECLARES the global: the
   // spelling says "install unless someone already did", which is a
   // declaration in runtime clothes — stamp's sh/ok/run vocabulary is the
