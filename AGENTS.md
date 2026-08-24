@@ -381,9 +381,8 @@ alters surface syntax updates ALL THREE in the same change.
  encodings by construction.
 - `bunfig.toml` carries TWO preload entries — top-level (for
  `bun <file>`) and `[test]` (for `bun test`) — and BOTH are
- load-bearing: the test runner does not inherit the top-level list
- (measured on 1.3.14, re-verified on 1.4.0). Removing either breaks
- its half of the world.
+ load-bearing: on Bun 1.4.0 the test runner does not inherit the
+ top-level list. Removing either breaks its half of the world.
 - `packages/vscode` tests never ride the compiler's fast loop; the
   extension suite is its own boundary. Edit loop is `bun run test:unit`
   (protocol/lockstep, seconds, no tsgo preflight); full package /
