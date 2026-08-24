@@ -123,9 +123,20 @@ function classifyRules(styleSheet, classes) {
   const residual = [];
   const global = [];
 
+  // Conditional at-rule ancestry (@media, @supports — anything but the
+  // structural @layer). Tailwind 4.3.3 moved variant conditions OUTSIDE
+  // the class rule (`@media …{.sm\:text-lg{…}}` where 4.3.2 nested the
+  // @media inside), so a rule's condition now lives on its ancestors;
+  // a conditional rule can never inline and must keep its wrappers.
+  const conditionals = [];
   walk(styleSheet, {
-    visit: 'Rule',
-    enter(rule) {
+    enter(node) {
+      if (node.type === 'Atrule' && node.name !== 'layer') {
+        conditionals.push(node);
+        return;
+      }
+      if (node.type !== 'Rule') return;
+      const rule = node;
       const selectors = [];
       walk(rule, {
         visit: 'ClassSelector',
@@ -137,7 +148,7 @@ function classifyRules(styleSheet, classes) {
       if (matched.length === 0) return;
       matched.forEach((name) => supported.add(name));
 
-      const simple = generate(rule.prelude)
+      const simple = conditionals.length === 0 && generate(rule.prelude)
         .trim()
         .split(',')
         .map((selector) => selector.trim())
@@ -148,8 +159,11 @@ function classifyRules(styleSheet, classes) {
         matched.forEach((name) => inlineable.add(name));
         inlineRules.push({ names: matched, rule });
       } else {
-        residual.push(rule);
+        residual.push({ rule, conditionals: conditionals.slice() });
       }
+    },
+    leave(node) {
+      if (node.type === 'Atrule' && node.name !== 'layer') conditionals.pop();
     },
   });
 
@@ -199,7 +213,11 @@ function inlineStyles(rules, variables) {
   return styles;
 }
 
-function residualRuleText(rule, variables) {
+function residualRuleText({ rule, conditionals }, variables) {
+  const wrap = (text) => conditionals.reduceRight(
+    (inner, atrule) => `@${atrule.name} ${generate(atrule.prelude)}{${inner}}`,
+    text);
+
   const children = [];
   rule.block.children.forEach((child) => children.push(child));
   const responsive = children.length > 0 && children.every((child) =>
@@ -207,12 +225,12 @@ function residualRuleText(rule, variables) {
     child.name === 'media' &&
     child.block &&
     [...child.block.children].every((nested) => nested.type === 'Declaration'));
-  if (!responsive) return resolveVariables(generate(rule), variables);
+  if (!responsive) return wrap(resolveVariables(generate(rule), variables));
 
   const selector = generate(rule.prelude);
   return children.map((media) => {
     const declarations = resolveVariables(generate(media.block), variables);
-    return `@media ${generate(media.prelude)}{${selector}${declarations}}`;
+    return wrap(`@media ${generate(media.prelude)}{${selector}${declarations}}`);
   }).join('\n');
 }
 
@@ -285,7 +303,7 @@ export function inlineEmailTree(root, config = {}) {
   const unsupported = applyInline(root, inlineable, inlineRules, variables);
   const headCss = [
     ...global,
-    ...residual.map((rule) => residualRuleText(rule, variables)),
+    ...residual.map((entry) => residualRuleText(entry, variables)),
   ].join('\n');
 
   if (headCss) {

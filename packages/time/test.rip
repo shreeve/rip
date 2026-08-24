@@ -33,7 +33,7 @@ test "no runtime deps; dayjs is the test oracle only", ->
   pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
     eq pkg[field], undefined
-  eq pkg.devDependencies, { dayjs: '1.11.20' }
+  eq pkg.devDependencies, { dayjs: '1.11.23' }
   eq pkg.files.includes('test'), false
 
 test "declares browser safety and earns it", ->
