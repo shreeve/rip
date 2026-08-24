@@ -645,10 +645,21 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // computed the author wrote. Every other line stays unanchored — the
 // companion's enclosing $self mark serves it, and a second source row
 // per member would compete with the class declare road's for hover.
+// The runtime AMBIENCE, one list: the members every component instance
+// carries without declaring them. The injection lives in
+// src/runtime/components.js (mount injection and the launch-global
+// fallback for `app`/`router`; `params`/`query` are route navigation
+// state) — that site names this constant as its co-owner, and a name
+// added there without a line here resurfaces as a TS7022 cycle on the
+// first computed that reads it.
+export const AMBIENT_FIELDS = ['app', 'router', 'params', 'query'];
+
 export function instanceTypeLines(info, selfType) {
   const lines = [];
   let hasChildren = false;
+  const memberNames = new Set();
   for (const m of info.members) {
+    memberNames.add(m.name);
     if (m.name === 'children') hasChildren = true;
     if (m.kind === 'method' || m.kind === 'hook') {
       const declared = info.roleText(m.func, 'returnType');
@@ -681,6 +692,20 @@ export function instanceTypeLines(info, selfType) {
   }
   // Scaffolding the author never wrote: no source span exists for these, so
   // they carry no mark and stay under the component's cover.
+  //
+  // The runtime AMBIENCE rides the interface, not just the class: the
+  // class road cannot vouch for it here — a computed's table function
+  // takes `this` as THIS interface, so a member the interface omits turns
+  // the member's own ReturnType<> projection into a cycle (TS7022 on the
+  // component) instead of a plain unknown-name. Declared on EVERY
+  // component (route-ness is not statically knowable) and OPTIONAL:
+  // `?: any` reads as `any` at every use — the cycle stays broken — while
+  // a hand-built value assigned to the interface owes none of them, and
+  // the route-only members read as what they are, possibly absent. An
+  // author member of the same name wins the line.
+  for (const name of AMBIENT_FIELDS) {
+    if (!memberNames.has(name)) lines.push({ segs: [{ text: `${name}?: any;` }] });
+  }
   if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
   lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });

@@ -142,6 +142,10 @@ type 'gate: annotated value is a non-null readonly computed container', '''
 ''', '''
   export interface UserCard {
     user: { readonly value: { name: string }; read(): { name: string } };
+    app?: any;
+    router?: any;
+    params?: any;
+    query?: any;
     children?: any;
     mount(target?: any): UserCard;
     unmount(options?: { removeDOM?: boolean }): void;

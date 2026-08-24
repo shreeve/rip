@@ -375,7 +375,10 @@ function __claimGateConstructor() {
       parent: metadata.parent ?? null,
       // Route fields the emitter lowers to `this.app` / `this.router` /
       // `this.params` / `this.query` — assigned in the constructor
-      // before `_init`, so member initializers can read them.
+      // before `_init`, so member initializers can read them. This name
+      // set is co-owned by AMBIENT_FIELDS in src/ts/components.js: the
+      // face declares what is injected here, and a name added on one
+      // side alone desyncs the type surface from the runtime.
       app: metadata.app ?? null,
       router: metadata.router ?? null,
       used: false,
