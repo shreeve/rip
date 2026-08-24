@@ -185,6 +185,39 @@ const HOST_FLOORS = [
   },
 ];
 export const HOST_FLOOR_NAME = 'host-floor.d.ts';
+
+// A package that INSTALLS its own ambient types. Ambient declarations —
+// `@types/*` packages and `bun-types` — bind per PROGRAM through the
+// governing tsconfig's typeRoots, which walk UP from the program root and
+// never down into a member, so a nested install is unread until the
+// member has a program of its own; a package whose own tsconfig already
+// partitions it needs nothing (its wrapper's typeRoots walk starts at
+// the package). The test is a NON-EMPTY install, not a directory's
+// existence — package managers leave empty `@types` scope dirs behind,
+// and an empty dir must not partition a program. A resolver-parked
+// conflict copy counts: whatever sits in a package's own node_modules is
+// what binds for that package's files, however it got there. Granting is
+// live (the next refresh reads the disk); RETRACTION is reload-only,
+// like every node_modules mutation without a manifest edit.
+const nonEmptyDir = (p) => {
+  try { return fs.readdirSync(p).some((e) => !e.startsWith('.')); } catch { return false; }
+};
+export function installsOwnTypes(pkgDir) {
+  return nonEmptyDir(path.join(pkgDir, 'node_modules', '@types'))
+    || fs.existsSync(path.join(pkgDir, 'node_modules', 'bun-types', 'package.json'));
+}
+
+// The CONFIG-driven reasons a package earns its own program, shared by
+// the editor and `rip check` so the two cannot drift: its mode flips
+// against its parent package's (floors and null posture are per-program,
+// and a flip cuts both ways), or it installs its own ambient types. The
+// third reason — the package DECLARES globals — reads the compile result
+// and stays with the callers.
+export function configEarnsBoundary(cfg, parentCfg, workspaceRoot) {
+  const dir = cfg?._configDir;
+  if (!dir || dir === workspaceRoot) return false;
+  return (cfg.strict === true) !== (parentCfg?.strict === true) || installsOwnTypes(dir);
+}
 const ancestorHas = (fromDir, pkgs) => {
   for (let dir = fromDir; ; dir = path.dirname(dir)) {
     if (pkgs.some((p) => fs.existsSync(path.join(dir, 'node_modules', p)))) return true;

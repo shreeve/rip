@@ -31,7 +31,7 @@ import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled } from '../../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 
 // The two trees whose build identity the editor and this CLI must agree
@@ -460,19 +460,20 @@ if (compiled.size > 0) {
   }
   // The AUTO BOUNDARY: a package becomes its own program when it DECLARES
   // globals (`globalThis.NAME ??=` — the vocabulary stays package-scoped,
-  // reaching importers the way the runtime does) or when its MODE FLIPS
+  // reaching importers the way the runtime does), when its MODE FLIPS
   // against its parent package's (floors and null posture are per-PROGRAM:
   // a strict package inside a gradual program would get the floor's `any`s,
   // and a gradual package inside a strict program would get strict nulls
-  // and refused floors). A package whose own tsconfig wraps it needs
-  // nothing more; the workspace root has no narrower scope to give.
+  // and refused floors), or when it INSTALLS its own ambient types
+  // (configEarnsBoundary carries the config-driven pair). A package whose
+  // own tsconfig wraps it needs nothing more; the workspace root has no
+  // narrower scope to give.
   const autoBoundaryRels = new Set();
   if (!mirrorRootIsFallback) {
     for (const [fsPath, entry] of compiled) {
       let pkgDir = null;
       const cfgDir = entry.cfg._configDir;
-      if (cfgDir && cfgDir !== workspaceRoot
-          && (entry.cfg.strict === true) !== (projectConfig(path.dirname(cfgDir)).strict === true)) {
+      if (cfgDir && configEarnsBoundary(entry.cfg, projectConfig(path.dirname(cfgDir)), workspaceRoot)) {
         pkgDir = cfgDir;
       } else if (entry.result.globalDecls?.length) {
         for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {

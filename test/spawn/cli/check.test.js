@@ -2210,6 +2210,27 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('a package that installs its own ambient types earns its own program: the install binds there and nowhere else', () => {
+    // Ambient declarations bind per PROGRAM through typeRoots, which walk
+    // up from the program root and never down into a member — so a nested
+    // install is unread until the member has its own program. The global
+    // resolves inside the installing package, and stays a defect outside
+    // it (the cannot-find family reports under every mode).
+    const dir = workspace({
+      'root.rip': 'console.log FOO_MARK\n',
+      'pkg/package.json': '{}',
+      'pkg/node_modules/@types/foo/package.json': '{"name":"@types/foo","version":"1.0.0","types":"index.d.ts"}',
+      'pkg/node_modules/@types/foo/index.d.ts': 'declare var FOO_MARK: number;\n',
+      'pkg/a.rip': 'console.log FOO_MARK\n',
+    });
+    try {
+      const r = check(dir, ['--json']);
+      const rows = JSON.parse(r.stdout);
+      expect(rows.map((d) => [d.file, d.code])).toEqual([['root.rip', 2304]]);
+      expect(r.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
     // Both postures are exercised: per file (an unannotated read the gate
     // would hold, an implicit-any parameter) and per program (a null the
