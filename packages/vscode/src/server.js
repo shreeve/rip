@@ -161,6 +161,7 @@ let shuttingDown = false;
 // The project roots (established at initialize).
 let workspaceRoot = null;        // the client workspace's fsPath, or null
 let mirrorRoot = null;           // where mirrors + the generated tsconfig live
+let mirrorRootReal = null;       // realpath twin when it differs (symlinked root)
 let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/absent)
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
@@ -239,6 +240,28 @@ function ensureOwnedFile(filePath, content) {
   fs.writeFileSync(filePath, content);
 }
 
+// tsgo realpaths module-resolution results, so an answer can spell the
+// mirror root through its resolved form (a temp root under macOS /var →
+// /private/var, a workspace reached through a symlink) while the server
+// spells it as configured. Both spellings name the same tree, so the
+// realpath twin is recorded once the root exists and containment checks
+// accept either.
+function recordMirrorRootReal() {
+  try { mirrorRootReal = fs.realpathSync(mirrorRoot); } catch { mirrorRootReal = null; }
+  if (mirrorRootReal === mirrorRoot) mirrorRootReal = null;
+}
+
+// The mirror-relative path of a file under the mirror tree — either
+// spelling — or null. The ONE containment test: every "is this inside
+// the mirror?" ask goes through here, so the symlink rule cannot drift
+// between consumers.
+function mirrorRelOf(fsPath) {
+  for (const root of [mirrorRoot, mirrorRootReal]) {
+    if (root && fsPath.startsWith(root + path.sep)) return path.relative(root, fsPath);
+  }
+  return null;
+}
+
 function ensureMirrorRoot() {
   if (mirrorRootReady) return;
   if (workspaceRoot && !mirrorRootIsFallback) {
@@ -246,6 +269,7 @@ function ensureMirrorRoot() {
       fs.mkdirSync(mirrorRoot, { recursive: true });
       ensureOwnedFile(path.join(mirrorRoot, '.gitignore'), '*\n');
       writeGeneratedTsconfig();
+      recordMirrorRootReal();
       mirrorRootReady = true;
       return;
     } catch (err) {
@@ -257,6 +281,7 @@ function ensureMirrorRoot() {
   mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-lsp-'));
   mirrorRootIsFallback = true;
   writeGeneratedTsconfig();
+  recordMirrorRootReal();
   mirrorRootReady = true;
 }
 
@@ -821,9 +846,10 @@ function faceOf(fsPath) {
 // have no faithful inverse (sanitized names) — their results drop.
 function sourcePathOfMirror(mirrorFsPath) {
   if (!workspaceRoot || mirrorRootIsFallback) return null;
-  if (!mirrorFsPath.startsWith(mirrorRoot + path.sep)) return null;
   if (!mirrorFsPath.endsWith('.rip.ts')) return null;
-  const rel = path.relative(mirrorRoot, mirrorFsPath).slice(0, -'.ts'.length);
+  const mirrorRel = mirrorRelOf(mirrorFsPath);
+  if (mirrorRel === null) return null;
+  const rel = mirrorRel.slice(0, -'.ts'.length);
   if (rel.split(path.sep)[0] === '__external__') return null;
   return path.join(workspaceRoot, rel);
 }
@@ -2243,7 +2269,11 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
 //     semantics as open buffers), and real TypeScript files
 //     (node_modules, .d.ts, workspace .ts siblings — passed through
 //     untouched). Synthetic generated spans DROP their results
-//     (recorded policy — never pinned to unrelated source).
+//     (recorded policy — never pinned to unrelated source). The one
+//     carve-out: an answer that names a MODULE (the ask sat inside an
+//     import/export specifier) is the file itself — its face target
+//     answers by URI at file start, no span consulted, because the
+//     file IS the related source (ripModuleLocation).
 
 // The request context for a feature call, or null when the position
 // does not survive translation.
@@ -2319,14 +2349,44 @@ function stateByTsUri(tsUri) {
   return null;
 }
 
+// One tsgo result uri, classified. This is the SHARED policy — which
+// uris are open buffers, which invert to a `.rip` source, which are
+// mirror paths with no faithful inverse (__external__, or a session with
+// no invertible root), and which are real TypeScript files — so the
+// rules cannot drift between the consumers, which differ only in what
+// they DO with each class.
+function classifyTsUri(uri) {
+  const open = stateByTsUri(uri);
+  if (open) return { kind: 'open', open };
+  if (!uri.startsWith('file://')) return null;
+  let fsPath;
+  try { fsPath = fileURLToPath(uri); } catch { return null; }
+  const sourcePath = sourcePathOfMirror(fsPath);
+  if (sourcePath !== null) return { kind: 'mirror', sourcePath };
+  if (mirrorRelOf(fsPath) !== null) return { kind: 'mirror-opaque' };
+  return { kind: 'real', fsPath };
+}
+
+// Location | Location[] | LocationLink[] → flat [{uri, range}] in tsgo
+// coordinates, still unmapped. Links prefer the selection range — the
+// symbol's own span, matching what a plain Location would carry.
+function flattenLocations(result) {
+  const list = result === null ? [] : Array.isArray(result) ? result : [result];
+  return list.map((item) => item.targetUri
+    ? { uri: item.targetUri, range: item.targetSelectionRange ?? item.targetRange }
+    : { uri: item.uri, range: item.range });
+}
+
 // One result location {uri, range} in tsgo coordinates → a Rip
 // location, or null (dropped: synthetic target, unmappable file, or a
 // stale open buffer whose changed region swallowed the range).
 // `strict` propagates to the range mapping (symbol-identifying
 // results refuse cover landings).
 function ripLocation(uri, range, { strict = false } = {}) {
-  const open = stateByTsUri(uri);
-  if (open) {
+  const target = classifyTsUri(uri);
+  if (!target) return null;
+  if (target.kind === 'open') {
+    const { open } = target;
     const document = documents.get(open.uri);
     if (!document) return null;
     const good = open.state.lastGood;
@@ -2340,17 +2400,12 @@ function ripLocation(uri, range, { strict = false } = {}) {
     const curRange = goodRangeToCurrent(ctx, srcRange);
     return curRange ? { uri: open.uri, range: curRange } : null;
   }
-  if (!uri.startsWith('file://')) return null;
-  let fsPath;
-  try { fsPath = fileURLToPath(uri); } catch { return null; }
-  const sourcePath = sourcePathOfMirror(fsPath);
-  if (sourcePath === null) {
-    // Inside the mirror tree but not invertible → drop; anywhere else
-    // is a REAL TypeScript file (node_modules, .d.ts, workspace .ts
-    // siblings) and passes through untouched.
-    if (mirrorRoot && fsPath.startsWith(mirrorRoot + path.sep)) return null;
-    return { uri, range };
-  }
+  // Inside the mirror tree but not invertible → drop; a REAL TypeScript
+  // file (node_modules, .d.ts, workspace .ts siblings) passes through
+  // untouched.
+  if (target.kind === 'mirror-opaque') return null;
+  if (target.kind === 'real') return { uri, range };
+  const { sourcePath } = target;
   // An OPEN buffer that reaches this branch has no usable lastGood (it
   // never compiled) — the disk face's positions describe a text the
   // buffer no longer shows, so the result drops rather than lies.
@@ -2363,18 +2418,39 @@ function ripLocation(uri, range, { strict = false } = {}) {
 
 // Location | Location[] | LocationLink[] → Rip locations (flat).
 function ripLocations(result) {
-  const list = result === null ? [] : Array.isArray(result) ? result : [result];
-  const mapped = [];
-  for (const item of list) {
-    if (item.targetUri) {
-      const loc = ripLocation(item.targetUri, item.targetSelectionRange ?? item.targetRange);
-      if (loc) mapped.push(loc);
-    } else {
-      const loc = ripLocation(item.uri, item.range);
-      if (loc) mapped.push(loc);
-    }
-  }
-  return mapped;
+  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range)).filter(Boolean);
+}
+
+// A definition answer FOR A MODULE SPECIFIER names a file, not a symbol:
+// for a FACE target the uri is the whole content of the answer. The
+// range tsgo reports lives in face coordinates that need not survive the
+// map-back — an empty range at offset 0 sits inside the runtime preamble
+// whenever the target's face delivers helpers, and a whole-file span
+// covers no single construct — so range-mapping such an answer drops
+// exactly the modules whose faces carry any synthetic lead-in. A face
+// target therefore answers the FILE, at its start (stable in every
+// version of the text, so no face positions are consulted): an open
+// target with a lastGood answers its own buffer uri; one without answers
+// through mirror inversion — the same file, spelled by the server; a
+// mirror whose `.rip` source no longer exists drops (tsgo can outrun a
+// deletion by one answer); a non-invertible mirror (__external__) drops.
+// A REAL TypeScript file keeps tsgo's own range — its coordinates are
+// its own, and an ambient `declare module` answer points mid-file at the
+// declaration, which the pin would erase.
+function ripModuleLocation(uri, range) {
+  const target = classifyTsUri(uri);
+  if (!target || target.kind === 'mirror-opaque') return null;
+  if (target.kind === 'real') return { uri, range };
+  const fileStart = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+  if (target.kind === 'open') return { uri: target.open.uri, range: fileStart };
+  if (!fs.existsSync(target.sourcePath)) return null;
+  return { uri: 'file://' + target.sourcePath, range: fileStart };
+}
+
+// Location | Location[] | LocationLink[] → the named modules' Rip
+// locations (flat).
+function ripModuleLocations(result) {
+  return flattenLocations(result).map(({ uri, range }) => ripModuleLocation(uri, range)).filter(Boolean);
 }
 
 async function tsgoRequest(method, params, label) {
@@ -2568,16 +2644,13 @@ connection.onHover(async (params) => {
   return { contents, ...(range ? { range } : {}) };
 });
 
-// The import/export specifier STRING an offset sits in, as a
-// current-buffer range — quotes included, matching what TypeScript
-// underlines — or null. This is the origin a client underlines for
-// go-to-definition: left to the editor's word pattern, a path like
-// `rip/http` underlines one segment at a time (words break at `/`,
-// `-`, `.`) where TypeScript underlines the whole string literal. The
-// stores carry the exact span, so a definition answered from inside one
-// names it — as LocationLink's originSelectionRange, which only a
-// linkSupport client is allowed to receive.
-function specifierOriginAt(ctx) {
+// The import/export specifier STRING span the last-good offset sits in
+// (stores coordinates, quotes included), or null. Membership is the
+// MODULE dispatch: a position inside a specifier asks about the module,
+// whether or not the span still maps into the edited buffer — an
+// unflushed edit that swallows one endpoint must not flip the ask back
+// to symbol treatment while the cursor's own offset aligns.
+function specifierSpanAt(ctx) {
   const stores = ctx.good.stores;
   if (!stores?.nodesByKind) return null;
   for (const kind of ['import', 'export']) {
@@ -2585,13 +2658,24 @@ function specifierOriginAt(ctx) {
       const src = stores.role(node.nodeId, 'source');
       if (!src || typeof src.sourceStart !== 'number') continue;
       if (ctx.offset < src.sourceStart || ctx.offset >= src.sourceEnd) continue;
-      return goodRangeToCurrent(ctx, {
-        start: offsetToPosition(ctx.good.srcLineStarts, src.sourceStart),
-        end: offsetToPosition(ctx.good.srcLineStarts, src.sourceEnd),
-      });
+      return src;
     }
   }
   return null;
+}
+
+// The specifier span as a current-buffer range — what a client
+// underlines for go-to-definition: left to the editor's word pattern, a
+// path like `rip/http` underlines one segment at a time (words break at
+// `/`, `-`, `.`) where TypeScript underlines the whole string literal —
+// as LocationLink's originSelectionRange, which only a linkSupport
+// client is allowed to receive. Null when the span does not survive
+// into the edited buffer; the answer then ships without an origin.
+function specifierOriginOf(ctx, span) {
+  return goodRangeToCurrent(ctx, {
+    start: offsetToPosition(ctx.good.srcLineStarts, span.sourceStart),
+    end: offsetToPosition(ctx.good.srcLineStarts, span.sourceEnd),
+  });
 }
 
 connection.onDefinition(async (params) => {
@@ -2603,15 +2687,18 @@ connection.onDefinition(async (params) => {
   // no verbatim twin. The whole specifier names ONE module — the stores
   // just said which — so the lenient position cannot land on a wrong
   // symbol here, and nowhere else is it accepted.
-  const origin = specifierOriginAt(ctx);
-  const position = ctx.genExactPosition ?? (origin ? ctx.genPosition : null);
+  const span = specifierSpanAt(ctx);
+  const position = ctx.genExactPosition ?? (span ? ctx.genPosition : null);
   if (position === null) return null;
   const result = await tsgoRequest('textDocument/definition', {
     textDocument: { uri: ctx.state.tsUri },
     position,
   }, 'definition');
-  const locations = ripLocations(result);
-  if (clientDefinitionLinks && origin && locations.length) {
+  // A position inside a specifier asked about the MODULE, and the answer
+  // is read as one (ripModuleLocations).
+  const locations = span ? ripModuleLocations(result) : ripLocations(result);
+  const origin = span && locations.length ? specifierOriginOf(ctx, span) : null;
+  if (clientDefinitionLinks && origin) {
     return locations.map((loc) => ({
       originSelectionRange: origin,
       targetUri: loc.uri,
@@ -2622,21 +2709,29 @@ connection.onDefinition(async (params) => {
   return locations;
 });
 
-// Type definition: served exactly like definition (EXACT flavor,
-// synthetic drops, recompile-for-mappings for unopened members,
-// real-.ts pass-through). A null answer is honest for primitive-typed
+// Type definition: served like definition (EXACT flavor, synthetic
+// drops, recompile-for-mappings for unopened members, real-.ts
+// pass-through), including the module treatment — at a specifier tsgo
+// answers the module file whole, the module-shaped span the range
+// map-back cannot serve. A null answer is honest for primitive-typed
 // symbols — a number has no type-declaration site.
 connection.onTypeDefinition(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
-  if (!ctx || ctx.genExactPosition === null) return null;
+  if (!ctx) return null;
+  const span = specifierSpanAt(ctx);
+  const position = ctx.genExactPosition ?? (span ? ctx.genPosition : null);
+  if (position === null) return null;
   const result = await tsgoRequest('textDocument/typeDefinition', {
     textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
+    position,
   }, 'type definition');
-  return ripLocations(result);
+  return span ? ripModuleLocations(result) : ripLocations(result);
 });
 
+// Implementation and references take NO module treatment: at a
+// specifier, tsgo answers the import-site string literals — verbatim
+// spans in each importing face that the ordinary range map-back serves.
 connection.onImplementation(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -3292,7 +3387,7 @@ function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
       }
       const sourcePath = fsPath === null ? null : sourcePathOfMirror(fsPath);
       if (sourcePath === null) {
-        if (fsPath !== null && (!mirrorRoot || !fsPath.startsWith(mirrorRoot + path.sep))) {
+        if (fsPath !== null && mirrorRelOf(fsPath) === null) {
           // A real TypeScript file: its edits apply as tsgo spelled them.
           changes[uri] = edits;
           continue;

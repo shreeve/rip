@@ -449,6 +449,56 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
     });
   }, 30000);
 
+  // A specifier answer names the MODULE — by URI, pinned to file start.
+  // tsgo reports the target in face coordinates (an empty range at
+  // offset 0, or the whole file); a target whose face opens with a
+  // synthetic runtime preamble has no source twin for either shape, so
+  // a range-mapped answer drops exactly those targets. UTIL above dodges
+  // the trap by accident (no helper references, so its face starts with
+  // authored bytes) — this target references `p` and does not. Both
+  // target states answer: unopened (mirror inversion) and open (the
+  // buffer's own uri).
+  test('specifier definition reaches a target whose face opens with the runtime preamble — unopened and open', async () => {
+    const HELPERS = "export def loud(s: string): string\n  p(s)\n  s.toUpperCase()\n";
+    await inWorkspace({ 'helpers.rip': HELPERS }, async (api) => {
+      await api.open('app.rip', "import { loud } from './helpers.rip'\nconsole.log(loud('hi'))\n");
+      const fileStart = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+      const cold = await api.definition('app.rip', 0, 25); // inside the specifier
+      expect(cold.length).toBeGreaterThanOrEqual(1);
+      expect(cold[0].targetUri).toBe(api.uriOf('helpers.rip'));
+      expect(cold[0].targetSelectionRange).toEqual(fileStart);
+
+      // The open-target branch: the same ask answers the buffer's uri.
+      await api.open('helpers.rip', HELPERS);
+      const open = await api.definition('app.rip', 0, 25);
+      expect(open.length).toBeGreaterThanOrEqual(1);
+      expect(open[0].targetUri).toBe(api.uriOf('helpers.rip'));
+      expect(open[0].targetSelectionRange).toEqual(fileStart);
+
+      // Type definition at a specifier takes the same module treatment
+      // (tsgo answers the module file whole — a span the range map-back
+      // cannot serve).
+      const typeDef = await api.typeDefinition('app.rip', 0, 25);
+      expect(typeDef.length).toBeGreaterThanOrEqual(1);
+      expect(typeDef[0].uri).toBe(api.uriOf('helpers.rip'));
+      expect(typeDef[0].range).toEqual(fileStart);
+    });
+  }, 30000);
+
+  // A specifier answer into a REAL TypeScript file keeps tsgo's own
+  // range: an ambient `declare module` answer points mid-file at the
+  // declaration, which a file-start pin would erase.
+  test('specifier definition into an ambient declare module keeps the declaration position', async () => {
+    const TYPES = "// ambient module declarations\ndeclare module 'virt' {\n  export const v: number\n}\n";
+    await inWorkspace({ 'types.d.ts': TYPES }, async (api) => {
+      await api.open('app.rip', "import { v } from 'virt'\nconsole.log(v)\n");
+      const defs = await api.definition('app.rip', 0, 20); // inside 'virt'
+      expect(defs.length).toBeGreaterThanOrEqual(1);
+      expect(defs[0].targetUri).toBe(api.uriOf('types.d.ts'));
+      expect(defs[0].targetSelectionRange.start.line).toBe(1);
+    });
+  }, 30000);
+
   // The byte verification runs on EVERY ask, cache hits included — and a
   // mismatch HEALS rather than stranding: the canonical face of a closed
   // file is exactly what a re-materialization writes, so the mirror is
