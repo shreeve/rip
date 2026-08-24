@@ -1,4 +1,6 @@
-# @nocheck
+# @ts-nocheck — throwaway SQLite shim, never hardened in place; the
+# exemption dies with the file.
+#
 # Local database — a single SQLite file (api/cart.sqlite) via `bun:sqlite`,
 # built into Bun, so there are zero dependencies and nothing to run.
 #

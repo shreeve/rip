@@ -790,6 +790,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const out = check(dir).stdout;
       expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code — annotate a declaration to check its scope, or set `rip\.strict` in package\.json/);
       expect(out).toMatch(/\d+ annotation diagnostics? hidden — set `rip\.strict` in package\.json to see where annotations are missing/);
+      // In the home project the line stays placeless; foreign projects (a
+      // closure's dependencies) add `(dirs)` and point the remedy there.
       expect(out).toMatch(/\d+ missing-types advisor(y|ies) hidden — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -2230,6 +2232,25 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(r.status).toBe(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
+
+  test('the missing-types line names foreign projects, and sends the install "there" only when the count is wholly theirs', () => {
+    const dep = {
+      'pkg/package.json': '{}',
+      'pkg/b.rip': "describe 'adds', ->\n  1\nexport ok = 1\n",
+      'a.rip': "import { ok } from './pkg/b.rip'\nconsole.log ok\n",
+    };
+    const foreign = workspace(dep);
+    const mixed = workspace({ ...dep, 'a.rip': "import { ok } from './pkg/b.rip'\nfsMod = require('fs')\nconsole.log ok, fsMod\n" });
+    try {
+      const f = check(foreign).stdout;
+      expect(f).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe` \(try `bun add -d @types\/bun` there\)/);
+      const m = check(mixed).stdout;
+      expect(m).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
+    } finally {
+      fs.rmSync(foreign, { recursive: true, force: true });
+      fs.rmSync(mixed, { recursive: true, force: true });
+    }
+  }, 90_000);
 
   test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
     // Both postures are exercised: per file (an unannotated read the gate

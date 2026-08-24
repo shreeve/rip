@@ -1,4 +1,3 @@
-# @nocheck
 # Test: `expr as Type` cast operator
 #
 # A TypeScript-style postfix type assertion. The cast is ERASED at runtime

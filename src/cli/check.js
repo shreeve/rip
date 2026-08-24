@@ -333,6 +333,7 @@ let hiddenAnnotations = 0;
 // Escape hatches in gradual targets, as `{ file, line }` in source order.
 const escapes = { any: [], casts: [], ignores: [] };
 let hiddenMissingTypes = 0;
+const hiddenMissingTypesDirs = new Set();
 let hiddenScope = 0;
 // The NAMES the missing-types advisories are about (`describe`, `require`
 // …) — TypeScript's own message carries each one, and a summary that says
@@ -707,6 +708,7 @@ if (compiled.size > 0) {
             else if (IMPLICIT_ANY_CODES.has(d.code)) { hiddenAnnotations++; hiddenAnnotationDirs.add(proj); }
             else if (MISSING_TYPES_CODES.has(d.code)) {
               hiddenMissingTypes++;
+              hiddenMissingTypesDirs.add(proj);
               const name = /Cannot find name '([^']+)'/.exec(d.message)?.[1];
               if (name) missingTypeNames.add(name);
             }
@@ -916,8 +918,14 @@ if (asJson) {
     const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
     const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
     const about = names.length ? ` — no declarations for ${shown}${more}` : '';
-    console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden`
-      + `${about} (try \`bun add -d @types/bun\`)`));
+    // Named projects earn the deictic — and only when the count is WHOLLY
+    // theirs: with none shown the missing declarations are the home
+    // project's own, and a count the home project shares must not send
+    // the install elsewhere.
+    const where = inProjects(hiddenMissingTypesDirs);
+    const wholly = where !== '' && !hiddenMissingTypesDirs.has('.');
+    console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden${where}`
+      + `${about} (try \`bun add -d @types/bun\`${wholly ? ' there' : ''})`));
   }
   // A forced posture says so: a `--strict` report is otherwise
   // indistinguishable from a package failing its own gate.

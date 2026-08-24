@@ -1,4 +1,3 @@
-# @nocheck
 # Test: Rip Types
 # Tests the optional type system — type annotations, type aliases,
 # structural types, interfaces, enums, generics, and .d.ts emission.
