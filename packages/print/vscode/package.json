@@ -5,7 +5,7 @@
   "version": "4.0.0",
   "publisher": "rip-lang",
   "license": "MIT",
-  "main": "./dist/extension.js",
+  "main": "./src/extension.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/shreeve/rip.git",
@@ -61,12 +61,11 @@
   "scripts": {
     "sync": "rip sync.rip",
     "test": "rip test.rip",
-    "package": "bun run build && npx @vscode/vsce package --skip-license",
+    "package": "npx @vscode/vsce package --skip-license",
     "install-vscode": "bun ../../../scripts/install-ext.mjs print vscode",
-    "install-cursor": "bun ../../../scripts/install-ext.mjs print cursor",
-    "build": "bun build src/extension.js --target=node --format=cjs --external vscode --outfile=dist/extension.js"
+    "install-cursor": "bun ../../../scripts/install-ext.mjs print cursor"
   },
   "dependencies": {
-    "highlight.js": "11.11.1"
+    "highlight.js": "11.12.0"
   }
 }

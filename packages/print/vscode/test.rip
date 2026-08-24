@@ -35,7 +35,7 @@ test "install commands delegate to the shared extension installer", ->
   eq pkg.scripts['install-cursor'], 'bun ../../../scripts/install-ext.mjs print cursor'
 
 test "highlight.js is an exact pin and the only dependency", ->
-  eq pkg.dependencies, { 'highlight.js': '11.11.1' }
+  eq pkg.dependencies, { 'highlight.js': '11.12.0' }
   eq pkg.devDependencies, undefined
 
 test "both commands are contributed with their three menu placements", ->
