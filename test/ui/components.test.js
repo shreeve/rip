@@ -1545,6 +1545,26 @@ describe('child components: props — the pinned contract', () => {
     expect(code).toContain("__effect(() => { if (this._inst3) this._inst3._updateProp('label', (this.name.value + \"!\")); });");
   });
 
+  test('a function-literal prop takes no updater; a callback INVOKED while the prop evaluates still does', () => {
+    // A closure's reads run when the child CALLS it, so the prop's value
+    // cannot change: the effect would track nothing (the body never runs
+    // inside it) and re-push an identical closure. `.map`'s callback is
+    // invoked while the prop is evaluated, so its read is a real
+    // dependency — the boundary is the function's VALUE position, never
+    // its body.
+    const { code } = compile(`${KID}App = component
+  name := "n"
+  list = ["q"]
+  render
+    div
+      Kid label: (-> name)
+      Kid label: (list.map((x) -> name))
+`);
+    const updaters = code.match(/_updateProp\('label',/g);
+    expect(updaters).toHaveLength(1);
+    expect(code).toContain("_updateProp('label', this.list.map(x => this.name.value));");
+  });
+
   test('a bare MODULE-level reactive name shares its container too — the rule one level up ', () => {
     const { code } = compile(`mname := "m"\n${KID}App = component
   render

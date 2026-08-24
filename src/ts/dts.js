@@ -46,10 +46,9 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from '../emitter.js';
 import {
-  componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED,
   segmentsText,
   selfArgsOf,
-  anyArgsOf,
 } from './components.js';
 
 export class DtsError extends Error {
@@ -356,8 +355,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
 
   const componentDecl = (node, name, exported, stmt) => {
     const info = componentTypeInfo(stores, source, node);
-    const optional = propsParamOptional(info);
-    const gated = info.members.some((m) => m.kind === 'gate');
     const exp = exported ? 'export ' : '';
     // A GENERIC component: the members already reference the parameter,
     // so the list has to reach both shipped declarations or the file
@@ -372,25 +369,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${segmentsText(l.segs)}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
-    if (gated) {
-      // The gated branch has no constructor to declare a parameter list
-      // on, so the prototype cannot NAME one — `${name}<T>` would put an
-      // unbound T inside a value's object type, which is the very defect
-      // this row exists to remove. It applies `any` per parameter: the
-      // prototype is a runtime identity, and a gated component's consumer
-      // reaches the instance through its route, never through this.
-      lines.push(`  readonly prototype: ${name}${anyArgsOf(typeParams)};`);
-      lines.push('};');
-      return;
-    }
-    lines.push(`  new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info)}): ${self};`);
-    // The static mount mirror constructs with NO props (`new this()`
-    // in the runtime), so a component with a REQUIRED prop must not
-    // offer it — the call would be tsc-clean while the runtime yields
-    // a required container holding undefined. Requiredness is a TYPE-story fact (annotations
-    // erase — the runtime never sees it), so the gate lives
-    // here, never as a runtime throw.
-    if (optional) lines.push(`  mount${typeParams}(target?: any): ${self};`);
+    for (const m of componentCtorMembers(info, name, typeParams, self)) lines.push(`  ${m}`);
     lines.push('};');
   };
 

@@ -34,6 +34,7 @@ import { COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  componentCtorMembers, runtimeApiDeclares,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
 } from './ts/components.js';
@@ -2119,6 +2120,12 @@ class Emitter {
     if (ambientLines.some((t) => t.includes('__ripAmbientApp('))) this._needsAmbienceHelper = true;
     for (const text of ambientLines) line(() => this.b.emit(text));
     if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
+    // The runtime base's API, declared because the inlined base types as
+    // `any` and carries nothing into the class. `this` rather than the
+    // component's name: an expression-valued component has no companion
+    // interface for a name to reach, and `this` keeps `mount`'s return
+    // the instance at hand rather than a fixed spelling.
+    for (const text of runtimeApiDeclares('this')) line(() => this.b.emit(text));
     line(() => this.b.emit('[key: `_${string}`]: any;'));
   }
 
@@ -2369,6 +2376,16 @@ class Emitter {
     }
     if (!propsParamOptional(info)) {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;\n`));
+    } else {
+      // The static mount mirror the binding's published type carries
+      // (componentCtorMembers, under the same condition). The base
+      // supplies it at runtime but types as `any`, so the class must
+      // declare it or a hoisted binding's assignment fails TS2741
+      // against its own published type. The RETURN stays `any`: a class
+      // expression has no name to give its own instance type, and the
+      // precise return already reaches every use site through the
+      // published type on the binding.
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: any) => any;\n`));
     }
     this.b.tsOnly(() => {
       this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);
@@ -3476,10 +3493,36 @@ class Emitter {
     // repaints. Read from the SAME facts the pin pass uses, so a binding
     // cannot be one thing here and another there.
     kept.classBindings = new Set();
+    // A component binding that STAYS on the hoist line is exactly a
+    // forward-referenced one — a binding whose first write can declare
+    // in place left above, taking the class expression with it and
+    // typing from it. Split from its declaration the initializer is not
+    // there to infer from, and the evolving `let` serves only
+    // same-function references (TS7034 at the declaration, TS7005 at
+    // every read inside a render body). The name's own published
+    // constructor type answers instead — the same surface the shipped
+    // `.d.ts` carries, so the two roads cannot disagree.
+    kept.componentTypes = new Map();
     for (const [name, , role] of kept) {
       if (role !== 'target') continue;
-      const v = facts.get(name)?.firstWrite?.[2];
-      if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) kept.classBindings.add(name);
+      const write = facts.get(name)?.firstWrite ?? null;
+      const v = write?.[2];
+      if (!isNode(v)) continue;
+      if (v[0] === 'class' || v[0] === 'component') kept.classBindings.add(name);
+      if (!this.ts || !this.isComponentDecl(v)) continue;
+      // A GENERIC component DECLINES and keeps the floor. Its class
+      // expression instantiates its own parameter through the optional
+      // props slot — the constructor yields `Box<T | undefined>` where
+      // the published surface returns `Box<T>` — so the annotation
+      // would be one the class cannot satisfy, trading the floor's
+      // ordinary implicit-any for a TS2322 on the declaration that
+      // names only generated types. The `.d.ts` road spells the same
+      // surface safely because a declaration is never checked against
+      // an implementation; only here must the class satisfy it.
+      if (this.annotationText(write, 'typeParams') !== null) continue;
+      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      info.appStashSpec = this.appStashSpec;
+      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(' ')} }`);
     }
     kept.pinnable = new Map();
     for (const [name, , role] of kept) {
@@ -3487,6 +3530,7 @@ class Emitter {
       const f = facts.get(name);
       if (!f?.nested || f.firstWrite === null) continue;
       if (kept.annotations?.has(name) || kept.schemaConsts?.has(name)) continue;
+      if (kept.componentTypes.has(name)) continue;
       // The key is computed ONCE and carried, never recomputed at the
       // emission site: it is derived from the name, the value slice and the
       // accessor path, and a second site that reproduced two of those three
@@ -3644,8 +3688,18 @@ class Emitter {
           // hoist line (entries.schemaConsts is set only there), so a
           // same-named function-local never annotates.
           const constType = entries.schemaConsts?.get(name) ?? null;
+          // A forward-referenced COMPONENT declares its published
+          // constructor type here, ahead of the class expression the
+          // split declaration left behind (applyDeclareInPlace names the
+          // tier). It precedes the pin tier because the type is
+          // CONSTRUCTED from the component's own surface rather than
+          // probed from a first write — a pin would answer the same
+          // question worse, and only after a round trip.
+          const ctorType = entries.componentTypes?.get(name) ?? null;
           if (constType !== null) this.b.tsOnly(() => this.b.emit(`: ${constType}`));
-          else {
+          else if (ctorType !== null) {
+            this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${ctorType}`));
+          } else {
             // Pin (evolving-let Tier 3): a caller-supplied inferred
             // type for a still-hoisted nested-referenced name, keyed
             // by name + a hash of the first write's VALUE source text
@@ -10209,6 +10263,15 @@ class Emitter {
   // module reactive name passes its CONTAINER (the #135 contract);
   // everything else snapshots, and a reactive snapshot drives an
   // _updateProp effect.
+  //
+  // A prop whose value IS a function literal never takes that effect.
+  // Its reads run when the CHILD calls the closure, not while the prop
+  // is evaluated, so the value cannot change: the effect would register
+  // no dependency (renderReactive's scan reaches into the body, but the
+  // body does not run inside the effect) and re-push an identical
+  // closure forever. The boundary is the function's VALUE position, not
+  // its body: `list.map((x) -> other)` invokes its callback while the
+  // prop is evaluated, so that read IS a dependency and still counts.
   addChildProp(props, updaters, pair, key, cleanKey, value) {
     const container = this.childContainerRef(value);
     if (container !== null) {
@@ -10217,7 +10280,7 @@ class Emitter {
     }
     this.checkCrossScopeLocals(value, pair);
     props.push({ pair, key, fn: () => this.renderExpr(value) });
-    if (this.renderReactive(value)) updaters.push({ pair, key, value });
+    if (!isFunc(value) && this.renderReactive(value)) updaters.push({ pair, key, value });
   }
 
   // The container-passable spellings: a bare REACTIVE member (`name`

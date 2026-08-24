@@ -993,8 +993,29 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   test('an all-optional props surface takes `props?:`', () => {
     const code = ts('Chip = component\n  @label := "c"\n').code;
     expect(code).toContain('constructor(props?: {');
-    // Optional props keep the inherited static mount callable.
-    expect(code).not.toContain('declare static mount');
+    // Optional props keep the static mount mirror CALLABLE. The class
+    // declares it because the inlined base types as `any` and carries no
+    // statics — without the declare, a hoisted binding's class
+    // expression is not assignable to its own published type. The
+    // precise return reaches use sites through that published type.
+    expect(code).toContain('declare static mount: (target?: any) => any;');
+    expect(code).not.toContain('declare static mount: never');
+  });
+
+  test('a forward-referenced component declares its published constructor type on the hoist line', () => {
+    // Split from its class expression by a use above it, the declaration
+    // has no initializer left to infer from — the evolving `let` serves
+    // only same-function reads. The component's own published surface
+    // answers instead: the SAME members the shipped `.d.ts` declares, so
+    // a consumer and the declaring module cannot read one differently.
+    const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
+    const faced = ts(src);
+    expect(faced.code).toContain(
+      'let Chip!: { new (props?: { label?: any; __bind_label__?: { value: any; read(): any; touch?(): void }; children?: any }): Chip; mount(target?: any): Chip; };',
+    );
+    // Whole-line TS syntax: stripping restores the bare hoist.
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+    expect(js(src).code).toContain('let Chip;');
   });
 
   test('a REQUIRED prop narrows the inherited static mount to never (F2)', () => {

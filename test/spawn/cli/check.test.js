@@ -1311,6 +1311,70 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A forward-referenced COMPONENT is not on the floor above: it has a
+  // published constructor type — the surface the shipped `.d.ts` already
+  // declares — so the split declaration is annotated with it instead of
+  // left evolving. That is the shape the class row calls "a design step
+  // beyond the filter": self-annotation is not circular here, because the
+  // type is CONSTRUCTED from the component's own members rather than read
+  // back from the binding. A plain `class` still has no such surface and
+  // keeps its floor, which is why the row above stays green.
+  test('under rip.strict a forward-rendered component carries its published type — the implicit-any family is closed and its props are checked through it', () => {
+    const dir = workspace({
+      'ok.rip': [
+        'Parent = component',
+        '  render',
+        "    Child text: 'hi'",           // renders Child above its declaration
+        '',
+        'Child = component',
+        '  @text: string',
+        '  render',
+        '    div',
+        '      = @text',
+      ].join('\n') + '\n',
+      'wrong.rip': [
+        'Parent = component',
+        '  render',
+        "    Child txet: 'hi'",           // misspelled prop, ABOVE the declaration
+        '',
+        'Child = component',
+        '  @text: string',
+        '  render',
+        '    div',
+        '      = @text',
+      ].join('\n') + '\n',
+      'generic.rip': [
+        "mk = -> new Box({ item: 'hi' })",
+        'Box<T> = component',
+        '  @item: T',
+        '  render',
+        '    div',
+        '      = "#{@item}"',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      // Neither 7005 nor 7034: the declaration is typed, so no read of it
+      // is an evolving `any` — the family this row exists to close.
+      expect(diags.filter((d) => d.file === 'ok.rip')).toEqual([]);
+      // And the type is LOAD-BEARING, not merely present: a prop the
+      // component never declared is caught through the forward binding,
+      // which the evolving `any` accepted silently.
+      const wrong = diags.filter((d) => d.file === 'wrong.rip');
+      expect(wrong.map((d) => d.code)).toEqual([2353]);   // the excess-property refusal
+      expect(wrong[0].message).toContain('txet');
+      // A GENERIC component keeps the floor, and this is what says so.
+      // Its class expression instantiates its parameter through the
+      // optional props slot, so the published `Box<T>` return is one the
+      // class cannot satisfy — annotating anyway trades this ordinary
+      // implicit-any for a TS2322 that names only generated types. This
+      // row reds the day the class road propagates its parameters
+      // exactly, which is the cue to drop the decline.
+      expect(diags.filter((d) => d.file === 'generic.rip').map((d) => d.code).sort((a, b) => a - b))
+        .toEqual([7005, 7034]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('a promoted parameter declares its field — the field-less spelling checks clean', () => {
     // `constructor: (@owner: string) ->` assigns the instance property and
     // declares nothing, and TypeScript reads a class's properties from its

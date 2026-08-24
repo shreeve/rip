@@ -8229,6 +8229,8 @@ var readonlyCastType = () => {
 var COMPONENT_FAILURE_TYPE = "";
 var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
+var componentCtorMembers = () => [];
+var runtimeApiDeclares = () => [];
 
 // src/emitter.js
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
@@ -9552,6 +9554,8 @@ class Emitter {
       line(() => this.b.emit(text));
     if (info.extendsTag !== null)
       line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>", "", MINTED)};`));
+    for (const text of runtimeApiDeclares("this"))
+      line(() => this.b.emit(text));
     line(() => this.b.emit("[key: `_${string}`]: any;"));
   }
   gateTwinSource(m, info) {
@@ -9684,6 +9688,9 @@ class Emitter {
     }
     if (!propsParamOptional(info)) {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;
+`));
+    } else {
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: any) => any;
 `));
     }
     this.b.tsOnly(() => {
@@ -10375,12 +10382,23 @@ class Emitter {
     } else
       kept.directives = entries.directives;
     kept.classBindings = new Set;
+    kept.componentTypes = new Map;
     for (const [name, , role] of kept) {
       if (role !== "target")
         continue;
-      const v = facts.get(name)?.firstWrite?.[2];
-      if (isNode(v) && (v[0] === "class" || v[0] === "component"))
+      const write = facts.get(name)?.firstWrite ?? null;
+      const v = write?.[2];
+      if (!isNode(v))
+        continue;
+      if (v[0] === "class" || v[0] === "component")
         kept.classBindings.add(name);
+      if (!this.ts || !this.isComponentDecl(v))
+        continue;
+      if (this.annotationText(write, "typeParams") !== null)
+        continue;
+      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      info.appStashSpec = this.appStashSpec;
+      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(" ")} }`);
     }
     kept.pinnable = new Map;
     for (const [name, , role] of kept) {
@@ -10390,6 +10408,8 @@ class Emitter {
       if (!f?.nested || f.firstWrite === null)
         continue;
       if (kept.annotations?.has(name) || kept.schemaConsts?.has(name))
+        continue;
+      if (kept.componentTypes.has(name))
         continue;
       const key = this.pinKey(name, f.firstWrite, f.firstWritePath);
       kept.pinnable.set(name, { node: f.firstWrite, key });
@@ -10474,9 +10494,12 @@ class Emitter {
           });
         } else {
           const constType = entries.schemaConsts?.get(name) ?? null;
+          const ctorType = entries.componentTypes?.get(name) ?? null;
           if (constType !== null)
             this.b.tsOnly(() => this.b.emit(`: ${constType}`));
-          else {
+          else if (ctorType !== null) {
+            this.b.tsOnly(() => this.b.emit(`${this.strict ? "" : "!"}: ${ctorType}`));
+          } else {
             const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined)
@@ -15695,7 +15718,7 @@ ${this.replayPad}}` : " }");
     }
     this.checkCrossScopeLocals(value, pair);
     props.push({ pair, key, fn: () => this.renderExpr(value) });
-    if (this.renderReactive(value))
+    if (!isFunc(value) && this.renderReactive(value))
       updaters.push({ pair, key, value });
   }
   childContainerRef(value) {

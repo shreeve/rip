@@ -705,6 +705,35 @@ export function propsTypeSegments(info) {
 
 export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 
+// ── the constructor surface ──────────────────────────────────────────
+// The members of the type a component BINDING carries, each a complete
+// `;`-terminated line. One construction serves both manifestations —
+// the shipped `.d.ts` declaration and the face's hoist-line annotation
+// for a forward-referenced binding — so a consumer and the declaring
+// module read the same component type. `self` is the instance type as
+// this surface must name it (a generic component's own parameters,
+// applied).
+export const componentCtorMembers = (info, name, typeParams = '', self = name) => {
+  // The GATED branch has no constructor to declare a parameter list on,
+  // so the prototype cannot NAME one — `${name}<T>` would put an unbound
+  // T inside a value's object type. It applies `any` per parameter: the
+  // prototype is a runtime identity, and a gated component's consumer
+  // reaches the instance through its route, never through this.
+  if (info.members.some((m) => m.kind === 'gate')) {
+    return [`readonly prototype: ${name}${anyArgsOf(typeParams)};`];
+  }
+  const optional = propsParamOptional(info);
+  const members = [`new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info)}): ${self};`];
+  // The static mount mirror constructs with NO props (`new this()` in
+  // the runtime), so a component with a REQUIRED prop must not offer it
+  // — the call would be tsc-clean while the runtime yields a required
+  // container holding undefined. Requiredness is a TYPE-story fact
+  // (annotations erase — the runtime never sees it), so the gate lives
+  // here, never as a runtime throw.
+  if (optional) members.push(`mount${typeParams}(target?: any): ${self};`);
+  return members;
+};
+
 // ── the instance surface ─────────────────────────────────────────────
 // The lines shared by the face's companion interface and the .d.ts
 // declaration: every member (typed or explicit-any — a declared
@@ -728,6 +757,30 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // added there without a line here resurfaces as a TS7022 cycle on the
 // first computed that reads it.
 export const AMBIENT_FIELDS = ['app', 'router', 'params', 'query'];
+
+// The API every component instance carries from the runtime BASE
+// (src/runtime/components.js). The inlined runtime is destructured
+// through a cast that types `__Component` as `any`, so a component's
+// `class extends __Component` inherits nothing at the type level: both
+// roads must DECLARE this surface, or the class instance is not
+// assignable to the constructor type its own binding publishes.
+// A null `returns` is the INSTANCE type, which each road spells its own
+// way — the companion interface by name, the class road as `this`.
+const RUNTIME_API = [
+  { name: 'mount', params: 'target?: any', returns: null },
+  { name: 'unmount', params: 'options?: { removeDOM?: boolean }', returns: 'void' },
+  { name: 'emit', params: 'name: string, detail?: any', returns: 'void' },
+];
+
+// The interface road's spelling: method members.
+export const runtimeApiMembers = (self) =>
+  RUNTIME_API.map((m) => `${m.name}(${m.params}): ${m.returns ?? self};`);
+
+// The class road's spelling: `declare` governs PROPERTIES, and a method
+// signature in a class body would be an overload with no implementation
+// — so the same surface takes the function-property form.
+export const runtimeApiDeclares = (self) =>
+  RUNTIME_API.map((m) => `declare ${m.name}: (${m.params}) => ${m.returns ?? self};`);
 
 // The CLASS road's half of the ambience: with a discovered stash the
 // class declares the same runtime-injected members the companion
@@ -888,8 +941,6 @@ export function instanceTypeLines(info, selfType) {
   }
   if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
-  lines.push({ segs: [{ text: `mount(target?: any): ${selfType};` }] });
-  lines.push({ segs: [{ text: 'unmount(options?: { removeDOM?: boolean }): void;' }] });
-  lines.push({ segs: [{ text: 'emit(name: string, detail?: any): void;' }] });
+  for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }
