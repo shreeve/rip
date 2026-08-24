@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "description": "Dependency-free application data substrate — stash, source, routes, workspace, and apply",
   "exports": {
     ".": "./index.rip",
     "./rash": "./rash.rip"

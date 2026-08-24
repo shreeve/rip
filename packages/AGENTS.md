@@ -39,7 +39,7 @@ rules don't cover comes up, decide with these, in this order:
    quarantined bench competitors, or — when a surface honestly needs
    them — named earned deps (`print` → highlight.js, `ui` →
    css-tree/tailwindcss, `sites` / `vscode` → their real stacks). The
-   shared harness stays tiny (~100 lines, four exports) and grows only
+   shared harness stays tiny (~110 lines, five exports) and grows only
    when a concrete test cannot be written without it.
 6. **Cookie-cutter edges, honest middles.** The frame (README top LAF,
    package.json key order for mold packages, test anatomy) stays

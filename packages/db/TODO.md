@@ -310,6 +310,9 @@ target's key, and cross-adapter FK suppression.
 | explicit SQL column type (`DECIMAL(10,2)`) | see **Money** below — the DDL is not the binding constraint, the wire is |
 | `CHECK` constraints | deliberately deferred: `migrate.js` does not diff CHECKs, so adding one to the column spec creates permanent undetectable drift. **Revive with:** CHECK diffing in the planner |
 | `ignored_columns` | a projection question, not a naming one — see above |
+| `dependent: :destroy` / `ON DELETE CASCADE` | behavior, not mapping. A `beforeDestroy` hook or a DB constraint covers it |
+| `belongsTo primary_key:` (FK to a non-pk column) | rare; the FK always references the target's declared key |
+| HABTM with no join model | deliberate. There is always a join table; naming it as a model is the honest form, and it is what makes `{through:}` writable |
 
 The three with no workaround each need a decision before any code.
 Written out so they are not re-derived; **do not start one without
@@ -432,9 +435,6 @@ prices, tax rates) or the database must do the rounding. The fix is then
 a real `decimal` field type mapping to `DECIMAL(p, s)` **and** a wire
 decode that reconstructs a `Decimal` — a package + runtime + harbor
 change, not a type override.
-| `dependent: :destroy` / `ON DELETE CASCADE` | behavior, not mapping. A `beforeDestroy` hook or a DB constraint covers it |
-| `belongsTo primary_key:` (FK to a non-pk column) | rare; the FK always references the target's declared key |
-| HABTM with no join model | deliberate. There is always a join table; naming it as a model is the honest form, and it is what makes `{through:}` writable |
 
 ### Correctness items that are real but dormant
 
@@ -475,9 +475,9 @@ change, not a type override.
 
 ### Runtime observations, unshipped paths
 
-- **No cancellation plumbing in the ORM** — `grep -c signal
-  src/runtime/orm.js` is `0`; `runSQL` (`:703-711`) passes no
-  options. The adapter half works.
+- **No cancellation plumbing in the ORM** — the only `signal` in
+  `src/runtime/orm.js` is a comment (`:658`), none of it plumbing;
+  `runSQL` (`:703-711`) passes no options. The adapter half works.
 - **Transaction retry divergence.** `packages/db` retries
   `no_lease_available` / `no_such_session` / conflicts honoring
   `retryAfterMs` (db.rip `isRetryable` / `transaction`); the ORM

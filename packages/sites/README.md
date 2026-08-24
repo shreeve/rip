@@ -794,6 +794,8 @@ CSS, HTML, images, fonts        no ordinary asset bytes
 `manifest.json` is not part of this protocol. `bundle.json` is one compressed
 startup package for the browser Rip program, `latest.json` is the inexpensive
 reconnect probe, and every non-Rip asset remains an ordinary HTTP resource.
+A `reload` is also published when the regenerated browser runtime ship set
+changes, not only on server-generation replacement.
 
 ### Authority and browser state
 
@@ -924,8 +926,9 @@ rename from watcher event names and does not preserve component identity
 across it; any state-preserving rename semantics belong to Rip App.
 
 An ordinary transition has different `from` and `hash` values and a nonempty
-list. An unchanged watcher batch emits no message. WSS never carries the
-complete `bundle.json`, ordinary asset bytes, or `latest.json`.
+list. An unchanged watcher batch emits no message. A batch that changes the
+browser runtime ship set delivers `reload` instead of `change`. WSS never
+carries the complete `bundle.json`, ordinary asset bytes, or `latest.json`.
 
 ### Manager startup and initial publication
 
@@ -1587,9 +1590,10 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` builds and caches a Caddy binary with released Janus `v1.6.3`;
-`JANUS_CADDY` can override that binary. `bun run test` discovers and runs every
-`test/*/test.rip` fixture.
+`test:janus` resolves an already-built Janus Caddy binary — `JANUS_CADDY`
+first, then the packaged `bin/caddy-janus`, then `caddy` on `PATH`, erroring
+if none exists — and asserts a non-replaced released Janus module. `bun run
+test` discovers and runs every `test/*/test.rip` fixture.
 
 Repository-wide certification additionally runs:
 

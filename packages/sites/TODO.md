@@ -33,8 +33,8 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Manager
 
-- [ ] Watch on by default; drop `--watch`; keep `--no-watch` /
-      `--no-watch-app` / `--no-watch-api`.
+- [ ] Drop `--watch` (watch is already on by default); keep
+      `--no-watch` / `--no-watch-app` / `--no-watch-api`.
 - [ ] Symlinked / workspace API deps participate in invalidation.
 - [ ] Bound heartbeat / re-registration so a stalled control plane
       cannot pile overlapping requests.

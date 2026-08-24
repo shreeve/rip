@@ -36,7 +36,7 @@ extension by `rip sync.rip` (never hand-edited).
 
 ## Supported Languages
 
-40+ languages including JavaScript, TypeScript, Python, Rust, Go, Ruby,
+40+ file extensions including JavaScript, TypeScript, Python, Rust, Go, Ruby,
 C, C++, Zig, Rip, CoffeeScript, Bash, YAML, JSON, HTML, CSS, SQL,
 Markdown, and more.
 

@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Syntax-highlighted source code printer — 190+ languages via highlight.js, served once to your browser, print-ready",
+  "description": "Syntax-highlighted source code printer — highlight.js under the hood, 40+ file extensions routed to their grammars, served once to your browser, print-ready",
   "bin": {
     "rip-print": "./print.rip"
   },

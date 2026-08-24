@@ -12,7 +12,7 @@ Application-owned request policy:
 - CSRF uses a signed double-submit cookie and constant-time header comparison.
 - `htmlJson` renders direct iOS JSON navigation as escaped highlighted HTML
   while API requests retain JSON; its representation inputs are all in `Vary`.
-- `timeout 30, grace: 1` expresses both deadlines in integer seconds, aborts
+- `timeout 1, grace: 1` expresses both deadlines in integer seconds, aborts
   cooperative work, and recycles a worker that ignores cancellation.
 - `secureHeaders` fills absent API response headers without overriding explicit
   application policy; it omits obsolete `X-XSS-Protection` and edge-owned HSTS.

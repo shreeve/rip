@@ -61,9 +61,9 @@ Janus admits the host, routes it to the live worker sockets
 (least-conn with health), answers anonymous GETs from its micro-cache,
 and owns the Hub directly.
 
-## Leg 3 — live publication
+## Live publication
 
-Same as leg 2, with the flag in the manager's environment:
+With the app running (see [Run](#run) above):
 
 ```bash
 cd packages/sites/demos/pulse
@@ -77,13 +77,13 @@ Hub. The list carries the changed Rip source. Rip App stages that source,
 advances the Workspace atomically, and every badge on the page updates without
 a manual refresh.
 
-The update applies by **remount labeled escape** (docs/WORKSPACE.md,
-M1): the route remounts against the new component, and the console says
-so — this is publication apply working, not definition-patching HMR.
+A label-only edit like this applies by **in-place definition patching**
+(docs/HMR.md, "Layer B — refresh tiers"): the component updates with focus
+preserved, and remount is the fallback when a patch cannot apply.
 
-## Leg 4 — live collaboration
+## Live collaboration
 
-No new commands: any pooled run (leg 2 or 3) already carries it. Open
+No new commands: any pooled run (see [Run](#run)) already carries it. Open
 the page in TWO browser windows and post from one — the other's list
 updates without a refresh.
 

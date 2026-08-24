@@ -3,7 +3,7 @@
 Top rung of the [demos ladder](../README.md): a multi-route shop that proves
 the full App rails — `index.rip` + `app/` + `api/` + SQLite. Products, cart,
 profile, and orders — the canonical full-shape exemplar beside Pulse’s thin
-live-publication demo ([docs/WORKSPACE.md](../../docs/WORKSPACE.md)).
+live-publication demo ([docs/WORKSPACE.md](../../../../docs/WORKSPACE.md)).
 
 It is a runnable example; the browser suite also drives its publication apply
 path through a real Rip Site.
@@ -12,11 +12,12 @@ path through a real Rip Site.
 
 | Path | Role |
 | --- | --- |
-| `index.rip` | API entry: migrate/seed, `/styles.css`, bare `start!` handoff |
+| `serve.rip` | Catalog entry: names the site `cart`, hosts `cart.ripdev.io` / `cart.local`, `hub.bridge: 'hub'` (tray **Add Site…** target) |
+| `index.rip` | API entry: migrate/seed, `use sessions`, the `hub` bridge, `/styles.css`, bare `start!` handoff |
 | `setup.rip` | One-shot `migrate` + `seed` |
 | `api/` | SQLite adapter, models, seed, `/api/*` handlers (not a public URL tree) |
 | `app/index.html` | SPA shell (Pico + styles + `bootApp`) |
-| `app/stash.rip` | `stash` — cart + `source` cells for user/products/orders |
+| `app/stash.rip` | `stash` — cart + `source` cells for user/products/orders plus the parametric `order` source |
 | `app/routes/` | File routes + `_layout.rip` |
 
 Client modules import `UserPublic` / etc. from `../api/models.rip`; the
@@ -27,7 +28,7 @@ Persistence starts on **bun:sqlite**. A follow-up swaps `api/db.rip` to
 
 ## Run
 
-With a Janus control endpoint running:
+With the edge up (`rip sites start edge`):
 
 ```bash
 cd packages/sites/demos/cart

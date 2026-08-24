@@ -47,7 +47,7 @@ distributed locks. Swarm takes the opposite approach:
   progress bars update live with per-worker stats. Workers never touch
   stdout.
 
-The result: ~330 lines of Rip, zero dependencies, and it handles
+The result: ~460 lines of Rip, zero dependencies, and it handles
 thousands of tasks reliably. Boring infrastructure, rock solid.
 
 ## Quick Start
@@ -256,6 +256,10 @@ add this to your VS Code or Cursor settings:
 "terminal.integrated.minimumContrastRatio": 1
 ```
 
+This disables the contrast adjustment and lets ANSI colors render as
+intended. The progress display works correctly in standard terminals
+(iTerm2, Terminal.app, etc.) without any changes.
+
 ## Test
 
 ```bash
@@ -267,7 +271,3 @@ retries, crash recovery), every CLI flag and error path, the ANSI
 progress rendering, `args()` stripping, the file-based queue contract
 line for line, and the `swarm` command itself — each case running the
 fixtures/ job scripts as real subprocesses.
-
-This disables the contrast adjustment and lets ANSI colors render as
-intended. The progress display works correctly in standard terminals
-(iTerm2, Terminal.app, etc.) without any changes.
