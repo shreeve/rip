@@ -338,9 +338,10 @@ export const containerType = (t, ro = '', notify = TAKEN) =>
 // The member's INSTANCE type as segments (`declare name: …` bodies,
 // interface member lines). The annotated piece marks as `: T` — the
 // recorded span's own shape (a TYPE run spans colon→end), so the
-// builder's verbatim comparison can classify it EXACT. Optional
-// annotated props read `T | undefined` — the container exists on
-// every instance; only the value may be absent.
+// builder's verbatim comparison can classify it EXACT. An optional
+// annotated member whose slot can actually be absent reads
+// `T | undefined` (widensToUndefined — the VOID SLOT); an optional
+// member whose default fills the slot stays `T`.
 // Syntactic literal inference for unannotated member initializers
 //: `loading := false` declares `{ value: boolean }` —
 // what `let loading = false` would infer, computed from the literal
@@ -422,6 +423,23 @@ export const declaresContainer = (m) =>
 export const isBehaviorProjected = (m) =>
   m.kind === 'computed' && m.annotation == null && Boolean(m.behavior);
 
+// The VOID SLOT: `?:` reaches inside the container — but only where
+// absence can actually inhabit the slot. `x?: T` is `T | undefined` in
+// TypeScript's own reading, so an optional member with no default (a
+// prop the caller may omit) and one whose default IS `undefined`
+// (`x?: T := undefined` — the author managing absence as a value) carry
+// it on `value` and `read()`. An optional member with a real default is
+// optional to the CALLER only — the default fills the slot, so inside
+// it is always `T`, TypeScript's own optional-with-default semantics.
+// Every surface that spells the member's container consults this one
+// predicate — the instance slot and the `<=>` bind seam must agree, or
+// a parent binding an equally-widened signal is rejected at the prop.
+const widensToUndefined = (m) => {
+  if (!m.optional) return false;
+  if (!m.hasDefault) return true;
+  return Array.isArray(m.node) && m.node.length === 3 && m.node[2] === 'undefined';
+};
+
 const memberTypeSegments = (m, lead) => {
   // An unannotated computed reads its type from the BODY, through the
   // face's behavior object (the emitter emits one per named component,
@@ -443,11 +461,11 @@ const memberTypeSegments = (m, lead) => {
   // scope there); those members keep any.
   const rootOf = (v) => (typeof v === 'string' ? v
     : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
-  const siblingRooted = m.siblings !== undefined &&
-    Array.isArray(m.node) && m.node.length === 3 && m.siblings.has(rootOf(m.node[2]));
+  const init = Array.isArray(m.node) && m.node.length === 3 ? m.node[2] : undefined;
+  const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
   const t = m.annotation ??
-    (m.hasDefault && !siblingRooted && Array.isArray(m.node) && m.node.length === 3
-      ? (syntacticLiteralType(m.node[2]) ?? typeofSpelling(m.node[2]))
+    (m.hasDefault && !siblingRooted && init !== undefined
+      ? (syntacticLiteralType(init) ?? typeofSpelling(init))
       : null);
   const typed = t !== null
     ? [{ text: `: ${t}`, node: m.node, role: 'annotation' }]
@@ -462,7 +480,7 @@ const memberTypeSegments = (m, lead) => {
     ? [{ text: pre }, { text: vt, node: m.node, role: 'annotation' }, { text: post }]
     : [{ text: `${pre}${vt}${post}` }]);
   if (containerish(m)) {
-    const und = t !== null && m.optional && m.kind === 'prop' ? ' | undefined' : '';
+    const und = t !== null && widensToUndefined(m) ? ' | undefined' : '';
     // PUBLIC is the line, not the kind: a member the caller can reach
     // takes whatever container arrives on its bind channel, and a
     // defaulted prop (`@step: number = 1`) carries kind 'state' while
@@ -570,11 +588,12 @@ export function propsTypeSegments(info) {
       { text: m.name, node: m.nameNode, role: m.nameRole },
       { text: '?', node: m.node, role: 'optionalMarker' },
     );
+    const wide = t !== null && widensToUndefined(m) ? `${t} | undefined` : t;
     if (t === null) segs.push({ text: ': any' });
-    else if (containerish(m)) segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' }, { text: ` | ${containerType(t)}` });
+    else if (containerish(m)) segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' }, { text: ` | ${containerType(wide)}` });
     else segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' });
     if (containerish(m)) {
-      segs.push({ text: `; __bind_${m.name}__?: ${containerType(t ?? 'any')}` });
+      segs.push({ text: `; __bind_${m.name}__?: ${containerType(wide ?? 'any')}` });
     }
   }
   // The projection channel — UNLESS the component declares a member

@@ -357,7 +357,9 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('declare let Counter: {');
     // The required prop's union arm and the bind slot.
     expect(d).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
-    expect(d).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
+    // `max` is an optional prop with no default: the void slot widens the
+    // instance container AND the bind seam it feeds — the two must agree.
+    expect(d).toContain('__bind_max__?: { value: number | undefined; read(): number | undefined; touch?(): void }');
     // A REQUIRED prop suppresses the static mount mirror (the
     // runtime's static mount constructs with NO props — offering it
     // would be tsc-clean with a required container holding

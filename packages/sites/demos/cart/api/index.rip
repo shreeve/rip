@@ -9,7 +9,7 @@ def errorResponse(errors: { form?: string, field?: Partial<Record<string, string
 # Bam Hub bridge (POST /hub) admits the same cookie the API already uses.
 currentUser = () ->
   user = User.find!(1)
-  if user?
+  if user
     session.authenticated = true
     session.userId = user.id
   user

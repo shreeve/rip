@@ -970,8 +970,10 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('the props ctor: optional entries with container unions and bind slots; the REQUIRED prop is an arm', () => {
     const code = ts(FIXTURE).code;
-    expect(code).toContain('max?: number | { value: number; read(): number; touch?(): void }');
-    expect(code).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
+    // The void slot: an optional no-default prop widens, and its bind
+    // slot carries the same width.
+    expect(code).toContain('max?: number | { value: number | undefined; read(): number | undefined; touch?(): void }');
+    expect(code).toContain('__bind_max__?: { value: number | undefined; read(): number | undefined; touch?(): void }');
     expect(code).toContain('label?: any');
     expect(code).toContain('children?: any');
     // @title: string (annotated, no marker, no default) is REQUIRED —

@@ -195,9 +195,9 @@
         "line": 72,
         "character": 8,
         "token": "label",
-        "expect": "(property) label?: string | { value: string; read(): string; touch?(): void; } | undefined",
+        "expect": "(property) label?: string | { value: string | undefined; read(): string | undefined; touch?(): void; } | undefined",
         "rule": "attr/prop name (component)",
-        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
+        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design, and an optional no-default prop's slot is the void slot, T | undefined inside"
       },
       {
         "line": 73,
