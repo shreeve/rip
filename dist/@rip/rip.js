@@ -8226,6 +8226,9 @@ var anyArgsOf = () => "";
 var readonlyCastType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
+var COMPONENT_FAILURE_TYPE = "";
+var ambientClassDeclares = () => [];
+var plainBehaviorValued = () => false;
 
 // src/emitter.js
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
@@ -8457,13 +8460,14 @@ function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
     this.stores = stores;
     this.b = builder;
     this.repl = repl;
     this.replResultName = null;
     this.replImportResolver = null;
     this.script = script;
+    this.appStashSpec = appStashSpec;
     this.browserModule = browserModule;
     this.hmr = hmr === true;
     this.modulePath = typeof modulePath === "string" && modulePath.length > 0 ? modulePath : null;
@@ -9167,7 +9171,9 @@ class Emitter {
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? "this") + ".");
     if (this.ts) {
-      this.emitPrimitive(name);
+      const span = this.emitPrimitive(name);
+      if (reactive && span !== null)
+        this.memberDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
@@ -9185,6 +9191,7 @@ class Emitter {
     } else {
       this.noteNameSpan(value);
     }
+    return span;
   }
   noteNameSpan(value) {
     if (!this.ts || this.declaringName || typeof value !== "string" || !isIdentifierName(value)) {
@@ -9530,13 +9537,57 @@ class Emitter {
       if (!isDeclarableMember(m))
         continue;
       this.noteMemberDecl(m);
-      line(() => this.emitSegments(memberDeclareSegments(m)));
+      if (this.gateTwinSource(m, info) !== null) {
+        line(() => this.emitGateTwin(m, this.gateTwinSource(m, info)));
+        continue;
+      }
+      line(() => this.emitSegments(memberDeclareSegments(m, info)));
     }
     if (!hasChildren)
       line(() => this.b.emit("declare children: any;"));
+    const ambientLines = ambientClassDeclares(info);
+    if (ambientLines.some((t) => t.includes("__ripAmbientApp(")))
+      this._needsAmbienceHelper = true;
+    for (const text of ambientLines)
+      line(() => this.b.emit(text));
     if (info.extendsTag !== null)
       line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>", "", MINTED)};`));
     line(() => this.b.emit("[key: `_${string}`]: any;"));
+  }
+  gateTwinSource(m, info) {
+    if (m.kind !== "gate" || m.annotation != null || !info.appStashSpec)
+      return null;
+    const src = Emitter.gateSource(m.node);
+    return src.error ? null : src;
+  }
+  emitGateTwin(m, src) {
+    this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
+    this.b.emit(" = __computed(() => this.");
+    this.mark(src.pathNode, "$self", () => {
+      const segs = Emitter.gateChain(src.pathNode).slice(1);
+      segs.forEach((seg, i) => {
+        if (i > 0)
+          this.b.emit(".");
+        this.emitPrimitive(seg);
+      });
+    });
+    if (src.key !== null) {
+      this.b.emit("(");
+      if (src.keyParts === null) {
+        this.b.emit(src.keyCode);
+      } else {
+        this.mark(src.key, "$self", () => {
+          this.b.emit("this.");
+          src.keyParts.forEach((seg, i) => {
+            if (i > 0)
+              this.b.emit(".");
+            this.emitPrimitive(seg);
+          });
+        });
+      }
+      this.b.emit(")");
+    }
+    this.b.emit("!);");
   }
   tsScaffoldAny(suffix = "") {
     if (this.ts)
@@ -14086,6 +14137,8 @@ ${pad ?? ""}`);
     }
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === "string" ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
+    if (tsInfo)
+      tsInfo.appStashSpec = this.appStashSpec;
     if (tsInfo !== null)
       this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map, renderPlainReads: new Set };
@@ -14116,10 +14169,13 @@ ${pad ?? ""}`);
         gateVars.forEach((gate, index) => {
           if (index > 0)
             this.b.emit(", ");
-          this.noteVocabulary("gate-prefix", "app", gate.pathNode);
-          this.noteVocabulary("gate-prefix", "data", gate.pathNode);
-          for (const seg of gate.keyParts ?? [])
-            this.noteSilence(seg, gate.key);
+          const twinned = this.ts && tsInfo !== null && tsInfo.members.some((m) => m.node === gate.node && this.gateTwinSource(m, tsInfo) !== null);
+          if (!twinned) {
+            this.noteVocabulary("gate-prefix", "app", gate.pathNode);
+            this.noteVocabulary("gate-prefix", "data", gate.pathNode);
+            for (const seg of gate.keyParts ?? [])
+              this.noteSilence(seg, gate.key);
+          }
           this.mark(gate.node, "$self", () => {
             this.mark(gate.node, "operator", () => {});
             this.mark(gate.node, "rhs", () => {
@@ -14130,10 +14186,10 @@ ${pad ?? ""}`);
                 this.emitQuotedPrimitive(gate.path);
                 this.b.emit(", key: (params");
                 if (this.ts)
-                  this.b.tsOnly(() => this.b.emit(": any"));
+                  this.b.tsOnly(() => this.b.emit(": Record<string, string>"));
                 this.b.emit(", query");
                 if (this.ts)
-                  this.b.tsOnly(() => this.b.emit(": any"));
+                  this.b.tsOnly(() => this.b.emit(": Record<string, string>"));
                 this.b.emit(") => ");
                 this.mark(gate.node, "key", () => {
                   this.mark(gate.key, "$self", () => {
@@ -14240,6 +14296,13 @@ ${pad ?? ""}`);
           memberValue(m.node, m.value);
           this._componentName = prevCN;
         });
+        if (behavior !== null && tsInfo !== null) {
+          const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === "plain");
+          if (tm !== undefined && plainBehaviorValued(tm)) {
+            const code = this.capturedExprText(() => memberValue(m.node, m.value));
+            computedBodies.push({ name: m.name, code, block: false });
+          }
+        }
       };
       const emitAccept = (name) => {
         const stmt = seen.get(name);
@@ -14421,7 +14484,7 @@ ${pad ?? ""}`);
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         const evNames = methodEventNames.get(name);
-        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : null;
+        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : name === "onError" ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
           if (Emitter.containsAwait(block))
@@ -17286,8 +17349,9 @@ ${this.replayPad}}` : " }");
                 this.b.emit("*");
               this.mark(pair, "key", () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
+              const inArgs = this.ts && this.contextuallyTyped(pair[2]);
               this.b.emit("(");
-              this.mark(pair[2], "params", () => this.emitParams(params));
+              this.mark(pair[2], "params", () => this.emitParams(params, null, !inArgs));
               this.b.emit(") ");
               this.mark(pair, "value", () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" });
@@ -17945,10 +18009,30 @@ ${"  ".repeat(ind)}`);
       return true;
     this._annotatedValueSpans ??= (() => {
       const spans = new Set;
+      const annotated = [];
       for (const n of this.stores.nodes) {
         if (n.semanticKind !== "assign" && n.semanticKind !== "pair")
           continue;
         if (!this.stores.role(n.nodeId, "annotation"))
+          continue;
+        const v = this.stores.role(n.nodeId, "value");
+        if (typeof v?.sourceStart === "number") {
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+          annotated.push([v.sourceStart, v.sourceEnd]);
+        }
+      }
+      const funcSpans = [];
+      for (const n of this.stores.nodes) {
+        if ((n.semanticKind === "func" || n.semanticKind === "def" || n.semanticKind === "class") && typeof n.sourceStart === "number" && annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
+          funcSpans.push([n.sourceStart, n.sourceEnd]);
+        }
+      }
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== "pair" || typeof n.sourceStart !== "number")
+          continue;
+        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e))
+          continue;
+        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e))
           continue;
         const v = this.stores.role(n.nodeId, "value");
         if (typeof v?.sourceStart === "number")
@@ -19336,7 +19420,7 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -19346,7 +19430,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -19593,6 +19677,40 @@ return { ${unit.names.join(", ")} };
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
+  if (face === "ts" && Array.isArray(parseResult.sexpr)) {
+    const stashLocal = (() => {
+      for (const s of parseResult.sexpr) {
+        if (!Array.isArray(s) || s[0] !== "export" || !Array.isArray(s[1]))
+          continue;
+        const decl = s[1];
+        if (decl[0] === "=") {
+          if (decl[1] === "stash")
+            return "stash";
+          continue;
+        }
+        const specList = decl.every((x) => typeof x === "string" && /^[A-Za-z_$][\w$]*$/.test(x) || Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && typeof x[1] === "string");
+        if (!specList)
+          continue;
+        for (const spec of decl) {
+          if (spec === "stash")
+            return "stash";
+          if (Array.isArray(spec) && spec[1] === "stash")
+            return spec[0];
+        }
+      }
+      return null;
+    })();
+    if (stashLocal !== null) {
+      builder.tsOnly(() => builder.emit(`
+export type __RipStash = typeof ${stashLocal};
+`));
+    }
+  }
+  if (emitter._needsAmbienceHelper === true) {
+    builder.tsOnly(() => builder.emit(`
+declare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };
+`));
+  }
   const globalDecls = [];
   if (face === "ts" && isNode(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
     const IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -19754,7 +19872,7 @@ var diagnosticError = (file, path, d) => {
   (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false } = {}) {
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -19792,7 +19910,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path, appStashSpec });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -22661,7 +22779,20 @@ function __transition(el, name, dir, done) {
     });
   });
 }
+function __componentFailure(error) {
+  const name = error != null && typeof error === "object" ? error.name : null;
+  if (name === "GateFailure" || name === "ComponentFailure")
+    return error;
+  const failure = new Error(error != null && error.message !== undefined ? error.message : String(error));
+  failure.name = "ComponentFailure";
+  const status = error != null ? error.status ?? error.response?.status : undefined;
+  if (status !== undefined)
+    failure.status = status;
+  failure.error = error;
+  return failure;
+}
 function __handleComponentError(error, component) {
+  const failure = __componentFailure(error);
   let current = component;
   const visited = new Set;
   while (current && !visited.has(current)) {
@@ -22670,7 +22801,7 @@ function __handleComponentError(error, component) {
       const prevC = __pushComponent(current);
       const prevO = __pushOwner(current._frame);
       try {
-        current.onError(error, component);
+        current.onError(failure, component);
         return;
       } catch (_) {} finally {
         __popOwner(prevO);
@@ -23645,6 +23776,7 @@ function source(opts) {
   }
   return opts.fetch.length === 1 ? makeSourceFamily(opts.fetch, staleTime) : makeSourceCell(opts.fetch, staleTime);
 }
+
 // packages/app/stash.rip
 var makeProxy;
 var plainObject;
@@ -24234,6 +24366,7 @@ function createStash(data = {}) {
 function unwrapStash(stash) {
   return stash?.[RAW] || stash;
 }
+
 // packages/app/mutation.rip
 function createMutation(fn, opts = {}) {
   if (!(typeof fn === "function")) {
@@ -25233,6 +25366,7 @@ function browserAdapter() {
     }
   };
 }
+
 // packages/app/renderer.rip
 var componentFrom;
 var constructGateComponent;

@@ -69,11 +69,11 @@ import {
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, closureImportsOf, isStdlibPath } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -727,14 +727,18 @@ function mirrorBytesOf(fsPath) {
 // are a different compile. Every consumer receives the SAME result
 // object — nothing mutates compile results today, and a consumer that
 // started annotating them would corrupt its siblings.
-const rawCompileCache = new Map(); // fsPath → { sourceHash, result }, insertion = recency
+const rawCompileCache = new Map(); // fsPath → { sourceHash, stashSpec, result }, insertion = recency
 const RAW_COMPILE_CAP = 32;
 function rawCompile(fsPath, source, sourceHash) {
+  // The stash discovery is a COMPILE INPUT (the face splices by it), so
+  // it joins the cache key — a hit on source bytes alone would keep
+  // serving a face compiled before app/stash.rip appeared or vanished.
+  const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
   const hit = rawCompileCache.get(fsPath);
-  if (hit && hit.sourceHash === sourceHash) return hit.result;
-  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
+  if (hit && hit.sourceHash === sourceHash && hit.stashSpec === stashSpec) return hit.result;
+  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts', appStashSpec: stashSpec });
   rawCompileCache.delete(fsPath);
-  rawCompileCache.set(fsPath, { sourceHash, result });
+  rawCompileCache.set(fsPath, { sourceHash, stashSpec, result });
   if (rawCompileCache.size > RAW_COMPILE_CAP) rawCompileCache.delete(rawCompileCache.keys().next().value);
   return result;
 }
@@ -872,11 +876,14 @@ function mirrorFromDisk(fsPath, source) {
   writeMirror(mirrorPath, result.code);
   // A dependency that DECLARES globals or lives in a mode-flipped package
   // gets its boundary the moment its face materializes — the closure pass
-  // may be the first to see it.
-  const depCfg = readProjectConfig ? readProjectConfig(path.dirname(fsPath)) : null;
+  // may be the first to see it. Only INSIDE the workspace: a dependency
+  // outside it (the stdlib) keeps its own posture and never earns a
+  // boundary here — the same rule the CLI walker applies.
+  const inWorkspace = workspaceRoot && fsPath.startsWith(workspaceRoot + path.sep);
+  const depCfg = inWorkspace && readProjectConfig ? readProjectConfig(path.dirname(fsPath)) : null;
   const depEarns = depCfg?._configDir
     && configEarnsBoundary(depCfg, readProjectConfig(path.dirname(depCfg._configDir)), workspaceRoot);
-  if (result.globalDecls?.length || depEarns) {
+  if (inWorkspace && (result.globalDecls?.length || depEarns)) {
     const bw = ensureAutoBoundary(fsPath);
     if (bw.length && tsgo) {
       tsgo.client.notify('workspace/didChangeWatchedFiles', {
@@ -884,9 +891,13 @@ function mirrorFromDisk(fsPath, source) {
       });
     }
   }
-  const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
+  const imports = closureImportsOf(result.stores, source, fsPath, workspaceRoot);
   cacheManifest.entries[fsPath] = {
     sourceHash: hashText(source), codeHash: hashText(result.code), imports,
+    // The stash discovery the face was compiled under — a COMPILE INPUT
+    // the source bytes cannot vouch for, so revalidation compares it
+    // against the live discovery (materializeClosure's cached road).
+    stashSpec: appStashSpecFor(fsPath, workspaceRoot),
     // The names this module declares as enums — what an IMPORTER needs to
     // color its own uses, and the one fact it cannot compute for itself.
     // Cheap to carry (names, no spans) and invalidated with the entry; a
@@ -925,7 +936,12 @@ function materializeClosure(seeds) {
     const file = queue.pop();
     if (materializedMirrors.has(file)) continue;
     if (documents.get('file://' + file)) continue; // open buffers own their mirrors and closures
-    if (!workspaceRoot || !file.startsWith(workspaceRoot + path.sep)) {
+    // The stdlib is the sanctioned exception to the workspace bound: the
+    // generated tsconfig points `rip/*` at its `__external__` mirror
+    // faces, so those faces must exist — and the subtree is finite, so
+    // the runaway-`../`-chain concern the bound guards against does not
+    // apply to it.
+    if (!workspaceRoot || (!file.startsWith(workspaceRoot + path.sep) && !isStdlibPath(file))) {
       connection.console.error(
         `[rip] closure truncated: ${file} resolves outside the workspace — not materialized (open it directly for single-file service)`,
       );
@@ -940,7 +956,13 @@ function materializeClosure(seeds) {
     const sourceHash = hashText(source);
     materializedMirrors.set(file, { sourceHash });
     const entry = cacheManifest.entries[file];
-    if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry)) {
+    // Freshness = source bytes AND the stash discovery the face was
+    // compiled under: creating or deleting app/stash.rip (or its
+    // anchor pair) changes no route's bytes, and an entry written
+    // before the field existed reads undefined — a mismatch, so it
+    // recompiles once and heals.
+    if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry) &&
+        entry.stashSpec === appStashSpecFor(file, workspaceRoot)) {
       cached++;
       // The cached road reconverges on the compile road's disk truth:
       // wrapperDirs is per-SESSION memory over per-WORKSPACE disk, and a
@@ -1678,7 +1700,8 @@ async function refresh(document) {
     // callable lines are recovery units. Other positioned rejections,
     // including incomplete token bodies and schema directives, reach the
     // catch below and ride the last good face.
-    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true });
+    const stashSpec = (() => { try { return appStashSpecFor(fileURLToPath(document.uri), workspaceRoot); } catch { return null; } })();
+    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true, appStashSpec: stashSpec });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     // staleness: lastGood (and the overlay/mirror) stay as they are.
@@ -1777,7 +1800,7 @@ async function refresh(document) {
     let fsPath = null;
     try { fsPath = fileURLToPath(document.uri); } catch { /* non-path uri */ }
     if (fsPath) {
-      const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
+      const imports = closureImportsOf(result.stores, text, fsPath, workspaceRoot);
       const previous = state.imports ?? [];
       state.imports = imports;
       // The entry describes the bytes ON DISK, so it is gated exactly as
@@ -1792,6 +1815,9 @@ async function refresh(document) {
       if (good.parseDiagnostics.length === 0) {
         cacheManifest.entries[fsPath] = {
           sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+          // The discovery this compile ran under (the compile-input rule
+          // the closure road's revalidation reads).
+          stashSpec: appStashSpecFor(fsPath, workspaceRoot),
           // An open buffer answers importers from its own last-good compile;
           // the entry has to carry the names too, or closing this buffer
           // leaves importers uncorrected until the file next changes.
@@ -2077,6 +2103,11 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   const ripChanged = new Set(); // closed .rip files this batch touched on disk
   let configChanged = false;
   let refreshAllForConfig = false;
+  // Stash DISCOVERY is a compile input made of existence facts
+  // (app/stash.rip and its index.rip/package.json anchor), so an event
+  // that creates or deletes one flips the spec for a whole subtree
+  // without touching any route's bytes.
+  let stashDiscoveryChanged = false;
   for (const change of changes) {
     if (!change.uri.startsWith('file://')) continue;
     let fsPath;
@@ -2115,10 +2146,17 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) {
         refreshAllForConfig = true;
         configChanged = true;
+        // A created/deleted package.json is half an anchor pair.
+        if (change.type !== FileChangeType.Changed) stashDiscoveryChanged = true;
       }
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
+    if (change.type !== FileChangeType.Changed &&
+        (path.basename(fsPath) === 'index.rip' ||
+         (path.basename(fsPath) === 'stash.rip' && path.basename(path.dirname(fsPath)) === 'app'))) {
+      stashDiscoveryChanged = true;
+    }
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
     ripChanged.add(fsPath);
     const mirrorPath = mirrorPathOf(change.uri);
@@ -2218,6 +2256,18 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
         connection.console.error(`[rip] wrapper for ${rel} not regenerated (${err.message}) — it keeps its previous config`);
       }
     }
+  }
+  if (stashDiscoveryChanged) {
+    // The discovery flipped for some subtree: every cached face and
+    // every materialized-this-session mark is suspect. Clearing them
+    // makes the next closure pass revisit each file through the
+    // manifest's stashSpec revalidation — entries whose discovery
+    // still matches revalidate cheaply, the flipped ones recompile —
+    // and the open docs refresh below recompile under the new spec.
+    rawCompileCache.clear();
+    faceCache.clear();
+    materializedMirrors.clear();
+    refreshAllForConfig = true;
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
@@ -2537,13 +2587,14 @@ function reorderUnionHover(ctx, contents) {
 // type and the hover shows it back; whether it is a GOOD annotation is the
 // author's business. The editor's job is to be honest about what the source
 // says, not to second-guess it.
-// A component MEMBER declaration takes the same presentation for the same
-// reason — the author declared `people := []` and reads it as an array —
-// but only AT ITS DECLARATION. `atMemberDecl` says the request landed
-// there; at every other position the member's container is real (a
+// A component MEMBER takes the same presentation for the same reason —
+// the author declared `people := []` and reads it as an array — at its
+// DECLARATION and at every IN-BODY read (where the lowering appended
+// `.value` to the bare name the author wrote). `atMemberDecl` says the
+// request landed on one of those spans, both carried by the compiler's
+// memberDecls channel; anywhere else the member's container is real (a
 // consumer holding an instance writes `inst.people.value`) and passes
-// through untouched. The two positions resolve to the same face symbol,
-// so the compiler's own record is what tells them apart.
+// through untouched.
 function presentReactiveCellHover(contents, atMemberDecl = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
@@ -2628,6 +2679,13 @@ connection.onHover(async (params) => {
     position: ctx.genPosition,
   }, 'hover');
   if (!hover) return null;
+  // A position whose mapping falls to a cover row over render scaffold
+  // answers with the lowering's own locals (`let _el14: any`) — never a
+  // user symbol. The decline is the machinery interim (RULINGS.md);
+  // SCAFFOLD_HOVER (translate.js) is the one shared pattern, and its
+  // `: any` requirement spares an author's own single-underscore
+  // binding, whose hover carries a real type.
+  if (typeof hover.contents?.value === 'string' && SCAFFOLD_HOVER.test(hover.contents.value)) return null;
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;

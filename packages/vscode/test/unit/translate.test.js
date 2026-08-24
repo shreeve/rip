@@ -12,7 +12,10 @@ import {
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
+  SCAFFOLD_FAMILIES,
 } from '../../src/translate.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('offset ↔ LSP position', () => {
   const text = 'ab\ncde\n\nf';
@@ -500,14 +503,16 @@ describe('memberDeclKind', () => {
   const decls = compile(src, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
   const at = (needle, word) => src.indexOf(word, src.indexOf(needle));
 
-  test('the members the face declares as CONTAINERS are recorded, at the name', () => {
+  test('container members are recorded at the name, and in-body reads join them', () => {
     // `cap` and `cell` are absent on purpose. A `=!` member's declared
     // type IS its value type, so there is nothing to see past; and a
     // member whose own annotation spells the container shape by hand
     // MEANT that shape — stripping it would answer with a type the
-    // author never wrote.
+    // author never wrote. The trailing `people` is the RENDER READ —
+    // a position where the lowering appended `.value` to the bare name
+    // the author wrote, so it answers value-first like the declaration.
     expect(decls.map((d) => src.slice(d.start, d.end)))
-      .toEqual(['label', 'people', 'shade', 'tint']);
+      .toEqual(['label', 'people', 'shade', 'tint', 'people']);
   });
 
   test('no member reads through the lowering — the projected kind is retired', () => {
@@ -522,26 +527,29 @@ describe('memberDeclKind', () => {
     expect(decls.some((d) => d.projected)).toBe(false);
   });
 
-  test('a declaration presents value-first; the same name at a READ does not', () => {
-    // The consumer half of the ruling: `inst.people.value` is real, so
-    // every position that is not a declaration keeps the container.
+  test('declarations and in-body reads present value-first; the container stays for consumers', () => {
+    // The consumer half of the ruling survives by OMISSION: a consumer
+    // holding an instance (`inst.people.value`) never passes through the
+    // member rewrite, so no consumer position is ever recorded. Inside
+    // the component, both the declaration and every bare read answer
+    // the value type — RULINGS.md's member-read row.
     expect(memberDeclKind(decls, at('people :=', 'people'))).toBe('value');
-    expect(memberDeclKind(decls, at('div people', 'people'))).toBeNull();
+    expect(memberDeclKind(decls, at('div people', 'people'))).toBe('value');
     // The unannotated computed answers like every other declaration now.
     expect(memberDeclKind(decls, at('shade ~=', 'shade'))).toBe('value');
     expect(memberDeclKind(decls, at('cap =!', 'cap'))).toBeNull();
     expect(memberDeclKind(decls, at('cell:', 'cell'))).toBeNull();
   });
 
-  test('the span comes from the role, not a text search — a self-named initializer is exact', () => {
-    // `people := people` puts the name twice on one line. The recorded
-    // span is the declaration's own role, so the READ beside it stays
-    // a consumer position.
+  test('the spans come from the role and the claimed occurrence, not a text search', () => {
+    // `people := people` puts the name twice on one line. The
+    // declaration's span is its own role and the read's is its claimed
+    // occurrence — two exact spans, never one smeared match.
     const self = 'W = component\n  people := people\n';
     const d = compile(self, { face: 'ts', runtimeDelivery: 'inline' }).memberDecls;
-    expect(d.map((x) => [x.start, x.end])).toEqual([[16, 22]]);
+    expect(d.map((x) => [x.start, x.end])).toEqual([[16, 22], [26, 32]]);
     expect(memberDeclKind(d, self.indexOf('people'))).toBe('value');
-    expect(memberDeclKind(d, self.lastIndexOf('people'))).toBeNull();
+    expect(memberDeclKind(d, self.lastIndexOf('people'))).toBe('value');
   });
 
   test('the span is half-open, like every other', () => {
@@ -554,5 +562,19 @@ describe('memberDeclKind', () => {
 
   test('the JS emission records nothing — the channel is the face\'s', () => {
     expect(compile(src, { runtimeDelivery: 'inline' }).memberDecls).toEqual([]);
+  });
+});
+
+describe('SCAFFOLD_FAMILIES', () => {
+  test('every minted render-scaffold family the emitter spells is in the shared list', () => {
+    // The list is a mirror of the emitter's minted-name scheme
+    // (newRenderVar hints + newRenderText's `_t`); this scan is what
+    // keeps the mirror honest — a new hint added in the emitter without
+    // a family entry fails here, not as a silent hover leak.
+    const emitterSrc = readFileSync(join(import.meta.dir, '../../../../src/emitter.js'), 'utf8');
+    const hints = new Set(['el', 't']); // newRenderVar's default hint; newRenderText's family
+    for (const m of emitterSrc.matchAll(/newRenderVar\('([a-z]+)'\)/g)) hints.add(m[1]);
+    const families = new Set(SCAFFOLD_FAMILIES.split('|'));
+    for (const hint of hints) expect(families.has(hint)).toBe(true);
   });
 });

@@ -168,6 +168,14 @@
         "why": "interim silence, served — the minted scaffold local (`_elN`) no longer leaks"
       },
       {
+        "line": 60,
+        "character": 26,
+        "token": "person",
+        "expect": "(parameter) person: string",
+        "rule": "render loop variable at a read",
+        "why": "plain inferred type, the ruled target — the value half served; the kind label rides the minted-kinds open half — measured 2026-08-24"
+      },
+      {
         "line": 61,
         "character": 6,
         "token": "slot",
@@ -365,6 +373,14 @@
       }
     ],
     "positions": [
+      {
+        "line": 8,
+        "character": 10,
+        "token": "string",
+        "expect": null,
+        "rule": "field type word",
+        "why": "the type is the target; the body serves silence, the ruled interim — measured 2026-08-24"
+      },
       {
         "line": 13,
         "character": 2,

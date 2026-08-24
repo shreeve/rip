@@ -30,9 +30,9 @@ import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
-import {
+import { COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  declaresContainer,
+  declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
@@ -387,7 +387,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -402,6 +402,11 @@ class Emitter {
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
+    // The relative specifier from this module to the app's stash module,
+    // when the CALLER discovered one (check.js and the editor own the
+    // project-anchor walk; the compiler stays pure). Types the `app`
+    // ambience and the render gates; null leaves both `any`.
+    this.appStashSpec = appStashSpec;
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
     // production emission must stay byte-identical when hmr is false.
@@ -1565,7 +1570,14 @@ class Emitter {
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
     if (this.ts) {
-      this.emitPrimitive(name);
+      // A reactive read's SOURCE span joins the value-first channel
+      // (memberDecls): the author wrote a bare read and the lowering
+      // appended `.value`, so a hover here answers the VALUE type, the
+      // same presentation the declaration serves — RULINGS.md's
+      // member-read row. A consumer holding an instance never passes
+      // through this rewrite, so consumer positions keep the container.
+      const span = this.emitPrimitive(name);
+      if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
@@ -1597,6 +1609,7 @@ class Emitter {
     } else {
       this.noteNameSpan(value);
     }
+    return span; // the claimed SOURCE span, for callers that record it
   }
 
   // Emit a name, recording the token-correction channels it belongs to.
@@ -1675,9 +1688,11 @@ class Emitter {
   // tests is the span the mapping resolves. Only members the face
   // declares as CONTAINERS are recorded: a member that declares its value
   // type directly has nothing to see past, and one whose own annotation
-  // spells the container shape by hand meant that shape. Every recorded
-  // member answers the same way — value-first at its declaration, the
-  // container at a read — so the channel carries spans and nothing else.
+  // spells the container shape by hand meant that shape. The channel also
+  // carries every IN-BODY reactive read (memberRead — where the lowering
+  // appended `.value` to a bare name), so the channel's meaning is "a
+  // position that answers VALUE-FIRST"; a consumer holding an instance
+  // is in neither set and keeps the container. Spans and nothing else.
   noteMemberDecl(m) {
     if (!this.ts || !declaresContainer(m)) return;
     const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
@@ -2086,11 +2101,77 @@ class Emitter {
       if (m.name === 'children') hasChildren = true;
       if (!isDeclarableMember(m)) continue;
       this.noteMemberDecl(m);
-      line(() => this.emitSegments(memberDeclareSegments(m)));
+      if (this.gateTwinSource(m, info) !== null) {
+        line(() => this.emitGateTwin(m, this.gateTwinSource(m, info)));
+        continue;
+      }
+      line(() => this.emitSegments(memberDeclareSegments(m, info)));
     }
     if (!hasChildren) line(() => this.b.emit('declare children: any;'));
+    // The ambience helper the `app` field infers through is declared
+    // once at MODULE scope, from the emit() tail — keyed off the USE,
+    // never off companion emission: expression-valued and function-
+    // nested components emit the field too, and a declaration parked on
+    // the companion road would strand them (no companion, or a declare
+    // at an illegal function-scope position). Declares hoist, so the
+    // tail position serves every class in the module.
+    const ambientLines = ambientClassDeclares(info);
+    if (ambientLines.some((t) => t.includes('__ripAmbientApp('))) this._needsAmbienceHelper = true;
+    for (const text of ambientLines) line(() => this.b.emit(text));
     if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
     line(() => this.b.emit('[key: `_${string}`]: any;'));
+  }
+
+  // The gate descriptor of a member that takes a face TWIN, or null.
+  // A bare gate under a discovered stash emits the read the author
+  // wrote instead of a projection formula; an annotated gate honors its
+  // annotation (the declare road), and without a stash `this.app` is
+  // undeclared on the class, so a twin would publish an error on every
+  // gate.
+  gateTwinSource(m, info) {
+    if (m.kind !== 'gate' || m.annotation != null || !info.appStashSpec) return null;
+    const src = Emitter.gateSource(m.node);
+    return src.error ? null : src;
+  }
+
+  // The gate's face twin — v3's construction. The read the author wrote
+  // emits as a REAL ts-only expression (`user = __computed(() =>
+  // this.app.data.user!)`): every path segment claims its source span,
+  // so hover answers at each depth and a wrong path draws its error on
+  // the segment the author wrote — and the `!` states the gate's own
+  // contract (the body does not render until the value exists). The
+  // member's type is the INSTANTIATED slot, which quickinfo prints
+  // resolved (the memberDeclareSegments doctrine: a written node
+  // echoes). The runtime road is untouched: `_init`'s `__gateBind`
+  // remains the only assignment the shipped JS carries. A keyed gate's
+  // key is a literal (verbatim) or a `params`/`query` chain, re-rooted
+  // on `this` — the class ambience declares both records.
+  emitGateTwin(m, src) {
+    this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
+    this.b.emit(' = __computed(() => this.');
+    this.mark(src.pathNode, '$self', () => {
+      const segs = Emitter.gateChain(src.pathNode).slice(1);
+      segs.forEach((seg, i) => {
+        if (i > 0) this.b.emit('.');
+        this.emitPrimitive(seg);
+      });
+    });
+    if (src.key !== null) {
+      this.b.emit('(');
+      if (src.keyParts === null) {
+        this.b.emit(src.keyCode);
+      } else {
+        this.mark(src.key, '$self', () => {
+          this.b.emit('this.');
+          src.keyParts.forEach((seg, i) => {
+            if (i > 0) this.b.emit('.');
+            this.emitPrimitive(seg);
+          });
+        });
+      }
+      this.b.emit(')');
+    }
+    this.b.emit('!);');
   }
 
   // Minted render-scaffold declarations type `any` in the face
@@ -8163,6 +8244,7 @@ class Emitter {
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === 'string'
       ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
+    if (tsInfo) tsInfo.appStashSpec = this.appStashSpec;
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
@@ -8210,33 +8292,42 @@ class Emitter {
         this.b.emit(`${pad}static __gates = [`);
         gateVars.forEach((gate, index) => {
           if (index > 0) this.b.emit(', ');
-          // `@app.data` is the marker that makes this a gate; the lowering
-          // erases it entirely, keeping only the route name. RULINGS.md pins
-          // those segments to silence — there is nothing for them to answer.
-          this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
-          this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
-          // A gate KEY's segments do reach the face — they emit verbatim
-          // into the minted key fn — so they stay in the mapping
-          // population. What they reach is that fn's own `params`/`query`,
-          // minted scaffold the user never wrote, so the editor declines
-          // until the ruled answer (the segment's plain inferred type) is
-          // served.
-          for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
+          // `@app.data` is the marker that makes this a gate. With a face
+          // TWIN (emitGateTwin — a discovered stash), the segments have a
+          // real typed expression to answer from, so they stay in the
+          // mapping population — the twin's claims, emitted above, own
+          // them. Without one the lowering erases the read entirely,
+          // keeping only the route name: RULINGS.md pins those segments
+          // to silence — there is nothing for them to answer — and the
+          // key's segments, which reach only the minted key fn's own
+          // scaffold, decline the same way.
+          const twinned = this.ts && tsInfo !== null &&
+            tsInfo.members.some((m) => m.node === gate.node && this.gateTwinSource(m, tsInfo) !== null);
+          if (!twinned) {
+            this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
+            this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
+            for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
+          }
           this.mark(gate.node, '$self', () => {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
               if (gate.key === null) {
                 this.emitQuotedPrimitive(gate.path);
               } else {
-                // The key fn is minted scaffold — its params carry explicit
-                // face-only `any` (the tsScaffoldAny doctrine) so a strict
-                // workspace never inherits implicit-any noise from them.
+                // The key fn is minted scaffold, but its params model
+                // exactly the runtime values the class ambience declares
+                // (`params`/`query` are `Record<string, string>` route
+                // state), so they carry that type rather than scaffold
+                // `any` — a position that maps into this cover (the twin
+                // and this fn both cover the key span; precedence is a
+                // mapping fact, not a contract) then answers the real
+                // type, never `any`.
                 this.b.emit('{ path: ');
                 this.emitQuotedPrimitive(gate.path);
                 this.b.emit(', key: (params');
-                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(', query');
-                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(') => ');
                 this.mark(gate.node, 'key', () => {
                   this.mark(gate.key, '$self', () => {
@@ -8354,6 +8445,19 @@ class Emitter {
           memberValue(m.node, m.value);
           this._componentName = prevCN;
         });
+        // The face's behavior thunk for a plain member the form table
+        // cannot spell — the same capture as emitComputed below, under
+        // the shared plainBehaviorValued predicate, so the class field
+        // that calls the thunk always finds it. The copy lowers member
+        // reads exactly as the real emission does; the rollback returns
+        // everything it consumed.
+        if (behavior !== null && tsInfo !== null) {
+          const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'plain');
+          if (tm !== undefined && plainBehaviorValued(tm)) {
+            const code = this.capturedExprText(() => memberValue(m.node, m.value));
+            computedBodies.push({ name: m.name, code, block: false });
+          }
+        }
       };
       const emitAccept = (name) => {
         const stmt = seen.get(name);
@@ -8574,7 +8678,11 @@ class Emitter {
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         const evNames = methodEventNames.get(name);
-        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : null;
+        // The onError hook's unannotated param types as the failure
+        // envelope every boundary delivers (COMPONENT_FAILURE_TYPE) —
+        // the injection seam already yields to an author-typed param.
+        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames])
+          : name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
           if (Emitter.containsAwait(block)) this.b.emit('async ');
@@ -12220,8 +12328,12 @@ class Emitter {
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
+              // A method of a contextually-typed literal takes its param
+              // types from the annotation the literal sits under; JS
+              // arity must not widen them (same rule as the arrow path).
+              const inArgs = this.ts && this.contextuallyTyped(pair[2]);
               this.b.emit('(');
-              this.mark(pair[2], 'params', () => this.emitParams(params));
+              this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
               this.b.emit(') ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
@@ -13129,9 +13241,38 @@ class Emitter {
     if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e)) return true;
     this._annotatedValueSpans ??= (() => {
       const spans = new Set();
+      const annotated = [];
       for (const n of this.stores.nodes) {
         if (n.semanticKind !== 'assign' && n.semanticKind !== 'pair') continue;
         if (!this.stores.role(n.nodeId, 'annotation')) continue;
+        const v = this.stores.role(n.nodeId, 'value');
+        if (typeof v?.sourceStart === 'number') {
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+          annotated.push([v.sourceStart, v.sourceEnd]);
+        }
+      }
+      // A pair's value INSIDE an annotated value types through it too:
+      // `cart: Cart = { addItem: (product) -> … }` — the annotation on
+      // the binding reaches the member the way TS contextual typing
+      // does, through the literal. Containment must STOP at function
+      // boundaries, exactly where TS's contextual typing stops: a
+      // literal built inside a nested function body has no contextual
+      // type, and sweeping its pairs would withhold the JS-arity `?`
+      // from parameters TS then requires at every call (TS2554 on
+      // legal fewer-arg calls). A function-valued pair itself is fine —
+      // the pair node starts at its key, before its value's boundary.
+      const funcSpans = [];
+      for (const n of this.stores.nodes) {
+        if ((n.semanticKind === 'func' || n.semanticKind === 'def' || n.semanticKind === 'class') &&
+            typeof n.sourceStart === 'number' &&
+            annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
+          funcSpans.push([n.sourceStart, n.sourceEnd]);
+        }
+      }
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== 'pair' || typeof n.sourceStart !== 'number') continue;
+        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
+        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
         const v = this.stores.role(n.nodeId, 'value');
         if (typeof v?.sourceStart === 'number') spans.add(`${v.sourceStart}:${v.sourceEnd}`);
       }
@@ -14966,7 +15107,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -14976,7 +15117,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -15281,6 +15422,52 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
+  }
+  // A module exporting a top-level `stash` binding — the framework
+  // contract launch reads — carries its own type on the face, so a
+  // component's `app` ambience can splice it by specifier
+  // (`import('<rel>').__RipStash`) without the component importing
+  // anything. Every export spelling that names a LOCAL binding counts —
+  // `export stash = …`, `export { stash }`, `export { thing as stash }`
+  // (the typeof names the local half) — while a re-export
+  // (`export … from`) carries no local binding and is excluded by its
+  // own head. TS-only THROUGH THE RECORDED REGION: the strip gate
+  // (TS face minus regions === JS face) must hold on stash modules too.
+  if (face === 'ts' && Array.isArray(parseResult.sexpr)) {
+    const stashLocal = (() => {
+      for (const s of parseResult.sexpr) {
+        if (!Array.isArray(s) || s[0] !== 'export' || !Array.isArray(s[1])) continue;
+        const decl = s[1];
+        if (decl[0] === '=') {
+          if (decl[1] === 'stash') return 'stash';
+          continue;
+        }
+        // A specifier list holds only names and [local, exported] pairs;
+        // any other declaration form (def, class, …) is not the binding
+        // contract and falls through.
+        const specList = decl.every((x) =>
+          (typeof x === 'string' && /^[A-Za-z_$][\w$]*$/.test(x)) ||
+          (Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string'));
+        if (!specList) continue;
+        for (const spec of decl) {
+          if (spec === 'stash') return 'stash';
+          if (Array.isArray(spec) && spec[1] === 'stash') return spec[0];
+        }
+      }
+      return null;
+    })();
+    if (stashLocal !== null) {
+      builder.tsOnly(() => builder.emit(`\nexport type __RipStash = typeof ${stashLocal};\n`));
+    }
+  }
+  // The ambience helper's ONE declaration per module, at module scope —
+  // where every class that emitted `app = __ripAmbientApp(...)` can
+  // reach it (declares hoist; nested and expression-valued components
+  // included). Named apart from the runtime's `globalThis.__ripApp` so
+  // the face never shadows the launch global's name. TS-only through
+  // the recorded region.
+  if (emitter._needsAmbienceHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };\n'));
   }
   // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
   // spelling is the boundary: `??=` says "install unless someone already

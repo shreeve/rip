@@ -101,6 +101,17 @@ export const SUPPRESSED_TS_CODES = new Set([...IMPLICIT_ANY_CODES, ...MISSING_TY
 // translate.test.js pin cites the verification) — never a broader
 // class. 6205 (all type parameters unused) is deliberately absent:
 // TypeScript does not flag it, and tsgo delivers it untagged.
+// A hover whose answer names minted render scaffold — the lowering's
+// own locals, always explicitly `any` (the tsScaffoldAny doctrine) —
+// declines rather than describing machinery. ONE pattern, consumed by
+// the server's hover guard and the editor leak gate alike; the family
+// list mirrors the emitter's newRenderVar hints plus newRenderText's
+// `_t`, and a toolchain test pins the mirror to the emitter source.
+// The `: any` requirement is what spares an author's own legal
+// single-underscore binding (`_t1 = 5` hovers `let _t1: number`).
+export const SCAFFOLD_FAMILIES = 'el|t|inst|frag|anchor|empty|slot';
+export const SCAFFOLD_HOVER = new RegExp(`\\b(?:let|const|var) _(?:${SCAFFOLD_FAMILIES})\\d+: any\\b`);
+
 export const UNNECESSARY_TS_CODES = new Set([
   2695, // left side of comma operator is unused (error severity, still flagged)
   6133, // declared but its value is never read

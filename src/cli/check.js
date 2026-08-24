@@ -31,7 +31,7 @@ import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary } from '../../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 
 // The two trees whose build identity the editor and this CLI must agree
@@ -260,6 +260,9 @@ if (targets.length === 0) {
   process.exit(0);
 }
 const workspaceRoot = findWorkspaceRoot(targets);
+// One run = one consistent view of the disk, so stash discovery
+// memoizes per directory — files sharing a dirname share one walk.
+const stashMemo = new Map();
 
 // ── mirror root ─────────────────────────────────────────────────────
 // A dedicated mirror at <root>/.rip/check (peer of the editor's
@@ -383,7 +386,7 @@ while (queue.length) {
   const srcLineStarts = lineStartsOf(source);
   let result;
   try {
-    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict });
+    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo) });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     const { reason, start, end } = compileErrorInfo(err, source.length);
@@ -403,7 +406,11 @@ while (queue.length) {
     },
     pinnables: result.pinnables ?? [],
   });
-  for (const imp of ripImportsOf(result.stores, source, path.dirname(fsPath))) {
+  // The spliced stash rides the closure like an import (closureImportsOf):
+  // a single-file check of a route must still compile the stash its face
+  // references.
+  const closureImports = closureImportsOf(result.stores, source, fsPath, workspaceRoot, stashMemo);
+  for (const imp of closureImports) {
     if (!seen.has(imp)) queue.push(imp);
   }
 }
@@ -577,7 +584,7 @@ if (compiled.size > 0) {
       // importer's queued hovers against its dependency's didOpen, and
       // which pinnables land would then depend on timing, not source.
       const repin = (fsPath, entry, pins) => {
-        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins });
+        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo) });
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];

@@ -514,9 +514,15 @@ export const jsArityOptional = (params) => {
   return out;
 };
 
-export const renderParams = (params, isOptional) => {
+export const renderParams = (params, isOptional, firstType = null) => {
   const arity = jsArityOptional(params);
-  return `(${params.map((p, i) => renderParam(p, (q) => isOptional(q) || arity.has(i))).join(', ')})`;
+  // An injected FIRST-param type (the onError envelope, the event seam)
+  // applies only to a bare untyped name — an annotated, defaulted, rest
+  // or pattern param is the author's own shape and is never overridden.
+  const inject = firstType !== null && typeof params[0] === 'string';
+  return `(${params.map((p, i) => (inject && i === 0
+    ? `${p}: ${firstType}`
+    : renderParam(p, (q) => isOptional(q) || arity.has(i)))).join(', ')})`;
 };
 
 export const paramTyped = (p) =>

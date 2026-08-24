@@ -2252,6 +2252,49 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  test('the stash types the app: bare gates and computeds infer from app/stash.rip, in a directory check and a single-file one', () => {
+    // The project anchor (index.rip + package.json) discovers the stash;
+    // the face splices `import('<rel>').__RipStash` with no source
+    // import, so the stash must ride the closure like an import — the
+    // single-file run is the case that would leave it unmaterialized.
+    const files = {
+      'index.rip': "console.log 'serve'\n",
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n",
+      'app/routes/page.rip': "export Page = component\n  todos ~= @app.data.todos\n  labels ~= todos.map((t) -> t.label)\n  q ~= @router.query.q ?? ''\n  render null\n",
+    };
+    const dir = workspace(files, { strict: true });
+    try {
+      const whole = check(dir, ['--json']);
+      expect(JSON.parse(whole.stdout)).toEqual([]);
+      const single = check(dir, ['app/routes/page.rip', '--json']);
+      expect(JSON.parse(single.stdout)).toEqual([]);
+      // The face carries the splice; the stash face carries its type.
+      const face = fs.readFileSync(path.join(dir, '.rip/check/app/routes/page.rip.ts'), 'utf8');
+      expect(face).toContain("import('rip/app').AppData<import(\"../stash.rip\").__RipStash>");
+      // The router rides the same discovery: the ambience carries the
+      // runtime's Router, so `@router.query` reads infer without
+      // annotation (the bare `q` above must survive the strict run).
+      expect(face).toContain("router?: import('rip/app').Router;");
+      const stashFace = fs.readFileSync(path.join(dir, '.rip/check/app/stash.rip.ts'), 'utf8');
+      expect(stashFace).toContain('export type __RipStash = typeof stash;');
+      // A WRONG stash path squiggles, on the computed road (the class
+      // ambience types the `_init` copy — the mapped one) AND on the
+      // gate road (the face twin IS the read the author wrote) — instead
+      // of collapsing to error-`any`.
+      fs.writeFileSync(path.join(dir, 'app/routes/typo.rip'), "export Typo = component\n  bad ~= @app.data.missing\n  worse <~ @app.data.absent\n  render null\n");
+      const typo = check(dir, ['app/routes/typo.rip', '--json']);
+      const typoRows = JSON.parse(typo.stdout);
+      expect(typoRows.some((d) => d.code === 2339 && /missing/.test(d.message))).toBe(true);
+      expect(typoRows.some((d) => d.code === 2339 && /absent/.test(d.message))).toBe(true);
+      // Without the anchor the same route types nothing and strict says so.
+      const bare = workspace({ 'page.rip': files['app/routes/page.rip'] }, { strict: true });
+      try {
+        const r = check(bare, ['--json']);
+        expect(JSON.parse(r.stdout).some((d) => d.code === 7006)).toBe(true);
+      } finally { fs.rmSync(bare, { recursive: true, force: true }); }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
     // Both postures are exercised: per file (an unannotated read the gate
     // would hold, an implicit-any parameter) and per program (a null the

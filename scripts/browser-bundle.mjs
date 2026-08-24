@@ -87,6 +87,9 @@ const IDE_STUBS = new Map([
     `export const selfArgsOf = () => '';`,
     `export const anyArgsOf = () => '';`,
     `export const readonlyCastType = ${unavailable('component type story')};`,
+    `export const COMPONENT_FAILURE_TYPE = '';`,
+    `export const ambientClassDeclares = () => [];`,
+    `export const plainBehaviorValued = () => false;`,
   ].join('\n')],
 ]);
 

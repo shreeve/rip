@@ -655,6 +655,27 @@ test 'onError catches error from effect in _init', '''
   caught
 ''', 'boom'
 
+test 'onError receives the failure envelope: message and the raw thrown value, wrapped once', '''
+  got = null
+  A = component
+    onError = (err) -> got = err
+    ~> raise "boom"
+  a = A.new()
+  [got.name, got.message, got.error instanceof Error, got.error.message]
+''', ['ComponentFailure', 'boom', true, 'boom']
+
+test 'onError passes a GateFailure-shaped error through untouched', '''
+  got = null
+  gateish = Error.new('nope')
+  gateish.name = 'GateFailure'
+  gateish.status = 404
+  A = component
+    onError = (err) -> got = err
+    ~> throw gateish
+  a = A.new()
+  [got is gateish, got.status]
+''', [true, 404]
+
 test 'onError receives source component', '''
   source = null
   A = component

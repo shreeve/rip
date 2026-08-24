@@ -186,6 +186,73 @@ const HOST_FLOORS = [
 ];
 export const HOST_FLOOR_NAME = 'host-floor.d.ts';
 
+// The app's stash module for a source file — the discovery half of the
+// typed `@app.data` splice (the compiler takes the answer as
+// `appStashSpec` and stays pure). The anchor is the project root: the
+// nearest directory holding both an `index.rip` and a `package.json`,
+// walking up from the file and stopping at the workspace root
+// (inclusive — a standalone app IS its workspace). The stash is the
+// framework contract `<root>/app/stash.rip`; the answer is the relative
+// specifier faces import by. Null for the stash module itself — its own
+// face carries `__RipStash`, not a self-import.
+// `memo`, when given, caches the DISCOVERY (the resolved stash path per
+// directory — the walk's fs facts, identical for every file sharing a
+// dirname); the per-file self-import guard stays outside it, so the
+// stash module itself never poisons its siblings' entry. A memo is for
+// one consistent view of the disk (the CLI's single run) — a long-lived
+// caller passes none, because discovery is a live filesystem fact.
+export function appStashSpecFor(fsPath, workspaceRoot, memo = null) {
+  const fromDir = path.dirname(fsPath);
+  let stashPath;
+  if (memo?.has(fromDir)) {
+    stashPath = memo.get(fromDir);
+  } else {
+    stashPath = null;
+    for (let dir = fromDir; ; dir = path.dirname(dir)) {
+      if (fs.existsSync(path.join(dir, 'index.rip')) && fs.existsSync(path.join(dir, 'package.json'))) {
+        const stash = path.join(dir, 'app', 'stash.rip');
+        if (fs.existsSync(stash)) stashPath = path.resolve(stash);
+        break;
+      }
+      if (!workspaceRoot || dir === workspaceRoot || path.dirname(dir) === dir) break;
+    }
+    memo?.set(fromDir, stashPath);
+  }
+  if (stashPath === null || stashPath === path.resolve(fsPath)) return null;
+  const rel = path.relative(fromDir, stashPath).split(path.sep).join('/');
+  return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+// The stash as a CLOSURE DEPENDENCY: a face compiled with an
+// `appStashSpec` references the stash module at the type level
+// (`import('<spec>').__RipStash`) without any source import, so a
+// walker following source imports alone would leave the stash face
+// unmaterialized and the splice resolving to a stub. Every closure walk
+// appends this to a file's imports.
+export function appStashImportOf(fsPath, workspaceRoot, memo = null) {
+  const spec = appStashSpecFor(fsPath, workspaceRoot, memo);
+  if (spec === null) return [];
+  // Both halves of the splice: the stash module itself, and the
+  // `rip/app` entry the projection type imports from — a closure that
+  // never source-imports either would otherwise leave a face
+  // unmaterialized and the splice resolving against a stub or nothing.
+  const deps = [path.resolve(path.dirname(fsPath), spec)];
+  if (REAL_STDLIB_APP_ENTRY !== null) deps.push(REAL_STDLIB_APP_ENTRY);
+  return deps;
+}
+
+// The closure's import list for one compiled file: the source imports
+// plus the stash splice's type-level dependencies. Walkers use THIS,
+// never bare ripImportsOf — a walk that forgets the append leaves the
+// stash face unmaterialized and the splice resolving against a stub.
+export function closureImportsOf(stores, sourceText, fsPath, workspaceRoot, memo = null) {
+  const imports = ripImportsOf(stores, sourceText, path.dirname(fsPath));
+  for (const dep of appStashImportOf(fsPath, workspaceRoot, memo)) {
+    if (!imports.includes(dep)) imports.push(dep);
+  }
+  return imports;
+}
+
 // A package that INSTALLS its own ambient types. Ambient declarations —
 // `@types/*` packages and `bun-types` — bind per PROGRAM through the
 // governing tsconfig's typeRoots, which walk UP from the program root and
@@ -872,6 +939,24 @@ const STDLIB_DIR = (() => {
   }
   return candidates.find((c) => fs.existsSync(path.join(c, 'vscode', 'package.json'))) ?? candidates[0];
 })();
+
+// The one subtree OUTSIDE a workspace whose files are sanctioned closure
+// members: the generated tsconfig already points `rip/*` at the stdlib's
+// mirror faces, and the stash splice reaches `rip/app` with no source
+// import — so a closure walker that refuses everything outside the
+// workspace strands the mapping against faces nobody wrote. Compared
+// realpath'd, the same spelling appStashImportOf and stdlibRipPaths use.
+const REAL_STDLIB_DIR = (() => {
+  try { return fs.realpathSync(STDLIB_DIR); } catch { return STDLIB_DIR; }
+})();
+// The `rip/app` entry the stash splice depends on, realpath'd once —
+// the same spelling stdlibRipPaths' realpath'd targets use, so the
+// face and the tsconfig `paths` mapping land at one mirror path.
+const REAL_STDLIB_APP_ENTRY = (() => {
+  try { return fs.realpathSync(path.join(STDLIB_DIR, 'app', 'index.rip')); } catch { return null; }
+})();
+export const isStdlibPath = (fsPath) =>
+  fsPath === REAL_STDLIB_DIR || fsPath.startsWith(REAL_STDLIB_DIR + path.sep);
 
 function stdlibRipTarget(spec) {
   if (!spec.startsWith('rip/')) return null;

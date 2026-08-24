@@ -185,6 +185,10 @@ export function componentTypeInfo(stores, source, node, behavior = null) {
         node: stmt, name: t.name, kind: 'plain', isPublic: t.isPublic,
         optional: false, hasDefault: true,
         annotation: roleText(stmt, 'annotation'),
+        // The stores' semanticKind decides component-ness (the emitter's
+        // own doctrine) — a user function named `component` builds a
+        // same-headed CALL node, which a shape test would misread.
+        isComponentValued: semantic(stmt[2]) === 'component',
         ...nameMark(stmt, stmt[1]),
       });
       return;
@@ -423,6 +427,37 @@ export const declaresContainer = (m) =>
 export const isBehaviorProjected = (m) =>
   m.kind === 'computed' && m.annotation == null && Boolean(m.behavior);
 
+// The FORM TABLE: the spellable type of a member — the author's
+// annotation, a syntactic literal's type, or a module-scope `typeof`
+// for entity paths. Null when nothing is spellable (a call, a
+// sibling-rooted read, a `this` chain).
+export const formTableType = (m) => {
+  // The typeof spelling resolves at MODULE scope (the declare row sits
+  // on the class) — an initializer rooted at a SIBLING member
+  // (`bad1 ~= store.itms`) must not spell it (this.store is not in
+  // scope there); those members keep nothing.
+  const rootOf = (v) => (typeof v === 'string' ? v
+    : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
+  const init = Array.isArray(m.node) && m.node.length === 3 ? m.node[2] : undefined;
+  const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
+  return m.annotation ??
+    (m.hasDefault && !siblingRooted && init !== undefined
+      ? (syntacticLiteralType(init) ?? typeofSpelling(init))
+      : null);
+};
+
+// A PRIVATE plain member the form table cannot spell reads through the
+// behavior object too (`updateUser = createMutation(...)` — a call
+// spells nothing, and `any` buried the initializer's real type). The
+// emitter captures the initializer as a thunk under the same predicate,
+// so the two decisions cannot drift. Public plain members stay out (the
+// props seam types them), and a member-held component declaration is
+// excluded by the stores' SEMANTIC verdict, recorded at classify time
+// (its class must not be re-lowered into a thunk).
+export const plainBehaviorValued = (m) =>
+  m.kind === 'plain' && !m.isPublic && Boolean(m.behavior) &&
+  formTableType(m) === null && m.isComponentValued !== true;
+
 // The VOID SLOT: `?:` reaches inside the container — but only where
 // absence can actually inhabit the slot. `x?: T` is `T | undefined` in
 // TypeScript's own reading, so an optional member with no default (a
@@ -440,7 +475,7 @@ const widensToUndefined = (m) => {
   return Array.isArray(m.node) && m.node.length === 3 && m.node[2] === 'undefined';
 };
 
-const memberTypeSegments = (m, lead) => {
+const memberTypeSegments = (m, lead, info = null) => {
   // An unannotated computed reads its type from the BODY, through the
   // face's behavior object (the emitter emits one per named component,
   // carrying the same compiled bodies `_init` does). The form table
@@ -455,18 +490,7 @@ const memberTypeSegments = (m, lead) => {
     const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
     return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
   }
-  // The typeof spelling resolves at MODULE scope (the declare row sits
-  // on the class) — an initializer rooted at a SIBLING member
-  // (`bad1 ~= store.itms`) must not spell it (this.store is not in
-  // scope there); those members keep any.
-  const rootOf = (v) => (typeof v === 'string' ? v
-    : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
-  const init = Array.isArray(m.node) && m.node.length === 3 ? m.node[2] : undefined;
-  const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
-  const t = m.annotation ??
-    (m.hasDefault && !siblingRooted && init !== undefined
-      ? (syntacticLiteralType(init) ?? typeofSpelling(init))
-      : null);
+  const t = formTableType(m);
   const typed = t !== null
     ? [{ text: `: ${t}`, node: m.node, role: 'annotation' }]
     : [{ text: ': any' }];
@@ -493,7 +517,25 @@ const memberTypeSegments = (m, lead) => {
     ];
   }
   if (m.kind === 'computed' || m.kind === 'gate') {
+    // An unannotated gate with a discovered stash projects its type from
+    // the path it reads (stashProjection) — the member the author left
+    // bare infers instead of falling to `any`. This road writes the
+    // projection as a type node (an interface member has no inferred
+    // position to take); the class declare road resolves the display.
+    if (m.kind === 'gate' && t === null) {
+      const proj = stashProjection(m, info);
+      if (proj !== null) {
+        return [{ text: `${lead}{ readonly value: ` }, { text: proj, node: m.nameNode, role: m.nameRole }, { text: `; read(): ${proj} }` }];
+      }
+    }
     return [{ text: `${lead}{ readonly value` }, ...typed, ...readBack('; read(): ', ' }')];
+  }
+  // A thunked plain member projects like a behavior computed: the
+  // interface spells ReturnType over the minted name (a written node,
+  // correct for checking; the class road's inferred field is what
+  // resolves the display).
+  if (plainBehaviorValued(m)) {
+    return [{ text: `${lead}ReturnType<typeof ${m.behavior}.${m.name}>` }];
   }
   if (t === null) return [{ text: `${lead}any` }];
   return typed; // readonly / plain: the annotation IS `: T`
@@ -502,7 +544,7 @@ const memberTypeSegments = (m, lead) => {
 // One face `declare` line for a non-callable member (methods and
 // hooks are REAL class methods — their annotations ride the shared
 // param/return machinery).
-export const memberDeclareSegments = (m) => {
+export const memberDeclareSegments = (m, info = null) => {
   // An unannotated computed takes an INFERRED position rather than a
   // `declare` carrying a type node. TypeScript's quickinfo echoes a
   // written type node VERBATIM — driven against tsgo, both
@@ -533,12 +575,26 @@ export const memberDeclareSegments = (m) => {
     // only ever a receiver and never an argument.
     { text: ` = __computed(() => ${m.behavior}.${m.name}.call(this as any));` },
   ];
+  // A thunked plain member takes the same inferred position: the field
+  // calls the behavior thunk the emitter captured (emitPlainish), and
+  // the member infers the initializer's real type instead of the form
+  // table's `any`. `this as any` breaks the same circularity the
+  // computed branch documents.
+  if (plainBehaviorValued(m)) return [
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    { text: ` = ${m.behavior}.${m.name}.call(this as any);` },
+  ];
+  // A stash-projected gate never reaches here: the emitter emits its
+  // face TWIN (emitGateTwin — the read the author wrote, through
+  // `__computed` and `!`) before consulting this table, for the same
+  // reason the computed branch above exists: an inferred position
+  // prints resolved where a written node echoes.
   return [
     // A `=!` member is a CONST value: readonly on the declare, so
     // instance writes draw TS2540.
     { text: m.kind === 'readonly' ? 'declare readonly ' : 'declare ' },
     { text: m.name, node: m.nameNode, role: m.nameRole },
-    ...memberTypeSegments(m, ': '),
+    ...memberTypeSegments(m, ': ', info),
     { text: ';' },
   ];
 };
@@ -673,6 +729,85 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // first computed that reads it.
 export const AMBIENT_FIELDS = ['app', 'router', 'params', 'query'];
 
+// The CLASS road's half of the ambience: with a discovered stash the
+// class declares the same runtime-injected members the companion
+// interface carries, so the REAL copies of `@app`/`@router` reads (the
+// `_init` lowering, hooks, methods — where `this` is the class) type
+// and hover as what the runtime injects instead of falling to
+// error-`any` — which also swallowed wrong stash paths whole. NON-
+// optional, unlike the interface's `?:`, on purpose: the class type is
+// internal (consumers and hand-built values type against the
+// interface), the lowering reads these only where the runtime injected
+// them, and an optional here would draw possibly-undefined on every
+// such read. An author member of the same name wins the line, as on
+// the interface.
+export const ambientClassDeclares = (info) => {
+  if (!info.appStashSpec) return [];
+  const taken = new Set(info.members.map((m) => m.name));
+  const lines = [];
+  for (const name of AMBIENT_FIELDS) {
+    if (taken.has(name)) continue;
+    // Not a `declare`: the written object type would echo its import()
+    // splices verbatim in the hover. Inferred through `__ripAmbientApp`
+    // (the emitter declares it once at module scope, from the emit()
+    // tail), the member's type is INSTANTIATED and prints resolved.
+    // TS-only like every line here; the runtime's injection remains the
+    // only real assignment.
+    if (name === 'app') lines.push(`app = __ripAmbientApp(0 as any as ${appDataType(info.appStashSpec)} & import('rip/app').StashMethods);`);
+    else if (name === 'router') lines.push(`declare router: import('rip/app').Router;`);
+    else lines.push(`declare ${name}: Record<string, string>;`);
+  }
+  return lines;
+};
+
+export const appDataType = (spec) =>
+  `import('rip/app').AppData<import(${JSON.stringify(spec)}).__RipStash>`;
+
+// The ambience's `app` member — ONE spelling for the interface road and
+// the class road. `data` is what the runtime delivers: a Stash — the
+// projected entries plus the StashMethods surface (`source()`, `inc`,
+// `reset`, …), spelled as an intersection. gateProjection stays on the
+// bare AppData: a gate path names a data entry, never a method.
+export const appAmbienceType = (spec) =>
+  `{ data: ${appDataType(spec)} & import('rip/app').StashMethods; [key: string]: any }`;
+
+// A render gate's member type, projected from the stash the gate reads:
+// `<~` admits only a literal `@app.data.<path>` (the emitter rejects the
+// rest), so the member IS `NonNullable<AppData[…path]>` — non-null by the
+// gate's own contract (the body does not render until the value exists) —
+// and a keyed gate is the family's return, un-nulled the same way.
+export const gateProjection = (m, spec) => {
+  const chain = (n) => (typeof n === 'string' ? [n]
+    : Array.isArray(n) && n[0] === '.' && n.length === 3 ? (chain(n[1]) ?? []).concat([n[2]]) : null);
+  const segs = Array.isArray(m.node) && m.node.length >= 3 ? chain(m.node[2]) : null;
+  if (!segs || segs.length < 4 || segs[0] !== 'this' || segs[1] !== 'app' || segs[2] !== 'data') return null;
+  let t = appDataType(spec);
+  for (const p of segs.slice(3)) t = `${t}[${JSON.stringify(p)}]`;
+  if (m.node.length > 3) t = `ReturnType<Extract<${t}, (...args: any) => any>>`;
+  return `NonNullable<${t}>`;
+};
+
+// The stash projection of a bare gate, or null — ONE predicate for both
+// rendering roads (the class declare and the companion interface), so
+// the two cannot drift. The annotation check here and the form-table
+// `t === null` the interface road computes agree on every projectable
+// gate: its initializer is a `this`-rooted chain, a form the table
+// never types (entityPath excludes `this`).
+export const stashProjection = (m, info) =>
+  m.kind === 'gate' && m.annotation == null && info?.appStashSpec
+    ? gateProjection(m, info.appStashSpec) : null;
+
+// The failure ENVELOPE an error boundary receives — what `onError`'s
+// unannotated parameter types as, in the face and the d.ts alike.
+// `name`, `message`, and the raw thrown value are always present; the
+// route fields ride only when the route layer filled them (the
+// renderer's GateFailure is the richer instance and is assignable).
+// Co-owned with `__componentFailure` in src/runtime/components.js —
+// the wrapper delivers exactly this shape, and a field added on one
+// side alone desyncs the type surface from the runtime.
+export const COMPONENT_FAILURE_TYPE =
+  '{ name: string; message: string; error: unknown; status?: number; path?: string; file?: string }';
+
 export function instanceTypeLines(info, selfType) {
   const lines = [];
   let hasChildren = false;
@@ -684,7 +819,8 @@ export function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, 'returnType');
       const base = declared ?? (m.isVoid ? 'void' : 'any');
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};` }] });
+      const firstType = m.name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, firstType)}: ${ret};` }] });
       continue;
     }
     // SEGMENTS, not one blob: the member's type is rendered here a second
@@ -704,7 +840,7 @@ export function instanceTypeLines(info, selfType) {
       segs: [
         { text: m.kind === 'readonly' ? 'readonly ' : '' },
         { text: m.name },
-        ...memberTypeSegments(m, ': '),
+        ...memberTypeSegments(m, ': ', info),
         { text: ';' },
       ],
     });
@@ -723,7 +859,32 @@ export function instanceTypeLines(info, selfType) {
   // the route-only members read as what they are, possibly absent. An
   // author member of the same name wins the line.
   for (const name of AMBIENT_FIELDS) {
-    if (!memberNames.has(name)) lines.push({ segs: [{ text: `${name}?: any;` }] });
+    if (memberNames.has(name)) continue;
+    // With a discovered stash, the ambience carries the runtime's real
+    // types (still optional — a hand-built value owes none of them):
+    // `app.data` is the app's own surface (AppData projects each entry to
+    // what the runtime delivers, so an unannotated `cart ~= @app.data.cart`
+    // infers), `router` is the Router the runtime injects, and
+    // `params`/`query` are its live route-state views (getters onto
+    // `router.params`/`router.query` — src/runtime/components.js). The
+    // splices are type-only import()s: the face stays import-free, and the
+    // discovery that found the stash is what guarantees `rip/app` rides
+    // the closure.
+    if (info.appStashSpec) {
+      if (name === 'app') {
+        lines.push({ segs: [{ text: `app?: ${appAmbienceType(info.appStashSpec)};` }] });
+        continue;
+      }
+      if (name === 'router') {
+        lines.push({ segs: [{ text: `router?: import('rip/app').Router;` }] });
+        continue;
+      }
+      if (name === 'params' || name === 'query') {
+        lines.push({ segs: [{ text: `${name}?: Record<string, string>;` }] });
+        continue;
+      }
+    }
+    lines.push({ segs: [{ text: `${name}?: any;` }] });
   }
   if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });

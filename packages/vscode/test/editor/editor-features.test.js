@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { decodeSemanticTokens } from '../../src/tsgo.js';
+import { SCAFFOLD_FAMILIES } from '../../src/translate.js';
 
 let tsgoAvailable = false;
 try {
@@ -1215,6 +1216,114 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
       expect(local.contents.value).toContain('let total: number');
     });
   }, 30000);
+
+  test('a bare gate at its declaration hovers the RESOLVED stash type, never the projection formula', async () => {
+    // The face carries the projection as an inferred position (the class
+    // declare rides `__computed`), so quickinfo prints the resolved type;
+    // a written node would echo the `AppData<...>` machinery verbatim.
+    await inWorkspace({
+      'index.rip': "console.log 'serve'\n",
+      'package.json': '{}',
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n",
+    }, async (api) => {
+      await api.open('app/routes/page.rip', "export Page = component\n  todos <~ @app.data.todos\n  q ~= @router.query.q ?? ''\n  shout ~= q.toUpperCase()\n  n = Number.parseInt('4')\n  render null\n");
+      let h;
+      for (let i = 0; i < 20; i++) {
+        h = await api.hover('app/routes/page.rip', 1, 3);
+        if (h?.contents?.value?.includes('Todo[]')) break;
+        await api.sleep(200);
+      }
+      expect(h.contents.value).toContain('Todo[]');
+      expect(h.contents.value).not.toContain('AppData');
+      // The typed router ambience rides the same discovery: a bare
+      // computed over `@router.query` infers string, no annotation.
+      const rq = await api.hover('app/routes/page.rip', 2, 2);
+      expect(rq.contents.value).toContain('q: string');
+      // The class road declares the ambience too, so the `@router`
+      // REFERENCE (the `_init` copy, where `this` is the class) hovers
+      // the runtime's Router instead of error-`any`.
+      const rr = await api.hover('app/routes/page.rip', 2, 10);
+      expect(rr.contents.value).toContain('Router');
+      expect(rr.contents.value).not.toContain('any');
+      // The gate's face twin (the read the author wrote, as a ts-only
+      // expression) gives every path segment a typed span — the same
+      // answers a computed line serves, v3's construction.
+      const gd = await api.hover('app/routes/page.rip', 1, 17);
+      expect(gd.contents.value).toContain('AppData');
+      const gt = await api.hover('app/routes/page.rip', 1, 22);
+      expect(gt.contents.value).toContain('todos: Todo[]');
+      // An IN-BODY read answers value-first like the declaration — the
+      // author wrote a bare name; the container the lowering wrapped it
+      // in is a consumer-position answer (RULINGS.md's member-read row).
+      const rd = await api.hover('app/routes/page.rip', 3, 11);
+      expect(rd.contents.value).toContain('q: string');
+      expect(rd.contents.value).not.toContain('readonly value');
+      // A PLAIN member with a call initializer infers through the
+      // behavior thunk instead of the form table's `any`.
+      const pl = await api.hover('app/routes/page.rip', 4, 2);
+      expect(pl.contents.value).toContain('n: number');
+    });
+  }, 30000);
+
+  test('no hover leaks rip internals anywhere in a stash-anchored component', async () => {
+    // The standing property: at EVERY position, a hover either answers
+    // in the author's vocabulary (framework type NAMES like AppData or
+    // Router included) or declines — never a minted `__` name, an
+    // import() splice, or lowering scaffold. Swept position by position
+    // over a component exercising every member kind and a full render.
+    const ROUTE = [
+      "export Page = component",
+      "  todos <~ @app.data.todos",
+      "  pick <~ @app.data.pick(params.id)",
+      "  q ~= @router.query.q ?? ''",
+      "  count := 0",
+      "  label?: string := undefined",
+      "  @variant: string = 'primary'",
+      "  first ~= todos[0]",
+      "  mounted: -> @router.onNavigate(-> count = 0)",
+      "  onError: (err) -> console.error(err)",
+      "  bump: (step: number) -> count = count + step",
+      "  render",
+      "    h1 \"#{q}\"",
+      "    ul",
+      "      for t in todos",
+      "        li key: t.id, t.label",
+      "    button @click: (-> bump(1)), \"#{count} #{first.label} #{pick.label}\"",
+      "",
+    ].join('\n');
+    await inWorkspace({
+      'index.rip': "console.log 'serve'\n",
+      'package.json': '{}',
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n  pick: (id: string) -> todos[0]\n",
+    }, async (api) => {
+      await api.open('app/routes/page.rip', ROUTE);
+      // Liveness canary: the sweep is meaningless if every hover
+      // declines (a dead program answers nothing and leaks nothing) —
+      // one known position must answer with a real type first.
+      let canary;
+      for (let i = 0; i < 30; i++) {
+        canary = await api.hover('app/routes/page.rip', 1, 3);
+        if (canary?.contents?.value?.includes('Todo[]')) break;
+        await api.sleep(200);
+      }
+      expect(canary.contents.value).toContain('Todo[]');
+      // Minted `__` names, import() splices, the `_`-slot index
+      // signature, AND the single-underscore render scaffold families —
+      // read from the same SCAFFOLD_FAMILIES list the server's guard
+      // consumes, so the gate and the guard cannot drift.
+      const LEAK = new RegExp(`__[A-Za-z]|import\\s*\\(|\`_\\$\\{string\\}\`|\\b_(?:${SCAFFOLD_FAMILIES})\\d+\\b`);
+      const lines = ROUTE.split('\n');
+      const leaks = [];
+      for (let ln = 0; ln < lines.length; ln++) {
+        for (let ch = 0; ch <= lines[ln].length; ch++) {
+          const h = await api.hover('app/routes/page.rip', ln, ch).catch(() => null);
+          const v = h?.contents?.value;
+          if (typeof v === 'string' && LEAK.test(v)) leaks.push(`${ln + 1}:${ch} → ${v.slice(0, 120)}`);
+        }
+      }
+      expect(leaks).toEqual([]);
+    });
+  }, 120000);
 });
 
 describe.skipIf(!tsgoAvailable)('code actions', () => {
