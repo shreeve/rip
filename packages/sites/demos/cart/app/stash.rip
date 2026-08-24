@@ -1,6 +1,6 @@
 import { source } from 'rip/app'
 import { api } from './api-client.rip'
-import { UserPublic as User, ProductPublic as Product, OrderPublic as Order } from '../api/models.rip'
+import { User, Product, Order } from './types.rip'
 
 type CartItem = Product & { quantity: number }
 
