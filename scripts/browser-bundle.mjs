@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import { compile } from '../src/compile.js';
 
-const REQUIRED_BUN = '1.3.14';
+const REQUIRED_BUN = '1.4.0';
 if (Bun.version !== REQUIRED_BUN) {
   console.error(
     `browser: Bun ${REQUIRED_BUN} required, found ${Bun.version}; ` +
