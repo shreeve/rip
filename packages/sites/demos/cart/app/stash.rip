@@ -24,7 +24,6 @@ cart: Cart =
   totalPrice: -> @items.reduce(((sum, i) -> sum + i.price * i.quantity), 0)
   clear: -> @items = []
 
-# Framework contract: launch reads `export stash` from app/stash.rip.
 export stash =
   cart: cart
   user: source

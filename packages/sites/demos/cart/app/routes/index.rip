@@ -22,7 +22,7 @@ export Products = component
   mounted: -> document.title = title('Products')
 
   setQuery: (opts: { search?: string, sort?: string }) ->
-    next = { ...@router.query, ...opts }
+    next: Record<string, string | undefined> = { ...@router.query, ...opts }
     params = URLSearchParams.new()
     for key, val of next when val
       params.set(key, val)
