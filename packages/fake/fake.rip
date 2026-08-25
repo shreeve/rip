@@ -251,13 +251,50 @@ unique = (fn, max = 1000) ->
     i++
   throw Error.new "fake.unique: exhausted after #{max} retries — pool too small"
 
+# ==[ Delimited tables — csv/tsv/psv/inline pipe, one dialect ]==
+#
+# The same rules whatever the delimiter: blank lines, `#` comments and
+# |---| separator rows are skipped; cells are trimmed, so columns can
+# be aligned freely; the first data line is the header; an empty cell
+# is null. No quoting — pick a delimiter the data doesn't contain.
+# The delimiter is sniffed from the header (tab, then pipe, then
+# comma) or passed explicitly.
+
+__tableLines = (text) ->
+  text.split(/\r?\n/).map((l) -> l.trim())
+    .filter (l) -> l and not l.startsWith('#') and not /^[|\s:-]+$/.test(l)
+
+__tableSniff = (line) ->
+  return '\t' if line.includes '\t'
+  return '|'  if line.includes '|'
+  ','
+
+__tableCells = (line, delim) ->
+  line = line.replace(/^\||\|$/g, '') if delim is '|'
+  line.split(delim).map (c) -> c.trim()
+
+table = (text, delim = null) ->
+  lines = __tableLines text
+  throw Error.new 'fake.table: needs a header line and at least one data row' if lines.length < 2
+  delim ?= __tableSniff lines[0]
+  header = __tableCells lines[0], delim
+  for line in lines[1...]
+    cells = __tableCells line, delim
+    row = {}
+    # Iterate the header, not the cells: a short row (e.g. a trailing
+    # tab eaten by the line trim) pads out to null like any empty cell.
+    header.forEach (name, i) ->
+      v = cells[i] ?? ''
+      row[name] = if v is '' then null else v
+    row
+
 export fake = {
   seed, random, integer, sample, chance, maybe,
   numerify, letterify, pattern, digits, token, uuid,
   firstName, lastName, fullName, nickname, sex, age,
   email, username, domain, phone, fax, phoneType, areaCode,
   street, streetAddress, city, state, zip, company, profession, jobTitle,
-  word, words, sentence, date, datetime, unique,
+  word, words, sentence, date, datetime, unique, table,
 }
 
 # ==[ Schema-driven derivation (used by Model.factory) ]==
@@ -363,13 +400,13 @@ __factoryDerive = (norm, overrides) ->
   attrs
 
 __factoryTableRows = (norm, text) ->
-  lines = text.split(/\r?\n/).map((l) -> l.trim()).filter (l) -> l and not /^[|\s:-]+$/.test(l)
+  lines = __tableLines text
   throw Error.new 'fake: factory(table) needs a header line and at least one row' if lines.length < 2
-  cells = (l) -> l.replace(/^\||\|$/g, '').split('|').map (c) -> c.trim()
-  header = cells(lines[0]).map __camel
+  delim = __tableSniff lines[0]
+  header = __tableCells(lines[0], delim).map __camel
   for line in lines[1...]
     row = {}
-    cells(line).forEach (v, i) ->
+    __tableCells(line, delim).forEach (v, i) ->
       name = header[i]
       return if name is undefined or v is ''
       t = norm.fields.get(name)?.typeName

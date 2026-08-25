@@ -105,6 +105,23 @@ test "weighted sample validates weights loudly", ->
   throws -> fake.sample ['a', 'b'], [1, -1]
   throws -> fake.sample ['a', 'b'], [0, 0]
 
+test "table: csv/tsv/psv parse identically — one dialect, three delimiters", ->
+  want = [{ code: 'A1', name: 'Alpha', price: '100' }, { code: 'B2', name: 'Beta', price: null }]
+  psv = """
+    # comment lines and separators are skipped
+    | code | name  | price |
+    |------|-------|-------|
+    | A1   | Alpha | 100   |
+    | B2   | Beta  |       |
+  """
+  csv = "code, name, price\nA1, Alpha, 100\nB2, Beta,"
+  tsv = "code\tname\tprice\nA1\tAlpha\t100\nB2\tBeta\t"
+  eq fake.table(psv), want
+  eq fake.table(csv), want
+  eq fake.table(tsv), want
+  eq fake.table('a;b\n1;2', ';'), [{ a: '1', b: '2' }]   # explicit delimiter
+  throws -> fake.table 'just-a-header'
+
 test "maybe honors probability edges; unique refuses exhaustion", ->
   eq fake.maybe(0, -> 'x'), null
   eq fake.maybe(1, -> 'x'), 'x'
