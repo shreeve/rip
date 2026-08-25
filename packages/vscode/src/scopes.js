@@ -539,6 +539,31 @@ export function importBindingsOf(stores, source) {
   return out;
 }
 
+// The NAMESPACE imports a file makes: `import * as ns from '…'`.
+//
+// Kept apart from `importBindingsOf` rather than folded into it, because
+// that function's result is what `scopeGateOf` reads as `typedImports`, and
+// a namespace alias is not a binding of a typed export — it is a binding of
+// the whole module. Callers that want it ask for it.
+//
+// Anchored on the STAR, not on the start of the clause: a default binding
+// may precede it (`import def, * as ns`) and the space after it is optional
+// (`import *as ns`). Both compile to a real namespace import, so both bind
+// the module here.
+export function namespaceImportsOf(stores, source) {
+  const out = [];
+  if (!stores?.nodes) return out;
+  for (const node of stores.nodesByKind('import')) {
+    const src = stores.role(node.nodeId, 'source');
+    if (typeof src?.sourceStart !== 'number') continue;
+    const module = source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, '');
+    const text = source.slice(node.sourceStart, node.sourceEnd);
+    const ns = /\*\s*as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+from\b/.exec(text);
+    if (ns) out.push({ local: ns[1], module });
+  }
+  return out;
+}
+
 // The LOCAL names an import bound to a typed export — what a caller hands
 // `scopeGateOf` as `typedImports`.
 //

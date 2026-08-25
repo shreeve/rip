@@ -26,7 +26,7 @@ import { ripManifestTarget } from '../../packages/vscode/src/mirror.js';
 export function publicEntriesOf(pkgDir) {
   let pkg = null;
   try { pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); }
-  catch { return { entries: [], patterns: 0 }; }
+  catch { return { entries: [], patterns: 0, outside: [] }; }
   const exp = pkg?.exports;
   const subpaths = [];
   let patterns = 0;
@@ -41,15 +41,23 @@ export function publicEntriesOf(pkgDir) {
     } else subpaths.push('.');            // a conditions-only object IS `.`
   } else if (typeof pkg?.main === 'string' || typeof pkg?.module === 'string') subpaths.push('.');
   const out = [];
+  const outside = [];
   for (const sub of subpaths) {
     const target = ripManifestTarget(pkg, sub);
-    if (target !== null) out.push(path.resolve(pkgDir, target));
+    if (target === null) continue;
+    const abs = path.resolve(pkgDir, target);
+    // A package publishes from inside itself. `npm pack` roots the tarball
+    // at the package directory, so an entry above it is absent from the
+    // shipped artifact — it resolves only inside a symlinked workspace, and
+    // breaks for the consumer this audit exists to speak for.
+    if (abs !== pkgDir && !abs.startsWith(pkgDir + path.sep)) { outside.push(target); continue; }
+    out.push(abs);
   }
-  if (out.length === 0 && patterns === 0) {
+  if (out.length === 0 && patterns === 0 && outside.length === 0) {
     const index = path.join(pkgDir, 'index.rip');
     if (fs.existsSync(index)) out.push(index);
   }
-  return { entries: [...new Set(out)], patterns };
+  return { entries: [...new Set(out)], patterns, outside };
 }
 
 // Whether an entry compiles, and why not when it does not. The names it

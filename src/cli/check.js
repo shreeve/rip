@@ -35,7 +35,7 @@ import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirr
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
-import { importBindingsOf } from '../../packages/vscode/src/scopes.js';
+import { importBindingsOf, namespaceImportsOf } from '../../packages/vscode/src/scopes.js';
 import { bareRipSpecifierTarget } from '../../packages/vscode/src/mirror.js';
 
 // The two trees whose build identity the editor and this CLI must agree
@@ -294,7 +294,9 @@ function printPublicReport(report, unreadable = []) {
   if (unreadable.length > 0) {
     console.log('');
     for (const u of unreadable) {
-      console.log(`${red('\u2717')} ${bold(rel(u.entryFile))}: publishes nothing a consumer can resolve — ${u.reason}`);
+      console.log(u.outside !== undefined
+        ? `${red('\u2717')} ${bold(rel(path.dirname(u.entryFile)))}: publishes from outside the package — \`${u.outside}\` is not in what this package ships`
+        : `${red('\u2717')} ${bold(rel(u.entryFile))}: publishes nothing a consumer can resolve — ${u.reason}`);
     }
     anyBad = true;
   } else if (!sawEntry) {
@@ -310,7 +312,7 @@ function printPublicReport(report, unreadable = []) {
   // checked-and-clean. The walk's own depth budget is this tool's cost
   // ceiling and no edit to the package clears it, so it annotates without
   // deciding.
-  process.exit(anyBad ? 1 : (anyUnaudited ? 2 : 0));
+  process.exit(anyBad ? 1 : ((anyUnaudited || incompleteCheck || tsgoUnavailable) ? 2 : 0));
 }
 
 // ── argument parsing ────────────────────────────────────────────────
@@ -343,6 +345,9 @@ const forceStrict = argv.includes('--strict');
 // question and prints its own report, in place of type-checking rather
 // than alongside it.
 const publicAudit = argv.includes('--public');
+// `--public` prints a report, not a diagnostic list. Accepting the pair and
+// emitting human text answers a machine in a language it did not ask for.
+if (publicAudit && argv.includes('--json')) fail('rip check: --public has no --json form — it prints a report, not a diagnostic list.');
 const KNOWN = new Set(['--json', '--no-frame', '--build', '--strict', '--public']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
@@ -913,7 +918,10 @@ if (compiled.size > 0) {
             // ours and answers false, which is the correct answer and not a
             // fallback.
             const owns = ownedBy(dir);
-            const { entries: pkgEntries, patterns } = publicEntriesOf(dir);
+            const { entries: pkgEntries, patterns, outside } = publicEntriesOf(dir);
+            for (const spec of outside) {
+              unreadable.push({ entryFile: path.join(dir, spec), reason: null, outside: spec });
+            }
             // What the PACKAGE publishes, across every entry, before any
             // walk — the sibling stop asks "does another row cover this?",
             // and a package publishes from all of its entries, not just the
@@ -1036,6 +1044,22 @@ if (compiled.size > 0) {
           if (entry.good.strict !== true) continue;
           const fromDir = path.dirname(fsPath);
           const ownPackage = nearestPackage(fromDir);
+          // Two readers, because a file binds a dependency's names two ways:
+          // the braced list and the default binding, and `import * as ns`,
+          // which binds the whole module and so narrows nothing.
+          for (const n of namespaceImportsOf(entry.result?.stores, entry.source)) {
+            const target = (n.module.startsWith('./') || n.module.startsWith('../'))
+              ? (n.module.endsWith('.rip') ? path.resolve(fromDir, n.module) : null)
+              : bareRipSpecifierTarget(n.module, fromDir);
+            if (target === null || !compiled.has(target)) continue;
+            if (nearestPackage(path.dirname(target)) === ownPackage) continue;
+            wanted.set(target, null);                   // null = the whole surface
+            const byFile = importers.get(fsPath) ?? new Map();
+            const forDep = byFile.get(target) ?? new Map();
+            forDep.set('*', n.local);                   // the alias is the one site
+            byFile.set(target, forDep);
+            importers.set(fsPath, byFile);
+          }
           for (const b of importBindingsOf(entry.result?.stores, entry.source)) {
             const target = (b.module.startsWith('./') || b.module.startsWith('../'))
               ? (b.module.endsWith('.rip') ? path.resolve(fromDir, b.module) : null)
@@ -1043,7 +1067,7 @@ if (compiled.size > 0) {
             if (target === null || !compiled.has(target)) continue;
             if (nearestPackage(path.dirname(target)) === ownPackage) continue;  // same package
             if (!wanted.has(target)) wanted.set(target, new Set());
-            wanted.get(target).add(b.imported);
+            wanted.get(target)?.add(b.imported);        // null stays null: all of it
             const byFile = importers.get(fsPath) ?? new Map();
             const forDep = byFile.get(target) ?? new Map();
             forDep.set(b.imported, b.local);
@@ -1080,6 +1104,8 @@ if (compiled.size > 0) {
                 const consumer = compiled.get(fsPath);
                 if (consumer?.mirrorPath === undefined) continue;
                 const locals = leaks.map((n) => names.get(n)).filter((n) => n !== undefined);
+                const viaAlias = names.get('*');
+                if (viaAlias !== undefined && !locals.includes(viaAlias)) locals.push(viaAlias);
                 if (locals.length === 0) continue;
                 const found = await useSitesOf(session, { mirrorFile: consumer.mirrorPath, names: locals })
                   .catch(() => new Map());

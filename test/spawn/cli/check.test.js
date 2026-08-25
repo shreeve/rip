@@ -1097,6 +1097,89 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  // Q4 — a package publishes from inside itself. `npm pack` roots the
+  // tarball at the package directory, so an entry named with `../` is not in
+  // the shipped artifact at all: the shape resolves only inside a symlinked
+  // workspace and breaks for the very consumer this audit speaks for. It is
+  // reported rather than skipped, because a manifest that names an entry has
+  // named it, and silence would read as a package with no surface.
+  test('--public reports a manifest that publishes from outside the package', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ name: '@q4/outside', exports: { '.': '../shared/api.rip' } }),
+      'inside.rip': 'export here: number = 1\n',
+    });
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toMatch(/publishes from outside the package/);
+      expect(out.stdout).toContain('../shared/api.rip');
+      expect(out.stdout).not.toContain('no package publishes');
+      expect(out.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A namespace import binds the whole module rather than any one name, so
+  // nothing narrows what a file may resolve untyped — every export is
+  // reachable through the alias. Reading only the braced list makes such an
+  // import invisible, and the identical inherited `any` reports as a clean
+  // project. Three spellings, because the star may be preceded by a default
+  // binding and the space after it is optional.
+  test('a received `any` is advised through a namespace import, however it is spelled', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-ns-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      for (const p of ['lib', 'app']) fs.mkdirSync(path.join(dir, 'packages', p), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'node_modules', '@n'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'package.json'),
+        JSON.stringify({ name: '@n/lib', exports: { '.': './lib.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'lib.rip'), 'export class Session\n  run: (x) -> x\n');
+      fs.symlinkSync(path.join('..', '..', 'packages', 'lib'), path.join(dir, 'node_modules', '@n', 'lib'));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@n/app', rip: { strict: true } }));
+      const app = path.join(dir, 'packages', 'app', 'app.rip');
+      const target = path.join('packages', 'app');
+
+      // The braced form, as a control: this one already worked.
+      fs.writeFileSync(app, "import { Session } from '@n/lib'\ns = new Session()\nconsole.log s\n");
+      expect(check(dir, [target]).stdout).toContain('imported from `@n/lib`');
+
+      // The same leak reached through an alias, in each legal spelling.
+      for (const line of ["import * as lib from '@n/lib'", "import *as lib from '@n/lib'"]) {
+        fs.writeFileSync(app, `${line}\ns = new lib.Session()\nconsole.log s\n`);
+        const out = check(dir, [target]).stdout;
+        expect(out).toContain('imported from `@n/lib`');
+        expect(out).toContain('`Session`');
+        expect(out).toMatch(/app\.rip:\d+:\d+\s+lib/);   // the alias is where it arrived
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A mode that prints a report has no JSON form to offer, and a run that
+  // could not read what it was asked has not audited a clean surface. Both
+  // are the same rule as the rest of this file's exit contract: 0 means
+  // checked-and-clean, never couldn't-check.
+  test('--public refuses --json, and will not exit 0 on a run it could not complete', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ name: 'exitpkg', exports: { '.': './index.rip' } }),
+      'index.rip': 'export ok: number = 1\n',
+      'secret.rip': 'export hidden: number = 2\n',
+    });
+    try {
+      // A clean package is clean.
+      expect(check(dir, ['--public']).status).toBe(0);
+      // `--json` is not a form this mode has; say so rather than answer a
+      // machine in prose.
+      const json = check(dir, ['--public', '--json']);
+      expect(json.stderr).toContain('--public has no --json form');
+      expect(json.status).toBe(2);
+      // A file the run cannot read leaves the surface unaudited.
+      fs.chmodSync(path.join(dir, 'secret.rip'), 0o000);
+      const blocked = check(dir, ['--public']);
+      expect(blocked.status).toBe(2);
+      fs.chmodSync(path.join(dir, 'secret.rip'), 0o644);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Q5 — the walk stops at a member whose type is another published export,
   // because that export has its own row and one edit fixes it there. The
   // stop is sound only when that row answers the question THIS position
