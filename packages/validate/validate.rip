@@ -290,8 +290,7 @@ export def registerValidator(name, fn, opts = {})
 # `getValidator('email')(anything)` behaves like read's 'email' type —
 # canonical value or null — with no setup owed by the caller.
 export def getValidator(name)
-  entry = registry.get(name)
-  return undefined unless entry
+  entry = registry.get(name) or return
   entry.wrapped ?= if entry.raw then entry.fn else (v) -> entry.fn String(v ?? '').trim()
 
 # Whether a validator takes its value untouched: the seam callers
