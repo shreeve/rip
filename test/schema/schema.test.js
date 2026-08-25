@@ -417,6 +417,23 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
   });
 
+  test('literal-union defaults: bracket the member, in place', () => {
+    const fieldOf = (src, name) => new Function('__schema', compile(src).code + '\nreturn U;')((d) => d)
+      .entries.find((e) => e.tag === 'field' && e.name === name);
+    const un = (src) => fieldOf(src, 'role');
+    // mid-union and first-member brackets both mark the default
+    expect(un('U = schema :model\n  role "admin" | ["user"]').constraints.default).toBe('user');
+    expect(un('U = schema :model\n  role ["admin"] | "user"').constraints.default).toBe('admin');
+    expect(un('U = schema :model\n  role "admin" | ["user"]').literals).toEqual(['admin', 'user']);
+    // one default only, whichever spelling
+    lexFails('U = schema :model\n  role "a" | ["b"] | ["c"]', /brackets more than one union member/);
+    lexFails('U = schema :model\n  role "a" | ["b"], ["c"]', /more than one '\[…\]' default bracket/);
+    // a default outside the union is a typo, both spellings
+    lexFails('U = schema :model\n  role "admin" | "user", ["usr"]', /defaults to "usr", which is not a member/);
+    // a lone leading bracket stays the ordinary default (typeless field)
+    expect(fieldOf('U = schema :model\n  label! ["x"]', 'label').constraints.default).toBe('x');
+  });
+
   test('inline @primary: one identity, one spelling, :model-only', () => {
     lexFails('U = schema :model\n  a! string @primary\n  b! string @primary',
       /both 'a' and 'b' declare '@primary' — a row has one identity/);

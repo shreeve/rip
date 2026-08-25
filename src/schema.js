@@ -635,6 +635,20 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercerArray = false;
   let typeConsumed = false;
   let typeFirst = line[pos];
+  const unionMemberAt = (p) => {
+    if (line[p]?.kind === 'STRING' && line[p].value.startsWith('"')) {
+      return { value: JSON.parse(line[p].value), bracketed: false, start: line[p].start, end: line[p].end, next: p + 1 };
+    }
+    if ((line[p]?.kind === '[' || line[p]?.kind === 'INDEX_START') &&
+        line[p + 1]?.kind === 'STRING' && line[p + 1].value.startsWith('"') &&
+        (line[p + 2]?.kind === ']' || line[p + 2]?.kind === 'INDEX_END')) {
+      return { value: JSON.parse(line[p + 1].value), bracketed: true, start: line[p].start, end: line[p + 2].end, next: p + 3 };
+    }
+    return null;
+  };
+  let unionDefault = undefined;
+  let unionDefaultSpan = null;
+  const unionFirst = unionMemberAt(pos);
   if (typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~') {
     const sym = symWordAt(line, pos + 1);
     const typeTok = line[pos + 1];
@@ -664,16 +678,32 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     typeName = typeFirst.value;
     typeConsumed = true;
     pos++;
-  } else if (typeFirst?.kind === 'STRING' && typeFirst.value.startsWith('"')) {
-    literals = [JSON.parse(typeFirst.value)];
+  } else if (unionFirst && (!unionFirst.bracketed || line[unionFirst.next]?.kind === '|')) {
+    // A union member is `"string"` or, bracketed, `["string"]` — the
+    // default marked in place, so it can never name a value outside
+    // the union. Bracketed-first counts only when a '|' follows;
+    // otherwise a leading `[…]` stays the ordinary default bracket.
+    literals = [];
+    const takeMember = (m) => {
+      literals.push(m.value);
+      if (m.bracketed) {
+        if (unionDefaultSpan) {
+          fail(`field '${name}' brackets more than one union member as its default — a field has one default`, m.start);
+        }
+        unionDefault = m.value;
+        unionDefaultSpan = { start: m.start, end: m.end };
+      }
+    };
+    takeMember(unionFirst);
+    pos = unionFirst.next;
     typeConsumed = true;
-    pos++;
-    while (line[pos]?.kind === '|' && line[pos + 1]?.kind === 'STRING' && line[pos + 1].value.startsWith('"')) {
-      literals.push(JSON.parse(line[pos + 1].value));
-      pos += 2;
-    }
-    if (line[pos]?.kind === '|') {
-      fail(`literal unions contain string literals only — '${line[pos + 1]?.kind ?? '<end>'}' is not allowed as a union member; use the '?' modifier for nullability`, line[pos].start);
+    while (line[pos]?.kind === '|') {
+      const m = unionMemberAt(pos + 1);
+      if (!m) {
+        fail(`literal unions contain string literals only — '${line[pos + 1]?.kind ?? '<end>'}' is not allowed as a union member; use the '?' modifier for nullability`, line[pos].start);
+      }
+      takeMember(m);
+      pos = m.next;
     }
     typeName = 'literal-union';
   }
@@ -708,10 +738,18 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let range = null;
   let bracketDefault = undefined;
   let hasDefault = false;
+  if (unionDefaultSpan) {
+    bracketDefault = unionDefault;
+    hasDefault = true;
+  }
   // The default literal's own source span — the face marks its
   // `satisfies` there, so a wrong-typed default anchors on the value
   // the author wrote instead of on the enclosing entry list.
   const defaultSpan = {};
+  if (unionDefaultSpan) {
+    defaultSpan.start = unionDefaultSpan.start;
+    defaultSpan.end = unionDefaultSpan.end;
+  }
   let regex = null;
   let transformTokens = null;
   let attrs = null;
@@ -826,6 +864,11 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   }
   if (regex) c.regex = regex;
   if (hasDefault) c.default = bracketDefault;
+  // Either spelling of a literal-union default must name a member —
+  // `["usr"]` beside "user" is a typo, not a policy.
+  if (literals && c.default !== undefined && !literals.includes(c.default)) {
+    fail(`field '${name}' defaults to ${JSON.stringify(c.default)}, which is not a member of its literal union (${literals.map((l) => JSON.stringify(l)).join(' | ')})`, first.start);
+  }
   if (ctx.defaultMaxString != null && !regex && !literals && VARCHAR_TYPES.has(typeName) && c.max === undefined) {
     c.max = ctx.defaultMaxString;
   }

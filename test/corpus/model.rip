@@ -21,7 +21,7 @@ User = schema :model
 
 Order = schema :model
   total!  ~integer
-  status! "open" | "paid" | "void"
+  status! "open" | ["paid"] | "void"   # bracketed member = the default
   @belongsTo User
   @belongsTo Coupon?
   @softDelete
