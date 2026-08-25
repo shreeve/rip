@@ -1056,6 +1056,9 @@ export main = (argv) ->
   apiInputs = Set.new()
   apiInputsCheck = null
   apiSweep = null
+  apiRejected = false
+  apiFailedCheck = null
+  apiDeadline = null
   generation = 0
   apiEpoch = 0
   apiSettledEpoch = 0
@@ -1605,6 +1608,11 @@ export main = (argv) ->
           Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
           bootingWorkers = []
           continue if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
+          # A candidate that failed to boot must not stay on the shelf:
+          # every later ring would replay the same doomed boot (a full
+          # readiness deadline per attempt). Drop it so rings fail fast;
+          # the next save that compiles mints a fresh candidate.
+          prepared = null
           throw error
         if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
           Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
@@ -1638,10 +1646,25 @@ export main = (argv) ->
       report = generate! project.entry, artifact, reportPath, "api-#{generation}"
     catch error
       apiSettledEpoch = epoch if epoch is apiEpoch
-      warn "rip-site: API candidate rejected; keeping current workers: #{String(error)}"
+      apiRejected = true
+      # Fingerprint the inputs that failed so the sweep retries only
+      # when disk actually changes — not every tick while a syntax
+      # error sits there.
+      apiFailedCheck = try diskInputsCheck([...apiInputs]) catch then null
+      if doorbellPublished and prepared?
+        # The cut already emptied the workers for an earlier candidate,
+        # and that candidate no longer matches disk — booting it would
+        # silently serve code the developer has replaced. Drop it; rings
+        # fail fast until a save compiles.
+        prepared = null
+        warn "rip-site: API candidate rejected while holding the doorbell; rings fail fast until a save compiles: #{String(error)}"
+      else
+        warn "rip-site: API candidate rejected; keeping current workers: #{String(error)}"
       return
     return if epoch isnt apiEpoch or stopping
     candidate = { artifact, inputs: report.inputs, epoch }
+    apiRejected = false
+    apiFailedCheck = null
     prepared = candidate
     setApiInputs report.inputs
     cutForCandidate! candidate
@@ -1652,12 +1675,22 @@ export main = (argv) ->
     apiReconcile = false
     apiEpoch++
     epoch = apiEpoch
-    clearTimeout apiTimer if apiTimer?
+    now = Date.now()
+    if apiTimer?
+      clearTimeout apiTimer
+      # Trailing reset, but never past the burst deadline (mirror of
+      # scheduleAppReconcile): a sustained sub-50ms event stream must
+      # not postpone the rebuild forever.
+      delay = Math.max 0, Math.min(50, apiDeadline - now)
+    else
+      apiDeadline = now + 250
+      delay = 50
     apiTimer = setTimeout ->
       apiTimer = null
+      apiDeadline = null
       next = apiChain.then -> prepareApi! epoch
       apiChain = next.catch (error) -> warn "rip-site: API reload failed: #{String(error)}"
-    , 50
+    , delay
     return
 
   startApiWatcher = ->
@@ -1665,14 +1698,23 @@ export main = (argv) ->
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return if stopping
       rel = String(filename or '')
-      return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
-      return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
+      known = path is project.entry or apiInputs.has(path) or [...apiInputs].some((input) -> input.startsWith("#{path}/"))
+      # A recorded input is relevant wherever it lives — under app/, in
+      # a linked node_modules package, anywhere. The location filters
+      # only prune events for files the build has never consumed.
+      unless known
+        return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+        return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
       if not apiWatchReady or operation isnt 'Active'
         apiReconcile = true
         return
       ambiguous = not filename? or rel is ''
-      relevant = ambiguous or path is project.entry or apiInputs.has(path) or [...apiInputs].some((input) -> input.startsWith("#{path}/"))
+      # After a rejected generation any event may be the missing piece —
+      # a created file that completes a broken import is not yet a
+      # recorded input — so everything is relevant until a generation
+      # succeeds.
+      relevant = ambiguous or known or apiRejected
       return unless relevant
       scheduleApiRefresh()
     # The sweep is the safety trigger behind the watcher's fast trigger
@@ -1681,7 +1723,13 @@ export main = (argv) ->
     apiSweep = setInterval (->
       return if stopping or apiTimer? or not apiWatchReady or operation isnt 'Active'
       return if apiSettledEpoch isnt apiEpoch
-      scheduleApiRefresh() if apiReconcile or not apiSettled()
+      return unless apiReconcile or not apiSettled()
+      # Standing-failure backoff: the same bytes fail the same way, so a
+      # rejected generation retries only when the inputs change on disk.
+      if apiFailedCheck?
+        current = try diskInputsCheck([...apiInputs]) catch then null
+        return if current is apiFailedCheck
+      scheduleApiRefresh()
     ), APP_SWEEP_MS
 
   startDoorbell = ->
