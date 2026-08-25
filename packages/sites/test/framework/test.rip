@@ -221,7 +221,7 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     onError (failure) ->
       return { claimed: failure.message, code: failure.code } if failure.code is 'teapot'
       null
-    get '/object' -> throw Object.assign(Error.new('short and stout'), { status: 418, code: 'teapot' })
+    get '/object' -> error! 'short and stout', 418, 'teapot'
     get '/declined' -> throw Error.new 'database password'
     obj = handle! request('GET', '/object')
     eq obj.status, 418

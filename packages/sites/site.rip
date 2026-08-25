@@ -802,8 +802,19 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # Error Helpers — Halt request with an HTTP error
 # ==============================================================================
 
-export error = (message = 'Bad request', status = 400) ->
-  throw Object.assign(Error.new(message), { status })
+# The optional trailing args serve APIs with a machine-readable error
+# contract: `error! 'No such patient', 404, 'unknown_patient',
+# 'patient.id'`. A given code also stamps `api: true` — the marker an
+# onError keys on to reshape the envelope — so system errors that
+# happen to carry a `code` (ENOENT and friends) can never impersonate
+# an intentional API error.
+export error = (message = 'Bad request', status = 400, code = null, field = null) ->
+  err = Object.assign(Error.new(message), { status })
+  if code?
+    err.code = code
+    err.api = true
+    err.field = field if field?
+  throw err
 
 export notice = (message = 'Something went wrong', status = 400) ->
   throw Object.assign(Error.new(message), { status, notice: message })
