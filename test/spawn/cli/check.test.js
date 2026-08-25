@@ -1186,6 +1186,276 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  // Ownership of a union is asked of each MEMBER. A union does not reliably
+  // remember the name it came from: under strictNullChecks an optional
+  // property whose type is a foreign alias becomes `Alias | null |
+  // undefined`, a new union with no alias at all. Reading that absence as
+  // "written here" opens the foreign definition — `BodyInit` expands to
+  // include `ReadableStream<any>` — and reports the language's `any` as
+  // this package's defect.
+  test('--public does not open a foreign alias that lost its name to strictNullChecks', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export type Opts =',
+        '  body?: BodyInit | null',       // optional + foreign alias
+        '',
+        'export def send(o: Opts): void',
+        '  return',
+        '',
+        'export def leaks(o: any[]): void',  // still finds a real one
+        '  return',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'nullable-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toMatch(/✓ send/);
+      expect(out.stdout).toMatch(/✓ Opts/);
+      // The `any` this package actually wrote is still its own.
+      expect(out.stdout).toMatch(/any\s+at: leaks\(o\)\[\]/);
+      expect(out.stdout).toContain('2/3 exports fully typed (66.7%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A position a consumer READS has to carry something they can use. `any`
+  // and `Function` are the same defect in different clothes — both take
+  // anything and return an unchecked value — while `unknown`, `object` and
+  // `{}` carry nothing and say so, which is a compile error at the use site
+  // rather than a silent hole. `never` is none of these: it is the honest
+  // return of a function that throws.
+  test('--public reports every shape that carries nothing out, but not `never`', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export def rAny(): any', '  return 1', '',
+        'export def rUnknown(): unknown', '  return 1', '',
+        'export def rObject(): object', '  return ({})', '',
+        'export def rEmpty(): {}', '  return ({})', '',
+        'export def rFunction(): Function', '  return (-> 1)', '',
+        "export def rNever(): never", "  throw Error.new('x')",
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'wide-out', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toMatch(/any\s+at: rAny\(\)/);
+      expect(out.stdout).toMatch(/unknown\s+at: rUnknown\(\)/);
+      expect(out.stdout).toMatch(/object\s+at: rObject\(\)/);
+      expect(out.stdout).toMatch(/\{\}\s+at: rEmpty\(\)/);
+      expect(out.stdout).toMatch(/Function\s+at: rFunction\(\)/);
+      expect(out.stdout).toMatch(/✓ rNever/);
+      expect(out.stdout).toContain('1/6 exports fully typed (16.7%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // On the way IN, width is a decision rather than a defect: a written
+  // annotation claims what belongs there, however wide. What is reported is
+  // an absence of that claim — a type that fell out of a default value.
+  // Polarity reverses again for a parameter OF a parameter, which is an
+  // argument the consumer's own callback receives and so has to be usable.
+  test('--public trusts a stated input however wide, and reports an unstated one', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export def stated(value: unknown): number', '  return 1', '',
+        'export def statedObj(value: object): number', '  return 1', '',
+        'export def unstated(opts = {}): number', '  return 1', '',
+        'export def inferred(n = 5): number', '  return n', '',
+        'export def withCb(cb: (item: unknown) => void): void', '  return',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'wide-in', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Stated: a contract, and trusted.
+      expect(out.stdout).toMatch(/✓ stated\b/);
+      expect(out.stdout).toMatch(/✓ statedObj/);
+      // Unstated AND wide: a missing annotation, one edit away.
+      expect(out.stdout).toMatch(/\{\}\s+at: unstated\(opts\)/);
+      // Unstated but inferred to something real: nothing to report.
+      expect(out.stdout).toMatch(/✓ inferred/);
+      // The callback's own argument is read by the consumer.
+      expect(out.stdout).toMatch(/unknown\s+at: withCb\(cb\)\(item\)/);
+      expect(out.stdout).toContain('3/5 exports fully typed (60.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Two ways to mistake an absence of information for a lack of it. A
+  // MAPPED type has no members until its parameter is bound, and a bare
+  // TYPE export has no direction at all — it may be an options bag the
+  // consumer builds or a result they inspect, and nothing says which, so
+  // only the rules that hold either way apply to it.
+  test('--public does not read a generic mapped type, or an undirected type export, as empty', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export type Wrap<S> = { [K in keyof S]: S[K] }',
+        '',
+        // A generic function's return is not instantiated, so a mapped type
+        // reaches an OUTPUT position with its parameter still unbound and no
+        // members yet. Reading that as `{}` condemns every generic alias.
+        'export def make<S>(source: S): Wrap<S>',
+        '  return (source as Wrap<S>)',
+        '',
+        'export type Options =',
+        '  json?: unknown',                                     // written; direction unknown
+        '',
+        'export type Result =',
+        '  payload: any',                                       // `any` holds either way
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'undirected', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toMatch(/✓ Wrap/);
+      expect(out.stdout).toMatch(/✓ make/);
+      expect(out.stdout).toMatch(/✓ Options/);
+      expect(out.stdout).toMatch(/any\s+at: Result\.payload/);
+      expect(out.stdout).toContain('3/4 exports fully typed (75.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The path names where a defect SURFACES in the type. That is not where
+  // to edit: a value assembled through inner definitions surfaces its `any`
+  // at the export, while the parameter carrying it belongs to a lambda
+  // several definitions away — annotating the obvious candidate changes
+  // nothing at all. The declaring symbol knows which position it was.
+  test('--public names the source position that declared the defect, not where it surfaces', () => {
+    const dir = workspace({
+      'index.rip': [
+        'def helper(input: string): string',     // line 1 — typed, and a red herring
+        '  input',
+        '',
+        'def build()',
+        '  call = (input, opts = {}) -> helper(input)',   // line 5 — the real one
+        '  Object.assign call, { get: call }',
+        '',
+        'export thing = build()',                // line 8 — where it surfaces
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'origin-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Surfaces at the export…
+      expect(out.stdout).toContain('any at: thing(input)');
+      // …and carries the lambda's parameter position, column and all.
+      expect(out.stdout).toMatch(/index\.rip:5:11\s+any\s+at: thing\(input\)/);
+      // Not the typed helper it calls, nor the export it surfaced on.
+      expect(out.stdout).not.toMatch(/index\.rip:1:\d+\s+any/);
+      expect(out.stdout).not.toMatch(/index\.rip:8:\d+\s+any/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // An export is reported WHOLE: every position it leaves untyped, not the
+  // first one found. Reporting one at a time turns a package into a series
+  // of rounds and never says how much work is left. What deduplicates them
+  // is the DECLARATION that would fix each — several members built from one
+  // lambda are one edit, and naming it once per member reads as many.
+  test('--public reports every position an export leaves untyped, once per declaration', () => {
+    const dir = workspace({
+      'index.rip': [
+        'def build()',
+        '  call = (input, opts) -> input',      // ONE lambda, two parameters
+        '  Object.assign call, { get: call, post: call, put: call }',
+        '',
+        'export thing = build()',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'whole-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
+      // Both parameters, not just the first.
+      expect(found.some((l) => /at: thing\(input\)/.test(l))).toBe(true);
+      expect(found.some((l) => /at: thing\(opts\)/.test(l))).toBe(true);
+      // `get`, `post` and `put` are the SAME lambda, so its parameters are
+      // named once — not once per member that exposes them.
+      expect(found.filter((l) => /\(input\)/.test(l)).length).toBe(1);
+      expect(found.filter((l) => /\(opts\)/.test(l)).length).toBe(1);
+      expect(out.stdout).not.toMatch(/at: thing\.(post|put)\(/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // `@field = param` emits a field declaration that never existed in the
+  // source, and its type follows the parameter. Annotating the parameter
+  // answers both, so the parameter is the finding and the field is its
+  // shadow — and several such fields all map back to the one constructor
+  // line, which would read as several things to fix at one position.
+  test('--public reports a constructor parameter, not the field that follows it', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export class Holder',
+        '  constructor: (first, second) ->',
+        '    @first = first',
+        '    @second = second',
+        '    @tally = {}',            // no parameter behind it: its own finding
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'shadow-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
+      expect(found.some((l) => /at: Holder\.new\(first\)/.test(l))).toBe(true);
+      expect(found.some((l) => /at: Holder\.new\(second\)/.test(l))).toBe(true);
+      // The fields those parameters feed are not separate work.
+      expect(out.stdout).not.toMatch(/at: Holder#first/);
+      expect(out.stdout).not.toMatch(/at: Holder#second/);
+      // A field with no parameter behind it still is: nothing else names it.
+      expect(found.some((l) => /at: Holder#tally/.test(l))).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A member that IS another published export has its own row, its own
+  // verdict, and one edit fixes it there. Repeating its positions under
+  // everything that happens to expose it reports one piece of work as
+  // several, and inflates every count that follows.
+  test('--public stops at a member that is another export of the same entry', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export class Boom extends Error',
+        '  constructor: (payload) ->',
+        "    super('x')",
+        '',
+        'def build()',
+        '  call = (n: number): number -> n',
+        '  Object.assign call, { Boom: Boom }',
+        '',
+        'export api = build()',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'sibling-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Reported once, under the export that owns it.
+      expect(out.stdout).toContain('at: Boom.new(payload)');
+      expect(out.stdout).not.toContain('at: api.Boom.new(payload)');
+      // `api` exposes it but is otherwise typed, so it is clean.
+      expect(out.stdout).toMatch(/✓ api/);
+      expect(out.stdout).toContain('1 position needs a type');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // A type prints as it was WRITTEN. An annotation naming something that
   // does not resolve still prints that name while meaning `any`, so the
   // written form alone puts a rich-looking type beside a verdict of `any`

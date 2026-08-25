@@ -13,7 +13,7 @@
 // The direction of any error here is the reason for that care. A walk that
 // stops early reports the export it was walking as fully typed, so every
 // way of losing the thread reads as a clean surface.
-import { API, TypeFlags, SymbolFlags, SignatureKind, NodeBuilderFlags } from 'typescript/unstable/async';
+import { API, TypeFlags, SymbolFlags, SignatureKind, NodeBuilderFlags, ObjectFlags } from 'typescript/unstable/async';
 import path from 'node:path';
 import { SyntaxKind } from 'typescript/unstable/ast';
 
@@ -38,8 +38,9 @@ async function typeOfExport(ck, symbol) {
   if (sym.flags & SymbolFlags.Alias) {
     try { sym = await ck.getAliasedSymbol(sym); } catch { /* keep the alias */ }
   }
-  const typeOnly = (sym.flags & TYPE_ONLY) && !(sym.flags & VALUE_LIKE);
-  return typeOnly ? ck.getDeclaredTypeOfSymbol(sym) : ck.getTypeOfSymbol(sym);
+  const typeOnly = Boolean((sym.flags & TYPE_ONLY) && !(sym.flags & VALUE_LIKE));
+  const type = await (typeOnly ? ck.getDeclaredTypeOfSymbol(sym) : ck.getTypeOfSymbol(sym));
+  return { type, typeOnly };
 }
 
 // Whose member is this? A package cannot fix `Promise<Response>`, and a class
@@ -110,19 +111,94 @@ export async function useSitesOf(session, { mirrorFile, names }) {
   return out;
 }
 
-// One published name, walked breadth-first to its first `any`.
+// A type that carries no information AT the position it sits in.
+//
+// `any` and `Function` are the same defect wearing different clothes: both
+// accept anything and hand back an unchecked value, so a consumer's misuse
+// of either goes unreported. The rest — `unknown`, `object`, `{}` — carry
+// nothing either, but they say so: reading one is a compile error rather
+// than a silent hole. Which of those matters depends on which way the value
+// is travelling, so the caller decides what to do with the answer.
+//
+// `never` is absent on purpose. It is the honest return of a function that
+// throws, and three of this repo's exports are exactly that.
+async function widthOf(ck, type, pkgDir) {
+  if ((type.flags & TypeFlags.Any) !== 0) return 'any';
+  if ((type.flags & TypeFlags.Unknown) !== 0) return 'unknown';
+  if ((type.flags & TypeFlags.NonPrimitive) !== 0) return 'object';
+  const symbol = await type.getSymbol();
+  // The global `Function`: callable with any arguments, returning `any`.
+  if (symbol?.name === 'Function' && !declaredUnder(symbol, pkgDir)) return 'Function';
+  // `{}` has no flag of its own — it is an object type with nothing in it.
+  if ((type.flags & TypeFlags.Object) === 0) return null;
+  // A MAPPED type has no members until its parameter is bound, and reading
+  // that emptiness as `{}` calls every generic alias information-free —
+  // `AppData<S>` describes its shape entirely in terms of `S`.
+  if ((type.objectFlags & ObjectFlags.Mapped) !== 0) return null;
+  if ((await ck.getPropertiesOfType(type)).length > 0) return null;
+  if ((await ck.getIndexInfosOfType(type)).length > 0) return null;
+  for (const [, kind] of SIGNATURES) {
+    if ((await ck.getSignaturesOfType(type, kind)).length > 0) return null;
+  }
+  return '{}';
+}
+
+// Whether a position STATES a contract. An annotation is a claim about what
+// belongs here, however wide; a type that merely fell out of a default value
+// claims nothing, and `opts = {}` is a missing annotation rather than a
+// decision to accept any object.
+async function isStated(symbol) {
+  const declaration = symbol?.declarations?.[0];
+  if (declaration === undefined) return true;
+  const node = await declaration.resolve().catch(() => null);
+  return node === null || node.type != null;
+}
+
+// WHERE a position was declared, as a generated-text offset.
+//
+// The path a finding prints says where the defect surfaces in the type; it
+// does not say what to edit. A value assembled through inner definitions
+// surfaces its `any` at the export — `http(input)` — while the parameter
+// that carries it belongs to a lambda several definitions away, and
+// annotating the obvious candidate changes nothing. The declaring symbol
+// knows the difference.
+async function declarationSiteOf(symbol) {
+  const declaration = symbol?.declarations?.[0];
+  if (declaration === undefined) return null;
+  const node = await declaration.resolve().catch(() => null);
+  if (node === null) return null;
+  let start = null;
+  try { start = await node.getStart(); } catch { return null; }
+  return typeof start === 'number' ? { path: String(declaration.path), start } : null;
+}
+
+// One published name, walked breadth-first to its first defect.
 //
 // Breadth-first so the shallowest leak is the one reported: the path a
 // consumer meets first is the one worth printing. The depth limit bounds
 // COST, and what it cuts is unexamined rather than clean — that count
 // leaves with the verdict, never discarded.
-async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
+async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymbol, siblings) {
   const seen = new Set();
-  let level = [{ type: rootType, at: rootName, bare: false }];
+  const found = [];
+  // Polarity: which way the value travels at this position. The export is
+  // something a consumer READS, and a parameter reverses that — including a
+  // parameter OF a parameter, which is an argument the consumer's own
+  // callback receives and so is read again. Width costs opposite things on
+  // the two sides, and the same shape is a defect on one and a decision on
+  // the other.
+  let level = [{ type: rootType, at: rootName, bare: false, reads, stated: true, origin: rootSymbol }];
   for (let depth = 0; depth < maxDepth && level.length; depth++) {
     const next = [];
     for (const item of level) {
-      if ((item.type.flags & TypeFlags.Any) !== 0) return { kind: 'leak', at: item.at, unexplored: 0 };
+      const width = await widthOf(ck, item.type, pkgDir);
+      // `any` and `Function` are unchecked in either direction. Anything
+      // else that carries nothing is a defect only where the consumer
+      // READS, or where it arrived without an annotation to claim it.
+      if (width !== null && (width === 'any' || width === 'Function' || item.reads === true || !item.stated)) {
+        found.push({ why: width, at: item.at, origin: await declarationSiteOf(item.origin) });
+        continue;
+      }
       if (seen.has(item.type.id)) continue;          // this very type, already walked
       seen.add(item.type.id);
       for (const [isCtor, kind] of SIGNATURES) {
@@ -132,6 +208,11 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
               type: await ck.getTypeOfSymbol(p),
               at: isCtor ? `${item.at}.new(${p.name})` : `${item.at}(${p.name})`,
               bare: false,
+              // No direction stays no direction: `!null` is `true`, which
+              // would invent a read the export never claimed.
+              reads: item.reads === null ? null : !item.reads,
+              stated: await isStated(p),
+              origin: p,
             });
           }
           // A constructor's return is the INSTANCE — the half of a class no
@@ -141,15 +222,28 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
             type: await ck.getReturnTypeOfSignature(sig),
             at: isCtor ? `${item.at}#` : `${item.at}()`,
             bare: isCtor,
+            reads: item.reads,
+            stated: true,
+            origin: item.origin,
           });
         }
       }
       for (const prop of await ck.getPropertiesOfType(item.type)) {
         if (!declaredUnder(prop, pkgDir)) continue;
+        // A member that IS another published export stops the walk. It has
+        // its own row, its own verdict, and one edit fixes it there;
+        // repeating its defects under everything that happens to expose it
+        // reports one piece of work as several.
+        const propType = await ck.getTypeOfSymbol(prop);
+        const propSymbol = await propType.getSymbol();
+        if (propSymbol != null && propSymbol.id !== rootSymbol?.id && siblings.has(propSymbol.id)) continue;
         next.push({
-          type: await ck.getTypeOfSymbol(prop),
+          type: propType,
           at: `${item.at}${item.bare ? '' : '.'}${prop.name}`,
           bare: false,
+          reads: item.reads,
+          stated: await isStated(prop),
+          origin: prop,
         });
       }
       // What a type CONTAINS as well as what it exposes. `any[]`,
@@ -173,6 +267,9 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
           type: arg,
           at: array ? `${item.at}[]` : `${item.at}<${i}>`,
           bare: false,
+          reads: item.reads,
+          stated: item.stated,
+          origin: item.origin,
         }));
       }
       for (const info of await ck.getIndexInfosOfType(item.type)) {
@@ -183,23 +280,37 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
         // writes and none of them can reach.
         if ((info.keyType.flags & (TypeFlags.String | TypeFlags.Number)) === 0) continue;
         if (info.declaration !== undefined && !declaredAt(info.declaration, pkgDir)) continue;
-        next.push({ type: info.valueType, at: `${item.at}[]`, bare: false });
+        next.push({ type: info.valueType, at: `${item.at}[]`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
       }
       if (await item.type.isUnionType() || await item.type.isIntersectionType()) {
-        // A union spelled inline in this package's source has no alias to
-        // name it, and is the package's to answer for. One that arrives
-        // under a foreign name is that name's definition, not this
-        // package's writing.
-        const alias = await item.type.getAliasSymbol();
-        if (alias == null || declaredUnder(alias, pkgDir)) {
-          const members = await item.type.getTypes();
-          members.forEach((m, i) => next.push({ type: m, at: `${item.at}|${i}`, bare: false }));
+        // Ownership is asked of each MEMBER, not of the union. A union does
+        // not reliably remember the name it came from: adding `null` and
+        // `undefined` to a foreign alias — which is what an optional
+        // property does under strictNullChecks — forms a new union that has
+        // no alias at all. Reading that absence as "written here" opens the
+        // foreign definition and reports its insides as this package's
+        // defect. A member carries its own declaration and cannot lose it.
+        const members = await item.type.getTypes();
+        for (const [i, member] of members.entries()) {
+          const symbol = await member.getSymbol();
+          if (symbol != null && !declaredUnder(symbol, pkgDir)) continue;
+          next.push({ type: member, at: `${item.at}|${i}`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
         }
       }
     }
     level = next;
   }
-  return { kind: 'typed', at: null, unexplored: level.length };
+  // One DECLARATION reached by several paths is one thing to fix: the six
+  // verbs share a lambda, and naming it six times would read as six defects.
+  const bySite = new Map();
+  for (const f of found) {
+    const key = f.origin === null ? `path:${f.at}` : `${f.origin.path}|${f.origin.start}`;
+    if (!bySite.has(key)) bySite.set(key, f);
+  }
+  const defects = [...bySite.values()];
+  return defects.length === 0
+    ? { kind: 'typed', why: null, at: null, origin: null, defects: [], unexplored: level.length }
+    : { kind: 'leak', why: defects[0].why, at: defects[0].at, origin: defects[0].origin, defects, unexplored: level.length };
 }
 
 // Every name one entry publishes, with the type a consumer resolves for it.
@@ -218,7 +329,15 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
 
   const rows = [];
   let unexplored = 0, forwarded = 0;
-  for (const [name, symbol] of await moduleSymbol.getExports()) {
+  const exported = await moduleSymbol.getExports();
+  // What else this entry publishes, so the walk can stop at it.
+  const siblings = new Set();
+  for (const [, sym] of exported) {
+    let s = sym;
+    if (s.flags & SymbolFlags.Alias) { try { s = await ck.getAliasedSymbol(s); } catch { /* keep it */ } }
+    siblings.add(s.id);
+  }
+  for (const [name, symbol] of exported) {
     if (only !== null && !only.has(name)) continue;
     // `export * from './x'` arrives as one marker symbol rather than as the
     // names it forwards, which are published all the same. The marker
@@ -227,7 +346,7 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
     // perfectly typed one. It is counted apart from the walk's own limits
     // because the two do not share a remedy.
     if (symbol.flags & SymbolFlags.ExportStar) { forwarded++; continue; }
-    const type = await typeOfExport(ck, symbol);
+    const { type, typeOnly } = await typeOfExport(ck, symbol);
     // A type prints as it was WRITTEN, which is not always what it means: an
     // annotation naming something unresolvable resolves to `any` while still
     // printing the name that was reached for. Showing the written form alone
@@ -241,9 +360,15 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
     const printed = ((type.flags & TypeFlags.Any) !== 0 && written !== 'any')
       ? `any (written: ${written})`
       : written;
-    const found = await walkOne(ck, type, name, pkgMirrorDir, maxDepth);
+    // A VALUE is something a consumer reads. A bare TYPE is not: it may be
+    // an options bag they construct or a result they inspect, and nothing
+    // about the export says which. Its positions get only the rules that
+    // hold either way.
+    let rootSym = symbol;
+    if (rootSym.flags & SymbolFlags.Alias) { try { rootSym = await ck.getAliasedSymbol(rootSym); } catch { /* keep it */ } }
+    const found = await walkOne(ck, type, name, pkgMirrorDir, maxDepth, typeOnly ? null : true, rootSym, siblings);
     unexplored += found.unexplored;
-    rows.push({ name, type: printed, kind: found.kind, at: found.at });
+    rows.push({ name, type: printed, kind: found.kind, why: found.why, at: found.at, origin: found.origin, defects: found.defects });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name));
   return { rows, unexplored, forwarded, unresolved: null };

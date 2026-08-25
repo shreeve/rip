@@ -146,6 +146,8 @@ function printPublicReport(report, unreadable = []) {
   const paint = (c, t) => (useColor ? `\x1b[${c}m${t}\x1b[0m` : t);
   const dim = (t) => paint('90', t), bold = (t) => paint('1', t);
   const green = (t) => paint('32', t), red = (t) => paint('31', t), yellow = (t) => paint('33', t);
+  const cyan = (t) => paint('96', t);      // file paths
+  const lineCol = (t) => paint('93', t);  // line / col
   const rel = (f) => path.relative(process.cwd(), f) || '.';
   const byPkg = new Map();
   for (const r of report) {
@@ -157,6 +159,31 @@ function printPublicReport(report, unreadable = []) {
     let name = rel(dir);
     try { name = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? name; } catch { /* unnamed */ }
     let total = 0, leaks = 0;
+    // Distinct source positions across the whole package: one position
+    // reached from two exports is still one edit, and the count that
+    // matters to whoever has to make them is how many there are.
+    const positions = new Set();
+    // The location column is sized ACROSS the package, not per export, so
+    // it does not shift between rows: the point of these lines is to be
+    // read straight down as a list of places to edit.
+    // Spelled the way every other position in this report is spelled:
+    // cyan file, yellow line and column, plain colons.
+    const locate = (d) => (d.site === undefined ? '' : `${rel(d.site.file)}:${d.site.line + 1}:${d.site.character + 1}`);
+    const paintLocation = (d) => (d.site === undefined ? ''
+      : `${cyan(rel(d.site.file))}:${lineCol(String(d.site.line + 1))}:${lineCol(String(d.site.character + 1))}`);
+    // Both columns are sized ACROSS the package, so neither shifts between
+    // rows: the kinds run from `{}` to `Function`, and an unpadded one
+    // leaves the paths starting at a different column line to line.
+    let locw = 0, kindw = 0;
+    for (const { rows } of entries) {
+      for (const r of rows) {
+        if (r.kind !== 'leak') continue;
+        for (const d of (r.defects?.length ? r.defects : [r])) {
+          locw = Math.max(locw, locate(d).length);
+          kindw = Math.max(kindw, (d.why ?? 'any').length);
+        }
+      }
+    }
     const lines = [];
     let unexplored = 0, forwarded = 0;
     for (const { entryFile, rows, unexplored: u, forwarded: f } of entries) {
@@ -196,7 +223,20 @@ function printPublicReport(report, unreadable = []) {
         for (const line of cont) lines.push(`      ${' '.repeat(w)}  ${dim(line)}`);
         if (r.kind === 'leak') {
           leaks++;
-          lines.push(`      ${dim('\u2514\u2500 any at: ')}${yellow(r.at)}`);
+          // EVERY position this export leaves untyped, deduplicated by the
+          // declaration that has to change — one lambda reached through six
+          // verbs is one edit, not six defects.
+          for (const d of (r.defects?.length ? r.defects : [r])) {
+            positions.add(d.site === undefined ? `at:${d.at}` : `${d.site.file}|${d.site.line}|${d.site.character}`);
+            const where = locate(d);
+            const pad = ' '.repeat(Math.max(0, locw - where.length));
+            // Spelled like a diagnostic: the location carries the color and
+            // what follows is the message, plain. Every line here is a
+            // finding, so the kind distinguishes nothing a color would help
+            // with — only `at:` is dimmed, as a separator.
+            const why = (d.why ?? 'any').padEnd(kindw);
+            lines.push(`      ${dim('\u2514\u2500')} ${paintLocation(d)}${pad}  ${why}${dim(' at:')} ${d.at}`);
+          }
         }
       }
     }
@@ -218,7 +258,9 @@ function printPublicReport(report, unreadable = []) {
     if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
     else {
       anyBad = true;
-      console.log(`${red('\u2717')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%). ${red(`${leaks} export${leaks === 1 ? '' : 's'} leak \`any\``)}.`);
+      const n = positions.size;
+      console.log(`${red('\u2717')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%). `
+        + `${red(`${n} position${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} a type`)}.`);
     }
   }
   if (unreadable.length > 0) {
@@ -819,6 +861,15 @@ if (compiled.size > 0) {
             // The package's own mirrored tree: the ownership line, and the
             // only directory whose declarations this package can change.
             const pkgMirrorDir = path.dirname(compiled.get(publicEntriesOf(dir)[0])?.mirrorPath ?? '');
+            // A finding's origin arrives as a position in the MIRROR. The
+            // report is about source, so each mirror is kept under the
+            // checker's own canonical spelling of its path — case-folded on
+            // a case-insensitive filesystem, and never the spelling this
+            // process happens to hold.
+            const byMirror = new Map();
+            for (const [fp, e] of compiled) {
+              if (e.mirrorPath !== undefined) byMirror.set(e.mirrorPath.toLowerCase(), { fsPath: fp, entry: e });
+            }
             for (const entryFile of publicEntriesOf(dir)) {
               const entry = compiled.get(entryFile);
               // An entry the audit cannot read is not an absence of
@@ -839,6 +890,47 @@ if (compiled.size > 0) {
               if (walked.unresolved !== null) {
                 unreadable.push({ entryFile, reason: walked.unresolved });
                 continue;
+              }
+              const toSite = (origin) => {
+                if (origin === null || origin === undefined) return undefined;
+                const owner = byMirror.get(origin.path.toLowerCase());
+                if (owner === undefined) return undefined;
+                const span = generatedSpanToSource(owner.entry.good.mappings, origin.start, origin.start);
+                if (!span) return undefined;
+                const at = offsetToPosition(owner.entry.good.srcLineStarts, span[0]);
+                return { file: owner.fsPath, line: at.line, character: at.character };
+              };
+              for (const row of walked.rows) {
+                row.site = toSite(row.origin);
+                // Deduplicated on the SOURCE position, which is the thing
+                // that gets edited. Several generated declarations can map
+                // back to one line — a class's fields all carry the
+                // constructor's — and naming it three times reads as three
+                // things to fix.
+                // A field assigned from a constructor parameter is not its
+                // own work: `@request = request` emits a field declaration
+                // that never existed in the source, and its type follows the
+                // parameter. Annotating the parameter answers both, so the
+                // parameter is the finding and the field is its shadow.
+                const fromParam = new Set();
+                for (const d of row.defects ?? []) {
+                  const p = /\(([A-Za-z_$][\w$]*)\)$/.exec(d.at);
+                  if (p !== null) fromParam.add(p[1]);
+                }
+                const atSite = new Set();
+                const kept = [];
+                for (const d of row.defects ?? []) {
+                  const f = /#([A-Za-z_$][\w$]*)$/.exec(d.at);
+                  if (f !== null && fromParam.has(f[1])) continue;
+                  d.site = toSite(d.origin);
+                  const key = d.site === undefined
+                    ? `at:${d.at}`
+                    : `${d.site.file}|${d.site.line}|${d.site.character}`;
+                  if (atSite.has(key)) continue;
+                  atSite.add(key);
+                  kept.push(d);
+                }
+                row.defects = kept;
               }
               report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded });
             }
@@ -1313,7 +1405,8 @@ if (asJson) {
       const files = [...byFile.keys()].sort((a, b) => rel(a).localeCompare(rel(b)));
       const shownAt = (f) => {
         const { at } = byFile.get(f);
-        return at === null ? rel(f) : `${rel(f)}${gray(`:${at.line + 1}:${at.character + 1}`)}`;
+        return at === null ? cyan(rel(f))
+          : `${cyan(rel(f))}:${yellow(String(at.line + 1))}:${yellow(String(at.character + 1))}`;
       };
       const w = Math.min(44, files.reduce((m, f) => Math.max(m, shownAt(f).replace(/\x1b\[[0-9;]*m/g, '').length), 0));
       for (const f of files) {
