@@ -34,7 +34,9 @@ import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vsco
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
-import { createPublicSession, walkPublicEntry } from '../../packages/vscode/src/publicwalk.js';
+import { createPublicSession, walkPublicEntry, useSitesOf } from '../../packages/vscode/src/publicwalk.js';
+import { importBindingsOf } from '../../packages/vscode/src/scopes.js';
+import { bareRipSpecifierTarget } from '../../packages/vscode/src/mirror.js';
 
 // The two trees whose build identity the editor and this CLI must agree
 // on. Computed once: they were spelled twice, and a hash that disagrees
@@ -530,6 +532,12 @@ const hiddenUninstalledDirs = new Set();   // where `bun install` answers
 // about. Counted, never reported: see the pull loop.
 let dependencyDiags = 0;
 const dependencyDirs = new Set();
+// package name -> the names this project imports from it and receives as
+// `any`. Filled by the inherited-`any` pass; read by the advisory.
+const inheritedAny = new Map();
+// Every place this project uses a value it received as `any`.
+const inheritedSites = [];
+const siteSeen = new Set();
 const seen = new Set();
 const explicitTargets = new Set(targets);
 const queue = [...targets];
@@ -839,6 +847,122 @@ if (compiled.size > 0) {
           try { await session.close(); } catch { /* the server is going away anyway */ }
         }
         printPublicReport(report, unreadable);
+      }
+
+      // ── INHERITED `any` ── the names THIS project imports from other
+      // packages and receives as `any`.
+      //
+      // Nothing else in the report covers it. The ledger below counts
+      // diagnostics and missing annotations INSIDE a dependency, which is a
+      // different claim: a package can carry no hidden diagnostics and still
+      // publish `any`, or carry thousands and publish none. And no checker
+      // will ever complain here, because using an `any` is not an error —
+      // the narrowing succeeds, the member access resolves, and the code
+      // reads as checked while nothing is checking it.
+      //
+      // Scoped to what this project actually IMPORTS. The whole published
+      // surface would be the same number for every consumer of a package,
+      // and so would say nothing about any of them.
+      if (!publicAudit) {
+        const nearestPackage = (from) => {
+          for (let d = from; ; d = path.dirname(d)) {
+            if (fs.existsSync(path.join(d, 'package.json'))) return d;
+            if (path.dirname(d) === d) return null;
+          }
+        };
+        // A module imported as a NAMESPACE takes no named bindings, so
+        // nothing narrows it: every export is reachable through the alias.
+        const wanted = new Map();         // dependency entry -> imported names
+        const importers = new Map();      // target file -> dependency entry -> imported name -> local name
+        for (const fsPath of explicitTargets) {
+          const entry = compiled.get(fsPath);
+          if (entry === undefined) continue;
+          // A file under `rip.noCheck` is not asked for diagnostics at all,
+          // and does not report what it inherits either: the setting says
+          // this code is not being checked, and an advisory about its type
+          // safety answers a question its author declined to ask.
+          if (isNoCheckPath(fsPath, entry.cfg._configDir, entry.cfg.noCheck)) continue;
+          // STRICT only. Gradual accepts `any` — that is what it is for —
+          // and an inherited one is not even a defect this project can
+          // answer by annotating, so it is not on the gradual path at all.
+          // It becomes actionable at the posture that refuses `any`, and a
+          // gradual project meets it where it would meet every other strict
+          // finding: under `--strict`, which reads the workspace as if it
+          // had flipped.
+          if (entry.good.strict !== true) continue;
+          const fromDir = path.dirname(fsPath);
+          const ownPackage = nearestPackage(fromDir);
+          for (const b of importBindingsOf(entry.result?.stores, entry.source)) {
+            const target = (b.module.startsWith('./') || b.module.startsWith('../'))
+              ? (b.module.endsWith('.rip') ? path.resolve(fromDir, b.module) : null)
+              : bareRipSpecifierTarget(b.module, fromDir);
+            if (target === null || !compiled.has(target)) continue;
+            if (nearestPackage(path.dirname(target)) === ownPackage) continue;  // same package
+            if (!wanted.has(target)) wanted.set(target, new Set());
+            wanted.get(target).add(b.imported);
+            const byFile = importers.get(fsPath) ?? new Map();
+            const forDep = byFile.get(target) ?? new Map();
+            forDep.set(b.imported, b.local);
+            byFile.set(target, forDep);
+            importers.set(fsPath, byFile);
+          }
+        }
+        if (wanted.size > 0) {
+          const session = createPublicSession(mirrorRoot);
+          try {
+            for (const [entryFile, names] of wanted) {
+              const entry = compiled.get(entryFile);
+              if (entry?.mirrorPath === undefined) continue;
+              const walked = await walkPublicEntry(session, {
+                mirrorFile: entry.mirrorPath,
+                pkgMirrorDir: path.dirname(entry.mirrorPath),
+                only: names,
+              }).catch(() => null);
+              if (walked === null || walked.unresolved !== null) continue;
+              const leaks = walked.rows.filter((r) => r.kind === 'leak').map((r) => r.name);
+              if (leaks.length === 0) continue;
+              const dir = nearestPackage(path.dirname(entryFile));
+              let label = dir === null ? entryFile : path.relative(process.cwd(), dir);
+              try { label = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? label; } catch { /* unnamed */ }
+              const seen = inheritedAny.get(label) ?? new Set();
+              for (const n of leaks) seen.add(n);
+              inheritedAny.set(label, seen);
+              // Where this project USES what it received untyped. The
+              // remedy is in the package named above, but the reach is
+              // here, and the reach is what a reader cannot otherwise see.
+              for (const [fsPath, byDep] of importers) {
+                const names = byDep.get(entryFile);
+                if (names === undefined) continue;
+                const consumer = compiled.get(fsPath);
+                if (consumer?.mirrorPath === undefined) continue;
+                const locals = leaks.map((n) => names.get(n)).filter((n) => n !== undefined);
+                if (locals.length === 0) continue;
+                const found = await useSitesOf(session, { mirrorFile: consumer.mirrorPath, names: locals })
+                  .catch(() => new Map());
+                const toSource = (span) => {
+                  const mapped = span === null ? null : generatedSpanToSource(consumer.good.mappings, span[0], span[1]);
+                  return mapped ? offsetToPosition(consumer.good.srcLineStarts, mapped[0]) : null;
+                };
+                for (const [local, { uses, arrival }] of found) {
+                  const at = toSource(arrival);
+                  for (const span of uses) {
+                    const used = toSource(span);
+                    if (used === null) continue;
+                    // A body the compiler emits twice reaches the same
+                    // source position from two generated ones, and a use
+                    // named twice reads as two uses.
+                    const key = `${fsPath}|${used.line}|${used.character}|${local}`;
+                    if (siteSeen.has(key)) continue;
+                    siteSeen.add(key);
+                    inheritedSites.push({ file: fsPath, local, label, at });
+                  }
+                }
+              }
+            }
+          } finally {
+            try { await session.close(); } catch { /* the server is going away anyway */ }
+          }
+        }
       }
 
       // Index every mirror face by its URI so a diagnostic's secondary
@@ -1161,6 +1285,43 @@ if (asJson) {
       + `${hostMismatches.size === 1 ? 'does' : 'do'} not match the running Bun ${runtimeBun} `
       + `— \`Bun\`, \`process\`, and the rest are typed from the wrong version `
       + `(try \`bun add -d @types/bun@${runtimeBun}\`${wholly ? ' there' : ''})`));
+  }
+  if (inheritedAny.size > 0) {
+    console.log('');
+    for (const label of [...inheritedAny.keys()].sort()) {
+      const names = [...inheritedAny.get(label)].sort();
+      const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
+      const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
+      console.log(advise(`${names.length} value${plural(names.length)} imported from \`${label}\` `
+        + `${names.length === 1 ? 'is' : 'are'} \`any\` (${shown}${more}) `
+        + `— run \`rip check --public\` there`));
+      // One line per FILE, and every file that has one. A file is the unit
+      // a reader opens, and naming each of them is complete at that level —
+      // unlike a sample of positions, which shows some of the reach and
+      // says nothing about the rest.
+      const byFile = new Map();
+      for (const x of inheritedSites) {
+        if (x.label !== label) continue;
+        const row = byFile.get(x.file) ?? { locals: new Set(), at: null };
+        row.locals.add(x.local);
+        // The file opens where the value ARRIVED — its import — which is
+        // the one position that is about the file as a whole rather than
+        // about one of the places it is used.
+        if (row.at === null && x.at !== null) row.at = x.at;
+        byFile.set(x.file, row);
+      }
+      const files = [...byFile.keys()].sort((a, b) => rel(a).localeCompare(rel(b)));
+      const shownAt = (f) => {
+        const { at } = byFile.get(f);
+        return at === null ? rel(f) : `${rel(f)}${gray(`:${at.line + 1}:${at.character + 1}`)}`;
+      };
+      const w = Math.min(44, files.reduce((m, f) => Math.max(m, shownAt(f).replace(/\x1b\[[0-9;]*m/g, '').length), 0));
+      for (const f of files) {
+        const label = shownAt(f);
+        const pad = ' '.repeat(Math.max(0, w - label.replace(/\x1b\[[0-9;]*m/g, '').length));
+        console.log(`  ${label}${pad}  ${gray([...byFile.get(f).locals].sort().join(', '))}`);
+      }
+    }
   }
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
   if (dependencyDiags > 0) {

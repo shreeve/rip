@@ -1241,6 +1241,145 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  // What a project RECEIVES as `any` from another package. Nothing else in
+  // the report covers it: the ledger counts diagnostics and missing
+  // annotations INSIDE a dependency, which is a different claim, and no
+  // checker complains at the use site because using an `any` is not an
+  // error. The signal is scoped to the names actually imported — the whole
+  // published surface would read the same for every consumer of a package.
+  test('an `any` received from another package is advised, named, and never gates', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-inh-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'packages', 'util'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'package.json'),
+        JSON.stringify({ name: '@rip/util', exports: { '.': './util.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'util.rip'), [
+        'export def leaky(x)',            // unannotated parameter
+        '  x',
+        '',
+        'export def alsoLeaky(w)',        // a second one, used in the same file
+        '  w',
+        '',
+        'export def tidy(n: number): number',
+        '  n',
+        '',
+        'export def unused(y)',           // leaks, but nobody imports it
+        '  y',
+      ].join('\n') + '\n');
+      // A sibling in the SAME package: crossing no package boundary, so it
+      // is this project's own business and never advised.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'local.rip'), 'export def near(z: number): number\n  z\n');
+      // Strict, so the gradual scope gate is not also in play here — what
+      // this case is about is which files are named and why.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@rip/app-under-test', rip: { strict: true } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'), [
+        "import { leaky, alsoLeaky, tidy } from '@rip/util'",
+        "import { near } from './local.rip'",
+        'console.log leaky(1), tidy(2), near(3)',
+        'again = leaky(4)',
+        'other = alsoLeaky(5)',
+      ].join('\n') + '\n');
+      // Imports a leaking name and never uses it: an import specifier is
+      // where a name arrives, not a place it is consumed.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'idle.rip'), [
+        "import { leaky } from '@rip/util'",
+        'export def unrelated(n: number): number',
+        '  n',
+      ].join('\n') + '\n');
+      fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
+      fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
+
+      const out = check(dir, [path.join('packages', 'app')]);
+      expect(out.stdout).toContain('imported from `@rip/util`');
+      expect(out.stdout).toContain('`leaky`');
+      // Imported and clean: not named.
+      expect(out.stdout).not.toContain('`tidy`');
+      // Leaks, but this project never took it — the count is about what
+      // THIS project receives, not what the package publishes.
+      expect(out.stdout).not.toContain('`unused`');
+      // Same package, so not inherited from anywhere.
+      expect(out.stdout).not.toContain('`near`');
+      // Every FILE that uses one, named once — complete at the level it
+      // describes. `app.rip` uses `leaky` twice and is listed once.
+      const files = out.stdout.split('\n').filter((l) => /^\s+packages\/app\/app\.rip[:\s]/.test(l));
+      expect(files.length).toBe(1);                    // `leaky` used twice, listed once
+      // The file opens where the value ARRIVED — its import, on line 1 —
+      // not at one of the places it is used.
+      expect(files[0]).toMatch(/app\.rip:1:\d+/);
+      // Both leaking names it uses, on that one line.
+      expect(files[0]).toContain('leaky');
+      expect(files[0]).toContain('alsoLeaky');
+      // The clean import is not why the file is listed.
+      expect(files[0]).not.toContain('tidy');
+      // Imports `leaky` but never uses it — the arrival is not a use, and
+      // the summary above already reports the arrival.
+      expect(out.stdout).not.toMatch(/idle\.rip/);
+      // Same package: not inherited from anywhere.
+      expect(out.stdout).not.toMatch(/local\.rip/);
+      // An advisory, never a gate.
+      expect(out.status).toBe(0);
+
+      // `rip.noCheck` governs it too: a file excluded from checking is not
+      // asked for diagnostics, and does not report what it inherits either.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@rip/app-under-test', rip: { strict: true, noCheck: ['*.rip'] } }));
+      const excluded = check(dir, [path.join('packages', 'app')]);
+      expect(excluded.stdout).not.toContain('imported from `@rip/util`');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Gradual accepts `any` — that is what it is for — and an inherited one
+  // is not even a defect the project can answer by annotating its own code,
+  // so it is not on the gradual path at all. It belongs to the posture that
+  // refuses `any`, and a gradual project meets it the same way it meets
+  // every other strict finding: under `--strict`.
+  test('an inherited `any` is a strict-posture finding, previewed by --strict', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-grad-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'packages', 'util'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'package.json'),
+        JSON.stringify({ name: '@rip/util', exports: { '.': './util.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'util', 'util.rip'), 'export def leaky(x)\n  x\n');
+      fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
+      fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
+      // No `rip.strict`: gradual, and nothing in this file is annotated, so
+      // no scope in it asks to be checked.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'), JSON.stringify({ name: '@rip/held' }));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'), [
+        "import { leaky } from '@rip/util'",
+        'held = ->',
+        '  leaky(1)',
+      ].join('\n') + '\n');
+
+      // Gradual: silent. Not the summary either — there is nothing here
+      // for a posture that accepts `any` to do.
+      const gradual = check(dir, [path.join('packages', 'app')]);
+      expect(gradual.stdout).not.toContain('imported from `@rip/util`');
+
+      // The same code, asked what strict would say.
+      const preview = check(dir, ['--strict', path.join('packages', 'app')]);
+      expect(preview.stdout).toContain('imported from `@rip/util`');
+      expect(preview.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
+
+      // And once the project actually flips, without asking.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@rip/held', rip: { strict: true } }));
+      const strict = check(dir, [path.join('packages', 'app')]);
+      expect(strict.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // The walk remembers types it has already been through, so a recursive
   // type ends instead of looping. What it remembers them BY decides
   // correctness: a name is not an identity — two files may each declare a

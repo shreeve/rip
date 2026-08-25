@@ -15,6 +15,7 @@
 // way of losing the thread reads as a clean surface.
 import { API, TypeFlags, SymbolFlags, SignatureKind, NodeBuilderFlags } from 'typescript/unstable/async';
 import path from 'node:path';
+import { SyntaxKind } from 'typescript/unstable/ast';
 
 // Types with a call or construct signature are opened through it; the rest
 // are opened through their properties. Both, for anything that has both.
@@ -64,6 +65,50 @@ const declaredUnder = (sym, dir) => {
     return p === under || p.startsWith(under + path.sep);
   });
 };
+
+// Where an importer USES a name, and where that name ARRIVED, as
+// generated-text spans.
+//
+// The two are kept apart because they answer different questions. A use is
+// where the value is consumed — a place a reader's own type safety ends.
+// The arrival is the import specifier, which is not a use at all: it is the
+// one position in the file that names what came in untyped, and so the
+// place to open the file at.
+//
+// A binding is resolved BY NAME in the importing file, because a reference
+// search is answered for the local alias and not for the export it aliases:
+// asking with the exporting module's symbol finds nothing at all.
+export async function useSitesOf(session, { mirrorFile, names }) {
+  const snapshot = await session.updateSnapshot({ openFiles: [mirrorFile] });
+  const project = await snapshot.getDefaultProjectForFile(mirrorFile);
+  if (!project) return new Map();
+  const ck = project.checker;
+  const source = await project.program.getSourceFile(mirrorFile);
+  if (source === undefined) return new Map();
+  const meaning = SymbolFlags.Value | SymbolFlags.Alias | SymbolFlags.Type;
+  const out = new Map();
+  for (const name of names) {
+    const symbol = await ck.resolveName(name, meaning, source, false).catch(() => null);
+    if (!symbol) continue;
+    const refs = await ck.getReferencesToSymbolInFile(mirrorFile, symbol).catch(() => null);
+    const uses = [];
+    let arrival = null;
+    for (const handle of refs ?? []) {
+      const node = await handle.resolve().catch(() => null);
+      if (node === null) continue;
+      const span = [await node.getStart(), await node.getEnd()];
+      const kind = node.parent?.kind;
+      if (kind === SyntaxKind.ImportSpecifier || kind === SyntaxKind.ImportClause
+        || kind === SyntaxKind.NamespaceImport) {
+        if (arrival === null) arrival = span;
+        continue;
+      }
+      uses.push(span);
+    }
+    if (uses.length > 0) out.set(name, { uses, arrival });
+  }
+  return out;
+}
 
 // One published name, walked breadth-first to its first `any`.
 //
@@ -158,7 +203,11 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth) {
 }
 
 // Every name one entry publishes, with the type a consumer resolves for it.
-export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDepth = 10 }) {
+// `only` narrows the roots to a named subset — what one importer actually
+// took, rather than everything the module publishes. A count of the whole
+// surface says the same thing to every consumer of a package and so says
+// nothing about any of them.
+export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDepth = 10, only = null }) {
   const snapshot = await session.updateSnapshot({ openFiles: [mirrorFile] });
   const project = await snapshot.getDefaultProjectForFile(mirrorFile);
   if (!project) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
@@ -170,6 +219,7 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
   const rows = [];
   let unexplored = 0, forwarded = 0;
   for (const [name, symbol] of await moduleSymbol.getExports()) {
+    if (only !== null && !only.has(name)) continue;
     // `export * from './x'` arrives as one marker symbol rather than as the
     // names it forwards, which are published all the same. The marker
     // counts as a gap, never as zero names: an entry that only re-exports
