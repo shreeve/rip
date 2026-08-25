@@ -1278,7 +1278,7 @@
         },
         {
           "comment": "Standalone / field-level directives — an explicit allowlist, NOT a \\w+ catch-all, so instance member access (@email, @role, @first) inside hook/computed bodies falls through to the @-variable rule instead of being mis-scoped as a directive. @id and @index are intentionally omitted: @id collides with the common @id member access, and @index always carries a column arg (handled by the composite/single-column rules above).",
-          "match": "@(?:timestamps|softDelete|unique|mixin|ensure|check|scope|defaultScope|idStart|tableWas|table|primaryKey|on|where|belongsTo|hasMany|hasOne)\\b",
+          "match": "@(?:timestamps|softDelete|unique|mixin|ensure|check|scope|defaultScope|idStart|tableWas|table|primary|on|where|belongsTo|hasMany|hasOne)\\b",
           "name": "entity.name.function.decorator.rip"
         }
       ]
