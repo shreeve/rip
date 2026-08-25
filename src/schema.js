@@ -385,10 +385,16 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   // Scanner-minted SYMBOL tokens split back into ':' + word pairs
   // inside the body — schema grammar reads the two-token spelling
   // everywhere (`@unique [:total, :status]`, `@ensure "…", :pw2`).
-  bodyTokens = bodyTokens.flatMap((tk) => tk.kind === 'SYMBOL'
-    ? [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
-       { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }]
-    : [tk]);
+  // A `!`/`?`-suffixed symbol has no identifier form to split into, so
+  // it rejects here rather than silently shedding its suffix.
+  bodyTokens = bodyTokens.flatMap((tk) => {
+    if (tk.kind !== 'SYMBOL') return [tk];
+    if (tk.value.endsWith('!') || tk.value.endsWith('?')) {
+      fail(`symbol ':${tk.value}' — a '${tk.value.at(-1)}' suffix is not supported inside a schema body; schema names are identifiers`, tk.start);
+    }
+    return [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
+            { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }];
+  });
 
   const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
     schemaStart: schemaTok.start,

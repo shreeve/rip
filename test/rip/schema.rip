@@ -5634,3 +5634,8 @@ fail 'open-ended: bare \'..\' is rejected', '''
   X = schema
     name! ..
 ''', null
+
+fail 'a suffixed symbol rejects inside a schema body', '''
+  Role = schema :enum
+    :draft!
+''', "suffix is not supported inside a schema body"

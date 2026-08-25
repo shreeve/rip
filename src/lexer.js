@@ -494,8 +494,19 @@ function symbolNameEnd(text, start) {
     end++;
     while (end < text.length && IDENT_PART.test(text[end])) end++;
   }
+  // One Ruby-style trailing `!` or `?` (`:save!`, `:valid?`), claimed
+  // only when the character after it cannot start an operator or
+  // another token — otherwise `:a!=b`, `:a??b`, and `:a?.b` keep their
+  // established comparison/coalesce/chain readings.
+  if ((text[end] === '!' || text[end] === '?') &&
+      (end + 1 >= text.length || SYMBOL_SUFFIX_BOUNDARY.test(text[end + 1]))) {
+    end++;
+  }
   return end;
 }
+// The claim boundary for a symbol's `!`/`?` suffix: whitespace or a
+// closer/separator that ends a value position.
+const SYMBOL_SUFFIX_BOUNDARY = /[\s,)\]};:]/;
 const DIGIT = /[0-9]/;
 
 // The numeric-literal matcher: binary/octal/hex with optional
@@ -1802,8 +1813,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       fail("type annotations use a single ':' (e.g. `x: number`), not '::'", pos, pos + 2);
     }
-    // Symbol literals: `:name`, `:domain.name`, and `:kebab-name`
-    // become one interned name — only where the
+    // Symbol literals: `:name`, `:domain.name`, `:kebab-name`, and a
+    // single trailing `!`/`?` (`:save!`, `:valid?`, claimed only at a
+    // clear boundary — symbolNameEnd) become one interned name — only
+    // where the
     // colon CANNOT be structural: after a value-ending token the
     // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
     // `c ? a :b` all keep their readings), and a schema HEAD's kind
