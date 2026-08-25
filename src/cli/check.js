@@ -137,6 +137,21 @@ build that wrote it.`;
 
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
 
+// The package a path belongs to: the nearest ancestor holding a package.json.
+// Memoized — asked once per checked file and again per declaration the walk
+// reaches, and one CLI run sees one consistent disk.
+const pkgOfMemo = new Map();
+const nearestPackage = (from) => {
+  if (pkgOfMemo.has(from)) return pkgOfMemo.get(from);
+  let found = null;
+  for (let d = from; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, 'package.json'))) { found = d; break; }
+    if (path.dirname(d) === d) break;
+  }
+  pkgOfMemo.set(from, found);
+  return found;
+};
+
 // The `--public` report, v3's shape: every export listed with the type a
 // consumer resolves, the path to the first `any` on a leaking one, and a
 // percentage per package — a failures-only list cannot show a surface
@@ -154,7 +169,7 @@ function printPublicReport(report, unreadable = []) {
     if (!byPkg.has(r.dir)) byPkg.set(r.dir, []);
     byPkg.get(r.dir).push(r);
   }
-  let anyBad = false, sawEntry = false;
+  let anyBad = false, sawEntry = false, anyUnaudited = false;
   for (const [dir, entries] of byPkg) {
     let name = rel(dir);
     try { name = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? name; } catch { /* unnamed */ }
@@ -185,6 +200,7 @@ function printPublicReport(report, unreadable = []) {
       }
     }
     const lines = [];
+    const unaudited = [];
     let unexplored = 0, forwarded = 0;
     for (const { entryFile, rows, unexplored: u, forwarded: f } of entries) {
       unexplored += u ?? 0;
@@ -216,6 +232,7 @@ function printPublicReport(report, unreadable = []) {
       };
       lines.push(`  ${bold(rel(entryFile))}`);
       for (const r of rows) {
+        if (r.kind === 'unaudited') { unaudited.push({ entryFile, name: r.name, type: r.type }); continue; }
         total++;
         const [head, ...cont] = wrap(r.type ?? '?');
         const mark = r.kind === 'leak' ? red('\u2717') : green('\u2713');
@@ -240,22 +257,31 @@ function printPublicReport(report, unreadable = []) {
         }
       }
     }
-    if (total === 0) continue;
+    if (total === 0 && unaudited.length === 0 && forwarded === 0 && unexplored === 0) continue;
+    sawEntry = true;                       // a package spoke, whatever it said
     console.log('');
-    console.log(lines.join('\n'));
-    console.log('');
+    if (lines.length) { console.log(lines.join('\n')); console.log(''); }
+    // Listed BY NAME, never merely counted: a reader has to know which of
+    // their published names went unexamined, and a name that disappears
+    // takes the denominator with it.
+    for (const u of unaudited) {
+      console.log(`  ${yellow('?')} ${u.name}${dim(' — not audited: declared in another package')}`);
+    }
+    if (unaudited.length) { anyUnaudited = true; console.log(''); }
     const typed = total - leaks;
-    const pct = (100 * typed / total).toFixed(1);
+    const pct = total === 0 ? '0.0' : (100 * typed / total).toFixed(1);
     // Two gaps with two remedies: a limit the walk hit, and names an
     // `export *` forwards without naming. Either makes the count a floor,
     // and each is reported as itself so the line says what to do about it.
+    if (forwarded > 0) { anyUnaudited = true; }
     if (forwarded > 0) {
       console.log(`${yellow('!')} ${forwarded} \`export *\` re-export${forwarded === 1 ? '' : 's'} not enumerated — every count below is a floor`);
     }
     if (unexplored > 0) {
       console.log(`${yellow('!')} ${unexplored} branch${unexplored === 1 ? '' : 'es'} not explored (walk limit) — every count below is a floor`);
     }
-    if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
+    if (total === 0) console.log(`${yellow('!')} ${bold(name)}: nothing here could be audited`);
+    else if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
     else {
       anyBad = true;
       const n = positions.size;
@@ -278,7 +304,11 @@ function printPublicReport(report, unreadable = []) {
       ? 'rip check --public: no package publishes a .rip entry here'
       : 'rip check --public: the published entry exports nothing');
   }
-  process.exit(anyBad ? 1 : 0);
+  // 1 for defects found, 2 for surface this audit never saw, 0 only for
+  // checked-and-clean. The walk's own depth budget is this tool's cost
+  // ceiling and no edit to the package clears it, so it annotates without
+  // deciding.
+  process.exit(anyBad ? 1 : (anyUnaudited ? 2 : 0));
 }
 
 // ── argument parsing ────────────────────────────────────────────────
@@ -838,6 +868,24 @@ if (compiled.size > 0) {
       };
       for (const item of compiled) if (item[1].pinnables.length) await probeOne(item);
 
+      // A finding's origin arrives as a position in the MIRROR. The report
+      // is about source, so each mirror is kept under the checker's own
+      // canonical spelling of its path — case-folded on a case-insensitive
+      // filesystem, and never the spelling this process happens to hold.
+      // One index for the run, shared by both passes below.
+      const byMirror = new Map();
+      for (const [fp, e] of compiled) {
+        if (e.mirrorPath !== undefined) byMirror.set(e.mirrorPath.toLowerCase(), { fsPath: fp, entry: e });
+      }
+      // Q1 spelled once: a declaration belongs to the package whose
+      // package.json is nearest it. Both passes ask it of a different
+      // package, so the package is the parameter.
+      const ownedBy = (pkgDir) => (declPath) => {
+        const owner = byMirror.get(String(declPath ?? '').toLowerCase());
+        if (owner === undefined) return false;
+        return nearestPackage(path.dirname(owner.fsPath)) === pkgDir;
+      };
+
       // ── PUBLIC PASS ── `--public`: what a CONSUMER's checker resolves
       // for every name a package publishes, and the path to the first `any`
       // inside it. The walk itself lives in
@@ -856,17 +904,22 @@ if (compiled.size > 0) {
           }).filter(Boolean))].sort()) {
             // The package's own mirrored tree: the ownership line, and the
             // only directory whose declarations this package can change.
-            const pkgMirrorDir = path.dirname(compiled.get(publicEntriesOf(dir)[0])?.mirrorPath ?? '');
-            // A finding's origin arrives as a position in the MIRROR. The
-            // report is about source, so each mirror is kept under the
-            // checker's own canonical spelling of its path — case-folded on
-            // a case-insensitive filesystem, and never the spelling this
-            // process happens to hold.
-            const byMirror = new Map();
-            for (const [fp, e] of compiled) {
-              if (e.mirrorPath !== undefined) byMirror.set(e.mirrorPath.toLowerCase(), { fsPath: fp, entry: e });
+            // Q1: a declaration is this package's when the package.json
+            // NEAREST it is this one. Mirrored paths arrive case-folded, so
+            // the index is keyed that way; a declaration this run never
+            // compiled (lib.dom, node types, a `.d.ts`) is in no package of
+            // ours and answers false, which is the correct answer and not a
+            // fallback.
+            const owns = ownedBy(dir);
+            const { entries: pkgEntries, patterns } = publicEntriesOf(dir);
+            // A package whose manifest names only patterns publishes surface
+            // this audit cannot enumerate. It has no entry to walk, and that
+            // is a floor rather than an absence — reporting nothing here is
+            // how "cannot enumerate" came to read as "nothing to enumerate".
+            if (pkgEntries.length === 0 && patterns > 0) {
+              report.push({ dir, entryFile: dir, rows: [], unexplored: 0, forwarded: patterns });
             }
-            for (const entryFile of publicEntriesOf(dir)) {
+            for (const entryFile of pkgEntries) {
               const entry = compiled.get(entryFile);
               // An entry the audit cannot read is not an absence of
               // findings, and never reports as one: an entry that does not
@@ -881,7 +934,7 @@ if (compiled.size > 0) {
               }
               const walked = await walkPublicEntry(session, {
                 mirrorFile: entry.mirrorPath,
-                pkgMirrorDir: pkgMirrorDir || path.dirname(entry.mirrorPath),
+                owns,
               });
               if (walked.unresolved !== null) {
                 unreadable.push({ entryFile, reason: walked.unresolved });
@@ -928,7 +981,7 @@ if (compiled.size > 0) {
                 }
                 row.defects = kept;
               }
-              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded });
+              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded + patterns });
             }
           }
         } finally {
@@ -1003,7 +1056,7 @@ if (compiled.size > 0) {
               if (entry?.mirrorPath === undefined) continue;
               const walked = await walkPublicEntry(session, {
                 mirrorFile: entry.mirrorPath,
-                pkgMirrorDir: path.dirname(entry.mirrorPath),
+                owns: ownedBy(nearestPackage(path.dirname(entryFile))),
                 only: names,
               }).catch(() => null);
               if (walked === null || walked.unresolved !== null) continue;

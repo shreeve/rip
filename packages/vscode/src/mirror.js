@@ -853,7 +853,7 @@ function manifestTarget(manifest, subpath) {
 }
 // The same entry when it is a `.rip` — the one the mirror builds a face
 // for. Anything else answers null here.
-function ripManifestTarget(manifest, subpath) {
+export function ripManifestTarget(manifest, subpath) {
   const target = manifestTarget(manifest, subpath);
   return target !== null && target.endsWith('.rip') ? target : null;
 }

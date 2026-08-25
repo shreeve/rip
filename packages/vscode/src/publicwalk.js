@@ -48,24 +48,71 @@ async function typeOfExport(ck, symbol) {
 // the language, not the API. Read off the declaration, which is the only
 // place the answer lives.
 //
-// A declaration's path is the checker's CANONICAL form: on a
-// case-insensitive filesystem it is case-folded, and need not match the
-// spelling this process holds. The comparison is case-insensitive for that
-// reason. A package that appears to own nothing descends into nothing, and
-// comes back fully typed.
-const canonical = (p) => String(p ?? '').toLowerCase();
-const declaredAt = (decl, dir) => {
-  const under = canonical(dir);
-  const p = canonical(decl?.path);
-  return p === under || p.startsWith(under + path.sep);
-};
-const declaredUnder = (sym, dir) => {
-  const under = canonical(dir);
-  return (sym.declarations ?? []).some((d) => {
-    const p = canonical(d?.path);
-    return p === under || p.startsWith(under + path.sep);
-  });
-};
+// The question is answered by the CALLER, through `owns`, because the answer
+// is "the package whose package.json is nearest this declaration" and only
+// the caller knows how a mirrored path maps back to a source file. A rule
+// spelled here as directory arithmetic gets the answer wrong for an entry
+// beside its package, an entry below it, a package nested inside it, and a
+// mirror rooted outside the workspace — each of which is a different special
+// case for a prefix and none of which is special for a manifest.
+//
+// The direction of a wrong answer is the whole reason for the care: a
+// package that appears to own nothing descends into nothing, and comes back
+// fully typed.
+const declaredAt = (decl, owns) => owns(decl?.path);
+const declaredUnder = (sym, owns) => (sym.declarations ?? []).some((d) => owns(d?.path));
+
+// What a module publishes, with every `export *` FOLLOWED to its target.
+//
+// A module's own export table lists a re-export as one opaque marker, not as
+// the names it forwards, so reading it alone reports a barrel — the ordinary
+// shape of a package index — as a surface with nothing on it. Each star is
+// therefore resolved through its own declaration: the clause's module
+// specifier names a module, and that module's exports are the names this one
+// publishes.
+//
+// A floor means the star could not be FOLLOWED — no module specifier, an
+// unresolvable module. It does not mean the star contributed no NAMES: a
+// star whose names are all shadowed by direct exports was followed
+// perfectly and hid nothing, and counting that as a floor fails a clean
+// package. Per declaration, so two unfollowable stars count two, which no
+// arithmetic on the merged marker symbol could recover.
+//
+// Direct exports win over forwarded ones, as they do at run time.
+async function exportsOfModule(ck, moduleSymbol) {
+  const entries = new Map();                 // symbol name -> symbol
+  const seen = new Set();                    // module ids, so a cycle ends
+  const queue = [moduleSymbol];
+  let unfollowed = 0;
+  // Breadth-first, because stars COMPOSE: a barrel's target is free to be
+  // another barrel, and stopping at the first hop loses everything behind
+  // it while reporting an empty, perfect surface. Breadth-first also gives
+  // shadowing for free — a name reached in fewer hops wins, and the entry's
+  // own direct exports are reached in none.
+  while (queue.length > 0) {
+    const mod = queue.shift();
+    if (seen.has(mod.id)) continue;
+    seen.add(mod.id);
+    const table = await mod.getExports().catch(() => null);
+    if (table == null) { unfollowed++; continue; }
+    for (const [, sym] of table) {
+      if (sym.flags & SymbolFlags.ExportStar) {
+        for (const decl of sym.declarations ?? []) {
+          const node = await decl.resolve().catch(() => null);
+          const spec = node?.moduleSpecifier;
+          const target = spec == null ? null : await ck.getSymbolAtLocation(spec).catch(() => null);
+          if (target == null) { unfollowed++; continue; }   // a star we cannot follow
+          queue.push(target);
+        }
+        continue;
+      }
+      // Never the table KEY: that is TypeScript's escaped form, where a
+      // leading `__` becomes `___` and matches no name a consumer imports.
+      if (!entries.has(sym.name)) entries.set(sym.name, sym);
+    }
+  }
+  return { entries: [...entries], unfollowed };
+}
 
 // Where an importer USES a name, and where that name ARRIVED, as
 // generated-text spans.
@@ -122,13 +169,13 @@ export async function useSitesOf(session, { mirrorFile, names }) {
 //
 // `never` is absent on purpose. It is the honest return of a function that
 // throws, and three of this repo's exports are exactly that.
-async function widthOf(ck, type, pkgDir) {
+async function widthOf(ck, type, owns) {
   if ((type.flags & TypeFlags.Any) !== 0) return 'any';
   if ((type.flags & TypeFlags.Unknown) !== 0) return 'unknown';
   if ((type.flags & TypeFlags.NonPrimitive) !== 0) return 'object';
   const symbol = await type.getSymbol();
   // The global `Function`: callable with any arguments, returning `any`.
-  if (symbol?.name === 'Function' && !declaredUnder(symbol, pkgDir)) return 'Function';
+  if (symbol?.name === 'Function' && !declaredUnder(symbol, owns)) return 'Function';
   // `{}` has no flag of its own — it is an object type with nothing in it.
   if ((type.flags & TypeFlags.Object) === 0) return null;
   // A MAPPED type has no members until its parameter is bound, and reading
@@ -178,7 +225,7 @@ async function declarationSiteOf(symbol) {
 // consumer meets first is the one worth printing. The depth limit bounds
 // COST, and what it cuts is unexamined rather than clean — that count
 // leaves with the verdict, never discarded.
-async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymbol, siblings) {
+async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol, siblings) {
   const seen = new Set();
   const found = [];
   // Polarity: which way the value travels at this position. The export is
@@ -191,7 +238,7 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymb
   for (let depth = 0; depth < maxDepth && level.length; depth++) {
     const next = [];
     for (const item of level) {
-      const width = await widthOf(ck, item.type, pkgDir);
+      const width = await widthOf(ck, item.type, owns);
       // `any` and `Function` are unchecked in either direction. Anything
       // else that carries nothing is a defect only where the consumer
       // READS, or where it arrived without an annotation to claim it.
@@ -229,7 +276,7 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymb
         }
       }
       for (const prop of await ck.getPropertiesOfType(item.type)) {
-        if (!declaredUnder(prop, pkgDir)) continue;
+        if (!declaredUnder(prop, owns)) continue;
         // A member that IS another published export stops the walk. It has
         // its own row, its own verdict, and one edit fixes it there;
         // repeating its defects under everything that happens to expose it
@@ -279,7 +326,7 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymb
         // that way (`[key: \`_${string}\`]: any`), which no consumer
         // writes and none of them can reach.
         if ((info.keyType.flags & (TypeFlags.String | TypeFlags.Number)) === 0) continue;
-        if (info.declaration !== undefined && !declaredAt(info.declaration, pkgDir)) continue;
+        if (info.declaration !== undefined && !declaredAt(info.declaration, owns)) continue;
         next.push({ type: info.valueType, at: `${item.at}[]`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
       }
       if (await item.type.isUnionType() || await item.type.isIntersectionType()) {
@@ -293,7 +340,7 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymb
         const members = await item.type.getTypes();
         for (const [i, member] of members.entries()) {
           const symbol = await member.getSymbol();
-          if (symbol != null && !declaredUnder(symbol, pkgDir)) continue;
+          if (symbol != null && !declaredUnder(symbol, owns)) continue;
           next.push({ type: member, at: `${item.at}|${i}`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
         }
       }
@@ -318,7 +365,7 @@ async function walkOne(ck, rootType, rootName, pkgDir, maxDepth, reads, rootSymb
 // took, rather than everything the module publishes. A count of the whole
 // surface says the same thing to every consumer of a package and so says
 // nothing about any of them.
-export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDepth = 10, only = null }) {
+export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null }) {
   const snapshot = await session.updateSnapshot({ openFiles: [mirrorFile] });
   const project = await snapshot.getDefaultProjectForFile(mirrorFile);
   if (!project) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
@@ -329,7 +376,8 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
 
   const rows = [];
   let unexplored = 0, forwarded = 0;
-  const exported = await moduleSymbol.getExports();
+  const { entries: exported, unfollowed } = await exportsOfModule(ck, moduleSymbol);
+  forwarded = unfollowed;
   // What else this entry publishes, so the walk can stop at it.
   const siblings = new Set();
   for (const [, sym] of exported) {
@@ -345,7 +393,7 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
     // is an ordinary shape, and reading it as an empty surface makes it a
     // perfectly typed one. It is counted apart from the walk's own limits
     // because the two do not share a remedy.
-    if (symbol.flags & SymbolFlags.ExportStar) { forwarded++; continue; }
+    if (symbol.flags & SymbolFlags.ExportStar) continue;   // counted once, when followed
     const { type, typeOnly } = await typeOfExport(ck, symbol);
     // A type prints as it was WRITTEN, which is not always what it means: an
     // annotation naming something unresolvable resolves to `any` while still
@@ -366,9 +414,16 @@ export async function walkPublicEntry(session, { mirrorFile, pkgMirrorDir, maxDe
     // hold either way.
     let rootSym = symbol;
     if (rootSym.flags & SymbolFlags.Alias) { try { rootSym = await ck.getAliasedSymbol(rootSym); } catch { /* keep it */ } }
-    const found = await walkOne(ck, type, name, pkgMirrorDir, maxDepth, typeOnly ? null : true, rootSym, siblings);
+    const found = await walkOne(ck, type, name, owns, maxDepth, typeOnly ? null : true, rootSym, siblings);
     unexplored += found.unexplored;
-    rows.push({ name, type: printed, kind: found.kind, why: found.why, at: found.at, origin: found.origin, defects: found.defects });
+    // Q3: three states, and the third is a fact about this AUDIT rather than
+    // about the code. A name declared in another package is published here
+    // all the same, but ownership rejects every position beneath it, so the
+    // walk descended into nothing and learned nothing. "Found no defect" and
+    // "was never able to look" are not the same answer, and only one of them
+    // is a clean bill.
+    const kind = found.kind === 'typed' && !declaredUnder(rootSym, owns) ? 'unaudited' : found.kind;
+    rows.push({ name, type: printed, kind, defects: found.defects });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name));
   return { rows, unexplored, forwarded, unresolved: null };

@@ -1049,6 +1049,225 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // report, so a compile failure has no other way out and must leave
   // through this one. An entry that does not compile publishes nothing a
   // consumer can resolve, and nothing-to-report is not the same answer.
+  // Q2a — what a package publishes is its MANIFEST's answer, and the mirror
+  // already computes that answer to decide which faces to build. A second
+  // reader is a second answer, and where they disagree `--public` audits
+  // files no consumer can reach while the mirror never compiled them.
+  //
+  // A subpath PATTERN is a third thing: real surface, not enumerable from
+  // the manifest alone. Under Q3 that is a floor — never "no entries", and
+  // never a reason to audit some other file instead.
+  test('--public resolves entries the way the mirror does, and floors what a manifest only patterns', () => {
+    // (a) Conditions pick one target, the way an importing consumer does.
+    const conditional = workspace({
+      'package.json': JSON.stringify({ name: '@q2a/cond', exports: { '.': { import: './a.rip', require: './b.rip' } } }),
+      'a.rip': 'export def fromImport(x)\n  x\n',
+      'b.rip': 'export def fromRequire(x)\n  x\n',
+    });
+    // (b) A pattern names a shape. It is surface, and it is unenumerable.
+    const patterned = workspace({
+      'package.json': JSON.stringify({ name: '@q2a/glob', exports: { './*': './src/*.rip' } }),
+      'src/thing.rip': 'export def thing(x)\n  x\n',
+      'index.rip': 'export def notPublished(x)\n  x\n',
+    });
+    // (c) No manifest opinion at all — index.rip is the conventional entry.
+    const bare = workspace({
+      'package.json': JSON.stringify({ name: '@q2a/bare' }),
+      'index.rip': 'export def only(x)\n  x\n',
+    });
+    try {
+      const a = check(conditional, ['--public']).stdout;
+      expect(a).toMatch(/fromImport/);
+      expect(a).not.toMatch(/fromRequire/);   // the mirror builds a face for one
+
+      const b = check(patterned, ['--public']);
+      expect(b.stdout).toContain('every count below is a floor');
+      expect(b.stdout).not.toMatch(/notPublished/);   // never audit an unpublished file
+      expect(b.status).toBe(2);
+
+      const c = check(bare, ['--public']);
+      expect(c.stdout).toMatch(/only/);
+      expect(c.status).toBe(1);
+    } finally {
+      for (const w of [conditional, patterned, bare]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Q3 — a published name is in exactly one of three states, and the exit
+  // status says which kinds occurred. Two of those states are facts about
+  // the CODE (clean, leaking); the third is a fact about this AUDIT (it did
+  // not see the surface). Mixing them is how "could not check" came to read
+  // as "checked and clean".
+  //
+  // Every published name appears BY NAME whatever its state — a name that
+  // vanishes takes the denominator with it, and a percentage whose
+  // denominator moves is not a measure of progress.
+  test('--public tells a clean name from a leaking one from one it never audited', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-q3-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      for (const p of ['lib', 'app']) fs.mkdirSync(path.join(dir, 'packages', p), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'node_modules', '@q3'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'package.json'),
+        JSON.stringify({ name: '@q3/lib', exports: { '.': './lib.rip' } }));
+      // One name that leaks and one that is clean, both declared HERE.
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'lib.rip'),
+        'export class Session\n  run: (x) -> x\n\nexport def solid(n: number): number\n  n\n');
+      fs.symlinkSync(path.join('..', '..', 'packages', 'lib'), path.join(dir, 'node_modules', '@q3', 'lib'));
+      // `app` publishes one of its own plus two it only forwards.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@q3/app', exports: { '.': './index.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'index.rip'),
+        "export { Session, solid } from '@q3/lib'\nexport def mine(n: number): number\n  n\n");
+
+      const own = check(path.join(dir, 'packages', 'lib'), ['--public']);
+      expect(own.stdout).toMatch(/✗ Session/);        // leaking, and it says where
+      expect(own.stdout).toMatch(/✓ solid/);          // clean
+      expect(own.stdout).toContain('1/2 exports fully typed');
+      expect(own.status).toBe(1);
+
+      const fwd = check(path.join(dir, 'packages', 'app'), ['--public']);
+      // All three published names are LISTED, none silently dropped.
+      for (const n of ['mine', 'Session', 'solid']) expect(fwd.stdout).toContain(n);
+      // The two it cannot audit are marked as such, not scored clean.
+      expect(fwd.stdout).toMatch(/not audited/);
+      // The denominator counts only what was audited, and says so.
+      expect(fwd.stdout).toContain('1/1 exports fully typed');
+      // Could-not-audit is neither pass nor defect.
+      expect(fwd.status).toBe(2);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // Q2b — a module's own export table carries `export * from` as a single
+  // opaque marker, so reading it alone reports a barrel as an empty surface.
+  // The names ARE published, so each star is followed to its target module
+  // and enumerated. What cannot be followed is a FLOOR: surface the audit
+  // never saw, which is neither typed nor leaking.
+  //
+  // The five arms are one test because the failure modes are each other's
+  // mirror image — a rule that floors correctly can invent floors, and a
+  // rule that never invents one can miss a dead star hiding beside a live
+  // one. Both directions have shipped here before.
+  test('--public follows each `export *` to its target, and floors only what it could not follow', () => {
+    const live = workspace({
+      'package.json': JSON.stringify({ name: '@q2/live', exports: { '.': './index.rip' } }),
+      'a.rip': 'export def leaf(x)\n  x\n',
+      'index.rip': "export * from './a.rip'\nexport def mine(n: number): number\n  n\n",
+    });
+    const dead = workspace({
+      'package.json': JSON.stringify({ name: '@q2/dead', exports: { '.': './index.rip' } }),
+      'index.rip': "export * from 'totally-not-installed-anywhere'\n",
+    });
+    const mixed = workspace({
+      'package.json': JSON.stringify({ name: '@q2/mixed', exports: { '.': './index.rip' } }),
+      'a.rip': 'export def good(n: number): number\n  n\n',
+      'index.rip': "export * from './a.rip'\nexport * from 'totally-not-installed-anywhere'\n",
+    });
+    // A barrel whose target is itself a barrel. Skipping the inner star
+    // loses everything behind it and reports an empty, perfect surface.
+    const nestedBarrel = workspace({
+      'package.json': JSON.stringify({ name: '@q2/nested', exports: { '.': './index.rip' } }),
+      'c.rip': 'export def deep(x)\n  x\n',
+      'b.rip': "export * from './c.rip'\n",
+      'index.rip': "export * from './b.rip'\n",
+    });
+    const shadowed = workspace({
+      'package.json': JSON.stringify({ name: '@q2/shadowed', exports: { '.': './index.rip' } }),
+      'a.rip': 'export def one(n: number): number\n  n\n',
+      'index.rip': "export * from './a.rip'\nexport def one(n: number): number\n  n\n",
+    });
+    try {
+      // (a) followed: the forwarded name is a row, audited, positioned in
+      // the file that declares it — and no floor, because nothing was missed.
+      const a = check(live, ['--public']);
+      expect(a.stdout).toMatch(/✗ leaf/);
+      expect(a.stdout).toMatch(/a\.rip:\d+:\d+\s+any at: leaf\(x\)/);
+      expect(a.stdout).toContain('1/2 exports fully typed');
+      expect(a.stdout).not.toContain('every count below is a floor');
+      expect(a.status).toBe(1);
+
+      // (b) unfollowable: a floor, and never a clean bill.
+      const b = check(dead, ['--public']);
+      expect(b.stdout).toContain('every count below is a floor');
+      expect(b.stdout).not.toContain('exports nothing');
+      expect(b.status).toBe(2);
+
+      // (c) a dead star does not hide behind a live one.
+      const c = check(mixed, ['--public']);
+      expect(c.stdout).toMatch(/✓ good/);            // the live star is enumerated
+      expect(c.stdout).toContain('every count below is a floor');   // the dead one still counts
+      expect(c.status).toBe(2);
+
+      // (e) stars compose: the names behind a barrel-of-barrels are
+      // published too, and are found by following through.
+      const e = check(nestedBarrel, ['--public']);
+      expect(e.stdout).toMatch(/✗ deep/);
+      expect(e.stdout).toMatch(/c\.rip:\d+:\d+\s+any at: deep\(x\)/);
+      expect(e.stdout).not.toContain('exports nothing');
+      expect(e.status).toBe(1);
+
+      // (d) a star whose names are shadowed by direct exports was followed
+      // successfully — nothing was missed, so nothing is floored.
+      const d = check(shadowed, ['--public']);
+      expect(d.stdout).not.toContain('every count below is a floor');
+      expect(d.status).toBe(0);
+    } finally {
+      for (const w of [live, dead, mixed, shadowed, nestedBarrel]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Q1 — a declaration belongs to the package whose package.json is NEAREST
+  // it, never to whichever directory the walk happened to start from.
+  //
+  // Ownership decides what the walk descends into, and a root that owns
+  // nothing descends into nothing and comes back fully typed, so every way
+  // of getting this wrong reads as a clean surface. Three shapes settle it
+  // together, because a rule that handles one by special case fails another:
+  // an entry BESIDE its package, an entry BELOW it, and a package NESTED
+  // inside it. Only "nearest package.json" answers all three at once.
+  test('--public owns a declaration by its nearest package.json, not by directory position', () => {
+    // (a) The manifest lists a subdirectory entry FIRST. The root entry's
+    // own members are still this package's.
+    const first = workspace({
+      'package.json': JSON.stringify({ name: '@q1/first', exports: { './sub': './sub/a.rip', '.': './index.rip' } }),
+      'sub/a.rip': 'export other: number = 1\n',
+      'index.rip': 'export lib = { helper: (x) -> x }\n',
+    });
+    // (b) The entry sits BELOW the package root while the implementation
+    // sits BESIDE it. Both are the package's, though neither is under the
+    // other — which a rule anchored on the entry's own directory misses.
+    const spread = workspace({
+      'package.json': JSON.stringify({ name: '@q1/spread', exports: { '.': './src/index.rip' } }),
+      'lib/thing.rip': 'export class Thing\n  run: (x) -> x\n',
+      'src/index.rip': "import { Thing } from '../lib/thing.rip'\nexport api = { t: Thing }\n",
+    });
+    // (c) A package NESTED inside the audited one. Its declarations are its
+    // own, and the parent must not answer for them.
+    const nested = workspace({
+      'package.json': JSON.stringify({ name: '@q1/outer', exports: { '.': './index.rip' } }),
+      'inner/package.json': JSON.stringify({ name: '@q1/inner', exports: { '.': './inner.rip' } }),
+      'inner/inner.rip': 'export class Helper\n  work: (x) -> x\n',
+      'index.rip': "import { Helper } from './inner/inner.rip'\nexport outer = { h: Helper }\n",
+    });
+    try {
+      const a = check(first, ['--public']).stdout;
+      expect(a).toContain('lib.helper(x)');           // descended into its own member
+      expect(a).toContain('1/2 exports fully typed');
+
+      const b = check(spread, ['--public']).stdout;
+      expect(b).toContain('api.t');                   // reached a member declared beside the entry
+      expect(b).toMatch(/lib\/thing\.rip:\d+:\d+/);  // and named its real position
+      expect(b).toContain('0/1 exports fully typed');
+
+      const c = check(nested, ['--public', 'index.rip']).stdout;
+      // The nested package's positions are ITS work, not the parent's.
+      expect(c).not.toMatch(/inner\/inner\.rip:\d+:\d+/);
+    } finally {
+      for (const d of [first, spread, nested]) fs.rmSync(d, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('--public reports an entry it cannot compile and refuses to exit 0', () => {
     const dir = workspace({
       // The entry parses and is refused by the emitter; the sibling
@@ -1096,28 +1315,6 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  // `export * from` forwards names without naming them, and the checker
-  // reports the whole clause as one marker symbol. Those names are
-  // published, so treating the marker as nothing reports a barrel — the
-  // ordinary shape of a package entry — as an empty, and therefore
-  // perfectly typed, surface.
-  test('--public says so when `export *` forwards names it cannot enumerate', () => {
-    const dir = workspace({
-      'leaf.rip': 'export def leaf(x)\n  x\n',
-      'index.rip': ["export * from './leaf.rip'", '', 'export def mine(n: number): number', '  n'].join('\n') + '\n',
-    });
-    fs.writeFileSync(path.join(dir, 'package.json'),
-      JSON.stringify({ name: 'barrel-pkg', exports: { '.': './index.rip' } }, null, 2));
-    try {
-      const out = check(dir, ['--public']);
-      expect(out.stdout).toContain('`export *` re-export not enumerated');
-      expect(out.stdout).toContain('every count below is a floor');
-      // The names it CAN see are still reported, and still counted.
-      expect(out.stdout).toMatch(/✓ mine/);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  }, 90_000);
 
   // A type can hold an `any` without being one and without exposing one as
   // a member: `any[]`, `Promise<any>` and `Record<string, any>` each hand a
