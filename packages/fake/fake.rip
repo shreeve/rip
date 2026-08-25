@@ -288,13 +288,20 @@ table = (text, delim = null) ->
       row[name] = if v is '' then null else v
     row
 
+# File-loading variants: csv reads a delimited file, comma by default —
+# override for anything else (csv path, ';'); tsv and psv are the tab
+# and pipe spellings of the same call.
+csv = (path, delim = ',') -> table Bun.file(path).text!, delim
+tsv = (path) -> csv! path, '\t'
+psv = (path) -> csv! path, '|'
+
 export fake = {
   seed, random, integer, sample, chance, maybe,
   numerify, letterify, pattern, digits, token, uuid,
   firstName, lastName, fullName, nickname, sex, age,
   email, username, domain, phone, fax, phoneType, areaCode,
   street, streetAddress, city, state, zip, company, profession, jobTitle,
-  word, words, sentence, date, datetime, unique, table,
+  word, words, sentence, date, datetime, unique, table, csv, tsv, psv,
 }
 
 # ==[ Schema-driven derivation (used by Model.factory) ]==

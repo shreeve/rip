@@ -2,6 +2,7 @@
 # fake tests — generators, determinism, and Model.factory
 # ==============================================================================
 
+import { rmSync } from 'node:fs'
 import { test, eq, ok, throws } from 'rip/testing'
 import { fake } from 'rip/fake'
 import * as mod from 'rip/fake'
@@ -121,6 +122,18 @@ test "table: csv/tsv/psv parse identically — one dialect, three delimiters", -
   eq fake.table(tsv), want
   eq fake.table('a;b\n1;2', ';'), [{ a: '1', b: '2' }]   # explicit delimiter
   throws -> fake.table 'just-a-header'
+
+test! "csv/tsv/psv load files; csv delimiter defaults to comma, overridable", ->
+  dir = "/tmp/rip-fake-test-#{process.pid}"
+  want = [{ a: '1', b: '2' }]
+  Bun.write! "#{dir}/t.csv", "a, b\n1, 2"
+  Bun.write! "#{dir}/t.tsv", "a\tb\n1\t2"
+  Bun.write! "#{dir}/t.psv", "| a | b |\n| 1 | 2 |"
+  eq fake.csv!("#{dir}/t.csv"), want
+  eq fake.tsv!("#{dir}/t.tsv"), want
+  eq fake.psv!("#{dir}/t.psv"), want
+  eq fake.csv!("#{dir}/t.psv", '|'), want   # csv is the general form
+  rmSync dir, recursive: true
 
 test "maybe honors probability edges; unique refuses exhaustion", ->
   eq fake.maybe(0, -> 'x'), null
