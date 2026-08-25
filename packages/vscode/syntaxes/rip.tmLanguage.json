@@ -1358,6 +1358,14 @@
             "2": { "name": "variable.other.property.rip" },
             "3": { "name": "keyword.operator.modifier.rip" }
           }
+        },
+        {
+          "comment": "Bare field: a required/optional marker with the type elided (defaults to string) and no trailer at all — `name!`, `label?`. The rule above needs trailing content to fire, so these fell through to the dammit-CALL painter. The modifier is REQUIRED here, so a plain identifier alone on a line inside an expression body stays untouched.",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)(?=\\s*$)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
+          }
         }
       ]
     }
