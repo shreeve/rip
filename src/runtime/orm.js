@@ -631,7 +631,7 @@ function finishModelNorm(def, norm) {
     else if (d.name === 'softDelete') softDelete = true;
     else if (d.name === 'table') table = d.args[0].name;
     else if (d.name === 'tableWas') tableWas = d.args[0].name;
-    else if (d.name === 'primaryKey') primaryKey = d.args[0];
+    else if (d.name === 'primary') primaryKey = d.args[0];
     const rel = normalizeDirectiveRelation(def, d);
     if (rel) {
       if (relations.has(rel.accessor)) collision(rel.accessor, 'relation');
@@ -641,6 +641,14 @@ function finishModelNorm(def, norm) {
       if (norm.derived.has(rel.accessor)) collision(rel.accessor, 'derived');
       if (norm.hooks.has(rel.accessor)) collision(rel.accessor, 'hook');
       relations.set(rel.accessor, rel);
+    }
+  }
+
+  // The inline spelling: '@primary' on the field line serializes as a
+  // field flag rather than a directive; it names itself.
+  if (!primaryKey) {
+    for (const [n, f] of norm.fields) {
+      if (f.primary) { primaryKey = { name: n }; break; }
     }
   }
 
@@ -666,13 +674,13 @@ function finishModelNorm(def, norm) {
   // These are the only two coherent readings, and the declaration
   // settles which:
   //
-  //   @primaryKey patientId          nothing declares patientId, so
+  //   @primary patientId             nothing declares patientId, so
   //                                  nothing says what it holds — it is
   //                                  the runtime's INTEGER surrogate:
   //                                  sequence default, RETURNING
   //                                  absorption, caller input refused
   //
-  //   @primaryKey mrn                mrn IS declared, with a type and
+  //   @primary mrn                   mrn IS declared, with a type and
   //   mrn! string                    constraints — a NATURAL key the
   //                                  caller supplies, which the INSERT
   //                                  writes like any other column
@@ -682,8 +690,8 @@ function finishModelNorm(def, norm) {
   // and an undeclared natural key would be a column with no type. The
   // two facts are one fact, so no separate flag states it.
   //
-  // It takes BOTH declarations, though — an @primaryKey naming the
-  // field. A bare `id! integer` with no @primaryKey keeps colliding as
+  // It takes BOTH declarations, though — an @primary naming the
+  // field. A bare `id! integer` with no @primary keeps colliding as
   // it always has, because someone writing that means "I have an id",
   // not "turn off the sequence", and the default name is exactly where
   // a silent posture flip would be unnoticeable.
@@ -695,17 +703,17 @@ function finishModelNorm(def, norm) {
   }
   if (pkField) {
     if (pkField.optional === true || pkField.required !== true) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "the primary key '" + norm.primaryKey + "' is declared optional — a row's " +
         'identity is never absent; declare it required (!)');
     }
     if (pkField.array === true) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "the primary key '" + norm.primaryKey + "' is declared as an array — a primary key is one value");
     }
     for (const d of norm.directives) {
       if (d.name === 'idStart') {
-        throw modelError(def, norm.primaryKey, 'primaryKey',
+        throw modelError(def, norm.primaryKey, 'primary',
           "@idStart seeds the sequence behind a runtime-managed primary key, but '" +
           norm.primaryKey + "' is declared as a field, which makes it caller-supplied — " +
           'there is no sequence to seed. Drop @idStart, or drop the field declaration');
@@ -809,7 +817,7 @@ function finishModelNorm(def, norm) {
   if (norm.naturalKey) {
     const fieldColumn = columnOf.get(norm.primaryKey);
     if (primaryKey?.column !== undefined && primaryKey.column !== fieldColumn) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "@primaryKey names column '" + primaryKey.column + "' but field '" + norm.primaryKey +
         "' reads column '" + fieldColumn + "' — state the column once, on the field");
     }

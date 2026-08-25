@@ -148,7 +148,7 @@ function isLiteralColumn(col) {
 //   'name'    @table UserProfile          a table name; bare is a
 //             @table "USER_MASTER"        logical name Rip snake_cases,
 //                                         quoted is the literal table
-//   'field'   @primaryKey patientId       a camelCase property name and
+//   'field'   @primary patientId          a camelCase property name and
 //             …, {column: "PATIENT_ID"}   the column it reads, same pair
 //                                         a declared field spells
 const MODEL_DIRECTIVES = {
@@ -164,7 +164,7 @@ const MODEL_DIRECTIVES = {
   idStart: 'int',
   table: 'name',
   tableWas: 'name',
-  primaryKey: 'field',
+  primary: 'field',
 };
 
 // Directives a :model declares at most once. For the argument-carrying
@@ -172,7 +172,7 @@ const MODEL_DIRECTIVES = {
 // read loops; for the argument-less pair (@timestamps, @softDelete) a
 // second occurrence is a duplicate declaration of a once-thing — both
 // layers reject it rather than tolerating it idempotently.
-const ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 'timestamps', 'softDelete'];
+const ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primary', 'timestamps', 'softDelete'];
 
 // Plain arrays, not Sets: at this size `includes` beats a hash lookup
 // and the error messages below `.join(', ')` them directly instead of

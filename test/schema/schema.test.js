@@ -353,22 +353,22 @@ describe('schema DSL: loud rejections', () => {
   });
 
   // A surrogate primary key is a property↔column pair like any
-  // field's, so `@primaryKey pid, {column: "PID"}` puts 'pid' in
+  // field's, so `@primary pid, {column: "PID"}` puts 'pid' in
   // property space and `@index [pid]` resolves to column 'PID' —
   // exactly as the runtime's columnFor resolves it.
   test('@index/@unique resolve the surrogate primary key through its {column:}', () => {
-    const pk = 'U = schema :model\n  name! string\n  @primaryKey pid, {column: "PID"}\n  ';
+    const pk = 'U = schema :model\n  name! string\n  @primary pid, {column: "PID"}\n  ';
     expect(() => tokenize(pk + '@index [pid]')).not.toThrow();
     expect(() => tokenize(pk + '@unique [pid]')).not.toThrow();
     expect(() => tokenize(pk + '@index [:PID]')).not.toThrow();
     // A natural key resolves through its field declaration.
-    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primaryKey mrn\n  @index [mrn]')).not.toThrow();
+    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primary mrn\n  @index [mrn]')).not.toThrow();
     // A genuinely unknown name still rejects with the column list.
     lexFails(pk + '@index [nope]', /@index: unknown column 'nope' — the table has: PID, name/);
     // The descriptor carries the pair the runtime resolves: the pk's
     // property→column mapping beside the index written in field space.
     const desc = new Function('__schema', compile(pk + '@index [pid]').code + '\nreturn U;')((d) => d);
-    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey').args[0])
+    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'primary').args[0])
       .toEqual({ name: 'pid', column: 'PID' });
     expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'index').args[0].fields)
       .toEqual(['pid']);
@@ -413,8 +413,20 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field 'a' option 'wat' — known options: column, was/);
     lexFails('U = schema :model\n  a! string, {was: 5}', /'was' names a database column, so it is QUOTED/);
     lexFails('U = schema :model\n  a! string, {was: "x"}, {was: "y"}', /more than one '\{…\}' attrs bracket/);
-    lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*only inline attribute is '@unique'/);
+    lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*inline attributes are '@unique' and '@primary'/);
     lexFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
+  });
+
+  test('inline @primary: one identity, one spelling, :model-only', () => {
+    lexFails('U = schema :model\n  a! string @primary\n  b! string @primary',
+      /both 'a' and 'b' declare '@primary' — a row has one identity/);
+    lexFails('U = schema :model\n  @primary a\n  a! string @primary',
+      /'@primary a' and inline '@primary' on field 'a' are two answers to one question/);
+    lexFails('M = schema :mixin\n  a! string @primary',
+      /inline '@primary' on field 'a' is :model-only — a mixin cannot declare the primary key/);
+    // The compact spellings: elided type defaults to string; the comma
+    // before a transform is optional after an inline attribute.
+    expect(() => tokenize("U = schema :model\n  id! @primary -> it.id or 'x'\n  n! string")).not.toThrow();
   });
 
   test('a field and a directive owning one column collide (mixin-free models)', () => {

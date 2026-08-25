@@ -71,7 +71,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   | | writes | means |
   |---|---|---|
   | `@table UserProfile` / `@table "USER_MASTER"` | bare or quoted | the table |
-  | `@primaryKey patientId, {column: "PATIENT_ID"}` | bare + quoted | the pk property and its column |
+  | `@primary patientId, {column: "PATIENT_ID"}` | bare + quoted | the pk property and its column |
   | `{column: "MRN_NBR"}` on a field | quoted | the column that field reads |
   | `{as: author}` on a relation | bare | the accessor |
   | `{foreignKey: "author_id"}` | quoted | the FK column |
@@ -104,21 +104,21 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 - **Natural keys, `hasOne through`, and writing a join model.**
 
   **Declaring the pk as a field is what makes it caller-supplied** —
-  alongside an explicit `@primaryKey` naming it. There is no third
+  alongside an explicit `@primary` naming it. There is no third
   reading: a declared pk field with a surrogate posture would be a
   `string` field over an INTEGER sequence column, and an undeclared
   natural key would be a column with no type. So no separate flag
   states it.
 
   ```
-  @primaryKey patientId        nothing declares it → the runtime's
+  @primary patientId        nothing declares it → the runtime's
                                INTEGER surrogate, unchanged
-  @primaryKey mrn              mrn is declared, with a type and
+  @primary mrn              mrn is declared, with a type and
   mrn! string                  constraints → the caller supplies it
   ```
 
   It takes BOTH declarations on purpose. A bare `id! integer` with no
-  `@primaryKey` stays exactly the collision it always was, because the
+  `@primary` stays exactly the collision it always was, because the
   default name is precisely where a silent posture flip would go
   unnoticed — the error now names the escape instead of just refusing.
 
@@ -291,7 +291,7 @@ Bucket A is the set with **no workaround** — missing one disqualifies
 the table entirely; raw `query!` still reads it, you just get rows
 instead of instances.
 
-**Shipped** (23): `@table`, `@tableWas`, `@primaryKey` (property +
+**Shipped** (23): `@table`, `@tableWas`, `@primary` (property +
 column), natural keys, `@idStart`, `{column:}`, `{was:}`, nullability
 (`!`/`?`), `[default]`, `@unique` (field and composite), `@index`,
 `@timestamps`, `@softDelete`, the three relation kinds, `{foreignKey:}`,
@@ -322,7 +322,7 @@ answering its open question.**
 
 ```
 Membership = schema :model
-  @primaryKey [userId, teamId]
+  @primary [userId, teamId]
   userId! integer
   teamId! integer
 ```

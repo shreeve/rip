@@ -45,6 +45,7 @@ const field = (name, typeName = 'string', opts = {}) => ({
   typeName,
   array: opts.array === true,
   ...(opts.unique ? { unique: true } : {}),
+  ...(opts.primary ? { primary: true } : {}),
   ...(opts.attrs ? { attrs: opts.attrs } : {}),
   ...(opts.literals ? { literals: opts.literals } : {}),
   ...(opts.constraints ? { constraints: opts.constraints } : {}),
@@ -801,7 +802,7 @@ describe('orm: paired reference — relations and eager loading', () => {
     await paired(async (k) => {
       k.__schema(model('Country',
         field('code'),
-        dir('primaryKey', { name: 'code' })));
+        dir('primary', { name: 'code' })));
       const City = k.__schema(model('City', field('name'),
         dir('belongsTo', { target: 'Country', as: 'home' })));
       const sql = City.toSQL();
@@ -3062,17 +3063,17 @@ describe('orm: runtime delivery', () => {
     ]);
   });
 
-  // ── @primaryKey and {column:} ─────────────────────────────────────
+  // ── @primary and {column:} ─────────────────────────────────────
   //
   // Both name the same pair — a PROPERTY and the COLUMN behind it —
   // and the split is what makes an inherited table addressable at all:
   // `PATIENT_ID`/`MRN_NBR` in the SQL, `patientId`/`mrn` in the code.
 
-  test('@primaryKey renames the pk property and its column, everywhere both are used', async () => {
+  test('@primary renames the pk property and its column, everywhere both are used', async () => {
     const src = [
  'Patient = schema :model',
  '  @table "MDM_PATIENT"',
- '  @primaryKey patientId, {column: "PATIENT_ID"}',
+ '  @primary patientId, {column: "PATIENT_ID"}',
  '  mrn! string, {column: "MRN_NBR"}',
     ].join('\n');
     const { code } = compile(src);
@@ -3371,7 +3372,7 @@ describe('orm: runtime delivery', () => {
 
   // ── natural primary keys ──────────────────────────────────────────
   //
-  // Declaring the pk as a field — alongside an explicit @primaryKey
+  // Declaring the pk as a field — alongside an explicit @primary
   // naming it — is what makes it caller-supplied. It takes BOTH: a
   // bare `id! integer` stays the collision it always was, because the
   // default name is exactly where a silent posture flip would go
@@ -3380,7 +3381,7 @@ describe('orm: runtime delivery', () => {
   test('a natural key is the caller\'s to supply, and the whole write path follows', async () => {
     const src = [
  'Patient = schema :model',
- '  @primaryKey mrn',
+ '  @primary mrn',
  '  mrn!  string, {column: "MRN_NBR"}',
  '  name! string',
     ].join('\n');
@@ -3427,12 +3428,24 @@ describe('orm: runtime delivery', () => {
       // the JSON-Schema export says string, not the surrogate's integer
       expect(P.toJSONSchema().properties.mrn).toEqual({ type: 'string' });
     });
+
+    // The inline spelling reaches the runtime as a field flag and
+    // lands in the identical natural-key posture.
+    const inline = compile('Country = schema :model\n  iso! string @primary\n  name! string').code;
+    await K4.scope(async () => {
+      K4.setAdapter(recordingAdapter());
+      const C = new Function('__schema', `${inline}\nreturn Country;`)(rt4.__schema);
+      const spec = C._tableSpec();
+      expect(spec.sequence).toBeNull();
+      expect(spec.primaryKey).toBe('iso');
+      expect(C.toSQL()).toContain('"iso" VARCHAR PRIMARY KEY');
+    });
   });
 
   test('a foreign key is as wide as the key it points at', async () => {
     const src = [
  'Country = schema :model',
- '  @primaryKey iso',
+ '  @primary iso',
  '  iso!  string',
  '  name! string',
  '',
@@ -3452,20 +3465,20 @@ describe('orm: runtime delivery', () => {
   });
 
   test('it takes BOTH declarations — a bare pk field is still a collision', async () => {
-    // no @primaryKey: `id` is the runtime's, and saying otherwise is
+    // no @primary: `id` is the runtime's, and saying otherwise is
     // an error that names the escape
     expect(() => compile('U = schema :model\n  id! integer\n  n! string'))
-      .toThrow(/field 'id' collides with the runtime-managed primary key.*write '@primaryKey id' to make it a caller-supplied natural key/s);
+      .toThrow(/field 'id' collides with the runtime-managed primary key.*write '@primary id' to make it a caller-supplied natural key/s);
     // …and the escape works
-    expect(() => compile('U = schema :model\n  @primaryKey id\n  id! uuid\n  n! string')).not.toThrow();
+    expect(() => compile('U = schema :model\n  @primary id\n  id! uuid\n  n! string')).not.toThrow();
     // a caller-supplied key has nothing generating it, so it is
     // required, scalar, and has no sequence to seed
-    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn? string'))
+    expect(() => compile('U = schema :model\n  @primary mrn\n  mrn? string'))
       .toThrow(/primary key 'mrn' is declared optional/);
-    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn! string\n  @idStart 5'))
+    expect(() => compile('U = schema :model\n  @primary mrn\n  mrn! string\n  @idStart 5'))
       .toThrow(/there is no sequence to seed/);
     // and the column is stated once, on the field
-    expect(() => compile('U = schema :model\n  @primaryKey mrn, {column: "A"}\n  mrn! string, {column: "B"}'))
+    expect(() => compile('U = schema :model\n  @primary mrn, {column: "A"}\n  mrn! string, {column: "B"}'))
       .toThrow(/state the column once, on the field/);
   });
 
@@ -3477,14 +3490,14 @@ describe('orm: runtime delivery', () => {
           return 'no error';
         } catch (e) { return e.message; }
       };
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn', 'string', { optional: true })]))
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn', 'string', { optional: true })]))
         .toMatch(/primary key 'mrn' is declared optional/);
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), dir('idStart', { value: 5 })]))
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn'), dir('idStart', { value: 5 })]))
         .toMatch(/there is no sequence to seed/);
       expect(said([field('id', 'integer')]))
         .toMatch(/id collides with the runtime-managed primary key/);
       // the legal shape stays legal
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
     });
   });
 

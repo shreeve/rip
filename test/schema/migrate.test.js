@@ -584,7 +584,7 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
 
   test('a surrogate→natural posture flip on the same column name blocks', async () => {
     const r = await run4(async (deployedRef) => {
-      K4.__schema(model('User', dir('primaryKey', { name: 'id' }), field('id', 'string'), field('name')));
+      K4.__schema(model('User', dir('primary', { name: 'id' }), field('id', 'string'), field('name')));
       deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
       return mig.plan();
     });
@@ -1465,7 +1465,7 @@ describe('migrate: rename-signal rejections — ambiguity is loud, never a silen
   // classed `safe`. There is no ALTER that moves a primary key.
   test('a primary-key rename is BLOCKED, not planned as add + drop', async () => {
     const steps = await plan4(
-      () => K4.__schema(model('Patient', dir('primaryKey', { name: 'patientId' }), field('name'))),
+      () => K4.__schema(model('Patient', dir('primary', { name: 'patientId' }), field('name'))),
       [table('patients', [col('name', 'VARCHAR', { notNull: true })])],
     );
     expect(steps.map((x) => [x.table, x.kind, x.class]))
@@ -1478,7 +1478,7 @@ describe('migrate: rename-signal rejections — ambiguity is loud, never a silen
   // could not see: it reported no steps at all.
   test('a natural key that drifted from its deployed column still diffs', async () => {
     const steps = await plan4(
-      () => K4.__schema(model('Country', dir('primaryKey', { name: 'iso' }),
+      () => K4.__schema(model('Country', dir('primary', { name: 'iso' }),
         field('iso', 'string', { constraints: { max: 2 } }), field('name'))),
       [{
         name: 'countries', sequence: null, primaryKey: 'iso', indexes: [], foreignKeys: [],

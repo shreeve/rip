@@ -469,10 +469,11 @@ class SchemaDef {
             name: e.name,
             required: e.modifiers.includes('!'),
             optional: e.modifiers.includes('?'),
-            // unique/attrs are persistence metadata riding the field
-            // (inline @unique, {was:} column renames) — inert for
-            // validation, read by the persistence layer's DDL.
+            // unique/primary/attrs are persistence metadata riding the
+            // field (inline @unique/@primary, {was:} column renames) —
+            // inert for validation, read by the persistence layer.
             unique: e.unique === true,
+            primary: e.primary === true,
             attrs: e.attrs || null,
             typeName: e.typeName,
             literals: e.literals || null,
@@ -1702,6 +1703,7 @@ function derive(source, transform) {
     entries.push({
       tag: 'field', name: f.name, modifiers: mods,
       unique: f.unique === true,
+      primary: f.primary === true,
       attrs: f.attrs || null,
       typeName: f.typeName, array: f.array,
       literals: f.literals || null,
