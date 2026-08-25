@@ -677,10 +677,15 @@ sourceHashes = (paths) ->
           .filter((entry) -> entry.isDirectory() and not entry.name.startsWith('.'))
           .map((entry) -> entry.name)
           .sort()
-        rash JSON.stringify(names)
+        rash TextEncoder.new().encode(JSON.stringify(names))
       else
         rash readFileSync(path)
-    catch then null
+    catch error
+      # Absence is data (null reads as 'missing' in checks). Anything
+      # else is a bug in THIS code and must stay loud — a swallowed
+      # TypeError here once made the directory branch a silent no-op.
+      throw error unless error.code in ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ELOOP']
+      null
     { path, hash }
 
 # The browser runtime ship set: the artifacts the site serves under
