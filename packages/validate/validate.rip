@@ -269,6 +269,10 @@ SYNC_ONLY = Set.new ['[object AsyncFunction]', '[object GeneratorFunction]', '[o
 # and the `~:name` schema-coercer table. The coercer registers first,
 # so a coercer-name collision rejects loudly and leaves the validator
 # registry unchanged; the two tables never disagree about a name.
+# Symbols are the vocabulary's native spelling — `:email` and 'email'
+# name the same validator everywhere a type name is accepted.
+nameOf = (name) -> if typeof name is 'symbol' then Symbol.keyFor(name) else name
+
 define = (name, fn, raw) ->
   fail "invalid validator name '#{name}'" unless typeof name is 'string' and NAME.test name
   fail "validator '#{name}' is already registered" if registry.has name
@@ -298,15 +302,15 @@ define name, fn, RAW.has(name) for own name, fn of BUILTIN
 export def registerValidator(name, fn, opts = {})
   unless opts.raw is undefined or typeof opts.raw is 'boolean'
     fail "validator '#{name}' raw flag must be boolean"
-  define name, fn, opts.raw is true
+  define nameOf(name), fn, opts.raw is true
 
 export def getValidator(name)
-  registry.get(name)?.prepared
+  registry.get(nameOf name)?.prepared
 
 # Whether a validator takes its value untouched: the seam callers
 # consult instead of hardcoding the raw set. Unknown names answer false.
 export def isRawType(name)
-  registry.get(name)?.raw is true
+  registry.get(nameOf name)?.raw is true
 
 export def validatorNames()
   Array.from(registry.keys()).sort()
@@ -314,6 +318,7 @@ export def validatorNames()
 # Apply a validator to a value in hand. Raw validators receive the value
 # untouched; every other validator receives its string form.
 export def check(value, type)
+  type = nameOf type
   entry = registry.get type
   fail "unknown validator '#{type}'" unless entry
   entry.fn if entry.raw then value else String(value ?? '')

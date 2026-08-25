@@ -878,6 +878,9 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
     for part in name.split('.')
       break unless v? and typeof v is 'object'
       v = v[part]
+  # Symbols are the type vocabulary's native spelling — `read 'email', :email!`
+  # and `read 'email', 'email!'` are the same call (suffixes ride the symbol).
+  type = Symbol.keyFor(type) if typeof type is 'symbol'
   return v if type is 'raw'
   v = v.trim() if typeof v is 'string'
 

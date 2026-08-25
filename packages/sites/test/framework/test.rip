@@ -238,6 +238,20 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   ok warnings.some((message) -> message.includes('database password'))
   ok warnings.some((message) -> message.includes('handled here'))
 
+test! 'read takes symbol types — :email! and :phone? spell the vocabulary', ->
+  resetGlobals()
+  post '/sym' ->
+    mail = read 'mail', :email!
+    phon = read 'phone', :phone?
+    { mail, phon }
+  good = handle! jsonRequest('POST', '/sym', { mail: '  A@B.CO ', phone: '(801) 555-2000' })
+  eq good.status, 200
+  eq good.json!, { mail: 'a@b.co', phon: '(801) 555-2000' }
+  missing = handle! jsonRequest('POST', '/sym', { phone: '(801) 555-2000' })
+  eq missing.status, 400   # :email! required
+  bad = handle! jsonRequest('POST', '/sym', { mail: 'a@b.co', phone: 'call me' })
+  eq bad.status, 422       # :phone? loud-optional, supplied but invalid
+
 test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
   error {}   # nothing wrong -> nothing thrown; the validate stanza needs no guard
   caught = null
