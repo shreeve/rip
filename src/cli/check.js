@@ -34,7 +34,7 @@ import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vsco
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
-import { createPublicSession, walkPublicEntry, useSitesOf } from '../../packages/vscode/src/publicwalk.js';
+import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
 import { importBindingsOf } from '../../packages/vscode/src/scopes.js';
 import { bareRipSpecifierTarget } from '../../packages/vscode/src/mirror.js';
 
@@ -244,7 +244,9 @@ function printPublicReport(report, unreadable = []) {
           // declaration that has to change — one lambda reached through six
           // verbs is one edit, not six defects.
           for (const d of (r.defects?.length ? r.defects : [r])) {
-            positions.add(d.site === undefined ? `at:${d.at}` : `${d.site.file}|${d.site.line}|${d.site.character}`);
+            // Counted per DECLARATION, the same identity the walk used —
+            // several declarations can map back to one source line.
+            positions.add(d.origin ? `${d.origin.path}|${d.origin.start}` : `at:${d.at}`);
             const where = locate(d);
             const pad = ' '.repeat(Math.max(0, locw - where.length));
             // Spelled like a diagnostic: the location carries the color and
@@ -912,6 +914,18 @@ if (compiled.size > 0) {
             // fallback.
             const owns = ownedBy(dir);
             const { entries: pkgEntries, patterns } = publicEntriesOf(dir);
+            // What the PACKAGE publishes, across every entry, before any
+            // walk — the sibling stop asks "does another row cover this?",
+            // and a package publishes from all of its entries, not just the
+            // one being walked.
+            const siblingIds = new Map();
+            for (const entryFile of pkgEntries) {
+              const e = compiled.get(entryFile);
+              if (e?.mirrorPath === undefined) continue;
+              for (const [id, pol] of await exportIdsOf(session, e.mirrorPath)) {
+                if (!siblingIds.has(id)) siblingIds.set(id, pol);
+              }
+            }
             // A package whose manifest names only patterns publishes surface
             // this audit cannot enumerate. It has no entry to walk, and that
             // is a floor rather than an absence — reporting nothing here is
@@ -935,6 +949,7 @@ if (compiled.size > 0) {
               const walked = await walkPublicEntry(session, {
                 mirrorFile: entry.mirrorPath,
                 owns,
+                siblingIds: new Map(siblingIds),
               });
               if (walked.unresolved !== null) {
                 unreadable.push({ entryFile, reason: walked.unresolved });
@@ -961,25 +976,13 @@ if (compiled.size > 0) {
                 // that never existed in the source, and its type follows the
                 // parameter. Annotating the parameter answers both, so the
                 // parameter is the finding and the field is its shadow.
-                const fromParam = new Set();
-                for (const d of row.defects ?? []) {
-                  const p = /\(([A-Za-z_$][\w$]*)\)$/.exec(d.at);
-                  if (p !== null) fromParam.add(p[1]);
-                }
-                const atSite = new Set();
-                const kept = [];
-                for (const d of row.defects ?? []) {
-                  const f = /#([A-Za-z_$][\w$]*)$/.exec(d.at);
-                  if (f !== null && fromParam.has(f[1])) continue;
-                  d.site = toSite(d.origin);
-                  const key = d.site === undefined
-                    ? `at:${d.at}`
-                    : `${d.site.file}|${d.site.line}|${d.site.character}`;
-                  if (atSite.has(key)) continue;
-                  atSite.add(key);
-                  kept.push(d);
-                }
-                row.defects = kept;
+                // Identity is the DECLARATION the walk found, which it has
+                // already deduplicated. Re-keying on the mapped source
+                // position collapses distinct declarations that share a
+                // line — every field a constructor synthesizes carries the
+                // constructor's position — and reports less work than there
+                // is. The mapped position is for display.
+                for (const d of row.defects ?? []) d.site = toSite(d.origin);
               }
               report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded + patterns });
             }

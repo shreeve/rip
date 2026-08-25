@@ -33,12 +33,8 @@ export function createPublicSession(mirrorRoot) {
 
 // The type a published name resolves to, following `export { X }` to what X
 // actually is.
-async function typeOfExport(ck, symbol) {
-  let sym = symbol;
-  if (sym.flags & SymbolFlags.Alias) {
-    try { sym = await ck.getAliasedSymbol(sym); } catch { /* keep the alias */ }
-  }
-  const typeOnly = Boolean((sym.flags & TYPE_ONLY) && !(sym.flags & VALUE_LIKE));
+async function typeOfExport(ck, sym) {
+  const typeOnly = isTypeOnly(sym);
   const type = await (typeOnly ? ck.getDeclaredTypeOfSymbol(sym) : ck.getTypeOfSymbol(sym));
   return { type, typeOnly };
 }
@@ -61,6 +57,41 @@ async function typeOfExport(ck, symbol) {
 // fully typed.
 const declaredAt = (decl, owns) => owns(decl?.path);
 const declaredUnder = (sym, owns) => (sym.declarations ?? []).some((d) => owns(d?.path));
+
+// What `export { X }` actually names. Spelled once: the sibling stop
+// compares identity against the RESOLVED symbol, and a second copy that
+// stopped following the alias would leave the two describing different
+// symbols and the stop would quietly never fire.
+async function resolveAlias(ck, symbol) {
+  if (!(symbol.flags & SymbolFlags.Alias)) return symbol;
+  try { return await ck.getAliasedSymbol(symbol); } catch { return symbol; }
+}
+
+// A name that is only ever a type has no value to take the type OF, so its
+// row is walked undirected and never evaluates read-side width.
+const isTypeOnly = (sym) => Boolean((sym.flags & TYPE_ONLY) && !(sym.flags & VALUE_LIKE));
+
+// Every symbol a module publishes, with the POLARITY its own row is walked
+// from. Collected across all of a package's entries before any walk: a
+// package publishes from every entry its manifest names, so what it
+// publishes is a property of the package, not of whichever entry is in hand.
+export async function exportIdsOf(session, mirrorFile) {
+  const ids = new Map();
+  const snapshot = await session.updateSnapshot({ openFiles: [mirrorFile] });
+  const project = await snapshot.getDefaultProjectForFile(mirrorFile);
+  if (!project) return ids;
+  const ck = project.checker;
+  const source = await project.program.getSourceFile(mirrorFile);
+  if (source === undefined) return ids;
+  const moduleSymbol = await ck.getSymbolAtLocation(source);
+  if (!moduleSymbol) return ids;
+  const { entries } = await exportsOfModule(ck, moduleSymbol);
+  for (const [, sym] of entries) {
+    const s = await resolveAlias(ck, sym);
+    ids.set(s.id, isTypeOnly(s) ? null : true);
+  }
+  return ids;
+}
 
 // What a module publishes, with every `export *` FOLLOWED to its target.
 //
@@ -265,6 +296,17 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
           // A constructor's return is the INSTANCE — the half of a class no
           // property enumeration reaches, since enumerating a class yields
           // its statics.
+          // The instance a constructor yields carries the constructor's
+          // parameters with it, so a field synthesized from `@name = param`
+          // can be recognised where the two TYPES are in hand. Sharing a
+          // name is not evidence of the assignment; sharing a name and a
+          // type is what `@name = param` actually produces.
+          const ctorParams = [];
+          if (isCtor) {
+            for (const p of await sig.getParameters()) {
+              ctorParams.push({ name: p.name, id: (await ck.getTypeOfSymbol(p)).id });
+            }
+          }
           next.push({
             type: await ck.getReturnTypeOfSignature(sig),
             at: isCtor ? `${item.at}#` : `${item.at}()`,
@@ -272,6 +314,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
             reads: item.reads,
             stated: true,
             origin: item.origin,
+            ctorParams,
           });
         }
       }
@@ -281,9 +324,24 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         // its own row, its own verdict, and one edit fixes it there;
         // repeating its defects under everything that happens to expose it
         // reports one piece of work as several.
+        //
+        // Only where that row answers the question THIS position asks. A
+        // sibling is walked from one side — a value is read, a bare type has
+        // no direction at all — and a stop at a row that never evaluates
+        // this side hands the position to a row that will not report it.
         const propType = await ck.getTypeOfSymbol(prop);
         const propSymbol = await propType.getSymbol();
-        if (propSymbol != null && propSymbol.id !== rootSymbol?.id && siblings.has(propSymbol.id)) continue;
+        const sibling = propSymbol == null ? undefined : siblings.get(propSymbol.id);
+        if (propSymbol != null && propSymbol.id !== rootSymbol?.id
+          && sibling !== undefined && sibling === item.reads) continue;
+        // A field that is the shadow of a constructor parameter is not its
+        // own work: annotating the parameter answers both, and reporting it
+        // twice overstates the edits. Decided on name AND type, never on
+        // name alone — a field that merely borrows a parameter's name was
+        // never fed by it, and hiding it sends the reader in a circle:
+        // annotate what the report names, and the field appears next run.
+        const shadows = (item.ctorParams ?? []).some((cp) => cp.name === prop.name && cp.id === propType.id);
+        if (shadows) continue;
         next.push({
           type: propType,
           at: `${item.at}${item.bare ? '' : '.'}${prop.name}`,
@@ -365,7 +423,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
 // took, rather than everything the module publishes. A count of the whole
 // surface says the same thing to every consumer of a package and so says
 // nothing about any of them.
-export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null }) {
+export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null, siblingIds = null }) {
   const snapshot = await session.updateSnapshot({ openFiles: [mirrorFile] });
   const project = await snapshot.getDefaultProjectForFile(mirrorFile);
   if (!project) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
@@ -379,11 +437,10 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
   const { entries: exported, unfollowed } = await exportsOfModule(ck, moduleSymbol);
   forwarded = unfollowed;
   // What else this entry publishes, so the walk can stop at it.
-  const siblings = new Set();
+  const siblings = siblingIds ?? new Map();
   for (const [, sym] of exported) {
-    let s = sym;
-    if (s.flags & SymbolFlags.Alias) { try { s = await ck.getAliasedSymbol(s); } catch { /* keep it */ } }
-    siblings.add(s.id);
+    const s = await resolveAlias(ck, sym);
+    if (!siblings.has(s.id)) siblings.set(s.id, isTypeOnly(s) ? null : true);
   }
   for (const [name, symbol] of exported) {
     if (only !== null && !only.has(name)) continue;
@@ -394,7 +451,8 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
     // perfectly typed one. It is counted apart from the walk's own limits
     // because the two do not share a remedy.
     if (symbol.flags & SymbolFlags.ExportStar) continue;   // counted once, when followed
-    const { type, typeOnly } = await typeOfExport(ck, symbol);
+    const rootSym = await resolveAlias(ck, symbol);
+    const { type, typeOnly } = await typeOfExport(ck, rootSym);
     // A type prints as it was WRITTEN, which is not always what it means: an
     // annotation naming something unresolvable resolves to `any` while still
     // printing the name that was reached for. Showing the written form alone
@@ -412,8 +470,6 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
     // an options bag they construct or a result they inspect, and nothing
     // about the export says which. Its positions get only the rules that
     // hold either way.
-    let rootSym = symbol;
-    if (rootSym.flags & SymbolFlags.Alias) { try { rootSym = await ck.getAliasedSymbol(rootSym); } catch { /* keep it */ } }
     const found = await walkOne(ck, type, name, owns, maxDepth, typeOnly ? null : true, rootSym, siblings);
     unexplored += found.unexplored;
     // Q3: three states, and the third is a fact about this AUDIT rather than

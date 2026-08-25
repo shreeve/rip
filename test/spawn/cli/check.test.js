@@ -1049,6 +1049,92 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // report, so a compile failure has no other way out and must leave
   // through this one. An entry that does not compile publishes nothing a
   // consumer can resolve, and nothing-to-report is not the same answer.
+  // Q6 — what makes two findings the SAME position. Deduplicating is right:
+  // one declaration reached by six paths is one edit. But the key has to be
+  // the declaration, and the compiler puts every field a constructor
+  // synthesizes on the constructor's line, so a key taken from the mapped
+  // SOURCE position collapses distinct annotations into one.
+  //
+  // The shadow relation is the same question asked the other way: a field
+  // synthesized from `@name = param` really is the parameter's shadow, but
+  // sharing a name is not evidence of it. Both errors run in the
+  // under-reporting direction.
+  test('--public counts a position per declaration, and calls a field a shadow only when it is one', () => {
+    // (a) Three fields, three annotations, one constructor line.
+    const many = workspace({
+      'package.json': JSON.stringify({ name: '@q6/many', exports: { '.': './index.rip' } }),
+      'index.rip': ['export class Holder', '  constructor: ->', '    @alpha = {}', '    @beta = {}', '    @gamma = {}'].join('\n') + '\n',
+    });
+    // (b) A field that merely SHARES a name with a parameter it was never
+    // assigned from. Annotating the parameter cannot fix it, so hiding it
+    // walks the reader in a circle.
+    const notShadow = workspace({
+      'package.json': JSON.stringify({ name: '@q6/notshadow', exports: { '.': './index.rip' } }),
+      'index.rip': 'export class Holder\n  constructor: (first) ->\n    @first = {}\n',
+    });
+    // (c) The genuine shadow: annotating the parameter answers both, so it
+    // is one position, not two.
+    const shadow = workspace({
+      'package.json': JSON.stringify({ name: '@q6/shadow', exports: { '.': './index.rip' } }),
+      'index.rip': 'export class Holder\n  constructor: (first) ->\n    @first = first\n',
+    });
+    try {
+      const a = check(many, ['--public']).stdout;
+      for (const f of ['alpha', 'beta', 'gamma']) expect(a).toContain(`Holder#${f}`);
+      expect(a).toContain('3 positions need a type');
+
+      const b = check(notShadow, ['--public']).stdout;
+      expect(b).toMatch(/Holder\.new\(first\)/);   // the parameter
+      expect(b).toMatch(/Holder#first/);            // AND the field it never fed
+      expect(b).toContain('2 positions need a type');
+
+      const c = check(shadow, ['--public']).stdout;
+      expect(c).toMatch(/Holder\.new\(first\)/);
+      expect(c).not.toMatch(/Holder#first/);        // one edit, one position
+      expect(c).toContain('1 position needs a type');
+    } finally {
+      for (const w of [many, notShadow, shadow]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Q5 — the walk stops at a member whose type is another published export,
+  // because that export has its own row and one edit fixes it there. The
+  // stop is sound only when that row answers the question THIS position
+  // asks, and two shapes break it in opposite ways.
+  test('--public stops at a sibling only where that sibling answers the same question', () => {
+    // (a) A bare TYPE export is walked undirected — nothing about it says
+    // which way values travel — so it never reports read-side width.
+    // Stopping there hands the position to a row that will not carry it,
+    // and PUBLISHING the interface becomes what hides the leak.
+    const typeOnly = workspace({
+      'package.json': JSON.stringify({ name: '@q5/type', exports: { '.': './index.rip' } }),
+      'index.rip': ['export interface Bag', '  hole: unknown', '',
+        'export class Client', '  bag: Bag = ({} as Bag)'].join('\n') + '\n',
+    });
+    // (b) A package publishes from every entry its manifest names, so what
+    // it publishes — the set the stop consults — is a property of the
+    // PACKAGE. Read per entry, one edit is blamed on every export that
+    // happens to expose it.
+    const twoEntry = workspace({
+      'package.json': JSON.stringify({ name: '@q5/two', exports: { '.': './index.rip', './s': './s.rip' } }),
+      's.rip': 'export class Session\n  run: (x) -> x\n',
+      'index.rip': "import { Session } from './s.rip'\nexport class Client\n  session: Session = new Session()\n",
+    });
+    try {
+      const a = check(typeOnly, ['--public']).stdout;
+      expect(a).toMatch(/unknown at: Client#bag\.hole/);
+      expect(a).toContain('1/2 exports fully typed');
+
+      const b = check(twoEntry, ['--public']).stdout;
+      expect(b).toContain('1/2 exports fully typed');   // Session owns the work
+      expect(b).toMatch(/✗ Session/);
+      expect(b).toMatch(/✓ Client/);
+      expect(b).not.toMatch(/at: Client#session\.run/);
+    } finally {
+      for (const w of [typeOnly, twoEntry]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Q2a — what a package publishes is its MANIFEST's answer, and the mirror
   // already computes that answer to decide which faces to build. A second
   // reader is a second answer, and where they disagree `--public` audits
