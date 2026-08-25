@@ -369,7 +369,7 @@ test "getValidator is self-preparing: stringified, trimmed, no setup owed", ->
   eq getValidator('email')(undefined), null
   eq getValidator('email')(null), null
   eq getValidator('zip')(84003), '84003'   # numbers stringify before the check
-  # the same function comes back on every call (wrapped once, cached)
+  # the same function comes back on every call (prepared at registration)
   eq getValidator('email'), getValidator('email')
 
 # ==[ Utilities ]==

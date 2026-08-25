@@ -275,7 +275,14 @@ define = (name, fn, raw) ->
   fail "validator '#{name}' must be a function" unless typeof fn is 'function'
   fail "validator '#{name}' must be a plain synchronous function" if SYNC_ONLY.has Object.prototype.toString.call(fn)
   registerCoercer name, fn, { raw }
-  registry.set name, { fn, raw }
+  # Two faces of one validator, both fixed here at registration: `fn`
+  # is the pure check `check` runs — the value must already be
+  # canonical, spaces and all. `prepared` is the acquiring form
+  # getValidator hands out: input stringified and trimmed first (raw
+  # types take theirs untouched), so `getValidator('email')(anything)`
+  # behaves like read's 'email' type with no setup owed by callers.
+  prepared = if raw then fn else (v) -> fn String(v ?? '').trim()
+  registry.set name, { fn, raw, prepared }
   fn
 
 define name, fn, RAW.has(name) for own name, fn of BUILTIN
@@ -285,13 +292,8 @@ export def registerValidator(name, fn, opts = {})
     fail "validator '#{name}' raw flag must be boolean"
   define name, fn, opts.raw is true
 
-# The returned validator is self-preparing: input is stringified and
-# trimmed before the check (raw types take their value untouched), so
-# `getValidator('email')(anything)` behaves like read's 'email' type —
-# canonical value or null — with no setup owed by the caller.
 export def getValidator(name)
-  entry = registry.get(name) or return
-  entry.wrapped ?= if entry.raw then entry.fn else (v) -> entry.fn String(v ?? '').trim()
+  registry.get(name)?.prepared
 
 # Whether a validator takes its value untouched: the seam callers
 # consult instead of hardcoding the raw set. Unknown names answer false.
