@@ -667,7 +667,21 @@ appModules = (appRoot, changes) ->
   { modules, moduleFiles, entries, directories, check: check(entries) }
 
 sourceHashes = (paths) ->
-  paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
+  paths.map (path) ->
+    hash = try
+      # Directory-membership inputs (generate records the sites dir as an
+      # input path): identity is the sorted subdirectory listing, exactly
+      # mirroring generate's siteDirNames — re-listed, never read.
+      if statSync(path).isDirectory()
+        names = readdirSync(path, { withFileTypes: true })
+          .filter((entry) -> entry.isDirectory() and not entry.name.startsWith('.'))
+          .map((entry) -> entry.name)
+          .sort()
+        rash JSON.stringify(names)
+      else
+        rash readFileSync(path)
+    catch then null
+    { path, hash }
 
 # The browser runtime ship set: the artifacts the site serves under
 # /@rip, from the rip checkout's dist/@rip (RIP_SHIP_DIR points a test at
