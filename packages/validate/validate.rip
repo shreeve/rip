@@ -192,6 +192,18 @@ BUILTIN =
     "#{_[1]}-#{_[3]}-#{_[4]}"
   time:      (v) -> v[/^(2[0-3]|[01]?\d):([0-5]\d)(?::([0-5]\d))?$/]            and _[0]
   time12:    (v) -> v[/^(1[0-2]|0?[1-9]):([0-5]\d)(?::([0-5]\d))?\s?(am|pm)$/i] and _[0].toLowerCase()
+  # A datetime is a calendar-true date, a 'T' or space, a two-digit 24h
+  # time, and an optional zone (Z or ±HH:MM); it normalizes to the
+  # canonical ISO 8601 `YYYY-MM-DDTHH:MM:SS[.fff][zone]` spelling.
+  datetime:  (v) ->
+    m = v[/^(\d{4})(-?)(\d{2})\2(\d{2})[T ](2[0-3]|[01]\d):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,6}))?)?(Z|[+-](?:2[0-3]|[01]\d):?[0-5]\d)?$/i]
+    return null unless m
+    [year, month, day] = [parseInt(_[1], 10), parseInt(_[3], 10), parseInt(_[4], 10)]
+    return null unless month >= 1 and month <= 12
+    return null unless day >= 1 and day <= daysInMonth(year, month)
+    frac = if _[8] then ".#{_[8]}" else ''
+    zone = if _[9] then _[9].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, '$1:$2') else ''
+    "#{_[1]}-#{_[3]}-#{_[4]}T#{_[5]}:#{_[6]}:#{_[7] or '00'}#{frac}#{zone}"
 
   # Booleans
   truthy:    (v) -> (v =~ /^(true|t|1|yes|y|on)$/i)  and true
