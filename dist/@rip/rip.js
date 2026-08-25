@@ -105,7 +105,7 @@ function isLiteralColumn(col) {
 var MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: "target",
-  timestamps: "none",
+  times: "none",
   softDelete: "none",
   belongsTo: "target",
   hasOne: "target",
@@ -117,7 +117,7 @@ var MODEL_DIRECTIVES = {
   tableWas: "name",
   primary: "field"
 };
-var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primary", "timestamps", "softDelete"];
+var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primary", "times", "softDelete"];
 var RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
 var FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
 var RELATION_ATTRS = {
@@ -537,7 +537,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
           fail(`:input schemas are fields-only — '${e.name}' is a ${e.tag}; use :shape or :model if you need behavior`, e.start);
         }
         if (e.tag === "directive" && e.name !== "mixin") {
-          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["timestamps", "softDelete", "belongsTo", "hasMany", "hasOne", "unique", "index", "idStart", "table", "tableWas", "primary"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
+          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["times", "softDelete", "belongsTo", "hasMany", "hasOne", "unique", "index", "idStart", "table", "tableWas", "primary"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
         }
       }
     }
@@ -1135,9 +1135,9 @@ function finishModelBody(entries, fail) {
   for (const e of entries) {
     if (e.tag !== "directive")
       continue;
-    if (e.name === "timestamps") {
-      claim("createdAt", "created_at", "@timestamps", e.start);
-      claim("updatedAt", "updated_at", "@timestamps", e.start);
+    if (e.name === "times") {
+      claim("createdAt", "created_at", "@times", e.start);
+      claim("updatedAt", "updated_at", "@times", e.start);
     } else if (e.name === "softDelete")
       claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
@@ -1941,7 +1941,7 @@ function foldProjectableMap(descriptor) {
   for (const e of descriptor.entries) {
     if (e.tag !== "directive")
       continue;
-    if (e.name === "timestamps")
+    if (e.name === "times")
       timestamps = true;
     else if (e.name === "softDelete")
       softDelete = true;

@@ -23,7 +23,7 @@ export User = schema :model
   lastName!  string, 1..
   email!     email @unique
   phone?     string
-  @timestamps
+  @times
   @hasMany Order
 
   beforeValidation: ->
@@ -35,7 +35,7 @@ export Order = schema :model
   status  "draft" | "submitted" | "completed", ["draft"]
   total!  integer, 0..
   @belongsTo User
-  @timestamps
+  @times
 ```
 
 ```rip
@@ -193,7 +193,7 @@ Event = schema :model
 ```
 
 A mixin's fields fold into the model. Declaring `createdAt`/`updatedAt`
-through a mixin is the explicit-control alternative to `@timestamps`
+through a mixin is the explicit-control alternative to `@times`
 (declaring them as ordinary fields is otherwise rejected — they are
 runtime-managed names).
 
@@ -275,7 +275,7 @@ A bare `id! integer` with no `@primaryKey` does not flip the posture —
 it is rejected as a collision with the runtime-managed key, and the
 error names the natural-key form.
 
-### `@timestamps`
+### `@times`
 
 Adds `created_at` / `updated_at` (`createdAt` / `updatedAt` on
 instances). Both are set on INSERT; `updated_at` bumps on every UPDATE
@@ -408,7 +408,7 @@ One rule governs every name a model writes:
 Properties stay camelCase in Rip (`firstName`), columns snake_case in
 SQL (`first_name`); the conversion is automatic and bidirectional, and
 `{column:}` overrides it per field. Every column has exactly one owner —
-a field whose column collides with a `@belongsTo` FK, a `@timestamps`
+a field whose column collides with a `@belongsTo` FK, a `@times`
 column, or another field's `{column:}` is rejected at declaration.
 
 This is how you address a table you did not create — declare only the
@@ -536,7 +536,7 @@ n = Session.where('expires_at < ?', now).deleteAll!
 
 Both return the number of affected rows, bypass validation and
 per-instance hooks (the bulk contract), and honor `@defaultScope`,
-`@timestamps` (`updateAll` bumps `updated_at`), and `@softDelete`
+`@times` (`updateAll` bumps `updated_at`), and `@softDelete`
 (`deleteAll` soft-deletes unless the chain says otherwise). Both refuse
 a chain carrying `order`/`limit`/`offset` — DuckDB's UPDATE and DELETE
 accept only a WHERE, and silently widening a scoped mutation is worse
@@ -691,7 +691,7 @@ export User = schema :model
   lastName?      string
   code?          string        # OTP — server-side only
   codeExpiresAt? datetime
-  @timestamps
+  @times
 
   fullName: ~> "#{@firstName ?? ''} #{@lastName ?? ''}".trim() or @email
 
@@ -726,7 +726,7 @@ Arguments are instances or bare identities, one or an array; an unsaved
 instance is refused by name.
 
 Writes go **through the join model**, never around it: links insert via
-the join's own `insertMany`, so its fields, defaults, `@timestamps`,
+the join's own `insertMany`, so its fields, defaults, `@times`,
 and validation all apply — a join model with required columns of its
 own works by passing them as the second (`attrs`) argument, and a
 missing required attr is a structured validation error. Links remove
@@ -877,7 +877,7 @@ harbor adapter decodes temporal columns to real `Date`s keyed off each
 column's `duckdbType` (and encodes `Date` params to ISO-8601 UTC on
 the way out). For an adapter that skips that, the ORM coerces the
 columns whose *declared* type is temporal (`date`/`datetime` fields,
-plus the `@timestamps`/`@softDelete` columns) through the same codec
+plus the `@times`/`@softDelete` columns) through the same codec
 on hydrate: `Date`s pass through untouched, ISO-8601 / SQL-timestamp
 text and epoch-millisecond numbers become the same instant, and a
 value that cannot be read as an instant rejects loudly naming the

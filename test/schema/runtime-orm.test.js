@@ -123,7 +123,7 @@ function makeWorld(k) {
   const User = k.__schema(model('User',
     field('name'),
     field('email', 'email', { unique: true }),
-    dir('timestamps'),
+    dir('times'),
     dir('hasMany', { target: 'Order', optional: false }),
   ));
   const Order = k.__schema(model('Order',
@@ -429,7 +429,7 @@ describe('orm: paired reference — dirty tracking and save', () => {
   test('updated_at bumps ONLY on a real write (timestamps model)', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT/, rows(['id', 'name', 'created_at', 'updated_at'], [1, 'A', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z']));
-      const U = k.__schema(model('Stamp', field('name'), dir('timestamps')));
+      const U = k.__schema(model('Stamp', field('name'), dir('times')));
       const inst = await U.first();
       await inst.save();                    // no-op: no bump
       const noopCalls = adapter.calls.length;
@@ -1292,7 +1292,7 @@ describe('orm: paired reference — upsert and insertMany', () => {
       const U = k.__schema(model('User',
         field('name'),
         field('email', 'email', { unique: true }),
-        dir('timestamps'),
+        dir('times'),
         hook('afterSave', () => hooks.push('afterSave')),
         hook('afterCommit', () => hooks.push('afterCommit'))));
       const written = await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
@@ -1700,7 +1700,7 @@ describe('orm: defensive structured SQL and canonical persistence', () => {
       const Account = k.__schema(model('Account',
         field('firstName'),
         field('email', 'email', { unique: true }),
-        dir('timestamps'),
+        dir('times'),
         dir('softDelete'),
         dir('belongsTo', { target: 'Owner', optional: false }),
         hook('beforeValidation', () => hooks.push('hook'))));
@@ -1767,7 +1767,7 @@ describe('orm: defensive structured SQL and canonical persistence', () => {
 
   test('updateAll validates writable columns before SQL; empty is a zero-row no-op', async () => {
     const r = await paired(async (k, adapter) => {
-      const U = k.__schema(model('User', field('name'), dir('timestamps')));
+      const U = k.__schema(model('User', field('name'), dir('times')));
       const empty = await U.where({}).updateAll({});
       const rejected = [];
       for (const values of [
@@ -2082,7 +2082,7 @@ describe('orm: paired reference — DDL', () => {
         field('notes', 'text', { optional: true }),
         field('tags', 'string', { array: true, optional: true }),
         field('price', 'number', { optional: true, constraints: { default: 0 } }),
-        dir('timestamps'),
+        dir('times'),
         dir('softDelete'),
         dir('idStart', { value: 5000 }),
         dir('index', { fields: ['name'] }),
@@ -2228,7 +2228,7 @@ describe('orm: paired reference — model algebra and wire shapes', () => {
       const U = k.__schema(model('User',
         field('name'),
         field('secret'),
-        dir('timestamps'),
+        dir('times'),
         dir('belongsTo', { target: 'Org', optional: false }),
       ));
       k.__schema(model('Org', field('name')));
@@ -2258,7 +2258,7 @@ describe('orm: paired reference — model algebra and wire shapes', () => {
     const js = await paired(async (k) => {
       const U = k.__schema(model('User',
         field('name'),
-        dir('timestamps'), dir('softDelete'),
+        dir('times'), dir('softDelete'),
         dir('belongsTo', { target: 'Org', optional: true }),
       ));
       k.__schema(model('Org', field('name')));
@@ -2298,7 +2298,7 @@ describe('orm: the defect battery (#102–#105)', () => {
       dir('belongsTo', { target: 'Org', optional: false }, { target: 'Extra', optional: false }));
     await loud4(junk, /@belongsTo: takes exactly one target name/);
     // args on an argless directive
-    await loud4(model('User', field('name'), dir('timestamps', { target: 'yes', optional: false })), /@timestamps: takes no arguments/);
+    await loud4(model('User', field('name'), dir('times', { target: 'yes', optional: false })), /@times: takes no arguments/);
     // idStart without an integer
     await loud4(model('User', field('name'), dir('idStart', { value: 'hello' })), /@idStart: takes one integer literal/);
   });
@@ -2311,7 +2311,7 @@ describe('orm: the defect battery (#102–#105)', () => {
     // implicit columns count as known
     await K4.scope(() => {
       const ok = K4.__schema(model('Known', field('name'),
-        dir('timestamps'), dir('softDelete'),
+        dir('times'), dir('softDelete'),
         dir('belongsTo', { target: 'Org', optional: false }),
         dir('index', { fields: ['createdAt'] }),
         dir('index', { fields: ['orgId'] }),
@@ -2330,11 +2330,11 @@ describe('orm: the defect battery (#102–#105)', () => {
     await loud4(collide, /field 'userId' and the @belongsTo User relation both own column 'user_id'/);
     // the mixin channel reaches the directive-managed columns (direct
     // declarations are caught by the reserved set first): a
-    // mixin-included createdAt + @timestamps is the same collision
+    // mixin-included createdAt + @times is the same collision
     await K4.scope(() => {
       K4.__schema({ kind: 'mixin', name: 'Stamps', entries: [field('createdAt', 'datetime')] });
-      const M = K4.__schema(model('Doc', field('name'), dir('mixin', { target: 'Stamps' }), dir('timestamps')));
-      expect(() => M._normalize()).toThrow(/field 'createdAt' and @timestamps both own column 'created_at'/);
+      const M = K4.__schema(model('Doc', field('name'), dir('mixin', { target: 'Stamps' }), dir('times')));
+      expect(() => M._normalize()).toThrow(/field 'createdAt' and @times both own column 'created_at'/);
     });
     // the legal neighbor stays legal
     await K4.scope(() => {
@@ -2471,7 +2471,7 @@ describe('orm:  unit tier', () => {
     await K4.scope(async () => {
       const adapter = recordingAdapter();
       K4.setAdapter(adapter);
-      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('name'), dir('times')));
       const u = U.parse({ name: 'A' });
       expect(u.name).toBe('A');
       expect(u.ok()).toBe(true);
@@ -2873,7 +2873,7 @@ describe('orm: runtime delivery', () => {
  'User = schema :model',
  '  name!  string',
  '  email! email @unique',
- '  @timestamps',
+ '  @times',
  '  beforeSave: -> @name = @name.trim()',
  '  shout: -> @name.toUpperCase()',
  'u = await User.create({name: "  Al  ", email: "a@b.c"})',
@@ -2995,7 +2995,7 @@ describe('orm: runtime delivery', () => {
  'P = schema :model',
  '  firstName! string, {was: "given_name"}',
  '  email!     email @unique',
- '  @timestamps',
+ '  @times',
  '  @idStart 5000',
  '  @tableWas "legacy_people"',
  '  @unique [:firstName, :email]',
@@ -3138,8 +3138,8 @@ describe('orm: runtime delivery', () => {
         field('b', 'string', { attrs: { column: 'x' } })]))
         .toMatch(/field 'a' and field 'b' both own column 'x'/);
       // a mapped column landing on a directive-managed one
-      expect(said([field('a', 'string', { attrs: { column: 'created_at' } }), dir('timestamps')]))
-        .toMatch(/field 'a' and @timestamps both own column 'created_at'/);
+      expect(said([field('a', 'string', { attrs: { column: 'created_at' } }), dir('times')]))
+        .toMatch(/field 'a' and @times both own column 'created_at'/);
       // …and on the primary key
       expect(said([field('a', 'string', { attrs: { column: 'id' } })]))
         .toMatch(/the primary key and field 'a' both own column 'id'/);
@@ -4130,7 +4130,7 @@ describe('orm: chain starters and structured where', () => {
       const adapter = recordingAdapter();
       K4.setAdapter(adapter);
       adapter.on(/^SELECT/, rows(['id', 'title'], [1, 'A']));
-      const Post = K4.__schema(model('Post', field('title'), dir('timestamps')));
+      const Post = K4.__schema(model('Post', field('title'), dir('times')));
       await Post.order({ createdAt: 'desc' }).limit(2).offset(1).all();
       await Post.limit(2).all();
       await Post.offset(3).all();
@@ -4185,7 +4185,7 @@ describe('orm: write-path honesty', () => {
         if (fail) throw new Error('duckdb: IO Error: disk full');
         return { columns: [], data: [], rowCount: 1 };
       });
-      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('name'), dir('times')));
       const t0 = new Date('2026-01-01T00:00:00Z');
       const u = U._hydrate(
         [{ name: 'id' }, { name: 'name' }, { name: 'created_at' }, { name: 'updated_at' }],
@@ -4261,7 +4261,7 @@ describe('orm: zero-affected-row honesty', () => {
       adapter.on(/^UPDATE "users"/, rows(['Count'], [0]));
       adapter.on(/^DELETE FROM "users"/, rows(['Count'], [1]));
       const fired = [];
-      const U = K4.__schema(model('User', field('name'), dir('timestamps'),
+      const U = K4.__schema(model('User', field('name'), dir('times'),
         hook('afterUpdate', () => fired.push('afterUpdate')),
         hook('afterSave', () => fired.push('afterSave')),
         hook('afterCommit', () => fired.push('afterCommit'))));
@@ -4633,7 +4633,7 @@ describe('orm: addX under the unique-pair race', () => {
 describe('orm: temporal columns hydrate as instants', () => {
   const eventCols = ['id', 'title', 'starts_on', 'at', 'created_at', 'updated_at'].map((name) => ({ name }));
   const eventModel = () => K4.__schema(model('Event',
-    field('title'), field('startsOn', 'date'), field('at', 'datetime'), dir('timestamps')));
+    field('title'), field('startsOn', 'date'), field('at', 'datetime'), dir('times')));
 
   test('declared date/datetime columns coerce wire strings and epoch numbers to the codec instants; a string field never', async () => {
     await K4.scope(async () => {
@@ -4711,7 +4711,7 @@ describe('orm: errors speak the caller namespace', () => {
   test('structured where()/updateAll() rejections echo the key as written over a property inventory', async () => {
     await K4.scope(async () => {
       K4.setAdapter(recordingAdapter());
-      const U = K4.__schema(model('User', field('firstName'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('firstName'), dir('times')));
       let err = null;
       try { await U.where({ firstNme: 'x' }).all(); } catch (e) { err = e; }
       expect(err?.message).toMatch(
@@ -4737,10 +4737,10 @@ describe('orm: errors speak the caller namespace', () => {
 });
 
 describe('orm: once-directives (runtime layer)', () => {
-  test('@timestamps and @softDelete declared twice reject as once-directives', async () => {
+  test('@times and @softDelete declared twice reject as once-directives', async () => {
     await K4.scope(() => {
-      const T = K4.__schema(model('Stamped', field('name'), dir('timestamps'), dir('timestamps')));
-      expect(() => T._normalize()).toThrow(/duplicate '@timestamps' — declared twice; a :model declares it once/);
+      const T = K4.__schema(model('Stamped', field('name'), dir('times'), dir('times')));
+      expect(() => T._normalize()).toThrow(/duplicate '@times' — declared twice; a :model declares it once/);
       const S = K4.__schema(model('Softened', field('name'), dir('softDelete'), dir('softDelete')));
       expect(() => S._normalize()).toThrow(/duplicate '@softDelete' — declared twice; a :model declares it once/);
     });

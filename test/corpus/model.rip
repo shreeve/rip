@@ -11,7 +11,7 @@ User = schema :model
   email!  email @unique
   handle? string, 2..24
   bio?    text
-  @timestamps
+  @times
   @belongsTo Organization
   @hasMany Order
   beforeSave: -> @name = @name.trim()
@@ -75,4 +75,4 @@ Post = schema :model
   @belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}
   @hasMany Tag, {as: labels, foreignKey: "post_id"}
 
-Inline = schema :model; label!; @timestamps; @belongsTo Person
+Inline = schema :model; label!; @times; @belongsTo Person

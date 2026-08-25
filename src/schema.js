@@ -17,7 +17,7 @@
 //
 // Kinds: :input (default), :shape, :mixin, :enum, :union,
 // :model. The :model kind carries the persistence surface —
-// directives (@timestamps, @softDelete, relations, @unique/@index,
+// directives (@times, @softDelete, relations, @unique/@index,
 // @idStart, @tableWas), @scope/@defaultScope, lifecycle hook binding,
 // field attrs ({was:}) and inline @unique, and the `on:` declaration
 // option (a per-schema adapter expression). Every persistence
@@ -473,7 +473,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
           fail(`:input schemas are fields-only — '${e.name}' is a ${e.tag}; use :shape or :model if you need behavior`, e.start);
         }
         if (e.tag === 'directive' && e.name !== 'mixin') {
-          fail(`:${kind} schemas only accept '@mixin Name'${kind === 'input' ? " and '@ensure'" : ''} — '@${e.name}' is ${['timestamps', 'softDelete', 'belongsTo', 'hasMany', 'hasOne', 'unique', 'index', 'idStart', 'table', 'tableWas', 'primary'].includes(e.name) ? ':model-only' : 'not a schema directive'}`, e.start);
+          fail(`:${kind} schemas only accept '@mixin Name'${kind === 'input' ? " and '@ensure'" : ''} — '@${e.name}' is ${['times', 'softDelete', 'belongsTo', 'hasMany', 'hasOne', 'unique', 'index', 'idStart', 'table', 'tableWas', 'primary'].includes(e.name) ? ':model-only' : 'not a schema directive'}`, e.start);
         }
       }
     }
@@ -1067,7 +1067,7 @@ function finishModelBody(entries, fail) {
     }
     if (ONCE_DIRECTIVES.includes(e.name)) {
       if (seenOnce.has(e.name)) {
-        // Argument-less once-directives (@timestamps, @softDelete) have
+        // Argument-less once-directives (@times, @softDelete) have
         // no second value to override; the duplicate is still refused —
         // it declares itself once.
         fail(shape === 'none'
@@ -1168,7 +1168,7 @@ function finishModelBody(entries, fail) {
   }
   for (const e of entries) {
     if (e.tag !== 'directive') continue;
-    if (e.name === 'timestamps') { claim('createdAt', 'created_at', '@timestamps', e.start); claim('updatedAt', 'updated_at', '@timestamps', e.start); }
+    if (e.name === 'times') { claim('createdAt', 'created_at', '@times', e.start); claim('updatedAt', 'updated_at', '@times', e.start); }
     else if (e.name === 'softDelete') claim('deletedAt', 'deleted_at', '@softDelete', e.start);
     // The claimed column mirrors the runtime's derivation: an explicit
     // foreignKey names it directly; otherwise it derives from the
@@ -2074,7 +2074,7 @@ function foldFkName(arg) {
 }
 
 // The projectable columns of a descriptor as an ordered Map(name → field
-// entry): declared fields, then a :model's implicit id / @timestamps /
+// entry): declared fields, then a :model's implicit id / @times /
 // @softDelete / @belongsTo FK columns — matching `projectableFields` in
 // runtime/orm.js so a fold yields the same field set the runtime
 // would. Returns null (bail) when the base uses `@mixin`.
@@ -2092,7 +2092,7 @@ function foldProjectableMap(descriptor) {
   const fks = [];
   for (const e of descriptor.entries) {
     if (e.tag !== 'directive') continue;
-    if (e.name === 'timestamps') timestamps = true;
+    if (e.name === 'times') timestamps = true;
     else if (e.name === 'softDelete') softDelete = true;
     else if (e.name === 'belongsTo') {
       const a = e.args && e.args[0];

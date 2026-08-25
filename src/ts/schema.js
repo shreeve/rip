@@ -36,7 +36,7 @@
 // as-is and its artifact fails any self-contained checker).
 //
 // Computed/derived members type `unknown` and methods
-// `(...args: any[]) => unknown` — @timestamps
+// `(...args: any[]) => unknown` — @times
 // and @softDelete columns type `string`/`string | null` — the
 // runtime writes ISO strings and its own JSON-Schema export says so
 //
@@ -433,7 +433,7 @@ const relationsOf = (descriptor) => {
 };
 
 // A :model's implicitly-managed columns as Data properties: the `id`
-// pk, belongsTo FK columns, and the @timestamps/@softDelete columns.
+// pk, belongsTo FK columns, and the @times/@softDelete columns.
 // Timestamp columns are `Date` — the adapter decodes temporal columns
 // to real Date objects at the wire, and the runtime manages them as
 // Dates (matching the `Date` a declared date/datetime field renders).
@@ -447,7 +447,7 @@ const modelImplicitProps = (descriptor) => {
     props.push(`${fkProp(rel)}: number${rel.optional ? ' | null' : ''}`);
   }
   const has = (n) => descriptor.entries.some((e) => e.tag === 'directive' && e.name === n);
-  if (has('timestamps')) props.push('createdAt: Date', 'updatedAt: Date');
+  if (has('times')) props.push('createdAt: Date', 'updatedAt: Date');
   if (has('softDelete')) props.push('deletedAt: Date | null');
   return props;
 };

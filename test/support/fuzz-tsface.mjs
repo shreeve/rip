@@ -279,7 +279,7 @@ const CONSTRUCTS = [
     // query chain over declared columns, and the hook's TS-only
     // `this` parameter.
     kind: 'schema :model type story (query chain + hook this-param)',
-    source: `Mo${id} = schema :model\n  name! string\n  @timestamps\n  beforeSave: -> @name = @name.trim()\nq${id} = Mo${id}.where(name: "a").first()\n`,
+    source: `Mo${id} = schema :model\n  name! string\n  @times\n  beforeSave: -> @name = @name.trim()\nq${id} = Mo${id}.where(name: "a").first()\n`,
   }),
   (rng, id) => {
     // M12-E: the component member-declare surface — every non-callable

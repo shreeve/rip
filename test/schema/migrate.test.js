@@ -233,7 +233,7 @@ describe('migrate: the differ — step kinds and classes', () => {
       K4.__schema(model('User',
         field('name', 'string', { constraints: { min: 1, max: 100 } }),
         field('email', 'email', { unique: true }),
-        dir('timestamps'),
+        dir('times'),
       ));
       deployedRef.value = { tables: [table('users', [
         col('name'), // VARCHAR — length hints never round-trip (DuckDB erases them)
@@ -676,7 +676,7 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
     expect(drift[0].sql).toEqual(['ALTER TABLE "users" ALTER COLUMN "status" SET DEFAULT \'Active\';']);
 
     const noise = await run4(async (deployedRef) => {
-      K4.__schema(model('User', field('name'), dir('timestamps')));
+      K4.__schema(model('User', field('name'), dir('times')));
       deployedRef.value = { tables: [table('users', [
         col('name', 'VARCHAR', { notNull: true }),
         col('created_at', 'TIMESTAMP', { default: 'NOW()' }),
@@ -857,7 +857,7 @@ describe('migrate: the differ — determinism and ordering', () => {
 
   test('same pair, repeated runs: byte-identical steps and rendered plan', async () => {
     const declared = await K4.scope(() => {
-      K4.__schema(model('User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')));
+      K4.__schema(model('User', field('name'), field('email', 'email', { unique: true }), dir('times')));
       K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       return mig.canonicalDeclared();
     });

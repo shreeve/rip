@@ -2222,7 +2222,7 @@ test! "a deployed schema matching the model plans nothing", ->
     }]
   fetch = harborMigrate { catalog: usersDeployed }
   steps = withRunner! fetch, ({ define }) ->
-    define model 'User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')
+    define model 'User', field('name'), field('email', 'email', { unique: true }), dir('times')
     mig.plan!
   eq steps, []
 

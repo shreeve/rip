@@ -98,11 +98,11 @@ code "model with modifiers and directives", '''
     name!    string
     email!   email @unique
     bio?     text
-    @timestamps
+    @times
     @belongsTo Organization
   ''', '''
   let User;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, unique: true}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongsTo", args: [{target: "Organization"}]}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, unique: true}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}, {tag: "directive", name: "times"}, {tag: "directive", name: "belongsTo", args: [{target: "Organization"}]}]});
   ''', opts
 
 code "model recognizes known hook names", '''
@@ -288,17 +288,17 @@ test "inline: literal-union + other fields parse in order", '''
   [r.ok, r.value.role, r.value.name]
   ''', [true, "admin", "Alice"]
 
-# Inline directive entries — `@timestamps`, `@belongsTo X`, `@mixin M`
+# Inline directive entries — `@times`, `@belongsTo X`, `@mixin M`
 # — all parse correctly inline alongside fields. Punctuation-heavy
 # grammars are the most likely place for the inline collector to get
 # semicolon-splitting wrong, so each form needs explicit coverage.
 
 code "inline: multiple directives + fields in one schema", '''
-  User = schema :model; name!; @timestamps; @belongsTo Org
+  User = schema :model; name!; @times; @belongsTo Org
   Org = schema :model; name!
   ''', '''
   let Org, User;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongsTo", args: [{target: "Org"}]}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "times"}, {tag: "directive", name: "belongsTo", args: [{target: "Org"}]}]});
   Org = __schema({kind: "model", name: "Org", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
   ''', opts
 
@@ -423,13 +423,13 @@ fail ":input rejects computed getters", '''
 fail ":input rejects non-@mixin directives", '''
   X = schema :input
     name! string
-    @timestamps
+    @times
   '''
 
-fail ":shape rejects @timestamps", '''
+fail ":shape rejects @times", '''
   X = schema :shape
     name! string
-    @timestamps
+    @times
   '''
 
 fail ":shape rejects @belongsTo", '''
@@ -2547,7 +2547,7 @@ type "derived schema emits a bare projection type", '''
     User = schema :model
       firstName! string
       lastName!  string
-      @timestamps
+      @times
     UserView = User.pick("id", "firstName")
   ''', '''
   interface SchemaIssue { field: string; error: string; message: string; }
@@ -2625,7 +2625,7 @@ type "chained + exported derived schema emits one bare type each", '''
     User = schema :model
       firstName! string
       lastName!  string
-      @timestamps
+      @times
     export UserView = User.pick("id", "firstName", "lastName").omit("lastName")
   ''', '''
   interface SchemaIssue { field: string; error: string; message: string; }
@@ -2762,7 +2762,7 @@ test ":model toSQL emits CREATE TABLE", modelHeader + '''
   User = schema :model
     name! string, 1..100
     email! email @unique
-    @timestamps
+    @times
   sql = User.toSQL()
   [sql.includes('CREATE TABLE "users"'), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
 ''', [true, true, true, true, true]
@@ -3249,16 +3249,16 @@ test "Order.create! records FK column in savedChanges with [null, newValue]", mo
   o.savedChanges.get("userId")
 ''', [null, 7]
 
-# @timestamps: updated_at must be bumped on every real UPDATE write
+# @times: updated_at must be bumped on every real UPDATE write
 # (not on no-op saves, where the whole point of the column-targeted
 # UPDATE optimization is to skip touching the row entirely). On INSERT
 # the DB DEFAULT CURRENT_TIMESTAMP supplies the value; we record it
 # in savedChanges so it shows up in the AR-style diff.
 
-test "@timestamps INSERT records createdAt and updatedAt in savedChanges from RETURNING", modelHeader + '''
+test "@times INSERT records createdAt and updatedAt in savedChanges from RETURNING", modelHeader + '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.create! {name: "Alice"}
   # Declared temporal columns coerce to real Dates at absorption, so
@@ -3271,10 +3271,10 @@ test "@timestamps INSERT records createdAt and updatedAt in savedChanges from RE
   ]
 ''', [null, "2026-01-01T00:00:00.000Z", null, "2026-01-02T00:00:00.000Z"]
 
-test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
+test "@times UPDATE bumps updated_at when fields change", modelHeader + '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.find! 1
   origTs = u.updatedAt
@@ -3302,10 +3302,10 @@ test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
   ]
 ''', [true, true, true, true, true, true]
 
-test "@timestamps UPDATE on a no-op save does NOT bump updated_at (no SQL)", modelHeader + '''
+test "@times UPDATE on a no-op save does NOT bump updated_at (no SQL)", modelHeader + '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.find! 1
   origTs = u.updatedAt
@@ -3319,12 +3319,12 @@ test "@timestamps UPDATE on a no-op save does NOT bump updated_at (no SQL)", mod
   ]
 ''', [0, true, false]
 
-test "@timestamps UPDATE bumps updated_at when only an FK changes", modelHeader + '''
+test "@times UPDATE bumps updated_at when only an FK changes", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
     @belongsTo User
-    @timestamps
+    @times
   adapter.canned.__default = {columns: [{name: "id"}, {name: "user_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[10001, 7, "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   o = Order.find! 10001
   adapter.calls = []
@@ -3340,7 +3340,7 @@ test "@timestamps UPDATE bumps updated_at when only an FK changes", modelHeader 
   ]
 ''', [true, true, true, true]
 
-test "@timestamps schema without directive does NOT touch updated_at", modelHeader + '''
+test "@times schema without directive does NOT touch updated_at", modelHeader + '''
   Stateless = schema :model
     name! string
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
@@ -3552,10 +3552,10 @@ test ":model toJSON includes id and declared fields", modelHeader + '''
   [json.id, json.name]
 ''', [7, "Alice"]
 
-test ":model toJSON includes @timestamps columns", modelHeader + '''
+test ":model toJSON includes @times columns", modelHeader + '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "a", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]], rows: 1}
   u = User.create! {name: "a"}
   json = u.toJSON()
@@ -3585,7 +3585,7 @@ test ":model toJSON includes !> eager-derived fields", modelHeader + '''
 ''', "Alice Smith"
 
 # !> eager-derived fields must also run on .create() after the INSERT
-# RETURNING data lands — otherwise DB-assigned slots (id, @timestamps,
+# RETURNING data lands — otherwise DB-assigned slots (id, @times,
 # belongsTo FKs) would be invisible to the derivation.
 
 test ":model.create() runs !> eager-derived after RETURNING columns arrive", modelHeader + '''
@@ -3622,7 +3622,7 @@ test ":model toJSON excludes methods, ~> computed getters, and internal state", 
 test ":model toJSON survives JSON.stringify round-trip with id preserved", modelHeader + '''
   User = schema :model
     name! string
-    @timestamps
+    @times
     @belongsTo Org
   Org = schema :model
     name! string
@@ -3703,7 +3703,7 @@ fail "reserved ORM name as field in :model", '''
 '''
 
 # Implicit-column names (createdAt / updatedAt / deletedAt) are managed
-# by @timestamps and @softDelete. Declaring them as user fields would
+# by @times and @softDelete. Declaring them as user fields would
 # either shadow the runtime API or produce duplicate SET writes for
 # the same column in one UPDATE statement.
 
@@ -3807,7 +3807,7 @@ fail ":mixin rejects computed entries at parse time", '''
 fail ":mixin rejects non-@mixin directives", '''
   X = schema :mixin
     a! string
-    @timestamps
+    @times
 '''
 
 # ==============================================================================
@@ -4005,11 +4005,11 @@ test 'algebra preserves sourceModel through chain', '''
 code "fold off by default: derived schema stays a runtime call", '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   V = User.pick("id", "name")
   ''', '''
   let User, V;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "times"}]});
   V = User.pick("id", "name");
   ''', opts
 
@@ -4018,11 +4018,11 @@ code "fold off by default: derived schema stays a runtime call", '''
 code 'fold: pick emits a self-contained shape literal', '''
   User = schema :model
     name! string
-    @timestamps
+    @times
   V = User.pick("id", "name")
   ''', '''
   let User, V;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "times"}]});
   V = __schema({kind: "shape", name: "V", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
   ''', { foldProjections: true }
 
@@ -5115,7 +5115,7 @@ test "toJSONSchema: models include DB-managed columns; refinements annotate", ''
     name! string
   User = schema :model
     name! string
-    @timestamps
+    @times
     @belongsTo Org
     @ensure "name must not be empty-ish", (u) -> u.name.trim().length > 0
   js = User.toJSONSchema()
@@ -5171,7 +5171,7 @@ test "_tableSpec exposes the canonical table structure", modelHeader + '''
   User = schema :model
     name!   string, 1..100
     email!  email @unique
-    @timestamps
+    @times
     @softDelete
     @belongsTo Org
     @index [name, email]

@@ -161,7 +161,7 @@ const CLEAN_ROWS = [
     // :model — statics through ModelSchema, the typed query chain
     // over declared columns, relation accessors between same-file
     // models, and callable `this` (hook + scope) typed per (ii)
- 'Org = schema :model\n  title! string\nUser = schema :model\n  name!  string\n  active? boolean\n  @timestamps\n  @belongsTo Org\n  beforeSave: -> @name = @name.trim()\n  @scope :live, -> @where(active: true)\nrun = ->\n  u = await User.find(1)\n  if u\n    s: string = u.name\n    org = await u.org()\n    t: string = org.title if org\n    rows = await User.live().where(name: "a").all()\n    made = await User.create(name: "n", orgId: 1)\n    s = made.name',
+ 'Org = schema :model\n  title! string\nUser = schema :model\n  name!  string\n  active? boolean\n  @times\n  @belongsTo Org\n  beforeSave: -> @name = @name.trim()\n  @scope :live, -> @where(active: true)\nrun = ->\n  u = await User.find(1)\n  if u\n    s: string = u.name\n    org = await u.org()\n    t: string = org.title if org\n    rows = await User.live().where(name: "a").all()\n    made = await User.create(name: "n", orgId: 1)\n    s = made.name',
     // :enum narrows through the bare-member type guard; :union types
     // the parse result as the constituent union
  'Role = schema :enum\n  :admin\n  :viewer\nv = JSON.parse("x")\nr: Role = "admin"\nr = Role.parse(v)\nif Role.ok(v)\n  r = v',
@@ -176,10 +176,10 @@ const CLEAN_ROWS = [
     // claim: were the folder to drift from `projectableFields`, a
     // companion naming a field the algebra does not (or missing one it
     // does) fails here rather than shipping a wrong shape. The model
-    // arm carries the implicit columns — id and @timestamps — which is
+    // arm carries the implicit columns — id and @times — which is
     // where the two field sets are computed most differently.
  'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ns: string = v.a\ns = "z"',
- 'User = schema :model\n  name! string\n  @timestamps\nView = User.pick("id", "name", "createdAt")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ni: number = v.id\nn: string = v.name\nn = "z"\ni = 2',
+ 'User = schema :model\n  name! string\n  @times\nView = User.pick("id", "name", "createdAt")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ni: number = v.id\nn: string = v.name\nn = "z"\ni = 2',
     //  the component member model — every member kind's declare,
     // methods/hooks, the ctor and _init props annotations, the
     // companion interface used as an annotation type

@@ -360,7 +360,7 @@ describe('package graph reconciliation', () => {
       mkdirSync(join(dir, 'api'));
       writeFileSync(join(dir, 'api', 'models.rip'), `export User = schema :model
   firstName! string
-  @timestamps
+  @times
 export UserPublic = User.pick("id", "firstName")
 `);
       writeFileSync(

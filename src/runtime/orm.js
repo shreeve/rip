@@ -186,10 +186,10 @@ const RESERVED_INSTANCE = new Set([
 ]);
 // Implicit columns owned by directive-driven runtime behavior:
 // declaring them as user fields would shadow the runtime API or
-// produce duplicate SET writes when @timestamps / @softDelete bump
+// produce duplicate SET writes when @times / @softDelete bump
 // them. (Mixin-included fields are exempt — declaring createdAt /
 // updatedAt through a mixin is the explicit-control alternative to
-// @timestamps.)
+// @times.)
 const RESERVED_IMPLICIT = new Set([
   'createdAt', 'updatedAt', 'deletedAt',
 ]);
@@ -590,7 +590,7 @@ function finishModelNorm(def, norm) {
 
   // Reserved ORM names guard DECLARED entries only: mixin-included
   // fields may spell createdAt/updatedAt (explicit control instead of
-  // @timestamps).
+  // @times).
   for (const e of def._desc.entries || []) {
     if ((e.tag === 'field' || e.tag === 'method' || e.tag === 'computed' || e.tag === 'derived') &&
         RESERVED.has(e.name)) {
@@ -617,7 +617,7 @@ function finishModelNorm(def, norm) {
     if (ONCE_DIRECTIVES.includes(d.name)) {
       if (seenOnce.has(d.name)) {
         // Same verdict as the compiler: an argument-less once-directive
-        // (@timestamps, @softDelete) has no second value to override;
+        // (@times, @softDelete) has no second value to override;
         // the duplicate is still refused — it declares itself once.
         throw modelError(def, '', 'directive',
           MODEL_DIRECTIVES[d.name] === 'none'
@@ -627,7 +627,7 @@ function finishModelNorm(def, norm) {
       }
       seenOnce.add(d.name);
     }
-    if (d.name === 'timestamps') timestamps = true;
+    if (d.name === 'times') timestamps = true;
     else if (d.name === 'softDelete') softDelete = true;
     else if (d.name === 'table') table = d.args[0].name;
     else if (d.name === 'tableWas') tableWas = d.args[0].name;
@@ -732,7 +732,7 @@ function finishModelNorm(def, norm) {
   // `columnOf` doubles as the column-OWNERSHIP guard: every table
   // column has exactly one owner. A field whose column equals a
   // belongsTo FK (`userId` + `@belongsTo User`), a directive-managed
-  // column (a mixin-included `createdAt` + `@timestamps`), or another
+  // column (a mixin-included `createdAt` + `@times`), or another
   // field's `{column:}` would otherwise emit duplicate-column DDL and
   // duplicate-column INSERTs that fail only at the database. Fields
   // could not collide among themselves while name → snake_case was
@@ -787,8 +787,8 @@ function finishModelNorm(def, norm) {
       'the @belongsTo ' + rel.target + ' relation');
   }
   if (timestamps) {
-    claim('createdAt', 'created_at', '@timestamps');
-    claim('updatedAt', 'updated_at', '@timestamps');
+    claim('createdAt', 'created_at', '@times');
+    claim('updatedAt', 'updated_at', '@times');
   }
   if (softDelete) claim('deletedAt', 'deleted_at', '@softDelete');
   norm.columnOf = columnOf;
@@ -796,7 +796,7 @@ function finishModelNorm(def, norm) {
   // The properties whose DECLARED type is temporal — the set hydrate
   // and row absorption coerce through coerceTemporal. An array
   // field is a JSON document whatever its element type, so it is
-  // excluded; @timestamps / @softDelete columns are datetime by
+  // excluded; @times / @softDelete columns are datetime by
   // definition.
   const temporalOf = new Map();
   for (const [n, f] of norm.fields) {
@@ -906,7 +906,7 @@ function relationKeyType(rel) {
 }
 
 // The full projectable column set: declared fields plus the columns a
-// :model manages implicitly — id, @timestamps, @softDelete, and
+// :model manages implicitly — id, @times, @softDelete, and
 // belongsTo FKs. Algebra operates over THIS set, so a client
 // projection can pick `id` or `createdAt`.
 function projectableFields(def) {
@@ -1918,7 +1918,7 @@ async function preload(def, instances, specs) {
 // The link is a ROW, not a column, so linking and unlinking are the
 // join model's INSERTs and DELETEs — and they go THROUGH the join
 // model rather than around it: `insertMany` validates every row and
-// respects the join's own fields, defaults, and `@timestamps`, and
+// respects the join's own fields, defaults, and `@times`, and
 // `deleteAll` respects its `@softDelete`. A join model with required
 // columns of its own is therefore usable: pass them as `attrs`.
 //
@@ -2280,7 +2280,7 @@ async function save(def, inst) {
     def._applyEagerDerived(inst);
     inst._snapshot = snapshot(norm, inst);
     inst._persisted = true;
-    // INSERT records [null, newValue] per written column; @timestamps
+    // INSERT records [null, newValue] per written column; @times
     // columns were assigned on this INSERT, so they join the diff.
     for (const [n, v] of writtenColumns) inst.savedChanges.set(n, [null, v]);
     if (norm.timestamps) {
@@ -2334,7 +2334,7 @@ async function save(def, inst) {
       changes.set(fkCamel, [old, written]);
       if (isDirty) dirtyVersions.set(fkCamel, inst._dirtyVersions.get(fkCamel));
     }
-    // @timestamps: bump updated_at iff this UPDATE will actually emit
+    // @times: bump updated_at iff this UPDATE will actually emit
     // SQL — never on a no-op save. The column is not in _snapshot (it
     // is always overwritten on real writes, never diffed); declaring
     // updatedAt as a user field is rejected at normalize, so a

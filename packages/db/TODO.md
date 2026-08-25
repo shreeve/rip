@@ -148,7 +148,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   accessor is the only name unique per relation — two relations to one
   target share a target name, and depluralizing an arbitrary `as:`
   would be a guess. Links go in via the join's own `insertMany`, so its
-  fields, defaults, `@timestamps`, and validation all apply and extra
+  fields, defaults, `@times`, and validation all apply and extra
   required columns are passable as `attrs`; they come out via its
   `deleteAll`, so a `@softDelete` join soft-deletes. Adding an existing
   link is a no-op, not a second row — duplicate join rows would read
@@ -294,7 +294,7 @@ instead of instances.
 **Shipped** (23): `@table`, `@tableWas`, `@primary` (property +
 column), natural keys, `@idStart`, `{column:}`, `{was:}`, nullability
 (`!`/`?`), `[default]`, `@unique` (field and composite), `@index`,
-`@timestamps`, `@softDelete`, the three relation kinds, `{foreignKey:}`,
+`@times`, `@softDelete`, the three relation kinds, `{foreignKey:}`,
 `{as:}`, `{through:}`, `{targetKey:}`, relation optionality, `~type` /
 `~:coercer` / literal-union coercion, `@mixin`, FK width following the
 target's key, and cross-adapter FK suppression.
