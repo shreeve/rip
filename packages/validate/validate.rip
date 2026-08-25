@@ -276,12 +276,20 @@ define = (name, fn, raw) ->
   fail "validator '#{name}' must be a plain synchronous function" if SYNC_ONLY.has Object.prototype.toString.call(fn)
   registerCoercer name, fn, { raw }
   # Two faces of one validator, both fixed here at registration: `fn`
-  # is the pure check `check` runs — the value must already be
+  # is the pure check check() runs — the value must already be
   # canonical, spaces and all. `prepared` is the acquiring form
   # getValidator hands out: input stringified and trimmed first (raw
   # types take theirs untouched), so `getValidator('email')(anything)`
   # behaves like read's 'email' type with no setup owed by callers.
-  prepared = if raw then fn else (v) -> fn String(v ?? '').trim()
+  # Scalars only: an array or object is never a valid text value —
+  # String() would coin fictions like 'a,b' (duplicate query params)
+  # or '[object Object]', and a hostile toString() could throw.
+  prepared = fn
+  unless raw
+    prepared = (v) ->
+      return null if typeof v is 'object' and v isnt null
+      return null if typeof v is 'function'
+      fn String(v ?? '').trim()
   registry.set name, { fn, raw, prepared }
   fn
 

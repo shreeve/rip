@@ -372,6 +372,13 @@ test "getValidator is self-preparing: stringified, trimmed, no setup owed", ->
   # the same function comes back on every call (prepared at registration)
   eq getValidator('email'), getValidator('email')
 
+test "prepared validators are scalar-only: composites are null, never fictions", ->
+  eq getValidator('zip')(['84003', '84004']), null   # duplicate query params
+  eq getValidator('email')({}), null                 # no '[object Object]'
+  eq getValidator('email')(-> 'x@y.co'), null
+  hostile = { toString: -> throw Error.new 'gotcha' }
+  eq getValidator('email')(hostile), null            # refused before String()
+
 # ==[ Utilities ]==
 
 console.log "\nUtilities"
