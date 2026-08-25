@@ -285,8 +285,14 @@ export def registerValidator(name, fn, opts = {})
     fail "validator '#{name}' raw flag must be boolean"
   define name, fn, opts.raw is true
 
+# The returned validator is self-preparing: input is stringified and
+# trimmed before the check (raw types take their value untouched), so
+# `getValidator('email')(anything)` behaves like read's 'email' type —
+# canonical value or null — with no setup owed by the caller.
 export def getValidator(name)
-  registry.get(name)?.fn
+  entry = registry.get(name)
+  return undefined unless entry
+  entry.wrapped ?= if entry.raw then entry.fn else (v) -> entry.fn String(v ?? '').trim()
 
 # Whether a validator takes its value untouched: the seam callers
 # consult instead of hardcoding the raw set. Unknown names answer false.

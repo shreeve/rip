@@ -364,6 +364,14 @@ test "getValidator answers softly; check rejects loudly", ->
   eq getValidator('nope'), undefined
   throws (-> check('x', 'nope')), "unknown validator 'nope'"
 
+test "getValidator is self-preparing: stringified, trimmed, no setup owed", ->
+  eq getValidator('email')('  Steve@Gmail.COM  '), 'steve@gmail.com'
+  eq getValidator('email')(undefined), null
+  eq getValidator('email')(null), null
+  eq getValidator('zip')(84003), '84003'   # numbers stringify before the check
+  # the same function comes back on every call (wrapped once, cached)
+  eq getValidator('email'), getValidator('email')
+
 # ==[ Utilities ]==
 
 console.log "\nUtilities"
