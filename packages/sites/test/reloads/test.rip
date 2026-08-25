@@ -18,6 +18,23 @@ unixFetch = (path, socket) ->
   options = { unix: socket }
   fetch "http://worker#{path}", options
 
+# Reading stderr as one promise only settles at EOF, which is too late for
+# a fact that expires: a rejected candidate is only observable while the
+# file that provoked it is still on disk. This accumulates as the bytes
+# arrive so a test can wait for a line, then move on.
+readStderr = (proc) ->
+  decoder = TextDecoder.new()
+  log = { text: '' }
+  log.done = do ->
+    # Streaming decode, not per-chunk: a pipe read splits wherever the
+    # kernel handed bytes over, and decoding each chunk on its own turns
+    # any multi-byte character straddling that seam into U+FFFD.
+    for await chunk as proc.stderr
+      log.text += decoder.decode chunk, { stream: true }
+    log.text += decoder.decode()
+    log.text
+  log
+
 test! 'App edits preserve workers and valid API candidates swap through the doorbell', ->
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-')
   project = join dir, 'project'
@@ -48,7 +65,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-    diagnostic = Response.new(proc.stderr).text()
+    diagnostic = readStderr proc
     waitFor! -> registration?
     first = registration.upstreams[0].path
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
@@ -62,8 +79,14 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
+    # The invalid entry has to stay on disk until the compiler has actually
+    # read it — an out-of-process generation that has not reached the file
+    # yet would compile whatever the NEXT write leaves there instead. The
+    # rejection on stderr is that proof, so wait for it rather than for a
+    # duration; the two facts below are what the rejection has to preserve.
     writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
-    sleep! 300
+    waitFor! -> diagnostic.text.includes 'API candidate rejected; keeping current workers'
+    ok diagnostic.text.includes('this is not valid Rip @@@'), 'the rejection quotes the offending source'
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
@@ -87,13 +110,10 @@ test! 'App edits preserve workers and valid API candidates swap through the door
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
-    output = await diagnostic
-    ok output.includes 'API candidate rejected; keeping current workers'
-    ok output.includes 'this is not valid Rip @@@'
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
-    await diagnostic if diagnostic?
+    await diagnostic.done if diagnostic?
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
