@@ -1083,8 +1083,19 @@ export function renderDump(declared) {
         "' is declared twice — one table has one declaration.");
     }
   }
+  // FK-dependency order, name-tiebroken: the dump is executable DDL
+  // (a collapsed baseline runs it verbatim), so a referenced table must
+  // be created before its referrer — the same rule the planner's
+  // create-table steps follow. Pure name order put order_items before
+  // orders and the baseline failed on the forward reference.
+  const byTableName = new Map(tables.map((t) => [t.name, t]));
+  const ordered = topoOrder(tables.map((t) => t.name), (n) =>
+    (byTableName.get(n).foreignKeys ?? [])
+      .map((fk) => fk.refTable)
+      .filter((ref) => ref !== n && byTableName.has(ref)), 'dump');
   const sections = [DUMP_HEADER];
-  for (const t of tables) {
+  for (const name of ordered) {
+    const t = byTableName.get(name);
     const lines = ['-- ' + t.name];
     // The cross-adapter annotation the plan output carries as its
     // note-adapter step: this table's DDL targets its own database,
