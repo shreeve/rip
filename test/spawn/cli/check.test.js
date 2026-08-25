@@ -1604,6 +1604,65 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  // Several packages leaking at once is the ordinary case for an app, and
+  // the advisories have to survive it as a READABLE unit: each package is
+  // its own finding with its own remedy, so each is set off by a blank
+  // line; the location column is sized across the whole family, so the
+  // names read down one column instead of stepping in and out per package;
+  // and the arrivals are named in full, never sampled.
+  //
+  // The column needs two packages whose paths are of DIFFERENT lengths —
+  // sized per block, the short path's names sit far to the left of the
+  // long one's, which is exactly what a single column must not do. The
+  // sample needs a package leaking more than a handful.
+  test('the received-`any` advisories read as one table: a blank line per package, one column of names, every arrival named', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-inh-table-'));
+    const many = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
+      for (const [pkg, fns] of [['aaa', many], ['bbb', ['zeta']]]) {
+        fs.mkdirSync(path.join(dir, 'packages', pkg), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'packages', pkg, 'package.json'),
+          JSON.stringify({ name: `@rip/${pkg}`, exports: { '.': `./${pkg}.rip` } }));
+        fs.writeFileSync(path.join(dir, 'packages', pkg, `${pkg}.rip`),
+          fns.map((fn) => `export def ${fn}(x)\n  x\n`).join('\n'));
+        fs.symlinkSync(path.join('..', '..', 'packages', pkg), path.join(dir, 'node_modules', '@rip', pkg));
+      }
+      fs.mkdirSync(path.join(dir, 'packages', 'app'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@rip/app-under-test', rip: { strict: true } }));
+      // The short path takes the FIRST package alphabetically, so a
+      // per-block width would put its names left of the long path's.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'z.rip'),
+        `import { ${many.join(', ')} } from '@rip/aaa'\n`
+        + many.map((fn, i) => `export z${i} = ${fn}(${i})\n`).join(''));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'a-considerably-longer-file-name.rip'),
+        "import { zeta } from '@rip/bbb'\nexport bb = zeta(2)\n");
+
+      const lines = check(dir, [path.join('packages', 'app')]).stdout.split('\n');
+      const headings = lines.map((l, i) => i).filter((i) => /values? imported from/.test(lines[i]));
+      expect(headings.length).toBe(2);
+      // Every package's finding is set off from the one above it.
+      for (const i of headings) expect(lines[i - 1]).toBe('');
+      // All five arrivals named, and nothing deferred to a "more".
+      const head = lines[headings.find((i) => lines[i].includes('@rip/aaa'))];
+      for (const fn of many) expect(head).toContain(`\`${fn}\``);
+      expect(head).not.toContain('more');
+      // One column of names, measured where the names actually START —
+      // the location is one run of non-space, the padding follows it.
+      const nameColumn = (file) => {
+        const row = lines.find((l) => l.includes(`${file}:`) && !/imported from/.test(l));
+        expect(row).toBeDefined();
+        return /^(\s+\S+\s+)\S/.exec(row)[1].length;
+      };
+      expect(nameColumn('z.rip')).toBe(nameColumn('a-considerably-longer-file-name.rip'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Gradual accepts `any` — that is what it is for — and an inherited one
   // is not even a defect the project can answer by annotating its own code,
   // so it is not on the gradual path at all. It belongs to the posture that
@@ -1949,8 +2008,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // dependency's own diagnostics are its author's, not the caller's:
   // reporting them makes a package's exit code hostage to code its
   // author does not own, and surfaces defects the dependency's own
-  // check cannot reproduce. The dependency is not silently dropped —
-  // one summary line names where to look.
+  // check cannot reproduce. Not counted either, for the second reason:
+  // a tally the reader is told to go verify elsewhere is worse than
+  // silence when the package's own check answers clean. The same file,
+  // asked about directly, is answered in full.
   test('a check reports its targets, not its dependencies', () => {
     const dir = workspace({
       'app/app.rip': [
@@ -1968,21 +2029,26 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // Asked about app/ — the dependency's TS2322 is not the answer.
       const scoped = JSON.parse(check(dir, ['--json', 'app']).stdout);
       expect(scoped).toEqual([]);
-      // But it is accounted for, not hidden.
-      expect(check(dir, ['app']).stdout).toMatch(/1 diagnostic in dependencies \(lib\)/);
+      // And not tallied on the way past either.
+      expect(check(dir, ['app']).stdout).not.toContain('in dependencies');
       // Asked about the whole tree — the same diagnostic IS the answer.
       const whole = JSON.parse(check(dir, ['--json']).stdout);
       expect(whole.map((d) => [d.file, d.code])).toEqual([['lib/lib.rip', 2322]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  // Config is per FILE (nearest package.json), so a strict consumer's
-  // check still hides its gradual DEPENDENCIES' diagnostics — and a
-  // summary that says "set `rip.strict` in package.json" after the user
-  // just did exactly that reads as broken. The lines name the projects
-  // the hidden diagnostics belong to, so the remedy points at the right
-  // package.json; the home project ('.') alone stays unnamed.
-  test('hidden-diagnostics summary names the gradual projects when the target itself is strict', () => {
+  // The ledger counts the code the run was ASKED about. A dependency is
+  // compiled and checked so the target's types resolve, but its hidden
+  // families are its own report to give — otherwise a strict consumer,
+  // which by the per-file gate hides nothing of its own, gets a ledger
+  // made entirely of other people's counts, offering a `rip.strict` it
+  // already set in a package.json it did not open.
+  //
+  // Widening the SAME workspace to cover that project brings the counts
+  // back, named: one check spans several package.jsons, and the remedy
+  // has to say which one it means (the home project alone stays unnamed).
+  // The two arms differ only in what the run was asked about.
+  test('hidden diagnostics are the ledger of the code checked, not of the dependencies it reached', () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),   // anchor the mirror at the monorepo root
       'packages/app/package.json': JSON.stringify({ rip: { strict: true } }),
@@ -1998,9 +2064,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const out = check(dir, [path.join('packages', 'app')]).stdout;
-      expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code \(packages\/util\) — annotate a declaration/);
-      expect(out).toMatch(/\d+ annotation diagnostics? hidden \(packages\/util\) — set `rip\.strict`/);
+      // Asked about the strict consumer: util is a dependency, and says
+      // nothing here — no ledger at all, not merely an unnamed one.
+      const consumer = check(dir, [path.join('packages', 'app')]).stdout;
+      expect(consumer).toContain('No type errors');
+      expect(consumer).not.toContain('hidden');
+      // Asked about the workspace: util is covered, so it is counted —
+      // and named, because the remedy belongs to ITS package.json.
+      const both = check(dir).stdout;
+      expect(both).toMatch(/\d+ diagnostics? hidden in unannotated code \(packages\/util\) — annotate a declaration/);
+      expect(both).toMatch(/\d+ annotation diagnostics? hidden \(packages\/util\) — set `rip\.strict`/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

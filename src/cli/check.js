@@ -570,10 +570,6 @@ const hiddenScopeDirs = new Set();
 const hiddenAnnotationDirs = new Set();
 let hiddenUninstalled = 0;
 const hiddenUninstalledDirs = new Set();   // where `bun install` answers
-// A DEPENDENCY's diagnostics — a closure file the run was not asked
-// about. Counted, never reported: see the pull loop.
-let dependencyDiags = 0;
-const dependencyDirs = new Set();
 // package name -> the names this project imports from it and receives as
 // `any`. Filled by the inherited-`any` pass; read by the advisory.
 const inheritedAny = new Map();
@@ -1124,15 +1120,21 @@ if (compiled.size > 0) {
           console.error(`rip check: could not pull diagnostics for ${path.relative(process.cwd(), fsPath)} (${err.message}) — the run is incomplete`);
           continue;
         }
-        // A DEPENDENCY answers for itself: a file the run was not asked
-        // about is still compiled and checked — a target's types cannot
-        // resolve otherwise — but its diagnostics report through its own
-        // check, not this one. Reporting them makes a package's exit
-        // code hostage to code its author does not own, and shows a
-        // consumer defects the dependency's own check cannot reproduce.
-        // Its HIDDEN families still count below: those name which
-        // package.json a `rip.strict` remedy belongs to, which is as
-        // true of a dependency as of a target.
+        // A DEPENDENCY answers for itself, in every currency this report
+        // has. A file the run was not asked about is still compiled and
+        // checked — a target's types cannot resolve otherwise — but what
+        // is read off it here belongs to THIS run's program, not to the
+        // package: its own host types, its non-`.rip` files, and the
+        // inference those support are all things a consumer's closure
+        // may never materialize. So nothing it says is carried out of
+        // this loop — not the diagnostics, which would make a package's
+        // exit code hostage to code its author does not own, and not a
+        // count of them either, which points a reader at a package where
+        // the number cannot be reproduced. Its HIDDEN families stop here
+        // for the same reason plus one more: a strict project hides
+        // nothing of its own, so counting dependencies would make its
+        // ledger wholly other people's, offering a `rip.strict` it has
+        // already set in a package.json it did not open.
         const isTarget = explicitTargets.has(fsPath);
         const mapped = [];
         for (const d of pulled?.items ?? []) {
@@ -1143,12 +1145,12 @@ if (compiled.size > 0) {
           // having no source span — inflating the number several-fold and
           // promising the user diagnostics `rip.strict` would never
           // deliver. Re-map with the strict flag to ask the real question.
-          if (!m && !entry.cfg.strict && mapTsDiagnostic({ ...entry.good, strict: true }, d)) {
+          if (!m && isTarget && !entry.cfg.strict && mapTsDiagnostic({ ...entry.good, strict: true }, d)) {
             // Which PROJECT the hidden diagnostic belongs to — config is
-            // per file, so a strict consumer's check still hides its
-            // gradual dependencies' diagnostics, and a summary that says
-            // "set `rip.strict`" right after the user did exactly that
-            // reads as broken unless it names whose package.json is meant.
+            // per file, so a directory check spans several package.jsons
+            // and a summary that says "set `rip.strict`" right after the
+            // user did exactly that in the one they were thinking of
+            // reads as broken unless it names which is meant.
             const proj = path.relative(process.cwd(), entry.cfg._configDir ?? path.dirname(fsPath)) || '.';
             const uninstalledAt = d.code === 2307
               ? declaredButUninstalled(/Cannot find module '([^']+)'/.exec(d.message)?.[1], path.dirname(fsPath)) : null;
@@ -1172,20 +1174,16 @@ if (compiled.size > 0) {
           mapped.push(m);
         }
         for (const m of applyRipDirectives(entry.good, mapped)) {
-          if (!isTarget) {
-            // Counted under the REPORT's own rule — error/warning only,
-            // no unused/deprecated fade classes — so the number is in the
-            // same currency as the count above it. It covers the
-            // dependency files THIS closure reached, which is fewer than
-            // checking that directory outright.
-            if ((m.severity ?? 1) > 2) continue;
-            dependencyDiags++;
-            // The file's own directory, not its project: the line answers
-            // "where do I go to see these", and a directory is what `rip
-            // check` takes back.
-            dependencyDirs.add(path.relative(process.cwd(), path.dirname(fsPath)) || '.');
-            continue;
-          }
+          // Dropped outright, not counted: a diagnostic raised against a
+          // dependency HERE is a reading of that file inside THIS run's
+          // program, where the package's own host types, its non-`.rip`
+          // runtime files, and the inference they support may all be
+          // absent. Its own check is the only place the reading is of the
+          // package as it is built — so a count taken here is not a
+          // smaller version of that report, it is a different one, and
+          // pointing the reader at the package sends them somewhere the
+          // number cannot be found.
+          if (!isTarget) continue;
           tsDiags.push({
             file: fsPath, severity: m.severity, code: m.code, message: m.message,
             line: m.range.start.line, character: m.range.start.character,
@@ -1315,8 +1313,8 @@ if (asJson) {
   // wording one lever two ways reads as two levers.
   const plural = (n) => (n === 1 ? '' : 's');
   // The projects a family's hidden diagnostics live in, minus the home
-  // project — "set `rip.strict`" must point at the right package.json when
-  // the hiding happens in a dependency the target does not govern.
+  // project — one check can span several package.jsons, and "set
+  // `rip.strict`" must point at the one that governs the hiding.
   const inProjects = (dirs) => {
     const named = [...dirs].filter((d) => d !== '.').sort();
     if (!named.length) return '';
@@ -1326,17 +1324,25 @@ if (asJson) {
   // for checking and withholds it, with the sites, so the remedy is one edit
   // away. Yellow, apart from the gray ledger below; they never move the exit
   // status.
-  const advisory = (sites, head) => {
+  //
+  // Yellow carries the CLAIM and stops there; the reasoning and the remedy
+  // that follow it are gray. A sentence painted end to end is loud at the
+  // length of its longest clause, and the clause that has to catch the eye
+  // is the first one — the rest is read once the reader has decided to look.
+  const claim = (head, tail) => `${advise(head)}${gray(tail)}`;
+  const advisory = (sites, head, tail) => {
     if (sites.length === 0) return;
     console.log('');
-    console.log(advise(head(sites.length)));
+    console.log(claim(head(sites.length), tail));
     for (const a of sites) console.log(`  ${rel(a.file)}${gray(':' + a.line)}`);
   };
-  advisory(escapes.any, (n) => `${n} \`any\` annotation${plural(n)} — an \`any\` annotation switches checking on for its scope `
-    + 'and tells the checker nothing; under gradual an unannotated binding is already `any`, so write the real type or drop the annotation');
-  advisory(escapes.casts, (n) => `${n} \`as any\` cast${plural(n)} — \`as any\` exempts one expression from a scope that is otherwise checked; `
-    + 'cast to the type it really is, or fix the value');
-  advisory(escapes.ignores, (n) => `${n} \`@ts-ignore\` directive${plural(n)} — \`@ts-ignore\` keeps silencing the next line after the error it hid is gone; `
+  advisory(escapes.any, (n) => `${n} \`any\` annotation${plural(n)}`,
+    ' — an `any` annotation switches checking on for its scope and tells the checker nothing; '
+    + 'under gradual an unannotated binding is already `any`, so write the real type or drop the annotation');
+  advisory(escapes.casts, (n) => `${n} \`as any\` cast${plural(n)}`,
+    ' — `as any` exempts one expression from a scope that is otherwise checked; cast to the type it really is, or fix the value');
+  advisory(escapes.ignores, (n) => `${n} \`@ts-ignore\` directive${plural(n)}`,
+    ' — `@ts-ignore` keeps silencing the next line after the error it hid is gone; '
     + '`@ts-expect-error` reports when the suppression is no longer needed');
   // Host types that describe a DIFFERENT runtime than the one this ran
   // under, per declaring project — once, regardless of how many files
@@ -1373,24 +1379,22 @@ if (asJson) {
     // `there` only when every mismatch names somewhere to go.
     const wholly = [...hostMismatches.values()].every((m) => m.where !== '');
     console.log('');
-    console.log(advise(`\`@types/bun\` ${shown}${more} `
-      + `${hostMismatches.size === 1 ? 'does' : 'do'} not match the running Bun ${runtimeBun} `
-      + `— \`Bun\`, \`process\`, and the rest are typed from the wrong version `
+    console.log(claim(`\`@types/bun\` ${shown}${more} `
+      + `${hostMismatches.size === 1 ? 'does' : 'do'} not match the running Bun ${runtimeBun}`,
+      ` — \`Bun\`, \`process\`, and the rest are typed from the wrong version `
       + `(try \`bun add -d @types/bun@${runtimeBun}\`${wholly ? ' there' : ''})`));
   }
   if (inheritedAny.size > 0) {
-    console.log('');
-    for (const label of [...inheritedAny.keys()].sort()) {
-      const names = [...inheritedAny.get(label)].sort();
-      const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
-      const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
-      console.log(advise(`${names.length} value${plural(names.length)} imported from \`${label}\` `
-        + `${names.length === 1 ? 'is' : 'are'} \`any\` (${shown}${more}) `
-        + `— run \`rip check --public\` there`));
-      // One line per FILE, and every file that has one. A file is the unit
-      // a reader opens, and naming each of them is complete at that level —
-      // unlike a sample of positions, which shows some of the reach and
-      // says nothing about the rest.
+    // Two levels, two questions: the heading is what this project
+    // RECEIVES untyped from that package, the rows are where it reaches.
+    // An import that arrives and is never used answers the first and not
+    // the second, so neither level restates the other.
+    //
+    // One line per FILE, and every file that has one. A file is the unit
+    // a reader opens, and naming each of them is complete at that level —
+    // unlike a sample of positions, which shows some of the reach and
+    // says nothing about the rest.
+    const blocks = [...inheritedAny.keys()].sort().map((label) => {
       const byFile = new Map();
       for (const x of inheritedSites) {
         if (x.label !== label) continue;
@@ -1402,29 +1406,43 @@ if (asJson) {
         if (row.at === null && x.at !== null) row.at = x.at;
         byFile.set(x.file, row);
       }
-      const files = [...byFile.keys()].sort((a, b) => rel(a).localeCompare(rel(b)));
-      const shownAt = (f) => {
-        const { at } = byFile.get(f);
-        return at === null ? cyan(rel(f))
-          : `${cyan(rel(f))}:${yellow(String(at.line + 1))}:${yellow(String(at.character + 1))}`;
-      };
-      const w = Math.min(44, files.reduce((m, f) => Math.max(m, shownAt(f).replace(/\x1b\[[0-9;]*m/g, '').length), 0));
+      return { label, byFile, files: [...byFile.keys()].sort((a, b) => rel(a).localeCompare(rel(b))) };
+    });
+    const bare = (s) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
+    const shownAt = (byFile, f) => {
+      const { at } = byFile.get(f);
+      return at === null ? cyan(rel(f))
+        : `${cyan(rel(f))}:${yellow(String(at.line + 1))}:${yellow(String(at.character + 1))}`;
+    };
+    // Sized across the WHOLE family, not per package: the packages are
+    // one table read down a single column of names, and three columns
+    // that each happen to fit their own block read as three tables. No
+    // ceiling on the width — a location wider than the cap cannot be
+    // shortened to fit it, so a cap does not bound the column, it only
+    // lets the long rows out of it and takes the one column back.
+    const w = blocks.reduce((m, b) =>
+      b.files.reduce((n, f) => Math.max(n, bare(shownAt(b.byFile, f))), m), 0);
+    for (const { label, byFile, files } of blocks) {
+      // EVERY name, never a sample: the list is the arrivals themselves,
+      // and a reader who cannot see which ones has to go find out anyway.
+      // A count with four of nine names beside it is the shape that reads
+      // as complete while withholding most of what it describes.
+      const names = [...inheritedAny.get(label)].sort();
+      const shown = names.map((n) => `\`${n}\``).join(', ');
+      // Each package is its own finding with its own remedy, so each
+      // gets the blank line an advisory gets — run together they read as
+      // one paragraph about nothing in particular.
+      console.log('');
+      console.log(claim(`${names.length} value${plural(names.length)} imported from \`${label}\` `
+        + `${names.length === 1 ? 'is' : 'are'} \`any\``,
+        ` (${shown}) — run \`rip check --public\` there`));
       for (const f of files) {
-        const label = shownAt(f);
-        const pad = ' '.repeat(Math.max(0, w - label.replace(/\x1b\[[0-9;]*m/g, '').length));
-        console.log(`  ${label}${pad}  ${gray([...byFile.get(f).locals].sort().join(', '))}`);
+        const at = shownAt(byFile, f);
+        console.log(`  ${at}${' '.repeat(Math.max(0, w - bare(at)))}  ${gray([...byFile.get(f).locals].sort().join(', '))}`);
       }
     }
   }
-  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0 || dependencyDiags > 0) console.log('');
-  if (dependencyDiags > 0) {
-    // Every directory names itself here — unlike the `rip.strict`
-    // families, whose home project is the one the reader is already in.
-    const dirs = [...dependencyDirs].sort();
-    const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
-    console.log(gray(`${dependencyDiags} diagnostic${plural(dependencyDiags)} in dependencies (${shown}) `
-      + `— check them there`));
-  }
+  if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
   if (hiddenScope > 0) {
     console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
       + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json (preview it with \`rip check --strict\`)`));
