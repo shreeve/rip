@@ -1748,6 +1748,10 @@ export main = (argv) ->
           Response.new(null, { status: 204 })
         catch error
           Response.new(String(error), { status: 503 })
+    # Same cross-user rule as worker sockets: the edge cannot ring a
+    # doorbell it cannot write to. An unrung doorbell is the lazy-boot
+    # wedge — every request 503s and the manager never hears why.
+    chmodSync doorbellPath, 0o666
 
   releaseHold = ->
     throw Error.new("cannot release while #{operation}") unless operation is 'Held'
