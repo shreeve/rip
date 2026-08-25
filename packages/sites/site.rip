@@ -810,7 +810,10 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # onError keys on to reshape the envelope — so system errors that
 # happen to carry a `code` (ENOENT and friends) can never impersonate
 # an intentional API error.
-export error = (message = 'Bad request', status = 400, code = null, field = null) ->
+# Typed `any`, not `never`: the empty-map no-op means error! can
+# return, and `never` would mark everything after `error! errs` —
+# the whole process stanza — unreachable to the checker.
+export error = (message: string | Record<string, string> = 'Bad request', status = 400, code = null, field = null): any ->
   # Object form — a field→message map, for collected validation:
   #
   #   errs = {}
