@@ -32,12 +32,18 @@ test "names come from gendered pools", ->
 
 test "phones are NANP-legal, fax matches, extensions opt in", ->
   fake.seed 7
-  for i in [0...50]
-    m = fake.phone().match /^\((\d{3})\) (\d{3})-\d{4}$/
+  toPhone = import!('rip/validate').toPhone
+  for i in [0...200]
+    ph = fake.phone()
+    m = ph.match /^\((\d{3})\) (\d{3})-\d{4}$/
     ok m, 'phone shape'
     ok m[1][0] >= '2', 'area code starts 2-9'
+    ok m[1][1] <= '8', 'area code middle digit never 9 (reserved)'
     ok m[1] % 100 isnt 11, 'area code never N11'
     ok m[2][0] >= '2', 'exchange starts 2-9'
+    # The real contract: everything the generator emits, the validator
+    # accepts unchanged — fakes must survive real validation.
+    eq toPhone(ph), ph
   ok /ext\. \d+/.test fake.phone(ext: true)
   ok /^\(\d{3}\) \d{3}-\d{4}$/.test fake.fax()
   ok ['cell', 'home', 'work'].includes fake.phoneType()

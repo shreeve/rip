@@ -180,11 +180,13 @@ email = (first, last) ->
 username = (first, last) ->
   "#{(first ?? firstName()).toLowerCase()}#{(last ?? lastName()).toLowerCase()}#{integer 1, 999}"
 
-# NANP-legal: area and exchange codes start 2-9, area code never N11.
+# NANP-legal: area code is [2-9][0-8][0-9] (a middle 9 is reserved for
+# expansion and rip/validate's toPhone refuses it), never N11; exchange
+# codes start 2-9.
 areaCode = ->
   loop
-    n = integer 201, 999
-    return String(n) unless n % 100 is 11
+    s = String(integer 2, 9) + String(integer 0, 8) + String(integer 0, 9)
+    return s unless s.endsWith '11'
 
 exchangeCode = -> String(integer 2, 9) + digits(2)
 
