@@ -47,7 +47,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { cpus } from 'node:os';
+import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -77,11 +77,38 @@ const number = (name, fallback, min) => {
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROOT = resolve(flag('root', HERE));
 
-// The root suite is the critical path — every other lane finishes inside
-// its shadow — and it spawns tsc/tsgo children of its own, so slots past
-// a handful buy no wall time and only add contention. Half the cores,
-// never fewer than 4 so a small CI runner still overlaps its lanes.
-const JOBS = Math.floor(number('jobs', Math.max(4, Math.floor(cpus().length / 2)), 1));
+// Everything below is one CPU budget, because the machine is one machine:
+// oversubscription does not fail loudly, it just stretches every clock
+// until the suites that time real machinery start missing deadlines they
+// meet idle (a reload doorbell, a scaling gate, a control-plane probe).
+//
+// availableParallelism, not cpus().length: it respects CPU affinity, so a
+// pinned or containerised runner is sized by what it may actually use.
+const CORES = availableParallelism();
+
+// ONE ratio sets the peak, so it is the same multiple of the machine at
+// every size rather than whatever two independent formulas happen to
+// produce. Above 1.0 deliberately: lanes are not uniformly CPU-bound —
+// they spawn subprocesses, wait on sockets and block on I/O — so a strict
+// 1:1 budget leaves those cores idle. Measured on an 8-core box: a 1.0x
+// peak cost +29% wall (81s against 63s); 1.25x costs +6%. Push it past
+// ~1.5 and the suites that time real machinery start missing deadlines
+// they meet idle, which is the whole reason this budget exists.
+const OVERSUBSCRIBE = 1.25;
+const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
+
+// Lane slots are a PACKING constraint, not a CPU one — the long sibling
+// lanes (sites, vscode, print) have to overlap the root lane or the wall
+// clock becomes their sum, which is what the old floor of 4 was really
+// buying. Half the cores, floor 2: on a two-core box the cores, not the
+// slots, are the constraint, and four lanes there only added contention.
+const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
+
+// The root lane is the critical path and the CPU-bound one, so it gets
+// whatever the budget has left after the siblings running beside it —
+// never more than the machine. Left bare, `bun test --parallel` defaults
+// to one worker per core and claims the whole machine on its own.
+const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - (JOBS - 1)));
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
@@ -146,7 +173,7 @@ const planLanes = () => {
     cmd: process.execPath,
     // 60s, not 15s: the extended tier's scaling gates budget up to three
     // full measurements, and a busy lane stretches one past 5s.
-    args: ['test', '--parallel', '--timeout', '60000'],
+    args: ['test', `--parallel=${ROOT_WORKERS}`, '--timeout', '60000'],
     env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
@@ -355,7 +382,7 @@ const skipped = lanes.filter((l) => l.skip);
 
 // "repo", not "root" — `root` names a lane, and the two would read as
 // the same thing on adjacent lines.
-console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time, repo ${ROOT}`);
+console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers), repo ${ROOT}`);
 for (const { name, why } of excluded) console.log(dim(`  · packages/${name} excluded: ${why}`));
 for (const lane of skipped) {
   console.log((CI ? red : yellow)(`  ⊘ ${lane.label} SKIPPED: ${lane.skip}`));
