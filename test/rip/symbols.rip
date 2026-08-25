@@ -1,7 +1,9 @@
 # Test: Symbol literals — `:name` is Symbol.for("name"): interned,
 # identity-comparable. A SPACED colon tight to a word is a symbol; a
 # tight key colon ({a:b}), a spaced pair ({a : b}), and a pending
-# ternary's else-colon all keep their structural readings.
+# ternary's else-colon all keep their structural readings. One trailing
+# `!`/`?` joins the name (`:save!`, `:valid?`) — claimed only at a clear
+# boundary, so `:a!=b`, `:a??b`, and `:a?.b` keep their operator readings.
 
 import { test, code, fail, type } from '../support/testing.js'
 
@@ -56,6 +58,34 @@ test 'symbols are interned across expressions', '''
 ''', true
 
 test 'symbol matches Symbol.for', ':test is Symbol.for("test")', true
+
+code 'symbol bang suffix', ':save!', 'Symbol.for("save!")'
+code 'symbol question suffix', ':valid?', 'Symbol.for("valid?")'
+code 'symbol dotted with suffix', ':a.b!', 'Symbol.for("a.b!")'
+code 'symbol hyphenated with suffix', ':foo-bar?', 'Symbol.for("foo-bar?")'
+
+test 'suffixed symbol description', '(:string!).description', 'string!'
+test 'suffixed symbol identity', 'x = :done!; x is Symbol.for("done!")', true
+test 'suffixed symbols as arguments', '''
+  f = (a, b) -> a.description + "," + b.description
+  f :save!, :load?
+''', 'save!,load?'
+test 'suffixed symbols in an array', '[:a!, :b?].map((s) -> s.description).join(",")', 'a!,b?'
+test 'suffixed symbol as object value', '{status: :active!}.status is :active!', true
+test 'suffixed symbols in ternary branches', '(true ? :yes! : :no?).description', 'yes!'
+test 'suffixed symbol in switch when', '''
+  x = :red!
+  switch x
+    when :red! then "stop"
+    else "go"
+''', 'stop'
+
+# The suffix claims only at a clear boundary — an operator-starting
+# character after `!`/`?` keeps its established reading.
+test 'spaced != after symbol stays comparison', ':a != :b', true
+test 'tight != after symbol stays comparison', ':a!=:b', true
+test 'tight ?? after symbol stays coalesce', '(:a??:b).description', 'a'
+test 'tight ?. after symbol stays optional chain', ':a?.description', 'a'
 test 'tight key colon stays a pair', 'b = 7\no = {a:b}\no.a', 7
 test 'spaced pair colon stays a pair', 'o = {a : 5}\no.a', 5
 test 'ternary else-colon never mints', 'c = 1\nd = 2\ne = 3\nc ? d :e', 2

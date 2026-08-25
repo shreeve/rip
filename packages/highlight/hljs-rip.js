@@ -126,10 +126,12 @@ export default function(hljs) {
     begin: /@[a-zA-Z_$][\w$]*/,
   };
 
-  // :name / :domain.name / :kebab-name → Symbol.for("…")
+  // :name / :domain.name / :kebab-name / :save! / :valid? → Symbol.for("…")
+  // The `!`/`?` suffix highlights only at a claim boundary, mirroring
+  // the lexer (`:a!=b` keeps `!=` as an operator).
   const SYMBOL_LIT = {
     className: 'symbol',
-    match: /(?<![\w$]):[a-zA-Z_$][\w$]*(?:[.-][a-zA-Z_$][\w$]*)*/,
+    match: /(?<![\w$]):[a-zA-Z_$][\w$]*(?:[.-][a-zA-Z_$][\w$]*)*(?:[!?](?=[\s,)\]};:]|$))?/,
   };
 
   const SIGIL_ATTR = {
