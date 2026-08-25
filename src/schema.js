@@ -385,16 +385,13 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   // Scanner-minted SYMBOL tokens split back into ':' + word pairs
   // inside the body — schema grammar reads the two-token spelling
   // everywhere (`@unique [:total, :status]`, `@ensure "…", :pw2`).
-  // A `!`/`?`-suffixed symbol has no identifier form to split into, so
-  // it rejects here rather than silently shedding its suffix.
-  bodyTokens = bodyTokens.flatMap((tk) => {
-    if (tk.kind !== 'SYMBOL') return [tk];
-    if (tk.value.endsWith('!') || tk.value.endsWith('?')) {
-      fail(`symbol ':${tk.value}' — a '${tk.value.at(-1)}' suffix is not supported inside a schema body; schema names are identifiers`, tk.start);
-    }
-    return [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
-            { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }];
-  });
+  // A `!`/`?`-suffixed name rides the word whole (`:draft!` → `draft!`);
+  // consumers with narrower name contracts (@scope's identifier gate,
+  // field/column resolution) keep their own positioned rejections.
+  bodyTokens = bodyTokens.flatMap((tk) => tk.kind === 'SYMBOL'
+    ? [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
+       { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }]
+    : [tk]);
 
   const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
     schemaStart: schemaTok.start,
@@ -997,8 +994,14 @@ function parseScopeDirective(argTokens, directiveTok, fail) {
     fail(`@scope name must be a :symbol — '@scope :active, -> @where(active: true)'`, argTokens[0].start);
   }
   const name = sym.value;
-  if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
-    fail(`@scope name ':${name}' must be a lowercase-first alphanumeric identifier`, sym.start);
+  // After '@scope' the ':' is structural, so the raw pair spelling
+  // governs and a tight `!`/`?` lands as its own token — fold it into
+  // the gate so the rejection echoes the user's spelling.
+  const suf = argTokens[2];
+  const suffixed = suf && !suf.spaced && suf.start === sym.end &&
+    (suf.value === '!' || suf.value === '?');
+  if (suffixed || !/^[a-z][a-zA-Z0-9]*$/.test(name)) {
+    fail(`@scope name ':${name}${suffixed ? suf.value : ''}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, sym.start);
   }
   let rest = argTokens.slice(2);
   if (rest[0]?.kind === ',') rest = rest.slice(1);

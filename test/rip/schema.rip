@@ -5635,7 +5635,22 @@ fail 'open-ended: bare \'..\' is rejected', '''
     name! ..
 ''', null
 
-fail 'a suffixed symbol rejects inside a schema body', '''
+test 'suffixed symbols as enum members', '''
   Role = schema :enum
     :draft!
-''', "suffix is not supported inside a schema body"
+    :valid?
+    :done
+  [Role.parse("draft!"), Role.parse("valid?"), Role.parse("done")].join(",")
+''', 'draft!,valid?,done'
+
+test 'suffixed symbol as a literal-union default', '''
+  S = schema :shape
+    status "draft!" | "done", [:draft!]
+  S.parse({}).status
+''', 'draft!'
+
+fail 'a suffixed @scope name rejects — scopes chain as builder methods', '''
+  M = schema :model
+    active? boolean, [true]
+    @scope :active?, -> @where(active: true)
+''', "lowercase-first alphanumeric identifier"
