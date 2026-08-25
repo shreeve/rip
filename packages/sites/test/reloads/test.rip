@@ -18,10 +18,10 @@ unixFetch = (path, socket) ->
   options = { unix: socket }
   fetch "http://worker#{path}", options
 
-# Reading stderr as one promise only settles at EOF, which is too late for
-# a fact that expires: a rejected candidate is only observable while the
-# file that provoked it is still on disk. This accumulates as the bytes
-# arrive so a test can wait for a line, then move on.
+# Reading stderr as one promise only settles at EOF — too late for a fact
+# that expires, since a rejected candidate is observable only while the
+# file that provoked it is still on disk. This accumulates as bytes arrive
+# so a test can wait for a line, then move on.
 readStderr = (proc) ->
   decoder = TextDecoder.new()
   log = { text: '' }
@@ -80,10 +80,9 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     # The invalid entry has to stay on disk until the compiler has actually
-    # read it — an out-of-process generation that has not reached the file
-    # yet would compile whatever the NEXT write leaves there instead. The
-    # rejection on stderr is that proof, so wait for it rather than for a
-    # duration; the two facts below are what the rejection has to preserve.
+    # READ it — a generation that has not reached the file yet would compile
+    # whatever the next write leaves there. The rejection is that proof, so
+    # wait for it rather than for a duration.
     writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
     waitFor! -> diagnostic.text.includes 'API candidate rejected; keeping current workers'
     ok diagnostic.text.includes('this is not valid Rip @@@'), 'the rejection quotes the offending source'
