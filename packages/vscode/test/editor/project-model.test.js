@@ -695,6 +695,18 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       expect(api.codes('app.rip')).toContain(2307); // honestly unresolved
     });
   }, 30000);
+
+  test('stdlib imports materialize through the fence — rip/<pkg> is mapped, so it must resolve', async () => {
+    await inWorkspace({}, async (api) => {
+      const src = 'import { check } from "rip/validate"\nk = check("1", "int")\n';
+      await api.open('app.rip', src);
+      await api.change('app.rip', src + '\n');
+      // The generated tsconfig maps rip/validate to an __external__ face;
+      // the closure walk must actually write that face (the workspace
+      // fence exempts STDLIB_DIR) or the import squiggles TS2307 forever.
+      await api.poll(() => !api.codes('app.rip').includes(2307), 'rip/validate resolves');
+    });
+  }, 30000);
 });
 
 // The module marker driven end-to-end: two PLAIN buffers (no

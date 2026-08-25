@@ -781,7 +781,7 @@ export function bareRipSpecifierTarget(spec, fromDir) {
 // narrower than a shell's. A candidate counts only if it actually
 // holds the stdlib (packages/vscode/package.json), so a stray
 // `packages` dir near an installed extension never wins.
-const STDLIB_DIR = (() => {
+export const STDLIB_DIR = (() => {
   const candidates = [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages')];
   const binDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
   binDirs.push(

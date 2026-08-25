@@ -73,7 +73,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, STDLIB_DIR, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -899,8 +899,12 @@ function mirrorIntact(file, entry) {
 // targets missing from disk are remembered (pendingImports) so a later
 // Created event pulls them in; targets resolving OUTSIDE the workspace
 // truncate the closure loudly (a `../` chain must not walk the whole
-// disk into __external__). Returns the counters (the scaling gate pins
-// them) and the created/changed mirror paths for tsgo notification.
+// disk into __external__) — EXCEPT the stdlib tree: `rip/<pkg>`
+// specifiers resolve into STDLIB_DIR, a bounded tree whose faces the
+// generated tsconfig already maps by name (stdlibRipPaths), so
+// materializing them completes a mapping the config promised rather
+// than opening the disk walk. Returns the counters (the scaling gate
+// pins them) and the created/changed mirror paths for tsgo notification.
 function materializeClosure(seeds) {
   ensureMirrorRoot();
   const queue = [...seeds];
@@ -910,7 +914,9 @@ function materializeClosure(seeds) {
     const file = queue.pop();
     if (materializedMirrors.has(file)) continue;
     if (documents.get('file://' + file)) continue; // open buffers own their mirrors and closures
-    if (!workspaceRoot || !file.startsWith(workspaceRoot + path.sep)) {
+    const inWorkspace = workspaceRoot && file.startsWith(workspaceRoot + path.sep);
+    const inStdlib = STDLIB_DIR && file.startsWith(STDLIB_DIR + path.sep);
+    if (!inWorkspace && !inStdlib) {
       connection.console.error(
         `[rip] closure truncated: ${file} resolves outside the workspace — not materialized (open it directly for single-file service)`,
       );
