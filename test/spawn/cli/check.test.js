@@ -885,6 +885,404 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // `--public` answers one question: what does a CONSUMER's checker
+  // resolve for every name a package publishes? It asks the checker, not
+  // the declarations — rip is inference-first, so an export with no
+  // annotation whose value has a typed origin IS typed, and measuring
+  // declarations would report failure exactly as a package gets better at
+  // inferring. A hover names a type without opening it, so the walk
+  // descends through members and reports the PATH to the first `any`.
+  //
+  // It stops at anything the package does not declare: a class extending
+  // `Error` carries Error's whole surface, and a package cannot fix that.
+  test('--public resolves types (inference included), finds nested any with its path, and stops at foreign members', () => {
+    const clean = workspace({
+      'index.rip': [
+        'def build(): string',
+        "  'x'",
+        '',
+        'export made = build()',            // NO annotation — inferred `string`
+        '',
+        'export class Boom extends Error',  // inherits Error's foreign surface
+        '  tag: string = "b"',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(clean, 'package.json'),
+      JSON.stringify({ name: 'clean-pkg', exports: { '.': './index.rip' } }, null, 2));
+    const leaky = workspace({
+      'index.rip': [
+        'export type Inner =',
+        '  limit: number',
+        '  extra: any',
+        '',
+        'export type Outer =',
+        '  inner: Inner',
+        '',
+        'export def fine(n: number): string',
+        '  "#{n}"',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(leaky, 'package.json'),
+      JSON.stringify({ name: 'leaky-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const ok = check(clean, ['--public']);
+      // The whole point: `made` carries no annotation and still counts.
+      // A declaration-based audit calls this untyped, which is the answer
+      // that gets WORSE as a package improves.
+      expect(ok.stdout).toMatch(/\u2713 made/);
+      // Error's inherited surface is not this package's to fix.
+      expect(ok.stdout).toMatch(/\u2713 Boom/);
+      expect(ok.stdout).toContain('2/2 exports fully typed (100.0%)');
+      expect(ok.status).toBe(0);
+
+      const bad = check(leaky, ['--public']);
+      // The path names the member that leaks, through the type that owns it.
+      expect(bad.stdout).toContain('any at: Outer.inner.extra');
+      expect(bad.stdout).toContain('any at: Inner.extra');
+      expect(bad.stdout).toMatch(/\u2713 fine/);      // foreign types stay opaque
+      expect(bad.status).toBe(1);                       // gate-able
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+      fs.rmSync(leaky, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A hover prints a signature only while the type is spelled inline. Give
+  // the type a NAME — `typeof HTTPError` — and the parameters and the
+  // constructed instance stop being printed, and enumerating members finds
+  // statics, never the constructor. So an audit that reads hovers and walks
+  // properties calls an unannotated constructor fully typed. Every case
+  // here is one a consumer inherits and cannot fix from outside.
+  test('--public opens signatures: constructor and call parameters, returns, and the instance a constructor yields', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export type Opts =',
+        '  extra: any',
+        '',
+        'export class Boom extends Error',   // no members: the .d.ts drops it entirely
+        '  constructor: (payload) ->',
+        "    super('boom')",
+        '',
+        'export class Chatty',
+        '  constructor: (tag: string) ->',
+        '    @tag = tag',
+        '',
+        '  describe: (detail) ->',
+        '    "#{detail}"',
+        '',
+        'export class Solid',
+        '  constructor: (tag: string) ->',
+        '    @tag = tag',
+        '',
+        '  describe: (detail: string): string ->',
+        '    "#{detail}"',
+        '',
+        'export def parse(text: string)',
+        '  JSON.parse(text)',
+        '',
+        'export def run(o: Opts): string',
+        "  'x'",
+        '',
+        'export def pick(cb: ((n: number) => string), tail): void',
+        '  return',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'sig-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // A construct signature's parameter, on a class that declares no
+      // annotated member of its own — nothing about a class's own surface
+      // decides whether its constructor is read.
+      expect(out.stdout).toContain('any at: Boom.new(payload)');
+      // The instance a constructor RETURNS, then a parameter of its method.
+      expect(out.stdout).toContain('any at: Chatty#describe(detail)');
+      // A return type, named as the return and not as the function.
+      expect(out.stdout).toContain('any at: parse()');
+      // A parameter typed as one of ours is walked THROUGH, not stopped at.
+      expect(out.stdout).toContain('any at: run(o).extra');
+      // The leak names the parameter that leaks. `cb` is fully typed and is
+      // itself a function, which is the neighbour a parameter list is most
+      // likely to be misattributed to.
+      expect(out.stdout).toContain('any at: pick(tail)');
+      // Annotating both positions answers it — no false leak on the way.
+      expect(out.stdout).toMatch(/✓ Solid/);
+      expect(out.stdout).toContain('1/7 exports fully typed (14.3%)');
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Ownership decides whether the walk enters a type at all, so getting it
+  // wrong does not misreport a leak — it reports NONE, and the export comes
+  // back clean. Neither spelling here carries `export` on the declaration
+  // itself, and a class expression has no declared name to carry it on.
+  test('--public treats a type as the package\'s however it is spelled: declared then exported, and a class expression', () => {
+    const dir = workspace({
+      'index.rip': [
+        'class Late',                       // exported below, not here
+        '  constructor: (seed) ->',
+        '    @seed = seed',
+        '',
+        'export Anon = class',              // a class EXPRESSION, nameless
+        '  constructor: (seed) ->',
+        '    @seed = seed',
+        '',
+        'export { Late }',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'own-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('any at: Late.new(seed)');
+      expect(out.stdout).toContain('any at: Anon.new(seed)');
+      expect(out.stdout).toContain('0/2 exports fully typed (0.0%)');
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // `--public` is a mode, not a modifier: it replaces the type-checking
+  // report, so a compile failure has no other way out and must leave
+  // through this one. An entry that does not compile publishes nothing a
+  // consumer can resolve, and nothing-to-report is not the same answer.
+  test('--public reports an entry it cannot compile and refuses to exit 0', () => {
+    const dir = workspace({
+      // The entry parses and is refused by the emitter; the sibling
+      // compiles, so the run reaches the public pass with one readable file
+      // and one unreadable entry.
+      'index.rip': [
+        'export type RoundingMode =',
+        "  'UP' | 'DOWN' |",
+        "  'HALF_UP'",
+      ].join('\n') + '\n',
+      'helper.rip': 'export def helper(n: number): number\n  n\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'broken-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('publishes nothing a consumer can resolve');
+      expect(out.stdout).not.toContain('no package publishes a .rip entry here');
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The walk's depth limit bounds COST. What it cuts is unexamined rather
+  // than clean: an audit that conflates the two reports best on the deepest
+  // surfaces, which are the ones most likely to leak.
+  test('--public says so when a walk limit cut the search short', () => {
+    // A chain longer than the depth limit, with the `any` past the end.
+    const depth = 14;
+    const lines = [];
+    for (let i = 0; i < depth; i++) {
+      lines.push(`export type L${i} =`, `  next: ${i + 1 === depth ? 'any' : `L${i + 1}`}`, '');
+    }
+    lines.push('export deep: L0 = ({} as L0)');
+    const dir = workspace({ 'index.rip': lines.join('\n') + '\n' });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'deep-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('not explored (walk limit)');
+      expect(out.stdout).toContain('every count below is a floor');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // `export * from` forwards names without naming them, and the checker
+  // reports the whole clause as one marker symbol. Those names are
+  // published, so treating the marker as nothing reports a barrel — the
+  // ordinary shape of a package entry — as an empty, and therefore
+  // perfectly typed, surface.
+  test('--public says so when `export *` forwards names it cannot enumerate', () => {
+    const dir = workspace({
+      'leaf.rip': 'export def leaf(x)\n  x\n',
+      'index.rip': ["export * from './leaf.rip'", '', 'export def mine(n: number): number', '  n'].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'barrel-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('`export *` re-export not enumerated');
+      expect(out.stdout).toContain('every count below is a floor');
+      // The names it CAN see are still reported, and still counted.
+      expect(out.stdout).toMatch(/✓ mine/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A type can hold an `any` without being one and without exposing one as
+  // a member: `any[]`, `Promise<any>` and `Record<string, any>` each hand a
+  // consumer an `any`, while the type itself is an array or a promise or an
+  // object, and every member it exposes belongs to the language. Checking
+  // only flags and members passes all three.
+  test('--public reaches an `any` held inside a type: element, type argument, and index value', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export def arr(): any[]',
+        '  []',
+        '',
+        'export def prom(): Promise<any>',
+        '  Promise.resolve(null)',
+        '',
+        'export def rec(): Record<string, any>',
+        '  ({})',
+        '',
+        'export def clean(): string[]',
+        '  []',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'held-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('any at: arr()[]');       // array element
+      expect(out.stdout).toContain('any at: prom()<0>');     // type argument
+      expect(out.stdout).toContain('any at: rec()[]');       // index value
+      expect(out.stdout).toMatch(/✓ clean/);                 // a typed element stays typed
+      expect(out.stdout).toContain('1/4 exports fully typed (25.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A general index — `string` or `number` keyed — is part of the surface:
+  // a consumer reaches it by ordinary indexing. (An index keyed by a
+  // PATTERN is not, and is skipped. That case has no fixture here because
+  // rip source cannot spell a template-literal type; it arises only in
+  // generated component code, where the compiler keys its own slot
+  // namespace `[key: `_${string}`]: any`.)
+  test('--public reports the value type of a general index signature', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export type Open =',
+        '  [key: string]: any',
+        '',
+        'export type Shut =',
+        '  [key: string]: number',
+        '',
+        'export open: Open = ({} as Open)',
+        'export shut: Shut = ({} as Shut)',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'idx-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('any at: open[]');
+      expect(out.stdout).toContain('any at: Open[]');
+      expect(out.stdout).toMatch(/✓ shut/);
+      expect(out.stdout).toContain('2/4 exports fully typed (50.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A type prints as it was WRITTEN. An annotation naming something that
+  // does not resolve still prints that name while meaning `any`, so the
+  // written form alone puts a rich-looking type beside a verdict of `any`
+  // and reads as a tool error rather than as the finding it is.
+  test('--public shows the resolved type when an annotation does not land', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export box: NotDeclaredAnywhere<string> = ({} as any)',
+        '',
+        "export fine: string = 'x'",
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'unres-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('any (written: NotDeclaredAnywhere<string>)');
+      expect(out.stdout).toContain('any at: box');
+      // A type that resolves is shown once, not doubled.
+      expect(out.stdout).toMatch(/✓ fine\s+string/);
+      expect(out.stdout).not.toContain('any (written: string)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The type column is the published surface itself — what a consumer
+  // resolves — and it is the one thing a reader checks a verdict against.
+  // It is printed whole: long types continue onto further lines rather than
+  // stopping, and the checker's own member elision is turned off.
+  test('--public prints a published type in full, however long', () => {
+    // Anonymous by construction: a NAMED type prints as its name, which is
+    // both correct and short. A structural type is the one that prints long,
+    // which is why `http`'s published intersection does.
+    const members = Array.from({ length: 24 }, (_, i) => `  aRatherLongMemberName${i}: 'valueNumber${i}'`);
+    const dir = workspace({
+      'index.rip': ['export wide = ({', ...members, '})'].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'wide-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Flattened, because a long type wraps across lines by design.
+      const flat = out.stdout.replace(/\s+/g, ' ');
+      expect(flat).toContain('aRatherLongMemberName0: string;');
+      // The last member survives both the report's width and the checker's
+      // default elision, which would otherwise cut in with `... N more ...`.
+      expect(flat).toContain('aRatherLongMemberName23: string;');
+      expect(out.stdout).not.toContain('more ...');
+      expect(out.stdout).not.toContain('…');   // no ellipsis anywhere
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The walk remembers types it has already been through, so a recursive
+  // type ends instead of looping. What it remembers them BY decides
+  // correctness: a name is not an identity — two files may each declare a
+  // `Config` — and a declaration is not one either, since `typeof C` and
+  // `C` share one. Collapse either way and a whole branch is skipped as
+  // already-seen, which reads as clean.
+  test('--public tells apart same-named types from different files, and a class from its own instance', () => {
+    const dir = workspace({
+      'clean.rip': 'export type Config =\n  size: number\n',
+      'dirty.rip': 'export type Config =\n  leak: any\n',
+      'index.rip': [
+        "import { Config as CleanConfig } from './clean.rip'",
+        "import { Config as DirtyConfig } from './dirty.rip'",
+        '',
+        'export type Pair =',
+        '  first: CleanConfig',
+        '  second: DirtyConfig',
+        '',
+        'export class Holder',
+        '  constructor: (tag: string) ->',
+        '    @tag = tag',
+        '',
+        '  reveal: (detail) ->',
+        '    detail',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'ident-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // The SECOND `Config` is a different type than the first, and the
+      // only one that leaks. Keyed by name, it never gets walked.
+      expect(out.stdout).toContain('any at: Pair.second.leak');
+      // `typeof Holder` is walked, and so is the instance it constructs —
+      // keyed by declaration alone, the second is the first.
+      expect(out.stdout).toContain('any at: Holder#reveal(detail)');
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // A top-level `globalThis.NAME ??= expr` DECLARES the global: the
   // spelling says "install unless someone already did", which is a
   // declaration in runtime clothes — stamp's sh/ok/run vocabulary is the

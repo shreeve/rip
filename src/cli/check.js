@@ -33,6 +33,8 @@ import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '..
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
+import { publicEntriesOf, compileFailureOf } from './public.js';
+import { createPublicSession, walkPublicEntry } from '../../packages/vscode/src/publicwalk.js';
 
 // The two trees whose build identity the editor and this CLI must agree
 // on. Computed once: they were spelled twice, and a hash that disagrees
@@ -105,6 +107,16 @@ Options:
                            package.json edited: the preview before flipping.
                            Dependencies outside the workspace keep their own
                            posture, as they would after the flip
+  --public                 Audit the PUBLIC surface instead of type-checking:
+                           for every package the targets belong to, report the
+                           type a CONSUMER resolves for each export and the
+                           path to the first any inside it — through members,
+                           and through the parameters, returns, and instances
+                           of the signatures they name. Inference counts,
+                           so an unannotated export with a typed origin passes;
+                           members a package does not declare are its
+                           dependencies' and are left alone. Exits 1 when any
+                           export leaks, so it can gate
   --build                  Print the build identity (a content hash over the
                            compiler and editor-server trees) and exit — the
                            editor logs the same hash in its ready line, so a
@@ -122,6 +134,108 @@ rebuilt at the start of every run; .build inside it names the compiler
 build that wrote it.`;
 
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
+
+// The `--public` report, v3's shape: every export listed with the type a
+// consumer resolves, the path to the first `any` on a leaking one, and a
+// percentage per package — a failures-only list cannot show a surface
+// getting better, which is the number this exists to produce.
+function printPublicReport(report, unreadable = []) {
+  const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+  const paint = (c, t) => (useColor ? `\x1b[${c}m${t}\x1b[0m` : t);
+  const dim = (t) => paint('90', t), bold = (t) => paint('1', t);
+  const green = (t) => paint('32', t), red = (t) => paint('31', t), yellow = (t) => paint('33', t);
+  const rel = (f) => path.relative(process.cwd(), f) || '.';
+  const byPkg = new Map();
+  for (const r of report) {
+    if (!byPkg.has(r.dir)) byPkg.set(r.dir, []);
+    byPkg.get(r.dir).push(r);
+  }
+  let anyBad = false, sawEntry = false;
+  for (const [dir, entries] of byPkg) {
+    let name = rel(dir);
+    try { name = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? name; } catch { /* unnamed */ }
+    let total = 0, leaks = 0;
+    const lines = [];
+    let unexplored = 0, forwarded = 0;
+    for (const { entryFile, rows, unexplored: u, forwarded: f } of entries) {
+      unexplored += u ?? 0;
+      forwarded += f ?? 0;
+      if (rows.length === 0) continue;
+      sawEntry = true;
+      const w = Math.min(28, rows.reduce((m, r) => Math.max(m, r.name.length), 0));
+      // The type column takes whatever the terminal has left, and a type
+      // too long for it CONTINUES rather than stopping: this column is the
+      // evidence the report exists to hand over, and a surface whose
+      // published type does not fit on a line is telling the reader
+      // something rather than wasting their space. The name column stays
+      // aligned so a long row costs nothing to scan past. Piped output has
+      // no width to ask for and takes 80, which also keeps it reproducible.
+      const room = Math.max(24, (process.stdout.columns || 80) - (w + 9));
+      const wrap = (text) => {
+        const out = [];
+        let rest = text;
+        while (rest.length > room) {
+          // Break after a space when one is near the edge, so a type breaks
+          // between its members rather than mid-name.
+          const cut = rest.lastIndexOf(' ', room);
+          const at = cut > room / 2 ? cut + 1 : room;
+          out.push(rest.slice(0, at).trimEnd());
+          rest = rest.slice(at);
+        }
+        out.push(rest);
+        return out;
+      };
+      lines.push(`  ${bold(rel(entryFile))}`);
+      for (const r of rows) {
+        total++;
+        const [head, ...cont] = wrap(r.type ?? '?');
+        const mark = r.kind === 'leak' ? red('\u2717') : green('\u2713');
+        lines.push(`    ${mark} ${r.name.padEnd(w)}  ${dim(head)}`);
+        for (const line of cont) lines.push(`      ${' '.repeat(w)}  ${dim(line)}`);
+        if (r.kind === 'leak') {
+          leaks++;
+          lines.push(`      ${dim('\u2514\u2500 any at: ')}${yellow(r.at)}`);
+        }
+      }
+    }
+    if (total === 0) continue;
+    console.log('');
+    console.log(lines.join('\n'));
+    console.log('');
+    const typed = total - leaks;
+    const pct = (100 * typed / total).toFixed(1);
+    // Two gaps with two remedies: a limit the walk hit, and names an
+    // `export *` forwards without naming. Either makes the count a floor,
+    // and each is reported as itself so the line says what to do about it.
+    if (forwarded > 0) {
+      console.log(`${yellow('!')} ${forwarded} \`export *\` re-export${forwarded === 1 ? '' : 's'} not enumerated — every count below is a floor`);
+    }
+    if (unexplored > 0) {
+      console.log(`${yellow('!')} ${unexplored} branch${unexplored === 1 ? '' : 'es'} not explored (walk limit) — every count below is a floor`);
+    }
+    if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
+    else {
+      anyBad = true;
+      console.log(`${red('\u2717')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%). ${red(`${leaks} export${leaks === 1 ? '' : 's'} leak \`any\``)}.`);
+    }
+  }
+  if (unreadable.length > 0) {
+    console.log('');
+    for (const u of unreadable) {
+      console.log(`${red('\u2717')} ${bold(rel(u.entryFile))}: publishes nothing a consumer can resolve — ${u.reason}`);
+    }
+    anyBad = true;
+  } else if (!sawEntry) {
+    // Told apart, because the remedies are not the same one: a package
+    // that declares no entry is out of scope, and an entry that exports
+    // nothing is in scope and empty.
+    const entries = report.length + unreadable.length;
+    console.log(entries === 0
+      ? 'rip check --public: no package publishes a .rip entry here'
+      : 'rip check --public: the published entry exports nothing');
+  }
+  process.exit(anyBad ? 1 : 0);
+}
 
 // ── argument parsing ────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -149,7 +263,11 @@ const showFrames = !argv.includes('--no-frame') && !asJson;
 // advisories read the posture ON DISK — they are the pre-flip cleanup
 // list, and the run that previews the flip is where it is wanted.
 const forceStrict = argv.includes('--strict');
-const KNOWN = new Set(['--json', '--no-frame', '--build', '--strict']);
+// The public-surface audit: a mode, not a modifier — it answers its own
+// question and prints its own report, in place of type-checking rather
+// than alongside it.
+const publicAudit = argv.includes('--public');
+const KNOWN = new Set(['--json', '--no-frame', '--build', '--strict', '--public']);
 const positionals = argv.filter((a) => !a.startsWith('-'));
 const unknownFlags = argv.filter((a) => a.startsWith('-') && !KNOWN.has(a));
 if (unknownFlags.length) fail(`rip check: unknown option${unknownFlags.length === 1 ? '' : 's'}: ${unknownFlags.join(', ')}\n\nRun 'rip check --help' for usage.`);
@@ -263,6 +381,7 @@ const workspaceRoot = findWorkspaceRoot(targets);
 // One run = one consistent view of the disk, so stash discovery
 // memoizes per directory — files sharing a dirname share one walk.
 const stashMemo = new Map();
+
 
 // ── mirror root ─────────────────────────────────────────────────────
 // A dedicated mirror at <root>/.rip/check (peer of the editor's
@@ -672,6 +791,55 @@ if (compiled.size > 0) {
         if (pins.size) repin(fsPath, entry, pins);
       };
       for (const item of compiled) if (item[1].pinnables.length) await probeOne(item);
+
+      // ── PUBLIC PASS ── `--public`: what a CONSUMER's checker resolves
+      // for every name a package publishes, and the path to the first `any`
+      // inside it. The walk itself lives in
+      // packages/vscode/src/publicwalk.js, which holds the type checker;
+      // what happens here is finding each package, mirroring its entries,
+      // and turning what comes back into a report.
+      if (publicAudit) {
+        const report = [], unreadable = [];
+        const session = createPublicSession(mirrorRoot);
+        try {
+          for (const dir of [...new Set(targets.map((f) => {
+            for (let d = path.dirname(f); ; d = path.dirname(d)) {
+              if (fs.existsSync(path.join(d, 'package.json'))) return d;
+              if (path.dirname(d) === d) return null;
+            }
+          }).filter(Boolean))].sort()) {
+            // The package's own mirrored tree: the ownership line, and the
+            // only directory whose declarations this package can change.
+            const pkgMirrorDir = path.dirname(compiled.get(publicEntriesOf(dir)[0])?.mirrorPath ?? '');
+            for (const entryFile of publicEntriesOf(dir)) {
+              const entry = compiled.get(entryFile);
+              // An entry the audit cannot read is not an absence of
+              // findings, and never reports as one: an entry that does not
+              // compile publishes nothing a consumer can resolve, which is
+              // the strongest finding this command has.
+              if (entry === undefined) {
+                unreadable.push({
+                  entryFile,
+                  reason: compileFailureOf(entryFile) ?? 'not part of this check\'s compiled set',
+                });
+                continue;
+              }
+              const walked = await walkPublicEntry(session, {
+                mirrorFile: entry.mirrorPath,
+                pkgMirrorDir: pkgMirrorDir || path.dirname(entry.mirrorPath),
+              });
+              if (walked.unresolved !== null) {
+                unreadable.push({ entryFile, reason: walked.unresolved });
+                continue;
+              }
+              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded });
+            }
+          }
+        } finally {
+          try { await session.close(); } catch { /* the server is going away anyway */ }
+        }
+        printPublicReport(report, unreadable);
+      }
 
       // Index every mirror face by its URI so a diagnostic's secondary
       // locations — which may point into a different file — map back to
