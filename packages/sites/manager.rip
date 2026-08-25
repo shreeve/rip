@@ -1,4 +1,4 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
@@ -1011,7 +1011,11 @@ export main = (argv) ->
     abort "rip-site: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
   abort 'rip-site: --control or JANUS_CONTROL is required' unless args.control?
   probeControl! args.control
+  # A system edge (e.g. Janus under systemd) runs as its own user and
+  # must traverse into this directory to reach the worker sockets —
+  # mkdtemp's private 0700 would wall it out.
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
+  chmodSync runDir, 0o755
   workers = []
   bootingWorkers = []
   workerSerial = 0
@@ -1261,6 +1265,10 @@ export main = (argv) ->
     worker = { proc, socket }
     try
       waitReady! proc, socket
+      # connect() on a unix socket needs write permission; a cross-user
+      # edge gets none from the default umask. World-writable is the
+      # unix-socket convention here (the 0755 runDir still scopes it).
+      chmodSync socket, 0o666
     catch error
       killWorker! proc
       throw error
