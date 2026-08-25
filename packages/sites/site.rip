@@ -862,7 +862,7 @@ export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator,
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
-export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?: any) ->
+export read = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: any) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper
