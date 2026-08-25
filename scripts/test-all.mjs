@@ -144,7 +144,9 @@ const planLanes = () => {
     label: ROOT_LANE,
     cwd: ROOT,
     cmd: process.execPath,
-    args: ['test', '--parallel', '--timeout', '15000'],
+    // 60s, not 15s: the extended tier's scaling gates budget up to three
+    // full measurements, and a busy lane stretches one past 5s.
+    args: ['test', '--parallel', '--timeout', '60000'],
     env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
