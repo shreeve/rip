@@ -14,20 +14,28 @@ PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 # var alone made this lane depend on which shell you happened to be in.
 PACKAGED_CADDY = join(import.meta.dir, '..', '..', 'bin', 'caddy-janus')
 
+MISSING = """
+  test:janus found no Janus-enabled Caddy. Looked, in order, at:
+    JANUS_CADDY                     (unset)
+    #{PACKAGED_CADDY}
+    caddy on PATH
+  Drop a built binary at either path, or export JANUS_CADDY.
+"""
+
+# Absent is a valid answer here, so this LOCATES rather than demands; the
+# registration at the bottom of the file decides what absence means. A
+# path that is set but is not a file stays an error — that is a broken
+# configuration, not a missing tool.
 releasedCaddy = ->
   binary = process.env.JANUS_CADDY or
     (existsSync(PACKAGED_CADDY) and PACKAGED_CADDY) or
     Bun.which('caddy')
-  unless binary
-    throw Error.new("""
-      test:janus found no Janus-enabled Caddy. Looked, in order, at:
-        JANUS_CADDY                     (unset)
-        #{PACKAGED_CADDY}
-        caddy on PATH
-      Drop a built binary at either path, or export JANUS_CADDY.
-    """)
+  return null unless binary
   throw Error.new("Janus binary is not an existing file: #{binary}") unless existsSync binary
   binary
+
+CADDY = releasedCaddy()
+TITLE = 'released Janus carries registration, public-file isolation, sendfile, reload, and deregistration'
 
 waitFor = (name, fn, timeout = 8000) ->
   deadline = Date.now() + timeout
@@ -40,8 +48,7 @@ waitFor = (name, fn, timeout = 8000) ->
 edgeFetch = (port, path, headers = {}) ->
   fetch "http://127.0.0.1:#{port}#{path}", { headers: { host: 'integration.test', ...headers } }
 
-test! 'released Janus carries registration, public-file isolation, sendfile, reload, and deregistration', ->
-  CADDY = releasedCaddy!
+certification = ->
   info = Bun.spawnSync [CADDY, 'build-info']
   build = info.stdout.toString()
   eq info.exitCode, 0, info.stderr.toString()
@@ -237,3 +244,17 @@ test! 'released Janus carries registration, public-file isolation, sendfile, rel
     try caddy?.kill('SIGTERM')
     await caddy.exited if caddy?
     rmSync dir, { recursive: true, force: true }
+
+# A Janus-enabled Caddy is an artifact no ordinary checkout builds: this
+# suite needs a binary carrying the PUBLISHED Janus module, which stock
+# Caddy is not. Locally its absence is a visible SKIP, so a developer
+# running this package's suite is told a tool is missing rather than that
+# their tree is broken. In CI it stays a FAILURE, following the teeth in
+# scripts/test-all.mjs — a certification run that quietly stops exercising
+# Janus must not be able to go green.
+if CADDY?
+  test! TITLE, certification
+else if process.env.CI
+  test! TITLE, -> throw Error.new(MISSING)
+else
+  console.log "  \u2298 #{TITLE} SKIPPED: no Janus-enabled Caddy; set JANUS_CADDY to run"
