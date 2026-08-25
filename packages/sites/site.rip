@@ -382,7 +382,9 @@ export errorEnvelope = (err: any): { status: number, error: ApiError } ->
   raw = err?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
   error =
-    if err?.issues
+    if err?.errors
+      { message: err.message or 'Validation failed', errors: err.errors }
+    else if err?.issues
       { message: err.message or 'Validation failed', issues: err.issues }
     else if err?.notice
       { notice: err.notice }
@@ -809,6 +811,19 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # happen to carry a `code` (ENOENT and friends) can never impersonate
 # an intentional API error.
 export error = (message = 'Bad request', status = 400, code = null, field = null) ->
+  # Object form — a field→message map, for collected validation:
+  #
+  #   errs = {}
+  #   errs.email = 'Enter a valid email' unless mail
+  #   error! errs
+  #
+  # An EMPTY map is a no-op, so the validate stanza always ends with the
+  # same line and needs no guard. Ships as 422 unless a status says
+  # otherwise (the 400 default remaps — validation is 422's whole job).
+  if message? and typeof message is 'object'
+    return unless Object.keys(message).length
+    status = 422 if status is 400
+    throw Object.assign(Error.new('Validation failed'), { status, errors: message })
   err = Object.assign(Error.new(message), { status })
   if code?
     err.code = code

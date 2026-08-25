@@ -238,6 +238,32 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   ok warnings.some((message) -> message.includes('database password'))
   ok warnings.some((message) -> message.includes('handled here'))
 
+test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
+  error {}   # nothing wrong -> nothing thrown; the validate stanza needs no guard
+  caught = null
+  try
+    error { firstName: 'Enter a first name', phone: 'Enter a phone number' }
+  catch e
+    caught = e
+  eq caught.status, 422
+  eq caught.errors, { firstName: 'Enter a first name', phone: 'Enter a phone number' }
+  # the default envelope carries the map through
+  eq errorEnvelope(caught),
+    status: 422
+    error: { message: 'Validation failed', errors: { firstName: 'Enter a first name', phone: 'Enter a phone number' } }
+  # an explicit status overrides the 422 default
+  overridden = null
+  try
+    error { field: 'nope' }, 400
+  catch e
+    overridden = e
+  eq overridden.status, 422   # 400 remaps — validation is 422's job
+  try
+    error { field: 'gone' }, 410
+  catch e
+    overridden = e
+  eq overridden.status, 410
+
 test 'error envelopes expose client details and mask server details', ->
   eq errorEnvelope(Error.new('database password')),
     status: 500
