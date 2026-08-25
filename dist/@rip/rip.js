@@ -1005,8 +1005,10 @@ function parseScopeDirective(argTokens, directiveTok, fail) {
     fail(`@scope name must be a :symbol — '@scope :active, -> @where(active: true)'`, argTokens[0].start);
   }
   const name = sym.value;
-  if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
-    fail(`@scope name ':${name}' must be a lowercase-first alphanumeric identifier`, sym.start);
+  const suf = argTokens[2];
+  const suffixed = suf && !suf.spaced && suf.start === sym.end && (suf.value === "!" || suf.value === "?");
+  if (suffixed || !/^[a-z][a-zA-Z0-9]*$/.test(name)) {
+    fail(`@scope name ':${name}${suffixed ? suf.value : ""}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, sym.start);
   }
   let rest = argTokens.slice(2);
   if (rest[0]?.kind === ",")
@@ -5600,8 +5602,12 @@ function symbolNameEnd(text, start) {
     while (end < text.length && IDENT_PART.test(text[end]))
       end++;
   }
+  if ((text[end] === "!" || text[end] === "?") && (end + 1 >= text.length || SYMBOL_SUFFIX_BOUNDARY.test(text[end + 1]))) {
+    end++;
+  }
   return end;
 }
+var SYMBOL_SUFFIX_BOUNDARY = /[\s,)\]};:]/;
 var DIGIT = /[0-9]/;
 var NUMBER_RE = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
 var REGEX_RE = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/;
