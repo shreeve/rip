@@ -75,6 +75,9 @@ test "an array never equals a plain object", ->
 test "nested structures compare deeply", ->
   eq { rows: [['a', 'b'], ['1', '2']], n: 2 }, { n: 2, rows: [['a', 'b'], ['1', '2']] }
 
+test "a context message rides the throw without displacing expected/got", ->
+  throws (-> eq(1, 0, 'child stderr here')), 'expected 0, got 1', 'child stderr here'
+
 # ==[ ok ]==
 
 console.log "\nok"
