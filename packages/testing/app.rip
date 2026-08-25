@@ -47,6 +47,17 @@ export scratchDb = (migrationsDir, opts = {}) ->
   for attempt in [1..3]
     port = 20000 + Math.floor(Math.random() * 20000)
     url = "http://127.0.0.1:#{port}"
+    # Publish the scratch coordinates into THIS process's env before the
+    # first await. Top-level await lets sibling modules evaluate the
+    # moment their importer suspends, so an app module that reads
+    # RIP_DB_URL at module scope races this function — and one that
+    # loses the race silently falls back to the developer's real
+    # database, where every test write lands. Attempt 1 reaches this
+    # line synchronously, which is what closes the race; bootApp
+    # repeats these values later for explicitness.
+    process.env.RIP_DB_URL = url
+    process.env.RIP_DB_TOKEN = token
+    process.env.DB_FILE = file
     args = [launcher, 'serve', file, '--bind', '127.0.0.1', '--port', String(port),
             '--token', token, '--name', "scratch-#{process.pid}-#{attempt}"]
     if process.env.HARBOR_STATEMENT_TIMEOUT_MS
