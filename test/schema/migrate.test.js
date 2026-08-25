@@ -222,7 +222,10 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(r.map((s) => s.kind + ':' + s.class + ':' + s.table)).toEqual([
       'create-table:safe:users', 'create-table:safe:orders',
     ]);
-    expect(r[1].sql.join('\n')).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r[1].sql.join('\n')).toContain('"user_id" INTEGER NOT NULL');
+    // No REFERENCES clause — @belongsTo mints the column, never the
+    // constraint (DuckDB FK enforcement is a net loss; see renderColumn).
+    expect(r[1].sql.join('\n')).not.toContain('REFERENCES');
   });
 
   test('matching database plans nothing (round-trip clean, unique fold included)', async () => {
@@ -1005,18 +1008,30 @@ describe('migrate: the declared-schema dump', () => {
       declare();
       return mig.canonicalDeclared();
     });
-    // The file IS: header + one section per name-sorted table, each
-    // '-- name' plus the renderCreate blocks, blank-line
-    // separated, trailing newline.
-    const sections = declared.tables.map((t) => ['-- ' + t.name, ...orm4.renderCreate(t)].join('\n'));
+    // The file IS: header + one section per table in FK-dependency
+    // order (parents before children, name-tiebroken), each '-- name'
+    // plus the renderCreate blocks, blank-line separated, trailing
+    // newline.
+    const byName = new Map(declared.tables.map((t) => [t.name, t]));
+    const orderedNames = [...byName.keys()].sort();
+    orderedNames.sort((a, b) => {
+      const aDeps = (byName.get(a).foreignKeys ?? []).map((fk) => fk.refTable);
+      const bDeps = (byName.get(b).foreignKeys ?? []).map((fk) => fk.refTable);
+      if (aDeps.includes(b)) return 1;
+      if (bDeps.includes(a)) return -1;
+      return 0;
+    });
+    const sections = orderedNames.map((n) => ['-- ' + n, ...orm4.renderCreate(byName.get(n))].join('\n'));
     const header = text.slice(0, text.indexOf('\n\n'));
     expect(header).toContain('rip schema dump');
     expect(header).toContain('--check');
     expect(text).toBe([header, ...sections].join('\n\n') + '\n');
-    // orders sorts before users; the section order is name order.
-    expect(text.indexOf('-- orders\n')).toBeLessThan(text.indexOf('-- users\n'));
+    // orders sorts before users by NAME, but users is orders' FK
+    // parent — dependency order wins, so users renders first.
+    expect(text.indexOf('-- users\n')).toBeLessThan(text.indexOf('-- orders\n'));
     expect(text).toContain('CREATE SEQUENCE "users_seq" START 1;');
-    expect(text).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(text).toContain('"user_id" INTEGER NOT NULL');
+    expect(text).not.toContain('REFERENCES');
     expect(text).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
     expect(text.endsWith(');\n')).toBe(true);
   });
@@ -1070,7 +1085,7 @@ describe('migrate: identifier ownership', () => {
     expect(sql).toContain('CREATE SEQUENCE "odd"" sequence" START 4;');
     expect(sql).toContain('CREATE TABLE "odd"" table"');
     expect(sql).toContain('"value""name" VARCHAR');
-    expect(sql).toContain('REFERENCES "owner"" table"("key""id")');
+    expect(sql).not.toContain('REFERENCES');
     expect(sql).toContain('CREATE INDEX "idx"" value" ON "odd"" table" ("value""name");');
   });
 

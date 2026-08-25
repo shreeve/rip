@@ -750,20 +750,25 @@ describe('orm: paired reference — relations and eager loading', () => {
     expect(r.value.ids).toEqual([7, 9]);
   });
 
-  test('as: / foreignKey: reach the DDL, including both REFERENCES', async () => {
-    await paired(async (k) => {
+  // Assertions live OUTSIDE the paired callback: runOn catches scenario
+  // throws into out.threw, so an inner expect failure is swallowed and
+  // the test goes vacuously green (this test and its natural-key twin
+  // below did exactly that for a while).
+  test('as: / foreignKey: reach the DDL — both columns, derived and explicit', async () => {
+    const r = await paired(async (k) => {
       k.__schema(model('User', field('name')));
       const Post = k.__schema(model('Post',
         field('title'),
         dir('belongsTo', { target: 'User', as: 'author', foreignKey: 'author_id' }),
         dir('belongsTo', { target: 'User', as: 'reviewer', foreignKey: 'reviewer_id' }),
       ));
-      const sql = Post.toSQL();
-      expect(sql).toContain('"author_id" INTEGER NOT NULL REFERENCES "users"("id")');
-      expect(sql).toContain('"reviewer_id" INTEGER NOT NULL REFERENCES "users"("id")');
-      expect(sql).not.toContain('"user_id"');
-      return null;
+      return Post.toSQL();
     });
+    expect(r.threw).toBeUndefined();
+    expect(r.value).toContain('"author_id" INTEGER NOT NULL');
+    expect(r.value).toContain('"reviewer_id" INTEGER NOT NULL');
+    expect(r.value).not.toContain('"user_id"');
+    expect(r.value).not.toContain('REFERENCES');
   });
 
   test('{as:} alone derives the FK from the ACCESSOR — two relations to one target, no explicit keys', async () => {
@@ -793,22 +798,24 @@ describe('orm: paired reference — relations and eager loading', () => {
     expect(r.value.author).toBe('Ann');
     expect(r.value.reviewer).toBe('Bob');
     expect(r.value.ids).toEqual([7, 9]);
-    expect(r.value.sql).toContain('"author_id" INTEGER NOT NULL REFERENCES "users"("id")');
-    expect(r.value.sql).toContain('"reviewer_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"author_id" INTEGER NOT NULL');
+    expect(r.value.sql).toContain('"reviewer_id" INTEGER NOT NULL');
     expect(r.value.sql).not.toContain('"user_id"');
   });
 
-  test('the accessor-derived FK copies a natural target key: type and REFERENCES in DDL', async () => {
-    await paired(async (k) => {
+  test('the accessor-derived FK copies a natural target key: VARCHAR width in DDL', async () => {
+    const r = await paired(async (k) => {
       k.__schema(model('Country',
         field('code'),
         dir('primary', { name: 'code' })));
       const City = k.__schema(model('City', field('name'),
         dir('belongsTo', { target: 'Country', as: 'home' })));
-      const sql = City.toSQL();
-      expect(sql).toContain('"home_id" VARCHAR NOT NULL REFERENCES "countries"("code")');
-      return null;
+      return City.toSQL();
     });
+    expect(r.threw).toBeUndefined();
+    // The FK column is as wide as the natural key it copies — VARCHAR,
+    // not the surrogate INTEGER.
+    expect(r.value).toContain('"home_id" VARCHAR NOT NULL');
   });
 
   test('explicit {foreignKey:} still wins over the accessor derivation', async () => {
@@ -819,7 +826,7 @@ describe('orm: paired reference — relations and eager loading', () => {
       return { fk: Post._normalize().relations.get('author').foreignKey, sql: Post.toSQL() };
     });
     expect(r.value.fk).toBe('boss_id');
-    expect(r.value.sql).toContain('"boss_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"boss_id" INTEGER NOT NULL');
     expect(r.value.sql).not.toContain('"author_id"');
   });
 
@@ -2087,8 +2094,8 @@ describe('orm: paired reference — DDL', () => {
     });
     expect(r.value.sql).toContain('CREATE SEQUENCE "trades_seq" START 5000;');
     expect(r.value.sql).toContain('"name" VARCHAR(100) NOT NULL');
-    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
-    expect(r.value.sql).toContain('"coupon_id" INTEGER REFERENCES "coupons"("id")');
+    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL');
+    expect(r.value.sql).toContain('"coupon_id" INTEGER,');   // optional relation: nullable column, no constraint
     expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_email" ON "trades" ("email");');
     expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_name_email" ON "trades" ("name", "email");');
     expect(r.value.dropped).toContain('DROP TABLE IF EXISTS "trades" CASCADE;');
@@ -3459,7 +3466,7 @@ describe('orm: runtime delivery', () => {
       const [, C] = new Function('__schema', `${code}\nreturn [Country, City];`)(rt4.__schema);
       const sql = C.toSQL();
       // the surrogate's INTEGER would be wrong: this key is a string
-      expect(sql).toContain('"country_id" VARCHAR NOT NULL REFERENCES "countries"("iso")');
+      expect(sql).toContain('"country_id" VARCHAR NOT NULL');
       expect(C.toJSONSchema().properties.countryId).toEqual({ type: 'string' });
     });
   });

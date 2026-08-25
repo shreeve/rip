@@ -3557,17 +3557,12 @@ SchemaDef.prototype._tableSpec = function (options) {
         : 'INTEGER',
       notNull: !rel.optional, unique: false, default: null, was: null,
     });
-    // A cross-adapter relation cannot carry a database FK constraint
-    // — the referenced table is in another database. The accessor
-    // still works (a second query); the DDL suppresses the constraint
-    // with a note.
+    // A cross-adapter relation's target lives in another database, so
+    // it stays out of foreignKeys (which orders the dump's DDL stream);
+    // the accessor still works as a second query.
     const crossAdapter = targetDef &&
       (targetDef._adapter || null) !== (this._adapter || null);
-    if (crossAdapter) {
-      notes.push('-- NOTE: ' + rel.foreignKey + ' references ' + refTable +
-        '(' + refColumn + ') on a different adapter; FK constraint suppressed (cross-database constraints are impossible)');
-      continue;
-    }
+    if (crossAdapter) continue;
     foreignKeys.push({ column: rel.foreignKey, refTable, refColumn });
   }
 
@@ -3658,7 +3653,7 @@ SchemaDef.prototype._tableSpec = function (options) {
   };
 };
 
-function renderColumn(spec, col, fkByColumn) {
+function renderColumn(spec, col) {
   const column = quoteIdent(col.name, null, 'column');
   const parts = ['  ' + column + ' ' + col.type];
   if (col.primary) {
@@ -3668,11 +3663,17 @@ function renderColumn(spec, col, fkByColumn) {
     // Uniqueness renders as a named index below, never inline column
     // UNIQUE — one index shape for declaration and introspection.
   }
-  const fk = fkByColumn ? fkByColumn.get(col.name) : null;
-  if (fk) {
-    parts.push('REFERENCES ' + quoteIdent(fk.refTable, null, 'foreign-key table') +
-      '(' + quoteIdent(fk.refColumn, null, 'foreign-key column') + ')');
-  }
+  // No REFERENCES clause, deliberately. DuckDB's FK enforcement is a
+  // net loss for an app database: an UPDATE of any indexed column on a
+  // referenced table is executed as DELETE+INSERT and the DELETE trips
+  // the incoming FK ("over-eager checking", documented + open issues
+  // duckdb#13819/#20246); deletes are invisible to FK verification
+  // within a transaction; there is no deferral; and ALTER TABLE ADD
+  // CONSTRAINT does not exist, so constraints also block every rebuild
+  // dance. Referential integrity is the app's job (@belongsTo still
+  // mints the typed column, NOT NULL, and the accessor — everything
+  // but the constraint), and `foreignKeys` metadata still orders the
+  // dump and names relations for tooling.
   if (col.default != null) parts.push('DEFAULT ' + col.default);
   return parts.join(' ');
 }
@@ -3686,12 +3687,11 @@ function renderIndex(spec, ix) {
 
 function renderCreate(spec) {
   const blocks = [];
-  const fkByColumn = new Map(spec.foreignKeys.map((fk) => [fk.column, fk]));
   if (spec.sequence) {
     blocks.push('CREATE SEQUENCE ' + quoteIdent(spec.sequence.name, null, 'sequence') +
       ' START ' + spec.sequence.start + ';');
   }
-  const lines = spec.columns.map((c) => renderColumn(spec, c, fkByColumn));
+  const lines = spec.columns.map((c) => renderColumn(spec, c));
   blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
   const ix = spec.indexes.map((i) => renderIndex(spec, i));

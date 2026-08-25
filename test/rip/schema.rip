@@ -2767,14 +2767,14 @@ test ":model toSQL emits CREATE TABLE", modelHeader + '''
   [sql.includes('CREATE TABLE "users"'), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
 ''', [true, true, true, true, true]
 
-test ":model toSQL emits belongsTo FK", modelHeader + '''
+test ":model toSQL emits the belongsTo FK column — no REFERENCES constraint", modelHeader + '''
   User = schema :model
     name! string
   Order = schema :model
     @belongsTo User
   sql = Order.toSQL()
-  [sql.includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
-''', [true]
+  [sql.includes('"user_id" INTEGER NOT NULL'), sql.includes('REFERENCES')]
+''', [true, false]
 
 test ":model toSQL marks optional belongsTo as nullable", modelHeader + '''
   User = schema :model
@@ -2782,9 +2782,9 @@ test ":model toSQL marks optional belongsTo as nullable", modelHeader + '''
   Order = schema :model
     @belongsTo User?
   sql = Order.toSQL()
-  hasFK = sql.match(/"user_id" INTEGER REFERENCES "users"\\("id"\\)/)?
-  hasFK
-''', true
+  # nullable: the column renders bare — no NOT NULL anywhere in the table
+  [sql.includes('"user_id" INTEGER'), sql.includes('NOT NULL')]
+''', [true, false]
 
 # -- toSQL: sequence start value (default / directive / option / precedence) --
 #
@@ -3674,7 +3674,7 @@ test "self-referential :model — Category @belongsTo Category?", modelHeader + 
     name! string
     @belongsTo Category?
   sql = Category.toSQL()
-  [sql.includes('"category_id" INTEGER REFERENCES "categories"("id")'), Category.kind]
+  [sql.match(/"category_id" INTEGER$/m)?, Category.kind]
 ''', [true, "model"]
 
 test ".toSQL() with circular @belongsTo / @hasMany doesn't loop", modelHeader + '''
@@ -3684,7 +3684,7 @@ test ".toSQL() with circular @belongsTo / @hasMany doesn't loop", modelHeader + 
   Order = schema :model
     total integer
     @belongsTo User
-  [User.toSQL().includes('CREATE TABLE "users"'), Order.toSQL().includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
+  [User.toSQL().includes('CREATE TABLE "users"'), Order.toSQL().includes('"user_id" INTEGER NOT NULL')]
 ''', [true, true]
 
 # -- namespace collisions --
@@ -5034,7 +5034,7 @@ test "on: routes a model's SQL to its own adapter; others use the global", '''
   [calls.a.length, calls.b.length]
 ''', [1, 2]
 
-test "cross-adapter @belongsTo: accessor works, FK DDL suppressed with a note", '''
+test "cross-adapter @belongsTo: accessor still works across databases", '''
   rows = {columns: [{name: "id"}, {name: "name"}], data: [[7, "main"]], rows: 1}
   __schemaSetAdapter { query: (sql, params) -> rows }
   SchemaRegistry.reset()
@@ -5047,8 +5047,8 @@ test "cross-adapter @belongsTo: accessor works, FK DDL suppressed with a note", 
   sql = Event.toSQL()
   ev = Event.find! 1
   owner = ev.user!
-  [sql.includes("REFERENCES users"), sql.includes("FK constraint suppressed"), owner.name]
-''', [false, true, "main"]
+  [sql.includes("REFERENCES"), owner.name]
+''', [false, "main"]
 
 fail "on: is :model-only", '''
   X = schema :shape, on: whatever
