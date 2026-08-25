@@ -37,7 +37,26 @@ seed = (n) ->
 
 random  = -> __rand()
 integer = (min = 0, max = 100) -> min + Math.floor __rand() * (max - min + 1)
-sample  = (ary) -> ary[Math.floor __rand() * ary.length]
+# sample ary — uniform pick. sample ary, weights — weighted pick from a
+# parallel array; entries past the end of weights count 1, so
+# sample(['a','b','c'], [10]) draws 10/1/1. Zero weight = never picked.
+sample = (ary, weights) ->
+  return ary[Math.floor __rand() * ary.length] unless weights?
+  throw Error.new "fake.sample: #{weights.length} weights for #{ary.length} values" if weights.length > ary.length
+  total = ary.length - weights.length
+  for w in weights
+    throw Error.new "fake.sample: bad weight #{w}" unless typeof w is 'number' and Number.isFinite(w) and w >= 0
+    total += w
+  throw Error.new 'fake.sample: total weight is zero' unless total > 0
+  r = __rand() * total
+  last = null
+  for v, i in ary
+    w = weights[i] ?? 1
+    continue unless w > 0
+    last = v
+    r -= w
+    return v if r < 0
+  last
 chance  = (prob = 0.5) -> __rand() < prob
 maybe   = (prob, fn) ->
   return null unless __rand() < prob
