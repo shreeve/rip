@@ -279,6 +279,10 @@ export function classifyToken(t) {
   if (t.kind === 'BOOL' || t.kind === 'NULL' || t.kind === 'UNDEFINED') return 'literal';
   if (t.kind === 'PROPERTY') return 'property';
   if (t.kind === '@') return 'variable';
+  // Symbols paint as one unit — the value may carry a !/? suffix or
+  // dots/hyphens (:save!, :valid?, :domain.name), which the word-spelled
+  // heuristic below would misread as an operator.
+  if (t.kind === 'SYMBOL') return 'keyword';
   if (t.kind === 'IDENTIFIER') {
     if (KEYWORD_WORDS.has(t.value)) return 'keyword';
     if (LITERAL_WORDS.has(t.value)) return 'literal';
