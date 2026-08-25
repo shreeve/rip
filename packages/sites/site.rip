@@ -692,10 +692,18 @@ runHandler = (c, route) ->
     applyMark(c._response or Response.new('', { status: 204 }))
   catch err
     console.warn 'Request error:', err if not err?.status or err.status >= 500
-    res = if _errorHandler?
-      _errorHandler.call!(c, err, c)
+    handled = if _errorHandler? then _errorHandler.call!(c, err, c) else null
+    res = if handled instanceof Response
+      handled
+    else if handled? and typeof handled is 'object'
+      # A plain object from onError rides out as JSON — the handler
+      # states the body, and the status comes from the thrown error
+      # itself (the same 400-599-or-500 rule the default envelope
+      # applies), so shaping an error takes no Response ceremony.
+      c.json handled, errorEnvelope(err).status
     else
-      # Same masked JSON envelope smart() emits: 5xx internals never leak.
+      # No handler, or the handler declined (null/undefined): the same
+      # masked JSON envelope smart() emits — 5xx internals never leak.
       masked = errorEnvelope(err)
       Response.new JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
