@@ -197,6 +197,7 @@ export type Ctx =
   header: (name: string, value?: string, opts?: { append?: boolean }) => string | null | undefined
   cache: (duration: number | string | false) => void
   session: Record<string, any>
+  error: any
   req: CtxReq
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
@@ -343,15 +344,34 @@ createContext = (req, params = {}, url = null, pathname = null) ->
 
 compose = (beforeFilters, afterFilters, handler) ->
   (c) ->
-    for filter in beforeFilters
-      result = filter.call!(c, c)
-      if result instanceof Response
-        c._response = result
-        return c
-    result = handler.call!(c, c)
-    c._response = result if result instanceof Response
+    # After filters ALWAYS run — on success, on a before-filter halt,
+    # and on a thrown error (which they can observe as @error before
+    # onError shapes the response). A request journal that goes quiet
+    # exactly when requests fail is worse than none at all.
+    caught = null
+    try
+      halted = false
+      for filter in beforeFilters
+        result = filter.call!(c, c)
+        if result instanceof Response
+          c._response = result
+          halted = true
+          break
+      unless halted
+        result = handler.call!(c, c)
+        c._response = result if result instanceof Response
+    catch err
+      caught = err
+      c.error = err
     for filter in afterFilters
-      filter.call!(c, c)
+      try
+        filter.call!(c, c)
+      catch afterError
+        # An after filter is the request's error only when the request
+        # had none; it never masks the handler's own throw.
+        throw afterError unless caught?
+        console.warn 'rip-site: after filter failed during error handling:', afterError
+    throw caught if caught?
     c
 
 # ==============================================================================

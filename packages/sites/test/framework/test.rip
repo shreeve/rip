@@ -149,7 +149,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   blocked = handle! request('GET', '/blocked')
   eq blocked.status, 403
   eq blocked.text!, 'halted'
-  eq reached, { handler: false, after: false }
+  eq reached, { handler: false, after: true }
 
   resetGlobals()
   late = []
@@ -170,6 +170,34 @@ test! 'before and after filters compose around handlers and short-circuit', ->
     eq failure.status, 500
     eq failure.json!, { error: { message: 'Internal Server Error' } }
   ok warnings.some((message) -> message.includes('filter secret'))
+
+test! 'after filters run on thrown errors and never mask them', ->
+  # The always-run contract: a request journal that goes quiet exactly
+  # when requests fail is worse than none at all.
+  resetGlobals()
+  seen = []
+  after -> seen.push (if @error? then "error:#{@error.status}" else 'clean')
+  get '/boom' -> throw Object.assign(Error.new('nope'), { status: 422 })
+  get '/calm' -> 'ok'
+  response = handle! request('GET', '/boom')
+  eq response.status, 422
+  handle! request('GET', '/calm')
+  eq seen, ['error:422', 'clean']
+
+  # An after filter's own throw is the request's error only when the
+  # request had none — it never masks the handler's.
+  resetGlobals()
+  after -> throw Error.new 'journal broke'
+  get '/boom' -> throw Object.assign(Error.new('the real error'), { status: 409 })
+  get '/calm' -> 'ok'
+  warnings = captureWarnings! ->
+    masked = handle! request('GET', '/boom')
+    eq masked.status, 409
+  ok warnings.some((message) -> message.includes('journal broke'))
+  warnings = captureWarnings! ->
+    plain = handle! request('GET', '/calm')
+    eq plain.status, 500
+  ok warnings.some((message) -> message.includes('journal broke'))
 
 test! 'raw filters run before body parsing on write requests only', ->
   resetGlobals()
