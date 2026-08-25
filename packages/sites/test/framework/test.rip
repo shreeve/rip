@@ -285,6 +285,23 @@ test! 'read merges body, query, and path with request-local context', ->
   eq mark(), null
   throws (-> read('outside')), 'no context for read()'
 
+test! "read's loud-optional '?' rejects supplied garbage, allows absence", ->
+  resetGlobals()
+  post '/loud' ->
+    dob: read('dob', 'date?')
+    email: read('email', 'email?')
+  # Absent and empty are quiet nulls — optional means optional.
+  quiet = handle! jsonRequest 'POST', '/loud', { email: '' }
+  eq quiet.json!, { dob: null, email: null }
+  # A valid value normalizes exactly as the bare validator would.
+  good = handle! jsonRequest 'POST', '/loud', { dob: '2024-02-29', email: 'A@B.CO' }
+  eq good.json!, { dob: '2024-02-29', email: 'a@b.co' }
+  # A supplied value that fails its validator names the field, 422 —
+  # never a silent null impersonating an omitted field.
+  bad = handle! jsonRequest 'POST', '/loud', { dob: '02/29/2024' }
+  eq bad.status, 422
+  eq bad.json!, { error: { message: 'dob is not a valid date' } }
+
 test! 'request marks and trusted tenant context stay request-local', ->
   resetGlobals()
   get '/context' ->

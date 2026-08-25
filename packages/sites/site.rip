@@ -860,11 +860,23 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
       must = true
       type = type.slice(0, -1)
 
+    # detect loud-optional (trailing '?'): an absent/empty value stays a
+    # quiet null — optional means optional — but a SUPPLIED value that
+    # fails its validator throws, naming the field. Without this, a
+    # typo'd value coerces to null and impersonates an omitted one; at a
+    # boundary that distinction is the whole point of validating.
+    else if type.endsWith '?'
+      loud = true
+      type = type.slice(0, -1)
+
     # apply validator function — raw validators (array/hash/json) take
     # the value untouched; the registry's isRawType seam decides.
     f = getValidator(type)
+    supplied = v? and v isnt ''
     v = String(v ?? '') unless isRawType(type)
     v = if f then f(v) else null
+    if loud and supplied and not v?
+      throw Object.assign(Error.new("#{name} is not a valid #{type}"), { status: 422, field: name, invalid: true })
 
   # Regex: apply regex pattern
   else if type instanceof RegExp
