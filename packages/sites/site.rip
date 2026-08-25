@@ -903,11 +903,13 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
       loud = true
       type = type.slice(0, -1)
 
-    # apply validator function — raw validators (array/hash/json) take
-    # the value untouched; the registry's isRawType seam decides.
+    # apply validator function. Preparation (stringify + trim, with raw
+    # validators taking their value untouched) is the validator's own
+    # job — getValidator hands back the prepared face, so read adds
+    # nothing here. The early trim above is NOT preparation: it feeds
+    # the supplied/empty decision, which must precede validation.
     f = getValidator(type)
     supplied = v? and v isnt ''
-    v = String(v ?? '') unless isRawType(type)
     v = if f then f(v) else null
     if loud and supplied and not v?
       throw Object.assign(Error.new("#{name} is not a valid #{type}"), { status: 422, field: name, invalid: true })
