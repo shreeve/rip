@@ -324,6 +324,52 @@ export function sourceCursorToGenerated(mappings, offset) {
   return null;
 }
 
+// A cursor in a SLOT THE EMISSION DROPPED — an object literal's key
+// position after a trailing comma, whose bytes the face carries
+// nowhere at all (`{ a: 1, ‸ }` emits `{a: 1}`, comma and slot gone).
+// sourceCursorToGenerated answers null there, and rightly: no row
+// contains the cursor and none ends at it. A completion still has a
+// truthful landing — the generated END of the last construct ending at
+// or before the cursor, drawn from inside the innermost row containing
+// it, and taken only when it falls within that row's own generated
+// span. The cursor stays inside the construct it is typing, one past
+// the sibling it follows.
+//
+// This is NOT the cover fallback the other flavors refuse. That one
+// lands at a cover's generated START, which moves the context off the
+// construct entirely. It is also wrong for SIGNATURE HELP, whose
+// active parameter is counted from the cursor's side of the commas —
+// one past the previous argument names the previous parameter. Only
+// completion reads this.
+export function sourceSlotToGenerated(mappings, offset, source, code) {
+  const inner = mappings.atSource(offset)[0];
+  if (!inner || inner.mappingKind !== 'cover') return null;
+  // The slot must be TRAILING: nothing but whitespace and closers
+  // between the cursor and the construct's end, read from the real
+  // text. This is what makes the landing truthful — the cursor really
+  // does sit after everything the construct holds, so one past the last
+  // sibling is where it belongs. It is also what refuses a tolerant
+  // parse that absorbed the following statement into an unclosed
+  // literal: that construct still holds source the author wrote as its
+  // own statement, and the interior of a construct the parse invented
+  // is no place to put a completion.
+  if (!/^[\s)\]}]*$/.test(source.slice(offset, inner.sourceEnd))) return null;
+  let prior = null;
+  for (const row of mappings.rows) {
+    if (row.mappingKind === 'synthetic') continue;
+    if (row.sourceStart < inner.sourceStart || row.sourceEnd > inner.sourceEnd) continue;
+    if (row.sourceEnd > offset) continue;
+    if (!prior || row.sourceEnd > prior.sourceEnd
+      || (row.sourceEnd === prior.sourceEnd && row.generatedEnd > prior.generatedEnd)) prior = row;
+  }
+  // Nothing precedes the cursor: an empty interior (`{ ‸ }`), whose
+  // landing is just inside the construct's own opening byte.
+  if (!prior) return inner.generatedStart + 1 < inner.generatedEnd ? inner.generatedStart + 1 : null;
+  return prior.generatedEnd >= inner.generatedStart && prior.generatedEnd <= inner.generatedEnd
+    ? prior.generatedEnd
+    : null;
+}
+
 // A generated INSERTION point (a zero-width edit — auto-import lines,
 // names merged into an existing import's braces) → source insertion
 // offset, or null. Three tiers, all side-table driven:

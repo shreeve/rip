@@ -6,7 +6,7 @@ import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
-  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated,
+  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
   insertionAboveAttachedDirectives, wholeImportLinesEdit,
   exactSpanMapper, staleOffsetMap,
@@ -110,6 +110,51 @@ describe('source → generated (the hover direction)', () => {
     const blank = source.indexOf('\n\n') + 1;
     const got = sourceOffsetToGenerated(mappings, blank);
     expect(got === null || typeof got === 'number').toBe(true);
+  });
+});
+
+describe('source → generated (a cursor in a slot the emission dropped)', () => {
+  // `{ a: 1, ‸ }` emits `{a: 1}`: the trailing comma and the key slot
+  // after it are gone, so no byte of the face stands where the cursor
+  // is. The cursor mapper answers null; the slot mapper lands inside
+  // the emitted literal, one past the property the cursor follows.
+  const slotAfter = (source, marker) => {
+    const { code, mappings } = compile(source, { runtimeDelivery: 'none' });
+    const offset = source.indexOf(marker) + marker.length;
+    return {
+      code,
+      cursor: sourceCursorToGenerated(mappings, offset),
+      slot: sourceSlotToGenerated(mappings, offset, source, code),
+    };
+  };
+
+  test('a key slot after a trailing comma lands inside the emitted literal', () => {
+    const { code, cursor, slot } = slotAfter('f({ a: 1,  })\n', '{ a: 1, ');
+    expect(cursor).toBeNull();
+    expect(slot).not.toBeNull();
+    // One past the emitted property, still within the braces.
+    expect(code.slice(slot, slot + 1)).toBe('}');
+    expect(code.slice(slot - 4, slot)).toBe('a: 1');
+  });
+
+  test('an empty literal lands just inside its opening brace', () => {
+    const { code, slot } = slotAfter('f({  })\n', '{ ');
+    expect(slot).not.toBeNull();
+    expect(code.slice(slot - 1, slot + 1)).toBe('{}');
+  });
+
+  // The guard. A tolerant parse of an unclosed literal absorbs the
+  // following statement into it, so the construct the cursor sits in is
+  // one the parse invented — its cover ends on that statement rather
+  // than on a brace. Landing a completion inside it would name a
+  // context the author never wrote.
+  test('an unclosed literal that swallowed the next statement refuses', () => {
+    const source = 'f({ a: 1, \n\nb = 2\n';
+    const { code, mappings } = compile(source, { runtimeDelivery: 'none', tolerant: true });
+    // The premise: the emission really did absorb the statement.
+    expect(code).toContain('b = 2');
+    const offset = source.indexOf('{ a: 1, ') + '{ a: 1, '.length;
+    expect(sourceSlotToGenerated(mappings, offset, source, code)).toBeNull();
   });
 });
 

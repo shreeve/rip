@@ -51,7 +51,7 @@
 
 import {
   createConnection, TextDocuments, TextDocumentSyncKind, ProposedFeatures,
-  DidChangeWatchedFilesNotification, FileChangeType,
+  CompletionTriggerKind, DidChangeWatchedFilesNotification, FileChangeType,
   ResponseError, ErrorCodes, SemanticTokensBuilder,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -64,7 +64,7 @@ import { buildProbe, parseProbeHover } from './pins.js';
 import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
-  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
+  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
@@ -1456,6 +1456,23 @@ const FALLBACK_LEGEND = {
 };
 let semanticTokensLegend = FALLBACK_LEGEND;
 
+// A completion trigger character is a PROMISE: the editor opens a
+// suggest session the moment one is typed, and a session that opens
+// with nothing from this server lives on the editor's OWN word matches
+// for the rest of the word — every later keystroke refilters that
+// session instead of asking again, so the members never arrive however
+// well the position maps. The advertised set therefore holds only
+// characters the pipeline answers. Two of tsgo's are not among them.
+// SPACE it advertises and then answers nothing for anywhere, at any
+// position, in a face or in plain TypeScript. STAR it reserves for
+// continuing a JSDoc block, a context no face can hold: Rip's comment
+// glyph is '#', so nothing a .rip file compiles to ever puts a cursor
+// inside `/** */`.
+const UNSERVED_COMPLETION_TRIGGERS = new Set([' ', '*']);
+
+// The set as advertised — what onCompletion is willing to relay.
+let completionTriggerCharacters = [];
+
 connection.onInitialize(async (params) => {
   compile = await loadCompiler();
   readProjectConfig = await loadProjectConfigReader();
@@ -1470,6 +1487,8 @@ connection.onInitialize(async (params) => {
   const session = await launchTsgo();
   const tsCaps = session?.capabilities ?? {};
   semanticTokensLegend = tsCaps.semanticTokensProvider?.legend ?? FALLBACK_LEGEND;
+  completionTriggerCharacters = (tsCaps.completionProvider?.triggerCharacters
+    ?? ['.', '"', "'", '`', '/', '@', '<', '#', ' ']).filter((c) => !UNSERVED_COMPLETION_TRIGGERS.has(c));
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Full,
@@ -1481,7 +1500,7 @@ connection.onInitialize(async (params) => {
       documentSymbolProvider: true,
       workspaceSymbolProvider: true,
       completionProvider: {
-        triggerCharacters: tsCaps.completionProvider?.triggerCharacters ?? ['.', '"', "'", '`', '/', '@', '<', '#', ' '],
+        triggerCharacters: completionTriggerCharacters,
         resolveProvider: true,
       },
       signatureHelpProvider: {
@@ -2354,7 +2373,10 @@ function requestContext(params) {
     ctx.genOffset = sourceOffsetToGenerated(good.mappings, offset, good.source, good.code);
     ctx.genExact = sourceOffsetToGeneratedExact(good.mappings, offset, good.source, good.code);
     ctx.genCursor = sourceCursorToGenerated(good.mappings, offset);
-    if (ctx.genOffset === null && ctx.genCursor === null) return null;
+    // Completion alone widens to the dropped-slot landing: an object
+    // literal's key after a trailing comma emits nothing to sit on.
+    ctx.genSlot = ctx.genCursor ?? sourceSlotToGenerated(good.mappings, offset, good.source, good.code);
+    if (ctx.genOffset === null && ctx.genSlot === null) return null;
     ctx.genPosition = ctx.genOffset === null ? null : offsetToPosition(good.genLineStarts, ctx.genOffset);
     ctx.genExactPosition = ctx.genExact === null ? null : offsetToPosition(good.genLineStarts, ctx.genExact);
   }
@@ -2906,6 +2928,18 @@ function faceEditsToCurrent(ctx, edits) {
   return mapped;
 }
 
+// The context to relay, or null for an ordinary request. A trigger
+// character outside the advertised set answered no promise this server
+// made, and relaying one is how tsgo comes to answer nothing (space) or
+// to panic outright (comma, which signature help advertises). The
+// position still carries the whole question, so such a request is
+// served rather than refused.
+function relayableCompletionContext(context) {
+  if (!context) return null;
+  if (context.triggerKind !== CompletionTriggerKind.TriggerCharacter) return context;
+  return completionTriggerCharacters.includes(context.triggerCharacter) ? context : null;
+}
+
 function ripCompletionItem(ctx, raw, index) {
   const item = {
     label: raw.label,
@@ -2945,12 +2979,13 @@ connection.onCompletion(async (params) => {
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
-  const genCursor = ctx.genCursor ?? ctx.genExact;
+  const genCursor = ctx.genSlot ?? ctx.genExact;
   if (genCursor === null) return null;
+  const context = relayableCompletionContext(params.context);
   const result = await tsgoRequest('textDocument/completion', {
     textDocument: { uri: ctx.state.tsUri },
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
-    ...(params.context ? { context: params.context } : {}),
+    ...(context ? { context } : {}),
   }, 'completion');
   if (!result) return null;
   const rawItems = Array.isArray(result) ? result : result.items ?? [];

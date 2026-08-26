@@ -115,7 +115,9 @@ async function inWorkspace(files, fn) {
       return [];
     },
     hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
-    completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
+    completion: (rel, line, character, context) => client.request('textDocument/completion', {
+      ...at(rel, line, character), ...(context ? { context } : {}),
+    }),
     resolveItem: (item) => client.request('completionItem/resolve', item),
     definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
     typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
@@ -171,6 +173,8 @@ function applyEdits(text, edits) {
 // Semantic-token decoding is LSP wire format, shared from the tsgo client
 // (`decodeSemanticTokens`) rather than hand-rolled per consumer.
 const decodeTokens = decodeSemanticTokens;
+
+const CompletionItemKind = { Field: 5, Property: 10 };
 
 const UTIL = 'export def shout(s: string): string\n  s.toUpperCase()\nexport answer = 42\n';
 
@@ -384,6 +388,95 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
       // msg.sub moved down one line; its position aligns and serves.
       const completion = await api.completion('app.rip', 2, 11);
       expect(completion.items.some((i) => i.label === 'substring')).toBe(true);
+    });
+  }, 30000);
+
+  // An object-literal key completes from the CONTEXTUAL type, whatever
+  // context the ask carries. What a declined ask costs here is the
+  // whole session, not one answer: the editor opens a suggest session
+  // on a trigger character, and one that opens with nothing from this
+  // server lives on the editor's own word matches for the rest of the
+  // word, every later keystroke refiltering it rather than asking
+  // again. The space before an option name is exactly that moment. So
+  // `retry` reaching the list is not the contract — reaching it as a
+  // PROPERTY, beside its siblings and with no identifier of the
+  // surrounding scope for company, is.
+  test('an object-literal key completes from the contextual type whatever context the ask carries', async () => {
+    const DEP = [
+      // Module-private, never exported: no completion in a consumer can
+      // legally name these, so their presence would prove an identifier
+      // scrape rather than a member request.
+      "RETRY_METHODS =! ['GET', 'PUT']",
+      'RETRY_LIMIT   =! 2',
+      '',
+      'type Options =',
+      '  prefixUrl?: string',
+      '  retry?: number | false | { limit?: number }',
+      '  referrer?: string',
+      '  referrerPolicy?: string',
+      '  redirect?: string',
+      '',
+      'export def create(options: Options): string',
+      '  return options.prefixUrl ?? RETRY_METHODS[RETRY_LIMIT] ?? \'\'',
+      '',
+    ].join('\n');
+    await inWorkspace({ 'dep.rip': DEP }, async (api) => {
+      const HEAD = 'import { create } from \'./dep.rip\'\n\n';
+      // ‸ marks the cursor; the whole call line varies, because what
+      // the face carries at the key depends on what follows it.
+      const SPACE = { triggerKind: 2, triggerCharacter: ' ' };
+      const INVOKED = { triggerKind: 1 };
+      const asks = [
+        // Typing the key: bytes sit at or before the cursor.
+        ["export api = create({ prefixUrl: '/api', ‸retry: 0 })", SPACE],
+        ["export api = create({ prefixUrl: '/api', ret‸retry: 0 })", INVOKED],
+        // Asking at an EMPTY key slot — an explicit invoke, the
+        // editor's ctrl+space. The emission drops the trailing comma
+        // and the slot with it, so no byte of the face stands where
+        // the cursor is; the landing comes from the construct instead.
+        ["export api = create({ prefixUrl: '/api', ‸ })", INVOKED],
+        ["export api = create({ prefixUrl: '/api',‸ })", INVOKED],
+        ["export api = create({ prefixUrl: '/api', ‸})", INVOKED],
+        // The same slot in a literal with nothing in it yet.
+        ['export api = create({ ‸ })', INVOKED],
+      ];
+
+      await api.open('use.rip', HEAD + asks[0][0].replace('‸', '') + '\n');
+      for (const [marked, context] of asks) {
+        const what = marked.slice('export api = create('.length);
+        await api.change('use.rip', HEAD + marked.replace('‸', '') + '\n');
+        const result = await api.completion('use.rip', 2, marked.indexOf('‸'), context);
+        const items = result?.items ?? result ?? [];
+        const labels = items.map((i) => i.label.replace(/\?$/, ''));
+
+        // The option the user is reaching for, as a member of the
+        // parameter's type — Field or Property, never a Variable the
+        // scope happened to offer.
+        const retry = items.find((i) => i.label.replace(/\?$/, '') === 'retry');
+        expect(retry, `${what}: 'retry' must be offered`).toBeDefined();
+        expect([CompletionItemKind.Field, CompletionItemKind.Property],
+          `${what}: 'retry' must arrive as a property of the contextual type`).toContain(retry.kind);
+
+        // Its siblings come with it — one lucky label could be a
+        // coincidence, a set of them cannot.
+        for (const sibling of ['referrer', 'referrerPolicy', 'redirect']) {
+          expect(labels, `${what}: '${sibling}' belongs to the same option set`).toContain(sibling);
+        }
+
+        // And nothing from the surrounding scope: a member request
+        // answers members only.
+        expect(items.filter((i) => i.kind !== CompletionItemKind.Field && i.kind !== CompletionItemKind.Property),
+          `${what}: an object-literal key answers members only`).toEqual([]);
+        for (const secret of ['RETRY_METHODS', 'RETRY_LIMIT']) {
+          expect(labels, `${what}: '${secret}' is module-private to the dependency`).not.toContain(secret);
+        }
+      }
+
+      // The other side of the same rule: the editor is never invited to
+      // open a session on the space at all. The space-triggered ask
+      // above is the defensive twin — a trigger this server does not
+      // advertise is served on its position, never relayed.
+      expect(api.capabilities.completionProvider.triggerCharacters).not.toContain(' ');
     });
   }, 30000);
 });
