@@ -1258,17 +1258,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   }, 90_000);
 
   // Q5 — the walk stops at a member whose type is another published export,
-  // because that export has its own row and one edit fixes it there. The
-  // stop is sound only when that row answers the question THIS position
-  // asks, and two shapes break it in opposite ways.
-  test('--public stops at a sibling only where that sibling answers the same question', () => {
-    // (a) A bare TYPE export is walked undirected — nothing about it says
-    // which way values travel — so it never reports read-side width.
-    // Stopping there hands the position to a row that will not carry it,
-    // and PUBLISHING the interface becomes what hides the leak.
+  // because that export has its own row and one edit fixes it there.
+  // MEMBERSHIP is the whole question, and two shapes probe what the set is.
+  test('--public stops at a sibling wherever one exists, and reads the set per package', () => {
+    // (a) The sibling is a bare TYPE and the position reading it is a
+    // value — different sides — and the stop fires all the same. Every row
+    // applies one verdict, so `Bag`'s row reports what `Client`'s would;
+    // descending anyway would bill one edit to two exports.
     const typeOnly = workspace({
       'package.json': JSON.stringify({ name: '@q5/type', exports: { '.': './index.rip' } }),
-      'index.rip': ['export interface Bag', '  hole: unknown', '',
+      'index.rip': ['export interface Bag', '  hole: any', '',
         'export class Client', '  bag: Bag = ({} as Bag)'].join('\n') + '\n',
     });
     // (b) A package publishes from every entry its manifest names, so what
@@ -1282,7 +1281,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     });
     try {
       const a = check(typeOnly, ['--public']).stdout;
-      expect(a).toMatch(/unknown at: Client#bag\.hole/);
+      expect(a).toMatch(/any at: Bag\.hole/);            // the row that owns the edit
+      expect(a).not.toMatch(/at: Client#bag/);           // and only that row
       expect(a).toContain('1/2 exports fully typed');
 
       const b = check(twoEntry, ['--public']).stdout;
@@ -1759,13 +1759,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  // A position a consumer READS has to carry something they can use. `any`
-  // and `Function` are the same defect in different clothes — both take
-  // anything and return an unchecked value — while `unknown`, `object` and
-  // `{}` carry nothing and say so, which is a compile error at the use site
-  // rather than a silent hole. `never` is none of these: it is the honest
-  // return of a function that throws.
-  test('--public reports every shape that carries nothing out, but not `never`', () => {
+  // `any` and `Function` are the same defect in different clothes — both
+  // take anything and hand back an unchecked value, so a consumer's misuse
+  // of either goes unreported wherever it sits. `unknown`, `object` and
+  // `{}` carry nothing either, but a written one SAYS SO: the consumer
+  // meets a compile error until they narrow, which is a guardrail rather
+  // than a hole. `never` is none of these: it is the honest return of a
+  // function that throws.
+  test('--public reports the unchecked shapes out of a signature, but not a stated width or `never`', () => {
     const dir = workspace({
       'index.rip': [
         'export def rAny(): any', '  return 1', '',
@@ -1781,23 +1782,24 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       const out = check(dir, ['--public']);
       expect(out.stdout).toMatch(/any\s+at: rAny\(\)/);
-      expect(out.stdout).toMatch(/unknown\s+at: rUnknown\(\)/);
-      expect(out.stdout).toMatch(/object\s+at: rObject\(\)/);
-      expect(out.stdout).toMatch(/\{\}\s+at: rEmpty\(\)/);
       expect(out.stdout).toMatch(/Function\s+at: rFunction\(\)/);
+      expect(out.stdout).toMatch(/✓ rUnknown/);
+      expect(out.stdout).toMatch(/✓ rObject/);
+      expect(out.stdout).toMatch(/✓ rEmpty/);
       expect(out.stdout).toMatch(/✓ rNever/);
-      expect(out.stdout).toContain('1/6 exports fully typed (16.7%)');
+      expect(out.stdout).toContain('4/6 exports fully typed (66.7%)');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
 
-  // On the way IN, width is a decision rather than a defect: a written
-  // annotation claims what belongs there, however wide. What is reported is
-  // an absence of that claim — a type that fell out of a default value.
-  // Polarity reverses again for a parameter OF a parameter, which is an
-  // argument the consumer's own callback receives and so has to be usable.
-  test('--public trusts a stated input however wide, and reports an unstated one', () => {
+  // Width is a decision rather than a defect wherever it is WRITTEN: the
+  // annotation claims what belongs there, however wide, and the claim
+  // stands whichever way the value travels — including at a parameter OF a
+  // parameter, which is an argument the consumer's own callback receives.
+  // What is reported is an absence of that claim: a type that fell out of
+  // a default value decides nothing.
+  test('--public trusts a stated width, and reports one that fell out of a default', () => {
     const dir = workspace({
       'index.rip': [
         'export def stated(value: unknown): number', '  return 1', '',
@@ -1818,9 +1820,135 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(out.stdout).toMatch(/\{\}\s+at: unstated\(opts\)/);
       // Unstated but inferred to something real: nothing to report.
       expect(out.stdout).toMatch(/✓ inferred/);
-      // The callback's own argument is read by the consumer.
-      expect(out.stdout).toMatch(/unknown\s+at: withCb\(cb\)\(item\)/);
-      expect(out.stdout).toContain('3/5 exports fully typed (60.0%)');
+      // The callback's own argument is read by the consumer, and claimed.
+      expect(out.stdout).toMatch(/✓ withCb/);
+      expect(out.stdout).toContain('4/5 exports fully typed (80.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Width that SAYS SO is a contract on the way out too. `unknown`,
+  // `object` and `{}` stop a consumer until they narrow, so a written one
+  // is a guardrail rather than a hole — some values genuinely have no
+  // knowable shape, and naming that is the complete answer. What the audit
+  // is for is the position nobody claimed: the same width arriving by
+  // inference tells a consumer nothing and says nothing either.
+  test('--public trusts a stated width on the way out, and reports the same width inferred', () => {
+    const dir = workspace({
+      'index.rip': [
+        'export type Bag =',
+        '  hole: unknown',
+        '  empty: {}',
+        '  obj: object',
+        '',
+        'export def stated(): Bag',
+        '  return ({ hole: 1, empty: {}, obj: {} })',
+        '',
+        // No annotation anywhere on the way to `hole`, which lands wide.
+        'export def inferred()',
+        "  return ({ hole: (JSON.parse('1') as unknown) })",
+        '',
+        // Unchecked in either direction, stated or not.
+        'export def leaks(): any', '  return 1',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'wide-read', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Written, and read: a claim about what belongs there, and trusted.
+      expect(out.stdout).toMatch(/\u2713 stated\b/);
+      expect(out.stdout).not.toMatch(/at: stated\(\)/);
+      // The same width, with nobody claiming it.
+      expect(out.stdout).toMatch(/unknown\s+at: inferred\(\)\.hole/);
+      expect(out.stdout).toMatch(/any\s+at: leaks\(\)/);
+      expect(out.stdout).toContain('2/4 exports fully typed (50.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The two positions that carry no symbol of their own, and so have to be
+  // asked about their annotation rather than told. An EXPORT's type comes
+  // from its declaration — a class or a type alias writes the shape out,
+  // while a binding takes whatever its initializer produced unless it says
+  // otherwise. A RETURN's comes from the function, reached through a
+  // parameter where there is one and through the exposing symbol where
+  // there is not, since a binding holds its function in an initializer.
+  test('--public asks a root export and a return for an annotation of their own', () => {
+    const dir = workspace({
+      'index.rip': [
+        // Bindings: one claimed, one taking what it was handed.
+        'export rootBare = Proxy.new {}, get: (_, key) -> 1',
+        'export rootAnn: unknown = (JSON.parse(\'1\') as unknown)',
+        // `{}` WRITTEN is a claim — the author will take anything
+        // non-nullish. `{}` PRODUCED by an empty class body claims
+        // nothing, and accepts anything non-nullish just the same.
+        'export type AliasEmpty = {}',
+        'export class Empty',
+        '',
+        // Returns, with and without a parameter to reach the function by.
+        'export def retBare()', "  return (JSON.parse('1') as unknown)", '',
+        'export def retAnn(): unknown', '  return 1', '',
+        'export def retBareP(a: number)', "  return (JSON.parse('1') as unknown)", '',
+        'export def retAnnP(a: number): unknown', '  return 1', '',
+        // The annotation rides the initializer, not the binding.
+        'export arrowRetAnn = (): unknown -> 1',
+        "export arrowRetBare = -> (JSON.parse('1') as unknown)",
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'own-claim', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toMatch(/\{\}\s+at: rootBare/);
+      expect(out.stdout).toMatch(/✓ rootAnn/);
+      expect(out.stdout).toMatch(/✓ AliasEmpty/);
+      expect(out.stdout).toMatch(/\{\}\s+at: Empty#/);
+      expect(out.stdout).toMatch(/unknown\s+at: retBare\(\)/);
+      expect(out.stdout).toMatch(/✓ retAnn\b/);
+      expect(out.stdout).toMatch(/unknown\s+at: retBareP\(\)/);
+      expect(out.stdout).toMatch(/✓ retAnnP/);
+      expect(out.stdout).toMatch(/✓ arrowRetAnn/);
+      expect(out.stdout).toMatch(/unknown\s+at: arrowRetBare\(\)/);
+      expect(out.stdout).toContain('5/10 exports fully typed (50.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // Not every annotation in the face was written by the author. A binding
+  // that stays hoisted and is read from inside a closure gets a PIN — the
+  // type the compiler inferred for it, spelled into the face as an
+  // ordinary annotation. Syntax cannot tell the two apart, so a position
+  // inside a pin has to be read as what it is: never claimed, however
+  // annotated it looks. Both bindings below land on the same hoist line,
+  // which is why the answer has to be per-span and not per-declaration.
+  test('--public does not read a pinned type as an annotation the author wrote', () => {
+    const dir = workspace({
+      'index.rip': [
+        'type Bag = { hole: unknown }',
+        '',
+        'authored: () => Bag = -> ({ hole: 1 })',
+        "guessed = -> ({ hole: (JSON.parse('1') as unknown) })",
+        '',
+        'export def fromAuthored()',
+        '  return authored()',
+        '',
+        'export def fromGuessed()',
+        '  return guessed()',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'pinned', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      // Written by hand, and trusted — the pin beside it changes nothing.
+      expect(out.stdout).toMatch(/✓ fromAuthored/);
+      // The compiler's own description of what it found.
+      expect(out.stdout).toMatch(/unknown\s+at: fromGuessed\(\)\.hole/);
+      expect(out.stdout).toContain('1/2 exports fully typed (50.0%)');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

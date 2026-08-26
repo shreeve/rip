@@ -734,6 +734,7 @@ while (queue.length) {
     good: {
       source, code: result.code, mappings: result.mappings,
       echoSpans: result.echoSpans ?? [],
+      pinSpans: result.pinSpans ?? [],
       srcLineStarts, genLineStarts: lineStartsOf(result.code),
       strict: cfg.strict === true,
       dir: path.dirname(fsPath),
@@ -929,6 +930,7 @@ if (compiled.size > 0) {
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];
+        entry.good.pinSpans = r.pinSpans ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });
@@ -975,6 +977,17 @@ if (compiled.size > 0) {
         return nearestPackage(path.dirname(owner.fsPath)) === pkgDir;
       };
 
+      // Whether a generated offset falls in type text the COMPILER wrote.
+      // A pin is the type inferred for a still-hoisted binding, spelled
+      // into the face as an ordinary annotation — nothing in the mirror's
+      // syntax separates it from one the author wrote, so a walk asking
+      // whether a position was CLAIMED has to be told. Both passes ask.
+      const synthesized = (declPath, start) => {
+        const spans = byMirror.get(String(declPath ?? '').toLowerCase())?.entry.good?.pinSpans;
+        if (spans === undefined) return false;
+        return spans.some(([from, to]) => start >= from && start < to);
+      };
+
       // ── PUBLIC PASS ── `--public`: what a CONSUMER's checker resolves
       // for every name a package publishes, and the path to the first `any`
       // inside it. The walk itself lives in
@@ -1005,14 +1018,12 @@ if (compiled.size > 0) {
             // seeds its own exports into the sibling set itself, and this
             // pass exists only so OTHER entries' exports can stop a walk —
             // enumerating the one entry here would enumerate it twice.
-            const siblingIds = new Map();
+            const siblingIds = new Set();
             if (pkgEntries.length > 1) {
               for (const entryFile of pkgEntries) {
                 const e = compiled.get(entryFile);
                 if (e?.mirrorPath === undefined) continue;
-                for (const [id, pol] of await exportIdsOf(session, e.mirrorPath)) {
-                  if (!siblingIds.has(id)) siblingIds.set(id, pol);
-                }
+                for (const id of await exportIdsOf(session, e.mirrorPath)) siblingIds.add(id);
               }
             }
             // A pattern is surface this audit cannot enumerate — a floor
@@ -1040,7 +1051,8 @@ if (compiled.size > 0) {
               const walked = await walkPublicEntry(session, {
                 mirrorFile: entry.mirrorPath,
                 owns,
-                siblingIds: new Map(siblingIds),
+                siblingIds: new Set(siblingIds),
+                synthesized,
               });
               if (walked.unresolved !== null) {
                 unreadable.push({ entryFile, reason: walked.unresolved });
@@ -1170,6 +1182,7 @@ if (compiled.size > 0) {
                 mirrorFile: entry.mirrorPath,
                 owns: ownedBy(dir),
                 only: names,
+                synthesized,
               }).catch(() => null);
               if (walked === null || walked.unresolved !== null) continue;
               const leaks = walked.rows.filter((r) => r.kind === 'leak').map((r) => r.name);

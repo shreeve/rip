@@ -8553,6 +8553,7 @@ class Emitter {
     this.mutables = [];
     this.enums = [];
     this.classDecls = [];
+    this.pinSpans = [];
     this.loopVars = [];
     this.attrNames = [];
     this.importedRefs = [];
@@ -10576,7 +10577,11 @@ class Emitter {
             const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined)
-              this.b.tsOnly(() => this.b.emit(`${this.strict ? "" : "!"}: ${pinType}`));
+              this.b.tsOnly(() => {
+                const at = this.b.offset;
+                this.b.emit(`${this.strict ? "" : "!"}: ${pinType}`);
+                this.pinSpans.push([at, this.b.offset]);
+              });
           }
         }
       }
@@ -19868,7 +19873,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20037,6 +20042,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     echoSpans: emitted.echoSpans ?? [],
     globalDecls: emitted.globalDecls ?? [],
     pinnables: emitted.pinnables,
+    pinSpans: emitted.pinSpans ?? [],
     mutables: emitted.mutables,
     enums: emitted.enums,
     classDecls: emitted.classDecls,

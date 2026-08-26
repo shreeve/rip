@@ -461,6 +461,15 @@ class Emitter {
     // hoist changed. Components ride this too: one lowers to a class
     // expression, and a forward-rendered child is ordinary library shape.
     this.classDecls = [];
+    // Generated `[start, end]` spans of a PIN's type text: the annotation
+    // itself, never the name it lands on. A pin is a type the compiler
+    // INFERRED and wrote into the face, and it is an ordinary annotation
+    // there — so a reader asking whether a position was ANNOTATED cannot
+    // tell it from the author's own, and takes every pinned position for
+    // a claim. Recorded here because only the emitter knows which
+    // annotations it wrote itself. Two bindings can share one hoist line,
+    // one pinned and one the author's, so the span is the unit.
+    this.pinSpans = [];
     // Generated `[start, end]` spans of a RENDER loop's item/index binding
     // names, every occurrence. The render path lowers the loop body to a
     // block-function factory, so in the face the binding genuinely IS a
@@ -3714,7 +3723,11 @@ class Emitter {
             // annotated forwards do.
             const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
-            if (pinType !== undefined) this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`));
+            if (pinType !== undefined) this.b.tsOnly(() => {
+              const at = this.b.offset;
+              this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`);
+              this.pinSpans.push([at, this.b.offset]);
+            });
           }
         }
       }
@@ -15619,7 +15632,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

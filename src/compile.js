@@ -269,6 +269,12 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     echoSpans: emitted.echoSpans ?? [],
     globalDecls: emitted.globalDecls ?? [],
     pinnables: emitted.pinnables,
+    // Generated spans of a PIN's type text. A pin is the type the compiler
+    // inferred for a still-hoisted binding and wrote into the face itself,
+    // so nothing at those offsets is the author's claim — which is the one
+    // thing a reader asking whether a position is ANNOTATED has to know.
+    // TS face only; empty otherwise.
+    pinSpans: emitted.pinSpans ?? [],
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.
     mutables: emitted.mutables,

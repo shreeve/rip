@@ -31,7 +31,7 @@ Never decide minimality by who imports a name. A package may be consumed through
 rip check --public <pkg>
 ```
 
-Each leaking export lists its positions and the path to each. Read a path as the walk order: a call's parameter, a member, an array element, a callback's own parameter. Polarity flips at parameters only — an export is read, its parameter is written, a parameter of that parameter is read again — and every other segment inherits. That is why `unknown` is a defect in one position and harmless in another.
+Each leaking export lists its positions and the path to each. Read a path as the walk order: a call's parameter, a member, an array element, a callback's own parameter. A position is reported when it carries `any` or `Function`, which are unchecked wherever they sit, or when nothing was written there at all. A width that is WRITTEN is a claim, and the audit takes it: `unknown`, `object` and `{}` stop a consumer until they narrow, so a deliberate one is a finished answer rather than a position to fix.
 
 ## 3 — Derive each type from a named consuming line
 

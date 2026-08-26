@@ -52,8 +52,7 @@ async function moduleAt(session, mirrorFile) {
 // one odd symbol must not take the whole audit down with it.
 async function typeOfExport(ck, sym) {
   const typeOnly = isTypeOnly(sym);
-  const type = await (typeOnly ? ck.getDeclaredTypeOfSymbol(sym) : ck.getTypeOfSymbol(sym)).catch(() => undefined);
-  return { type, typeOnly };
+  return await (typeOnly ? ck.getDeclaredTypeOfSymbol(sym) : ck.getTypeOfSymbol(sym)).catch(() => undefined);
 }
 
 // Whose member is this? A package cannot fix `Promise<Response>`, and a class
@@ -85,15 +84,16 @@ async function resolveAlias(ck, symbol) {
 }
 
 // A name that is only ever a type has no value to take the type OF, so its
-// row is walked undirected and never evaluates read-side width.
+// type is the one it DECLARES — a distinction the checker draws with two
+// different calls, and answering it with the wrong one resolves nothing.
 const isTypeOnly = (sym) => Boolean((sym.flags & TYPE_ONLY) && !(sym.flags & VALUE_LIKE));
 
-// Every symbol a module publishes, with the POLARITY its own row is walked
-// from. Collected across all of a package's entries before any walk: a
-// package publishes from every entry its manifest names, so what it
-// publishes is a property of the package, not of whichever entry is in hand.
+// Every symbol a module publishes. Collected across all of a package's
+// entries before any walk: a package publishes from every entry its
+// manifest names, so what it publishes is a property of the package, not
+// of whichever entry is in hand.
 export async function exportIdsOf(session, mirrorFile) {
-  const ids = new Map();
+  const ids = new Set();
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
     if (ck === null || source === undefined) return ids;
@@ -102,7 +102,7 @@ export async function exportIdsOf(session, mirrorFile) {
     const { entries } = await exportsOfModule(ck, moduleSymbol);
     for (const [, sym] of entries) {
       const s = await resolveAlias(ck, sym);
-      ids.set(s.id, isTypeOnly(s) ? null : true);
+      ids.add(s.id);
     }
     return ids;
   } finally {
@@ -271,15 +271,47 @@ async function widthOf(ck, type, owns, functionTypeId, members) {
   return '{}';
 }
 
+// Whether a type annotation is the AUTHOR's claim.
+//
+// Not every annotation in the face was written by one. A pin is the type
+// the compiler inferred for a still-hoisted binding and spelled into the
+// face itself, and it is an ordinary annotation there — syntax cannot tell
+// it from one the author wrote, so the caller supplies the offsets. Every
+// position inside a pin's type text arrived with nothing claiming it,
+// however annotated it looks: `let make: () => { hole: unknown }` is the
+// compiler describing what it found, not a contract anyone offered.
+async function authored(typeNode, declPath, synthesized) {
+  if (typeNode == null) return false;
+  let start = null;
+  try { start = await typeNode.getStart(); } catch { return true; }
+  return typeof start !== 'number' || !synthesized(declPath, start);
+}
+
 // Whether a position STATES a contract. An annotation is a claim about what
 // belongs here, however wide; a type that merely fell out of a default value
 // claims nothing, and `opts = {}` is a missing annotation rather than a
 // decision to accept any object.
-async function isStated(symbol) {
+async function isStated(symbol, synthesized) {
   const declaration = symbol?.declarations?.[0];
   if (declaration === undefined) return true;
   const node = await declaration.resolve().catch(() => null);
-  return node === null || node.type != null;
+  return node === null || await authored(node.type, declaration.path, synthesized);
+}
+
+// Whether an EXPORT states its own type, which is a different question from
+// the one above. A declaration that spells the shape out — a class, an
+// interface, a function — IS the claim, and has no annotation to look for;
+// only a BINDING takes its type from one, and a binding without it takes
+// whatever its initializer happened to produce. `export env = Proxy.new {}`
+// resolves to `{}` because nothing said otherwise, and that is the position
+// this answers for.
+async function isStatedExport(symbol, synthesized) {
+  const declaration = symbol?.declarations?.[0];
+  if (declaration === undefined) return true;
+  const node = await declaration.resolve().catch(() => null);
+  if (node === null) return true;
+  if (node.type != null) return authored(node.type, declaration.path, synthesized);
+  return node.initializer === undefined;
 }
 
 // WHERE a position was declared, as a generated-text offset.
@@ -327,26 +359,46 @@ async function signatureSiteOf(params) {
   return null;
 }
 
+// Whether a SIGNATURE states its return, reached the same two ways and for
+// the same reason: the return carries no symbol of its own, so the
+// annotation is read off the FUNCTION.
+//
+// A parameter is the way in, and its parent is that function whatever the
+// function is spelled like. With no parameter to enter by, the symbol that
+// exposes the signature answers instead — and a binding holds its function
+// in an initializer, so `f = (): unknown -> …` writes the annotation there
+// rather than on `f`. The binding's own annotation still wins where it has
+// one, which is what `f: Reader = -> …` claims.
+async function returnIsStated(params, origin, synthesized) {
+  for (const p of params) {
+    const declaration = p?.declarations?.[0];
+    if (declaration === undefined) continue;
+    const node = await declaration.resolve().catch(() => null);
+    const fn = node?.parent;
+    if (fn != null) return authored(fn.type, declaration.path, synthesized);
+  }
+  const declaration = origin?.declarations?.[0];
+  if (declaration === undefined) return true;
+  const node = await declaration.resolve().catch(() => null);
+  if (node === null) return true;
+  return await authored(node.type, declaration.path, synthesized)
+    || await authored(node.initializer?.type, declaration.path, synthesized);
+}
+
 // One published name, walked breadth-first to its first defect.
 //
 // Breadth-first so the shallowest leak is the one reported: the path a
 // consumer meets first is the one worth printing. The depth limit bounds
 // COST, and what it cuts is unexamined rather than clean — that count
 // leaves with the verdict, never discarded.
-async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol, siblings, functionTypeId, caches) {
+async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, siblings, functionTypeId, caches, synthesized) {
   const seen = new Set();
   const found = [];
   // Positions the CHECKER had no type for. The async API is allowed to
   // answer a symbol with undefined, and a thread lost there is unexamined
   // surface, not clean surface — it leaves with the floor.
   let lost = 0;
-  // Polarity: which way the value travels at this position. The export is
-  // something a consumer READS, and a parameter reverses that — including a
-  // parameter OF a parameter, which is an argument the consumer's own
-  // callback receives and so is read again. Width costs opposite things on
-  // the two sides, and the same shape is a defect on one and a decision on
-  // the other.
-  let level = [{ type: rootType, at: rootName, bare: false, reads, stated: true, origin: rootSymbol }];
+  let level = [{ type: rootType, at: rootName, bare: false, stated: await isStatedExport(rootSymbol, synthesized), origin: rootSymbol }];
   for (let depth = 0; depth < maxDepth && level.length; depth++) {
     const next = [];
     for (const item of level) {
@@ -359,9 +411,19 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         caches.width.set(item.type.id, width);
       }
       // `any` and `Function` are unchecked in either direction. Anything
-      // else that carries nothing is a defect only where the consumer
-      // READS, or where it arrived without an annotation to claim it.
-      if (width !== null && (width === 'any' || width === 'Function' || item.reads === true || !item.stated)) {
+      // else that carries nothing is a defect only where it arrived
+      // without an annotation to claim it.
+      //
+      // The audit flags positions where a consumer can be WRONG without
+      // being told, and a written `unknown` is the opposite of that: the
+      // compiler stops the consumer until they narrow, whichever way the
+      // value travels. Some values genuinely have no knowable shape — a
+      // caller's payload, a caught throw — and naming that is the whole
+      // answer rather than a placeholder for a better one. Whether a
+      // narrower type exists is a judgment about intent that no walk can
+      // make; it belongs in review, and the lazy case costs a consumer
+      // ceremony rather than correctness.
+      if (width !== null && (width === 'any' || width === 'Function' || !item.stated)) {
         found.push({ why: width, at: item.at, origin: item.site ?? await declarationSiteOf(item.origin) });
         continue;
       }
@@ -412,10 +474,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
               type: pType,
               at: isCtor ? `${item.at}.new(${p.name})` : `${item.at}(${p.name})`,
               bare: false,
-              // No direction stays no direction: `!null` is `true`, which
-              // would invent a read the export never claimed.
-              reads: item.reads === null ? null : !item.reads,
-              stated: await isStated(p),
+              stated: await isStated(p, synthesized),
               origin: p,
             });
             if (isCtor) ctorParams.push({ name: p.name, id: pType.id });
@@ -426,8 +485,15 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
             type: returnType,
             at: isCtor ? `${item.at}#` : `${item.at}()`,
             bare: isCtor,
-            reads: item.reads,
-            stated: true,
+            // A constructor is not exempt. It has no return annotation to
+            // omit — a class body IS the claim — but an EMPTY body claims
+            // nothing, and `{}` is the one width a class instance can
+            // carry. TypeScript classes are structural, so `class Empty`
+            // accepts every non-nullish value and is a hole a consumer
+            // falls through rather than an opaque token. Answering here
+            // the way every other return does reports exactly that case
+            // and no other.
+            stated: await returnIsStated(params, item.origin, synthesized),
             origin: item.origin,
             site: await signatureSiteOf(params),
             ctorParams,
@@ -441,16 +507,16 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         // repeating its defects under everything that happens to expose it
         // reports one piece of work as several.
         //
-        // Only where that row answers the question THIS position asks. A
-        // sibling is walked from one side — a value is read, a bare type has
-        // no direction at all — and a stop at a row that never evaluates
-        // this side hands the position to a row that will not report it.
+        // Membership is the whole question. Every row applies one verdict —
+        // `any` and `Function` wherever they sit, anything else only where
+        // nothing claimed the position — so a sibling's row reports what
+        // this position would, whatever either was reached from, and the
+        // stop hands the work to a row that will do it.
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
         const propSymbol = await propType.getSymbol();
-        const sibling = propSymbol == null ? undefined : siblings.get(propSymbol.id);
         if (propSymbol != null && propSymbol.id !== rootSymbol?.id
-          && sibling !== undefined && sibling === item.reads) continue;
+          && siblings.has(propSymbol.id)) continue;
         // A field that is the shadow of a constructor parameter is not its
         // own work: annotating the parameter answers both, and reporting it
         // twice overstates the edits. Decided on name AND type, never on
@@ -463,8 +529,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
           type: propType,
           at: `${item.at}${item.bare ? '' : '.'}${prop.name}`,
           bare: false,
-          reads: item.reads,
-          stated: await isStated(prop),
+          stated: await isStated(prop, synthesized),
           origin: prop,
         });
       }
@@ -497,7 +562,6 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
           type: arg,
           at: array ? `${item.at}[]` : `${item.at}<${i}>`,
           bare: false,
-          reads: item.reads,
           stated: item.stated,
           origin: item.origin,
           site: item.site,
@@ -511,7 +575,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         // writes and none of them can reach.
         if ((info.keyType.flags & (TypeFlags.String | TypeFlags.Number)) === 0) continue;
         if (info.declaration !== undefined && !declaredAt(info.declaration, owns)) continue;
-        next.push({ type: info.valueType, at: `${item.at}[]`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
+        next.push({ type: info.valueType, at: `${item.at}[]`, bare: false, stated: item.stated, origin: item.origin });
       }
       if (await item.type.isUnionType() || await item.type.isIntersectionType()) {
         // Ownership is asked of each MEMBER, not of the union. A union does
@@ -525,7 +589,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         for (const [i, member] of members.entries()) {
           const symbol = await member.getSymbol();
           if (symbol != null && !declaredUnder(symbol, owns)) continue;
-          next.push({ type: member, at: `${item.at}|${i}`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin, site: item.site });
+          next.push({ type: member, at: `${item.at}|${i}`, bare: false, stated: item.stated, origin: item.origin, site: item.site });
         }
       }
     }
@@ -549,7 +613,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
 // took, rather than everything the module publishes. A count of the whole
 // surface says the same thing to every consumer of a package and so says
 // nothing about any of them.
-export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null, siblingIds = null }) {
+export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null, siblingIds = null, synthesized = () => false }) {
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
     if (ck === null) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
@@ -574,11 +638,11 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
     // `only`, the stop may defer only to a row that will EXIST — a sibling
     // the narrowing filters out below has no row, and seeding it here hands
     // its defects to a row that never prints.
-    const siblings = siblingIds ?? new Map();
+    const siblings = siblingIds ?? new Set();
     for (const [name, sym] of exported) {
       if (only !== null && !only.has(name)) continue;
       const s = await resolveAlias(ck, sym);
-      if (!siblings.has(s.id)) siblings.set(s.id, isTypeOnly(s) ? null : true);
+      siblings.add(s.id);
     }
     for (const [name, symbol] of exported) {
       if (only !== null && !only.has(name)) continue;
@@ -590,7 +654,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
       // because the two do not share a remedy.
       if (symbol.flags & SymbolFlags.ExportStar) continue;   // counted once, when followed
       const rootSym = await resolveAlias(ck, symbol);
-      const { type, typeOnly } = await typeOfExport(ck, rootSym);
+      const type = await typeOfExport(ck, rootSym);
       // No type is no verdict. "Found no defect" and "was never able to
       // look" are not the same answer, and only one of them is a clean bill.
       if (type === undefined) {
@@ -610,11 +674,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
       const printed = ((type.flags & TypeFlags.Any) !== 0 && written !== 'any')
         ? `any (written: ${written})`
         : written;
-      // A VALUE is something a consumer reads. A bare TYPE is not: it may be
-      // an options bag they construct or a result they inspect, and nothing
-      // about the export says which. Its positions get only the rules that
-      // hold either way.
-      const found = await walkOne(ck, type, name, owns, maxDepth, typeOnly ? null : true, rootSym, siblings, functionTypeId, caches);
+      const found = await walkOne(ck, type, name, owns, maxDepth, rootSym, siblings, functionTypeId, caches, synthesized);
       unexplored += found.unexplored;
       // Q3: three states, and the third is a fact about this AUDIT rather than
       // about the code. A name declared in another package is published here
