@@ -50,7 +50,7 @@ Rip supports:
 - parameter, rest, default, optional, and destructured annotations;
 - function and arrow return types;
 - casts with `as`;
-- type aliases and interfaces;
+- type aliases and interfaces, with block bodies whose bare-colon members take their type from the indented block beneath them;
 - typed class, static, string-named, and prototype members;
 - overload signatures;
 - enum type companions;
@@ -291,6 +291,8 @@ unannotated object-literal method is `any`). Everything else — present
 and future strict-family members — stays on, so new strictness arrives
 as a visible leak, never as silent inference loss. Any strictness the
 project's own tsconfig chain sets is yielded to whole.
+
+Syntax-class diagnostics (the TS1000–1999 band) also publish in every mode: a face that does not parse invalidates every conclusion the checker draws from the file, and the malformed bytes are the emitter's, never the author's. One whose generated span maps to no source position reports at the file head rather than dropping — a vanished syntax error reads as a clean file.
 
 ## Project configuration
 

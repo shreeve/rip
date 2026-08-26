@@ -391,6 +391,52 @@ describe('TS-face emission pins', () => {
     expect(ts('export type Q = number\nz = 1\n').code).toBe('export type Q = number;\nlet z = 1;' + MARKER);
   });
 
+  test('bare-colon members open nested layout blocks: object, union, wrapped single, recursive', () => {
+    // The value-level bare-colon nesting, at the type level: a member
+    // whose line ends at its ':' takes its type from the indented
+    // block beneath it. Member children brace into an inline object.
+    expect(ts('type S =\n  a?: string\n  inner?:\n    x?: number\n    y?: string\nz = 1\n').code)
+      .toBe('type S = {\n  a?: string;\n  inner?: { x?: number; y?: string };\n};\nlet z = 1;' + MARKER);
+    // Sub-blocks nest recursively.
+    expect(ts('type T =\n  outer:\n    mid:\n      leaf: number\nz = 1\n').code)
+      .toBe('type T = {\n  outer: { mid: { leaf: number } };\n};\nlet z = 1;' + MARKER);
+    // `|` variants join into a union annotation (string-literal types
+    // display double-quoted, the same normalization as everywhere).
+    expect(ts("type U =\n  status?:\n    | 'a'\n    | 'b'\nz = 1\n").code)
+      .toBe('type U = {\n  status?: "a" | "b";\n};\nlet z = 1;' + MARKER);
+    // A single non-member child is the annotation wrapped onto its own line.
+    expect(ts('type F =\n  fn?:\n    (e: Event) => void\nz = 1\n').code)
+      .toBe('type F = {\n  fn?: (e: Event) => void;\n};\nlet z = 1;' + MARKER);
+    // A bracket-wrapped child stays one member of the sub-block.
+    expect(ts('type G =\n  inner:\n    m: Map<K,\n      V>\nz = 1\n').code)
+      .toBe('type G = {\n  inner: { m: Map<K, V> };\n};\nlet z = 1;' + MARKER);
+    // Comment-only child lines are trivia.
+    expect(ts('type C =\n  inner:\n    x: number\n    # note\n    y: string\nz = 1\n').code)
+      .toBe('type C = {\n  inner: { x: number; y: string };\n};\nlet z = 1;' + MARKER);
+    // Index-signature keys nest the same way.
+    expect(ts('type M =\n  [k: string]:\n    x: number\nz = 1\n').code)
+      .toBe('type M = {\n  [k: string]: { x: number };\n};\nlet z = 1;' + MARKER);
+    // Interface bodies nest identically (the shared member pipeline).
+    expect(ts('interface P\n  inner:\n    x: number\nz = 1\n').code)
+      .toBe('interface P {\n  inner: { x: number };\n}\nlet z = 1;' + MARKER);
+  });
+
+  test('block heads are judged on meaning: bracket wraps, comments, signature and bracketed keys', () => {
+    // A bracket-wrapped member consumes its continuation lines before
+    // any head reading — the interior lines never open blocks.
+    expect(ts('type T =\n  handler: (\n    event:\n    MouseEvent\n  ) => void\nz = 1\n').code)
+      .toBe('type T = {\n  handler: ( event: MouseEvent ) => void;\n};\nlet z = 1;' + MARKER);
+    // A trailing comment on a bare-colon head is trivia, as at the value level.
+    expect(ts('type C =\n  inner: # note\n    x: number\nz = 1\n').code)
+      .toBe('type C = {\n  inner: { x: number };\n};\nlet z = 1;' + MARKER);
+    // A signature-shaped head opens its block (wrapped method shorthand).
+    expect(ts('interface P\n  addItem(item: string):\n    void\nz = 1\n').code)
+      .toBe('interface P {\n  addItem(item: string): void;\n}\nlet z = 1;' + MARKER);
+    // An index key with nested brackets opens its block.
+    expect(ts('type M =\n  [k: A[B]]:\n    x: number\nz = 1\n').code)
+      .toBe('type M = {\n  [k: A[B]]: { x: number };\n};\nlet z = 1;' + MARKER);
+  });
+
   test('a unicode-named type declaration renders, strips, and passes the region-shape spec', () => {
     const src = 'type Ω = number\nω: Ω\nω = 1\n';
     const faced = ts(src);
@@ -1182,6 +1228,35 @@ describe('TS-face negatives', () => {
     expect(err.message).toMatch(/unrecognized member '\| Ok' in the block body of 'type B'/);
     // Positioned on the declaration's own line, not the file head.
     expect(err.line).toBe(2);
+  });
+
+  test('an empty member annotation rejects loudly, and `: type` is not the block opener', () => {
+    const rejects = (src, re) => {
+      let err = null;
+      try { ts(src); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(CompileError);
+      expect(err.message).toMatch(re);
+    };
+    // A bare ':' with nothing beneath it has no type at all.
+    rejects('type T =\n  inner?:\nz = 1\n', /carries no type/);
+    rejects('type T =\n  a: number\n  inner?:\nz = 1\n', /carries no type/);
+    rejects('interface P\n  inner?:\nz = 1\n', /carries no type/);
+    // The block opener is the bare ':' — an annotation spelled `type` is not a keyword.
+    rejects('type T =\n  inner?: type\n    x: number\nz = 1\n', /drop the 'type' keyword/);
+    // A sub-block classifies like a block body: mixed shapes reject.
+    rejects('type T =\n  inner?:\n    x: number\n    | Err\nz = 1\n', /nested block of 'inner\?'/);
+  });
+
+  test("every `: type` block spelling rejects with the pointer — none flattens silently", () => {
+    const rejects = (src, re) => {
+      let err = null;
+      try { ts(src); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(CompileError);
+      expect(err.message).toMatch(re);
+    };
+    rejects('interface P\n  m(x: number): type\n    label: string\nz = 1\n', /drop the 'type' keyword/);
+    rejects('type T =\n  inner: type # note\n    x: number\nz = 1\n', /drop the 'type' keyword/);
+    rejects('type M =\n  [k: A[B]]: type\n    x: number\nz = 1\n', /drop the 'type' keyword/);
   });
 
   test('a non-array rest annotation passes through the face — the checker flags it ON SOURCE (TS2370), unlike the shipped dts which rejects', () => {

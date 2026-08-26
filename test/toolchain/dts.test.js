@@ -104,6 +104,9 @@ const ROWS = [
   // signatures, quoted/numeric keys, readonly modifiers — each a
   // recognized member shape, braced like the interface path
   ['type M =\n  [key: string]: number\nz = 1', 'type M = {\n  [key: string]: number;\n};\nexport {};\n'],
+  // bare-colon members take their type from the indented block beneath
+  ['type S =\n  inner?:\n    x?: number\n    y?: string\nz = 1', 'type S = {\n  inner?: { x?: number; y?: string };\n};\nexport {};\n'],
+  ['interface N\n  inner:\n    x: number\nz = 1', 'interface N {\n  inner: { x: number };\n}\nexport {};\n'],
   ['type C =\n  (x: number): string\nz = 1', 'type C = {\n  (x: number): string;\n};\nexport {};\n'],
   ['type Q =\n  "a-b": string\n  0: boolean\nz = 1', 'type Q = {\n  "a-b": string;\n  0: boolean;\n};\nexport {};\n'],
   // Single-quoted keys normalize to double (the TS display convention,

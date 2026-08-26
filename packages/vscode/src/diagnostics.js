@@ -13,7 +13,7 @@ import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
   SUPPRESSED_TS_CODES, diagnosticTagsFor,
 } from './translate.js';
-import { ALWAYS_REPORTED_CODES } from './scopes.js';
+import { alwaysReported, isSyntaxClass } from './scopes.js';
 import { declaredButUninstalled } from './mirror.js';
 
 // A CompileError → { reason, start, end } in SOURCE offsets: the first
@@ -59,13 +59,27 @@ export function mapTsDiagnostic(good, d) {
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
   const span = generatedSpanToSource(good.mappings, s, e);
-  if (!span) return null;
+  // A generated span with no source mapping lives in a purely
+  // synthetic region. A TYPE claim there is about bytes the author
+  // never wrote — dropped. A SYNTAX-class error there still means the
+  // face does not parse, so it reports at the FILE HEAD instead: a
+  // vanished syntax error reads as a clean file.
+  if (!span) {
+    if (!isSyntaxClass(d.code)) return null;
+    return {
+      severity: d.severity ?? 1,
+      code: d.code,
+      source: 'rip/ts',
+      message: d.message,
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    };
+  }
   // The DECLARATION-SCOPE gate. Judged on the MAPPED source position, so it
   // must follow the mapping: the question is which .rip declaration the
   // author would see this on, not where it landed in the face. A strict
   // project is ungated, and a name/module that does not resolve reports
   // either way — see scopes.js.
-  if (!good.strict && good.checkedLines && !ALWAYS_REPORTED_CODES.has(d.code)) {
+  if (!good.strict && good.checkedLines && !alwaysReported(d.code)) {
     const line = offsetToPosition(good.srcLineStarts, span[0]).line;
     if (!good.checkedLines[line]) return null;
   }

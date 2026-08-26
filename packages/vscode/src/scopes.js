@@ -103,6 +103,31 @@ export const ALWAYS_REPORTED_CODES = new Set([
   2724, // module has no exported member — did you mean 'Y'?
 ]);
 
+// The SYNTAX class — TypeScript reserves the 1000–1999 band for
+// grammar diagnostics ("Type expected", "';' expected"). One bypasses
+// as a BAND where the codes above are enumerated one by one because
+// the enumeration exists to judge, per code, whether an annotation
+// could silence a TYPE claim — and a grammar error makes no type
+// claim. It says the generated face itself does not parse, which
+// invalidates every conclusion the checker draws from the file, and
+// the malformed bytes are the emitter's, never the author's: no
+// annotation reaches them, so no scope can hold them.
+//
+// A few band members are TYPE claims in disguise — inference-driven
+// judgments on the author's own bytes, published on a face that
+// parses fine — and those stay behind the gate, enumerated with the
+// same per-code discipline as the set above: 1345 (a void-typed
+// expression tested for truthiness — silenced by annotating the
+// callee's return) and 1360 (a `satisfies` mismatch — a stated type
+// relation on the author's value). The import-shape advice codes
+// (1192/1259/1479) stay IN the band: like the enumerated 2613/2614
+// they name a module boundary that does not fit, and no annotation
+// answers them.
+const TYPE_CLAIMS_IN_SYNTAX_BAND = new Set([1345, 1360]);
+export const isSyntaxClass = (code) =>
+  code >= 1000 && code < 2000 && !TYPE_CLAIMS_IN_SYNTAX_BAND.has(code);
+export const alwaysReported = (code) => isSyntaxClass(code) || ALWAYS_REPORTED_CODES.has(code);
+
 // offset → 0-based line, over one pass of the source. Every pass here works
 // in offsets (tokens, node spans, mapped diagnostic positions) and reports in
 // lines, so they all cross here.
