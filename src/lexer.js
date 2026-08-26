@@ -1134,15 +1134,52 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // EXCEPTION: a trailing '>' (or '>>'/'>>>') that closes a generic
       // in a return-type annotation ends its line — `def f(a): Map<K, V>`
       // must open its body block, not swallow it.
+      const current = indents[indents.length - 1];
       const prev = last();
-      const prevUnfinished = prev != null && UNFINISHED.has(prev.kind) && !closesTypeGeneric(tokens, insideTypeBody(), typeGenericMemo);
+      // A DANGLING member dot. A trailing '.' leaves its line unfinished,
+      // which is what a member chain wrapped across lines needs — but the
+      // same spelling is what stands there the instant a member access is
+      // typed above another construct, and continuing swallows that
+      // construct into the chain (`foo.` above `export y = 1` reads as
+      // `foo.export(y = 1)`). The discriminator is TypeScript's: past the
+      // line break, a word followed by ANOTHER word on the same line opens
+      // a new construct, never a property. A word followed by anything
+      // else — '(', '.', a literal — is still a property, so a chain
+      // whose next line calls or reaches on continues to continue.
+      //
+      // Rip needs one guard TypeScript does not, because here `bar baz` IS
+      // a property call — implicit parens make two words a call, so that
+      // test alone would break every wrapped chain ending in one. A real
+      // continuation indents past the statement it continues, so only a
+      // line at or above the current indent can dangle.
+      const danglingDot = () => {
+        if (prev == null || (prev.kind !== '.' && prev.kind !== '?.')) return false;
+        // Inside brackets indentation carries nothing — a continuation
+        // there needs no indent, so the guard below cannot tell one from
+        // a new construct, and a bracket is not where a construct begins.
+        if (parens.length > 0) return false;
+        // Render blocks read a line-leading identifier as an ELEMENT, so
+        // two words at the same indent are a sibling element and its
+        // argument, not a new construct — the same reason the leading-dot
+        // rule below excludes them. What a trailing dot means there is
+        // the render grammar's to say, and it is not saying it here.
+        if (inRender) return false;
+        if (prefix.length > current.length) return false;
+        if (!IDENT_START.test(text[pos] ?? '')) return false;
+        let at = pos;
+        while (at < text.length && IDENT_PART.test(text[at])) at++;
+        while (text[at] === ' ' || text[at] === '\t') at++;
+        return IDENT_START.test(text[at] ?? '');
+      };
+      const prevUnfinished = prev != null && UNFINISHED.has(prev.kind)
+        && !closesTypeGeneric(tokens, insideTypeBody(), typeGenericMemo)
+        && !danglingDot();
       const commaCont = text[pos] === ',';
       const dotAt = text[pos] === '?' && text[pos + 1] === '.' ? pos + 1 : (text[pos] === '.' ? pos : -1);
       // Inside render blocks a line-leading '.' is a NEW element
       // (`.card` — implicit-div class selector), never a member-chain
       // continuation.
       const dotCont = dotAt >= 0 && text[dotAt + 1] !== '.' && !DIGIT.test(text[dotAt + 1] ?? '') && !inRender;
-      const current = indents[indents.length - 1];
       if (commaCont && !prevUnfinished && prefix.length < current.length) {
         // A comma at a LOWER indent continues the enclosing list: the
         // open blocks above it close, but no statement boundary appears

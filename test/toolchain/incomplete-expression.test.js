@@ -69,6 +69,13 @@ describe('tolerant repair at the parser level', () => {
     expect(r.code).toContain('class A');
   });
 
+  test('a dangling dot does not swallow the construct below it', () => {
+    const r = tolerant('items = [1]\nx = items.\n\nexport type Later<K extends string = string> =\n  a?: K\n');
+    expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
+    expect(r.code).toContain('type Later');                  // the declaration is still its own
+    expect(r.code).not.toContain('items.export');            // the chain did not eat it
+  });
+
   test('a deleted real token leaves its marker even when the lexer already complained', () => {
     // The first-rejection rule is the PARSER's own: a lexer diagnostic
     // (here the unclosed call) must not suppress the record of a panic
@@ -180,6 +187,37 @@ describeExtended('completion and signature help on an incomplete expression', ()
       const parseable = await s.completions('app.rip', 1, 10);
       expect(parseable).toContain('map');
       expect(parseable).toContain('filter');
+    } finally { await s.close(); }
+  }, 90_000);
+
+  // The dot MID-FILE, which is where one is typed in a file already
+  // being written. A trailing dot continues its line, so a dot above
+  // another construct read as a member chain THROUGH it — the
+  // declaration below vanished into the chain, and every reference to it
+  // lost its type. The lexer's dangling-dot rule ends the line instead:
+  // the hole lands at the dot, and the construct below parses on its own.
+  test('a bare dot MID-FILE serves the member list and leaves the construct below intact', async () => {
+    const WHOLE = (dot) => 'items: number[] = [1, 2, 3]\n'
+      + `x = items${dot}\n\n`
+      + 'export type Later<K extends string = string> =\n  a?: K\n\n'
+      + 'later: Later = { a: "x" }\n';
+    const s = await openSession({ 'app.rip': WHOLE(''), 'package.json': '{}\n' });
+    try {
+      s.open('app.rip');
+      await s.diagnostics('app.rip');
+      s.forget('app.rip');
+      s.change('app.rip', WHOLE('.'));
+      const broken = await s.diagnostics('app.rip');
+      // Tolerance is never acceptance: the buffer still reports itself.
+      expect(broken.length).toBeGreaterThan(0);
+      // The declaration below the dot survived — swallowed into the
+      // chain, `Later` is not a name any more and its use cannot resolve.
+      expect(broken.some((d) => /Cannot find name 'Later'/.test(d.message ?? ''))).toBe(false);
+      const atDot = await s.completions('app.rip', 1, 10);
+      expect(atDot).toContain('map');
+      expect(atDot).toContain('filter');
+      // Members, not the surrounding scope.
+      expect(atDot).not.toContain('items');
     } finally { await s.close(); }
   }, 90_000);
 

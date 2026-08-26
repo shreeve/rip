@@ -6058,12 +6058,30 @@ ${baseline}`).join(`
         pos = withNl;
         continue;
       }
+      const current = indents[indents.length - 1];
       const prev = last();
-      const prevUnfinished = prev != null && UNFINISHED.has(prev.kind) && !closesTypeGeneric(tokens, insideTypeBody(), typeGenericMemo);
+      const danglingDot = () => {
+        if (prev == null || prev.kind !== "." && prev.kind !== "?.")
+          return false;
+        if (parens.length > 0)
+          return false;
+        if (inRender)
+          return false;
+        if (prefix.length > current.length)
+          return false;
+        if (!IDENT_START.test(text[pos] ?? ""))
+          return false;
+        let at = pos;
+        while (at < text.length && IDENT_PART.test(text[at]))
+          at++;
+        while (text[at] === " " || text[at] === "\t")
+          at++;
+        return IDENT_START.test(text[at] ?? "");
+      };
+      const prevUnfinished = prev != null && UNFINISHED.has(prev.kind) && !closesTypeGeneric(tokens, insideTypeBody(), typeGenericMemo) && !danglingDot();
       const commaCont = text[pos] === ",";
       const dotAt = text[pos] === "?" && text[pos + 1] === "." ? pos + 1 : text[pos] === "." ? pos : -1;
       const dotCont = dotAt >= 0 && text[dotAt + 1] !== "." && !DIGIT.test(text[dotAt + 1] ?? "") && !inRender;
-      const current = indents[indents.length - 1];
       if (commaCont && !prevUnfinished && prefix.length < current.length) {
         dedentTo(prefix, lineStart, " — align the ',' with the statement it continues");
         atLineStart = false;
