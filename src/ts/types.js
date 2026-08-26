@@ -320,7 +320,21 @@ const foldNestedBlocks = (body) => {
         );
       }
     }
-    if (!norm.endsWith(':')) return { text: norm, next: j };
+    if (!norm.endsWith(':')) {
+      // A member that already carries a type takes no block. Left alone the
+      // block's members fold into the PARENT as siblings and the line emits
+      // with whatever operator it trailed off on — a face that does not
+      // parse, blamed on the alias head rather than on this line. The
+      // nesting form opens from the bare ':' and nowhere else.
+      let k = j;
+      while (k < lines.length && normalizeTypeText(lines[k]) === '') k++;
+      if (k < lines.length && indentOf(lines[k]) > ind) {
+        throw new TypeTextError(
+          `the block under '${norm}' opens only from a bare ':' — finish the type on this line, or brace the block`,
+        );
+      }
+      return { text: norm, next: j };
+    }
     const key = norm.slice(0, -1).trim();
     const parts = [];
     while (j < lines.length && (lines[j].trim() === '' || indentOf(lines[j]) > ind)) {

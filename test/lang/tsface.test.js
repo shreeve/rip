@@ -1245,6 +1245,10 @@ describe('TS-face negatives', () => {
     rejects('type T =\n  inner?: type\n    x: number\nz = 1\n', /drop the 'type' keyword/);
     // A sub-block classifies like a block body: mixed shapes reject.
     rejects('type T =\n  inner?:\n    x: number\n    | Err\nz = 1\n', /nested block of 'inner\?'/);
+    // A line that already carries a type takes no block: the members would
+    // flatten into the parent and the line would emit a dangling operator.
+    rejects('type T =\n  inner?: number | false |\n    limit?: number\nz = 1\n', /opens only from a bare/);
+    rejects('type T =\n  inner?: Fetcher &\n    limit?: number\nz = 1\n', /opens only from a bare/);
   });
 
   test("every `: type` block spelling rejects with the pointer — none flattens silently", () => {
