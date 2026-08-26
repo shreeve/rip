@@ -1002,7 +1002,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // A parameter typed as one of ours is walked THROUGH, not stopped at.
       expect(out.stdout).toContain('any at: run(o).extra');
       // The leak names the parameter that leaks. `cb` is fully typed and is
-      // itself a function, which is the neighbour a parameter list is most
+      // itself a function, which is the neighbor a parameter list is most
       // likely to be misattributed to.
       expect(out.stdout).toContain('any at: pick(tail)');
       // Annotating both positions answers it — no false leak on the way.
@@ -1159,9 +1159,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // are the same rule as the rest of this file's exit contract: 0 means
   // checked-and-clean, never couldn't-check.
   test('--public refuses --json, and will not exit 0 on a run it could not complete', () => {
+    // `secret.rip` is in the ENTRY's closure — the audit reads only what
+    // the manifest publishes and what that reaches, so an unreadable file
+    // outside the closure is no part of this surface.
     const dir = workspace({
       'package.json': JSON.stringify({ name: 'exitpkg', exports: { '.': './index.rip' } }),
-      'index.rip': 'export ok: number = 1\n',
+      'index.rip': "import { hidden } from './secret.rip'\nexport ok: number = 1\nconsole.log hidden\n",
       'secret.rip': 'export hidden: number = 2\n',
     });
     try {
@@ -1317,7 +1320,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // The five arms are one test because the failure modes are each other's
   // mirror image — a rule that floors correctly can invent floors, and a
   // rule that never invents one can miss a dead star hiding beside a live
-  // one. Both directions have shipped here before.
+  // one.
   test('--public follows each `export *` to its target, and floors only what it could not follow', () => {
     const live = workspace({
       'package.json': JSON.stringify({ name: '@q2/live', exports: { '.': './index.rip' } }),
@@ -1459,6 +1462,102 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }, 90_000);
+
+  // The manifest is the audit's INPUT, not a filter over whatever else got
+  // compiled: the published entries are read first and become the compile
+  // targets. Each case here is a way the old direction — audit what the
+  // ordinary check happened to cover — turned the mode's answer wrong.
+  test('--public reads the manifest first: a named entry that is missing is the finding, not an empty run', () => {
+    // No .rip file exists anywhere, so a file-first walk finds nothing to
+    // check and calls the package clean — while its manifest publishes an
+    // entry no consumer can resolve.
+    const dir = workspace({});
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'dangling-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('publishes nothing a consumer can resolve');
+      expect(out.stdout).not.toContain('no .rip files found');
+      expect(out.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('--public audits the manifest\'s entries wherever the run was pointed', () => {
+    // The named file does not import the entry. The audit still answers
+    // for the entry, because the manifest is what publishes — an entry
+    // outside some other target set is not a defect of the package.
+    const dir = workspace({
+      'index.rip': 'export def api(n: number): number\n  n\n',
+      'util.rip': 'export def helper(n: number): number\n  n\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'aimed-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public', 'util.rip']);
+      expect(out.stdout).not.toContain('publishes nothing a consumer can resolve');
+      expect(out.stdout).toContain('1/1 exports fully typed');
+      expect(out.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('--public prints its own report when no entry compiles', () => {
+    // The sole entry fails to compile, so nothing reaches the checker.
+    // The mode still answers its own question — in place of type-checking,
+    // never silently degrading to it.
+    const dir = workspace({
+      'index.rip': [
+        'export type RoundingMode =',
+        "  'UP' | 'DOWN' |",
+        "  'HALF_UP'",
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'solo-broken', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('publishes nothing a consumer can resolve');
+      expect(out.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('--public floors only a pattern that names .rip surface — a null block is an opinion, not a floor', () => {
+    // `"./internal/*": null` is the manifest BLOCKING subpaths, and a
+    // non-.rip pattern publishes surface this audit was never for. Neither
+    // hides a name a consumer could resolve, so neither may cost the
+    // package its clean exit.
+    const dir = workspace({
+      'index.rip': 'export def api(n: number): number\n  n\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'blocked-pkg',
+        exports: { '.': './index.rip', './internal/*': null, './styles/*': './styles/*.css' },
+      }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).not.toContain('every count below is a floor');
+      expect(out.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('--public counts a pattern floor once per package, not once per entry', () => {
+    // The pattern is a fact about the MANIFEST; a count that rides each
+    // entry's row multiplies it by however many entries the package has.
+    const dir = workspace({
+      'a.rip': 'export def one(n: number): number\n  n\n',
+      'b.rip': 'export def two(n: number): number\n  n\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'floor-pkg',
+        exports: { '.': './a.rip', './b': './b.rip', './*': './src/*.rip' },
+      }, null, 2));
+    try {
+      const out = check(dir, ['--public']);
+      expect(out.stdout).toContain('1 `export *` re-export not enumerated');
+      expect(out.status).toBe(2);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
   // The walk's depth limit bounds COST. What it cuts is unexamined rather
@@ -1968,6 +2067,66 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }, 90_000);
+
+  // The walk stops at a member whose type is another export of the same
+  // entry, deferring the defect to that export's own row. Narrowed to what
+  // THIS project imported, the sibling has no row — so the deferral must
+  // not swallow the defect with it.
+  test('a leak deferred to an unimported sibling still reaches the advisory', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-defer-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      for (const p of ['lib', 'app']) fs.mkdirSync(path.join(dir, 'packages', p), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'node_modules', '@d'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'package.json'),
+        JSON.stringify({ name: '@d/lib', exports: { '.': './lib.rip' } }));
+      // `api` is imported; `Session` — where the leak lives — is not.
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'lib.rip'), [
+        'export class Session',
+        '  run: (x) -> x',
+        '',
+        'export api = { session: new Session() }',
+      ].join('\n') + '\n');
+      fs.symlinkSync(path.join('..', '..', 'packages', 'lib'), path.join(dir, 'node_modules', '@d', 'lib'));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@d/app', rip: { strict: true } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'),
+        "import { api } from '@d/lib'\nconsole.log api.session.run(1)\n");
+      const out = check(dir, [path.join('packages', 'app')]);
+      expect(out.stdout).toContain('imported from `@d/lib`');
+      expect(out.stdout).toContain('`api`');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // An `export { name }` clause forwards what came in untyped; nothing at
+  // that position consumes it — the same rule as the import specifier one
+  // node over.
+  test('a re-export is a forward, not a use — the file is not listed as a use site', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-fwd-'));
+    try {
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      for (const p of ['lib', 'app']) fs.mkdirSync(path.join(dir, 'packages', p), { recursive: true });
+      fs.mkdirSync(path.join(dir, 'node_modules', '@f'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'package.json'),
+        JSON.stringify({ name: '@f/lib', exports: { '.': './lib.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'lib.rip'), 'export def leaky(x)\n  x\n');
+      fs.symlinkSync(path.join('..', '..', 'packages', 'lib'), path.join(dir, 'node_modules', '@f', 'lib'));
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
+        JSON.stringify({ name: '@f/app', rip: { strict: true } }));
+      // A real use, so the advisory prints at all.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'),
+        "import { leaky } from '@f/lib'\nconsole.log leaky(1)\n");
+      // Import and forward only — no consumption.
+      fs.writeFileSync(path.join(dir, 'packages', 'app', 'forward.rip'),
+        "import { leaky } from '@f/lib'\nexport { leaky }\n");
+      const out = check(dir, [path.join('packages', 'app')]);
+      expect(out.stdout).toContain('imported from `@f/lib`');
+      expect(out.stdout).toMatch(/app\.rip/);
+      expect(out.stdout).not.toMatch(/forward\.rip/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
   // Several packages leaking at once is the ordinary case for an app, and

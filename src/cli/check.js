@@ -36,7 +36,7 @@ import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
 import { importBindingsOf, namespaceImportsOf } from '../../packages/vscode/src/scopes.js';
-import { bareRipSpecifierTarget } from '../../packages/vscode/src/mirror.js';
+import { ripSpecifierTarget } from '../../packages/vscode/src/mirror.js';
 
 // The two trees whose build identity the editor and this CLI must agree
 // on. Computed once: they were spelled twice, and a hash that disagrees
@@ -110,11 +110,13 @@ Options:
                            Dependencies outside the workspace keep their own
                            posture, as they would after the flip
   --public                 Audit the PUBLIC surface instead of type-checking:
-                           for every package the targets belong to, report the
-                           type a CONSUMER resolves for each export and the
-                           path to the first any inside it — through members,
-                           and through the parameters, returns, and instances
-                           of the signatures they name. Inference counts,
+                           for every package the given paths reach, read the
+                           manifest — its entries are what gets compiled and
+                           audited — and report the type a CONSUMER resolves
+                           for each export and the path to the first any
+                           inside it — through members, and through the
+                           parameters, returns, and instances of the
+                           signatures they name. Inference counts,
                            so an unannotated export with a typed origin passes;
                            members a package does not declare are its
                            dependencies' and are left alone. Exits 1 when any
@@ -152,18 +154,30 @@ const nearestPackage = (from) => {
   return found;
 };
 
+// ── report colors ───────────────────────────────────────────────────
+// ONE palette for every printer in this file, named by role. Colors chosen
+// to byte-match `tsc --pretty`: bright cyan file, bright yellow line/col,
+// gray detail, reverse-video gutter; advisories in plain yellow. Two
+// printers each declaring their own set is how one name came to mean two
+// colors in one binary.
+const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const paint = (c, s) => (useColor ? `\x1b[${c}m${s}\x1b[0m` : s);
+const dim = (s) => paint('90', s);      // detail: TS codes, summaries, hidden-family ledger
+const bold = (s) => paint('1', s);
+const green = (s) => paint('32', s);
+const red = (s) => paint('31', s);
+const cyan = (s) => paint('96', s);     // file paths
+const lineCol = (s) => paint('93', s);  // line / col
+const advise = (s) => paint('33', s);   // advisories and floors
+const invert = (s) => paint('7', s);    // the gutter "box"
+const sevPaint = (sev, s) => paint(sev === 1 ? '91' : '93', s); // error red / warning yellow
+const rel = (f) => path.relative(process.cwd(), f) || '.';
+
 // The `--public` report, v3's shape: every export listed with the type a
 // consumer resolves, the path to the first `any` on a leaking one, and a
 // percentage per package — a failures-only list cannot show a surface
 // getting better, which is the number this exists to produce.
 function printPublicReport(report, unreadable = []) {
-  const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
-  const paint = (c, t) => (useColor ? `\x1b[${c}m${t}\x1b[0m` : t);
-  const dim = (t) => paint('90', t), bold = (t) => paint('1', t);
-  const green = (t) => paint('32', t), red = (t) => paint('31', t), yellow = (t) => paint('33', t);
-  const cyan = (t) => paint('96', t);      // file paths
-  const lineCol = (t) => paint('93', t);  // line / col
-  const rel = (f) => path.relative(process.cwd(), f) || '.';
   const byPkg = new Map();
   for (const r of report) {
     if (!byPkg.has(r.dir)) byPkg.set(r.dir, []);
@@ -193,7 +207,7 @@ function printPublicReport(report, unreadable = []) {
     for (const { rows } of entries) {
       for (const r of rows) {
         if (r.kind !== 'leak') continue;
-        for (const d of (r.defects?.length ? r.defects : [r])) {
+        for (const d of r.defects) {
           locw = Math.max(locw, locate(d).length);
           kindw = Math.max(kindw, (d.why ?? 'any').length);
         }
@@ -206,7 +220,6 @@ function printPublicReport(report, unreadable = []) {
       unexplored += u ?? 0;
       forwarded += f ?? 0;
       if (rows.length === 0) continue;
-      sawEntry = true;
       const w = Math.min(28, rows.reduce((m, r) => Math.max(m, r.name.length), 0));
       // The type column takes whatever the terminal has left, and a type
       // too long for it CONTINUES rather than stopping: this column is the
@@ -232,7 +245,7 @@ function printPublicReport(report, unreadable = []) {
       };
       lines.push(`  ${bold(rel(entryFile))}`);
       for (const r of rows) {
-        if (r.kind === 'unaudited') { unaudited.push({ entryFile, name: r.name, type: r.type }); continue; }
+        if (r.kind === 'unaudited') { unaudited.push({ entryFile, name: r.name, type: r.type, why: r.why }); continue; }
         total++;
         const [head, ...cont] = wrap(r.type ?? '?');
         const mark = r.kind === 'leak' ? red('\u2717') : green('\u2713');
@@ -243,7 +256,7 @@ function printPublicReport(report, unreadable = []) {
           // EVERY position this export leaves untyped, deduplicated by the
           // declaration that has to change — one lambda reached through six
           // verbs is one edit, not six defects.
-          for (const d of (r.defects?.length ? r.defects : [r])) {
+          for (const d of r.defects) {
             // Counted per DECLARATION, the same identity the walk used —
             // several declarations can map back to one source line.
             positions.add(d.origin ? `${d.origin.path}|${d.origin.start}` : `at:${d.at}`);
@@ -267,7 +280,7 @@ function printPublicReport(report, unreadable = []) {
     // their published names went unexamined, and a name that disappears
     // takes the denominator with it.
     for (const u of unaudited) {
-      console.log(`  ${yellow('?')} ${u.name}${dim(' — not audited: declared in another package')}`);
+      console.log(`  ${advise('?')} ${u.name}${dim(` — not audited: ${u.why ?? 'declared in another package'}`)}`);
     }
     if (unaudited.length) { anyUnaudited = true; console.log(''); }
     const typed = total - leaks;
@@ -275,14 +288,14 @@ function printPublicReport(report, unreadable = []) {
     // Two gaps with two remedies: a limit the walk hit, and names an
     // `export *` forwards without naming. Either makes the count a floor,
     // and each is reported as itself so the line says what to do about it.
-    if (forwarded > 0) { anyUnaudited = true; }
     if (forwarded > 0) {
-      console.log(`${yellow('!')} ${forwarded} \`export *\` re-export${forwarded === 1 ? '' : 's'} not enumerated — every count below is a floor`);
+      anyUnaudited = true;
+      console.log(`${advise('!')} ${forwarded} \`export *\` re-export${forwarded === 1 ? '' : 's'} not enumerated — every count below is a floor`);
     }
     if (unexplored > 0) {
-      console.log(`${yellow('!')} ${unexplored} branch${unexplored === 1 ? '' : 'es'} not explored (walk limit) — every count below is a floor`);
+      console.log(`${advise('!')} ${unexplored} branch${unexplored === 1 ? '' : 'es'} not explored (walk limit) — every count below is a floor`);
     }
-    if (total === 0) console.log(`${yellow('!')} ${bold(name)}: nothing here could be audited`);
+    if (total === 0) console.log(`${advise('!')} ${bold(name)}: nothing here could be audited`);
     else if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
     else {
       anyBad = true;
@@ -312,7 +325,13 @@ function printPublicReport(report, unreadable = []) {
   // checked-and-clean. The walk's own depth budget is this tool's cost
   // ceiling and no edit to the package clears it, so it annotates without
   // deciding.
-  process.exit(anyBad ? 1 : ((anyUnaudited || incompleteCheck || tsgoUnavailable) ? 2 : 0));
+  //
+  // RETURNED, not exited: this verdict speaks for the report alone. The
+  // run-completeness flags (incompleteCheck, tsgoUnavailable) are the
+  // mainline's, and the caller folds them in where the other exit paths
+  // already live — a printer that reads them here is fused to state
+  // declared hundreds of lines below it.
+  return anyBad ? 1 : (anyUnaudited ? 2 : 0);
 }
 
 // ── argument parsing ────────────────────────────────────────────────
@@ -452,8 +471,59 @@ function findWorkspaceRoot(files) {
   return nearest ?? base;
 }
 
-const targets = collectTargets(positionals.length ? positionals : ['.']);
-if (targets.length === 0) {
+// ── `--public` seeds from the MANIFESTS ─────────────────────────────
+// The audit's question is about published entries, so the manifests are
+// read FIRST and their entries become the compile targets. Deriving the
+// entries from whatever a file walk happened to cover answers a different
+// question three wrong ways at once: a package whose only published entry
+// is missing has no files to find and reads as clean; an entry outside
+// some other target set reads as unresolvable when it is merely
+// unvisited; and a run where nothing compiles skips the report entirely.
+function* walkManifests(dir) {
+  if (fs.existsSync(path.join(dir, 'package.json'))) yield dir;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    yield* walkManifests(path.join(dir, entry.name));
+  }
+}
+// The packages the given paths reach: every manifest at or under a
+// directory, and the nearest one enclosing a file — or enclosing a
+// directory that holds none, so pointing at a package's src/ audits the
+// package.
+function collectPublicPackages(paths) {
+  const dirs = new Set();
+  for (const p of paths) {
+    const abs = path.resolve(p);
+    let st;
+    try { st = fs.statSync(abs); } catch { fail(`rip check: path not found: ${p}`); }
+    if (st.isFile()) {
+      if (!abs.endsWith('.rip')) fail(`rip check: not a .rip file: ${p}`);
+      const dir = nearestPackage(path.dirname(abs));
+      if (dir !== null) dirs.add(dir);
+    } else {
+      let found = false;
+      for (const dir of walkManifests(abs)) { dirs.add(dir); found = true; }
+      if (!found) {
+        const dir = nearestPackage(abs);
+        if (dir !== null) dirs.add(dir);
+      }
+    }
+  }
+  return [...dirs].sort();
+}
+
+const publicPkgs = publicAudit
+  ? collectPublicPackages(positionals.length ? positionals : ['.']).map((dir) => ({ dir, ...publicEntriesOf(dir) }))
+  : null;
+const targets = publicAudit
+  ? [...new Set(publicPkgs.flatMap((p) => p.entries))].filter((f) => fs.existsSync(f)).sort()
+  : collectTargets(positionals.length ? positionals : ['.']);
+// Under `--public` an empty target set is not an empty RUN: the manifests
+// may still name entries that are missing, publish from outside, or only
+// pattern — each of which the audit reports below, never as a clean 0.
+if (targets.length === 0 && !publicAudit) {
   if (asJson) console.log('[]');
   else console.log('rip check: no .rip files found');
   process.exit(0);
@@ -475,21 +545,26 @@ const stashMemo = new Map();
 // program.
 let mirrorRoot = path.join(workspaceRoot, '.rip', 'check');
 let mirrorRootIsFallback = false;
-try {
-  fs.rmSync(mirrorRoot, { recursive: true, force: true });
-  fs.mkdirSync(mirrorRoot, { recursive: true });
-  fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
-  fs.writeFileSync(path.join(mirrorRoot, '.build'),
-    cacheIdentityOf(compilerDir, serverDir) + '\n');
-} catch (err) {
-  // Degraded, never silent: the fallback re-roots tsgo outside the
-  // workspace, so per-project wrappers stop applying and @types
-  // resolution changes — the user must know their diagnostics come
-  // from a different posture than the editor's.
-  mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
-  mirrorRootIsFallback = true;
-  fallbackToClean = mirrorRoot;
-  console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);
+// With no targets at all (`--public` over manifests that name no file on
+// disk) there is nothing to mirror, and a run that compiles nothing must
+// not go writing trees into whatever directory it ran from.
+if (targets.length > 0) {
+  try {
+    fs.rmSync(mirrorRoot, { recursive: true, force: true });
+    fs.mkdirSync(mirrorRoot, { recursive: true });
+    fs.writeFileSync(path.join(mirrorRoot, '.gitignore'), '*\n');
+    fs.writeFileSync(path.join(mirrorRoot, '.build'),
+      cacheIdentityOf(compilerDir, serverDir) + '\n');
+  } catch (err) {
+    // Degraded, never silent: the fallback re-roots tsgo outside the
+    // workspace, so per-project wrappers stop applying and @types
+    // resolution changes — the user must know their diagnostics come
+    // from a different posture than the editor's.
+    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
+    mirrorRootIsFallback = true;
+    fallbackToClean = mirrorRoot;
+    console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);
+  }
 }
 
 // ── closure compile (pins-less) ─────────────────────────────────────
@@ -610,9 +685,9 @@ const hiddenUninstalledDirs = new Set();   // where `bun install` answers
 // package name -> the names this project imports from it and receives as
 // `any`. Filled by the inherited-`any` pass; read by the advisory.
 const inheritedAny = new Map();
-// Every place this project uses a value it received as `any`.
+// The files where this project uses a value it received as `any` — one
+// row per (file, local binding), with the arrival position to open at.
 const inheritedSites = [];
-const siteSeen = new Set();
 const seen = new Set();
 const explicitTargets = new Set(targets);
 const queue = [...targets];
@@ -813,6 +888,13 @@ if (compiled.size > 0) {
   } catch { session = null; }
 
   if (!session) {
+    // `--public` cannot walk without a checker, and the mode answers its
+    // own question or says why it could not — never the type-check frame
+    // it exists to replace.
+    if (publicAudit) {
+      console.error('rip check --public: tsgo not available (bun install in packages/vscode) — the audit needs the type checker and could not run');
+      process.exit(2);
+    }
     // Without tsgo the mirror is built but nothing type-checks. Report the
     // Rip parse errors we do have, but the run is NOT clean — it exits
     // non-zero (below) so a CI gate never reads un-type-checked code as OK.
@@ -903,12 +985,7 @@ if (compiled.size > 0) {
         const report = [], unreadable = [];
         const session = createPublicSession(mirrorRoot);
         try {
-          for (const dir of [...new Set(targets.map((f) => {
-            for (let d = path.dirname(f); ; d = path.dirname(d)) {
-              if (fs.existsSync(path.join(d, 'package.json'))) return d;
-              if (path.dirname(d) === d) return null;
-            }
-          }).filter(Boolean))].sort()) {
+          for (const { dir, entries: pkgEntries, patterns, outside } of publicPkgs) {
             // The package's own mirrored tree: the ownership line, and the
             // only directory whose declarations this package can change.
             // Q1: a declaration is this package's when the package.json
@@ -918,27 +995,31 @@ if (compiled.size > 0) {
             // ours and answers false, which is the correct answer and not a
             // fallback.
             const owns = ownedBy(dir);
-            const { entries: pkgEntries, patterns, outside } = publicEntriesOf(dir);
             for (const spec of outside) {
               unreadable.push({ entryFile: path.join(dir, spec), reason: null, outside: spec });
             }
             // What the PACKAGE publishes, across every entry, before any
             // walk — the sibling stop asks "does another row cover this?",
             // and a package publishes from all of its entries, not just the
-            // one being walked.
+            // one being walked. A SINGLE entry needs no prebuild: the walk
+            // seeds its own exports into the sibling set itself, and this
+            // pass exists only so OTHER entries' exports can stop a walk —
+            // enumerating the one entry here would enumerate it twice.
             const siblingIds = new Map();
-            for (const entryFile of pkgEntries) {
-              const e = compiled.get(entryFile);
-              if (e?.mirrorPath === undefined) continue;
-              for (const [id, pol] of await exportIdsOf(session, e.mirrorPath)) {
-                if (!siblingIds.has(id)) siblingIds.set(id, pol);
+            if (pkgEntries.length > 1) {
+              for (const entryFile of pkgEntries) {
+                const e = compiled.get(entryFile);
+                if (e?.mirrorPath === undefined) continue;
+                for (const [id, pol] of await exportIdsOf(session, e.mirrorPath)) {
+                  if (!siblingIds.has(id)) siblingIds.set(id, pol);
+                }
               }
             }
-            // A package whose manifest names only patterns publishes surface
-            // this audit cannot enumerate. It has no entry to walk, and that
-            // is a floor rather than an absence — reporting nothing here is
-            // how "cannot enumerate" came to read as "nothing to enumerate".
-            if (pkgEntries.length === 0 && patterns > 0) {
+            // A pattern is surface this audit cannot enumerate — a floor
+            // rather than an absence. It is a fact about the MANIFEST,
+            // carried once per package: riding each entry's row would
+            // multiply it by however many entries the package has.
+            if (patterns > 0) {
               report.push({ dir, entryFile: dir, rows: [], unexplored: 0, forwarded: patterns });
             }
             for (const entryFile of pkgEntries) {
@@ -946,11 +1027,13 @@ if (compiled.size > 0) {
               // An entry the audit cannot read is not an absence of
               // findings, and never reports as one: an entry that does not
               // compile publishes nothing a consumer can resolve, which is
-              // the strongest finding this command has.
+              // the strongest finding this command has. Every entry on disk
+              // was a compile target, so the only way to be missing here is
+              // to have failed — and `compileFailureOf` names the failure.
               if (entry === undefined) {
                 unreadable.push({
                   entryFile,
-                  reason: compileFailureOf(entryFile) ?? 'not part of this check\'s compiled set',
+                  reason: compileFailureOf(entryFile) ?? 'could not be compiled this run',
                 });
                 continue;
               }
@@ -973,7 +1056,6 @@ if (compiled.size > 0) {
                 return { file: owner.fsPath, line: at.line, character: at.character };
               };
               for (const row of walked.rows) {
-                row.site = toSite(row.origin);
                 // Deduplicated on the SOURCE position, which is the thing
                 // that gets edited. Several generated declarations can map
                 // back to one line — a class's fields all carry the
@@ -992,13 +1074,14 @@ if (compiled.size > 0) {
                 // is. The mapped position is for display.
                 for (const d of row.defects ?? []) d.site = toSite(d.origin);
               }
-              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded + patterns });
+              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded });
             }
           }
         } finally {
           try { await session.close(); } catch { /* the server is going away anyway */ }
         }
-        printPublicReport(report, unreadable);
+        const verdict = printPublicReport(report, unreadable);
+        process.exit(verdict !== 0 ? verdict : ((incompleteCheck || tsgoUnavailable) ? 2 : 0));
       }
 
       // ── INHERITED `any` ── the names THIS project imports from other
@@ -1016,12 +1099,6 @@ if (compiled.size > 0) {
       // surface would be the same number for every consumer of a package,
       // and so would say nothing about any of them.
       if (!publicAudit) {
-        const nearestPackage = (from) => {
-          for (let d = from; ; d = path.dirname(d)) {
-            if (fs.existsSync(path.join(d, 'package.json'))) return d;
-            if (path.dirname(d) === d) return null;
-          }
-        };
         // A module imported as a NAMESPACE takes no named bindings, so
         // nothing narrows it: every export is reachable through the alias.
         const wanted = new Map();         // dependency entry -> imported names
@@ -1044,89 +1121,95 @@ if (compiled.size > 0) {
           if (entry.good.strict !== true) continue;
           const fromDir = path.dirname(fsPath);
           const ownPackage = nearestPackage(fromDir);
+          // The dependency an import lands on, when it IS one: resolved by
+          // the shared rule (ripSpecifierTarget — the same spelling the
+          // closure walk and the typed-import gate resolve with), compiled
+          // this run, and across a package boundary.
+          const dependencyOf = (module) => {
+            const target = ripSpecifierTarget(module, fromDir);
+            if (target === null || !compiled.has(target)) return null;
+            if (nearestPackage(path.dirname(target)) === ownPackage) return null;  // same package
+            return target;
+          };
+          const record = (target, imported, local) => {
+            const byFile = importers.get(fsPath) ?? new Map();
+            const forDep = byFile.get(target) ?? new Map();
+            forDep.set(imported, local);
+            byFile.set(target, forDep);
+            importers.set(fsPath, byFile);
+          };
           // Two readers, because a file binds a dependency's names two ways:
           // the braced list and the default binding, and `import * as ns`,
           // which binds the whole module and so narrows nothing.
           for (const n of namespaceImportsOf(entry.result?.stores, entry.source)) {
-            const target = (n.module.startsWith('./') || n.module.startsWith('../'))
-              ? (n.module.endsWith('.rip') ? path.resolve(fromDir, n.module) : null)
-              : bareRipSpecifierTarget(n.module, fromDir);
-            if (target === null || !compiled.has(target)) continue;
-            if (nearestPackage(path.dirname(target)) === ownPackage) continue;
+            const target = dependencyOf(n.module);
+            if (target === null) continue;
             wanted.set(target, null);                   // null = the whole surface
-            const byFile = importers.get(fsPath) ?? new Map();
-            const forDep = byFile.get(target) ?? new Map();
-            forDep.set('*', n.local);                   // the alias is the one site
-            byFile.set(target, forDep);
-            importers.set(fsPath, byFile);
+            record(target, '*', n.local);               // the alias is the one site
           }
           for (const b of importBindingsOf(entry.result?.stores, entry.source)) {
-            const target = (b.module.startsWith('./') || b.module.startsWith('../'))
-              ? (b.module.endsWith('.rip') ? path.resolve(fromDir, b.module) : null)
-              : bareRipSpecifierTarget(b.module, fromDir);
-            if (target === null || !compiled.has(target)) continue;
-            if (nearestPackage(path.dirname(target)) === ownPackage) continue;  // same package
+            const target = dependencyOf(b.module);
+            if (target === null) continue;
             if (!wanted.has(target)) wanted.set(target, new Set());
             wanted.get(target)?.add(b.imported);        // null stays null: all of it
-            const byFile = importers.get(fsPath) ?? new Map();
-            const forDep = byFile.get(target) ?? new Map();
-            forDep.set(b.imported, b.local);
-            byFile.set(target, forDep);
-            importers.set(fsPath, byFile);
+            record(target, b.imported, b.local);
           }
         }
         if (wanted.size > 0) {
           const session = createPublicSession(mirrorRoot);
+          // Accumulated ACROSS dependencies and resolved once per consumer
+          // below: each useSitesOf call snapshots its file, and a consumer
+          // importing from k leaking packages is one file, not k.
+          const leakedLocals = new Map();   // consumer file -> local name -> package label
           try {
             for (const [entryFile, names] of wanted) {
               const entry = compiled.get(entryFile);
               if (entry?.mirrorPath === undefined) continue;
+              const dir = nearestPackage(path.dirname(entryFile));
               const walked = await walkPublicEntry(session, {
                 mirrorFile: entry.mirrorPath,
-                owns: ownedBy(nearestPackage(path.dirname(entryFile))),
+                owns: ownedBy(dir),
                 only: names,
               }).catch(() => null);
               if (walked === null || walked.unresolved !== null) continue;
               const leaks = walked.rows.filter((r) => r.kind === 'leak').map((r) => r.name);
               if (leaks.length === 0) continue;
-              const dir = nearestPackage(path.dirname(entryFile));
               let label = dir === null ? entryFile : path.relative(process.cwd(), dir);
               try { label = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? label; } catch { /* unnamed */ }
               const seen = inheritedAny.get(label) ?? new Set();
               for (const n of leaks) seen.add(n);
               inheritedAny.set(label, seen);
-              // Where this project USES what it received untyped. The
-              // remedy is in the package named above, but the reach is
-              // here, and the reach is what a reader cannot otherwise see.
               for (const [fsPath, byDep] of importers) {
                 const names = byDep.get(entryFile);
                 if (names === undefined) continue;
-                const consumer = compiled.get(fsPath);
-                if (consumer?.mirrorPath === undefined) continue;
                 const locals = leaks.map((n) => names.get(n)).filter((n) => n !== undefined);
                 const viaAlias = names.get('*');
                 if (viaAlias !== undefined && !locals.includes(viaAlias)) locals.push(viaAlias);
                 if (locals.length === 0) continue;
-                const found = await useSitesOf(session, { mirrorFile: consumer.mirrorPath, names: locals })
-                  .catch(() => new Map());
-                const toSource = (span) => {
-                  const mapped = span === null ? null : generatedSpanToSource(consumer.good.mappings, span[0], span[1]);
-                  return mapped ? offsetToPosition(consumer.good.srcLineStarts, mapped[0]) : null;
-                };
-                for (const [local, { uses, arrival }] of found) {
-                  const at = toSource(arrival);
-                  for (const span of uses) {
-                    const used = toSource(span);
-                    if (used === null) continue;
-                    // A body the compiler emits twice reaches the same
-                    // source position from two generated ones, and a use
-                    // named twice reads as two uses.
-                    const key = `${fsPath}|${used.line}|${used.character}|${local}`;
-                    if (siteSeen.has(key)) continue;
-                    siteSeen.add(key);
-                    inheritedSites.push({ file: fsPath, local, label, at });
-                  }
-                }
+                const forFile = leakedLocals.get(fsPath) ?? new Map();
+                for (const local of locals) forFile.set(local, label);
+                leakedLocals.set(fsPath, forFile);
+              }
+            }
+            // Where this project USES what it received untyped. The remedy
+            // is in the package named above, but the reach is here, and the
+            // reach is what a reader cannot otherwise see. A use counts
+            // only when it maps to source — a body the compiler emits twice
+            // reaches one source position from two generated ones, and a
+            // local whose every use is unmapped has no reach to show — and
+            // one row per (file, local) is all the table reads.
+            for (const [fsPath, forFile] of leakedLocals) {
+              const consumer = compiled.get(fsPath);
+              if (consumer?.mirrorPath === undefined) continue;
+              const found = await useSitesOf(session, { mirrorFile: consumer.mirrorPath, names: [...forFile.keys()] })
+                .catch(() => new Map());
+              const toSource = (span) => {
+                const mapped = span === null ? null : generatedSpanToSource(consumer.good.mappings, span[0], span[1]);
+                return mapped ? offsetToPosition(consumer.good.srcLineStarts, mapped[0]) : null;
+              };
+              for (const [local, { uses, arrival }] of found) {
+                if (!uses.some((span) => toSource(span) !== null)) continue;
+                inheritedSites.push({ file: fsPath, local, label: forFile.get(local), at: toSource(arrival) });
               }
             }
           } finally {
@@ -1280,6 +1363,30 @@ if (compiled.size > 0) {
   }
 }
 
+// ── `--public`, when nothing compiled ───────────────────────────────
+// The pass above prints and exits, so reaching here under `--public`
+// means no entry compiled at all and there is no checker to walk. What
+// remains reportable are manifest and compiler facts — entries that
+// failed to compile, entries published from outside the package, pattern
+// floors — and the mode still answers with its own report, never the
+// type-check frame it exists to replace.
+if (publicAudit) {
+  const report = [], unreadable = [];
+  for (const { dir, entries: pkgEntries, patterns, outside } of publicPkgs) {
+    for (const spec of outside) {
+      unreadable.push({ entryFile: path.join(dir, spec), reason: null, outside: spec });
+    }
+    if (patterns > 0) {
+      report.push({ dir, entryFile: dir, rows: [], unexplored: 0, forwarded: patterns });
+    }
+    for (const entryFile of pkgEntries) {
+      unreadable.push({ entryFile, reason: compileFailureOf(entryFile) ?? 'could not be compiled this run' });
+    }
+  }
+  const verdict = printPublicReport(report, unreadable);
+  process.exit(verdict !== 0 ? verdict : ((incompleteCheck || tsgoUnavailable) ? 2 : 0));
+}
+
 // ── report ──────────────────────────────────────────────────────────
 // Error (1) and Warning (2) are the type gate; Info/Hint (3/4) — the
 // unused/deprecated fade classes — are not failures and stay out of the
@@ -1301,19 +1408,8 @@ if (asJson) {
 } else {
   // Match `tsc --pretty`: `file:line:col - error TSxxxx: message`, a blank
   // line, a reverse-video line-number gutter with the source line, an
-  // aligned `~~~` underline, then a `Found N errors …` summary.
-  // Colors chosen to byte-match `tsc --pretty`: bright cyan file, bright
-  // yellow line/col (colored separately), gray ` TS<code>: `, bright red
-  // squiggle, reverse-video gutter.
-  const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
-  const paint = (c, s) => (useColor ? `\x1b[${c}m${s}\x1b[0m` : s);
-  const cyan = (s) => paint('96', s);     // file paths (header)
-  const yellow = (s) => paint('93', s);   // line / col
-  const gray = (s) => paint('90', s);     // the TSxxxx code + summary :line
-  const invert = (s) => paint('7', s);    // the gutter "box"
-  const sevPaint = (sev, s) => paint(sev === 1 ? '91' : '93', s); // error red / warning yellow
-  const advise = (s) => paint('33', s);   // the `any` advisory: yellow
-  const rel = (f) => path.relative(process.cwd(), f);
+  // aligned `~~~` underline, then a `Found N errors …` summary. The
+  // report colors live at module scope, shared with `--public`'s printer.
   const sourceLines = new Map();
   const linesOf = (fsPath) => {
     if (!sourceLines.has(fsPath)) {
@@ -1324,8 +1420,8 @@ if (asJson) {
   };
 
   for (const r of rows) {
-    const loc = `${cyan(rel(r.file))}:${yellow(String(r.line + 1))}:${yellow(String(r.character + 1))}`;
-    const code = gray(r.code != null ? ` TS${r.code}: ` : ': '); // tsc wraps the whole ` TSxxxx: ` segment
+    const loc = `${cyan(rel(r.file))}:${lineCol(String(r.line + 1))}:${lineCol(String(r.character + 1))}`;
+    const code = dim(r.code != null ? ` TS${r.code}: ` : ': '); // tsc wraps the whole ` TSxxxx: ` segment
     const message = r.message.replace(/\n/g, '\n  '); // indent continuation lines
     console.log(`${loc} - ${sevPaint(r.severity, SEV[r.severity])}${code}${message}`);
     if (showFrames) {
@@ -1344,7 +1440,7 @@ if (asJson) {
     // location line, then, with frames, an indented frame with a cyan
     // underline.
     for (const rr of r.related ?? []) {
-      console.log(`  ${cyan(rel(rr.file))}:${yellow(String(rr.line + 1))}:${yellow(String(rr.character + 1))} - ${rr.message}`);
+      console.log(`  ${cyan(rel(rr.file))}:${lineCol(String(rr.line + 1))}:${lineCol(String(rr.character + 1))} - ${rr.message}`);
       if (showFrames) {
         const rtext = linesOf(rr.file)[rr.line] ?? '';
         const rnum = String(rr.line + 1);
@@ -1371,20 +1467,20 @@ if (asJson) {
     // A run where tsgo never started type-checked nothing — the stderr
     // note already said so; don't print a false "no type errors" clean.
     if (tsgoUnavailable || incompleteCheck) { /* coverage was short — no clean "✓" to claim (a per-file note already went to stderr) */ }
-    else if (warningCount === 0) console.log(paint('32', '✓ No type errors') + gray(` (${compiled.size} file${compiled.size === 1 ? '' : 's'} checked)`));
+    else if (warningCount === 0) console.log(paint('32', '✓ No type errors') + dim(` (${compiled.size} file${compiled.size === 1 ? '' : 's'} checked)`));
     else console.log(`Found ${warningCount} warning${warningCount === 1 ? '' : 's'}.`);
   } else if (perFile.size === 1) {
     const [f, info] = [...perFile][0];
     console.log(errorCount === 1
-      ? `Found 1 error in ${rel(f)}${gray(':' + info.firstLine)}`
-      : `Found ${errorCount} errors in the same file, starting at: ${rel(f)}${gray(':' + info.firstLine)}`);
+      ? `Found 1 error in ${rel(f)}${dim(':' + info.firstLine)}`
+      : `Found ${errorCount} errors in the same file, starting at: ${rel(f)}${dim(':' + info.firstLine)}`);
   } else {
     console.log(`Found ${errorCount} errors in ${perFile.size} files.`);
     console.log('');
     console.log('Errors  Files');
     // tsc leaves the filename PLAIN here (only the `:line` is gray).
     for (const [f, info] of perFile) {
-      console.log(`${String(info.count).padStart(6)}  ${rel(f)}${gray(':' + info.firstLine)}`);
+      console.log(`${String(info.count).padStart(6)}  ${rel(f)}${dim(':' + info.firstLine)}`);
     }
   }
   // Named once, at the end, whatever the run's verdict — a clean run that
@@ -1411,12 +1507,12 @@ if (asJson) {
   // that follow it are gray. A sentence painted end to end is loud at the
   // length of its longest clause, and the clause that has to catch the eye
   // is the first one — the rest is read once the reader has decided to look.
-  const claim = (head, tail) => `${advise(head)}${gray(tail)}`;
+  const claim = (head, tail) => `${advise(head)}${dim(tail)}`;
   const advisory = (sites, head, tail) => {
     if (sites.length === 0) return;
     console.log('');
     console.log(claim(head(sites.length), tail));
-    for (const a of sites) console.log(`  ${rel(a.file)}${gray(':' + a.line)}`);
+    for (const a of sites) console.log(`  ${rel(a.file)}${dim(':' + a.line)}`);
   };
   advisory(escapes.any, (n) => `${n} \`any\` annotation${plural(n)}`,
     ' — an `any` annotation switches checking on for its scope and tells the checker nothing; '
@@ -1494,7 +1590,7 @@ if (asJson) {
     const shownAt = (byFile, f) => {
       const { at } = byFile.get(f);
       return at === null ? cyan(rel(f))
-        : `${cyan(rel(f))}:${yellow(String(at.line + 1))}:${yellow(String(at.character + 1))}`;
+        : `${cyan(rel(f))}:${lineCol(String(at.line + 1))}:${lineCol(String(at.character + 1))}`;
     };
     // Sized across the WHOLE family, not per package: the packages are
     // one table read down a single column of names, and three columns
@@ -1520,23 +1616,23 @@ if (asJson) {
         ` (${shown}) — run \`rip check --public\` there`));
       for (const f of files) {
         const at = shownAt(byFile, f);
-        console.log(`  ${at}${' '.repeat(Math.max(0, w - bare(at)))}  ${gray([...byFile.get(f).locals].sort().join(', '))}`);
+        console.log(`  ${at}${' '.repeat(Math.max(0, w - bare(at)))}  ${dim([...byFile.get(f).locals].sort().join(', '))}`);
       }
     }
   }
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
   if (hiddenScope > 0) {
-    console.log(gray(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
+    console.log(dim(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `
       + `— annotate a declaration to check its scope, or set \`rip.strict\` in package.json (preview it with \`rip check --strict\`)`));
   }
   if (hiddenAnnotations > 0) {
-    console.log(gray(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
+    console.log(dim(`${hiddenAnnotations} annotation diagnostic${plural(hiddenAnnotations)} hidden${inProjects(hiddenAnnotationDirs)} `
       + `— set \`rip.strict\` in package.json to see where annotations are missing (preview it with \`rip check --strict\`)`));
   }
   if (hiddenUninstalled > 0) {
     const dirs = [...hiddenUninstalledDirs].sort();
     const shown = dirs.slice(0, 3).join(', ') + (dirs.length > 3 ? ` and ${dirs.length - 3} more` : '');
-    console.log(gray(`${hiddenUninstalled} uninstalled-dependency import${plural(hiddenUninstalled)} hidden `
+    console.log(dim(`${hiddenUninstalled} uninstalled-dependency import${plural(hiddenUninstalled)} hidden `
       + `— run \`bun install\` in ${shown}`));
   }
   if (hiddenMissingTypes > 0) {
@@ -1550,12 +1646,12 @@ if (asJson) {
     // the install elsewhere.
     const where = inProjects(hiddenMissingTypesDirs);
     const wholly = where !== '' && !hiddenMissingTypesDirs.has('.');
-    console.log(gray(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden${where}`
+    console.log(dim(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden${where}`
       + `${about} (try \`bun add -d @types/bun\`${wholly ? ' there' : ''})`));
   }
   // A forced posture says so: a `--strict` report is otherwise
   // indistinguishable from a package failing its own gate.
-  if (forceStrict) console.log(gray('checked under --strict — every package in the workspace read as if it set `rip.strict`; the posture on disk was not applied'));
+  if (forceStrict) console.log(dim('checked under --strict — every package in the workspace read as if it set `rip.strict`; the posture on disk was not applied'));
 }
 
 // Exit: 1 on type errors; 2 when the run could not cover what was asked —

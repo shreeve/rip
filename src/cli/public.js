@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { compile } from '../compile.js';
-import { ripManifestTarget } from '../../packages/vscode/src/mirror.js';
+import { ripManifestTarget, isSubpathExportsMap } from '../../packages/vscode/src/mirror.js';
 
 // The `.rip` modules a package publishes, resolved the way the MIRROR
 // resolves them — `ripManifestTarget` is the same function that decides
@@ -19,10 +19,15 @@ import { ripManifestTarget } from '../../packages/vscode/src/mirror.js';
 //
 // A subpath PATTERN (`"./*": "./src/*.rip"`) is counted, never resolved: it
 // is real surface that cannot be enumerated from the manifest alone, which
-// makes it a floor rather than an absence. `index.rip` is the conventional
-// entry only when the manifest expresses no opinion at all — a manifest that
-// names an entry has named it, and a named entry that is missing is an
-// unreadable entry, not a licence to audit some other file.
+// makes it a floor rather than an absence. Only a pattern that TARGETS
+// `.rip` surface floors, though — a `null` target is the manifest BLOCKING
+// the subpaths it matches, and a non-.rip target publishes surface this
+// audit was never for; neither hides a name a consumer could resolve, and
+// either kept as a floor would cost a fully audited package its clean exit
+// forever. `index.rip` is the conventional entry only when the manifest
+// expresses no opinion at all — a manifest that names an entry has named
+// it, and a named entry that is missing is an unreadable entry, not a
+// license to audit some other file.
 export function publicEntriesOf(pkgDir) {
   let pkg = null;
   try { pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); }
@@ -30,16 +35,24 @@ export function publicEntriesOf(pkgDir) {
   const exp = pkg?.exports;
   const subpaths = [];
   let patterns = 0;
+  // Pattern keys that name no .rip surface. Not a floor — but still the
+  // manifest speaking, so they hold the index.rip fallback off below.
+  let blocked = 0;
   if (typeof exp === 'string') subpaths.push('.');
   else if (exp && typeof exp === 'object') {
-    const bySubpath = Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
-    if (bySubpath) {
+    if (isSubpathExportsMap(exp)) {
       for (const key of Object.keys(exp)) {
-        if (key.includes('*')) { patterns++; continue; }
+        if (key.includes('*')) {
+          // Resolved by the SAME reader as every enumerable subpath, so
+          // blocking and publishing cannot drift apart.
+          if (ripManifestTarget(pkg, key) !== null) patterns++;
+          else blocked++;
+          continue;
+        }
         subpaths.push(key);
       }
     } else subpaths.push('.');            // a conditions-only object IS `.`
-  } else if (typeof pkg?.main === 'string' || typeof pkg?.module === 'string') subpaths.push('.');
+  } else if (typeof pkg?.main === 'string') subpaths.push('.');
   const out = [];
   const outside = [];
   for (const sub of subpaths) {
@@ -53,7 +66,7 @@ export function publicEntriesOf(pkgDir) {
     if (abs !== pkgDir && !abs.startsWith(pkgDir + path.sep)) { outside.push(target); continue; }
     out.push(abs);
   }
-  if (out.length === 0 && patterns === 0 && outside.length === 0) {
+  if (out.length === 0 && patterns === 0 && blocked === 0 && outside.length === 0) {
     const index = path.join(pkgDir, 'index.rip');
     if (fs.existsSync(index)) out.push(index);
   }

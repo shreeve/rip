@@ -58,7 +58,7 @@
 
 import path from 'node:path';
 import { generatedSpanToSource } from './translate.js';
-import { bareRipSpecifierTarget } from './mirror.js';
+import { ripSpecifierTarget } from './mirror.js';
 
 // A defect no annotation answers. Reported under every mode — gating one of
 // these would hide a real bug behind "gradual mode", and there is no
@@ -516,14 +516,26 @@ export function exportedNamesOf(stores, source) {
 // A namespace import (`* as ns`) is skipped — its uses are member accesses
 // through `ns`, not occurrences of a bare local, so there is no name for the
 // gate to match. Skipping withholds checking, never grants it.
-export function importBindingsOf(stores, source) {
-  const out = [];
-  if (!stores?.nodes) return out;
+// One reader for the import NODES themselves — the module specifier
+// (quotes stripped) and the clause text — consumed by both binding readers
+// below. Their RESULTS stay apart on purpose (a namespace alias is not a
+// binding of a typed export), but the iteration is one rule: how the
+// compiler stores an import's source role is a fact with one spelling.
+function* importNodesOf(stores, source) {
+  if (!stores?.nodes) return;
   for (const node of stores.nodesByKind('import')) {
     const src = stores.role(node.nodeId, 'source');
     if (typeof src?.sourceStart !== 'number') continue;
-    const module = source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, '');
-    const text = source.slice(node.sourceStart, node.sourceEnd);
+    yield {
+      module: source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''),
+      text: source.slice(node.sourceStart, node.sourceEnd),
+    };
+  }
+}
+
+export function importBindingsOf(stores, source) {
+  const out = [];
+  for (const { module, text } of importNodesOf(stores, source)) {
     const braced = /\{([^}]*)\}/.exec(text);
     for (const part of (braced?.[1] ?? '').split(',')) {
       const [imported, local] = part.trim().split(/\s+as\s+/).map((s) => s.trim());
@@ -552,12 +564,7 @@ export function importBindingsOf(stores, source) {
 // the module here.
 export function namespaceImportsOf(stores, source) {
   const out = [];
-  if (!stores?.nodes) return out;
-  for (const node of stores.nodesByKind('import')) {
-    const src = stores.role(node.nodeId, 'source');
-    if (typeof src?.sourceStart !== 'number') continue;
-    const module = source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, '');
-    const text = source.slice(node.sourceStart, node.sourceEnd);
+  for (const { module, text } of importNodesOf(stores, source)) {
     const ns = /\*\s*as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+from\b/.exec(text);
     if (ns) out.push({ local: ns[1], module });
   }
@@ -585,7 +592,7 @@ export function namespaceImportsOf(stores, source) {
 //   (withholding checking, the safe direction).
 //
 //   Bare, landing on a workspace `.rip` (`@rip/util`, resolved the way the
-//   runtime resolves it — bareRipSpecifierTarget) — the same module as a
+//   runtime resolves it — ripSpecifierTarget) — the same module as a
 //   relative `.rip` spelled through its package name, asked the same
 //   question. Any other bare specifier is some other ecosystem's module
 //   and carries nothing here.
@@ -593,15 +600,10 @@ export function typedImportsOf(stores, source, fromDir, typedExportsAt) {
   const local = new Set();
   if (!stores) return local;
   for (const b of importBindingsOf(stores, source)) {
-    let target;
-    if (b.module.startsWith('./') || b.module.startsWith('../')) {
-      if (/\.(ts|tsx|mts|cts)$/.test(b.module)) { local.add(b.local); continue; }
-      if (!b.module.endsWith('.rip')) continue;
-      target = path.resolve(fromDir, b.module);
-    } else {
-      target = bareRipSpecifierTarget(b.module, fromDir);
-      if (target === null) continue;
-    }
+    if ((b.module.startsWith('./') || b.module.startsWith('../'))
+      && /\.(ts|tsx|mts|cts)$/.test(b.module)) { local.add(b.local); continue; }
+    const target = ripSpecifierTarget(b.module, fromDir);
+    if (target === null) continue;
     let exports;
     try { exports = typedExportsAt(target); } catch { continue; }
     if (exports?.has(b.imported)) local.add(b.local);

@@ -828,6 +828,13 @@ export function typeImportSpecifiers(text) {
 // `exports` beats `main`; a conditions object reads in bun's runtime
 // order (import → default → first string). Glob subpaths are not
 // expanded — a miss errs toward the TS2307, never a silent wrong file.
+// A subpath-map `exports` object ({'.': …, './x': …}) as opposed to a bare
+// conditions object ({ import: './x.rip' }), which IS the '.' entry. One
+// spelling of the shape decision, shared with every reader that has to ask
+// it — a second copy of this predicate is a second answer to what a
+// manifest publishes.
+export const isSubpathExportsMap = (exp) => Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
+
 function manifestTarget(manifest, subpath) {
   const pick = (entry) => {
     if (typeof entry === 'string') return entry;
@@ -842,10 +849,7 @@ function manifestTarget(manifest, subpath) {
   const exp = manifest?.exports;
   if (typeof exp === 'string') { if (subpath === '.') target = exp; }
   else if (exp && typeof exp === 'object') {
-    // A conditions-only exports object ({ import: './x.rip' }) IS the
-    // '.' entry; a subpath map nests them one level down.
-    const bySubpath = Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
-    target = bySubpath ? pick(exp[subpath]) : (subpath === '.' ? pick(exp) : null);
+    target = isSubpathExportsMap(exp) ? pick(exp[subpath]) : (subpath === '.' ? pick(exp) : null);
   } else if (subpath === '.' && typeof manifest?.main === 'string') {
     target = manifest.main;
   }
@@ -871,7 +875,7 @@ function declarationTarget(manifest, subpath, dir) {
   if (target === null || !/\.[cm]?js$/.test(target)) return null;
   const candidates = [];
   const exp = manifest?.exports;
-  const entry = exp && typeof exp === 'object' ? (Object.keys(exp).some((k) => k === '.' || k.startsWith('./')) ? exp[subpath] : (subpath === '.' ? exp : null)) : null;
+  const entry = exp && typeof exp === 'object' ? (isSubpathExportsMap(exp) ? exp[subpath] : (subpath === '.' ? exp : null)) : null;
   if (entry && typeof entry === 'object' && typeof entry.types === 'string') candidates.push(entry.types);
   if (subpath === '.') for (const named of [manifest?.types, manifest?.typings]) if (typeof named === 'string') candidates.push(named);
   candidates.push(target.replace(/\.([cm]?)js$/, '.d.$1ts'));
@@ -907,6 +911,20 @@ export function bareRipSpecifierTarget(spec, fromDir) {
     }
     if (path.dirname(dir) === dir) return stdlibRipTarget(spec);
   }
+}
+
+// The `.rip` module ANY specifier lands on, from `fromDir` — the one
+// spelling of the resolution rule: a relative specifier resolves only when
+// it names a `.rip` file (bare specifiers resolve through node_modules,
+// relative ones by the filesystem — absolute paths either way). Every
+// reader of an import edge — the closure walk, the typed-import gate, the
+// inherited-`any` pass — resolves through this, so no two of them can
+// disagree about which module an import lands on.
+export function ripSpecifierTarget(spec, fromDir) {
+  if (spec.startsWith('./') || spec.startsWith('../')) {
+    return spec.endsWith('.rip') ? path.resolve(fromDir, spec) : null;
+  }
+  return bareRipSpecifierTarget(spec, fromDir);
 }
 
 // The rip checkout's packages/ — the stdlib the runtime loader serves
@@ -1078,16 +1096,8 @@ export function ripImportsOf(stores, sourceText, fromDir) {
   const seen = new Set();
   const targets = [];
   const addSpec = (spec) => {
-    // Bare specifiers resolve through node_modules, relative ones by the
-    // filesystem — absolute paths either way.
-    let abs;
-    if (spec.startsWith('./') || spec.startsWith('../')) {
-      if (!spec.endsWith('.rip')) return;
-      abs = path.resolve(fromDir, spec);
-    } else {
-      abs = bareRipSpecifierTarget(spec, fromDir);
-      if (abs === null) return;
-    }
+    const abs = ripSpecifierTarget(spec, fromDir);
+    if (abs === null) return;
     if (seen.has(abs)) return;   // one edge per module, however many spellings name it
     seen.add(abs);
     targets.push(abs);
