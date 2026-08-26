@@ -1,5 +1,6 @@
 ---
 name: type-public-api
+argument-hint: "[package]"
 description: Type a Rip package's public API until `rip check --public` reports 100%, using the minimum annotations. Use when annotating or typing a package's exports, when `rip check --public` reports untyped positions, or when asked to "type" or "annotate" a package under packages/.
 ---
 
