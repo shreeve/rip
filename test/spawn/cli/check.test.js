@@ -1097,6 +1097,80 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
+  // The same question from the other side: what makes two positions ONE
+  // piece of work. A declaration reached by several paths is one edit, and
+  // deduplicating by declaration is what says so. A TYPE reached at several
+  // positions is not: `any[]` at a parameter and `any[]` at a property are
+  // one type and two annotations, in two places, and the second is never
+  // named by a walk that only remembers which types it has opened. Every
+  // way of losing that thread reports the position as clean surface.
+  //
+  // What counts as one position has to be read the same way the report
+  // reads it, or the memory drops what the report would have placed
+  // somewhere new: two call signatures returning the same type are two
+  // returns to annotate, though the symbol exposing them is one.
+  //
+  // The remembering still has to bound the walk. A type that contains
+  // itself arrives at itself, and must open a finite number of times.
+  test('--public opens a repeated type once per position, and still ends on a type that contains itself', () => {
+    // Three arrivals at one `any[]`: a parameter and two properties, each
+    // its own annotation to write.
+    const repeated = workspace({
+      'package.json': JSON.stringify({ name: '@q6/repeated', exports: { '.': './index.rip' } }),
+      'index.rip': [
+        'type Opts =',
+        '  first?: any[]',
+        '  second?: any[]',
+        '',
+        'export def take(o: Opts, items: any[]): string',
+        "  ''",
+      ].join('\n') + '\n',
+    });
+    // `Node.next` is a `Node`, so the walk meets the type it is already
+    // inside. One annotation, however many times it is reached.
+    const cyclic = workspace({
+      'package.json': JSON.stringify({ name: '@q6/cyclic', exports: { '.': './index.rip' } }),
+      'index.rip': [
+        'type Node =',
+        '  next: Node',
+        '  tag: any',
+        '',
+        'export def visit(n: Node): string',
+        "  ''",
+      ].join('\n') + '\n',
+    });
+    // Two signatures, one exposing symbol, one returned type — and two
+    // return annotations to write.
+    const overloaded = workspace({
+      'package.json': JSON.stringify({ name: '@q6/overloaded', exports: { '.': './index.rip' } }),
+      'index.rip': [
+        'type F =',
+        '  (a: string): any[]',
+        '  (a: number): any[]',
+        '',
+        'export def use(f: F): string',
+        "  ''",
+      ].join('\n') + '\n',
+    });
+    try {
+      const a = check(repeated, ['--public']).stdout;
+      expect(a).toContain('any at: take(items)[]');
+      expect(a).toContain('any at: take(o).first[]');
+      expect(a).toContain('any at: take(o).second[]');
+      expect(a).toContain('3 positions need a type');
+
+      const b = check(cyclic, ['--public']).stdout;
+      expect(b).toContain('any at: visit(n).tag');
+      expect(b).toContain('1 position needs a type');
+
+      const c = check(overloaded, ['--public']).stdout;
+      expect(c).toContain('any at: use(f)()[]');
+      expect(c).toContain('2 positions need a type');
+    } finally {
+      for (const w of [repeated, cyclic, overloaded]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Q4 — a package publishes from inside itself. `npm pack` roots the
   // tarball at the package directory, so an entry named with `../` is not in
   // the shipped artifact at all: the shape resolves only inside a symlinked
@@ -1828,6 +1902,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // of rounds and never says how much work is left. What deduplicates them
   // is the DECLARATION that would fix each — several members built from one
   // lambda are one edit, and naming it once per member reads as many.
+  //
+  // A parameter carries its own declaration and a return carries none, so
+  // both halves of one lambda have to arrive at the lambda: the parameters
+  // through the symbols that declare them, the return through the function
+  // those symbols sit in. However many names expose that lambda, what is
+  // left to write is the two parameters and the return it was declared
+  // with, all on the one line it was declared on.
   test('--public reports every position an export leaves untyped, once per declaration', () => {
     const dir = workspace({
       'index.rip': [
@@ -1850,9 +1931,62 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // named once — not once per member that exposes them.
       expect(found.filter((l) => /\(input\)/.test(l)).length).toBe(1);
       expect(found.filter((l) => /\(opts\)/.test(l)).length).toBe(1);
-      expect(out.stdout).not.toMatch(/at: thing\.(post|put)\(/);
+      // And the return once, though four names reach it: the export's own
+      // call signature and the three members built from the same lambda.
+      expect(found.filter((l) => /at: thing[.\w]*\(\)/.test(l)).length).toBe(1);
+      expect(out.stdout).not.toMatch(/at: thing\./);
+      // Every one of them on the lambda's own line, which is where the
+      // annotation goes — not on the export, nor on the keys exposing it.
+      for (const l of found) expect(l).toMatch(/index\.rip:2:/);
+      expect(out.stdout).toContain('3 positions need a type');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // A defect INSIDE a return type belongs to the return annotation too, so
+  // it arrives at the same one place however it was reached. What that
+  // rule does NOT cover is a signature with no parameter at all: nothing
+  // there points back at the function, and the position falls back to
+  // whatever exposed it.
+  test('--public attributes a return to the signature that declares it, and says so through the type it returns', () => {
+    const inside = workspace({
+      'package.json': JSON.stringify({ name: '@ret/inside', rip: { strict: true }, exports: { '.': './index.rip' } }),
+      'index.rip': [
+        'def build()',
+        '  call = (input: string) -> Promise.resolve(null as any)',
+        '  Object.assign call, { get: call, post: call }',
+        '',
+        'export thing = build()',
+      ].join('\n') + '\n',
+    });
+    const noParams = workspace({
+      'package.json': JSON.stringify({ name: '@ret/noparams', rip: { strict: true }, exports: { '.': './index.rip' } }),
+      'index.rip': [
+        'def build()',
+        '  make = -> null as any',
+        '  Object.assign make, { again: make }',
+        '',
+        'export thing = build()',
+      ].join('\n') + '\n',
+    });
+    try {
+      const a = check(inside, ['--public']).stdout;
+      // The `any` inside `Promise<any>`, named once and placed on the
+      // lambda, though three names reach that same return.
+      expect(a).toContain('any at: thing()<0>');
+      expect(a).toMatch(/index\.rip:2:\d+\s+any\s+at: thing\(\)<0>/);
+      expect(a).toContain('1 position needs a type');
+
+      // The stated limit, pinned so it cannot drift unnoticed: with no
+      // parameter to reach the function through, each name that exposes
+      // the lambda carries a return position of its own.
+      const b = check(noParams, ['--public']).stdout;
+      expect(b).toContain('any at: thing()');
+      expect(b).toContain('any at: thing.again()');
+      expect(b).toContain('2 positions need a type');
+    } finally {
+      for (const w of [inside, noParams]) fs.rmSync(w, { recursive: true, force: true });
     }
   }, 90_000);
 

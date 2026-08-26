@@ -300,6 +300,33 @@ async function declarationSiteOf(symbol) {
   return typeof start === 'number' ? { path: String(declaration.path), start } : null;
 }
 
+// WHERE a SIGNATURE is written, as a generated-text offset.
+//
+// A return is the one position under a signature that no symbol of its own
+// claims: a parameter carries its declaration, and the return carries
+// nothing. Attributed instead to whatever EXPOSES the signature, one lambda
+// published under several names reports its single return as several things
+// to fix, and the count says more work is left than there is.
+//
+// A parameter is the way in. A parameter's declaration sits inside the
+// function that declares it, and that function is the one place a return
+// annotation can go — so every name exposing that lambda arrives at the
+// same site. A signature with no parameters offers no way in and answers
+// null, for the caller to fall back on what exposed it.
+async function signatureSiteOf(params) {
+  for (const p of params) {
+    const declaration = p?.declarations?.[0];
+    if (declaration === undefined) continue;
+    const node = await declaration.resolve().catch(() => null);
+    const fn = node?.parent;
+    if (fn == null) continue;
+    let start = null;
+    try { start = await fn.getStart(); } catch { continue; }
+    if (typeof start === 'number') return { path: String(declaration.path), start };
+  }
+  return null;
+}
+
 // One published name, walked breadth-first to its first defect.
 //
 // Breadth-first so the shallowest leak is the one reported: the path a
@@ -335,11 +362,32 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
       // else that carries nothing is a defect only where the consumer
       // READS, or where it arrived without an annotation to claim it.
       if (width !== null && (width === 'any' || width === 'Function' || item.reads === true || !item.stated)) {
-        found.push({ why: width, at: item.at, origin: await declarationSiteOf(item.origin) });
+        found.push({ why: width, at: item.at, origin: item.site ?? await declarationSiteOf(item.origin) });
         continue;
       }
-      if (seen.has(item.type.id)) continue;          // this very type, already walked
-      seen.add(item.type.id);
+      // This very type, already opened from this very declaration. The
+      // pair is the unit because the pair is what a finding names: one
+      // declaration reached by several paths is one edit, and remembering
+      // the type alone would be right if that were the whole story — but
+      // one type sitting at several declarations is an edit each, and a
+      // memory keyed on the type drops every arrival after the first.
+      // What it drops is a position the walk never examined, which leaves
+      // as clean surface.
+      //
+      // The declaration is the one a finding HERE would name, which is the
+      // signature's own where the position has it and the arriving symbol
+      // otherwise. Reading it any other way splits the two apart, and a
+      // position the report would have placed somewhere new is dropped as
+      // already covered.
+      //
+      // The pair still bounds the walk. A type that contains itself
+      // re-arrives through the same declaration that holds it, and stops
+      // there; types and declarations are both finite, so every cycle is.
+      const arrival = item.site
+        ? `${item.type.id}|${item.site.path}:${item.site.start}`
+        : `${item.type.id}|${item.origin?.id ?? 0}`;
+      if (seen.has(arrival)) continue;
+      seen.add(arrival);
       const { signatures, props, indexInfos } = await membersOf(ck, item.type, caches.members);
       for (const [isCtor, sigs] of signatures) {
         for (const sig of sigs) {
@@ -356,7 +404,8 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
           // evidence of the assignment; sharing a name and a type is what
           // `@name = param` actually produces.
           const ctorParams = [];
-          for (const p of await sig.getParameters()) {
+          const params = await sig.getParameters();
+          for (const p of params) {
             const pType = await ck.getTypeOfSymbol(p);
             if (pType === undefined) { lost++; continue; }
             next.push({
@@ -380,6 +429,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
             reads: item.reads,
             stated: true,
             origin: item.origin,
+            site: await signatureSiteOf(params),
             ctorParams,
           });
         }
@@ -432,6 +482,14 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
       // to fix. The body of a foreign alias is not: `body?: BodyInit` is a
       // fully typed thing to write, and the `any` inside the DOM's own
       // definition of `BodyInit` belongs to the DOM.
+      //
+      // A type written AT the reference is fixed where the reference is,
+      // so both branches below carry the position's site down with them:
+      // the `any` in a return's `Promise<any>` is the return annotation's
+      // to fix, wherever that return was reached from. An index signature
+      // is not written at the reference — it is a member with a
+      // declaration of its own, which is the declaration that owns it and
+      // the one an edit goes to — so the site stops there.
       if (await item.type.isTypeReference()) {
         const args = await ck.getTypeArguments(item.type);
         const array = await ck.isArrayType(item.type);
@@ -442,6 +500,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
           reads: item.reads,
           stated: item.stated,
           origin: item.origin,
+          site: item.site,
         }));
       }
       for (const info of indexInfos) {
@@ -466,7 +525,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, reads, rootSymbol
         for (const [i, member] of members.entries()) {
           const symbol = await member.getSymbol();
           if (symbol != null && !declaredUnder(symbol, owns)) continue;
-          next.push({ type: member, at: `${item.at}|${i}`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin });
+          next.push({ type: member, at: `${item.at}|${i}`, bare: false, reads: item.reads, stated: item.stated, origin: item.origin, site: item.site });
         }
       }
     }
