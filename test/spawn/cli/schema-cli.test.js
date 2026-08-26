@@ -367,8 +367,8 @@ export Order = schema :model
       expect(first).toContain('CREATE TABLE "users"');
       expect(first).toContain('CREATE TABLE "orders"');
       expect(first).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
-      // Name-sorted: orders before users.
-      expect(first.indexOf('-- orders')).toBeLessThan(first.indexOf('-- users'));
+      // FK-dependency order: users (the parent) renders before orders.
+      expect(first.indexOf('-- users')).toBeLessThan(first.indexOf('-- orders'));
       expect(first.endsWith('\n')).toBe(true);
       const again = spawnSync('bun', [BIN, 'schema', 'dump', 'models.rip'], { cwd: d, encoding: 'utf8', env: ENV });
       expect(again.status).toBe(0);

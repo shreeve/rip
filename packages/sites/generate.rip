@@ -45,6 +45,9 @@ siteDirNames = (sitesDir) ->
     .sort()
 recordDir = (path, names) ->
   dirInventory[path] = JSON.stringify names
+absentInventory = {}
+recordAbsent = (path) ->
+  absentInventory[path] = true
 
 plugin =
   name: 'rip'
@@ -79,7 +82,12 @@ plugin =
       configs = {}
       for name in names
         configPath = join sitesDir, name, 'config.rip'
-        continue unless existsSync configPath
+        unless existsSync configPath
+          # Absence is an input too: a tenant built without a config.rip
+          # must rebuild the moment one appears, so the path is recorded
+          # for the watcher/sweep even though there are no bytes to hash.
+          recordAbsent configPath
+          continue
         record configPath, readFileSync(configPath)
         configs[name] = import!(configPath).default
       { contents: "export default #{JSON.stringify(configs)}", loader: 'js' }
@@ -127,6 +135,9 @@ try
     inputs.push path
   for path, expected of dirInventory
     throw Error.new("site directory changed during generation: #{path}") unless JSON.stringify(siteDirNames(path)) is expected
+    inputs.push path
+  for path of absentInventory
+    throw Error.new("input appeared during generation: #{path}") if existsSync path
     inputs.push path
   inputs.sort()
 

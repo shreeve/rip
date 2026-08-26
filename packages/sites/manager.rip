@@ -1,4 +1,4 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
@@ -667,7 +667,26 @@ appModules = (appRoot, changes) ->
   { modules, moduleFiles, entries, directories, check: check(entries) }
 
 sourceHashes = (paths) ->
-  paths.map (path) -> { path, hash: (if existsSync(path) then rash(readFileSync(path)) else null) }
+  paths.map (path) ->
+    hash = try
+      # Directory-membership inputs (generate records the sites dir as an
+      # input path): identity is the sorted subdirectory listing, exactly
+      # mirroring generate's siteDirNames — re-listed, never read.
+      if statSync(path).isDirectory()
+        names = readdirSync(path, { withFileTypes: true })
+          .filter((entry) -> entry.isDirectory() and not entry.name.startsWith('.'))
+          .map((entry) -> entry.name)
+          .sort()
+        rash TextEncoder.new().encode(JSON.stringify(names))
+      else
+        rash readFileSync(path)
+    catch error
+      # Absence is data (null reads as 'missing' in checks). Anything
+      # else is a bug in THIS code and must stay loud — a swallowed
+      # TypeError here once made the directory branch a silent no-op.
+      throw error unless error.code in ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ELOOP']
+      null
+    { path, hash }
 
 # The browser runtime ship set: the artifacts the site serves under
 # /@rip, from the rip checkout's dist/@rip (RIP_SHIP_DIR points a test at
@@ -1011,7 +1030,11 @@ export main = (argv) ->
     abort "rip-site: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
   abort 'rip-site: --control or JANUS_CONTROL is required' unless args.control?
   probeControl! args.control
+  # A system edge (e.g. Janus under systemd) runs as its own user and
+  # must traverse into this directory to reach the worker sockets —
+  # mkdtemp's private 0700 would wall it out.
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
+  chmodSync runDir, 0o755
   workers = []
   bootingWorkers = []
   workerSerial = 0
@@ -1036,6 +1059,11 @@ export main = (argv) ->
   apiReconcile = false
   apiWatchReady = false
   apiInputs = Set.new()
+  apiInputsCheck = null
+  apiSweep = null
+  apiRejected = false
+  apiFailedCheck = null
+  apiDeadline = null
   generation = 0
   apiEpoch = 0
   apiSettledEpoch = 0
@@ -1261,6 +1289,10 @@ export main = (argv) ->
     worker = { proc, socket }
     try
       waitReady! proc, socket
+      # connect() on a unix socket needs write permission; a cross-user
+      # edge gets none from the default umask. World-writable is the
+      # unix-socket convention here (the 0755 runDir still scopes it).
+      chmodSync socket, 0o666
     catch error
       killWorker! proc
       throw error
@@ -1397,6 +1429,19 @@ export main = (argv) ->
 
   diskInputsCheck = (paths) ->
     check sourceHashes(paths or []).map (entry) -> { id: entry.path, hash: entry.hash ?? 'missing' }
+
+  # Every apiInputs assignment funnels here so the accepted generation
+  # leaves a disk baseline behind; the API sweep compares against it to
+  # find edits whose watch notification never arrived (editors that save
+  # by rename — vim's backupcopy dance — can slip past the watcher).
+  setApiInputs = (paths) ->
+    apiInputs = Set.new paths
+    apiInputsCheck = try diskInputsCheck(paths) catch then null
+
+  apiSettled = ->
+    return true unless apiInputsCheck?
+    try diskInputsCheck([...apiInputs]) is apiInputsCheck
+    catch then false
 
   # Every appPublication assignment funnels here. The settled baseline
   # comes from documents.inputHashes — hashes of the input bytes AS THE
@@ -1568,6 +1613,11 @@ export main = (argv) ->
           Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
           bootingWorkers = []
           continue if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
+          # A candidate that failed to boot must not stay on the shelf:
+          # every later ring would replay the same doomed boot (a full
+          # readiness deadline per attempt). Drop it so rings fail fast;
+          # the next save that compiles mints a fresh candidate.
+          prepared = null
           throw error
         if candidate isnt prepared or apiSettledEpoch isnt apiEpoch
           Promise.all! candidateWorkers.map (worker) -> killWorker worker.proc
@@ -1601,12 +1651,27 @@ export main = (argv) ->
       report = generate! project.entry, artifact, reportPath, "api-#{generation}"
     catch error
       apiSettledEpoch = epoch if epoch is apiEpoch
-      warn "rip-site: API candidate rejected; keeping current workers: #{String(error)}"
+      apiRejected = true
+      # Fingerprint the inputs that failed so the sweep retries only
+      # when disk actually changes — not every tick while a syntax
+      # error sits there.
+      apiFailedCheck = try diskInputsCheck([...apiInputs]) catch then null
+      if doorbellPublished and prepared?
+        # The cut already emptied the workers for an earlier candidate,
+        # and that candidate no longer matches disk — booting it would
+        # silently serve code the developer has replaced. Drop it; rings
+        # fail fast until a save compiles.
+        prepared = null
+        warn "rip-site: API candidate rejected while holding the doorbell; rings fail fast until a save compiles: #{String(error)}"
+      else
+        warn "rip-site: API candidate rejected; keeping current workers: #{String(error)}"
       return
     return if epoch isnt apiEpoch or stopping
     candidate = { artifact, inputs: report.inputs, epoch }
+    apiRejected = false
+    apiFailedCheck = null
     prepared = candidate
-    apiInputs = Set.new report.inputs
+    setApiInputs report.inputs
     cutForCandidate! candidate
     apiSettledEpoch = epoch
     bootPrepared! if args.eager
@@ -1615,12 +1680,22 @@ export main = (argv) ->
     apiReconcile = false
     apiEpoch++
     epoch = apiEpoch
-    clearTimeout apiTimer if apiTimer?
+    now = Date.now()
+    if apiTimer?
+      clearTimeout apiTimer
+      # Trailing reset, but never past the burst deadline (mirror of
+      # scheduleAppReconcile): a sustained sub-50ms event stream must
+      # not postpone the rebuild forever.
+      delay = Math.max 0, Math.min(50, apiDeadline - now)
+    else
+      apiDeadline = now + 250
+      delay = 50
     apiTimer = setTimeout ->
       apiTimer = null
+      apiDeadline = null
       next = apiChain.then -> prepareApi! epoch
       apiChain = next.catch (error) -> warn "rip-site: API reload failed: #{String(error)}"
-    , 50
+    , delay
     return
 
   startApiWatcher = ->
@@ -1628,16 +1703,39 @@ export main = (argv) ->
     apiWatcher = watch project.root, { recursive: true }, (event, filename) ->
       return if stopping
       rel = String(filename or '')
-      return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
       path = resolve project.root, rel
-      return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
+      known = path is project.entry or apiInputs.has(path) or [...apiInputs].some((input) -> input.startsWith("#{path}/"))
+      # A recorded input is relevant wherever it lives — under app/, in
+      # a linked node_modules package, anywhere. The location filters
+      # only prune events for files the build has never consumed.
+      unless known
+        return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+        return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
       if not apiWatchReady or operation isnt 'Active'
         apiReconcile = true
         return
       ambiguous = not filename? or rel is ''
-      relevant = ambiguous or path is project.entry or apiInputs.has(path) or [...apiInputs].some((input) -> input.startsWith("#{path}/"))
+      # After a rejected generation any event may be the missing piece —
+      # a created file that completes a broken import is not yet a
+      # recorded input — so everything is relevant until a generation
+      # succeeds.
+      relevant = ambiguous or known or apiRejected
       return unless relevant
       scheduleApiRefresh()
+    # The sweep is the safety trigger behind the watcher's fast trigger
+    # (mirror of appSweep): an entry edit whose notification was lost is
+    # found by disk disagreeing with the accepted generation's baseline.
+    apiSweep = setInterval (->
+      return if stopping or apiTimer? or not apiWatchReady or operation isnt 'Active'
+      return if apiSettledEpoch isnt apiEpoch
+      return unless apiReconcile or not apiSettled()
+      # Standing-failure backoff: the same bytes fail the same way, so a
+      # rejected generation retries only when the inputs change on disk.
+      if apiFailedCheck?
+        current = try diskInputsCheck([...apiInputs]) catch then null
+        return if current is apiFailedCheck
+      scheduleApiRefresh()
+    ), APP_SWEEP_MS
 
   startDoorbell = ->
     return unless project.entry?
@@ -1650,6 +1748,10 @@ export main = (argv) ->
           Response.new(null, { status: 204 })
         catch error
           Response.new(String(error), { status: 503 })
+    # Same cross-user rule as worker sockets: the edge cannot ring a
+    # doorbell it cannot write to. An unrung doorbell is the lazy-boot
+    # wedge — every request 503s and the manager never hears why.
+    chmodSync doorbellPath, 0o666
 
   releaseHold = ->
     throw Error.new("cannot release while #{operation}") unless operation is 'Held'
@@ -1670,7 +1772,7 @@ export main = (argv) ->
         appArtifact = candidateArtifact
         for slot in [0...args.workers]
           bootSlot! candidateWorkers
-        apiInputs = Set.new report.inputs
+        setApiInputs report.inputs
 
       workers = candidateWorkers
       queuePublish!
@@ -1786,7 +1888,7 @@ export main = (argv) ->
       commitAppDocuments project, documents if documents?
       if documents?
         setAppPublication documents
-      apiInputs = Set.new record.inputs
+      setApiInputs record.inputs
       appChanged = documents? and buildAppDocuments!(project).hash isnt documents.hash
       apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
       operation = 'Activating'
@@ -1893,7 +1995,7 @@ export main = (argv) ->
       migrationReport = runMigrationChild! body
       record = persistMigration { ...record, phase: 'migration-finished', outcome: migrationReport.outcome, migration: migrationReport }
       if migrationReport.code is 0 and ['committed', 'confirmed-none'].includes(migrationReport.outcome)
-        apiInputs = Set.new record.inputs
+        setApiInputs record.inputs
         return activateMigration! record
       if migrationReport.code isnt 0 and migrationReport.outcome is 'confirmed-none'
         return restoreHeld! record
@@ -1944,6 +2046,7 @@ export main = (argv) ->
     stopTask = do ->
       clearInterval heartbeat if heartbeat?
       clearInterval appSweep if appSweep?
+      clearInterval apiSweep if apiSweep?
       clearTimeout appTimer if appTimer?
       appTimer = null
       appDeadline = null
@@ -2019,7 +2122,7 @@ export main = (argv) ->
       unless operation is 'Maintenance'
         appArtifact = join runDir, 'app.js'
         report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
-        apiInputs = Set.new report.inputs
+        setApiInputs report.inputs
         if project.appRoot?
           authoritative = buildAppDocuments! project
           authoritative = (stabilizeAppDocuments! authoritative).documents

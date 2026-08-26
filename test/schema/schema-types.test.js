@@ -125,7 +125,7 @@ describe('schema declarations: the per-kind shapes', () => {
       '  name! string',
       '  code? string, ["x"]',
       '  posted! boolean, [false]',
-      '  @timestamps',
+      '  @times',
       '  @softDelete',
       '  @belongsTo Org?',
       '  @hasMany Person',
@@ -594,7 +594,7 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
         kind: 'model', name: 'Stamped',
         entries: [
           { tag: 'field', name: 'name', modifiers: ['!'], typeName: 'string', array: false },
-          { tag: 'directive', name: 'timestamps' },
+          { tag: 'directive', name: 'times' },
         ],
       });
       const inst = await M.create({ name: 'n' });

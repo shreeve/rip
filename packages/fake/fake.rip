@@ -37,7 +37,26 @@ seed = (n) ->
 
 random  = -> __rand()
 integer = (min = 0, max = 100) -> min + Math.floor __rand() * (max - min + 1)
-sample  = (ary) -> ary[Math.floor __rand() * ary.length]
+# sample ary — uniform pick. sample ary, weights — weighted pick from a
+# parallel array; entries past the end of weights count 1, so
+# sample(['a','b','c'], [10]) draws 10/1/1. Zero weight = never picked.
+sample = (ary, weights) ->
+  return ary[Math.floor __rand() * ary.length] unless weights?
+  throw Error.new "fake.sample: #{weights.length} weights for #{ary.length} values" if weights.length > ary.length
+  total = ary.length - weights.length
+  for w in weights
+    throw Error.new "fake.sample: bad weight #{w}" unless typeof w is 'number' and Number.isFinite(w) and w >= 0
+    total += w
+  throw Error.new 'fake.sample: total weight is zero' unless total > 0
+  r = __rand() * total
+  last = null
+  for v, i in ary
+    w = weights[i] ?? 1
+    continue unless w > 0
+    last = v
+    r -= w
+    return v if r < 0
+  last
 chance  = (prob = 0.5) -> __rand() < prob
 maybe   = (prob, fn) ->
   return null unless __rand() < prob
@@ -161,11 +180,13 @@ email = (first, last) ->
 username = (first, last) ->
   "#{(first ?? firstName()).toLowerCase()}#{(last ?? lastName()).toLowerCase()}#{integer 1, 999}"
 
-# NANP-legal: area and exchange codes start 2-9, area code never N11.
+# NANP-legal: area code is [2-9][0-8][0-9] (a middle 9 is reserved for
+# expansion and rip/validate's toPhone refuses it), never N11; exchange
+# codes start 2-9.
 areaCode = ->
   loop
-    n = integer 201, 999
-    return String(n) unless n % 100 is 11
+    s = String(integer 2, 9) + String(integer 0, 8) + String(integer 0, 9)
+    return s unless s.endsWith '11'
 
 exchangeCode = -> String(integer 2, 9) + digits(2)
 
@@ -232,13 +253,57 @@ unique = (fn, max = 1000) ->
     i++
   throw Error.new "fake.unique: exhausted after #{max} retries — pool too small"
 
+# ==[ Delimited tables — csv/tsv/psv/inline pipe, one dialect ]==
+#
+# The same rules whatever the delimiter: blank lines, `#` comments and
+# |---| separator rows are skipped; cells are trimmed, so columns can
+# be aligned freely; the first data line is the header; an empty cell
+# is null. No quoting — pick a delimiter the data doesn't contain.
+# The delimiter is sniffed from the header (tab, then pipe, then
+# comma) or passed explicitly.
+
+__tableLines = (text) ->
+  text.split(/\r?\n/).map((l) -> l.trim())
+    .filter (l) -> l and not l.startsWith('#') and not /^[|\s:-]+$/.test(l)
+
+__tableSniff = (line) ->
+  return '\t' if line.includes '\t'
+  return '|'  if line.includes '|'
+  ','
+
+__tableCells = (line, delim) ->
+  line = line.replace(/^\||\|$/g, '') if delim is '|'
+  line.split(delim).map (c) -> c.trim()
+
+table = (text, delim = null) ->
+  lines = __tableLines text
+  throw Error.new 'fake.table: needs a header line and at least one data row' if lines.length < 2
+  delim ?= __tableSniff lines[0]
+  header = __tableCells lines[0], delim
+  for line in lines[1...]
+    cells = __tableCells line, delim
+    row = {}
+    # Iterate the header, not the cells: a short row (e.g. a trailing
+    # tab eaten by the line trim) pads out to null like any empty cell.
+    header.forEach (name, i) ->
+      v = cells[i] ?? ''
+      row[name] = if v is '' then null else v
+    row
+
+# File-loading variants: csv reads a delimited file, comma by default —
+# override for anything else (csv path, ';'); tsv and psv are the tab
+# and pipe spellings of the same call.
+csv = (path, delim = ',') -> table Bun.file(path).text!, delim
+tsv = (path) -> csv! path, '\t'
+psv = (path) -> csv! path, '|'
+
 export fake = {
   seed, random, integer, sample, chance, maybe,
   numerify, letterify, pattern, digits, token, uuid,
   firstName, lastName, fullName, nickname, sex, age,
   email, username, domain, phone, fax, phoneType, areaCode,
   street, streetAddress, city, state, zip, company, profession, jobTitle,
-  word, words, sentence, date, datetime, unique,
+  word, words, sentence, date, datetime, unique, table, csv, tsv, psv,
 }
 
 # ==[ Schema-driven derivation (used by Model.factory) ]==
@@ -344,13 +409,13 @@ __factoryDerive = (norm, overrides) ->
   attrs
 
 __factoryTableRows = (norm, text) ->
-  lines = text.split(/\r?\n/).map((l) -> l.trim()).filter (l) -> l and not /^[|\s:-]+$/.test(l)
+  lines = __tableLines text
   throw Error.new 'fake: factory(table) needs a header line and at least one row' if lines.length < 2
-  cells = (l) -> l.replace(/^\||\|$/g, '').split('|').map (c) -> c.trim()
-  header = cells(lines[0]).map __camel
+  delim = __tableSniff lines[0]
+  header = __tableCells(lines[0], delim).map __camel
   for line in lines[1...]
     row = {}
-    cells(line).forEach (v, i) ->
+    __tableCells(line, delim).forEach (v, i) ->
       name = header[i]
       return if name is undefined or v is ''
       t = norm.fields.get(name)?.typeName

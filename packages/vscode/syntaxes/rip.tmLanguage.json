@@ -710,7 +710,7 @@
       "name": "keyword.operator.assignment.compound.rip" },
     { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
     { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
-    { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*(?:[.-][a-zA-Z_$][\\w$]*)*", "name": "constant.other.symbol.rip" },
+    { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*(?:[.-][a-zA-Z_$][\\w$]*)*(?:[!?](?=[\\s,)\\]};:]|$))?", "name": "constant.other.symbol.rip" },
 
     {"comment": "=== ASSIGNMENT (with variable name capture) ==="},
     {
@@ -1278,7 +1278,7 @@
         },
         {
           "comment": "Standalone / field-level directives — an explicit allowlist, NOT a \\w+ catch-all, so instance member access (@email, @role, @first) inside hook/computed bodies falls through to the @-variable rule instead of being mis-scoped as a directive. @id and @index are intentionally omitted: @id collides with the common @id member access, and @index always carries a column arg (handled by the composite/single-column rules above).",
-          "match": "@(?:timestamps|softDelete|unique|mixin|ensure|check|scope|defaultScope|idStart|tableWas|table|primaryKey|on|where|belongsTo|hasMany|hasOne)\\b",
+          "match": "@(?:times|softDelete|unique|mixin|ensure|check|scope|defaultScope|idStart|tableWas|table|primary|on|where|belongsTo|hasMany|hasOne)\\b",
           "name": "entity.name.function.decorator.rip"
         }
       ]
@@ -1354,6 +1354,14 @@
         {
           "comment": "Field whose type is not a bare name: a literal (`kind! 'email'`, `tier! 'basic' | 'pro'`), a coercer (`celsius! ~number`, `contact! ~:email`), or a derivation (`id! -> it.Id`). Both patterns above need an identifier after the name to fire at all, so every one of these fell through — the name left unscoped, or, when it carried a `!`, claimed by the dammit-CALL rule and painted a function, which read `tier!` as an awaited call in the middle of a schema. Only the name and its marker are taken here; the type falls through to $self, which already scopes strings, arrows and symbols. A method entry (`describe: ->`) is untouched because its name is followed by `:`, never by whitespace.",
           "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?(?=\\s+\\S)",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" }
+          }
+        },
+        {
+          "comment": "Bare field: a required/optional marker with the type elided (defaults to string) and no trailer at all — `name!`, `label?`. The rule above needs trailing content to fire, so these fell through to the dammit-CALL painter. The modifier is REQUIRED here, so a plain identifier alone on a line inside an expression body stays untouched.",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)(?=\\s*$)",
           "captures": {
             "2": { "name": "variable.other.property.rip" },
             "3": { "name": "keyword.operator.modifier.rip" }

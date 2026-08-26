@@ -103,6 +103,12 @@ test "symbol literals", ->
   ok hl('k = :one.two.three-four.five').includes span('symbol', ':one.two.three-four.five')
   # a plain ternary colon is not a symbol
   ok not hl('x = a ? b : c').includes('hljs-symbol')
+  # one trailing !/? joins the symbol at a claim boundary
+  ok hl('k = :save!').includes span('symbol', ':save!')
+  ok hl('k = :valid?').includes span('symbol', ':valid?')
+  # an operator-starting character after !/? keeps the bare symbol
+  ok hl('k = :a!=b').includes span('symbol', ':a')
+  ok hl('k = :a?.b').includes span('symbol', ':a')
 
 # ==[ Regexes, numbers, comments ]==
 

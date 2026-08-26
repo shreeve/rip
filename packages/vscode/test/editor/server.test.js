@@ -255,7 +255,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         'User = schema :model, on: analytics',
         '  name!  string',
         '  email! email @unique',
-        '  @timestamps',
+        '  @times',
         '  @belongsTo Organization',
         '  @idStart 5000',
         'console.log User',
@@ -791,7 +791,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         'User = schema :model',        // 0
         '  name!   string',            // 1
         '  active? boolean',           // 2
-        '  @timestamps',               // 3
+        '  @times',               // 3
         'load = ->',                   // 4
         '  u = await User.find(1)',    // 5
         '  if u',                      // 6

@@ -20,7 +20,10 @@ const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 let client;
 
 async function activate(context) {
-  const outputChannel = vscode.window.createOutputChannel('Rip');
+  // A log channel, not a plain one: with no separate traceOutputChannel,
+  // vscode-languageclient falls back to this channel and calls
+  // LogOutputChannel-only methods on it (onDidChangeLogLevel).
+  const outputChannel = vscode.window.createOutputChannel('Rip', { log: true });
   outputChannel.appendLine('Rip extension activated');
 
   const serverModule = path.join(context.extensionPath, 'src', 'server.js');

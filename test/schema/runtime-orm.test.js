@@ -45,6 +45,7 @@ const field = (name, typeName = 'string', opts = {}) => ({
   typeName,
   array: opts.array === true,
   ...(opts.unique ? { unique: true } : {}),
+  ...(opts.primary ? { primary: true } : {}),
   ...(opts.attrs ? { attrs: opts.attrs } : {}),
   ...(opts.literals ? { literals: opts.literals } : {}),
   ...(opts.constraints ? { constraints: opts.constraints } : {}),
@@ -122,7 +123,7 @@ function makeWorld(k) {
   const User = k.__schema(model('User',
     field('name'),
     field('email', 'email', { unique: true }),
-    dir('timestamps'),
+    dir('times'),
     dir('hasMany', { target: 'Order', optional: false }),
   ));
   const Order = k.__schema(model('Order',
@@ -428,7 +429,7 @@ describe('orm: paired reference — dirty tracking and save', () => {
   test('updated_at bumps ONLY on a real write (timestamps model)', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT/, rows(['id', 'name', 'created_at', 'updated_at'], [1, 'A', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z']));
-      const U = k.__schema(model('Stamp', field('name'), dir('timestamps')));
+      const U = k.__schema(model('Stamp', field('name'), dir('times')));
       const inst = await U.first();
       await inst.save();                    // no-op: no bump
       const noopCalls = adapter.calls.length;
@@ -749,20 +750,25 @@ describe('orm: paired reference — relations and eager loading', () => {
     expect(r.value.ids).toEqual([7, 9]);
   });
 
-  test('as: / foreignKey: reach the DDL, including both REFERENCES', async () => {
-    await paired(async (k) => {
+  // Assertions live OUTSIDE the paired callback: runOn catches scenario
+  // throws into out.threw, so an inner expect failure is swallowed and
+  // the test goes vacuously green (this test and its natural-key twin
+  // below did exactly that for a while).
+  test('as: / foreignKey: reach the DDL — both columns, derived and explicit', async () => {
+    const r = await paired(async (k) => {
       k.__schema(model('User', field('name')));
       const Post = k.__schema(model('Post',
         field('title'),
         dir('belongsTo', { target: 'User', as: 'author', foreignKey: 'author_id' }),
         dir('belongsTo', { target: 'User', as: 'reviewer', foreignKey: 'reviewer_id' }),
       ));
-      const sql = Post.toSQL();
-      expect(sql).toContain('"author_id" INTEGER NOT NULL REFERENCES "users"("id")');
-      expect(sql).toContain('"reviewer_id" INTEGER NOT NULL REFERENCES "users"("id")');
-      expect(sql).not.toContain('"user_id"');
-      return null;
+      return Post.toSQL();
     });
+    expect(r.threw).toBeUndefined();
+    expect(r.value).toContain('"author_id" INTEGER NOT NULL');
+    expect(r.value).toContain('"reviewer_id" INTEGER NOT NULL');
+    expect(r.value).not.toContain('"user_id"');
+    expect(r.value).not.toContain('REFERENCES');
   });
 
   test('{as:} alone derives the FK from the ACCESSOR — two relations to one target, no explicit keys', async () => {
@@ -792,22 +798,24 @@ describe('orm: paired reference — relations and eager loading', () => {
     expect(r.value.author).toBe('Ann');
     expect(r.value.reviewer).toBe('Bob');
     expect(r.value.ids).toEqual([7, 9]);
-    expect(r.value.sql).toContain('"author_id" INTEGER NOT NULL REFERENCES "users"("id")');
-    expect(r.value.sql).toContain('"reviewer_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"author_id" INTEGER NOT NULL');
+    expect(r.value.sql).toContain('"reviewer_id" INTEGER NOT NULL');
     expect(r.value.sql).not.toContain('"user_id"');
   });
 
-  test('the accessor-derived FK copies a natural target key: type and REFERENCES in DDL', async () => {
-    await paired(async (k) => {
+  test('the accessor-derived FK copies a natural target key: VARCHAR width in DDL', async () => {
+    const r = await paired(async (k) => {
       k.__schema(model('Country',
         field('code'),
-        dir('primaryKey', { name: 'code' })));
+        dir('primary', { name: 'code' })));
       const City = k.__schema(model('City', field('name'),
         dir('belongsTo', { target: 'Country', as: 'home' })));
-      const sql = City.toSQL();
-      expect(sql).toContain('"home_id" VARCHAR NOT NULL REFERENCES "countries"("code")');
-      return null;
+      return City.toSQL();
     });
+    expect(r.threw).toBeUndefined();
+    // The FK column is as wide as the natural key it copies — VARCHAR,
+    // not the surrogate INTEGER.
+    expect(r.value).toContain('"home_id" VARCHAR NOT NULL');
   });
 
   test('explicit {foreignKey:} still wins over the accessor derivation', async () => {
@@ -818,7 +826,7 @@ describe('orm: paired reference — relations and eager loading', () => {
       return { fk: Post._normalize().relations.get('author').foreignKey, sql: Post.toSQL() };
     });
     expect(r.value.fk).toBe('boss_id');
-    expect(r.value.sql).toContain('"boss_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"boss_id" INTEGER NOT NULL');
     expect(r.value.sql).not.toContain('"author_id"');
   });
 
@@ -1284,7 +1292,7 @@ describe('orm: paired reference — upsert and insertMany', () => {
       const U = k.__schema(model('User',
         field('name'),
         field('email', 'email', { unique: true }),
-        dir('timestamps'),
+        dir('times'),
         hook('afterSave', () => hooks.push('afterSave')),
         hook('afterCommit', () => hooks.push('afterCommit'))));
       const written = await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
@@ -1692,7 +1700,7 @@ describe('orm: defensive structured SQL and canonical persistence', () => {
       const Account = k.__schema(model('Account',
         field('firstName'),
         field('email', 'email', { unique: true }),
-        dir('timestamps'),
+        dir('times'),
         dir('softDelete'),
         dir('belongsTo', { target: 'Owner', optional: false }),
         hook('beforeValidation', () => hooks.push('hook'))));
@@ -1759,7 +1767,7 @@ describe('orm: defensive structured SQL and canonical persistence', () => {
 
   test('updateAll validates writable columns before SQL; empty is a zero-row no-op', async () => {
     const r = await paired(async (k, adapter) => {
-      const U = k.__schema(model('User', field('name'), dir('timestamps')));
+      const U = k.__schema(model('User', field('name'), dir('times')));
       const empty = await U.where({}).updateAll({});
       const rejected = [];
       for (const values of [
@@ -2074,7 +2082,7 @@ describe('orm: paired reference — DDL', () => {
         field('notes', 'text', { optional: true }),
         field('tags', 'string', { array: true, optional: true }),
         field('price', 'number', { optional: true, constraints: { default: 0 } }),
-        dir('timestamps'),
+        dir('times'),
         dir('softDelete'),
         dir('idStart', { value: 5000 }),
         dir('index', { fields: ['name'] }),
@@ -2086,8 +2094,8 @@ describe('orm: paired reference — DDL', () => {
     });
     expect(r.value.sql).toContain('CREATE SEQUENCE "trades_seq" START 5000;');
     expect(r.value.sql).toContain('"name" VARCHAR(100) NOT NULL');
-    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
-    expect(r.value.sql).toContain('"coupon_id" INTEGER REFERENCES "coupons"("id")');
+    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL');
+    expect(r.value.sql).toContain('"coupon_id" INTEGER,');   // optional relation: nullable column, no constraint
     expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_email" ON "trades" ("email");');
     expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_name_email" ON "trades" ("name", "email");');
     expect(r.value.dropped).toContain('DROP TABLE IF EXISTS "trades" CASCADE;');
@@ -2220,7 +2228,7 @@ describe('orm: paired reference — model algebra and wire shapes', () => {
       const U = k.__schema(model('User',
         field('name'),
         field('secret'),
-        dir('timestamps'),
+        dir('times'),
         dir('belongsTo', { target: 'Org', optional: false }),
       ));
       k.__schema(model('Org', field('name')));
@@ -2250,7 +2258,7 @@ describe('orm: paired reference — model algebra and wire shapes', () => {
     const js = await paired(async (k) => {
       const U = k.__schema(model('User',
         field('name'),
-        dir('timestamps'), dir('softDelete'),
+        dir('times'), dir('softDelete'),
         dir('belongsTo', { target: 'Org', optional: true }),
       ));
       k.__schema(model('Org', field('name')));
@@ -2290,7 +2298,7 @@ describe('orm: the defect battery (#102–#105)', () => {
       dir('belongsTo', { target: 'Org', optional: false }, { target: 'Extra', optional: false }));
     await loud4(junk, /@belongsTo: takes exactly one target name/);
     // args on an argless directive
-    await loud4(model('User', field('name'), dir('timestamps', { target: 'yes', optional: false })), /@timestamps: takes no arguments/);
+    await loud4(model('User', field('name'), dir('times', { target: 'yes', optional: false })), /@times: takes no arguments/);
     // idStart without an integer
     await loud4(model('User', field('name'), dir('idStart', { value: 'hello' })), /@idStart: takes one integer literal/);
   });
@@ -2303,7 +2311,7 @@ describe('orm: the defect battery (#102–#105)', () => {
     // implicit columns count as known
     await K4.scope(() => {
       const ok = K4.__schema(model('Known', field('name'),
-        dir('timestamps'), dir('softDelete'),
+        dir('times'), dir('softDelete'),
         dir('belongsTo', { target: 'Org', optional: false }),
         dir('index', { fields: ['createdAt'] }),
         dir('index', { fields: ['orgId'] }),
@@ -2322,11 +2330,11 @@ describe('orm: the defect battery (#102–#105)', () => {
     await loud4(collide, /field 'userId' and the @belongsTo User relation both own column 'user_id'/);
     // the mixin channel reaches the directive-managed columns (direct
     // declarations are caught by the reserved set first): a
-    // mixin-included createdAt + @timestamps is the same collision
+    // mixin-included createdAt + @times is the same collision
     await K4.scope(() => {
       K4.__schema({ kind: 'mixin', name: 'Stamps', entries: [field('createdAt', 'datetime')] });
-      const M = K4.__schema(model('Doc', field('name'), dir('mixin', { target: 'Stamps' }), dir('timestamps')));
-      expect(() => M._normalize()).toThrow(/field 'createdAt' and @timestamps both own column 'created_at'/);
+      const M = K4.__schema(model('Doc', field('name'), dir('mixin', { target: 'Stamps' }), dir('times')));
+      expect(() => M._normalize()).toThrow(/field 'createdAt' and @times both own column 'created_at'/);
     });
     // the legal neighbor stays legal
     await K4.scope(() => {
@@ -2463,7 +2471,7 @@ describe('orm:  unit tier', () => {
     await K4.scope(async () => {
       const adapter = recordingAdapter();
       K4.setAdapter(adapter);
-      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('name'), dir('times')));
       const u = U.parse({ name: 'A' });
       expect(u.name).toBe('A');
       expect(u.ok()).toBe(true);
@@ -2865,7 +2873,7 @@ describe('orm: runtime delivery', () => {
  'User = schema :model',
  '  name!  string',
  '  email! email @unique',
- '  @timestamps',
+ '  @times',
  '  beforeSave: -> @name = @name.trim()',
  '  shout: -> @name.toUpperCase()',
  'u = await User.create({name: "  Al  ", email: "a@b.c"})',
@@ -2987,7 +2995,7 @@ describe('orm: runtime delivery', () => {
  'P = schema :model',
  '  firstName! string, {was: "given_name"}',
  '  email!     email @unique',
- '  @timestamps',
+ '  @times',
  '  @idStart 5000',
  '  @tableWas "legacy_people"',
  '  @unique [:firstName, :email]',
@@ -3062,17 +3070,17 @@ describe('orm: runtime delivery', () => {
     ]);
   });
 
-  // ── @primaryKey and {column:} ─────────────────────────────────────
+  // ── @primary and {column:} ─────────────────────────────────────
   //
   // Both name the same pair — a PROPERTY and the COLUMN behind it —
   // and the split is what makes an inherited table addressable at all:
   // `PATIENT_ID`/`MRN_NBR` in the SQL, `patientId`/`mrn` in the code.
 
-  test('@primaryKey renames the pk property and its column, everywhere both are used', async () => {
+  test('@primary renames the pk property and its column, everywhere both are used', async () => {
     const src = [
  'Patient = schema :model',
  '  @table "MDM_PATIENT"',
- '  @primaryKey patientId, {column: "PATIENT_ID"}',
+ '  @primary patientId, {column: "PATIENT_ID"}',
  '  mrn! string, {column: "MRN_NBR"}',
     ].join('\n');
     const { code } = compile(src);
@@ -3130,8 +3138,8 @@ describe('orm: runtime delivery', () => {
         field('b', 'string', { attrs: { column: 'x' } })]))
         .toMatch(/field 'a' and field 'b' both own column 'x'/);
       // a mapped column landing on a directive-managed one
-      expect(said([field('a', 'string', { attrs: { column: 'created_at' } }), dir('timestamps')]))
-        .toMatch(/field 'a' and @timestamps both own column 'created_at'/);
+      expect(said([field('a', 'string', { attrs: { column: 'created_at' } }), dir('times')]))
+        .toMatch(/field 'a' and @times both own column 'created_at'/);
       // …and on the primary key
       expect(said([field('a', 'string', { attrs: { column: 'id' } })]))
         .toMatch(/the primary key and field 'a' both own column 'id'/);
@@ -3371,7 +3379,7 @@ describe('orm: runtime delivery', () => {
 
   // ── natural primary keys ──────────────────────────────────────────
   //
-  // Declaring the pk as a field — alongside an explicit @primaryKey
+  // Declaring the pk as a field — alongside an explicit @primary
   // naming it — is what makes it caller-supplied. It takes BOTH: a
   // bare `id! integer` stays the collision it always was, because the
   // default name is exactly where a silent posture flip would go
@@ -3380,7 +3388,7 @@ describe('orm: runtime delivery', () => {
   test('a natural key is the caller\'s to supply, and the whole write path follows', async () => {
     const src = [
  'Patient = schema :model',
- '  @primaryKey mrn',
+ '  @primary mrn',
  '  mrn!  string, {column: "MRN_NBR"}',
  '  name! string',
     ].join('\n');
@@ -3427,12 +3435,24 @@ describe('orm: runtime delivery', () => {
       // the JSON-Schema export says string, not the surrogate's integer
       expect(P.toJSONSchema().properties.mrn).toEqual({ type: 'string' });
     });
+
+    // The inline spelling reaches the runtime as a field flag and
+    // lands in the identical natural-key posture.
+    const inline = compile('Country = schema :model\n  iso! string @primary\n  name! string').code;
+    await K4.scope(async () => {
+      K4.setAdapter(recordingAdapter());
+      const C = new Function('__schema', `${inline}\nreturn Country;`)(rt4.__schema);
+      const spec = C._tableSpec();
+      expect(spec.sequence).toBeNull();
+      expect(spec.primaryKey).toBe('iso');
+      expect(C.toSQL()).toContain('"iso" VARCHAR PRIMARY KEY');
+    });
   });
 
   test('a foreign key is as wide as the key it points at', async () => {
     const src = [
  'Country = schema :model',
- '  @primaryKey iso',
+ '  @primary iso',
  '  iso!  string',
  '  name! string',
  '',
@@ -3446,26 +3466,26 @@ describe('orm: runtime delivery', () => {
       const [, C] = new Function('__schema', `${code}\nreturn [Country, City];`)(rt4.__schema);
       const sql = C.toSQL();
       // the surrogate's INTEGER would be wrong: this key is a string
-      expect(sql).toContain('"country_id" VARCHAR NOT NULL REFERENCES "countries"("iso")');
+      expect(sql).toContain('"country_id" VARCHAR NOT NULL');
       expect(C.toJSONSchema().properties.countryId).toEqual({ type: 'string' });
     });
   });
 
   test('it takes BOTH declarations — a bare pk field is still a collision', async () => {
-    // no @primaryKey: `id` is the runtime's, and saying otherwise is
+    // no @primary: `id` is the runtime's, and saying otherwise is
     // an error that names the escape
     expect(() => compile('U = schema :model\n  id! integer\n  n! string'))
-      .toThrow(/field 'id' collides with the runtime-managed primary key.*write '@primaryKey id' to make it a caller-supplied natural key/s);
+      .toThrow(/field 'id' collides with the runtime-managed primary key.*write '@primary id' to make it a caller-supplied natural key/s);
     // …and the escape works
-    expect(() => compile('U = schema :model\n  @primaryKey id\n  id! uuid\n  n! string')).not.toThrow();
+    expect(() => compile('U = schema :model\n  @primary id\n  id! uuid\n  n! string')).not.toThrow();
     // a caller-supplied key has nothing generating it, so it is
     // required, scalar, and has no sequence to seed
-    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn? string'))
+    expect(() => compile('U = schema :model\n  @primary mrn\n  mrn? string'))
       .toThrow(/primary key 'mrn' is declared optional/);
-    expect(() => compile('U = schema :model\n  @primaryKey mrn\n  mrn! string\n  @idStart 5'))
+    expect(() => compile('U = schema :model\n  @primary mrn\n  mrn! string\n  @idStart 5'))
       .toThrow(/there is no sequence to seed/);
     // and the column is stated once, on the field
-    expect(() => compile('U = schema :model\n  @primaryKey mrn, {column: "A"}\n  mrn! string, {column: "B"}'))
+    expect(() => compile('U = schema :model\n  @primary mrn, {column: "A"}\n  mrn! string, {column: "B"}'))
       .toThrow(/state the column once, on the field/);
   });
 
@@ -3477,14 +3497,14 @@ describe('orm: runtime delivery', () => {
           return 'no error';
         } catch (e) { return e.message; }
       };
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn', 'string', { optional: true })]))
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn', 'string', { optional: true })]))
         .toMatch(/primary key 'mrn' is declared optional/);
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), dir('idStart', { value: 5 })]))
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn'), dir('idStart', { value: 5 })]))
         .toMatch(/there is no sequence to seed/);
       expect(said([field('id', 'integer')]))
         .toMatch(/id collides with the runtime-managed primary key/);
       // the legal shape stays legal
-      expect(said([dir('primaryKey', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
+      expect(said([dir('primary', { name: 'mrn' }), field('mrn'), field('name')])).toBe('no error');
     });
   });
 
@@ -4110,7 +4130,7 @@ describe('orm: chain starters and structured where', () => {
       const adapter = recordingAdapter();
       K4.setAdapter(adapter);
       adapter.on(/^SELECT/, rows(['id', 'title'], [1, 'A']));
-      const Post = K4.__schema(model('Post', field('title'), dir('timestamps')));
+      const Post = K4.__schema(model('Post', field('title'), dir('times')));
       await Post.order({ createdAt: 'desc' }).limit(2).offset(1).all();
       await Post.limit(2).all();
       await Post.offset(3).all();
@@ -4165,7 +4185,7 @@ describe('orm: write-path honesty', () => {
         if (fail) throw new Error('duckdb: IO Error: disk full');
         return { columns: [], data: [], rowCount: 1 };
       });
-      const U = K4.__schema(model('User', field('name'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('name'), dir('times')));
       const t0 = new Date('2026-01-01T00:00:00Z');
       const u = U._hydrate(
         [{ name: 'id' }, { name: 'name' }, { name: 'created_at' }, { name: 'updated_at' }],
@@ -4241,7 +4261,7 @@ describe('orm: zero-affected-row honesty', () => {
       adapter.on(/^UPDATE "users"/, rows(['Count'], [0]));
       adapter.on(/^DELETE FROM "users"/, rows(['Count'], [1]));
       const fired = [];
-      const U = K4.__schema(model('User', field('name'), dir('timestamps'),
+      const U = K4.__schema(model('User', field('name'), dir('times'),
         hook('afterUpdate', () => fired.push('afterUpdate')),
         hook('afterSave', () => fired.push('afterSave')),
         hook('afterCommit', () => fired.push('afterCommit'))));
@@ -4613,7 +4633,7 @@ describe('orm: addX under the unique-pair race', () => {
 describe('orm: temporal columns hydrate as instants', () => {
   const eventCols = ['id', 'title', 'starts_on', 'at', 'created_at', 'updated_at'].map((name) => ({ name }));
   const eventModel = () => K4.__schema(model('Event',
-    field('title'), field('startsOn', 'date'), field('at', 'datetime'), dir('timestamps')));
+    field('title'), field('startsOn', 'date'), field('at', 'datetime'), dir('times')));
 
   test('declared date/datetime columns coerce wire strings and epoch numbers to the codec instants; a string field never', async () => {
     await K4.scope(async () => {
@@ -4691,7 +4711,7 @@ describe('orm: errors speak the caller namespace', () => {
   test('structured where()/updateAll() rejections echo the key as written over a property inventory', async () => {
     await K4.scope(async () => {
       K4.setAdapter(recordingAdapter());
-      const U = K4.__schema(model('User', field('firstName'), dir('timestamps')));
+      const U = K4.__schema(model('User', field('firstName'), dir('times')));
       let err = null;
       try { await U.where({ firstNme: 'x' }).all(); } catch (e) { err = e; }
       expect(err?.message).toMatch(
@@ -4717,10 +4737,10 @@ describe('orm: errors speak the caller namespace', () => {
 });
 
 describe('orm: once-directives (runtime layer)', () => {
-  test('@timestamps and @softDelete declared twice reject as once-directives', async () => {
+  test('@times and @softDelete declared twice reject as once-directives', async () => {
     await K4.scope(() => {
-      const T = K4.__schema(model('Stamped', field('name'), dir('timestamps'), dir('timestamps')));
-      expect(() => T._normalize()).toThrow(/duplicate '@timestamps' — declared twice; a :model declares it once/);
+      const T = K4.__schema(model('Stamped', field('name'), dir('times'), dir('times')));
+      expect(() => T._normalize()).toThrow(/duplicate '@times' — declared twice; a :model declares it once/);
       const S = K4.__schema(model('Softened', field('name'), dir('softDelete'), dir('softDelete')));
       expect(() => S._normalize()).toThrow(/duplicate '@softDelete' — declared twice; a :model declares it once/);
     });

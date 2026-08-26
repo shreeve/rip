@@ -75,9 +75,14 @@ deepEq = (a, b) ->
     return true
   false
 
-export def eq(a, b)
+# The message is CONTEXT, not a replacement — most often a failed
+# subprocess's stderr, which is the whole diagnosis. `ok` takes one, so
+# callers already pass one here (test/janus, packages/tray); it was being
+# accepted and silently dropped.
+export def eq(a, b, message = null)
   unless deepEq(a, b)
-    throw Error.new "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
+    detail = "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
+    throw Error.new(if message? then "#{detail}: #{message}" else detail)
 
 export def ok(cond, message = 'assertion failed')
   throw Error.new(message) unless cond

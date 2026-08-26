@@ -925,8 +925,12 @@ function mirrorIntact(file, entry) {
 // targets missing from disk are remembered (pendingImports) so a later
 // Created event pulls them in; targets resolving OUTSIDE the workspace
 // truncate the closure loudly (a `../` chain must not walk the whole
-// disk into __external__). Returns the counters (the scaling gate pins
-// them) and the created/changed mirror paths for tsgo notification.
+// disk into __external__) — EXCEPT the stdlib tree: `rip/<pkg>`
+// specifiers resolve into STDLIB_DIR, a bounded tree whose faces the
+// generated tsconfig already maps by name (stdlibRipPaths), so
+// materializing them completes a mapping the config promised rather
+// than opening the disk walk. Returns the counters (the scaling gate
+// pins them) and the created/changed mirror paths for tsgo notification.
 function materializeClosure(seeds) {
   ensureMirrorRoot();
   const queue = [...seeds];

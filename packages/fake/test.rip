@@ -2,6 +2,7 @@
 # fake tests — generators, determinism, and Model.factory
 # ==============================================================================
 
+import { rmSync } from 'node:fs'
 import { test, eq, ok, throws } from 'rip/testing'
 import { fake } from 'rip/fake'
 import * as mod from 'rip/fake'
@@ -31,12 +32,18 @@ test "names come from gendered pools", ->
 
 test "phones are NANP-legal, fax matches, extensions opt in", ->
   fake.seed 7
-  for i in [0...50]
-    m = fake.phone().match /^\((\d{3})\) (\d{3})-\d{4}$/
+  toPhone = import!('rip/validate').toPhone
+  for i in [0...200]
+    ph = fake.phone()
+    m = ph.match /^\((\d{3})\) (\d{3})-\d{4}$/
     ok m, 'phone shape'
     ok m[1][0] >= '2', 'area code starts 2-9'
+    ok m[1][1] <= '8', 'area code middle digit never 9 (reserved)'
     ok m[1] % 100 isnt 11, 'area code never N11'
     ok m[2][0] >= '2', 'exchange starts 2-9'
+    # The real contract: everything the generator emits, the validator
+    # accepts unchanged — fakes must survive real validation.
+    eq toPhone(ph), ph
   ok /ext\. \d+/.test fake.phone(ext: true)
   ok /^\(\d{3}\) \d{3}-\d{4}$/.test fake.fax()
   ok ['cell', 'home', 'work'].includes fake.phoneType()
@@ -85,6 +92,54 @@ test "seeded runs reproduce byte-for-byte", ->
   b = [fake.fullName(), fake.phone(), fake.email()]
   eq a, b
   fake.seed()
+
+test "weighted sample follows weights; short weights default to 1", ->
+  fake.seed 7
+  vals = ['a', 'b', 'c']
+  counts = { a: 0, b: 0, c: 0 }
+  counts[fake.sample vals, [10, 1, 3]]++ for i in [0...2800]
+  ok counts.a > counts.c and counts.c > counts.b, JSON.stringify counts
+  picked = Set.new (fake.sample(vals, [1, 0, 1]) for i in [0...200])
+  eq picked.has('b'), false
+  counts = { a: 0, b: 0, c: 0 }
+  counts[fake.sample vals, [8]]++ for i in [0...1000]
+  ok counts.a > counts.b and counts.a > counts.c, JSON.stringify counts
+  fake.seed()
+
+test "weighted sample validates weights loudly", ->
+  throws -> fake.sample ['a'], [1, 2]
+  throws -> fake.sample ['a', 'b'], ['x']
+  throws -> fake.sample ['a', 'b'], [1, -1]
+  throws -> fake.sample ['a', 'b'], [0, 0]
+
+test "table: csv/tsv/psv parse identically — one dialect, three delimiters", ->
+  want = [{ code: 'A1', name: 'Alpha', price: '100' }, { code: 'B2', name: 'Beta', price: null }]
+  psv = """
+    # comment lines and separators are skipped
+    | code | name  | price |
+    |------|-------|-------|
+    | A1   | Alpha | 100   |
+    | B2   | Beta  |       |
+  """
+  csv = "code, name, price\nA1, Alpha, 100\nB2, Beta,"
+  tsv = "code\tname\tprice\nA1\tAlpha\t100\nB2\tBeta\t"
+  eq fake.table(psv), want
+  eq fake.table(csv), want
+  eq fake.table(tsv), want
+  eq fake.table('a;b\n1;2', ';'), [{ a: '1', b: '2' }]   # explicit delimiter
+  throws -> fake.table 'just-a-header'
+
+test! "csv/tsv/psv load files; csv delimiter defaults to comma, overridable", ->
+  dir = "/tmp/rip-fake-test-#{process.pid}"
+  want = [{ a: '1', b: '2' }]
+  Bun.write! "#{dir}/t.csv", "a, b\n1, 2"
+  Bun.write! "#{dir}/t.tsv", "a\tb\n1\t2"
+  Bun.write! "#{dir}/t.psv", "| a | b |\n| 1 | 2 |"
+  eq fake.csv!("#{dir}/t.csv"), want
+  eq fake.tsv!("#{dir}/t.tsv"), want
+  eq fake.psv!("#{dir}/t.psv"), want
+  eq fake.csv!("#{dir}/t.psv", '|'), want   # csv is the general form
+  rmSync dir, recursive: true
 
 test "maybe honors probability edges; unique refuses exhaustion", ->
   eq fake.maybe(0, -> 'x'), null

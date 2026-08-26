@@ -681,9 +681,25 @@ setEdgeMode = (mode) ->
   snapshotEdge!
 
 # Exit when nothing remains to supervise — no idle forever control plane.
+#
+# "Nothing to supervise" is not the same as "nobody is talking to me", and
+# a timer knows neither. A client reaches us the long way round — the CLI
+# spawns this process, polls /1.0 until it answers, and only THEN sends
+# what it came for — so a sweep landing in that gap kills a connection it
+# was just told was good (seen under a loaded `test:all`: ECONNRESET on
+# POST /1.0/apps/<name>/start). In-flight covers the other half, and must
+# be the whole request, not its arrival: stopApp clears `desired` FIRST
+# and then waits, unbounded, for the manager to go quiet — nothing is
+# marked running for that entire span. Boot counts too; nobody spawns a
+# control plane with nothing to ask it.
+IDLE_GRACE = 2000
+inFlight = 0
+lastActivity = Date.now()
+
 maybeExitIdle = ->
   return unless state.edge.desired is 'stopped' and not state.edge.managed
   return if state.apps.some (app) -> app.desired is 'running'
+  return if inFlight > 0 or Date.now() - lastActivity < IDLE_GRACE
   setTimeout shutdown, 100
 
 trustEdge = ->
@@ -810,7 +826,7 @@ mutate = (run) ->
   mutationChain = task.catch -> null
   task
 
-handle = (request) ->
+route = (request) ->
   url = URL.new request.url
   parts = url.pathname.split('/').filter(Boolean)
   try
@@ -855,6 +871,17 @@ handle = (request) ->
     Response.json({ error: 'not found' }, { status: 404 })
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })
+
+# Only the control socket counts as activity. The edge-status socket is
+# polled by Caddy, and an EXTERNAL Caddy polling it must not be able to
+# pin an otherwise idle control plane alive forever.
+handle = (request) ->
+  inFlight++
+  try
+    route! request
+  finally
+    inFlight--
+    lastActivity = Date.now()
 
 acquire = ->
   try

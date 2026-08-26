@@ -242,6 +242,11 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq removed.code, 0
     eq JSON.parse(removed.out).name, 'fixture'
     eq JSON.parse((cli!(APP, ['list', '--json'], env)).out), []
+
+    # The grace that stops a just-probed client from being reset must not
+    # curdle into "never exits": with nothing left to supervise, the control
+    # plane still goes away on its own. Bound covers grace + the next sweep.
+    waitFor! 'idle control plane exit', (-> not existsSync(join(site.runtime, 'agent.json'))), 15000
   finally
     try
       stopped = cli! APP, ['stop', 'fixture'], env

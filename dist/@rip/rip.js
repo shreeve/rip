@@ -105,7 +105,7 @@ function isLiteralColumn(col) {
 var MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: "target",
-  timestamps: "none",
+  times: "none",
   softDelete: "none",
   belongsTo: "target",
   hasOne: "target",
@@ -115,9 +115,9 @@ var MODEL_DIRECTIVES = {
   idStart: "int",
   table: "name",
   tableWas: "name",
-  primaryKey: "field"
+  primary: "field"
 };
-var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primaryKey", "timestamps", "softDelete"];
+var ONCE_DIRECTIVES = ["idStart", "table", "tableWas", "primary", "times", "softDelete"];
 var RELATION_DIRECTIVES = ["belongsTo", "hasOne", "hasMany"];
 var FIELD_ATTRS = { __proto__: null, column: "literal", was: "column" };
 var RELATION_ATTRS = {
@@ -537,7 +537,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
           fail(`:input schemas are fields-only — '${e.name}' is a ${e.tag}; use :shape or :model if you need behavior`, e.start);
         }
         if (e.tag === "directive" && e.name !== "mixin") {
-          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["timestamps", "softDelete", "belongsTo", "hasMany", "hasOne", "unique", "index", "idStart", "table", "tableWas", "primaryKey"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
+          fail(`:${kind} schemas only accept '@mixin Name'${kind === "input" ? " and '@ensure'" : ""} — '@${e.name}' is ${["times", "softDelete", "belongsTo", "hasMany", "hasOne", "unique", "index", "idStart", "table", "tableWas", "primary"].includes(e.name) ? ":model-only" : "not a schema directive"}`, e.start);
         }
       }
     }
@@ -688,6 +688,18 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercerArray = false;
   let typeConsumed = false;
   let typeFirst = line[pos];
+  const unionMemberAt = (p) => {
+    if (line[p]?.kind === "STRING" && line[p].value.startsWith('"')) {
+      return { value: JSON.parse(line[p].value), bracketed: false, start: line[p].start, end: line[p].end, next: p + 1 };
+    }
+    if ((line[p]?.kind === "[" || line[p]?.kind === "INDEX_START") && line[p + 1]?.kind === "STRING" && line[p + 1].value.startsWith('"') && (line[p + 2]?.kind === "]" || line[p + 2]?.kind === "INDEX_END")) {
+      return { value: JSON.parse(line[p + 1].value), bracketed: true, start: line[p].start, end: line[p + 2].end, next: p + 3 };
+    }
+    return null;
+  };
+  let unionDefault = undefined;
+  let unionDefaultSpan = null;
+  const unionFirst = unionMemberAt(pos);
   if (typeFirst?.kind === "UNARY_MATH" && typeFirst.value === "~") {
     const sym = symWordAt(line, pos + 1);
     const typeTok = line[pos + 1];
@@ -717,16 +729,28 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     typeName = typeFirst.value;
     typeConsumed = true;
     pos++;
-  } else if (typeFirst?.kind === "STRING" && typeFirst.value.startsWith('"')) {
-    literals = [JSON.parse(typeFirst.value)];
+  } else if (unionFirst && (!unionFirst.bracketed || line[unionFirst.next]?.kind === "|")) {
+    literals = [];
+    const takeMember = (m) => {
+      literals.push(m.value);
+      if (m.bracketed) {
+        if (unionDefaultSpan) {
+          fail(`field '${name}' brackets more than one union member as its default — a field has one default`, m.start);
+        }
+        unionDefault = m.value;
+        unionDefaultSpan = { start: m.start, end: m.end };
+      }
+    };
+    takeMember(unionFirst);
+    pos = unionFirst.next;
     typeConsumed = true;
-    pos++;
-    while (line[pos]?.kind === "|" && line[pos + 1]?.kind === "STRING" && line[pos + 1].value.startsWith('"')) {
-      literals.push(JSON.parse(line[pos + 1].value));
-      pos += 2;
-    }
-    if (line[pos]?.kind === "|") {
-      fail(`literal unions contain string literals only — '${line[pos + 1]?.kind ?? "<end>"}' is not allowed as a union member; use the '?' modifier for nullability`, line[pos].start);
+    while (line[pos]?.kind === "|") {
+      const m = unionMemberAt(pos + 1);
+      if (!m) {
+        fail(`literal unions contain string literals only — '${line[pos + 1]?.kind ?? "<end>"}' is not allowed as a union member; use the '?' modifier for nullability`, line[pos].start);
+      }
+      takeMember(m);
+      pos = m.next;
     }
     typeName = "literal-union";
   }
@@ -754,11 +778,20 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let range = null;
   let bracketDefault = undefined;
   let hasDefault = false;
+  if (unionDefaultSpan) {
+    bracketDefault = unionDefault;
+    hasDefault = true;
+  }
   const defaultSpan = {};
+  if (unionDefaultSpan) {
+    defaultSpan.start = unionDefaultSpan.start;
+    defaultSpan.end = unionDefaultSpan.end;
+  }
   let regex = null;
   let transformTokens = null;
   let attrs = null;
   let uniqueAttr = false;
+  let primaryAttr = false;
   if (rest.length > 0) {
     if (rest[0]?.kind === ",")
       rest = rest.slice(1);
@@ -785,13 +818,16 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
         continue;
       if (part[0].kind !== "->") {
         const innerArrow = findTopLevelArrowIdx(part);
-        if (innerArrow > 0) {
+        const attrArrow = part[0].kind === "@" && innerArrow === 2;
+        if (innerArrow > 0 && !attrArrow) {
           fail(`field '${name}' has a transform after other content; a comma is required before '->'`, part[innerArrow].start);
         }
-        while (part.length && (part[part.length - 1].kind === "OUTDENT" || part[part.length - 1].kind === "TERMINATOR"))
-          part = part.slice(0, -1);
-        if (!part.length)
-          continue;
+        if (!attrArrow) {
+          while (part.length && (part[part.length - 1].kind === "OUTDENT" || part[part.length - 1].kind === "TERMINATOR"))
+            part = part.slice(0, -1);
+          if (!part.length)
+            continue;
+        }
       }
       const head = part[0];
       if (head.kind === "[" || head.kind === "INDEX_START") {
@@ -824,12 +860,26 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
         if (kind !== "model" && kind !== "mixin") {
           fail(`inline '@${attrName ?? ""}' on field '${name}' is persistence metadata — :model/:mixin-only ('@unique' marks single-column uniqueness)`, head.start);
         }
+        if (part.length > 2 && part[2].kind === "->") {
+          if (p !== parts.length - 1) {
+            fail(`transform '-> …' must be the last element on the field line for '${name}'`, part[2].start);
+          }
+          transformTokens = part.slice(3);
+          part = part.slice(0, 2);
+        }
         if (part.length === 2 && attrName === "unique") {
           if (uniqueAttr)
             fail(`field '${name}' has more than one '@unique'`, head.start);
           uniqueAttr = true;
+        } else if (part.length === 2 && attrName === "primary") {
+          if (kind !== "model") {
+            fail(`inline '@primary' on field '${name}' is :model-only — a mixin cannot declare the primary key`, head.start);
+          }
+          if (primaryAttr)
+            fail(`field '${name}' has more than one '@primary'`, head.start);
+          primaryAttr = true;
         } else {
-          fail(`unknown inline attribute '@${attrName ?? ""}' on field '${name}' — the only inline attribute is '@unique'`, head.start);
+          fail(`unknown inline attribute '@${attrName ?? ""}' on field '${name}' — the inline attributes are '@unique' and '@primary'`, head.start);
         }
       } else {
         fail(`unexpected trailer for field '${name}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, head.start);
@@ -852,6 +902,9 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     c.regex = regex;
   if (hasDefault)
     c.default = bracketDefault;
+  if (literals && c.default !== undefined && !literals.includes(c.default)) {
+    fail(`field '${name}' defaults to ${JSON.stringify(c.default)}, which is not a member of its literal union (${literals.map((l) => JSON.stringify(l)).join(" | ")})`, first.start);
+  }
   if (ctx.defaultMaxString != null && !regex && !literals && VARCHAR_TYPES.has(typeName) && c.max === undefined) {
     c.max = ctx.defaultMaxString;
   }
@@ -871,6 +924,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     constraints,
     transformTokens,
     unique: uniqueAttr,
+    primary: primaryAttr,
     attrs,
     start: first.start,
     defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end]
@@ -951,8 +1005,10 @@ function parseScopeDirective(argTokens, directiveTok, fail) {
     fail(`@scope name must be a :symbol — '@scope :active, -> @where(active: true)'`, argTokens[0].start);
   }
   const name = sym.value;
-  if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
-    fail(`@scope name ':${name}' must be a lowercase-first alphanumeric identifier`, sym.start);
+  const suf = argTokens[2];
+  const suffixed = suf && !suf.spaced && suf.start === sym.end && (suf.value === "!" || suf.value === "?");
+  if (suffixed || !/^[a-z][a-zA-Z0-9]*$/.test(name)) {
+    fail(`@scope name ':${name}${suffixed ? suf.value : ""}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, sym.start);
   }
   let rest = argTokens.slice(2);
   if (rest[0]?.kind === ",")
@@ -1036,13 +1092,23 @@ function finishModelBody(entries, fail) {
     columnOf.set(property, col);
     propertyOwnerOf.set(property, owner);
   };
-  const pkDirective = entries.find((e) => e.tag === "directive" && e.name === "primaryKey");
+  let pkDirective = entries.find((e) => e.tag === "directive" && e.name === "primary");
+  const inlinePks = entries.filter((e) => e.tag === "field" && e.primary);
+  if (inlinePks.length > 1) {
+    fail(`both '${inlinePks[0].name}' and '${inlinePks[1].name}' declare '@primary' — a row has one identity`, inlinePks[1].start);
+  }
+  if (inlinePks.length === 1) {
+    if (pkDirective) {
+      fail(`'@primary ${pkDirective.args[0].name}' and inline '@primary' on field '${inlinePks[0].name}' are two answers to one question — state it once`, pkDirective.start);
+    }
+    pkDirective = { tag: "directive", name: "primary", args: [{ name: inlinePks[0].name }], start: inlinePks[0].start };
+  }
   const pkColumn = pkDirective ? pkDirective.args[0].column ?? snakeCase(pkDirective.args[0].name) : "id";
   const pkName = pkDirective ? pkDirective.args[0].name : "id";
   const pkFieldEntry = entries.find((e) => e.tag === "field" && e.name === pkName) ?? null;
   const naturalKey = !!(pkDirective && pkFieldEntry);
   if (!pkDirective && pkFieldEntry) {
-    fail(`field '${pkName}' collides with the runtime-managed primary key — a :model's ${pkName} is sequence-assigned. Drop the declaration, or write '@primaryKey ${pkName}' to make it a caller-supplied natural key instead`, pkFieldEntry.start);
+    fail(`field '${pkName}' collides with the runtime-managed primary key — a :model's ${pkName} is sequence-assigned. Drop the declaration, or write '@primary ${pkName}' to make it a caller-supplied natural key instead`, pkFieldEntry.start);
   }
   if (naturalKey) {
     if (!pkFieldEntry.modifiers?.includes("!")) {
@@ -1056,7 +1122,7 @@ function finishModelBody(entries, fail) {
       fail(`@idStart seeds the sequence behind a runtime-managed primary key, but '${pkName}' is declared as a field, which makes it caller-supplied — there is no sequence to seed. Drop @idStart, or drop the field declaration`, idStart.start);
     }
     if (pkDirective.args[0].column !== undefined && pkDirective.args[0].column !== (pkFieldEntry.attrs?.column ?? snakeCase(pkName))) {
-      fail(`@primaryKey names column '${pkDirective.args[0].column}' but field '${pkName}' reads a different one — state the column once, on the field`, pkDirective.start);
+      fail(`@primary names column '${pkDirective.args[0].column}' but field '${pkName}' reads a different one — state the column once, on the field`, pkDirective.start);
     }
   } else {
     claim(pkName, pkColumn, "the primary key", pkDirective?.start ?? entries[0]?.start ?? 0);
@@ -1069,9 +1135,9 @@ function finishModelBody(entries, fail) {
   for (const e of entries) {
     if (e.tag !== "directive")
       continue;
-    if (e.name === "timestamps") {
-      claim("createdAt", "created_at", "@timestamps", e.start);
-      claim("updatedAt", "updated_at", "@timestamps", e.start);
+    if (e.name === "times") {
+      claim("createdAt", "created_at", "@times", e.start);
+      claim("updatedAt", "updated_at", "@times", e.start);
     } else if (e.name === "softDelete")
       claim("deletedAt", "deleted_at", "@softDelete", e.start);
     else if (e.name === "belongsTo") {
@@ -1755,6 +1821,8 @@ function entryLiteral(e, fnCode, marks = {}) {
       ];
       if (e.unique)
         obj.push("unique: true");
+      if (e.primary)
+        obj.push("primary: true");
       if (e.literals)
         obj.push(`literals: ${JSON.stringify(e.literals)}`);
       if (e.coerce) {
@@ -1796,7 +1864,7 @@ function entryLiteral(e, fnCode, marks = {}) {
         if (e.name === "mixin" || RELATION_DIRECTIVES.includes(e.name)) {
           const a = e.args[0];
           obj.push(`args: [{target: ${JSON.stringify(a.target)}${a.optional ? ", optional: true" : ""}` + `${a.as ? `, as: ${JSON.stringify(a.as)}` : ""}` + `${a.foreignKey ? `, foreignKey: ${JSON.stringify(a.foreignKey)}` : ""}` + `${a.through ? `, through: ${JSON.stringify(a.through)}` : ""}` + `${a.targetKey ? `, targetKey: ${JSON.stringify(a.targetKey)}` : ""}}]`);
-        } else if (e.name === "primaryKey") {
+        } else if (e.name === "primary") {
           obj.push(`args: [{name: ${JSON.stringify(e.args[0].name)}` + `${e.args[0].column ? `, column: ${JSON.stringify(e.args[0].column)}` : ""}}]`);
         } else if (e.name === "on") {
           obj.push(`args: [{field: ${JSON.stringify(e.args[0].field)}}]`);
@@ -1873,7 +1941,7 @@ function foldProjectableMap(descriptor) {
   for (const e of descriptor.entries) {
     if (e.tag !== "directive")
       continue;
-    if (e.name === "timestamps")
+    if (e.name === "times")
       timestamps = true;
     else if (e.name === "softDelete")
       softDelete = true;
@@ -5534,8 +5602,12 @@ function symbolNameEnd(text, start) {
     while (end < text.length && IDENT_PART.test(text[end]))
       end++;
   }
+  if ((text[end] === "!" || text[end] === "?") && (end + 1 >= text.length || SYMBOL_SUFFIX_BOUNDARY.test(text[end + 1]))) {
+    end++;
+  }
   return end;
 }
+var SYMBOL_SUFFIX_BOUNDARY = /[\s,)\]};:]/;
 var DIGIT = /[0-9]/;
 var NUMBER_RE = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
 var REGEX_RE = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/;
@@ -20528,6 +20600,7 @@ class SchemaDef {
             required: e.modifiers.includes("!"),
             optional: e.modifiers.includes("?"),
             unique: e.unique === true,
+            primary: e.primary === true,
             attrs: e.attrs || null,
             typeName: e.typeName,
             literals: e.literals || null,
@@ -21735,6 +21808,7 @@ function derive(source, transform) {
       name: f.name,
       modifiers: mods,
       unique: f.unique === true,
+      primary: f.primary === true,
       attrs: f.attrs || null,
       typeName: f.typeName,
       array: f.array,

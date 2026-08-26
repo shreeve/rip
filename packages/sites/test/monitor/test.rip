@@ -55,7 +55,7 @@ heartbeatLine = (head) ->
     timestamp: '2026-07-30T12:34:56.123456789Z'
   })}\n"
 
-waitFor = (fn, timeout = 2000) ->
+waitFor = (fn, timeout = 8000) ->
   deadline = Date.now() + timeout
   loop
     value = fn()

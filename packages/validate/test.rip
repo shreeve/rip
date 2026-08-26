@@ -22,11 +22,12 @@ import { spawnSync } from 'child_process'
 pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
 
 BUILTINS =! [
-  'address', 'array', 'bool', 'cents', 'color', 'date', 'decimal',
-  'email', 'falsy', 'float', 'hash', 'id', 'ids', 'int', 'ip', 'json',
-  'mac', 'money', 'money_even', 'name', 'phone', 'semver', 'sex',
-  'slug', 'ssn', 'state', 'string', 'text', 'time', 'time12', 'truthy',
-  'url', 'username', 'uuid', 'whole', 'zip', 'zipplus4',
+  'address', 'array', 'bool', 'cents', 'color', 'date', 'datetime',
+  'decimal', 'email', 'falsy', 'float', 'hash', 'id', 'ids', 'int',
+  'ip', 'json', 'mac', 'money', 'money_even', 'name', 'phone',
+  'semver', 'sex', 'slug', 'ssn', 'state', 'string', 'text', 'time',
+  'time12', 'truthy', 'url', 'username', 'uuid', 'whole', 'zip',
+  'zipplus4',
 ]
 
 # Schemas exercising the auto-registered coercers (names resolve lazily
@@ -67,7 +68,7 @@ test "declares browser safety and earns it", ->
   eq imports, ["import { registerCoercer } from '../../src/runtime/schema.js'"]
   eq /\bBun\.|node:|process\.|globalThis/.test(source), false
 
-test "a fresh process holds exactly the 37 built-ins, all bridged", ->
+test "a fresh process holds exactly the 38 built-ins, all bridged", ->
   dir = mkdtempSync join(tmpdir(), 'validate-')
   probe = join dir, 'probe.rip'
   writeFileSync probe, [
@@ -82,7 +83,7 @@ test "a fresh process holds exactly the 37 built-ins, all bridged", ->
     env: plainEnv()
   }
   eq r.status, 0
-  eq r.stdout, '37\n2024-02-29\n'
+  eq r.stdout, '38\n2024-02-29\n'
 
 # ==[ The vocabulary, row by row ]==
 
@@ -181,6 +182,20 @@ rows = [
   ['date', '2024-2-15', null]
   ['date', '2024-02-15 ', null]
   ['date', '99-01-01', null]
+
+  # datetime: calendar-true date + strict 24h time, canonical ISO 8601
+  ['datetime', '2026-08-24T14:30:00Z', '2026-08-24T14:30:00Z']
+  ['datetime', '2026-08-24 14:30', '2026-08-24T14:30:00']
+  ['datetime', '2026-08-24t14:30:00.250z', '2026-08-24T14:30:00.250Z']
+  ['datetime', '2026-08-24T14:30:00+0530', '2026-08-24T14:30:00+05:30']
+  ['datetime', '20260824T14:30', '2026-08-24T14:30:00']
+  ['datetime', '2024-02-29T00:00', '2024-02-29T00:00:00']
+  ['datetime', '2026-02-30T10:00', null]
+  ['datetime', '2026-08-24T24:00', null]
+  ['datetime', '2026-08-24T14:60', null]
+  ['datetime', '2026-08-24T7:05', null]
+  ['datetime', '2026-08-24', null]
+  ['datetime', 'not-a-date', null]
 
   # time / time12
   ['time', '00:30', '00:30']
@@ -306,7 +321,7 @@ test "blank strings normalize to blank, not to a miss, in the string family", ->
   eq check('', 'phone'), ''
 
 test "every built-in name is present and the list is sorted", ->
-  eq BUILTINS.length, 37
+  eq BUILTINS.length, 38
   names = validatorNames()
   ok names.includes(name) for name in BUILTINS
   eq names, [...names].sort()
@@ -348,6 +363,27 @@ test "getValidator answers softly; check rejects loudly", ->
   eq typeof getValidator('id'), 'function'
   eq getValidator('nope'), undefined
   throws (-> check('x', 'nope')), "unknown validator 'nope'"
+
+test "getValidator is self-preparing: stringified, trimmed, no setup owed", ->
+  eq getValidator('email')('  Steve@Gmail.COM  '), 'steve@gmail.com'
+  eq getValidator('email')(undefined), null
+  eq getValidator('email')(null), null
+  eq getValidator('zip')(84003), '84003'   # numbers stringify before the check
+  # the same function comes back on every call (prepared at registration)
+  eq getValidator('email'), getValidator('email')
+
+test "symbols name validators everywhere strings do", ->
+  eq getValidator(:email), getValidator('email')
+  eq check('steve@gmail.com', :email), 'steve@gmail.com'
+  eq isRawType(:email), false
+  throws (-> check('x', :nope)), "unknown validator 'nope'"
+
+test "prepared validators are scalar-only: composites are null, never fictions", ->
+  eq getValidator('zip')(['84003', '84004']), null   # duplicate query params
+  eq getValidator('email')({}), null                 # no '[object Object]'
+  eq getValidator('email')(-> 'x@y.co'), null
+  hostile = { toString: -> throw Error.new 'gotcha' }
+  eq getValidator('email')(hostile), null            # refused before String()
 
 # ==[ Utilities ]==
 

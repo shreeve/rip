@@ -186,10 +186,10 @@ const RESERVED_INSTANCE = new Set([
 ]);
 // Implicit columns owned by directive-driven runtime behavior:
 // declaring them as user fields would shadow the runtime API or
-// produce duplicate SET writes when @timestamps / @softDelete bump
+// produce duplicate SET writes when @times / @softDelete bump
 // them. (Mixin-included fields are exempt — declaring createdAt /
 // updatedAt through a mixin is the explicit-control alternative to
-// @timestamps.)
+// @times.)
 const RESERVED_IMPLICIT = new Set([
   'createdAt', 'updatedAt', 'deletedAt',
 ]);
@@ -590,7 +590,7 @@ function finishModelNorm(def, norm) {
 
   // Reserved ORM names guard DECLARED entries only: mixin-included
   // fields may spell createdAt/updatedAt (explicit control instead of
-  // @timestamps).
+  // @times).
   for (const e of def._desc.entries || []) {
     if ((e.tag === 'field' || e.tag === 'method' || e.tag === 'computed' || e.tag === 'derived') &&
         RESERVED.has(e.name)) {
@@ -617,7 +617,7 @@ function finishModelNorm(def, norm) {
     if (ONCE_DIRECTIVES.includes(d.name)) {
       if (seenOnce.has(d.name)) {
         // Same verdict as the compiler: an argument-less once-directive
-        // (@timestamps, @softDelete) has no second value to override;
+        // (@times, @softDelete) has no second value to override;
         // the duplicate is still refused — it declares itself once.
         throw modelError(def, '', 'directive',
           MODEL_DIRECTIVES[d.name] === 'none'
@@ -627,11 +627,11 @@ function finishModelNorm(def, norm) {
       }
       seenOnce.add(d.name);
     }
-    if (d.name === 'timestamps') timestamps = true;
+    if (d.name === 'times') timestamps = true;
     else if (d.name === 'softDelete') softDelete = true;
     else if (d.name === 'table') table = d.args[0].name;
     else if (d.name === 'tableWas') tableWas = d.args[0].name;
-    else if (d.name === 'primaryKey') primaryKey = d.args[0];
+    else if (d.name === 'primary') primaryKey = d.args[0];
     const rel = normalizeDirectiveRelation(def, d);
     if (rel) {
       if (relations.has(rel.accessor)) collision(rel.accessor, 'relation');
@@ -641,6 +641,14 @@ function finishModelNorm(def, norm) {
       if (norm.derived.has(rel.accessor)) collision(rel.accessor, 'derived');
       if (norm.hooks.has(rel.accessor)) collision(rel.accessor, 'hook');
       relations.set(rel.accessor, rel);
+    }
+  }
+
+  // The inline spelling: '@primary' on the field line serializes as a
+  // field flag rather than a directive; it names itself.
+  if (!primaryKey) {
+    for (const [n, f] of norm.fields) {
+      if (f.primary) { primaryKey = { name: n }; break; }
     }
   }
 
@@ -666,13 +674,13 @@ function finishModelNorm(def, norm) {
   // These are the only two coherent readings, and the declaration
   // settles which:
   //
-  //   @primaryKey patientId          nothing declares patientId, so
+  //   @primary patientId             nothing declares patientId, so
   //                                  nothing says what it holds — it is
   //                                  the runtime's INTEGER surrogate:
   //                                  sequence default, RETURNING
   //                                  absorption, caller input refused
   //
-  //   @primaryKey mrn                mrn IS declared, with a type and
+  //   @primary mrn                   mrn IS declared, with a type and
   //   mrn! string                    constraints — a NATURAL key the
   //                                  caller supplies, which the INSERT
   //                                  writes like any other column
@@ -682,8 +690,8 @@ function finishModelNorm(def, norm) {
   // and an undeclared natural key would be a column with no type. The
   // two facts are one fact, so no separate flag states it.
   //
-  // It takes BOTH declarations, though — an @primaryKey naming the
-  // field. A bare `id! integer` with no @primaryKey keeps colliding as
+  // It takes BOTH declarations, though — an @primary naming the
+  // field. A bare `id! integer` with no @primary keeps colliding as
   // it always has, because someone writing that means "I have an id",
   // not "turn off the sequence", and the default name is exactly where
   // a silent posture flip would be unnoticeable.
@@ -695,17 +703,17 @@ function finishModelNorm(def, norm) {
   }
   if (pkField) {
     if (pkField.optional === true || pkField.required !== true) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "the primary key '" + norm.primaryKey + "' is declared optional — a row's " +
         'identity is never absent; declare it required (!)');
     }
     if (pkField.array === true) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "the primary key '" + norm.primaryKey + "' is declared as an array — a primary key is one value");
     }
     for (const d of norm.directives) {
       if (d.name === 'idStart') {
-        throw modelError(def, norm.primaryKey, 'primaryKey',
+        throw modelError(def, norm.primaryKey, 'primary',
           "@idStart seeds the sequence behind a runtime-managed primary key, but '" +
           norm.primaryKey + "' is declared as a field, which makes it caller-supplied — " +
           'there is no sequence to seed. Drop @idStart, or drop the field declaration');
@@ -724,7 +732,7 @@ function finishModelNorm(def, norm) {
   // `columnOf` doubles as the column-OWNERSHIP guard: every table
   // column has exactly one owner. A field whose column equals a
   // belongsTo FK (`userId` + `@belongsTo User`), a directive-managed
-  // column (a mixin-included `createdAt` + `@timestamps`), or another
+  // column (a mixin-included `createdAt` + `@times`), or another
   // field's `{column:}` would otherwise emit duplicate-column DDL and
   // duplicate-column INSERTs that fail only at the database. Fields
   // could not collide among themselves while name → snake_case was
@@ -779,8 +787,8 @@ function finishModelNorm(def, norm) {
       'the @belongsTo ' + rel.target + ' relation');
   }
   if (timestamps) {
-    claim('createdAt', 'created_at', '@timestamps');
-    claim('updatedAt', 'updated_at', '@timestamps');
+    claim('createdAt', 'created_at', '@times');
+    claim('updatedAt', 'updated_at', '@times');
   }
   if (softDelete) claim('deletedAt', 'deleted_at', '@softDelete');
   norm.columnOf = columnOf;
@@ -788,7 +796,7 @@ function finishModelNorm(def, norm) {
   // The properties whose DECLARED type is temporal — the set hydrate
   // and row absorption coerce through coerceTemporal. An array
   // field is a JSON document whatever its element type, so it is
-  // excluded; @timestamps / @softDelete columns are datetime by
+  // excluded; @times / @softDelete columns are datetime by
   // definition.
   const temporalOf = new Map();
   for (const [n, f] of norm.fields) {
@@ -809,7 +817,7 @@ function finishModelNorm(def, norm) {
   if (norm.naturalKey) {
     const fieldColumn = columnOf.get(norm.primaryKey);
     if (primaryKey?.column !== undefined && primaryKey.column !== fieldColumn) {
-      throw modelError(def, norm.primaryKey, 'primaryKey',
+      throw modelError(def, norm.primaryKey, 'primary',
         "@primaryKey names column '" + primaryKey.column + "' but field '" + norm.primaryKey +
         "' reads column '" + fieldColumn + "' — state the column once, on the field");
     }
@@ -898,7 +906,7 @@ function relationKeyType(rel) {
 }
 
 // The full projectable column set: declared fields plus the columns a
-// :model manages implicitly — id, @timestamps, @softDelete, and
+// :model manages implicitly — id, @times, @softDelete, and
 // belongsTo FKs. Algebra operates over THIS set, so a client
 // projection can pick `id` or `createdAt`.
 function projectableFields(def) {
@@ -1910,7 +1918,7 @@ async function preload(def, instances, specs) {
 // The link is a ROW, not a column, so linking and unlinking are the
 // join model's INSERTs and DELETEs — and they go THROUGH the join
 // model rather than around it: `insertMany` validates every row and
-// respects the join's own fields, defaults, and `@timestamps`, and
+// respects the join's own fields, defaults, and `@times`, and
 // `deleteAll` respects its `@softDelete`. A join model with required
 // columns of its own is therefore usable: pass them as `attrs`.
 //
@@ -2272,7 +2280,7 @@ async function save(def, inst) {
     def._applyEagerDerived(inst);
     inst._snapshot = snapshot(norm, inst);
     inst._persisted = true;
-    // INSERT records [null, newValue] per written column; @timestamps
+    // INSERT records [null, newValue] per written column; @times
     // columns were assigned on this INSERT, so they join the diff.
     for (const [n, v] of writtenColumns) inst.savedChanges.set(n, [null, v]);
     if (norm.timestamps) {
@@ -2326,7 +2334,7 @@ async function save(def, inst) {
       changes.set(fkCamel, [old, written]);
       if (isDirty) dirtyVersions.set(fkCamel, inst._dirtyVersions.get(fkCamel));
     }
-    // @timestamps: bump updated_at iff this UPDATE will actually emit
+    // @times: bump updated_at iff this UPDATE will actually emit
     // SQL — never on a no-op save. The column is not in _snapshot (it
     // is always overwritten on real writes, never diffed); declaring
     // updatedAt as a user field is rejected at normalize, so a
@@ -3549,17 +3557,12 @@ SchemaDef.prototype._tableSpec = function (options) {
         : 'INTEGER',
       notNull: !rel.optional, unique: false, default: null, was: null,
     });
-    // A cross-adapter relation cannot carry a database FK constraint
-    // — the referenced table is in another database. The accessor
-    // still works (a second query); the DDL suppresses the constraint
-    // with a note.
+    // A cross-adapter relation's target lives in another database, so
+    // it stays out of foreignKeys (which orders the dump's DDL stream);
+    // the accessor still works as a second query.
     const crossAdapter = targetDef &&
       (targetDef._adapter || null) !== (this._adapter || null);
-    if (crossAdapter) {
-      notes.push('-- NOTE: ' + rel.foreignKey + ' references ' + refTable +
-        '(' + refColumn + ') on a different adapter; FK constraint suppressed (cross-database constraints are impossible)');
-      continue;
-    }
+    if (crossAdapter) continue;
     foreignKeys.push({ column: rel.foreignKey, refTable, refColumn });
   }
 
@@ -3650,7 +3653,7 @@ SchemaDef.prototype._tableSpec = function (options) {
   };
 };
 
-function renderColumn(spec, col, fkByColumn) {
+function renderColumn(spec, col) {
   const column = quoteIdent(col.name, null, 'column');
   const parts = ['  ' + column + ' ' + col.type];
   if (col.primary) {
@@ -3660,11 +3663,17 @@ function renderColumn(spec, col, fkByColumn) {
     // Uniqueness renders as a named index below, never inline column
     // UNIQUE — one index shape for declaration and introspection.
   }
-  const fk = fkByColumn ? fkByColumn.get(col.name) : null;
-  if (fk) {
-    parts.push('REFERENCES ' + quoteIdent(fk.refTable, null, 'foreign-key table') +
-      '(' + quoteIdent(fk.refColumn, null, 'foreign-key column') + ')');
-  }
+  // No REFERENCES clause, deliberately. DuckDB's FK enforcement is a
+  // net loss for an app database: an UPDATE of any indexed column on a
+  // referenced table is executed as DELETE+INSERT and the DELETE trips
+  // the incoming FK ("over-eager checking", documented + open issues
+  // duckdb#13819/#20246); deletes are invisible to FK verification
+  // within a transaction; there is no deferral; and ALTER TABLE ADD
+  // CONSTRAINT does not exist, so constraints also block every rebuild
+  // dance. Referential integrity is the app's job (@belongsTo still
+  // mints the typed column, NOT NULL, and the accessor — everything
+  // but the constraint), and `foreignKeys` metadata still orders the
+  // dump and names relations for tooling.
   if (col.default != null) parts.push('DEFAULT ' + col.default);
   return parts.join(' ');
 }
@@ -3678,12 +3687,11 @@ function renderIndex(spec, ix) {
 
 function renderCreate(spec) {
   const blocks = [];
-  const fkByColumn = new Map(spec.foreignKeys.map((fk) => [fk.column, fk]));
   if (spec.sequence) {
     blocks.push('CREATE SEQUENCE ' + quoteIdent(spec.sequence.name, null, 'sequence') +
       ' START ' + spec.sequence.start + ';');
   }
-  const lines = spec.columns.map((c) => renderColumn(spec, c, fkByColumn));
+  const lines = spec.columns.map((c) => renderColumn(spec, c));
   blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
   const ix = spec.indexes.map((i) => renderIndex(spec, i));

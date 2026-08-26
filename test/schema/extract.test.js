@@ -12,11 +12,11 @@ const MODELS = `export User = schema :model
   lastName!  string
   email!     email @unique
   phone?     string
-  @timestamps
+  @times
 
 export Order = schema :model
   total! number, 0..
-  @timestamps
+  @times
   @belongsTo User
 
 export UserView  = User.pick("id", "firstName", "lastName", "email", "phone")

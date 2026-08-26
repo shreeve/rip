@@ -1,5 +1,5 @@
 import { test, eq, ok } from 'rip/testing'
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -17,6 +17,23 @@ waitFor = (fn, timeout = 5000) ->
 unixFetch = (path, socket) ->
   options = { unix: socket }
   fetch "http://worker#{path}", options
+
+# Reading stderr as one promise only settles at EOF — too late for a fact
+# that expires, since a rejected candidate is observable only while the
+# file that provoked it is still on disk. This accumulates as bytes arrive
+# so a test can wait for a line, then move on.
+readStderr = (proc) ->
+  decoder = TextDecoder.new()
+  log = { text: '' }
+  log.done = do ->
+    # Streaming decode, not per-chunk: a pipe read splits wherever the
+    # kernel handed bytes over, and decoding each chunk on its own turns
+    # any multi-byte character straddling that seam into U+FFFD.
+    for await chunk as proc.stderr
+      log.text += decoder.decode chunk, { stream: true }
+    log.text += decoder.decode()
+    log.text
+  log
 
 test! 'App edits preserve workers and valid API candidates swap through the doorbell', ->
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-')
@@ -48,7 +65,7 @@ test! 'App edits preserve workers and valid API candidates swap through the door
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-    diagnostic = Response.new(proc.stderr).text()
+    diagnostic = readStderr proc
     waitFor! -> registration?
     first = registration.upstreams[0].path
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
@@ -62,8 +79,13 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
+    # The invalid entry has to stay on disk until the compiler has actually
+    # READ it — a generation that has not reached the file yet would compile
+    # whatever the next write leaves there. The rejection is that proof, so
+    # wait for it rather than for a duration.
     writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
-    sleep! 300
+    waitFor! -> diagnostic.text.includes 'API candidate rejected; keeping current workers'
+    ok diagnostic.text.includes('this is not valid Rip @@@'), 'the rejection quotes the offending source'
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
@@ -87,13 +109,324 @@ test! 'App edits preserve workers and valid API candidates swap through the door
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
-    output = await diagnostic
-    ok output.includes 'API candidate rejected; keeping current workers'
-    ok output.includes 'this is not valid Rip @@@'
   finally
     try proc?.kill('SIGKILL')
     await proc.exited if proc?
-    await diagnostic if diagnostic?
+    await diagnostic.done if diagnostic?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a boot-crashing API candidate recovers once the file heals', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-crash-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'crash-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/crash-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'crash.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '2000' }
+    diagnostic = readStderr proc
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    # Generates cleanly, crashes at boot — the vim-intermediate shape that
+    # gets PAST candidate rejection and poisons the prepared generation.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    throw Error.new('boom: half-saved file')
+    get '/version' -> { version: 'broken' }
+    start!
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+
+    # The ring boots the poisoned candidate and must report failure, not hang.
+    rung = unixFetch! '/ring', doorbell[0].path
+    eq rung.status, 503
+
+    # The heal: the next save must become a fresh candidate even though the
+    # manager is sitting in the doorbell-cut state after a failed boot.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'healed' }
+    start!
+    """
+    # Recovery contract: a later ring boots the healed candidate and real
+    # worker upstreams replace the doorbell.
+    healed = waitFor! ->
+      response = try unixFetch!('/ring', doorbell[0].path) catch then null
+      return null unless response?.status is 204
+      updates.findLast((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq ((unixFetch!('/version', healed[0].path)).json!), { version: 'healed' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    await diagnostic.done if diagnostic?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a vim-style atomic save (write temp, rename over) still reloads', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-vim-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'vim-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/vim-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'vim.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '2000' }
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    # Vim with backupcopy=auto: dot a swapfile, write the new content to a
+    # temp name, move the original aside, rename the temp over the entry.
+    entry = join project, 'index.rip'
+    writeFileSync join(project, '.index.rip.swp'), 'swap noise'
+    writeFileSync join(project, '4913'), ''
+    rmSync join(project, '4913')
+    writeFileSync join(project, 'index.rip~'), readFileSync(entry)
+    tmp = join project, 'index.rip.tmp'
+    writeFileSync tmp, """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'vimmed' }
+    start!
+    """
+    renameSync tmp, entry
+    rmSync join(project, 'index.rip~')
+
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    eq (unixFetch!('/ring', doorbell[0].path)).status, 204
+    swapped = waitFor! ->
+      updates.findLast((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq ((unixFetch!('/version', swapped[0].path)).json!), { version: 'vimmed' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a never-ready candidate fails fast on later rings and a compiling save recovers', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-neverready-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'neverready-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/neverready-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'neverready.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '400' }
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+
+    # Compiles, boots, never becomes ready: no start! call.
+    writeFileSync join(project, 'index.rip'), """
+    import { get } from 'rip/sites'
+    get '/version' -> { version: 'sleeper' }
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+
+    # First ring pays the readiness deadline and fails.
+    eq (unixFetch!('/ring', doorbell[0].path)).status, 503
+    # Later rings fail fast — the doomed candidate left the shelf.
+    began = Date.now()
+    eq (unixFetch!('/ring', doorbell[0].path)).status, 503
+    ok Date.now() - began < 300, 'a repeat ring must not replay the readiness deadline'
+
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'awake' }
+    start!
+    """
+    healed = waitFor! ->
+      response = try unixFetch!('/ring', doorbell[0].path) catch then null
+      return null unless response?.status is 204
+      updates.findLast((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq ((unixFetch!('/version', healed[0].path)).json!), { version: 'awake' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a rejected save after a cut drops the stale candidate instead of serving it', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-stale-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'stale-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/stale-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'stale.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '2000' }
+    diagnostic = readStderr proc
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+
+    # Good candidate A: accepted, cut to doorbell, never rung.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'A' }
+    start!
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+
+    # Broken save B: rejected — and A must leave the shelf with it.
+    writeFileSync join(project, 'index.rip'), 'this is not valid Rip @@@'
+    waitFor! -> diagnostic.text.includes 'rejected while holding the doorbell'
+
+    # A ring must NOT boot A (disk says B): fail fast instead.
+    began = Date.now()
+    eq (unixFetch!('/ring', doorbell[0].path)).status, 503
+    ok Date.now() - began < 300, 'the stale candidate must not boot'
+
+    # Healed save C: rings serve C.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'C' }
+    start!
+    """
+    healed = waitFor! ->
+      response = try unixFetch!('/ring', doorbell[0].path) catch then null
+      return null unless response?.status is 204
+      updates.findLast((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq ((unixFetch!('/version', healed[0].path)).json!), { version: 'C' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    await diagnostic.done if diagnostic?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'creating the file that completes a broken import triggers the fast path', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-newfile-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  updates = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'newfile-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/newfile-registration/upstreams'
+        updates.push request.json!.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'newfile.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, RIP_BOOT_DEADLINE_MS: '2000' }
+    diagnostic = readStderr proc
+    waitFor! -> registration?
+    first = registration.upstreams[0].path
+
+    # Import a module that does not exist yet: candidate rejected.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    import { extra } from './extra.rip'
+    get '/version' -> { version: extra }
+    start!
+    """
+    waitFor! -> diagnostic.text.includes 'API candidate rejected'
+
+    # Creating the missing file is the fix — and must ride the watcher.
+    writeFileSync join(project, 'extra.rip'), "export extra = 'arrived'"
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    served = waitFor! ->
+      response = try unixFetch!('/ring', doorbell[0].path) catch then null
+      return null unless response?.status is 204
+      updates.findLast((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq ((unixFetch!('/version', served[0].path)).json!), { version: 'arrived' }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    await diagnostic.done if diagnostic?
     control.stop true
     rmSync dir, { recursive: true, force: true }
 

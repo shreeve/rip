@@ -620,7 +620,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         '  at! datetime, ["2024-01-01T10:00:00Z"]',
         'M = schema :model',
         '  name! string',
-        '  @timestamps',
+        '  @times',
         '  @ensure "fresh", (m) -> not m.id? or m.id > 0',
         'd: Date = Ev.parse({}).when',
         'console.log d, M',

@@ -11,7 +11,7 @@ User = schema :model
   email!  email @unique
   handle? string, 2..24
   bio?    text
-  @timestamps
+  @times
   @belongsTo Organization
   @hasMany Order
   beforeSave: -> @name = @name.trim()
@@ -21,7 +21,7 @@ User = schema :model
 
 Order = schema :model
   total!  ~integer
-  status! "open" | "paid" | "void"
+  status! "open" | ["paid"] | "void"   # bracketed member = the default
   @belongsTo User
   @belongsTo Coupon?
   @softDelete
@@ -50,19 +50,24 @@ Person = schema :model
 # table, a column).
 Patient = schema :model
   @table "MDM_PATIENT"
-  @primaryKey patientId, {column: "PATIENT_ID"}
+  @primary patientId, {column: "PATIENT_ID"}
   mrn!       string, {column: "MRN_NBR"}, @unique
   firstName! string
   @hasMany Study, {through: Enrollment}
   @hasOne Insurer, {as: payer, through: Enrollment}
 
-# Declaring the pk as a field, alongside an explicit @primaryKey, is
-# what makes it a caller-supplied NATURAL key: no sequence, and the
-# INSERT writes it like any other column.
+# Declaring the pk as a field marked inline @primary is what makes it
+# a caller-supplied NATURAL key: no sequence, and the INSERT writes it
+# like any other column. (Standalone `@primary iso` says the same.)
 Country = schema :model
-  @primaryKey iso
-  iso!  string, 2..2
+  iso!  string @primary, 2..2
   name! string
+
+# The compact pk spellings: the type slot elides to `string`, and the
+# comma before a transform is optional after an inline attribute.
+Ticket = schema :model
+  id!  @primary -> it.id or 'T' + it.num
+  num! integer
 
 Post = schema :model
   title! string
@@ -70,4 +75,4 @@ Post = schema :model
   @belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}
   @hasMany Tag, {as: labels, foreignKey: "post_id"}
 
-Inline = schema :model; label!; @timestamps; @belongsTo Person
+Inline = schema :model; label!; @times; @belongsTo Person

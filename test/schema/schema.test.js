@@ -283,7 +283,7 @@ describe('schema DSL: loud rejections', () => {
   test('the persistence spellings stay :model-only on the other kinds (the completed matrix)', () => {
     lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
     lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);
-    lexFails('I = schema :input\n  a! string\n  @timestamps', /:model-only/);
+    lexFails('I = schema :input\n  a! string\n  @times', /:model-only/);
     lexFails('S = schema :shape\n  a! string\n  @belongsTo User', /:model-only/);
     lexFails('S = schema :shape\n  a! string\n  @scope :hot, -> @where(a: 1)', /query scopes.*:model-only/);
     lexFails('M = schema :mixin\n  a! string\n  @defaultScope -> @where(a: 1)', /query scopes.*:model-only/);
@@ -292,7 +292,7 @@ describe('schema DSL: loud rejections', () => {
   });
 
   test('unknown :model directives reject by name at parse time, positioned', () => {
-    lexFails('U = schema :model\n  name! string\n  @timestamp', /unknown directive '@timestamp' on :model — legal: @mixin, @timestamps/);
+    lexFails('U = schema :model\n  name! string\n  @timestamp', /unknown directive '@timestamp' on :model — legal: @mixin, @times/);
     lexFails('U = schema :model\n  name! string\n  @bogus', /unknown directive '@bogus' on :model/);
     lexFails('U = schema :model\n  name! string\n  @belongs_too Order', /unknown directive '@belongs_too' on :model/);
     // positioned at the directive name, not the schema head
@@ -306,7 +306,7 @@ describe('schema DSL: loud rejections', () => {
 
   test('malformed or junk-bearing directive args reject at their own position', () => {
     lexFails('U = schema :model\n  name! string\n  @belongsTo User Order junk 42', /@belongsTo: takes one target name and an optional '\{…\}' options bracket/);
-    lexFails('U = schema :model\n  name! string\n  @timestamps yes please', /@timestamps: takes no arguments/);
+    lexFails('U = schema :model\n  name! string\n  @times yes please', /@times: takes no arguments/);
     lexFails('U = schema :model\n  name! string\n  @softDelete now', /@softDelete: takes no arguments/);
     lexFails('U = schema :model\n  name! string\n  @belongsTo', /@belongsTo requires a target name/);
     lexFails('U = schema :model\n  name! string\n  @idStart soon', /@idStart requires an integer literal/);
@@ -332,7 +332,7 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  name! string\n  @unique [nope, missing]', /@unique: unknown column 'nope' — the table has: id, name/);
     lexFails('U = schema :model\n  name! string\n  @index bogus_column', /@index: unknown column 'bogus_column'/);
     // implicit columns count as known
-    const ok = 'U = schema :model\n  name! string\n  @timestamps\n  @softDelete\n  @belongsTo Org\n  @index createdAt\n  @index [org_id, deleted_at]\n  @unique :name';
+    const ok = 'U = schema :model\n  name! string\n  @times\n  @softDelete\n  @belongsTo Org\n  @index createdAt\n  @index [org_id, deleted_at]\n  @unique :name';
     expect(() => tokenize(ok)).not.toThrow();
     // a @mixin defers the whole check to the runtime root (its fields
     // are not parse-visible; normalize re-checks the expanded set)
@@ -353,22 +353,22 @@ describe('schema DSL: loud rejections', () => {
   });
 
   // A surrogate primary key is a property↔column pair like any
-  // field's, so `@primaryKey pid, {column: "PID"}` puts 'pid' in
+  // field's, so `@primary pid, {column: "PID"}` puts 'pid' in
   // property space and `@index [pid]` resolves to column 'PID' —
   // exactly as the runtime's columnFor resolves it.
   test('@index/@unique resolve the surrogate primary key through its {column:}', () => {
-    const pk = 'U = schema :model\n  name! string\n  @primaryKey pid, {column: "PID"}\n  ';
+    const pk = 'U = schema :model\n  name! string\n  @primary pid, {column: "PID"}\n  ';
     expect(() => tokenize(pk + '@index [pid]')).not.toThrow();
     expect(() => tokenize(pk + '@unique [pid]')).not.toThrow();
     expect(() => tokenize(pk + '@index [:PID]')).not.toThrow();
     // A natural key resolves through its field declaration.
-    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primaryKey mrn\n  @index [mrn]')).not.toThrow();
+    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primary mrn\n  @index [mrn]')).not.toThrow();
     // A genuinely unknown name still rejects with the column list.
     lexFails(pk + '@index [nope]', /@index: unknown column 'nope' — the table has: PID, name/);
     // The descriptor carries the pair the runtime resolves: the pk's
     // property→column mapping beside the index written in field space.
     const desc = new Function('__schema', compile(pk + '@index [pid]').code + '\nreturn U;')((d) => d);
-    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'primaryKey').args[0])
+    expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'primary').args[0])
       .toEqual({ name: 'pid', column: 'PID' });
     expect(desc.entries.find((e) => e.tag === 'directive' && e.name === 'index').args[0].fields)
       .toEqual(['pid']);
@@ -381,8 +381,8 @@ describe('schema DSL: loud rejections', () => {
   test('a property claiming two columns rejects positioned', () => {
     lexFails('U = schema :model\n  userId! integer, {column: "USER_REF"}\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own property 'userId' \(columns 'USER_REF' and 'user_id'\) — every property reads exactly one column/);
-    lexFails('U = schema :model\n  createdAt! datetime, {column: "CREATED"}\n  @timestamps',
-      /field 'createdAt' and @timestamps both own property 'createdAt' \(columns 'CREATED' and 'created_at'\)/);
+    lexFails('U = schema :model\n  createdAt! datetime, {column: "CREATED"}\n  @times',
+      /field 'createdAt' and @times both own property 'createdAt' \(columns 'CREATED' and 'created_at'\)/);
     // Same column on both sides is the column-side collision, unchanged.
     lexFails('U = schema :model\n  userId! integer, {column: "user_id"}\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own column 'user_id' — every table column has exactly one owner/);
@@ -413,16 +413,45 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field 'a' option 'wat' — known options: column, was/);
     lexFails('U = schema :model\n  a! string, {was: 5}', /'was' names a database column, so it is QUOTED/);
     lexFails('U = schema :model\n  a! string, {was: "x"}, {was: "y"}', /more than one '\{…\}' attrs bracket/);
-    lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*only inline attribute is '@unique'/);
+    lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*inline attributes are '@unique' and '@primary'/);
     lexFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
+  });
+
+  test('literal-union defaults: bracket the member, in place', () => {
+    const fieldOf = (src, name) => new Function('__schema', compile(src).code + '\nreturn U;')((d) => d)
+      .entries.find((e) => e.tag === 'field' && e.name === name);
+    const un = (src) => fieldOf(src, 'role');
+    // mid-union and first-member brackets both mark the default
+    expect(un('U = schema :model\n  role "admin" | ["user"]').constraints.default).toBe('user');
+    expect(un('U = schema :model\n  role ["admin"] | "user"').constraints.default).toBe('admin');
+    expect(un('U = schema :model\n  role "admin" | ["user"]').literals).toEqual(['admin', 'user']);
+    // one default only, whichever spelling
+    lexFails('U = schema :model\n  role "a" | ["b"] | ["c"]', /brackets more than one union member/);
+    lexFails('U = schema :model\n  role "a" | ["b"], ["c"]', /more than one '\[…\]' default bracket/);
+    // a default outside the union is a typo, both spellings
+    lexFails('U = schema :model\n  role "admin" | "user", ["usr"]', /defaults to "usr", which is not a member/);
+    // a lone leading bracket stays the ordinary default (typeless field)
+    expect(fieldOf('U = schema :model\n  label! ["x"]', 'label').constraints.default).toBe('x');
+  });
+
+  test('inline @primary: one identity, one spelling, :model-only', () => {
+    lexFails('U = schema :model\n  a! string @primary\n  b! string @primary',
+      /both 'a' and 'b' declare '@primary' — a row has one identity/);
+    lexFails('U = schema :model\n  @primary a\n  a! string @primary',
+      /'@primary a' and inline '@primary' on field 'a' are two answers to one question/);
+    lexFails('M = schema :mixin\n  a! string @primary',
+      /inline '@primary' on field 'a' is :model-only — a mixin cannot declare the primary key/);
+    // The compact spellings: elided type defaults to string; the comma
+    // before a transform is optional after an inline attribute.
+    expect(() => tokenize("U = schema :model\n  id! @primary -> it.id or 'x'\n  n! string")).not.toThrow();
   });
 
   test('a field and a directive owning one column collide (mixin-free models)', () => {
     // the exact repro: the field's snake column IS the relation's FK
     lexFails('U = schema :model\n  userId! integer\n  name! string\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own column 'user_id'/);
-    lexFails('U = schema :model\n  createdAt! datetime\n  @timestamps',
-      /field 'createdAt' and @timestamps both own column 'created_at'/);
+    lexFails('U = schema :model\n  createdAt! datetime\n  @times',
+      /field 'createdAt' and @times both own column 'created_at'/);
     lexFails('U = schema :model\n  deletedAt? datetime\n  @softDelete',
       /field 'deletedAt' and @softDelete both own column 'deleted_at'/);
     // duplicate relations claim one column too — directive-vs-directive
@@ -441,13 +470,13 @@ describe('schema DSL: loud rejections', () => {
     lexFails('U = schema :model\n  name! string\n  @table Alpha\n  @table Beta', /duplicate '@table'/);
   });
 
-  test('duplicate @timestamps / @softDelete reject as once-directives, not as column two-owners', () => {
+  test('duplicate @times / @softDelete reject as once-directives, not as column two-owners', () => {
     // The argument-less pair has no second value to last-win; the
     // duplicate is still refused — it declares itself once — and the
     // runtime holds the same verdict on hand-built descriptors
     // (pinned in runtime-orm.test.js).
-    lexFails('U = schema :model\n  name! string\n  @timestamps\n  @timestamps',
-      /duplicate '@timestamps' — declared twice; a :model declares it once/);
+    lexFails('U = schema :model\n  name! string\n  @times\n  @times',
+      /duplicate '@times' — declared twice; a :model declares it once/);
     lexFails('U = schema :model\n  name! string\n  @softDelete\n  @softDelete',
       /duplicate '@softDelete' — declared twice; a :model declares it once/);
   });
@@ -970,22 +999,22 @@ describe('schema: stores and mappings', () => {
     expect(result.declarations).toContain('declare const S: Schema<S, S>;');
     expect(result.declarations).toContain('interface Schema<Out, In = unknown> {');
     expect(result.declarations).not.toContain('interface ModelSchema'); // no :model → no persistence tier
-    const model = fullCompile('M = schema :model\n  a! string\n  @timestamps');
+    const model = fullCompile('M = schema :model\n  a! string\n  @times');
     expect(model.declarations).toContain('type MData = { a: string } & { id: number; createdAt: Date; updatedAt: Date };');
     expect(model.declarations).toContain('declare const M: ModelSchema<M, MData, number, MCreate>;');
   });
 
   test('a model declaration gets the standard store rows: $self, body role, cover mapping', () => {
-    const src = 'M = schema :model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a';
+    const src = 'M = schema :model, on: analytics\n  a! string\n  @times\n  beforeSave: -> @a';
     const { stores, mappings } = compile(src);
     const nodes = stores.nodesByKind('schema');
     expect(nodes.length).toBe(1);
     const id = nodes[0].nodeId;
     expect(src.slice(nodes[0].sourceStart, nodes[0].sourceEnd))
-      .toBe('schema :model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a');
+      .toBe('schema :model, on: analytics\n  a! string\n  @times\n  beforeSave: -> @a');
     const body = stores.role(id, 'body');
     expect(src.slice(body.sourceStart, body.sourceEnd))
-      .toBe(':model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a');
+      .toBe(':model, on: analytics\n  a! string\n  @times\n  beforeSave: -> @a');
     const gen = mappings.bestAtSource(body.sourceStart);
     expect(gen).not.toBeNull();
     expect(gen.mappingKind).toBe('cover');

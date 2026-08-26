@@ -13,13 +13,40 @@ tests = readdirSync(import.meta.dir, { withFileTypes: true })
 
 throw Error.new('server tests found no test/*/test.rip files') unless tests.length
 
-for test in tests
-  name = relative root, test
-  p "$ rip #{name}"
-  child = Bun.spawn [rip, test],
-    cwd: root
-    stdin: 'inherit'
-    stdout: 'inherit'
-    stderr: 'inherit'
-  code = await child.exited
-  exit code unless code is 0
+# Suites run concurrently — each binds port 0 or its own socket, so
+# they don't contend for addresses, and the wall clock collapses from
+# the sum of the suites toward the slowest one. Concurrency is CAPPED,
+# not unbounded: these suites time real machinery (reload doorbells,
+# monitor streams) against waitFor deadlines, and under `test:all` this
+# lane already shares the machine with two dozen others — full fan-out
+# starves those clocks into flakes. Output pipes start draining at
+# spawn so a chatty suite can't block on a full pipe; each suite's
+# block then prints whole, in launch order.
+CAP = 4
+queue = tests.entries()
+results = Array.new tests.length
+
+worker = ->
+  loop
+    { value, done } = queue.next()
+    return if done
+    [i, test] = value
+    child = Bun.spawn [rip, test],
+      cwd: root
+      stdin: 'ignore'
+      stdout: 'pipe'
+      stderr: 'pipe'
+    out = Bun.readableStreamToText child.stdout
+    err = Bun.readableStreamToText child.stderr
+    code = await child.exited
+    results[i] = { name: relative(root, test), code, out: await out, err: await err }
+
+Promise.all! (worker() for _ in [1..Math.min(CAP, tests.length)])
+
+status = 0
+for suite in results
+  p "$ rip #{suite.name}"
+  process.stdout.write suite.out if suite.out
+  process.stderr.write suite.err if suite.err
+  status = 1 unless suite.code is 0
+exit status unless status is 0

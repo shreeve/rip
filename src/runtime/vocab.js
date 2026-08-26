@@ -141,20 +141,20 @@ function isLiteralColumn(col) {
 // validator; adding a directive means adding one entry here and
 // teaching both layers that shape, if it is a new one.
 //
-//   'none'    @timestamps                 no arguments
+//   'none'    @times                 no arguments
 //   'target'  @belongsTo User, {...}      a PascalCase model + options
 //   'columns' @index [:a, :b]             one field name or a list
 //   'int'     @idStart 1000               an integer literal
 //   'name'    @table UserProfile          a table name; bare is a
 //             @table "USER_MASTER"        logical name Rip snake_cases,
 //                                         quoted is the literal table
-//   'field'   @primaryKey patientId       a camelCase property name and
+//   'field'   @primary patientId          a camelCase property name and
 //             …, {column: "PATIENT_ID"}   the column it reads, same pair
 //                                         a declared field spells
 const MODEL_DIRECTIVES = {
   __proto__: null,
   mixin: 'target',
-  timestamps: 'none',
+  times: 'none',
   softDelete: 'none',
   belongsTo: 'target',
   hasOne: 'target',
@@ -164,15 +164,15 @@ const MODEL_DIRECTIVES = {
   idStart: 'int',
   table: 'name',
   tableWas: 'name',
-  primaryKey: 'field',
+  primary: 'field',
 };
 
 // Directives a :model declares at most once. For the argument-carrying
 // ones a second occurrence would silently last-win in the runtime's
-// read loops; for the argument-less pair (@timestamps, @softDelete) a
+// read loops; for the argument-less pair (@times, @softDelete) a
 // second occurrence is a duplicate declaration of a once-thing — both
 // layers reject it rather than tolerating it idempotently.
-const ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primaryKey', 'timestamps', 'softDelete'];
+const ONCE_DIRECTIVES = ['idStart', 'table', 'tableWas', 'primary', 'times', 'softDelete'];
 
 // Plain arrays, not Sets: at this size `includes` beats a hash lookup
 // and the error messages below `.join(', ')` them directly instead of

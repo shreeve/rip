@@ -211,6 +211,7 @@ export type Ctx =
   header: (name: string, value?: string, opts?: { append?: boolean }) => string | null | undefined
   cache: (duration: number | string | false) => void
   session: Record<string, any>
+  error: any
   req: CtxReq
   mark?: string                  # the request's correlation id, set by the handler
 
@@ -365,15 +366,34 @@ createContext = (req, params = {}, url = null, pathname = null) ->
 
 compose = (beforeFilters, afterFilters, handler) ->
   (c) ->
-    for filter in beforeFilters
-      result = filter.call!(c, c)
-      if result instanceof Response
-        c._response = result
-        return c
-    result = handler.call!(c, c)
-    c._response = result if result instanceof Response
+    # After filters ALWAYS run — on success, on a before-filter halt,
+    # and on a thrown error (which they can observe as @error before
+    # onError shapes the response). A request journal that goes quiet
+    # exactly when requests fail is worse than none at all.
+    caught = null
+    try
+      halted = false
+      for filter in beforeFilters
+        result = filter.call!(c, c)
+        if result instanceof Response
+          c._response = result
+          halted = true
+          break
+      unless halted
+        result = handler.call!(c, c)
+        c._response = result if result instanceof Response
+    catch err
+      caught = err
+      c.error = err
     for filter in afterFilters
-      filter.call!(c, c)
+      try
+        filter.call!(c, c)
+      catch afterError
+        # An after filter is the request's error only when the request
+        # had none; it never masks the handler's own throw.
+        throw afterError unless caught?
+        console.warn 'rip-site: after filter failed during error handling:', afterError
+    throw caught if caught?
     c
 
 # ==============================================================================
@@ -404,7 +424,9 @@ export errorEnvelope = (err): { status: number, error: ApiError } ->
   raw = err?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
   error =
-    if err?.issues
+    if err?.errors
+      { message: err.message or 'Validation failed', errors: err.errors }
+    else if err?.issues
       { message: err.message or 'Validation failed', issues: err.issues }
     else if err?.notice
       { notice: err.notice }
@@ -714,10 +736,18 @@ runHandler = (c, route) ->
     applyMark(c._response or Response.new('', { status: 204 }))
   catch err
     console.warn 'Request error:', err if not err?.status or err.status >= 500
-    res = if _errorHandler?
-      _errorHandler.call!(c, err, c)
+    handled = if _errorHandler? then _errorHandler.call!(c, err, c) else null
+    res = if handled instanceof Response
+      handled
+    else if handled? and typeof handled is 'object'
+      # A plain object from onError rides out as JSON — the handler
+      # states the body, and the status comes from the thrown error
+      # itself (the same 400-599-or-500 rule the default envelope
+      # applies), so shaping an error takes no Response ceremony.
+      c.json handled, errorEnvelope(err).status
     else
-      # Same masked JSON envelope smart() emits: 5xx internals never leak.
+      # No handler, or the handler declined (null/undefined): the same
+      # masked JSON envelope smart() emits — 5xx internals never leak.
       masked = errorEnvelope(err)
       Response.new JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
@@ -816,8 +846,35 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # Error Helpers — Halt request with an HTTP error
 # ==============================================================================
 
-export error = (message = 'Bad request', status = 400) ->
-  throw Object.assign(Error.new(message), { status })
+# The optional trailing args serve APIs with a machine-readable error
+# contract: `error! 'No such patient', 404, 'unknown_patient',
+# 'patient.id'`. A given code also stamps `api: true` — the marker an
+# onError keys on to reshape the envelope — so system errors that
+# happen to carry a `code` (ENOENT and friends) can never impersonate
+# an intentional API error.
+# Typed `any`, not `never`: the empty-map no-op means error! can
+# return, and `never` would mark everything after `error! errs` —
+# the whole process stanza — unreachable to the checker.
+export error = (message: string | Record<string, string> = 'Bad request', status = 400, code = null, field = null): any ->
+  # Object form — a field→message map, for collected validation:
+  #
+  #   errs = {}
+  #   errs.email = 'Enter a valid email' unless mail
+  #   error! errs
+  #
+  # An EMPTY map is a no-op, so the validate stanza always ends with the
+  # same line and needs no guard. Ships as 422 unless a status says
+  # otherwise (the 400 default remaps — validation is 422's whole job).
+  if message? and typeof message is 'object'
+    return unless Object.keys(message).length
+    status = 422 if status is 400
+    throw Object.assign(Error.new('Validation failed'), { status, errors: message })
+  err = Object.assign(Error.new(message), { status })
+  if code?
+    err.code = code
+    err.api = true
+    err.field = field if field?
+  throw err
 
 export notice = (message = 'Something went wrong', status = 400) ->
   throw Object.assign(Error.new(message), { status, notice: message })
@@ -850,7 +907,7 @@ export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator,
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
-export read = (name?: string, type?: string | RegExp | any[] | Record<string, any>, miss?) ->
+export read = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper
@@ -866,6 +923,9 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
     for part in name.split('.')
       break unless v? and typeof v is 'object'
       v = v[part]
+  # Symbols are the type vocabulary's native spelling — `read 'email', :email!`
+  # and `read 'email', 'email!'` are the same call (suffixes ride the symbol).
+  type = Symbol.keyFor(type) if typeof type is 'symbol'
   return v if type is 'raw'
   v = v.trim() if typeof v is 'string'
 
@@ -882,11 +942,25 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
       must = true
       type = type.slice(0, -1)
 
-    # apply validator function — raw validators (array/hash/json) take
-    # the value untouched; the registry's isRawType seam decides.
+    # detect loud-optional (trailing '?'): an absent/empty value stays a
+    # quiet null — optional means optional — but a SUPPLIED value that
+    # fails its validator throws, naming the field. Without this, a
+    # typo'd value coerces to null and impersonates an omitted one; at a
+    # boundary that distinction is the whole point of validating.
+    else if type.endsWith '?'
+      loud = true
+      type = type.slice(0, -1)
+
+    # apply validator function. Preparation (stringify + trim, with raw
+    # validators taking their value untouched) is the validator's own
+    # job — getValidator hands back the prepared face, so read adds
+    # nothing here. The early trim above is NOT preparation: it feeds
+    # the supplied/empty decision, which must precede validation.
     f = getValidator(type)
-    v = String(v ?? '') unless isRawType(type)
+    supplied = v? and v isnt ''
     v = if f then f(v) else null
+    if loud and supplied and not v?
+      throw Object.assign(Error.new("#{name} is not a valid #{type}"), { status: 422, field: name, invalid: true })
 
   # Regex: apply regex pattern
   else if type instanceof RegExp

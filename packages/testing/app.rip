@@ -6,7 +6,7 @@
 # Three capabilities, none app-specific:
 #
 #   scratchDb   temp DuckDB file + the app's migration ledger replayed +
-#               duckdb-harbor on an ephemeral port. Real database, real
+#               `harbor serve` on an ephemeral port. Real database, real
 #               SQL, disposable — your dev database is never in play.
 #   bootApp     set env, import the app's entry in-process, hand back
 #               the framework's fetch handler (start() installs it as
@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 # Replay every .sql in migrationsDir (sorted, same order as rip schema)
-# into a fresh DuckDB file, then serve it with duckdb-harbor. Returns
+# into a fresh DuckDB file, then serve it with `harbor serve`. Returns
 # { url, token, file, dir, stop } — stop! kills harbor and removes the
 # scratch directory; the process-exit hook covers forgotten stops.
 export scratchDb = (migrationsDir, opts = {}) ->
@@ -41,24 +41,41 @@ export scratchDb = (migrationsDir, opts = {}) ->
       throw Error.new "scratchDb: migration #{name} failed: #{ran.stderr.toString()}"
 
   token = opts.token ?? 'scratch-token'
-  launcher = Bun.which('duckdb-harbor') or join(process.env.HOME, 'bin', 'duckdb-harbor')
+  launcher = Bun.which('harbor') or throw Error.new 'scratchDb: no `harbor` binary on PATH'
   proc = null
   url = null
   for attempt in [1..3]
     port = 20000 + Math.floor(Math.random() * 20000)
     url = "http://127.0.0.1:#{port}"
-    proc = Bun.spawn [launcher, '--bind', '127.0.0.1', '--port', String(port), '--token', token, file],
+    # Publish the scratch coordinates into THIS process's env before the
+    # first await. Top-level await lets sibling modules evaluate the
+    # moment their importer suspends, so an app module that reads
+    # RIP_DB_URL at module scope races this function — and one that
+    # loses the race silently falls back to the developer's real
+    # database, where every test write lands. Attempt 1 reaches this
+    # line synchronously, which is what closes the race; bootApp
+    # repeats these values later for explicitness.
+    process.env.RIP_DB_URL = url
+    process.env.RIP_DB_TOKEN = token
+    process.env.DB_FILE = file
+    args = [launcher, 'serve', file, '--bind', '127.0.0.1', '--port', String(port),
+            '--token', token, '--name', "scratch-#{process.pid}-#{attempt}"]
+    if process.env.HARBOR_STATEMENT_TIMEOUT_MS
+      args.push '--statement-timeout', "#{process.env.HARBOR_STATEMENT_TIMEOUT_MS}ms"
+    proc = Bun.spawn args,
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
+      # Registry litter (name.lock/name.token) lands in the scratch dir
+      # and is removed with it — never in the user's ~/.harbor.
+      env: { ...process.env, HARBOR_HOME: dir }
     # A live child must not hold the test process's event loop open —
     # the tally prints at exit, and exit is what kills harbor.
     proc.unref()
     deadline = Date.now() + 15000
     healthy = false
-    # `/ready` on current harbors, `/health` on ones predating the swap.
-    # Whichever launcher is on the PATH here is not this repo's to pick,
-    # so accept either rather than hang for fifteen seconds against a
+    # `/ready` on current harbors, `/health` on ones predating the swap —
+    # accept either rather than hang for fifteen seconds against a
     # server that is up and answering the other name.
     probe = (path) ->
       try fetch!("#{url}#{path}", { signal: AbortSignal.timeout(500) }) catch then null
@@ -71,7 +88,7 @@ export scratchDb = (migrationsDir, opts = {}) ->
       Bun.sleep! 100
     break if healthy
     proc.kill()
-    throw Error.new 'scratchDb: duckdb-harbor failed to start on three ports' if attempt is 3
+    throw Error.new 'scratchDb: harbor failed to start on three ports' if attempt is 3
 
   stopped = false
   stop! = ->

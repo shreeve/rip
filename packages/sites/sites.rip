@@ -494,11 +494,29 @@ switch verb
     else if noun is 'all'
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: wantsControl! }
       abort 'rip-sites: no apps in the catalog' unless apps.length
+      offsets = {}
       for app in apps
         id = encodeURIComponent app.id
         log = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?lines=#{lines}", null, { start: false }
         console.log "—— #{app.name} ——"
         process.stdout.write log.text or '(empty)\n'
+        offsets[app.id] = log.next
+      if follow
+        # One poll loop over every app; the header reprints only when
+        # the app producing lines changes, so a single busy app reads
+        # as one uninterrupted stream.
+        current = apps[apps.length - 1].id
+        loop
+          sleep! 250
+          for app in apps
+            id = encodeURIComponent app.id
+            next = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?after=#{offsets[app.id]}", null, { start: false }
+            if next.text
+              unless current is app.id
+                console.log "—— #{app.name} ——"
+                current = app.id
+              process.stdout.write next.text
+            offsets[app.id] = next.next
     else
       requireApp!
       id = encodeURIComponent noun

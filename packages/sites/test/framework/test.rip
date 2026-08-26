@@ -149,7 +149,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   blocked = handle! request('GET', '/blocked')
   eq blocked.status, 403
   eq blocked.text!, 'halted'
-  eq reached, { handler: false, after: false }
+  eq reached, { handler: false, after: true }
 
   resetGlobals()
   late = []
@@ -170,6 +170,34 @@ test! 'before and after filters compose around handlers and short-circuit', ->
     eq failure.status, 500
     eq failure.json!, { error: { message: 'Internal Server Error' } }
   ok warnings.some((message) -> message.includes('filter secret'))
+
+test! 'after filters run on thrown errors and never mask them', ->
+  # The always-run contract: a request journal that goes quiet exactly
+  # when requests fail is worse than none at all.
+  resetGlobals()
+  seen = []
+  after -> seen.push (if @error? then "error:#{@error.status}" else 'clean')
+  get '/boom' -> throw Object.assign(Error.new('nope'), { status: 422 })
+  get '/calm' -> 'ok'
+  response = handle! request('GET', '/boom')
+  eq response.status, 422
+  handle! request('GET', '/calm')
+  eq seen, ['error:422', 'clean']
+
+  # An after filter's own throw is the request's error only when the
+  # request had none — it never masks the handler's.
+  resetGlobals()
+  after -> throw Error.new 'journal broke'
+  get '/boom' -> throw Object.assign(Error.new('the real error'), { status: 409 })
+  get '/calm' -> 'ok'
+  warnings = captureWarnings! ->
+    masked = handle! request('GET', '/boom')
+    eq masked.status, 409
+  ok warnings.some((message) -> message.includes('journal broke'))
+  warnings = captureWarnings! ->
+    plain = handle! request('GET', '/calm')
+    eq plain.status, 500
+  ok warnings.some((message) -> message.includes('journal broke'))
 
 test! 'raw filters run before body parsing on write requests only', ->
   resetGlobals()
@@ -214,6 +242,22 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     eq custom.status, 409
     eq custom.json!, { handled: 'handled here' }
 
+    # A plain object from onError is JSON with the thrown error's own
+    # status; returning null declines and delegates to the masked
+    # default envelope.
+    resetGlobals()
+    onError (failure) ->
+      return { claimed: failure.message, code: failure.code } if failure.code is 'teapot'
+      null
+    get '/object' -> error! 'short and stout', 418, 'teapot'
+    get '/declined' -> throw Error.new 'database password'
+    obj = handle! request('GET', '/object')
+    eq obj.status, 418
+    eq obj.json!, { claimed: 'short and stout', code: 'teapot' }
+    declined = handle! request('GET', '/declined')
+    eq declined.status, 500
+    eq declined.json!, { error: { message: 'Internal Server Error' } }
+
     resetGlobals()
     get '/present' -> 'yes'
     missing = handle! request('GET', '/missing')
@@ -221,6 +265,46 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     eq missing.text!, 'Not Found'
   ok warnings.some((message) -> message.includes('database password'))
   ok warnings.some((message) -> message.includes('handled here'))
+
+test! 'read takes symbol types — :email! and :phone? spell the vocabulary', ->
+  resetGlobals()
+  post '/sym' ->
+    mail = read 'mail', :email!
+    phon = read 'phone', :phone?
+    { mail, phon }
+  good = handle! jsonRequest('POST', '/sym', { mail: '  A@B.CO ', phone: '(801) 555-2000' })
+  eq good.status, 200
+  eq good.json!, { mail: 'a@b.co', phon: '(801) 555-2000' }
+  missing = handle! jsonRequest('POST', '/sym', { phone: '(801) 555-2000' })
+  eq missing.status, 400   # :email! required
+  bad = handle! jsonRequest('POST', '/sym', { mail: 'a@b.co', phone: 'call me' })
+  eq bad.status, 422       # :phone? loud-optional, supplied but invalid
+
+test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
+  error {}   # nothing wrong -> nothing thrown; the validate stanza needs no guard
+  caught = null
+  try
+    error { firstName: 'Enter a first name', phone: 'Enter a phone number' }
+  catch e
+    caught = e
+  eq caught.status, 422
+  eq caught.errors, { firstName: 'Enter a first name', phone: 'Enter a phone number' }
+  # the default envelope carries the map through
+  eq errorEnvelope(caught),
+    status: 422
+    error: { message: 'Validation failed', errors: { firstName: 'Enter a first name', phone: 'Enter a phone number' } }
+  # an explicit status overrides the 422 default
+  overridden = null
+  try
+    error { field: 'nope' }, 400
+  catch e
+    overridden = e
+  eq overridden.status, 422   # 400 remaps — validation is 422's job
+  try
+    error { field: 'gone' }, 410
+  catch e
+    overridden = e
+  eq overridden.status, 410
 
 test 'error envelopes expose client details and mask server details', ->
   eq errorEnvelope(Error.new('database password')),
@@ -284,6 +368,23 @@ test! 'read merges body, query, and path with request-local context', ->
   eq ctx(), null
   eq mark(), null
   throws (-> read('outside')), 'no context for read()'
+
+test! "read's loud-optional '?' rejects supplied garbage, allows absence", ->
+  resetGlobals()
+  post '/loud' ->
+    dob: read('dob', 'date?')
+    email: read('email', 'email?')
+  # Absent and empty are quiet nulls — optional means optional.
+  quiet = handle! jsonRequest 'POST', '/loud', { email: '' }
+  eq quiet.json!, { dob: null, email: null }
+  # A valid value normalizes exactly as the bare validator would.
+  good = handle! jsonRequest 'POST', '/loud', { dob: '2024-02-29', email: 'A@B.CO' }
+  eq good.json!, { dob: '2024-02-29', email: 'a@b.co' }
+  # A supplied value that fails its validator names the field, 422 —
+  # never a silent null impersonating an omitted field.
+  bad = handle! jsonRequest 'POST', '/loud', { dob: '02/29/2024' }
+  eq bad.status, 422
+  eq bad.json!, { error: { message: 'dob is not a valid date' } }
 
 test! 'request marks and trusted tenant context stay request-local', ->
   resetGlobals()
