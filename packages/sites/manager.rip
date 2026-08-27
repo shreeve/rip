@@ -404,7 +404,7 @@ ensureProxyFirst = (files, bridgePath) ->
     proxy = [...proxy, bridgePath]
   { ...files, proxy_first: proxy }
 
-loadServeConfig = (appDir) ->
+export loadServeConfig = (appDir) ->
   configPath = join appDir, 'serve.rip'
   return null unless existsSync configPath
   requireFile configPath, 'serve.rip config'

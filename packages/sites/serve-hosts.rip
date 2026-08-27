@@ -1,0 +1,25 @@
+# Prints a project's serve.rip host declaration as one marker-framed
+# JSON line on stdout:
+#   rip-serve-hosts:{"name":…,"hosts":[…],"site":{"host":…,"aliases":…}|null}
+#
+# The agent spawns this instead of importing serve.rip itself: a module
+# cache lives as long as its process, so a long-lived agent would keep
+# serving the first version of an edited serve.rip forever. A fresh
+# process per read (the agent mtime-caches the result) is never stale.
+# The marker keeps the payload parseable when serve.rip's own module
+# scope prints, and the explicit exit keeps a config whose import graph
+# holds a handle (timer, watcher, socket) from wedging the child open.
+import { loadServeConfig } from './manager.rip'
+
+root = process.argv[2]
+unless root
+  console.error 'usage: serve-hosts.rip <project-root>'
+  process.exit 2
+
+serve = loadServeConfig! root
+out =
+  name: serve?.name or null
+  hosts: serve?.hosts or []
+  site: if serve?.site? then { host: serve.site.host, aliases: serve.site.aliases } else null
+console.log "rip-serve-hosts:#{JSON.stringify out}"
+process.exit 0
