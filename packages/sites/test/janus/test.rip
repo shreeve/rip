@@ -12,7 +12,7 @@ PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 # sources: env, then the packaged binary, then PATH. Test and production
 # should not disagree about where a Janus binary comes from — and an env
 # var alone made this lane depend on which shell you happened to be in.
-PACKAGED_CADDY = join(import.meta.dir, '..', '..', 'bin', 'caddy-janus')
+PACKAGED_CADDY = join(import.meta.dir, '..', '..', 'bin', 'janus')
 
 MISSING = """
   test:janus found no Janus-enabled Caddy. Looked, in order, at:

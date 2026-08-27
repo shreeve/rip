@@ -17,7 +17,7 @@ bun run test:janus
 ```
 
 The test resolves an already-built Janus Caddy binary: `JANUS_CADDY` first,
-then the packaged `bin/caddy-janus`, then `caddy` on `PATH`. It performs no
+then the packaged `bin/janus`, then `caddy` on `PATH`. It performs no
 build and errors when no binary exists. In every case the test rejects a
 local module replacement.
 
