@@ -256,29 +256,102 @@ const hasMemberColon = (m) => {
 // bodies become TS braces. Members joining respects bracket/angle
 // balance so a generic wrapped across body lines stays one member.
 
-// Nested anonymous type blocks : a
-// member whose type is the bare keyword `type` opens an indented
-// sub-block of members — folded here into an inline object type
-// (`data: type` + children → `data: { items: string[]; total: number }`),
-// recursively, BEFORE memberLines discards indentation. Lines that
-// don't end in `: type` pass through untouched.
-const foldAnonBlocks = (body) => {
+// Net bracket/angle depth of a normalized text run — the balance
+// memberLines and the nesting fold both join continuation lines by.
+const netDepth = (text) => {
+  let depth = 0;
+  let inStr = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+    } else if (c === '"' || c === "'") inStr = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === '<') depth++;
+    else if (c === '>' && text[i - 1] !== '=') depth--;
+  }
+  return depth;
+};
+
+// ── layout nesting: bare-colon heads ─────────────────────────────────
+// A body line whose NORMALIZED text ends at a depth-0 ':' takes its
+// type from the indented block beneath it — the same bare-colon
+// nesting object literals use at the value level, for every key shape
+// the member grammar knows (property, index-signature, method/call
+// heads alike). The sub-block classifies like a block alias body,
+// recursively:
+//   member children  → an inline object type
+//                      (`inner?:` + `x?: number` → `inner?: { x?: number }`)
+//   `|` variants     → a union annotation
+//   one other child  → the annotation wrapped onto its own line
+// Anything else rejects — never a silent flatten into the parent.
+// Each line normalizes FIRST (a trailing `#` comment is trivia here as
+// everywhere) and then joins bracket continuations BEFORE any head
+// reading, so a wrapped `handler: (` consumes its interior lines and
+// never donates them as heads. A bare ':' with nothing beneath it
+// carries no type and rejects. The ':' itself is the one block
+// opener: an annotation spelled as the bare word `type` above a
+// deeper line rejects with the fix rather than reading as a type
+// named 'type'.
+const noTypeError = (key) => new TypeTextError(
+  `member '${key}' carries no type — write one after ':', or nest an indented block of members beneath it`,
+);
+const foldNestedBlocks = (body) => {
   const lines = body.split('\n');
   const indentOf = (l) => /^[ \t]*/.exec(l)[0].length;
   const foldFrom = (i0) => {
-    const line = lines[i0];
-    const m = /^([ \t]*)(.+?):[ \t]*type[ \t]*$/.exec(line);
-    if (m === null) return { text: line, next: i0 + 1 };
-    const ind = indentOf(line);
-    const parts = [];
+    let norm = normalizeTypeText(lines[i0]);
     let j = i0 + 1;
+    if (norm === '') return { text: '', next: j };
+    while (netDepth(norm) > 0 && j < lines.length) {
+      const cont = normalizeTypeText(lines[j]);
+      j++;
+      if (cont !== '') norm += ` ${cont}`;
+    }
+    const ind = indentOf(lines[i0]);
+    if (/:\s*type$/.test(norm)) {
+      let k = j;
+      while (k < lines.length && normalizeTypeText(lines[k]) === '') k++;
+      if (k < lines.length && indentOf(lines[k]) > ind) {
+        throw new TypeTextError(
+          `the block under '${norm.replace(/:\s*type$/, '').trim()}' opens from the bare ':' — drop the 'type' keyword`,
+        );
+      }
+    }
+    if (!norm.endsWith(':')) {
+      // A member that already carries a type takes no block. Left alone the
+      // block's members fold into the PARENT as siblings and the line emits
+      // with whatever operator it trailed off on — a face that does not
+      // parse, blamed on the alias head rather than on this line. The
+      // nesting form opens from the bare ':' and nowhere else.
+      let k = j;
+      while (k < lines.length && normalizeTypeText(lines[k]) === '') k++;
+      if (k < lines.length && indentOf(lines[k]) > ind) {
+        throw new TypeTextError(
+          `the block under '${norm}' opens only from a bare ':' — finish the type on this line, or brace the block`,
+        );
+      }
+      return { text: norm, next: j };
+    }
+    const key = norm.slice(0, -1).trim();
+    const parts = [];
     while (j < lines.length && (lines[j].trim() === '' || indentOf(lines[j]) > ind)) {
       if (lines[j].trim() === '') { j++; continue; }
       const r = foldFrom(j);
-      parts.push(r.text.trim());
       j = r.next;
+      if (r.text !== '') parts.push(r.text);
     }
-    return { text: `${m[1]}${m[2]}: { ${parts.join('; ')} }`, next: j };
+    if (parts.length === 0) throw noTypeError(key);
+    const c = classifyMembers(parts);
+    if (c.kind === 'union') return { text: `${key}: ${c.arms.join(' | ')}`, next: j };
+    if (c.kind === 'object') return { text: `${key}: { ${parts.join('; ')} }`, next: j };
+    if (c.kind === 'single') return { text: `${key}: ${parts[0]}`, next: j };
+    throw new TypeTextError(
+      `unrecognized member '${c.offender}' in the nested block of '${key}' — a nested block is a ` +
+      `union (| variants), an object type (keyed properties, index/call signatures), or one wrapped type`,
+    );
   };
   const out = [];
   let i = 0;
@@ -290,28 +363,43 @@ const foldAnonBlocks = (body) => {
   return out.join('\n');
 };
 
+// The block-body classification — one judgment for a member list at
+// every nesting depth, so a body cannot read differently at top level
+// than one indent deeper. Exactly one of:
+//   UNION  — every member after the first starts with `|`; the first
+//            is `|`-prefixed too, or a plain leading variant.
+//   OBJECT — every member is a recognized OBJECT MEMBER (the grammar
+//            above).
+//   SINGLE — exactly one member that is no object member AND carries
+//            no member colon: a type wrapped across lines. A lone
+//            member-shaped line that failed the grammar rejects —
+//            SINGLE is for types, never for failed members.
+//   reject — everything else, blaming the first line that breaks the
+//            dominant reading.
+const classifyMembers = (members) => {
+  const union =
+    members.length > 0 &&
+    members.slice(1).every((m) => m.startsWith('|')) &&
+    (members[0].startsWith('|') || (members.length > 1 && !isObjectMember(members[0])));
+  if (union) return { kind: 'union', arms: members.map((m) => m.replace(/^\|\s*/, '')) };
+  if (members.length > 0 && members.every(isObjectMember)) return { kind: 'object' };
+  if (members.length === 1 && !hasMemberColon(members[0])) return { kind: 'single' };
+  const offender =
+    members.find((m) => !isObjectMember(m) && !m.startsWith('|')) ??
+    members.find((m) => !isObjectMember(m)) ??
+    members[0];
+  return { kind: 'reject', offender };
+};
+
 const memberLines = (body) => {
-  const members = [];
-  let depth = 0;
-  for (const rawLine of foldAnonBlocks(body).split('\n')) {
-    const line = normalizeTypeText(rawLine);
-    if (line === '') continue;
-    if (depth > 0 && members.length > 0) members[members.length - 1] += ` ${line}`;
-    else members.push(line);
-    const current = members[members.length - 1];
-    depth = 0;
-    let inStr = null;
-    for (let i = 0; i < current.length; i++) {
-      const c = current[i];
-      if (inStr) {
-        if (c === '\\') i++;
-        else if (c === inStr) inStr = null;
-      } else if (c === '"' || c === "'") inStr = c;
-      else if ('([{'.includes(c)) depth++;
-      else if (')]}'.includes(c)) depth--;
-      else if (c === '<') depth++;
-      else if (c === '>' && current[i - 1] !== '=') depth--;
-    }
+  // Fold output arrives normalized and bracket-joined — one member per
+  // non-empty line.
+  const members = foldNestedBlocks(body).split('\n').filter((l) => l !== '');
+  // A member that still ends at its ':' has no type at all — a shape
+  // that evaded the fold must reject here rather than ship an empty
+  // annotation TypeScript error-recovers to `any`.
+  for (const m of members) {
+    if (m.endsWith(':')) throw noTypeError(m.slice(0, -1).trim());
   }
   return members;
 };
@@ -360,47 +448,27 @@ export const renderTypeDecl = (rawText) => {
   const members = memberLines(body);
   const head = header.trimEnd(); // ends with the alias '='
 
-  // A block alias body is one of exactly four shapes; anything else
-  // rejects (never a space-join of unclassified lines):
-  //   UNION      — every member after the first starts with `|`; the
-  //                first is `|`-prefixed too, or a plain leading
-  //                variant. Variants join onto one line.
-  //   OBJECT     — every member is a recognized OBJECT MEMBER (the
-  //                grammar above); the body braces, one member per
-  //                line.
-  //   SINGLE     — exactly one member that is no object member AND
-  //                carries no member colon: a type wrapped across
-  //                body lines, rejoined. A lone line that LOOKS
-  //                member-shaped but failed the grammar rejects —
-  //                SINGLE is for types, never for failed members.
-  //   (rejected) — everything else.
-  const union =
-    members.length > 0 &&
-    members.slice(1).every((m) => m.startsWith('|')) &&
-    (members[0].startsWith('|') || (members.length > 1 && !isObjectMember(members[0])));
-  if (union) {
-    lines.push(`${exp}${head} ${members.map((m) => m.replace(/^\|\s*/, '')).join(' | ')};`);
+  // The body reads through the shared classifyMembers judgment: a
+  // union joins its variants onto one line, an object braces one
+  // member per line, a single wrapped type rejoins; anything else
+  // rejects (never a space-join of unclassified lines).
+  const c = classifyMembers(members);
+  if (c.kind === 'union') {
+    lines.push(`${exp}${head} ${c.arms.join(' | ')};`);
     return lines;
   }
-  if (members.length > 0 && members.every(isObjectMember)) {
+  if (c.kind === 'object') {
     lines.push(`${exp}${head} {`);
     for (const m of members) lines.push(`  ${m};`);
     lines.push('};');
     return lines;
   }
-  if (members.length === 1 && !hasMemberColon(members[0])) {
+  if (c.kind === 'single') {
     lines.push(`${exp}${head} ${members[0]};`);
     return lines;
   }
-  // The offender is the first line that breaks the dominant reading:
-  // a non-member, non-variant line when one exists; otherwise the
-  // variant/member mixed into the other kind's body.
-  const offender =
-    members.find((m) => !isObjectMember(m) && !m.startsWith('|')) ??
-    members.find((m) => !isObjectMember(m)) ??
-    members[0];
   throw new TypeTextError(
-    `unrecognized member '${offender}' in the block body of ` +
+    `unrecognized member '${c.offender}' in the block body of ` +
     `'${head.replace(/\s*=$/, '')}' — a block alias body is a union (| variants), an ` +
     `object type (keyed properties, index/call signatures), or one wrapped type`,
   );
@@ -552,9 +620,15 @@ export const jsArityOptional = (params) => {
   return out;
 };
 
-export const renderParams = (params, isOptional) => {
+export const renderParams = (params, isOptional, firstType = null) => {
   const arity = jsArityOptional(params);
-  return `(${params.map((p, i) => renderParam(p, (q) => isOptional(q) || arity.has(i))).join(', ')})`;
+  // An injected FIRST-param type (the onError envelope, the event seam)
+  // applies only to a bare untyped name — an annotated, defaulted, rest
+  // or pattern param is the author's own shape and is never overridden.
+  const inject = firstType !== null && typeof params[0] === 'string';
+  return `(${params.map((p, i) => (inject && i === 0
+    ? `${p}: ${firstType}`
+    : renderParam(p, (q) => isOptional(q) || arity.has(i)))).join(', ')})`;
 };
 
 export const paramTyped = (p) =>

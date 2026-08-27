@@ -26,7 +26,7 @@ excluded = (anchor) ->
 # Package-internal: the one reading of an anchor's EXTERNAL href —
 # `links.rip` resolves the same spelling `ownsAnchor` judged, so the
 # href a click navigates is the href ownership approved.
-export def _anchorHref(anchor: any): string | null
+export def _anchorHref(anchor): string | null
   href = anchor.getAttribute?('href') ?? anchor.href
   return null unless typeof href is 'string' and href.length > 0
   if /^[a-z][a-z0-9+.-]*:/i.test href
@@ -38,7 +38,7 @@ export def _anchorHref(anchor: any): string | null
   return null if href.startsWith('//') or href.includes('\\')
   href
 
-export def ownsAnchor(router: any, anchor: any): boolean
+export def ownsAnchor(router, anchor): boolean
   return false unless anchor?
   return false if excluded anchor
   href = _anchorHref anchor
@@ -64,10 +64,10 @@ browserHost = ->
       attributeFilter: ['href', 'target', 'download', 'data-router-ignore']
     -> observer.disconnect()
 
-export def ariaCurrent(router: any, host: { anchors: () => any[], observe?: (fn: () => void) => () => void } = null): () => void
+export def ariaCurrent(router, host: { anchors: () => any[], observe?: (fn: () => void) => () => void } = null): () => void
   unless router? and typeof router.claims is 'function'
     throw TypeError.new 'Rip App: ariaCurrent requires a router'
-  host: any = host ?? browserHost()
+  host = host ?? browserHost()
   owned = WeakSet.new()
 
   markCurrent = ->

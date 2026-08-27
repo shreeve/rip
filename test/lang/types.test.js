@@ -521,6 +521,8 @@ const STMT_PAIRS = [
   ['type T = Map<string, number>\nz = 1', 'z = 1'],
   ['type R =\n  | Ok\n  | Err\nz = 1', 'z = 1'],
   ['type S =\n  x: number\n  y: string\nz = 1', 'z = 1'],
+  ['type S =\n  inner?:\n    x?: number\n    y?: string\nz = 1', 'z = 1'],
+  ['interface P\n  inner:\n    x: number\nz = 1', 'z = 1'],
   ['export type ID = string\nz = 1', 'z = 1'],
   ['export type Pair<A, B> = [A, B]\nz = 1', 'z = 1'],
   // adversarial characters inside alias text: a `#` comment BETWEEN

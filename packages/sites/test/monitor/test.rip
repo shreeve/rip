@@ -574,7 +574,7 @@ test! 'an aborted old generation keeps its blocked terminal output failure', ->
 
 test! 'a stale generation resolving after move cannot write or reconnect', ->
   output = []
-  oldGate: any = {}
+  oldGate = {}
   oldGate.promise = Promise.new (resolve) -> oldGate.open = resolve
   calls = []
   fetcher = (url, options) ->

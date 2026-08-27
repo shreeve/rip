@@ -12,7 +12,7 @@
 import { ownsAnchor, _anchorHref } from './aria.rip'
 
 export type LinkHost =
-  listen: (type: string, fn: (event: any) => void, opts?: Record<string, any>) => () => void
+  listen: (type: string, fn: (event: Event) => void, opts?: AddEventListenerOptions | boolean | null) => () => void
 
 # Only a pointer resting on (or focus holding) a link for the settle
 # window preloads — brushing past never fires — and re-visiting the
@@ -34,10 +34,10 @@ anchorFrom = (node) ->
   node = node.parentElement while node? and node.tagName isnt 'A'
   node ?? null
 
-export def interceptClicks(router: any, host: LinkHost = null): () => void
+export def interceptClicks(router, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function' and typeof router.push is 'function'
     throw TypeError.new 'Rip App: interceptClicks requires a router'
-  host: any = host ?? browserHost()
+  host = host ?? browserHost()
 
   onClick = (event) ->
     return if event.defaultPrevented
@@ -58,15 +58,15 @@ export def interceptClicks(router: any, host: LinkHost = null): () => void
     remove()
     return
 
-export def preloadLinks(router: any, renderer: any, host: LinkHost = null): () => void
+export def preloadLinks(router, renderer, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function'
     throw TypeError.new 'Rip App: preloadLinks requires a router'
   unless renderer? and typeof renderer.preload is 'function'
     throw TypeError.new 'Rip App: preloadLinks requires a renderer with preload()'
-  host: any = host ?? browserHost()
+  host = host ?? browserHost()
 
-  settleTimer: any = null
-  settleAnchor: any = null
+  settleTimer = null
+  settleAnchor = null
   last = { href: null, at: 0 }
 
   cancelSettle = ->

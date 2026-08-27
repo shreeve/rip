@@ -119,6 +119,7 @@ test "a from mismatch and malformed prepared state leave the active publication 
   ws = createWorkspace()
   ws.activate state()
   throws (-> ws.commit(HASH_2, state(HASH_3), [])), 'not AAAAAA'
+  # @ts-expect-error
   throws (-> ws.commit(HASH_1, { hash: HASH_2, sources: { 'app.rip': 4 }, compiled: {} }, [])), 'must be a string'
   eq ws.hash(), HASH_1
   eq ws.read('app.rip'), 'export App = component'

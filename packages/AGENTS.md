@@ -138,7 +138,8 @@ separate pass. A package-root `bun.lock` is not isolation under
 resolves against the repo-root lockfile — and CI's frozen-lockfile gate
 is root-only (`test/toolchain/dependencies.test.js` rejects a sibling
 `bun.lock` next to each `packages/*/package.json`). Nested quarantine
-trees that are their own package (`csv/bench`, `print/vscode`) may keep
+trees that are their own package (`csv/bench`, `print/vscode`,
+`sites/demos/cart`) may keep
 a lock. Earned packages may use `test/` when the suite is host-heavy
 (see [Tests](#tests)).
 

@@ -9,17 +9,32 @@
 # signal. Params and query keep their object identity across
 # navigations that do not change them.
 
-import { parseQuery } from './routes.rip'
+import { parseQuery, RouteMatch } from './routes.rip'
 import { delay } from './timing.rip'
+
+# What the router writes into a history entry: whatever the host keeps,
+# plus the scroll position it saves for traversals.
+export type RouterState = Record<string, unknown> & { __ripScroll?: ScrollPosition | null }
+
+export type ScrollPosition = { x: number, y: number }
 
 export type RouterAdapter =
   read: () => string
-  readState?: () => unknown
+  readState?: () => RouterState | null | undefined
   push: (url: string, state: unknown) => void
   replace: (url: string, state: unknown) => void
   go: (delta: number) => void
   listen: (fn: () => void) => () => void
-  scroll?: Record<string, any>
+  scroll?: RouterScroll
+
+# The adapter's scroll primitives, every one optional: save/restore a
+# position around traversals, jump to top on fresh navigations, and watch
+# scrolling so departures the router cannot intercept still save.
+export type RouterScroll =
+  save?: () => ScrollPosition | null
+  restore?: (position: ScrollPosition | null) => void
+  top?: () => void
+  watch?: (fn: () => void) => (() => void) | null
 
 export type RouterOpts =
   routes: Record<string, any> | (() => Record<string, any>)
@@ -28,19 +43,30 @@ export type RouterOpts =
   hash?: boolean
   onError?: (failure: { status: number, path: string }) => void
 
+# A resolved URL: the manifest's match (route and params) plus the query
+# and fragment. `claims` adds the internal respelling an external href maps
+# to.
+export type RouterMatch = RouteMatch & { query: Record<string, string>, hash: string }
+
+export type RouteClaim = RouterMatch & { path: string, url: string }
+
 export type Router =
   init: () => Router
   push: (url: string, opts?: { noScroll?: boolean }) => boolean
   replace: (url: string, opts?: { noScroll?: boolean }) => boolean
   back: () => void
   forward: () => void
-  match: (url: string) => Record<string, any> | null
-  claims: (url: string) => Record<string, any> | null
+  match: (url: string) => RouterMatch | null
+  claims: (url: string) => RouteClaim | null
   onNavigate: (fn: (info: Record<string, any>) => void) => () => void
   rebuild: () => void
   destroy: () => void
   navigating: boolean
   readonly current: Record<string, any> | null
+  readonly path: string | null
+  readonly hash: string
+  readonly params: Record<string, string>
+  readonly query: Record<string, string>
 
 splitUrl = (url) ->
   hashAt = url.indexOf '#'
@@ -84,7 +110,7 @@ export def createRouter(opts: RouterOpts): Router
 
   activeManifest = if typeof routes is 'function' then validManifest routes() else validManifest routes
   callbacks: Set<any> = Set.new()
-  unlisten: any = null
+  unlisten = null
 
   _path = __state null
   _route = __state null
@@ -99,7 +125,7 @@ export def createRouter(opts: RouterOpts): Router
   # The hash is deliberately absent: a fragment-only navigation must not
   # look like a route change to the renderer. `router.hash` tracks it.
   _current = __computed ->
-    route: any = _route.value
+    route = _route.value
     return null unless route
     { route, layouts: route.layouts, params: _params.value, query: _query.value }
 
@@ -181,22 +207,22 @@ export def createRouter(opts: RouterOpts): Router
   # departures the router cannot intercept (back/forward) still find
   # where the user was. Push-time saves stay exact; this covers the
   # traversal case.
-  saveTimer: any = null
-  unwatchScroll: any = null
+  saveTimer = null
+  unwatchScroll = null
   saveScrollNow = ->
     saveTimer = null
-    state: any = adapter.readState?() ?? {}
+    state = adapter.readState?() ?? {}
     adapter.replace adapter.read(), { ...state, __ripScroll: adapter.scroll?.save?() ?? null }
   saveScroll = ->
     saveTimer = setTimeout saveScrollNow, 100 unless saveTimer
 
-  router: any =
+  router =
     init: ->
       return router if unlisten
       handleExternal()
       unlisten = adapter.listen ->
         return unless handleExternal()
-        state: any = adapter.readState?()
+        state = adapter.readState?()
         adapter.scroll?.restore?(state?.__ripScroll ?? null)
       unwatchScroll = adapter.scroll?.watch?(saveScroll) ?? null
       router
@@ -207,7 +233,7 @@ export def createRouter(opts: RouterOpts): Router
       hit = attempt path
       return miss path unless hit
       position = adapter.scroll?.save?() ?? null
-      state: any = adapter.readState?() ?? {}
+      state = adapter.readState?() ?? {}
       adapter.replace adapter.read(), { ...state, __ripScroll: position }
       adapter.push externalFor(url), null
       commit hit, path, query, hash
@@ -219,7 +245,7 @@ export def createRouter(opts: RouterOpts): Router
       { path, query, hash } = splitUrl url
       hit = attempt path
       return miss path unless hit
-      state: any = adapter.readState?() ?? {}
+      state = adapter.readState?() ?? {}
       adapter.replace externalFor(url), { ...state, __ripScroll: null }
       commit hit, path, query, hash
       adapter.scroll?.top?() unless opts.noScroll
@@ -260,7 +286,7 @@ export def createRouter(opts: RouterOpts): Router
       internal = path + (if query then '?' + query else '') + (if hash then '#' + hash else '')
       { path, url: internal, route: hit.route, params: hit.params, query: parseQuery(query), hash }
 
-    onNavigate: (fn) ->
+    onNavigate: (fn): (() => void) ->
       unless typeof fn is 'function'
         throw TypeError.new 'Rip App: onNavigate expects a function'
       callbacks.add fn
@@ -312,7 +338,9 @@ export def createRouter(opts: RouterOpts): Router
   Object.defineProperty router, 'navigating',
     get: -> _navigating.value
     set: (value) -> _navigating.value = value
-  router
+  # The six accessors above are invisible to the literal's own type, so the
+  # Router it has become is asserted through `unknown`.
+  router as unknown as Router
 
 # The one browser-backed adapter: History API entries, location reads,
 # popstate, and manual scroll ownership. Construction outside a browser
@@ -342,7 +370,7 @@ export def browserAdapter(): RouterAdapter
     # asynchronously, so on arrival the page can still be too short to
     # reach `y` — retry across frames until the document accommodates it,
     # giving up after 20. A newer restore or top() supersedes the loop.
-    restore: (position: any) ->
+    restore: (position) ->
       return unless position?
       ticket = ++restoring
       x = position.x or 0

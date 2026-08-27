@@ -703,7 +703,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       await api.change('app.rip', src + '\n');
       // The generated tsconfig maps rip/validate to an __external__ face;
       // the closure walk must actually write that face (the workspace
-      // fence exempts STDLIB_DIR) or the import squiggles TS2307 forever.
+      // fence exempts the stdlib) or the import squiggles TS2307 forever.
       await api.poll(() => !api.codes('app.rip').includes(2307), 'rip/validate resolves');
     });
   }, 30000);

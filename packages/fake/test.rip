@@ -195,8 +195,7 @@ inserts = -> adapter.calls.filter((c) -> /INSERT/i.test(c.sql)).length
 
 test! "signed counts: 0/-1 build one, -3 builds three, no INSERT", ->
   reset()
-  for n in [0, -1]
-    p = FakePatient.factory! n
+  for p in [FakePatient.factory!(0), FakePatient.factory!(-1)]
     ok p.firstName.length > 0
     ok p.lastName.length > 0
   ary = FakePatient.factory!(-3)

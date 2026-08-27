@@ -6,7 +6,12 @@ type Tallies = { [slot: string]: number, entries: number }
 type Crate = { inner: { depth: number } }
 type Firm = { note: string | undefined }
 
+type Manifest = {
+  cargo: string[]
+  stow(item: string): number }
+
 let coordinate: [string, number] = ['origin', 12]
+let hold: Manifest = { cargo: [], stow: (item) => item.length }
 
 function measure(sample: string): number
 function measure(sample: number): string
@@ -24,3 +29,4 @@ let wrongOverload: string = measure('alpha')
 let wrongEcho = echoOf(7)
 let wrongFirm: Firm = {}
 let wrongDrift: string | undefined = 42
+let wrongStow = hold.stow(42)

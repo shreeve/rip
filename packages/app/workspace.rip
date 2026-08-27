@@ -87,7 +87,7 @@ prepared = (state) ->
 export def createWorkspace(): Workspace
   sources = Map.new()
   compiled = Map.new()
-  watchers = Set.new()
+  watchers: Set<(event: WorkspaceEvent, path: string) => void> = Set.new()
   activeHash = null
   staging = false
 

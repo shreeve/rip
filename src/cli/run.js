@@ -24,6 +24,12 @@ import { pathToFileURL } from 'url';
 import { CompileError } from '../compile.js';
 import { remapStack } from '../stackmap.js';
 
+// The stdlib anchor is spent: the loader preload has already read it
+// (preloads evaluate before this module), and leaving it in the
+// environment would hand this entry's checkout to every process the
+// program goes on to spawn, overriding a context that knows its own.
+delete process.env.RIP_STDLIB_ANCHOR;
+
 const entry = realpathSync(process.argv[2]);
 process.argv = [process.argv[0], entry, ...process.argv.slice(3)];
 Bun.main = entry;

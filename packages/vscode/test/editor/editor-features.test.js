@@ -31,7 +31,9 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { decodeSemanticTokens } from '../../src/tsgo.js';
+import { SCAFFOLD_FAMILIES } from '../../src/translate.js';
 
 let tsgoAvailable = false;
 try {
@@ -114,7 +116,9 @@ async function inWorkspace(files, fn) {
       return [];
     },
     hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
-    completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
+    completion: (rel, line, character, context) => client.request('textDocument/completion', {
+      ...at(rel, line, character), ...(context ? { context } : {}),
+    }),
     resolveItem: (item) => client.request('completionItem/resolve', item),
     definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
     typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
@@ -170,6 +174,8 @@ function applyEdits(text, edits) {
 // Semantic-token decoding is LSP wire format, shared from the tsgo client
 // (`decodeSemanticTokens`) rather than hand-rolled per consumer.
 const decodeTokens = decodeSemanticTokens;
+
+const CompletionItemKind = { Field: 5, Property: 10 };
 
 const UTIL = 'export def shout(s: string): string\n  s.toUpperCase()\nexport answer = 42\n';
 
@@ -385,6 +391,95 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
       expect(completion.items.some((i) => i.label === 'substring')).toBe(true);
     });
   }, 30000);
+
+  // An object-literal key completes from the CONTEXTUAL type, whatever
+  // context the ask carries. What a declined ask costs here is the
+  // whole session, not one answer: the editor opens a suggest session
+  // on a trigger character, and one that opens with nothing from this
+  // server lives on the editor's own word matches for the rest of the
+  // word, every later keystroke refiltering it rather than asking
+  // again. The space before an option name is exactly that moment. So
+  // `retry` reaching the list is not the contract — reaching it as a
+  // PROPERTY, beside its siblings and with no identifier of the
+  // surrounding scope for company, is.
+  test('an object-literal key completes from the contextual type whatever context the ask carries', async () => {
+    const DEP = [
+      // Module-private, never exported: no completion in a consumer can
+      // legally name these, so their presence would prove an identifier
+      // scrape rather than a member request.
+      "RETRY_METHODS =! ['GET', 'PUT']",
+      'RETRY_LIMIT   =! 2',
+      '',
+      'type Options =',
+      '  prefixUrl?: string',
+      '  retry?: number | false | { limit?: number }',
+      '  referrer?: string',
+      '  referrerPolicy?: string',
+      '  redirect?: string',
+      '',
+      'export def create(options: Options): string',
+      '  return options.prefixUrl ?? RETRY_METHODS[RETRY_LIMIT] ?? \'\'',
+      '',
+    ].join('\n');
+    await inWorkspace({ 'dep.rip': DEP }, async (api) => {
+      const HEAD = 'import { create } from \'./dep.rip\'\n\n';
+      // ‸ marks the cursor; the whole call line varies, because what
+      // the face carries at the key depends on what follows it.
+      const SPACE = { triggerKind: 2, triggerCharacter: ' ' };
+      const INVOKED = { triggerKind: 1 };
+      const asks = [
+        // Typing the key: bytes sit at or before the cursor.
+        ["export api = create({ prefixUrl: '/api', ‸retry: 0 })", SPACE],
+        ["export api = create({ prefixUrl: '/api', ret‸retry: 0 })", INVOKED],
+        // Asking at an EMPTY key slot — an explicit invoke, the
+        // editor's ctrl+space. The emission drops the trailing comma
+        // and the slot with it, so no byte of the face stands where
+        // the cursor is; the landing comes from the construct instead.
+        ["export api = create({ prefixUrl: '/api', ‸ })", INVOKED],
+        ["export api = create({ prefixUrl: '/api',‸ })", INVOKED],
+        ["export api = create({ prefixUrl: '/api', ‸})", INVOKED],
+        // The same slot in a literal with nothing in it yet.
+        ['export api = create({ ‸ })', INVOKED],
+      ];
+
+      await api.open('use.rip', HEAD + asks[0][0].replace('‸', '') + '\n');
+      for (const [marked, context] of asks) {
+        const what = marked.slice('export api = create('.length);
+        await api.change('use.rip', HEAD + marked.replace('‸', '') + '\n');
+        const result = await api.completion('use.rip', 2, marked.indexOf('‸'), context);
+        const items = result?.items ?? result ?? [];
+        const labels = items.map((i) => i.label.replace(/\?$/, ''));
+
+        // The option the user is reaching for, as a member of the
+        // parameter's type — Field or Property, never a Variable the
+        // scope happened to offer.
+        const retry = items.find((i) => i.label.replace(/\?$/, '') === 'retry');
+        expect(retry, `${what}: 'retry' must be offered`).toBeDefined();
+        expect([CompletionItemKind.Field, CompletionItemKind.Property],
+          `${what}: 'retry' must arrive as a property of the contextual type`).toContain(retry.kind);
+
+        // Its siblings come with it — one lucky label could be a
+        // coincidence, a set of them cannot.
+        for (const sibling of ['referrer', 'referrerPolicy', 'redirect']) {
+          expect(labels, `${what}: '${sibling}' belongs to the same option set`).toContain(sibling);
+        }
+
+        // And nothing from the surrounding scope: a member request
+        // answers members only.
+        expect(items.filter((i) => i.kind !== CompletionItemKind.Field && i.kind !== CompletionItemKind.Property),
+          `${what}: an object-literal key answers members only`).toEqual([]);
+        for (const secret of ['RETRY_METHODS', 'RETRY_LIMIT']) {
+          expect(labels, `${what}: '${secret}' is module-private to the dependency`).not.toContain(secret);
+        }
+      }
+
+      // The other side of the same rule: the editor is never invited to
+      // open a session on the space at all. The space-triggered ask
+      // above is the defensive twin — a trigger this server does not
+      // advertise is served on its position, never relayed.
+      expect(api.capabilities.completionProvider.triggerCharacters).not.toContain(' ');
+    });
+  }, 30000);
 });
 
 describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
@@ -418,6 +513,34 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
     });
   }, 30000);
 
+  // The stdlib sits OUTSIDE the workspace, so its face mirrors under
+  // __external__ — and a definition answer is only as good as the
+  // inverse that spells the mirror back as a source. The stdlib's rel
+  // IS its source path, so both the symbol and the specifier must land
+  // on the real `.rip`; the sanitized (non-file uri) __external__
+  // spellings are the ones with no inverse.
+  test('definition crosses into the stdlib, naming the real .rip source', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', 'import { check } from "rip/validate"\nk = check("1", "int")\n');
+
+      const defs = await api.definition('app.rip', 1, 6); // check at its use
+      expect(defs).toHaveLength(1);
+      expect(defs[0].uri.endsWith('/packages/validate/validate.rip')).toBe(true);
+      // The SOURCE, not the mirror face it resolved through.
+      expect(defs[0].uri).not.toContain('__external__');
+      // An exact Rip range: the answer names the declaration's own span.
+      const source = fs.readFileSync(fileURLToPath(defs[0].uri), 'utf8').split('\n');
+      const { start, end } = defs[0].range;
+      expect(start.line).toBe(end.line);
+      expect(source[start.line].slice(start.character, end.character)).toBe('check');
+
+      // The specifier answers the same file, at its start.
+      const spec = await api.definition('app.rip', 0, 28);
+      expect(spec.length).toBeGreaterThanOrEqual(1);
+      expect(spec[0].targetUri.endsWith('/packages/validate/validate.rip')).toBe(true);
+    });
+  }, 30000);
+
   // Cmd-hover underlines what the definition answer names as its origin.
   // Left to the editor's word pattern, a specifier like './util.rip'
   // underlines one path segment at a time (words break at '/', '-', '.');
@@ -446,6 +569,56 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       expect(single[0].originSelectionRange).toEqual({
         start: { line: 0, character: 23 }, end: { line: 0, character: 35 },
       });
+    });
+  }, 30000);
+
+  // A specifier answer names the MODULE — by URI, pinned to file start.
+  // tsgo reports the target in face coordinates (an empty range at
+  // offset 0, or the whole file); a target whose face opens with a
+  // synthetic runtime preamble has no source twin for either shape, so
+  // a range-mapped answer drops exactly those targets. UTIL above dodges
+  // the trap by accident (no helper references, so its face starts with
+  // authored bytes) — this target references `p` and does not. Both
+  // target states answer: unopened (mirror inversion) and open (the
+  // buffer's own uri).
+  test('specifier definition reaches a target whose face opens with the runtime preamble — unopened and open', async () => {
+    const HELPERS = "export def loud(s: string): string\n  p(s)\n  s.toUpperCase()\n";
+    await inWorkspace({ 'helpers.rip': HELPERS }, async (api) => {
+      await api.open('app.rip', "import { loud } from './helpers.rip'\nconsole.log(loud('hi'))\n");
+      const fileStart = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+      const cold = await api.definition('app.rip', 0, 25); // inside the specifier
+      expect(cold.length).toBeGreaterThanOrEqual(1);
+      expect(cold[0].targetUri).toBe(api.uriOf('helpers.rip'));
+      expect(cold[0].targetSelectionRange).toEqual(fileStart);
+
+      // The open-target branch: the same ask answers the buffer's uri.
+      await api.open('helpers.rip', HELPERS);
+      const open = await api.definition('app.rip', 0, 25);
+      expect(open.length).toBeGreaterThanOrEqual(1);
+      expect(open[0].targetUri).toBe(api.uriOf('helpers.rip'));
+      expect(open[0].targetSelectionRange).toEqual(fileStart);
+
+      // Type definition at a specifier takes the same module treatment
+      // (tsgo answers the module file whole — a span the range map-back
+      // cannot serve).
+      const typeDef = await api.typeDefinition('app.rip', 0, 25);
+      expect(typeDef.length).toBeGreaterThanOrEqual(1);
+      expect(typeDef[0].uri).toBe(api.uriOf('helpers.rip'));
+      expect(typeDef[0].range).toEqual(fileStart);
+    });
+  }, 30000);
+
+  // A specifier answer into a REAL TypeScript file keeps tsgo's own
+  // range: an ambient `declare module` answer points mid-file at the
+  // declaration, which a file-start pin would erase.
+  test('specifier definition into an ambient declare module keeps the declaration position', async () => {
+    const TYPES = "// ambient module declarations\ndeclare module 'virt' {\n  export const v: number\n}\n";
+    await inWorkspace({ 'types.d.ts': TYPES }, async (api) => {
+      await api.open('app.rip', "import { v } from 'virt'\nconsole.log(v)\n");
+      const defs = await api.definition('app.rip', 0, 20); // inside 'virt'
+      expect(defs.length).toBeGreaterThanOrEqual(1);
+      expect(defs[0].targetUri).toBe(api.uriOf('types.d.ts'));
+      expect(defs[0].targetSelectionRange.start.line).toBe(1);
     });
   }, 30000);
 
@@ -1165,6 +1338,114 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
       expect(local.contents.value).toContain('let total: number');
     });
   }, 30000);
+
+  test('a bare gate at its declaration hovers the RESOLVED stash type, never the projection formula', async () => {
+    // The face carries the projection as an inferred position (the class
+    // declare rides `__computed`), so quickinfo prints the resolved type;
+    // a written node would echo the `AppData<...>` machinery verbatim.
+    await inWorkspace({
+      'index.rip': "console.log 'serve'\n",
+      'package.json': '{}',
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n",
+    }, async (api) => {
+      await api.open('app/routes/page.rip', "export Page = component\n  todos <~ @app.data.todos\n  q ~= @router.query.q ?? ''\n  shout ~= q.toUpperCase()\n  n = Number.parseInt('4')\n  render null\n");
+      let h;
+      for (let i = 0; i < 20; i++) {
+        h = await api.hover('app/routes/page.rip', 1, 3);
+        if (h?.contents?.value?.includes('Todo[]')) break;
+        await api.sleep(200);
+      }
+      expect(h.contents.value).toContain('Todo[]');
+      expect(h.contents.value).not.toContain('AppData');
+      // The typed router ambience rides the same discovery: a bare
+      // computed over `@router.query` infers string, no annotation.
+      const rq = await api.hover('app/routes/page.rip', 2, 2);
+      expect(rq.contents.value).toContain('q: string');
+      // The class road declares the ambience too, so the `@router`
+      // REFERENCE (the `_init` copy, where `this` is the class) hovers
+      // the runtime's Router instead of error-`any`.
+      const rr = await api.hover('app/routes/page.rip', 2, 10);
+      expect(rr.contents.value).toContain('Router');
+      expect(rr.contents.value).not.toContain('any');
+      // The gate's face twin (the read the author wrote, as a ts-only
+      // expression) gives every path segment a typed span — the same
+      // answers a computed line serves, v3's construction.
+      const gd = await api.hover('app/routes/page.rip', 1, 17);
+      expect(gd.contents.value).toContain('AppData');
+      const gt = await api.hover('app/routes/page.rip', 1, 22);
+      expect(gt.contents.value).toContain('todos: Todo[]');
+      // An IN-BODY read answers value-first like the declaration — the
+      // author wrote a bare name; the container the lowering wrapped it
+      // in is a consumer-position answer (RULINGS.md's member-read row).
+      const rd = await api.hover('app/routes/page.rip', 3, 11);
+      expect(rd.contents.value).toContain('q: string');
+      expect(rd.contents.value).not.toContain('readonly value');
+      // A PLAIN member with a call initializer infers through the
+      // behavior thunk instead of the form table's `any`.
+      const pl = await api.hover('app/routes/page.rip', 4, 2);
+      expect(pl.contents.value).toContain('n: number');
+    });
+  }, 30000);
+
+  test('no hover leaks rip internals anywhere in a stash-anchored component', async () => {
+    // The standing property: at EVERY position, a hover either answers
+    // in the author's vocabulary (framework type NAMES like AppData or
+    // Router included) or declines — never a minted `__` name, an
+    // import() splice, or lowering scaffold. Swept position by position
+    // over a component exercising every member kind and a full render.
+    const ROUTE = [
+      "export Page = component",
+      "  todos <~ @app.data.todos",
+      "  pick <~ @app.data.pick(params.id)",
+      "  q ~= @router.query.q ?? ''",
+      "  count := 0",
+      "  label?: string := undefined",
+      "  @variant: string = 'primary'",
+      "  first ~= todos[0]",
+      "  mounted: -> @router.onNavigate(-> count = 0)",
+      "  onError: (err) -> console.error(err)",
+      "  bump: (step: number) -> count = count + step",
+      "  render",
+      "    h1 \"#{q}\"",
+      "    ul",
+      "      for t in todos",
+      "        li key: t.id, t.label",
+      "    button @click: (-> bump(1)), \"#{count} #{first.label} #{pick.label}\"",
+      "",
+    ].join('\n');
+    await inWorkspace({
+      'index.rip': "console.log 'serve'\n",
+      'package.json': '{}',
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n  pick: (id: string) -> todos[0]\n",
+    }, async (api) => {
+      await api.open('app/routes/page.rip', ROUTE);
+      // Liveness canary: the sweep is meaningless if every hover
+      // declines (a dead program answers nothing and leaks nothing) —
+      // one known position must answer with a real type first.
+      let canary;
+      for (let i = 0; i < 30; i++) {
+        canary = await api.hover('app/routes/page.rip', 1, 3);
+        if (canary?.contents?.value?.includes('Todo[]')) break;
+        await api.sleep(200);
+      }
+      expect(canary.contents.value).toContain('Todo[]');
+      // Minted `__` names, import() splices, the `_`-slot index
+      // signature, AND the single-underscore render scaffold families —
+      // read from the same SCAFFOLD_FAMILIES list the server's guard
+      // consumes, so the gate and the guard cannot drift.
+      const LEAK = new RegExp(`__[A-Za-z]|import\\s*\\(|\`_\\$\\{string\\}\`|\\b_(?:${SCAFFOLD_FAMILIES})\\d+\\b`);
+      const lines = ROUTE.split('\n');
+      const leaks = [];
+      for (let ln = 0; ln < lines.length; ln++) {
+        for (let ch = 0; ch <= lines[ln].length; ch++) {
+          const h = await api.hover('app/routes/page.rip', ln, ch).catch(() => null);
+          const v = h?.contents?.value;
+          if (typeof v === 'string' && LEAK.test(v)) leaks.push(`${ln + 1}:${ch} → ${v.slice(0, 120)}`);
+        }
+      }
+      expect(leaks).toEqual([]);
+    });
+  }, 120000);
 });
 
 describe.skipIf(!tsgoAvailable)('code actions', () => {

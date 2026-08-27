@@ -2,7 +2,7 @@
 
 The decision record for what the corpus must exercise where no instrument can derive a denominator: checker BEHAVIORS (narrowing, inference enforcement — semantics with no token or production to count) and CONTAINMENT cells (construct-inside-construct shapes the context-free grammar gate cannot distinguish). Type kinds do NOT live here: the gate's census enumerates TS's own type grammar as a closed denominator and queues every unclaimed kind itself. The gate joins this file live, the manifest pattern applied to semantics: a behavior whose carrier is missing paints red, a containment cell no fixture satisfies paints red — so a claim cannot rot silently when a fixture is edited. Rows are added by ruling, never by script; the twin/verdict dimensions hold each carrier's semantic half.
 
-A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifies still exists in it, resolved against any corpus bucket, so a claim's fire side names its error-lane carrier. ABSENT is a ruled claim not yet carried: it paints yellow on purpose, the queue's memory, exactly like a parked production.
+A carrier is `fixture:symbol` — the fixture file and a symbol the gate verifies still exists in it, resolved against any corpus bucket, so a claim's fire side names its error-lane carrier. ABSENT is a ruled claim not yet carried, and it paints red: `claims.carriage` gates at zero, so a ruling that landed without its fixture fails the gate until someone authors the carrier or parks the row on the finding that blocks it. A park is the only yellow here — the queue's memory, and the Parked table below owns it.
 
 ## Behaviors
 
@@ -53,6 +53,7 @@ The census owns which type KINDS the corpus claims; these rows own what the chec
 | generic call-site inference preserves literal types and enforces the constraint | 22-vocabulary.rip:narrowed | 22-vocabulary.errors.rip:wrongEcho |
 | a union-with-`undefined` member demands its key where `?:` does not | 22-vocabulary.rip:optionality | 22-vocabulary.errors.rip:wrongFirm |
 | a nullable-union TARGET accepts each arm and rejects outside them — a string-or-`undefined` and a number-or-`null` binding, where those arms meet strict-null checking | 22-vocabulary.rip:nullables | 22-vocabulary.errors.rip:wrongDrift |
+| a method-shorthand member in a block `type` body enforces its call arguments at the use site | 22-vocabulary.rip:stowed | 22-vocabulary.errors.rip:wrongStow |
 
 ### Functions and async
 

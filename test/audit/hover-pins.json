@@ -168,6 +168,14 @@
         "why": "interim silence, served — the minted scaffold local (`_elN`) no longer leaks"
       },
       {
+        "line": 60,
+        "character": 26,
+        "token": "person",
+        "expect": "(parameter) person: string",
+        "rule": "render loop variable at a read",
+        "why": "plain inferred type, the ruled target — the value half served; the kind label rides the minted-kinds open half — measured 2026-08-24"
+      },
+      {
         "line": 61,
         "character": 6,
         "token": "slot",
@@ -195,9 +203,9 @@
         "line": 72,
         "character": 8,
         "token": "label",
-        "expect": "(property) label?: string | { value: string; read(): string; touch?(): void; } | undefined",
+        "expect": "(property) label?: string | { value: string | undefined; read(): string | undefined; touch?(): void; } | undefined",
         "rule": "attr/prop name (component)",
-        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design"
+        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design, and an optional no-default prop's slot is the void slot, T | undefined inside"
       },
       {
         "line": 73,
@@ -365,6 +373,14 @@
       }
     ],
     "positions": [
+      {
+        "line": 8,
+        "character": 10,
+        "token": "string",
+        "expect": null,
+        "rule": "field type word",
+        "why": "the type is the target; the body serves silence, the ruled interim — measured 2026-08-24"
+      },
       {
         "line": 13,
         "character": 2,

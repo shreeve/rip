@@ -26,12 +26,13 @@ toFn = (source) ->
 # writes through to the source, while reads see the timed output. A
 # function source has no write path, so its wrapper is getter-only.
 wrap = (out, source, disposer) ->
-  obj: any = { read: -> out.read() }
-  descriptor: any = { get: -> out.value }
+  obj: Partial<TimedSignal<unknown>> = { read: -> out.read() }
+  descriptor: PropertyDescriptor = { get: -> out.value }
   descriptor.set = ((v) -> source.value = v) if typeof source isnt 'function'
   Object.defineProperty obj, 'value', descriptor
   obj.dispose = -> disposer?()
-  obj
+  # `value` is the accessor defined above.
+  obj as TimedSignal<any>
 
 # delay(ms, source) — truthy waits ms, falsy is immediate. Any tracked
 # notification restarts the window, so a non-boolean source whose value

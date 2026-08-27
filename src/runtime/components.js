@@ -375,7 +375,10 @@ function __claimGateConstructor() {
       parent: metadata.parent ?? null,
       // Route fields the emitter lowers to `this.app` / `this.router` /
       // `this.params` / `this.query` — assigned in the constructor
-      // before `_init`, so member initializers can read them.
+      // before `_init`, so member initializers can read them. This name
+      // set is co-owned by AMBIENT_FIELDS in src/ts/components.js: the
+      // face declares what is injected here, and a name added on one
+      // side alone desyncs the type surface from the runtime.
       app: metadata.app ?? null,
       router: metadata.router ?? null,
       used: false,
@@ -687,7 +690,25 @@ function __transition(el, name, dir, done) {
   });
 }
 
+// The failure ENVELOPE a boundary receives: `name`, `message`, and the
+// raw thrown value always; `status` when the throw carried one; the
+// route fields only when the route layer filled them (a GateFailure
+// passes through untouched — it already is the richer envelope).
+// Co-owned with COMPONENT_FAILURE_TYPE in src/ts/components.js: the
+// face declares exactly what this wrapper delivers.
+function __componentFailure(error) {
+  const name = error != null && typeof error === 'object' ? error.name : null;
+  if (name === 'GateFailure' || name === 'ComponentFailure') return error;
+  const failure = new Error(error != null && error.message !== undefined ? error.message : String(error));
+  failure.name = 'ComponentFailure';
+  const status = error != null ? (error.status ?? error.response?.status) : undefined;
+  if (status !== undefined) failure.status = status;
+  failure.error = error;
+  return failure;
+}
+
 function __handleComponentError(error, component) {
+  const failure = __componentFailure(error);
   let current = component;
   // Cycle guard: a corrupted _parent chain must not hang the walk.
   const visited = new Set();
@@ -697,7 +718,7 @@ function __handleComponentError(error, component) {
       const prevC = __pushComponent(current);
       const prevO = __pushOwner(current._frame);
       try {
-        current.onError(error, component);
+        current.onError(failure, component);
         return;
       } catch (_) {
         // A throwing boundary declines this error; continue at its parent

@@ -83,6 +83,27 @@ const ROWS = [
   ['def tick!\n  1', 'declare function tick(): void;\nexport {};\n'],
   ['save! = (x) -> x', 'declare function save(x?: any): void;\nexport {};\n'],
   ['export save! = (x: number) -> x', 'export declare function save(x: number): void;\n'],
+  // ASYNC wraps as Promise<T>, exactly as the face spells it: a caller
+  // awaits what the annotation names, and a declaration carries no
+  // `async` keyword to imply the wrap. Unwrapped, the .d.ts told a
+  // consumer a number came back where a Promise does — a lie that
+  // type-checks and fails at runtime.
+  ['def go(a: number): number\n  await a', 'declare function go(a: number): Promise<number>;\nexport {};\n'],
+  ['go! = (a: number) ->\n  await a', 'declare function go(a: number): Promise<void>;\nexport {};\n'],
+  ['export class K\n  load: (a: number): number ->\n    await a', 'export declare class K {\n  load(a: number): Promise<number>;\n}\n'],
+  // an author who already spelled the Promise keeps their spelling
+  ['def already(a: number): Promise<number>\n  await a', 'declare function already(a: number): Promise<number>;\nexport {};\n'],
+  // a void GENERATOR returns its iterator, so the void spelling would
+  // misdeclare it — a consumer told `void` cannot call `.next()` on
+  // what it gets back. It stays DECLARED (`any`, matching the face and
+  // the component companion): dropping the return type here would drop
+  // the whole declaration for a paramless def, and a vanished export is
+  // worse than a wide one.
+  ['def pump!()\n  yield 1', 'declare function pump(): any;\nexport {};\n'],
+  ['pump! = ->\n  yield 1', 'declare function pump(): any;\nexport {};\n'],
+  ['export class A\n  step!: ->\n    yield 1', 'export declare class A {\n  step(): any;\n}\n'],
+  // the author-spelled iterator still wins, exactly as any annotation does
+  ['def numbers(): Generator<number>\n  yield 1', 'declare function numbers(): Generator<number>;\nexport {};\n'],
   // an explicit return type on a void def wins (the rule; the marker
   // still suppresses the implicit return at runtime)
   ['def typed!(x): Number\n  bump(x)', 'declare function typed(x?: any): Number;\nexport {};\n'],
@@ -104,6 +125,9 @@ const ROWS = [
   // signatures, quoted/numeric keys, readonly modifiers — each a
   // recognized member shape, braced like the interface path
   ['type M =\n  [key: string]: number\nz = 1', 'type M = {\n  [key: string]: number;\n};\nexport {};\n'],
+  // bare-colon members take their type from the indented block beneath
+  ['type S =\n  inner?:\n    x?: number\n    y?: string\nz = 1', 'type S = {\n  inner?: { x?: number; y?: string };\n};\nexport {};\n'],
+  ['interface N\n  inner:\n    x: number\nz = 1', 'interface N {\n  inner: { x: number };\n}\nexport {};\n'],
   ['type C =\n  (x: number): string\nz = 1', 'type C = {\n  (x: number): string;\n};\nexport {};\n'],
   ['type Q =\n  "a-b": string\n  0: boolean\nz = 1', 'type Q = {\n  "a-b": string;\n  0: boolean;\n};\nexport {};\n'],
   // Single-quoted keys normalize to double (the TS display convention,
@@ -421,7 +445,9 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('declare let Counter: {');
     // The required prop's union arm and the bind slot.
     expect(d).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
-    expect(d).toContain('__bind_max__?: { value: number; read(): number; touch?(): void }');
+    // `max` is an optional prop with no default: the void slot widens the
+    // instance container AND the bind seam it feeds — the two must agree.
+    expect(d).toContain('__bind_max__?: { value: number | undefined; read(): number | undefined; touch?(): void }');
     // A REQUIRED prop suppresses the static mount mirror (the
     // runtime's static mount constructs with NO props — offering it
     // would be tsc-clean with a required container holding

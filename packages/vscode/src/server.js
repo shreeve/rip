@@ -51,7 +51,7 @@
 
 import {
   createConnection, TextDocuments, TextDocumentSyncKind, ProposedFeatures,
-  DidChangeWatchedFilesNotification, FileChangeType,
+  CompletionTriggerKind, DidChangeWatchedFilesNotification, FileChangeType,
   ResponseError, ErrorCodes, SemanticTokensBuilder,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -64,16 +64,16 @@ import { buildProbe, parseProbeHover } from './pins.js';
 import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
-  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, generatedSpanToSource,
+  sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, STDLIB_DIR, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, closureImportsOf, isStdlibPath, anchorStdlib } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -112,35 +112,24 @@ async function loadCompiler() {
   throw new Error('rip compiler not found (looked for ../../../src/compile.js and ../compiler/src/compile.js)');
 }
 
-// The lexer rides the same dual-path resolution as compile. It backs the
-// declaration-scope gate (scopes.js), which needs TYPE tokens: a text scan
-// cannot tell the annotation `x: T = v` from the object literal `{ x: T }`,
-// and reading the wrong one would gate the wrong declarations. Absent (older
-// staged compiler): no tokenizer, so `checkedLines` stays undefined and
-// mapTsDiagnostic leaves every diagnostic ungated — the pre-gate behaviour,
-// never a silent over-suppression.
-// Fails OPEN. No tokenizer (older staged compiler) or a source the lexer
-// refuses leaves the gate undefined, and an undefined gate publishes
-// everything. Failing CLOSED would be an empty annotation set — which reads
-// as "no declaration is annotated", silencing the entire file, and a silent
-// file is indistinguishable from a clean one.
-function scopeGateFor(source, fsPath, face, typedImports) {
-  if (!tokenize) return undefined;
-  try { return scopeGateOf(tokenize(source, fsPath).tokens, source, face, typedImports); }
+// The declaration-scope gate (scopes.js) reads the compile's own token tape
+// — the tokens the parse consumed, which is exactly the code the face
+// carries — so the gate and the face describe one text, and the editor
+// and `rip check` gate the same text. Two consequences of "the same
+// compile": a `__DATA__` payload is not code (it seeds no binding and
+// holds no annotation), and an open buffer's TOLERANT compile gates its
+// recovered face — mid-edit, an unclosed bracket leaves the file gated
+// like any other, not thrown open. The gate needs TYPE tokens: a text
+// scan cannot tell the annotation `x: T = v` from the object literal
+// `{ x: T }`, and reading the wrong one would gate the wrong declarations.
+// Fails OPEN: a gate scopes.js cannot build leaves it undefined, and an
+// undefined gate publishes everything. Failing CLOSED would be an empty
+// annotation set — which reads as "no declaration is annotated",
+// silencing the entire file, and a silent file is indistinguishable from
+// a clean one.
+function scopeGateFor(source, face, typedImports) {
+  try { return scopeGateOf(face.tokens, source, face, typedImports); }
   catch { return undefined; }
-}
-
-async function loadTokenizer() {
-  const candidates = [
-    new URL('../../../src/lexer.js', import.meta.url),
-    new URL('../compiler/src/lexer.js', import.meta.url),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(fileURLToPath(candidate))) {
-      return (await import(candidate.href)).tokenize;
-    }
-  }
-  return null;
 }
 
 // readProjectConfig rides the same dual-path resolution as compile
@@ -164,7 +153,6 @@ const documents = new TextDocuments(TextDocument);
 
 let compile = null;
 let readProjectConfig = null;
-let tokenize = null;
 let tsgo = null;
 let tsgoReady = null;
 let tsgoLaunches = 0;
@@ -173,6 +161,7 @@ let shuttingDown = false;
 // The project roots (established at initialize).
 let workspaceRoot = null;        // the client workspace's fsPath, or null
 let mirrorRoot = null;           // where mirrors + the generated tsconfig live
+let mirrorRootReal = null;       // realpath twin when it differs (symlinked root)
 let mirrorRootIsFallback = false; // temp-dir mirror root (workspace unwritable/absent)
 let mirrorRootReady = false;     // lazily created on first materialization
 let clientSupportsWatchers = false;
@@ -251,6 +240,28 @@ function ensureOwnedFile(filePath, content) {
   fs.writeFileSync(filePath, content);
 }
 
+// tsgo realpaths module-resolution results, so an answer can spell the
+// mirror root through its resolved form (a temp root under macOS /var →
+// /private/var, a workspace reached through a symlink) while the server
+// spells it as configured. Both spellings name the same tree, so the
+// realpath twin is recorded once the root exists and containment checks
+// accept either.
+function recordMirrorRootReal() {
+  try { mirrorRootReal = fs.realpathSync(mirrorRoot); } catch { mirrorRootReal = null; }
+  if (mirrorRootReal === mirrorRoot) mirrorRootReal = null;
+}
+
+// The mirror-relative path of a file under the mirror tree — either
+// spelling — or null. The ONE containment test: every "is this inside
+// the mirror?" ask goes through here, so the symlink rule cannot drift
+// between consumers.
+function mirrorRelOf(fsPath) {
+  for (const root of [mirrorRoot, mirrorRootReal]) {
+    if (root && fsPath.startsWith(root + path.sep)) return path.relative(root, fsPath);
+  }
+  return null;
+}
+
 function ensureMirrorRoot() {
   if (mirrorRootReady) return;
   if (workspaceRoot && !mirrorRootIsFallback) {
@@ -258,6 +269,7 @@ function ensureMirrorRoot() {
       fs.mkdirSync(mirrorRoot, { recursive: true });
       ensureOwnedFile(path.join(mirrorRoot, '.gitignore'), '*\n');
       writeGeneratedTsconfig();
+      recordMirrorRootReal();
       mirrorRootReady = true;
       return;
     } catch (err) {
@@ -269,6 +281,7 @@ function ensureMirrorRoot() {
   mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-lsp-'));
   mirrorRootIsFallback = true;
   writeGeneratedTsconfig();
+  recordMirrorRootReal();
   mirrorRootReady = true;
 }
 
@@ -405,7 +418,7 @@ function ensureAutoBoundary(fsPath) {
   }
   writeGeneratedTsconfig();
   written.push(path.join(mirrorRoot, 'tsconfig.json'), path.join(mirrorRoot, HOST_FLOOR_NAME));
-  connection.console.log(`[rip] ${rel}: the package becomes its own program (declared globals or rip.strict)`);
+  connection.console.log(`[rip] ${rel}: the package becomes its own program (declared globals, a mode flip against its parent, or its own installed types)`);
   return written;
 }
 
@@ -706,20 +719,26 @@ function mirrorBytesOf(fsPath) {
 // memo that is two full compiles of every direct dependency (+57% on the
 // average importing file of this repo's packages/, +131 ms on the worst).
 //
-// Holds full results, so it is BOUNDED — recency-evicted well above the
-// widest direct-import fan-out measured here (16). The open buffer's own
+// Holds full results — token tape included, the largest part of one, and
+// read again whenever a face or typed-export memo misses on a hit here —
+// so it is BOUNDED: recency-evicted well above the widest direct-import
+// fan-out measured here (16). The open buffer's own
 // compile never lands here: it rides pins/tolerant/strict options, which
 // are a different compile. Every consumer receives the SAME result
 // object — nothing mutates compile results today, and a consumer that
 // started annotating them would corrupt its siblings.
-const rawCompileCache = new Map(); // fsPath → { sourceHash, result }, insertion = recency
+const rawCompileCache = new Map(); // fsPath → { sourceHash, stashSpec, result }, insertion = recency
 const RAW_COMPILE_CAP = 32;
 function rawCompile(fsPath, source, sourceHash) {
+  // The stash discovery is a COMPILE INPUT (the face splices by it), so
+  // it joins the cache key — a hit on source bytes alone would keep
+  // serving a face compiled before app/stash.rip appeared or vanished.
+  const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
   const hit = rawCompileCache.get(fsPath);
-  if (hit && hit.sourceHash === sourceHash) return hit.result;
-  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts' });
+  if (hit && hit.sourceHash === sourceHash && hit.stashSpec === stashSpec) return hit.result;
+  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts', appStashSpec: stashSpec });
   rawCompileCache.delete(fsPath);
-  rawCompileCache.set(fsPath, { sourceHash, result });
+  rawCompileCache.set(fsPath, { sourceHash, stashSpec, result });
   if (rawCompileCache.size > RAW_COMPILE_CAP) rawCompileCache.delete(rawCompileCache.keys().next().value);
   return result;
 }
@@ -738,7 +757,6 @@ function rawCompile(fsPath, source, sourceHash) {
 // at, not the one they last saved.
 const typedExportCache = new Map(); // fsPath → { sourceHash, names }
 function typedExportsFor(fsPath) {
-  if (!tokenize) return null;
   const open = documents.get('file://' + fsPath);
   let source;
   if (open) source = open.getText();
@@ -749,7 +767,7 @@ function typedExportsFor(fsPath) {
   let names;
   try {
     const result = rawCompile(fsPath, source, sourceHash);
-    names = typedExportsOf(tokenize(source, fsPath).tokens, source, result);
+    names = typedExportsOf(result.tokens, source, result);
   } catch {
     names = new Set(); // a source that will not compile types none of its importers
   }
@@ -821,21 +839,55 @@ function faceOf(fsPath) {
     // The declaration-scope gate, computed once per face and cached with it
     // — the face is keyed by sourceHash, so an edit that changes which
     // declarations carry annotations rebuilds this alongside the mappings.
-    checkedLines: scopeGateFor(source, fsPath, result,
+    checkedLines: scopeGateFor(source, result,
       typedImportsFor(result.stores, source, path.dirname(fsPath))),
   };
   faceCache.set(fsPath, face);
   return face;
 }
 
-// The inverse of mirrorPathOf for workspace files. __external__ mirrors
-// have no faithful inverse (sanitized names) — their results drop.
+// Every out-of-workspace source this server has mirrored: the live
+// closure, and the manifest a warm start restored before the closure
+// walk reached anything. Bounded by what actually mirrors externally —
+// in practice the stdlib faces a `rip/*` specifier pulled in.
+function* externalMirroredSources() {
+  const seen = new Set();
+  const inWorkspace = workspaceRoot + path.sep;
+  for (const source of [materializedMirrors.keys(), Object.keys(cacheManifest.entries)]) {
+    for (const file of source) {
+      if (file.startsWith(inWorkspace) || seen.has(file)) continue;
+      seen.add(file);
+      yield file;
+    }
+  }
+}
+
+// The inverse of mirrorPathOf. A workspace file's mirror rel IS its
+// source's rel, so it inverts by construction. An __external__ rel does
+// NOT, and re-deriving one from a candidate path proves nothing:
+// mirrorRelForFsPath strips colons on the way in, so its output is a
+// fixed point of itself, and on Windows the drive letter's colon goes
+// with it. The faithful inverse is a LOOKUP over the sources actually
+// mirrored — the answer is then a path this server itself put there, in
+// its own spelling, on every platform. Ambiguity refuses: a mirror two
+// sources claim (the collision warnOnMirrorCollision reports) names
+// neither. A mirror no source claims — a non-file uri under the
+// sanitizer, which nothing invertible ever produced — drops.
 function sourcePathOfMirror(mirrorFsPath) {
   if (!workspaceRoot || mirrorRootIsFallback) return null;
-  if (!mirrorFsPath.startsWith(mirrorRoot + path.sep)) return null;
   if (!mirrorFsPath.endsWith('.rip.ts')) return null;
-  const rel = path.relative(mirrorRoot, mirrorFsPath).slice(0, -'.ts'.length);
-  if (rel.split(path.sep)[0] === '__external__') return null;
+  const mirrorRel = mirrorRelOf(mirrorFsPath);
+  if (mirrorRel === null) return null;
+  const rel = mirrorRel.slice(0, -'.ts'.length);
+  if (rel.split(path.sep)[0] === '__external__') {
+    let found = null;
+    for (const file of externalMirroredSources()) {
+      if (mirrorPathOf('file://' + file) !== mirrorFsPath) continue;
+      if (found !== null) return null;
+      found = file;
+    }
+    return found;
+  }
   return path.join(workspaceRoot, rel);
 }
 
@@ -857,11 +909,14 @@ function mirrorFromDisk(fsPath, source) {
   writeMirror(mirrorPath, result.code);
   // A dependency that DECLARES globals or lives in a mode-flipped package
   // gets its boundary the moment its face materializes — the closure pass
-  // may be the first to see it.
-  const depCfg = readProjectConfig ? readProjectConfig(path.dirname(fsPath)) : null;
-  const depFlipped = depCfg?._configDir && depCfg._configDir !== workspaceRoot
-    && (depCfg.strict === true) !== (readProjectConfig(path.dirname(depCfg._configDir)).strict === true);
-  if (result.globalDecls?.length || depFlipped) {
+  // may be the first to see it. Only INSIDE the workspace: a dependency
+  // outside it (the stdlib) keeps its own posture and never earns a
+  // boundary here — the same rule the CLI walker applies.
+  const inWorkspace = workspaceRoot && fsPath.startsWith(workspaceRoot + path.sep);
+  const depCfg = inWorkspace && readProjectConfig ? readProjectConfig(path.dirname(fsPath)) : null;
+  const depEarns = depCfg?._configDir
+    && configEarnsBoundary(depCfg, readProjectConfig(path.dirname(depCfg._configDir)), workspaceRoot);
+  if (inWorkspace && (result.globalDecls?.length || depEarns)) {
     const bw = ensureAutoBoundary(fsPath);
     if (bw.length && tsgo) {
       tsgo.client.notify('workspace/didChangeWatchedFiles', {
@@ -869,9 +924,13 @@ function mirrorFromDisk(fsPath, source) {
       });
     }
   }
-  const imports = ripImportsOf(result.stores, source, path.dirname(fsPath));
+  const imports = closureImportsOf(result.stores, source, fsPath, workspaceRoot);
   cacheManifest.entries[fsPath] = {
     sourceHash: hashText(source), codeHash: hashText(result.code), imports,
+    // The stash discovery the face was compiled under — a COMPILE INPUT
+    // the source bytes cannot vouch for, so revalidation compares it
+    // against the live discovery (materializeClosure's cached road).
+    stashSpec: appStashSpecFor(fsPath, workspaceRoot),
     // The names this module declares as enums — what an IMPORTER needs to
     // color its own uses, and the one fact it cannot compute for itself.
     // Cheap to carry (names, no spans) and invalidated with the entry; a
@@ -900,11 +959,12 @@ function mirrorIntact(file, entry) {
 // Created event pulls them in; targets resolving OUTSIDE the workspace
 // truncate the closure loudly (a `../` chain must not walk the whole
 // disk into __external__) — EXCEPT the stdlib tree: `rip/<pkg>`
-// specifiers resolve into STDLIB_DIR, a bounded tree whose faces the
-// generated tsconfig already maps by name (stdlibRipPaths), so
-// materializing them completes a mapping the config promised rather
-// than opening the disk walk. Returns the counters (the scaling gate
-// pins them) and the created/changed mirror paths for tsgo notification.
+// specifiers resolve into the one this server is anchored on, a bounded
+// tree whose faces the generated tsconfig already maps by name
+// (stdlibRipPaths), so materializing them completes a mapping the config
+// promised rather than opening the disk walk. Returns the counters (the
+// scaling gate pins them) and the created/changed mirror paths for tsgo
+// notification.
 function materializeClosure(seeds) {
   ensureMirrorRoot();
   const queue = [...seeds];
@@ -914,9 +974,12 @@ function materializeClosure(seeds) {
     const file = queue.pop();
     if (materializedMirrors.has(file)) continue;
     if (documents.get('file://' + file)) continue; // open buffers own their mirrors and closures
-    const inWorkspace = workspaceRoot && file.startsWith(workspaceRoot + path.sep);
-    const inStdlib = STDLIB_DIR && file.startsWith(STDLIB_DIR + path.sep);
-    if (!inWorkspace && !inStdlib) {
+    // The stdlib is the sanctioned exception to the workspace bound: the
+    // generated tsconfig points `rip/*` at its `__external__` mirror
+    // faces, so those faces must exist — and the subtree is finite, so
+    // the runaway-`../`-chain concern the bound guards against does not
+    // apply to it.
+    if (!workspaceRoot || (!file.startsWith(workspaceRoot + path.sep) && !isStdlibPath(file))) {
       connection.console.error(
         `[rip] closure truncated: ${file} resolves outside the workspace — not materialized (open it directly for single-file service)`,
       );
@@ -931,7 +994,13 @@ function materializeClosure(seeds) {
     const sourceHash = hashText(source);
     materializedMirrors.set(file, { sourceHash });
     const entry = cacheManifest.entries[file];
-    if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry)) {
+    // Freshness = source bytes AND the stash discovery the face was
+    // compiled under: creating or deleting app/stash.rip (or its
+    // anchor pair) changes no route's bytes, and an entry written
+    // before the field existed reads undefined — a mismatch, so it
+    // recompiles once and heals.
+    if (entry && entry.sourceHash === sourceHash && mirrorIntact(file, entry) &&
+        entry.stashSpec === appStashSpecFor(file, workspaceRoot)) {
       cached++;
       // The cached road reconverges on the compile road's disk truth:
       // wrapperDirs is per-SESSION memory over per-WORKSPACE disk, and a
@@ -1421,11 +1490,31 @@ const FALLBACK_LEGEND = {
 };
 let semanticTokensLegend = FALLBACK_LEGEND;
 
+// A completion trigger character is a PROMISE: the editor opens a
+// suggest session the moment one is typed, and a session that opens
+// with nothing from this server lives on the editor's OWN word matches
+// for the rest of the word — every later keystroke refilters that
+// session instead of asking again, so the members never arrive however
+// well the position maps. The advertised set therefore holds only
+// characters the pipeline answers. Two of tsgo's are not among them.
+// SPACE it advertises and then answers nothing for anywhere, at any
+// position, in a face or in plain TypeScript. STAR it reserves for
+// continuing a JSDoc block, a context no face can hold: Rip's comment
+// glyph is '#', so nothing a .rip file compiles to ever puts a cursor
+// inside `/** */`.
+const UNSERVED_COMPLETION_TRIGGERS = new Set([' ', '*']);
+
+// The set as advertised — what onCompletion is willing to relay.
+let completionTriggerCharacters = [];
+
 connection.onInitialize(async (params) => {
   compile = await loadCompiler();
   readProjectConfig = await loadProjectConfigReader();
-  tokenize = await loadTokenizer();
   workspaceRoot = detectWorkspaceRoot(params);
+  // Before any mirror is planned: the workspace decides which checkout's
+  // stdlib `rip/*` names resolve to, for resolution and the generated
+  // `paths` map alike.
+  anchorStdlib(workspaceRoot);
   planMirrorRoot();
   loadCache();
   clientSupportsWatchers = !!params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
@@ -1436,6 +1525,8 @@ connection.onInitialize(async (params) => {
   const session = await launchTsgo();
   const tsCaps = session?.capabilities ?? {};
   semanticTokensLegend = tsCaps.semanticTokensProvider?.legend ?? FALLBACK_LEGEND;
+  completionTriggerCharacters = (tsCaps.completionProvider?.triggerCharacters
+    ?? ['.', '"', "'", '`', '/', '@', '<', '#', ' ']).filter((c) => !UNSERVED_COMPLETION_TRIGGERS.has(c));
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Full,
@@ -1447,7 +1538,7 @@ connection.onInitialize(async (params) => {
       documentSymbolProvider: true,
       workspaceSymbolProvider: true,
       completionProvider: {
-        triggerCharacters: tsCaps.completionProvider?.triggerCharacters ?? ['.', '"', "'", '`', '/', '@', '<', '#', ' '],
+        triggerCharacters: completionTriggerCharacters,
         resolveProvider: true,
       },
       signatureHelpProvider: {
@@ -1670,7 +1761,8 @@ async function refresh(document) {
     // callable lines are recovery units. Other positioned rejections,
     // including incomplete token bodies and schema directives, reach the
     // catch below and ride the last good face.
-    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true });
+    const stashSpec = (() => { try { return appStashSpecFor(fileURLToPath(document.uri), workspaceRoot); } catch { return null; } })();
+    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true, appStashSpec: stashSpec });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     // staleness: lastGood (and the overlay/mirror) stay as they are.
@@ -1739,7 +1831,7 @@ async function refresh(document) {
     // this reads it back rather than deriving the path a second way.
     checkedLines: (() => {
       const dir = (() => { try { return path.dirname(fileURLToPath(document.uri)); } catch { return null; } })();
-      return scopeGateFor(text, document.uri, result, typedImportsFor(result.stores, text, dir));
+      return scopeGateFor(text, result, typedImportsFor(result.stores, text, dir));
     })(),
   };
 
@@ -1769,7 +1861,7 @@ async function refresh(document) {
     let fsPath = null;
     try { fsPath = fileURLToPath(document.uri); } catch { /* non-path uri */ }
     if (fsPath) {
-      const imports = ripImportsOf(result.stores, text, path.dirname(fsPath));
+      const imports = closureImportsOf(result.stores, text, fsPath, workspaceRoot);
       const previous = state.imports ?? [];
       state.imports = imports;
       // The entry describes the bytes ON DISK, so it is gated exactly as
@@ -1784,6 +1876,9 @@ async function refresh(document) {
       if (good.parseDiagnostics.length === 0) {
         cacheManifest.entries[fsPath] = {
           sourceHash: hashText(text), codeHash: hashText(result.code), imports,
+          // The discovery this compile ran under (the compile-input rule
+          // the closure road's revalidation reads).
+          stashSpec: appStashSpecFor(fsPath, workspaceRoot),
           // An open buffer answers importers from its own last-good compile;
           // the entry has to carry the names too, or closing this buffer
           // leaves importers uncorrected until the file next changes.
@@ -1792,14 +1887,15 @@ async function refresh(document) {
         scheduleManifestSave();
       }
       const wrapperFiles = ensureProjectWrapper(fsPath);
-      // Globals-declaring or mode-flipped against the parent package:
-      // either way the package needs its own program (floors and null
-      // posture are per-program, and a flip cuts both ways — a strict
-      // package inside a gradual program would ride the floor's `any`s, a
-      // gradual one inside a strict program would ride strict nulls).
-      const flipped = state.configDir && state.configDir !== workspaceRoot
-        && (state.strict === true) !== (readProjectConfig(path.dirname(state.configDir)).strict === true);
-      if (result.globalDecls?.length || flipped) {
+      // Globals-declaring, mode-flipped against the parent package, or
+      // installing its own ambient types: each way the package needs its
+      // own program (floors, null posture, and typeRoots are per-program,
+      // and a flip cuts both ways — configEarnsBoundary carries the
+      // config-driven reasons).
+      const stateEarns = state.configDir && configEarnsBoundary(
+        { strict: state.strict, _configDir: state.configDir },
+        readProjectConfig(path.dirname(state.configDir)), workspaceRoot);
+      if (result.globalDecls?.length || stateEarns) {
         wrapperFiles.push(...ensureAutoBoundary(fsPath));
       }
       if (wrapperFiles.length && tsgo) {
@@ -2068,6 +2164,11 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   const ripChanged = new Set(); // closed .rip files this batch touched on disk
   let configChanged = false;
   let refreshAllForConfig = false;
+  // Stash DISCOVERY is a compile input made of existence facts
+  // (app/stash.rip and its index.rip/package.json anchor), so an event
+  // that creates or deletes one flips the spec for a whole subtree
+  // without touching any route's bytes.
+  let stashDiscoveryChanged = false;
   for (const change of changes) {
     if (!change.uri.startsWith('file://')) continue;
     let fsPath;
@@ -2106,10 +2207,17 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) {
         refreshAllForConfig = true;
         configChanged = true;
+        // A created/deleted package.json is half an anchor pair.
+        if (change.type !== FileChangeType.Changed) stashDiscoveryChanged = true;
       }
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
+    if (change.type !== FileChangeType.Changed &&
+        (path.basename(fsPath) === 'index.rip' ||
+         (path.basename(fsPath) === 'stash.rip' && path.basename(path.dirname(fsPath)) === 'app'))) {
+      stashDiscoveryChanged = true;
+    }
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
     ripChanged.add(fsPath);
     const mirrorPath = mirrorPathOf(change.uri);
@@ -2210,6 +2318,18 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       }
     }
   }
+  if (stashDiscoveryChanged) {
+    // The discovery flipped for some subtree: every cached face and
+    // every materialized-this-session mark is suspect. Clearing them
+    // makes the next closure pass revisit each file through the
+    // manifest's stashSpec revalidation — entries whose discovery
+    // still matches revalidate cheaply, the flipped ones recompile —
+    // and the open docs refresh below recompile under the new spec.
+    rawCompileCache.clear();
+    faceCache.clear();
+    materializedMirrors.clear();
+    refreshAllForConfig = true;
+  }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
     // (strict/noCheck change the face itself, not just diagnostics), so
@@ -2260,7 +2380,11 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
 //     semantics as open buffers), and real TypeScript files
 //     (node_modules, .d.ts, workspace .ts siblings — passed through
 //     untouched). Synthetic generated spans DROP their results
-//     (recorded policy — never pinned to unrelated source).
+//     (recorded policy — never pinned to unrelated source). The one
+//     carve-out: an answer that names a MODULE (the ask sat inside an
+//     import/export specifier) is the file itself — its face target
+//     answers by URI at file start, no span consulted, because the
+//     file IS the related source (ripModuleLocation).
 
 // The request context for a feature call, or null when the position
 // does not survive translation.
@@ -2287,7 +2411,10 @@ function requestContext(params) {
     ctx.genOffset = sourceOffsetToGenerated(good.mappings, offset, good.source, good.code);
     ctx.genExact = sourceOffsetToGeneratedExact(good.mappings, offset, good.source, good.code);
     ctx.genCursor = sourceCursorToGenerated(good.mappings, offset);
-    if (ctx.genOffset === null && ctx.genCursor === null) return null;
+    // Completion alone widens to the dropped-slot landing: an object
+    // literal's key after a trailing comma emits nothing to sit on.
+    ctx.genSlot = ctx.genCursor ?? sourceSlotToGenerated(good.mappings, offset, good.source, good.code);
+    if (ctx.genOffset === null && ctx.genSlot === null) return null;
     ctx.genPosition = ctx.genOffset === null ? null : offsetToPosition(good.genLineStarts, ctx.genOffset);
     ctx.genExactPosition = ctx.genExact === null ? null : offsetToPosition(good.genLineStarts, ctx.genExact);
   }
@@ -2336,14 +2463,44 @@ function stateByTsUri(tsUri) {
   return null;
 }
 
+// One tsgo result uri, classified. This is the SHARED policy — which
+// uris are open buffers, which invert to a `.rip` source, which are
+// mirror paths with no faithful inverse (__external__, or a session with
+// no invertible root), and which are real TypeScript files — so the
+// rules cannot drift between the consumers, which differ only in what
+// they DO with each class.
+function classifyTsUri(uri) {
+  const open = stateByTsUri(uri);
+  if (open) return { kind: 'open', open };
+  if (!uri.startsWith('file://')) return null;
+  let fsPath;
+  try { fsPath = fileURLToPath(uri); } catch { return null; }
+  const sourcePath = sourcePathOfMirror(fsPath);
+  if (sourcePath !== null) return { kind: 'mirror', sourcePath };
+  if (mirrorRelOf(fsPath) !== null) return { kind: 'mirror-opaque' };
+  return { kind: 'real', fsPath };
+}
+
+// Location | Location[] | LocationLink[] → flat [{uri, range}] in tsgo
+// coordinates, still unmapped. Links prefer the selection range — the
+// symbol's own span, matching what a plain Location would carry.
+function flattenLocations(result) {
+  const list = result === null ? [] : Array.isArray(result) ? result : [result];
+  return list.map((item) => item.targetUri
+    ? { uri: item.targetUri, range: item.targetSelectionRange ?? item.targetRange }
+    : { uri: item.uri, range: item.range });
+}
+
 // One result location {uri, range} in tsgo coordinates → a Rip
 // location, or null (dropped: synthetic target, unmappable file, or a
 // stale open buffer whose changed region swallowed the range).
 // `strict` propagates to the range mapping (symbol-identifying
 // results refuse cover landings).
 function ripLocation(uri, range, { strict = false } = {}) {
-  const open = stateByTsUri(uri);
-  if (open) {
+  const target = classifyTsUri(uri);
+  if (!target) return null;
+  if (target.kind === 'open') {
+    const { open } = target;
     const document = documents.get(open.uri);
     if (!document) return null;
     const good = open.state.lastGood;
@@ -2357,17 +2514,12 @@ function ripLocation(uri, range, { strict = false } = {}) {
     const curRange = goodRangeToCurrent(ctx, srcRange);
     return curRange ? { uri: open.uri, range: curRange } : null;
   }
-  if (!uri.startsWith('file://')) return null;
-  let fsPath;
-  try { fsPath = fileURLToPath(uri); } catch { return null; }
-  const sourcePath = sourcePathOfMirror(fsPath);
-  if (sourcePath === null) {
-    // Inside the mirror tree but not invertible → drop; anywhere else
-    // is a REAL TypeScript file (node_modules, .d.ts, workspace .ts
-    // siblings) and passes through untouched.
-    if (mirrorRoot && fsPath.startsWith(mirrorRoot + path.sep)) return null;
-    return { uri, range };
-  }
+  // Inside the mirror tree but not invertible → drop; a REAL TypeScript
+  // file (node_modules, .d.ts, workspace .ts siblings) passes through
+  // untouched.
+  if (target.kind === 'mirror-opaque') return null;
+  if (target.kind === 'real') return { uri, range };
+  const { sourcePath } = target;
   // An OPEN buffer that reaches this branch has no usable lastGood (it
   // never compiled) — the disk face's positions describe a text the
   // buffer no longer shows, so the result drops rather than lies.
@@ -2380,18 +2532,39 @@ function ripLocation(uri, range, { strict = false } = {}) {
 
 // Location | Location[] | LocationLink[] → Rip locations (flat).
 function ripLocations(result) {
-  const list = result === null ? [] : Array.isArray(result) ? result : [result];
-  const mapped = [];
-  for (const item of list) {
-    if (item.targetUri) {
-      const loc = ripLocation(item.targetUri, item.targetSelectionRange ?? item.targetRange);
-      if (loc) mapped.push(loc);
-    } else {
-      const loc = ripLocation(item.uri, item.range);
-      if (loc) mapped.push(loc);
-    }
-  }
-  return mapped;
+  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range)).filter(Boolean);
+}
+
+// A definition answer FOR A MODULE SPECIFIER names a file, not a symbol:
+// for a FACE target the uri is the whole content of the answer. The
+// range tsgo reports lives in face coordinates that need not survive the
+// map-back — an empty range at offset 0 sits inside the runtime preamble
+// whenever the target's face delivers helpers, and a whole-file span
+// covers no single construct — so range-mapping such an answer drops
+// exactly the modules whose faces carry any synthetic lead-in. A face
+// target therefore answers the FILE, at its start (stable in every
+// version of the text, so no face positions are consulted): an open
+// target with a lastGood answers its own buffer uri; one without answers
+// through mirror inversion — the same file, spelled by the server; a
+// mirror whose `.rip` source no longer exists drops (tsgo can outrun a
+// deletion by one answer); a non-invertible mirror (__external__) drops.
+// A REAL TypeScript file keeps tsgo's own range — its coordinates are
+// its own, and an ambient `declare module` answer points mid-file at the
+// declaration, which the pin would erase.
+function ripModuleLocation(uri, range) {
+  const target = classifyTsUri(uri);
+  if (!target || target.kind === 'mirror-opaque') return null;
+  if (target.kind === 'real') return { uri, range };
+  const fileStart = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+  if (target.kind === 'open') return { uri: target.open.uri, range: fileStart };
+  if (!fs.existsSync(target.sourcePath)) return null;
+  return { uri: 'file://' + target.sourcePath, range: fileStart };
+}
+
+// Location | Location[] | LocationLink[] → the named modules' Rip
+// locations (flat).
+function ripModuleLocations(result) {
+  return flattenLocations(result).map(({ uri, range }) => ripModuleLocation(uri, range)).filter(Boolean);
 }
 
 async function tsgoRequest(method, params, label) {
@@ -2478,13 +2651,14 @@ function reorderUnionHover(ctx, contents) {
 // type and the hover shows it back; whether it is a GOOD annotation is the
 // author's business. The editor's job is to be honest about what the source
 // says, not to second-guess it.
-// A component MEMBER declaration takes the same presentation for the same
-// reason — the author declared `people := []` and reads it as an array —
-// but only AT ITS DECLARATION. `atMemberDecl` says the request landed
-// there; at every other position the member's container is real (a
+// A component MEMBER takes the same presentation for the same reason —
+// the author declared `people := []` and reads it as an array — at its
+// DECLARATION and at every IN-BODY read (where the lowering appended
+// `.value` to the bare name the author wrote). `atMemberDecl` says the
+// request landed on one of those spans, both carried by the compiler's
+// memberDecls channel; anywhere else the member's container is real (a
 // consumer holding an instance writes `inst.people.value`) and passes
-// through untouched. The two positions resolve to the same face symbol,
-// so the compiler's own record is what tells them apart.
+// through untouched.
 function presentReactiveCellHover(contents, atMemberDecl = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
@@ -2569,6 +2743,13 @@ connection.onHover(async (params) => {
     position: ctx.genPosition,
   }, 'hover');
   if (!hover) return null;
+  // A position whose mapping falls to a cover row over render scaffold
+  // answers with the lowering's own locals (`let _el14: any`) — never a
+  // user symbol. The decline is the machinery interim (RULINGS.md);
+  // SCAFFOLD_HOVER (translate.js) is the one shared pattern, and its
+  // `: any` requirement spares an author's own single-underscore
+  // binding, whose hover carries a real type.
+  if (typeof hover.contents?.value === 'string' && SCAFFOLD_HOVER.test(hover.contents.value)) return null;
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
@@ -2585,16 +2766,13 @@ connection.onHover(async (params) => {
   return { contents, ...(range ? { range } : {}) };
 });
 
-// The import/export specifier STRING an offset sits in, as a
-// current-buffer range — quotes included, matching what TypeScript
-// underlines — or null. This is the origin a client underlines for
-// go-to-definition: left to the editor's word pattern, a path like
-// `rip/http` underlines one segment at a time (words break at `/`,
-// `-`, `.`) where TypeScript underlines the whole string literal. The
-// stores carry the exact span, so a definition answered from inside one
-// names it — as LocationLink's originSelectionRange, which only a
-// linkSupport client is allowed to receive.
-function specifierOriginAt(ctx) {
+// The import/export specifier STRING span the last-good offset sits in
+// (stores coordinates, quotes included), or null. Membership is the
+// MODULE dispatch: a position inside a specifier asks about the module,
+// whether or not the span still maps into the edited buffer — an
+// unflushed edit that swallows one endpoint must not flip the ask back
+// to symbol treatment while the cursor's own offset aligns.
+function specifierSpanAt(ctx) {
   const stores = ctx.good.stores;
   if (!stores?.nodesByKind) return null;
   for (const kind of ['import', 'export']) {
@@ -2602,13 +2780,24 @@ function specifierOriginAt(ctx) {
       const src = stores.role(node.nodeId, 'source');
       if (!src || typeof src.sourceStart !== 'number') continue;
       if (ctx.offset < src.sourceStart || ctx.offset >= src.sourceEnd) continue;
-      return goodRangeToCurrent(ctx, {
-        start: offsetToPosition(ctx.good.srcLineStarts, src.sourceStart),
-        end: offsetToPosition(ctx.good.srcLineStarts, src.sourceEnd),
-      });
+      return src;
     }
   }
   return null;
+}
+
+// The specifier span as a current-buffer range — what a client
+// underlines for go-to-definition: left to the editor's word pattern, a
+// path like `rip/http` underlines one segment at a time (words break at
+// `/`, `-`, `.`) where TypeScript underlines the whole string literal —
+// as LocationLink's originSelectionRange, which only a linkSupport
+// client is allowed to receive. Null when the span does not survive
+// into the edited buffer; the answer then ships without an origin.
+function specifierOriginOf(ctx, span) {
+  return goodRangeToCurrent(ctx, {
+    start: offsetToPosition(ctx.good.srcLineStarts, span.sourceStart),
+    end: offsetToPosition(ctx.good.srcLineStarts, span.sourceEnd),
+  });
 }
 
 connection.onDefinition(async (params) => {
@@ -2620,15 +2809,18 @@ connection.onDefinition(async (params) => {
   // no verbatim twin. The whole specifier names ONE module — the stores
   // just said which — so the lenient position cannot land on a wrong
   // symbol here, and nowhere else is it accepted.
-  const origin = specifierOriginAt(ctx);
-  const position = ctx.genExactPosition ?? (origin ? ctx.genPosition : null);
+  const span = specifierSpanAt(ctx);
+  const position = ctx.genExactPosition ?? (span ? ctx.genPosition : null);
   if (position === null) return null;
   const result = await tsgoRequest('textDocument/definition', {
     textDocument: { uri: ctx.state.tsUri },
     position,
   }, 'definition');
-  const locations = ripLocations(result);
-  if (clientDefinitionLinks && origin && locations.length) {
+  // A position inside a specifier asked about the MODULE, and the answer
+  // is read as one (ripModuleLocations).
+  const locations = span ? ripModuleLocations(result) : ripLocations(result);
+  const origin = span && locations.length ? specifierOriginOf(ctx, span) : null;
+  if (clientDefinitionLinks && origin) {
     return locations.map((loc) => ({
       originSelectionRange: origin,
       targetUri: loc.uri,
@@ -2639,21 +2831,29 @@ connection.onDefinition(async (params) => {
   return locations;
 });
 
-// Type definition: served exactly like definition (EXACT flavor,
-// synthetic drops, recompile-for-mappings for unopened members,
-// real-.ts pass-through). A null answer is honest for primitive-typed
+// Type definition: served like definition (EXACT flavor, synthetic
+// drops, recompile-for-mappings for unopened members, real-.ts
+// pass-through), including the module treatment — at a specifier tsgo
+// answers the module file whole, the module-shaped span the range
+// map-back cannot serve. A null answer is honest for primitive-typed
 // symbols — a number has no type-declaration site.
 connection.onTypeDefinition(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
-  if (!ctx || ctx.genExactPosition === null) return null;
+  if (!ctx) return null;
+  const span = specifierSpanAt(ctx);
+  const position = ctx.genExactPosition ?? (span ? ctx.genPosition : null);
+  if (position === null) return null;
   const result = await tsgoRequest('textDocument/typeDefinition', {
     textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
+    position,
   }, 'type definition');
-  return ripLocations(result);
+  return span ? ripModuleLocations(result) : ripLocations(result);
 });
 
+// Implementation and references take NO module treatment: at a
+// specifier, tsgo answers the import-site string literals — verbatim
+// spans in each importing face that the ordinary range map-back serves.
 connection.onImplementation(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -2766,6 +2966,18 @@ function faceEditsToCurrent(ctx, edits) {
   return mapped;
 }
 
+// The context to relay, or null for an ordinary request. A trigger
+// character outside the advertised set answered no promise this server
+// made, and relaying one is how tsgo comes to answer nothing (space) or
+// to panic outright (comma, which signature help advertises). The
+// position still carries the whole question, so such a request is
+// served rather than refused.
+function relayableCompletionContext(context) {
+  if (!context) return null;
+  if (context.triggerKind !== CompletionTriggerKind.TriggerCharacter) return context;
+  return completionTriggerCharacters.includes(context.triggerCharacter) ? context : null;
+}
+
 function ripCompletionItem(ctx, raw, index) {
   const item = {
     label: raw.label,
@@ -2805,12 +3017,13 @@ connection.onCompletion(async (params) => {
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
-  const genCursor = ctx.genCursor ?? ctx.genExact;
+  const genCursor = ctx.genSlot ?? ctx.genExact;
   if (genCursor === null) return null;
+  const context = relayableCompletionContext(params.context);
   const result = await tsgoRequest('textDocument/completion', {
     textDocument: { uri: ctx.state.tsUri },
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
-    ...(params.context ? { context: params.context } : {}),
+    ...(context ? { context } : {}),
   }, 'completion');
   if (!result) return null;
   const rawItems = Array.isArray(result) ? result : result.items ?? [];
@@ -3309,7 +3522,7 @@ function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
       }
       const sourcePath = fsPath === null ? null : sourcePathOfMirror(fsPath);
       if (sourcePath === null) {
-        if (fsPath !== null && (!mirrorRoot || !fsPath.startsWith(mirrorRoot + path.sep))) {
+        if (fsPath !== null && mirrorRelOf(fsPath) === null) {
           // A real TypeScript file: its edits apply as tsgo spelled them.
           changes[uri] = edits;
           continue;

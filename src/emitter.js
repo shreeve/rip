@@ -30,10 +30,11 @@ import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
-import {
+import { COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  declaresContainer,
+  declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  componentCtorMembers, runtimeApiDeclares,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
 } from './ts/components.js';
@@ -266,6 +267,36 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // this helper, never a hand-maintained head pair (a site that listed
 // only 'def' would silently misclassify void defs).
 const isDefHead = (h) => h === 'def' || h === 'void-def';
+// Does this subtree await — i.e. is the function owning it ASYNC? A
+// `dammit` call (`f!`) awaits, and an awaited for-as carries its await
+// in a flag slot rather than a nested node. Nested function and class
+// bodies own their own awaits, so the walk stops at them. Exported for
+// the same reason as containsYield below: the return type it decides is
+// spelled independently by the face and by the declarations.
+export function containsAwait(sexpr) {
+  if (!isNode(sexpr)) return false;
+  const head = sexpr[0];
+  if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
+  if (head === 'for-as' && sexpr[3] === true) return true;
+  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  return sexpr.some((item) => containsAwait(item));
+}
+
+// Does this subtree yield — i.e. is the function owning it a GENERATOR?
+// Nested function and class bodies own their own yields, so the walk
+// stops at them. Exported because a generator's return type is decided
+// in three places that must agree: the TS face (tsReturnAnnotation), the
+// shipped declarations (src/ts/dts.js), and the component companion
+// (src/ts/components.js, which mirrors this rather than importing it —
+// the emitter imports THAT module, so the edge cannot run both ways).
+export function containsYield(sexpr) {
+  if (!isNode(sexpr)) return false;
+  const head = sexpr[0];
+  if (head === 'yield' || head === 'yield-from') return true;
+  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  return sexpr.some((item) => containsYield(item));
+}
+
 const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 // What may be a BINDING NAME. One spelling, read by the pattern walker and
 // by captureScan's own occurrence recorder — a walker that returned names
@@ -391,7 +422,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -406,6 +437,11 @@ class Emitter {
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
+    // The relative specifier from this module to the app's stash module,
+    // when the CALLER discovered one (check.js and the editor own the
+    // project-anchor walk; the compiler stays pure). Types the `app`
+    // ambience and the render gates; null leaves both `any`.
+    this.appStashSpec = appStashSpec;
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
     // production emission must stay byte-identical when hmr is false.
@@ -455,6 +491,15 @@ class Emitter {
     // hoist changed. Components ride this too: one lowers to a class
     // expression, and a forward-rendered child is ordinary library shape.
     this.classDecls = [];
+    // Generated `[start, end]` spans of a PIN's type text: the annotation
+    // itself, never the name it lands on. A pin is a type the compiler
+    // INFERRED and wrote into the face, and it is an ordinary annotation
+    // there — so a reader asking whether a position was ANNOTATED cannot
+    // tell it from the author's own, and takes every pinned position for
+    // a claim. Recorded here because only the emitter knows which
+    // annotations it wrote itself. Two bindings can share one hoist line,
+    // one pinned and one the author's, so the span is the unit.
+    this.pinSpans = [];
     // Generated `[start, end]` spans of a RENDER loop's item/index binding
     // names, every occurrence. The render path lowers the loop body to a
     // block-function factory, so in the face the binding genuinely IS a
@@ -1569,7 +1614,14 @@ class Emitter {
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
     if (this.ts) {
-      this.emitPrimitive(name);
+      // A reactive read's SOURCE span joins the value-first channel
+      // (memberDecls): the author wrote a bare read and the lowering
+      // appended `.value`, so a hover here answers the VALUE type, the
+      // same presentation the declaration serves — RULINGS.md's
+      // member-read row. A consumer holding an instance never passes
+      // through this rewrite, so consumer positions keep the container.
+      const span = this.emitPrimitive(name);
+      if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
@@ -1601,6 +1653,7 @@ class Emitter {
     } else {
       this.noteNameSpan(value);
     }
+    return span; // the claimed SOURCE span, for callers that record it
   }
 
   // Emit a name, recording the token-correction channels it belongs to.
@@ -1679,9 +1732,11 @@ class Emitter {
   // tests is the span the mapping resolves. Only members the face
   // declares as CONTAINERS are recorded: a member that declares its value
   // type directly has nothing to see past, and one whose own annotation
-  // spells the container shape by hand meant that shape. Every recorded
-  // member answers the same way — value-first at its declaration, the
-  // container at a read — so the channel carries spans and nothing else.
+  // spells the container shape by hand meant that shape. The channel also
+  // carries every IN-BODY reactive read (memberRead — where the lowering
+  // appended `.value` to a bare name), so the channel's meaning is "a
+  // position that answers VALUE-FIRST"; a consumer holding an instance
+  // is in neither set and keeps the container. Spans and nothing else.
   noteMemberDecl(m) {
     if (!this.ts || !declaresContainer(m)) return;
     const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
@@ -1970,15 +2025,26 @@ class Emitter {
   // generated manifestation (arrows registered void through their
   // owning definition carry no voidMarker role of their own; their
   // `: void` emits unmarked inside the enclosing $self cover).
-  tsReturnAnnotation(node, isAsync, isVoid, voidOwner = node) {
+  //
+  // A GENERATOR takes NEITHER treatment, because neither names what
+  // its caller receives: TS rejects `: void` on one outright (TS2505),
+  // and the async wrap would promise a value that an async generator
+  // hands back through its iterator instead. Both spellings are
+  // GENERATED, so a wrong one is unanswerable — the author annotated
+  // nothing in the void case, and gets their own annotation mangled in
+  // the async one. Emitting no annotation leaves TS to infer the exact
+  // iterator (`Generator<T, void, unknown>`); an author who wants it
+  // spelled writes it (`: Generator<T>`, `: AsyncGenerator<T>`) and
+  // that text passes through untouched, like any other annotation.
+  tsReturnAnnotation(node, isAsync, isVoid, isGen, voidOwner = node) {
     if (!this.ts) return;
     const text = this.annotationText(node, 'returnType');
     if (text !== null) {
-      const spelled = isAsync && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
+      const spelled = isAsync && !isGen && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
       this.b.tsOnly(() => this.mark(node, 'returnType', () => this.emitTypeText(node, 'returnType', `: ${spelled}`)));
       return;
     }
-    if (isVoid) {
+    if (isVoid && !isGen) {
       const spelled = isAsync ? 'Promise<void>' : 'void';
       this.b.tsOnly(() => this.mark(voidOwner, 'voidMarker', () => this.b.emit(`: ${spelled}`)));
     }
@@ -2090,11 +2156,83 @@ class Emitter {
       if (m.name === 'children') hasChildren = true;
       if (!isDeclarableMember(m)) continue;
       this.noteMemberDecl(m);
-      line(() => this.emitSegments(memberDeclareSegments(m)));
+      if (this.gateTwinSource(m, info) !== null) {
+        line(() => this.emitGateTwin(m, this.gateTwinSource(m, info)));
+        continue;
+      }
+      line(() => this.emitSegments(memberDeclareSegments(m, info)));
     }
     if (!hasChildren) line(() => this.b.emit('declare children: any;'));
+    // The ambience helper the `app` field infers through is declared
+    // once at MODULE scope, from the emit() tail — keyed off the USE,
+    // never off companion emission: expression-valued and function-
+    // nested components emit the field too, and a declaration parked on
+    // the companion road would strand them (no companion, or a declare
+    // at an illegal function-scope position). Declares hoist, so the
+    // tail position serves every class in the module.
+    const ambientLines = ambientClassDeclares(info);
+    if (ambientLines.some((t) => t.includes('__ripAmbientApp('))) this._needsAmbienceHelper = true;
+    for (const text of ambientLines) line(() => this.b.emit(text));
     if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
+    // The runtime base's API, declared because the inlined base types as
+    // `any` and carries nothing into the class. `this` rather than the
+    // component's name: an expression-valued component has no companion
+    // interface for a name to reach, and `this` keeps `mount`'s return
+    // the instance at hand rather than a fixed spelling.
+    for (const text of runtimeApiDeclares('this')) line(() => this.b.emit(text));
     line(() => this.b.emit('[key: `_${string}`]: any;'));
+  }
+
+  // The gate descriptor of a member that takes a face TWIN, or null.
+  // A bare gate under a discovered stash emits the read the author
+  // wrote instead of a projection formula; an annotated gate honors its
+  // annotation (the declare road), and without a stash `this.app` is
+  // undeclared on the class, so a twin would publish an error on every
+  // gate.
+  gateTwinSource(m, info) {
+    if (m.kind !== 'gate' || m.annotation != null || !info.appStashSpec) return null;
+    const src = Emitter.gateSource(m.node);
+    return src.error ? null : src;
+  }
+
+  // The gate's face twin — v3's construction. The read the author wrote
+  // emits as a REAL ts-only expression (`user = __computed(() =>
+  // this.app.data.user!)`): every path segment claims its source span,
+  // so hover answers at each depth and a wrong path draws its error on
+  // the segment the author wrote — and the `!` states the gate's own
+  // contract (the body does not render until the value exists). The
+  // member's type is the INSTANTIATED slot, which quickinfo prints
+  // resolved (the memberDeclareSegments doctrine: a written node
+  // echoes). The runtime road is untouched: `_init`'s `__gateBind`
+  // remains the only assignment the shipped JS carries. A keyed gate's
+  // key is a literal (verbatim) or a `params`/`query` chain, re-rooted
+  // on `this` — the class ambience declares both records.
+  emitGateTwin(m, src) {
+    this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
+    this.b.emit(' = __computed(() => this.');
+    this.mark(src.pathNode, '$self', () => {
+      const segs = Emitter.gateChain(src.pathNode).slice(1);
+      segs.forEach((seg, i) => {
+        if (i > 0) this.b.emit('.');
+        this.emitPrimitive(seg);
+      });
+    });
+    if (src.key !== null) {
+      this.b.emit('(');
+      if (src.keyParts === null) {
+        this.b.emit(src.keyCode);
+      } else {
+        this.mark(src.key, '$self', () => {
+          this.b.emit('this.');
+          src.keyParts.forEach((seg, i) => {
+            if (i > 0) this.b.emit('.');
+            this.emitPrimitive(seg);
+          });
+        });
+      }
+      this.b.emit(')');
+    }
+    this.b.emit('!);');
   }
 
   // Minted render-scaffold declarations type `any` in the face
@@ -2292,6 +2430,16 @@ class Emitter {
     }
     if (!propsParamOptional(info)) {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;\n`));
+    } else {
+      // The static mount mirror the binding's published type carries
+      // (componentCtorMembers, under the same condition). The base
+      // supplies it at runtime but types as `any`, so the class must
+      // declare it or a hoisted binding's assignment fails TS2741
+      // against its own published type. The RETURN stays `any`: a class
+      // expression has no name to give its own instance type, and the
+      // precise return already reaches every use site through the
+      // published type on the binding.
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: any) => any;\n`));
     }
     this.b.tsOnly(() => {
       this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);
@@ -3399,10 +3547,36 @@ class Emitter {
     // repaints. Read from the SAME facts the pin pass uses, so a binding
     // cannot be one thing here and another there.
     kept.classBindings = new Set();
+    // A component binding that STAYS on the hoist line is exactly a
+    // forward-referenced one — a binding whose first write can declare
+    // in place left above, taking the class expression with it and
+    // typing from it. Split from its declaration the initializer is not
+    // there to infer from, and the evolving `let` serves only
+    // same-function references (TS7034 at the declaration, TS7005 at
+    // every read inside a render body). The name's own published
+    // constructor type answers instead — the same surface the shipped
+    // `.d.ts` carries, so the two roads cannot disagree.
+    kept.componentTypes = new Map();
     for (const [name, , role] of kept) {
       if (role !== 'target') continue;
-      const v = facts.get(name)?.firstWrite?.[2];
-      if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) kept.classBindings.add(name);
+      const write = facts.get(name)?.firstWrite ?? null;
+      const v = write?.[2];
+      if (!isNode(v)) continue;
+      if (v[0] === 'class' || v[0] === 'component') kept.classBindings.add(name);
+      if (!this.ts || !this.isComponentDecl(v)) continue;
+      // A GENERIC component DECLINES and keeps the floor. Its class
+      // expression instantiates its own parameter through the optional
+      // props slot — the constructor yields `Box<T | undefined>` where
+      // the published surface returns `Box<T>` — so the annotation
+      // would be one the class cannot satisfy, trading the floor's
+      // ordinary implicit-any for a TS2322 on the declaration that
+      // names only generated types. The `.d.ts` road spells the same
+      // surface safely because a declaration is never checked against
+      // an implementation; only here must the class satisfy it.
+      if (this.annotationText(write, 'typeParams') !== null) continue;
+      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      info.appStashSpec = this.appStashSpec;
+      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(' ')} }`);
     }
     kept.pinnable = new Map();
     for (const [name, , role] of kept) {
@@ -3410,6 +3584,7 @@ class Emitter {
       const f = facts.get(name);
       if (!f?.nested || f.firstWrite === null) continue;
       if (kept.annotations?.has(name) || kept.schemaConsts?.has(name)) continue;
+      if (kept.componentTypes.has(name)) continue;
       // The key is computed ONCE and carried, never recomputed at the
       // emission site: it is derived from the name, the value slice and the
       // accessor path, and a second site that reproduced two of those three
@@ -3567,8 +3742,18 @@ class Emitter {
           // hoist line (entries.schemaConsts is set only there), so a
           // same-named function-local never annotates.
           const constType = entries.schemaConsts?.get(name) ?? null;
+          // A forward-referenced COMPONENT declares its published
+          // constructor type here, ahead of the class expression the
+          // split declaration left behind (applyDeclareInPlace names the
+          // tier). It precedes the pin tier because the type is
+          // CONSTRUCTED from the component's own surface rather than
+          // probed from a first write — a pin would answer the same
+          // question worse, and only after a round trip.
+          const ctorType = entries.componentTypes?.get(name) ?? null;
           if (constType !== null) this.b.tsOnly(() => this.b.emit(`: ${constType}`));
-          else {
+          else if (ctorType !== null) {
+            this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${ctorType}`));
+          } else {
             // Pin (evolving-let Tier 3): a caller-supplied inferred
             // type for a still-hoisted nested-referenced name, keyed
             // by name + a hash of the first write's VALUE source text
@@ -3579,7 +3764,11 @@ class Emitter {
             // annotated forwards do.
             const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
-            if (pinType !== undefined) this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`));
+            if (pinType !== undefined) this.b.tsOnly(() => {
+              const at = this.b.offset;
+              this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`);
+              this.pinSpans.push([at, this.b.offset]);
+            });
           }
         }
       }
@@ -6336,12 +6525,13 @@ class Emitter {
     // mark() is a no-op for rows without the role.
     const isVoid = node[0] === 'void-def';
     const isAsync = Emitter.containsAwait(node[3]);
+    const isGen = Emitter.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
     this.tsOverloadSigs(node, ind);
     this.mark(node, 'voidMarker', () => this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
       if (isAsync) this.b.emit('async ');
-      this.b.emit(Emitter.containsYield(node[3]) ? 'function* ' : 'function ');
+      this.b.emit(isGen ? 'function* ' : 'function ');
       this.mark(node, 'name', () => this.b.emit(node[1]));
       // Generic def: the TYPE_PARAMS side-band role
       // re-emits after the name, TS-only (`function wrap<T extends
@@ -6358,7 +6548,7 @@ class Emitter {
         this.mark(node[2], '$self', () => this.emitParams(node[2]));
         this.b.emit(')');
       });
-      this.tsReturnAnnotation(node, isAsync, isVoid);
+      this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(' ');
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
@@ -6422,14 +6612,7 @@ class Emitter {
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
   static containsAwait(sexpr) {
-    if (!isNode(sexpr)) return false;
-    const head = sexpr[0];
-    if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
-    // An awaited for-as (`for await x as it`) is an await by
-    // construction — its flag slot, not a nested node, carries it.
-    if (head === 'for-as' && sexpr[3] === true) return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return sexpr.some((item) => Emitter.containsAwait(item));
+    return containsAwait(sexpr);
   }
 
   // the implicit `it`: a ZERO-param arrow whose body
@@ -6455,11 +6638,7 @@ class Emitter {
 
   // Generator marking, symmetric with containsAwait.
   static containsYield(sexpr) {
-    if (!isNode(sexpr)) return false;
-    const head = sexpr[0];
-    if (head === 'yield' || head === 'yield-from') return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return sexpr.some((item) => Emitter.containsYield(item));
+    return containsYield(sexpr);
   }
 
   // ── The grouping lattice: ONE source of truth ──────────────────────
@@ -8167,6 +8346,7 @@ class Emitter {
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === 'string'
       ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
+    if (tsInfo) tsInfo.appStashSpec = this.appStashSpec;
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
@@ -8214,33 +8394,42 @@ class Emitter {
         this.b.emit(`${pad}static __gates = [`);
         gateVars.forEach((gate, index) => {
           if (index > 0) this.b.emit(', ');
-          // `@app.data` is the marker that makes this a gate; the lowering
-          // erases it entirely, keeping only the route name. RULINGS.md pins
-          // those segments to silence — there is nothing for them to answer.
-          this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
-          this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
-          // A gate KEY's segments do reach the face — they emit verbatim
-          // into the minted key fn — so they stay in the mapping
-          // population. What they reach is that fn's own `params`/`query`,
-          // minted scaffold the user never wrote, so the editor declines
-          // until the ruled answer (the segment's plain inferred type) is
-          // served.
-          for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
+          // `@app.data` is the marker that makes this a gate. With a face
+          // TWIN (emitGateTwin — a discovered stash), the segments have a
+          // real typed expression to answer from, so they stay in the
+          // mapping population — the twin's claims, emitted above, own
+          // them. Without one the lowering erases the read entirely,
+          // keeping only the route name: RULINGS.md pins those segments
+          // to silence — there is nothing for them to answer — and the
+          // key's segments, which reach only the minted key fn's own
+          // scaffold, decline the same way.
+          const twinned = this.ts && tsInfo !== null &&
+            tsInfo.members.some((m) => m.node === gate.node && this.gateTwinSource(m, tsInfo) !== null);
+          if (!twinned) {
+            this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
+            this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
+            for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
+          }
           this.mark(gate.node, '$self', () => {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
               if (gate.key === null) {
                 this.emitQuotedPrimitive(gate.path);
               } else {
-                // The key fn is minted scaffold — its params carry explicit
-                // face-only `any` (the tsScaffoldAny doctrine) so a strict
-                // workspace never inherits implicit-any noise from them.
+                // The key fn is minted scaffold, but its params model
+                // exactly the runtime values the class ambience declares
+                // (`params`/`query` are `Record<string, string>` route
+                // state), so they carry that type rather than scaffold
+                // `any` — a position that maps into this cover (the twin
+                // and this fn both cover the key span; precedence is a
+                // mapping fact, not a contract) then answers the real
+                // type, never `any`.
                 this.b.emit('{ path: ');
                 this.emitQuotedPrimitive(gate.path);
                 this.b.emit(', key: (params');
-                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(', query');
-                if (this.ts) this.b.tsOnly(() => this.b.emit(': any'));
+                if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(') => ');
                 this.mark(gate.node, 'key', () => {
                   this.mark(gate.key, '$self', () => {
@@ -8358,6 +8547,19 @@ class Emitter {
           memberValue(m.node, m.value);
           this._componentName = prevCN;
         });
+        // The face's behavior thunk for a plain member the form table
+        // cannot spell — the same capture as emitComputed below, under
+        // the shared plainBehaviorValued predicate, so the class field
+        // that calls the thunk always finds it. The copy lowers member
+        // reads exactly as the real emission does; the rollback returns
+        // everything it consumed.
+        if (behavior !== null && tsInfo !== null) {
+          const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'plain');
+          if (tm !== undefined && plainBehaviorValued(tm)) {
+            const code = this.capturedExprText(() => memberValue(m.node, m.value));
+            computedBodies.push({ name: m.name, code, block: false });
+          }
+        }
       };
       const emitAccept = (name) => {
         const stmt = seen.get(name);
@@ -8578,7 +8780,11 @@ class Emitter {
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         const evNames = methodEventNames.get(name);
-        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : null;
+        // The onError hook's unannotated param types as the failure
+        // envelope every boundary delivers (COMPONENT_FAILURE_TYPE) —
+        // the injection seam already yields to an author-typed param.
+        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames])
+          : name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
           if (Emitter.containsAwait(block)) this.b.emit('async ');
@@ -8587,7 +8793,7 @@ class Emitter {
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
+          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {
@@ -10105,6 +10311,15 @@ class Emitter {
   // module reactive name passes its CONTAINER (the #135 contract);
   // everything else snapshots, and a reactive snapshot drives an
   // _updateProp effect.
+  //
+  // A prop whose value IS a function literal never takes that effect.
+  // Its reads run when the CHILD calls the closure, not while the prop
+  // is evaluated, so the value cannot change: the effect would register
+  // no dependency (renderReactive's scan reaches into the body, but the
+  // body does not run inside the effect) and re-push an identical
+  // closure forever. The boundary is the function's VALUE position, not
+  // its body: `list.map((x) -> other)` invokes its callback while the
+  // prop is evaluated, so that read IS a dependency and still counts.
   addChildProp(props, updaters, pair, key, cleanKey, value) {
     const container = this.childContainerRef(value);
     if (container !== null) {
@@ -10113,7 +10328,7 @@ class Emitter {
     }
     this.checkCrossScopeLocals(value, pair);
     props.push({ pair, key, fn: () => this.renderExpr(value) });
-    if (this.renderReactive(value)) updaters.push({ pair, key, value });
+    if (!isFunc(value) && this.renderReactive(value)) updaters.push({ pair, key, value });
   }
 
   // The container-passable spellings: a bare REACTIVE member (`name`
@@ -12224,9 +12439,15 @@ class Emitter {
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
+              // A method of a contextually-typed literal takes its param
+              // types from the annotation the literal sits under; JS
+              // arity must not widen them (same rule as the arrow path).
+              const inArgs = this.ts && this.contextuallyTyped(pair[2]);
               this.b.emit('(');
-              this.mark(pair[2], 'params', () => this.emitParams(params));
-              this.b.emit(') ');
+              this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
+              this.b.emit(')');
+              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
+              this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
               });
@@ -12719,7 +12940,7 @@ class Emitter {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (mName !== 'constructor') {
-              this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, pair);
+              this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
@@ -13133,9 +13354,38 @@ class Emitter {
     if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e)) return true;
     this._annotatedValueSpans ??= (() => {
       const spans = new Set();
+      const annotated = [];
       for (const n of this.stores.nodes) {
         if (n.semanticKind !== 'assign' && n.semanticKind !== 'pair') continue;
         if (!this.stores.role(n.nodeId, 'annotation')) continue;
+        const v = this.stores.role(n.nodeId, 'value');
+        if (typeof v?.sourceStart === 'number') {
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+          annotated.push([v.sourceStart, v.sourceEnd]);
+        }
+      }
+      // A pair's value INSIDE an annotated value types through it too:
+      // `cart: Cart = { addItem: (product) -> … }` — the annotation on
+      // the binding reaches the member the way TS contextual typing
+      // does, through the literal. Containment must STOP at function
+      // boundaries, exactly where TS's contextual typing stops: a
+      // literal built inside a nested function body has no contextual
+      // type, and sweeping its pairs would withhold the JS-arity `?`
+      // from parameters TS then requires at every call (TS2554 on
+      // legal fewer-arg calls). A function-valued pair itself is fine —
+      // the pair node starts at its key, before its value's boundary.
+      const funcSpans = [];
+      for (const n of this.stores.nodes) {
+        if ((n.semanticKind === 'func' || n.semanticKind === 'def' || n.semanticKind === 'class') &&
+            typeof n.sourceStart === 'number' &&
+            annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
+          funcSpans.push([n.sourceStart, n.sourceEnd]);
+        }
+      }
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== 'pair' || typeof n.sourceStart !== 'number') continue;
+        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
+        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
         const v = this.stores.role(n.nodeId, 'value');
         if (typeof v?.sourceStart === 'number') spans.add(`${v.sourceStart}:${v.sourceEnd}`);
       }
@@ -13225,7 +13475,7 @@ class Emitter {
         this.b.emit('(');
         this.mark(node, 'params', () => this.emitParams(params, null, !inArgs));
         this.b.emit(')');
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.funcBlock(node, block, stmts, ind, hoist, isVoid);
       } else {
@@ -13256,7 +13506,7 @@ class Emitter {
             this.b.emit(')');
           }
         });
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.mark(node, 'kind', () => this.b.emit('=>'));
         this.b.emit(' ');
@@ -14970,7 +15220,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -14980,7 +15230,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -15286,6 +15536,52 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
+  // A module exporting a top-level `stash` binding — the framework
+  // contract launch reads — carries its own type on the face, so a
+  // component's `app` ambience can splice it by specifier
+  // (`import('<rel>').__RipStash`) without the component importing
+  // anything. Every export spelling that names a LOCAL binding counts —
+  // `export stash = …`, `export { stash }`, `export { thing as stash }`
+  // (the typeof names the local half) — while a re-export
+  // (`export … from`) carries no local binding and is excluded by its
+  // own head. TS-only THROUGH THE RECORDED REGION: the strip gate
+  // (TS face minus regions === JS face) must hold on stash modules too.
+  if (face === 'ts' && Array.isArray(parseResult.sexpr)) {
+    const stashLocal = (() => {
+      for (const s of parseResult.sexpr) {
+        if (!Array.isArray(s) || s[0] !== 'export' || !Array.isArray(s[1])) continue;
+        const decl = s[1];
+        if (decl[0] === '=') {
+          if (decl[1] === 'stash') return 'stash';
+          continue;
+        }
+        // A specifier list holds only names and [local, exported] pairs;
+        // any other declaration form (def, class, …) is not the binding
+        // contract and falls through.
+        const specList = decl.every((x) =>
+          (typeof x === 'string' && /^[A-Za-z_$][\w$]*$/.test(x)) ||
+          (Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string'));
+        if (!specList) continue;
+        for (const spec of decl) {
+          if (spec === 'stash') return 'stash';
+          if (Array.isArray(spec) && spec[1] === 'stash') return spec[0];
+        }
+      }
+      return null;
+    })();
+    if (stashLocal !== null) {
+      builder.tsOnly(() => builder.emit(`\nexport type __RipStash = typeof ${stashLocal};\n`));
+    }
+  }
+  // The ambience helper's ONE declaration per module, at module scope —
+  // where every class that emitted `app = __ripAmbientApp(...)` can
+  // reach it (declares hoist; nested and expression-valued components
+  // included). Named apart from the runtime's `globalThis.__ripApp` so
+  // the face never shadows the launch global's name. TS-only through
+  // the recorded region.
+  if (emitter._needsAmbienceHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };\n'));
+  }
   // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
   // spelling is the boundary: `??=` says "install unless someone already
   // did", which is a declaration wearing runtime clothes — DSL vocabulary
@@ -15369,7 +15665,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

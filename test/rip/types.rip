@@ -1,4 +1,3 @@
-# @nocheck
 # Test: Rip Types
 # Tests the optional type system — type annotations, type aliases,
 # structural types, interfaces, enums, generics, and .d.ts emission.
@@ -636,11 +635,41 @@ type 'class with methods dts', '''
 '''
 
 # ==============================================================================
+# Void slot — `?:` reaches inside the reactive container where absence
+# can live: no default, or a default that is `undefined`. A real default
+# fills the slot, so inside it stays `T`.
+# ==============================================================================
+type 'void slot: optionality reaches inside the container only where absence can live', '''
+  export Panel = component
+    label?: string := undefined
+    variant?: string := 'primary'
+    @title?: string
+    render null
+  ''', '''
+  export interface Panel {
+    label: { value: string | undefined; read(): string | undefined; touch(): void };
+    variant: { value: string; read(): string; touch(): void };
+    title: { value: string | undefined; read(): string | undefined; touch?(): void };
+    app?: any;
+    router?: any;
+    params?: any;
+    query?: any;
+    children?: any;
+    mount(target?: any): Panel;
+    unmount(options?: { removeDOM?: boolean }): void;
+    emit(name: string, detail?: any): void;
+  }
+  export declare let Panel: {
+    new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: any }): Panel;
+    mount(target?: any): Panel;
+  };
+  '''
+
+# ==============================================================================
 # Enum auto-numbering — bare members take the next number (0-based,
 # continuing after an explicit numeric; a bare member after a STRING
 # value rejects)
 # ==============================================================================
-
 type 'enum dts', '''
   enum Direction
     North

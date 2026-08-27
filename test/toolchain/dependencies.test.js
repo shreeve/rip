@@ -45,6 +45,21 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   expect(pkg.workspaces).toEqual(['packages/*', 'test/browser']);
 });
 
+test('the cart demo\'s @types/bun rides the Bun pin', () => {
+  // The demo installs its own host types (it is not a workspace member, so
+  // nothing hoists), and the version is the Bun pin spelled once more —
+  // this gate keeps it in lockstep so a Bun upgrade cannot strand the
+  // demo's types on the version it left. The pin is read from
+  // `.bun-version`, the ONE place it is spelled: the workflows reach it
+  // through `bun-version-file` and test/toolchain/bun-pin.test.js refuses
+  // a literal `bun-version:` anywhere, so scraping a workflow here would
+  // assert the very spelling that gate forbids.
+  const pin = readFileSync(join(ROOT, '.bun-version'), 'utf8').trim();
+  expect(pin).toMatch(/^\d+\.\d+\.\d+$/);
+  const cart = readPkg('packages/sites/demos/cart/package.json');
+  expect(cart.devDependencies['@types/bun']).toBe(pin);
+});
+
 // Workspace packages must not carry a sibling bun.lock. Under
 // linker=hoisted, `bun install` from a package directory still resolves
 // against the ROOT lockfile — a package-local lock is not isolation, and

@@ -23,8 +23,11 @@ resolveStorage = (opts) ->
     throw Error.new 'Rip App: persistStash requires a browser or an injected storage'
   if opts.local then window.localStorage else window.sessionStorage
 
-export def persistStash(app: any, opts: { local?: boolean, key?: string, debounce?: number, storage?: any } = {}): () => void
-  target: any = unwrapStash(app) or app
+# What persistence needs of a storage: the three Web Storage calls it makes.
+export type StashStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
+  target = unwrapStash(app) or app
   return (-> null) if target[PERSISTED]
   target[PERSISTED] = true
   storage = resolveStorage opts
@@ -37,7 +40,7 @@ export def persistStash(app: any, opts: { local?: boolean, key?: string, debounc
   catch error
     null
 
-  pending: any = null
+  pending = null
   save = ->
     pending = null
     try
@@ -62,7 +65,7 @@ export def persistStash(app: any, opts: { local?: boolean, key?: string, debounc
 
   # Purge cancels any pending debounced save, so reset()'s own baseline
   # writes cannot re-create the snapshot one debounce later.
-  dataRaw: any = unwrapStash app.data
+  dataRaw = unwrapStash app.data
   if dataRaw? and typeof dataRaw is 'object'
     Object.defineProperty dataRaw, PURGE,
       value: ->

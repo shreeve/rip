@@ -101,6 +101,17 @@ export const SUPPRESSED_TS_CODES = new Set([...IMPLICIT_ANY_CODES, ...MISSING_TY
 // translate.test.js pin cites the verification) — never a broader
 // class. 6205 (all type parameters unused) is deliberately absent:
 // TypeScript does not flag it, and tsgo delivers it untagged.
+// A hover whose answer names minted render scaffold — the lowering's
+// own locals, always explicitly `any` (the tsScaffoldAny doctrine) —
+// declines rather than describing machinery. ONE pattern, consumed by
+// the server's hover guard and the editor leak gate alike; the family
+// list mirrors the emitter's newRenderVar hints plus newRenderText's
+// `_t`, and a toolchain test pins the mirror to the emitter source.
+// The `: any` requirement is what spares an author's own legal
+// single-underscore binding (`_t1 = 5` hovers `let _t1: number`).
+export const SCAFFOLD_FAMILIES = 'el|t|inst|frag|anchor|empty|slot';
+export const SCAFFOLD_HOVER = new RegExp(`\\b(?:let|const|var) _(?:${SCAFFOLD_FAMILIES})\\d+: any\\b`);
+
 export const UNNECESSARY_TS_CODES = new Set([
   2695, // left side of comma operator is unused (error severity, still flagged)
   6133, // declared but its value is never read
@@ -311,6 +322,52 @@ export function sourceCursorToGenerated(mappings, offset) {
   const hole = mappings.zeroWidthExactAtSource?.(offset);
   if (hole) return hole.generatedStart;
   return null;
+}
+
+// A cursor in a SLOT THE EMISSION DROPPED — an object literal's key
+// position after a trailing comma, whose bytes the face carries
+// nowhere at all (`{ a: 1, ‸ }` emits `{a: 1}`, comma and slot gone).
+// sourceCursorToGenerated answers null there, and rightly: no row
+// contains the cursor and none ends at it. A completion still has a
+// truthful landing — the generated END of the last construct ending at
+// or before the cursor, drawn from inside the innermost row containing
+// it, and taken only when it falls within that row's own generated
+// span. The cursor stays inside the construct it is typing, one past
+// the sibling it follows.
+//
+// This is NOT the cover fallback the other flavors refuse. That one
+// lands at a cover's generated START, which moves the context off the
+// construct entirely. It is also wrong for SIGNATURE HELP, whose
+// active parameter is counted from the cursor's side of the commas —
+// one past the previous argument names the previous parameter. Only
+// completion reads this.
+export function sourceSlotToGenerated(mappings, offset, source, code) {
+  const inner = mappings.atSource(offset)[0];
+  if (!inner || inner.mappingKind !== 'cover') return null;
+  // The slot must be TRAILING: nothing but whitespace and closers
+  // between the cursor and the construct's end, read from the real
+  // text. This is what makes the landing truthful — the cursor really
+  // does sit after everything the construct holds, so one past the last
+  // sibling is where it belongs. It is also what refuses a tolerant
+  // parse that absorbed the following statement into an unclosed
+  // literal: that construct still holds source the author wrote as its
+  // own statement, and the interior of a construct the parse invented
+  // is no place to put a completion.
+  if (!/^[\s)\]}]*$/.test(source.slice(offset, inner.sourceEnd))) return null;
+  let prior = null;
+  for (const row of mappings.rows) {
+    if (row.mappingKind === 'synthetic') continue;
+    if (row.sourceStart < inner.sourceStart || row.sourceEnd > inner.sourceEnd) continue;
+    if (row.sourceEnd > offset) continue;
+    if (!prior || row.sourceEnd > prior.sourceEnd
+      || (row.sourceEnd === prior.sourceEnd && row.generatedEnd > prior.generatedEnd)) prior = row;
+  }
+  // Nothing precedes the cursor: an empty interior (`{ ‸ }`), whose
+  // landing is just inside the construct's own opening byte.
+  if (!prior) return inner.generatedStart + 1 < inner.generatedEnd ? inner.generatedStart + 1 : null;
+  return prior.generatedEnd >= inner.generatedStart && prior.generatedEnd <= inner.generatedEnd
+    ? prior.generatedEnd
+    : null;
 }
 
 // A generated INSERTION point (a zero-width edit — auto-import lines,

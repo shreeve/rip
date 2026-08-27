@@ -622,7 +622,7 @@ grammar =
     # Arrow return type (`(a): T -> body`): TYPE is dropped from the
     # template; its pattern label records the span (erasure).
     o 'PARAM_START ParamList PARAM_END TYPE[returnType] ArrowKind Block', '[5, 2, 6]', 'func: kind, params, body'
-    o 'ArrowKind Block'                                , '[1, [], 2]'
+    o 'ArrowKind Block'                                , '[1, [], 2]', 'func: kind, _, body'
   ]
 
   ArrowKind: [

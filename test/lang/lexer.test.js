@@ -425,6 +425,73 @@ describe('call-paren disambiguation', () => {
   });
 });
 
+describe('a dangling member dot ends its line', () => {
+  // A trailing '.' continues its line, which is what a member chain
+  // wrapped across lines needs. The exception is the shape that cannot
+  // be a chain: past the line break, a word followed by ANOTHER word on
+  // the same line opens a new construct, and continuing there swallows
+  // that construct into the chain. Rip carries a guard TypeScript does
+  // not need — `bar baz` IS a property call here, implicit parens making
+  // two words a call — so only a line at or above the current indent,
+  // outside any bracket, can dangle.
+  // The trailing dot is the first '.' in each fixture below. A dot that
+  // CONTINUES takes the next line's word as its PROPERTY; a dot left
+  // dangling is followed by whatever closes the line instead — which is
+  // a TERMINATOR at statement level but a CALL_END first inside a render
+  // block's implicit call, so the property is what the check reads.
+  const terminated = (text) => {
+    const ts = tokenize(text).tokens;
+    const i = ts.findIndex((t) => t.kind === '.' || t.kind === '?.');
+    return i >= 0 && ts[i + 1]?.kind !== 'PROPERTY';
+  };
+
+  test('a word followed by a word at or above the indent dangles', () => {
+    for (const text of [
+      'x = foo.\n\nexport type T =\n  a?: string\n',   // keyword, keyword
+      'x = foo.\n\nexport y = 1\n',                    // keyword, identifier
+      'x = foo.\n\nexport def g(n)\n  n\n',
+      'x = foo?.\n\nexport y = 1\n',                   // the soft-access spelling too
+      // No keyword in sight: two plain identifiers at the statement's own
+      // indent. This spelling USED to lower to `foo.bar(baz)`, and it is
+      // the one the indent guard decides — narrow that guard and the old
+      // reading comes back silently.
+      'baz = 1\nx = foo.\nbar baz\n',
+    ]) expect(terminated(text), text).toBe(true);
+  });
+
+  test('anything a chain can continue with keeps continuing', () => {
+    for (const text of [
+      'x = foo.\n  bar baz\n',        // the implicit-paren call Rip allows
+      'x = foo.\n  bar baz, qux\n',
+      'x = foo.\n  bar()\n',          // a word then '(' — never two words
+      'x = foo.\n  bar\n',            // a word and nothing after it
+      'x = foo.\n  bar.qux baz\n',    // a word then '.'
+      'x = foo.\nbar\n',              // same indent, but still one word
+    ]) expect(terminated(text), text).toBe(false);
+  });
+
+  test('a render block keeps its own reading of a trailing dot', () => {
+    // A line-leading identifier is an ELEMENT there, so two words at the
+    // same indent are a sibling element and its argument — the shape the
+    // dangling test would otherwise claim. The leading-dot rule excludes
+    // render blocks for the same reason.
+    for (const text of [
+      'App = component\n  render\n    div\n      = items.\n      span foo\n',
+      'App = component\n  render\n    div\n      = items.\n        map foo\n',
+    ]) expect(terminated(text), text).toBe(false);
+  });
+
+  test('inside a bracket the indent carries nothing, so nothing dangles', () => {
+    // A continuation inside brackets needs no indent, so the indent
+    // guard cannot tell one from a new construct — and a bracket is not
+    // where a construct begins.
+    for (const text of [
+      'x = f(foo.\nbar baz)\n',
+      'x = f(foo.\n  bar baz)\n',
+    ]) expect(terminated(text), text).toBe(false);
+  });
+});
+
 describe('indentation is a literal prefix (tabs, spaces, consistent mixes)', () => {
   test('tab-indented blocks nest by textual containment', () => {
     expect(kinds('if a\n\tx = 1\n\ty = 2')).toEqual([

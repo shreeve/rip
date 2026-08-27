@@ -15,6 +15,7 @@
   },
   "files": [
     "hljs-rip.js",
+    "hljs-rip.d.ts",
     "README.md"
   ],
   "devDependencies": {

@@ -27,31 +27,31 @@
 # installed.
 
 import { createStash, _cloneSeed, _stampDefaults, _mergePlain } from './stash.rip'
-import { createComponents } from './components.rip'
+import { createComponents, ComponentsStore } from './components.rip'
 import { buildRoutes } from './routes.rip'
-import { createRouter, browserAdapter } from './router.rip'
-import { createRenderer } from './renderer.rip'
-import { interceptClicks, preloadLinks } from './links.rip'
-import { persistStash } from './persist.rip'
+import { createRouter, browserAdapter, RouterAdapter, Router } from './router.rip'
+import { createRenderer, Renderer, GateFailure } from './renderer.rip'
+import { interceptClicks, preloadLinks, LinkHost } from './links.rip'
+import { persistStash, StashStorage } from './persist.rip'
 
 export type LaunchOpts =
   bundle: Record<string, any>
   target?: Record<string, any>
-  adapter?: Record<string, any>
+  adapter?: RouterAdapter
   base?: string
   hash?: boolean
   stash?: Record<string, any>
-  components?: Record<string, any>
-  links?: { listen: (type: string, fn: (event: any) => void, opts?: Record<string, any>) => () => void }
+  components?: ComponentsStore
+  links?: LinkHost
   persist?: boolean | 'local' | 'session'
-  storage?: Record<string, any>
-  onError?: (failure: Record<string, any>) => void
+  storage?: StashStorage
+  onError?: (failure: GateFailure | { status: number, path: string }) => void
 
 export type LaunchResult =
   app: Record<string, any>
-  components: Record<string, any>
-  router: Record<string, any>
-  renderer: Record<string, any>
+  components: ComponentsStore
+  router: Router
+  renderer: Renderer
   destroy: () => void
 
 ROUTE_ROOT = 'routes'
@@ -87,7 +87,7 @@ export validatePrepared = (value, stash = null) ->
   routePaths = [...paths].filter (path) -> path.startsWith ROUTE_ROOT + '/'
   buildRoutes routePaths, ROUTE_ROOT
   stashModule = bundle.compiled?['stash.rip']
-  seed: any = stash ?? stashModule?.stash
+  seed = stash ?? stashModule?.stash
   if not seed? and stashModule?
     fail "the bundle's 'stash.rip' module must export 'stash'"
   if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
@@ -110,17 +110,17 @@ export def launch(opts: LaunchOpts): LaunchResult
   prepared = validatePrepared opts.bundle, opts.stash
   bundle = prepared.bundle
   target = opts.target ?? defaultTarget()
-  adapter: any = opts.adapter ?? browserAdapter()
+  adapter = opts.adapter ?? browserAdapter()
 
   # The stash: an explicit option wins; otherwise the bundle's
   # `stash.rip` module provides it through its `stash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
-  seed: any = prepared.seed
+  seed = prepared.seed
   # The seed clones on the way in (cells by reference): the declaration
   # object outlives this launch, and its next launch must start from
   # the declared baseline, not this session's writes.
-  app: any = createStash { data: _cloneSeed(seed ?? {}) }
+  app = createStash { data: _cloneSeed(seed ?? {}) }
 
   # Seed overlay: bundle data merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is

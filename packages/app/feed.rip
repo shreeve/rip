@@ -8,11 +8,15 @@
 export type Feed =
   close: () => void
   connected: () => boolean
-  resync: () => Promise<void>
+  resync: () => void
+
+# What apply answers: applied or not, or the two escalations. The feed awaits
+# it, so a synchronous answer is honored too.
+export type ApplyResult = boolean | 'rejected' | 'reload'
 
 export type PublicationClient =
   hash: () => string
-  apply: (change: Record<string, unknown>) => Promise<boolean | 'rejected' | 'reload'>
+  apply: (change: Record<string, unknown>) => ApplyResult | Promise<ApplyResult>
   reload: (reason?: string) => void
 
 export type ConnectFeedOpts =
@@ -73,7 +77,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
   connection = 0
   token = null
   buffer = []
-  tail = Promise.resolve()
+  tail: Promise<unknown> = Promise.resolve()
   probes = Map.new()
   rejectedHash = null
 

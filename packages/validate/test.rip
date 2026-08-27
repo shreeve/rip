@@ -89,7 +89,7 @@ test "a fresh process holds exactly the 38 built-ins, all bridged", ->
 
 console.log "\nVocabulary"
 
-rows = [
+rows: [string, string, unknown][] = [
   # id: positive integer, no leading zero, at most 15 digits
   ['id', '12345', 12345]
   ['id', '999999999999999', 999999999999999]
@@ -352,11 +352,13 @@ test "async and generator validators reject", ->
   throws (-> registerValidator('gen', (v) -> yield v)), 'synchronous'
 
 test "a non-boolean raw flag rejects", ->
+  # @ts-expect-error
   throws (-> registerValidator('rawish', ((v) -> v), { raw: 1 })), 'raw flag'
 
 test "an invalid name or non-function rejects", ->
   throws (-> registerValidator('a-b', (v) -> v)), 'invalid validator name'
   throws (-> registerValidator('', (v) -> v)), 'invalid validator name'
+  # @ts-expect-error
   throws (-> registerValidator('fine', 'not a function')), 'must be a function'
 
 test "getValidator answers softly; check rejects loudly", ->

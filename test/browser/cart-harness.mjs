@@ -19,7 +19,7 @@ const PORT = Number(process.env.CART_HARNESS_PORT || 4174);
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-`));
 const cartDir = join(fixtureRoot, 'cart');
-cpSync(cartSrc, cartDir, { recursive: true });
+cpSync(cartSrc, cartDir, { recursive: true, filter: (p) => !p.includes('node_modules') });
 
 // The cart imports `rip/*` — the loader's stdlib namespace resolves
 // them from this checkout, so a /tmp cart needs no node_modules.

@@ -4,13 +4,14 @@
 # into pure functions (parsePlacement, computePlacement, belowPosition) that
 # take plain rects and a viewport, so it is testable without a real DOM.
 
+import { AriaPositionOptions } from './core.rip'
 
 # parsePlacement -- translate a friendly `"<side> <align>"` placement into a
 # VALID CSS `position-area` grid keyword plus the matching self-alignment.
 # The grid keywords are span-based -- `bottom start`/`bottom end` are not
 # valid values -- so align maps to a span and the cross-axis edge is pinned
 # with justify-self/align-self. Pure; no DOM.
-export def parsePlacement(placement: string = 'bottom start'): any
+export def parsePlacement(placement: string = 'bottom start')
   [side, align] = (placement or 'bottom start').split(' ')
   align ??= 'start'
   vertical = side is 'bottom' or side is 'top'
@@ -23,12 +24,12 @@ export def parsePlacement(placement: string = 'bottom start'): any
 # computePlacement -- the manual fallback math. Given the trigger rect and
 # the viewport, return the fixed-position style props that place a floating
 # element on `side` aligned to `align`. Pure; no DOM.
-export def computePlacement(trigger: any, viewport: any, opts: any = {}): any
+export def computePlacement(trigger, viewport, opts = {})
   side = opts.side ?? 'bottom'
   align = opts.align ?? 'start'
   offset = opts.offset ?? 4
   matchWidth = opts.matchWidth ?? false
-  styles: any = { position: 'fixed', inset: 'auto', margin: '0' }
+  styles = { position: 'fixed', inset: 'auto', margin: '0' }
   switch side
     when 'bottom' then styles.top = "#{trigger.bottom + offset}px"
     when 'top'    then styles.bottom = "#{viewport.height - trigger.top + offset}px"
@@ -55,8 +56,8 @@ export def computePlacement(trigger: any, viewport: any, opts: any = {}): any
 # floating rect MEASURED after an initial placement directly below the
 # trigger; if it overflows the viewport bottom it flips above, and if it
 # overflows the right edge it shifts left. Pure; no DOM.
-export def belowPosition(trigger: any, floating: any, viewport: any, gap: number = 4): any
-  result: any = { left: trigger.left, top: trigger.bottom + gap, minWidth: trigger.width }
+export def belowPosition(trigger, floating, viewport, gap: number = 4)
+  result = { left: trigger.left, top: trigger.bottom + gap, minWidth: trigger.width }
   result.top = trigger.top - floating.height - gap if floating.bottom > viewport.height
   result.left = viewport.width - floating.width - gap if floating.right > viewport.width
   result
@@ -94,8 +95,8 @@ _OWNED = ['position', 'inset', 'top', 'right', 'bottom', 'left',
   'transform', 'minWidth', 'justifySelf', 'alignSelf',
   'positionAnchor', 'positionArea', 'positionTry', 'positionVisibility']
 
-_resetStyles = (el: any): void ->
-  style: any = el.style
+_resetStyles = (el): void ->
+  style = el.style
   for prop in _OWNED
     style[prop] = ''
   return
@@ -105,10 +106,10 @@ _resetStyles = (el: any): void ->
 # `opts.matchWidth`. Uses CSS anchor positioning when the browser both
 # supports it and accepts the translated `position-area`; otherwise falls
 # through to the manual fallback (computePlacement).
-export def position(trigger: any, floating: any, opts: any = {}): void
+export def position(trigger, floating, opts: AriaPositionOptions = {}): void
   return unless trigger and floating
-  fl: any = floating
-  tr: any = trigger
+  fl = floating
+  tr = trigger
   { side, align, vertical, areaAlign, positionArea } = parsePlacement(opts.placement ?? 'bottom start')
   offset = opts.offset ?? 4
   matchWidth = opts.matchWidth ?? false
@@ -150,10 +151,10 @@ export def position(trigger: any, floating: any, opts: any = {}): void
 # positionBelow -- place a fixed popup directly below its trigger, flipping
 # above (or shifting left) when it would overflow the viewport. `gap` is the
 # pixel gap; `setVisible` reveals it via `visibility:visible` once placed.
-export def positionBelow(trigger: any, popup: any, gap: number = 4, setVisible: boolean = true): void
+export def positionBelow(trigger, popup, gap: number = 4, setVisible: boolean = true): void
   return unless trigger and popup
-  tr: any = trigger
-  pop: any = popup
+  tr = trigger
+  pop = popup
   rect = tr.getBoundingClientRect()
   pop.style.position = 'fixed'
   pop.style.left = "#{rect.left}px"

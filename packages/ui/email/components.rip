@@ -206,7 +206,7 @@ export Heading = component
   @as: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' := 'h1'
   @class: string := ''
   @style: string := ''
-  @children: any =! undefined
+  @children =! undefined
   @m?: string | number := undefined
   @mx?: string | number := undefined
   @my?: string | number := undefined
@@ -304,7 +304,7 @@ escapeAttribute = (text: unknown): string ->
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
 
-childText = (value: any): string ->
+childText = (value): string ->
   return '' unless value?
   return value if typeof value is 'string'
   if Array.isArray value
@@ -451,7 +451,7 @@ export CodeBlock = component
 export CodeInline = component
   @class: string := ''
   @style: string := ''
-  @children: any =! undefined
+  @children =! undefined
   _style: string ~= joinStyles 'background:#f4f4f4;padding:2px 4px;border-radius:3px;font-family:monospace;font-size:0.9em', @style
   _orangeCss: string =! '''
     meta ~ .cino { display: none !important; opacity: 0 !important; }

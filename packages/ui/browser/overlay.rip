@@ -2,7 +2,12 @@
 # browser's own overlay elements: the Popover API and `<dialog>`. No portal
 # machinery; the platform owns the top layer, light-dismiss, and modality.
 
-import { getRef } from './core.rip'
+import { getRef, AriaElRef } from './core.rip'
+
+# The overlay elements with the listeners a prior binding stored on them, so
+# a re-invocation tears that pair down before attaching.
+type PopoverBoundEl = HTMLElement & { __ariaBindPopover?: ((e: ToggleEvent) => void) | null }
+type DialogBoundEl = HTMLDialogElement & { __ariaBindDialog?: [(e: Event) => void, () => void] | null }
 
 # A once-installed focusin tracker: `document.activeElement` is often
 # `<body>` at the moment a popover/dialog opens (the trigger already blurred
@@ -13,7 +18,7 @@ if typeof document isnt 'undefined' and not globalThis.__ariaFocusTrackerBound
   document.addEventListener 'focusin', ((e) -> globalThis.__ariaLastFocusedEl = e.target), true
   globalThis.__ariaFocusTrackerBound = true
 
-_currentFocus = (): any ->
+_currentFocus = () ->
   active = document.activeElement
   return active if active and active isnt document.body
   last = globalThis.__ariaLastFocusedEl
@@ -22,7 +27,7 @@ _currentFocus = (): any ->
 
 # Mirror `hidden`/`inert`/`aria-hidden` to the open state so an overlay in
 # the layout (not yet promoted to the top layer) is inert and unspoken.
-_syncHidden = (el: any, isOpen: boolean): void ->
+_syncHidden = (el, isOpen: boolean): void ->
   if isOpen
     el.hidden = false
     try el.inert = false
@@ -37,7 +42,7 @@ _syncHidden = (el: any, isOpen: boolean): void ->
 
 # Restore focus to `target`, retrying across a few frames because the
 # platform may still be settling focus as the overlay tears down.
-_restoreFocus = (target: any): void ->
+_restoreFocus = (target): void ->
   return unless target?.focus?
   attempt = (tries: number = 6) ->
     return unless target.isConnected isnt false
@@ -59,17 +64,17 @@ _restoreFocus = (target: any): void ->
 # Idempotent for the same reason as popupDismiss: the widget re-invokes this
 # on every `open` change, so any prior `toggle` listener stored on the
 # element is removed before a new one is attached.
-export def bindPopover(open: boolean, popover: any, setOpen: (open: boolean) => void, source: any = null): any
-  el: any = getRef(popover)
+export def bindPopover(open: boolean, popover: AriaElRef, setOpen: (open: boolean) => void, source: AriaElRef = null)
+  el: PopoverBoundEl | null | undefined = getRef(popover)
   return unless el
   return unless Object.hasOwn(HTMLElement.prototype, 'togglePopover')
-  restoreEl: any = null
+  restoreEl = null
 
   if el.__ariaBindPopover
     el.removeEventListener 'toggle', el.__ariaBindPopover
     el.__ariaBindPopover = null
 
-  onToggle = (e: any) ->
+  onToggle = (e: ToggleEvent) ->
     isOpen = e.newState is 'open'
     if isOpen
       restoreEl = getRef(source) or _currentFocus()
@@ -106,10 +111,11 @@ export def bindPopover(open: boolean, popover: any, setOpen: (open: boolean) => 
 #
 # The native `cancel`/`close` events are the SOLE close-emission path: the
 # widget's own key handler must not also call setOpen, or `close` doubles.
-export def bindDialog(open: boolean, dialog: any, setOpen: (open: boolean) => void, dismissable: boolean = true): any
-  el: any = getRef(dialog)
+export def bindDialog(open: boolean, dialog: AriaElRef, setOpen: (open: boolean) => void, dismissable: boolean = true)
+  # A `<dialog>` by duck test, not by tag: the guard below is the contract.
+  el = getRef(dialog) as DialogBoundEl | null | undefined
   return unless el?.showModal?
-  restoreEl: any = null
+  restoreEl = null
 
   if el.__ariaBindDialog
     [prevCancel, prevClose] = el.__ariaBindDialog
@@ -117,7 +123,7 @@ export def bindDialog(open: boolean, dialog: any, setOpen: (open: boolean) => vo
     el.removeEventListener 'close', prevClose
     el.__ariaBindDialog = null
 
-  onCancel = (e: any) ->
+  onCancel = (e) ->
     unless dismissable
       e.preventDefault()
       return

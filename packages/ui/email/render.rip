@@ -8,7 +8,7 @@ export type EmailOutput =
 
 DOCTYPE =! '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
 
-inlineTailwind = (root: any) ->
+inlineTailwind = (root) ->
   entries = takeEmailTailwindRoots()
   return unless entries.length
 
@@ -22,9 +22,9 @@ inlineTailwind = (root: any) ->
   if result.unsupported.length
     console.warn "Tailwind: unsupported classes retained: #{result.unsupported.join(' ')}"
 
-dedupeStyles = (root: any) ->
+dedupeStyles = (root) ->
   seen: Set<string> = Set.new()
-  visit = (node: any) ->
+  visit = (node) ->
     marker = node.attributes?.get 'data-email-style'
     if node.tag is 'style' and marker and node._innerHTML?
       node.removeAttribute 'data-email-style'
@@ -38,24 +38,24 @@ dedupeStyles = (root: any) ->
     return
   visit root
 
-finalizeEmail = (root: any) ->
+finalizeEmail = (root) ->
   inlineTailwind root
   dedupeStyles root
 
-renderEmail = (ComponentClass: any, props: Record<string, any>, consume: any): any ->
+renderEmail = (ComponentClass, props: Record<string, any>, consume) ->
   takeEmailTailwindRoots()
   try
     _renderComponent ComponentClass, props, consume, finalizeEmail
   finally
     takeEmailTailwindRoots()
 
-export toHTML = (ComponentClass: any, props: Record<string, any> = {}): string ->
+export toHTML = (ComponentClass, props: Record<string, any> = {}): string ->
   renderEmail ComponentClass, props, (root) -> "#{DOCTYPE}#{serializeChildren(root)}"
 
-export toText = (ComponentClass: any, props: Record<string, any> = {}): string ->
+export toText = (ComponentClass, props: Record<string, any> = {}): string ->
   renderEmail ComponentClass, props, (root) -> toPlainText root
 
-export toEmail = (ComponentClass: any, props: Record<string, any> = {}): EmailOutput ->
+export toEmail = (ComponentClass, props: Record<string, any> = {}): EmailOutput ->
   renderEmail ComponentClass, props, (root) ->
     html = serializeChildren root
     text = toPlainText root

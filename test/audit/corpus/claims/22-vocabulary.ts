@@ -78,3 +78,15 @@ sounding = null
 let nullables: [string | undefined, number | null] = [drift, sounding]
 
 console.log('nullable:', nullables)
+
+// ── An alias's method-shorthand member enforces its call arguments ──
+
+type Manifest = {
+  cargo: string[]
+  stow(item: string): number
+}
+
+let hold: Manifest = { cargo: [], stow: (item) => item.length }
+let stowed = hold.stow('crate')
+
+console.log('method member:', stowed.toFixed(0))

@@ -29,19 +29,32 @@ import { posix, resolve } from 'node:path'
 # Module State
 # ==============================================================================
 
+# One registered route: its compiled pattern, the handler after smart()
+# wrapping, and the input schema that drives validation and OpenAPI.
+type RouteRecord =
+  method: string
+  regex: RegExp
+  keys: string[]
+  staticPath: string | null
+  handler: Function
+  path: string
+  inputSchema: Record<string, any> | null
+  _chain?: Function              # the composed middleware chain, cached per epoch
+  _chainEpoch?: number
+
 _: RegExpMatchArray | null            = null  # Match capture holder for Rip's =~
-_errorHandler: Function | null        = null  # Custom error handler
-_notFoundHandler: Function | null     = null  # Custom 404 handler
+_errorHandler: ErrorHandler | null    = null  # Custom error handler
+_notFoundHandler: RouteHandler | null = null  # Custom 404 handler
 _rawFilter: Function | null           = null  # Raw request filter (before body parsing)
 _beforeFilters: Function[]            = []    # Before request filters
 _afterFilters: Function[]             = []    # After request filters
-_routes: any[]                        = []    # Route definitions
+_routes: RouteRecord[]                        = []    # Route definitions
 _middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
 SESSION = :rip.server.session
 _prefix: string                       = ''    # Current route prefix for grouping
 _openapiRegistered: boolean           = false # GET /openapi.json auto-registered?
 _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
-_routeIndex: any                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
+_routeIndex                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
 _composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
 export resetGlobals = ->
@@ -58,8 +71,9 @@ export resetGlobals = ->
   _routeIndex          = null
   _composeEpoch++
 
-# AsyncLocalStorage for request context (enables sync read() in handlers)
-export requestContext: AsyncLocalStorage<{ env?: any, data: any }> = AsyncLocalStorage.new()
+# AsyncLocalStorage for request context (enables sync read() in handlers):
+# the request's Ctx and its merged body/query/params.
+export requestContext: AsyncLocalStorage<{ env?: Ctx, data: Record<string, any> }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -199,8 +213,16 @@ export type Ctx =
   session: Record<string, any>
   error: any
   req: CtxReq
+  mark?: string                  # the request's correlation id, set by the handler
 
 export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
+
+# The leading options slot a verb accepts before its handlers: `input:` wires
+# schema validation and the OpenAPI contract.
+export type RouteOptions = { input?: Record<string, any> }
+
+# The custom error handler: the thrown value, then the request context.
+export type ErrorHandler = (this: Ctx, error: any, c: Ctx) => any
 
 # Duration units for @cache. Every accepted spelling is listed — plurals
 # included — so nothing is inferred: `m` is minutes, a month is spelled
@@ -398,7 +420,7 @@ export type ApiError = { message?: string, notice?: string, issues?: unknown[] }
 # throws (no/invalid status) are masked to a generic status message so internal
 # details never leak. Exported so a custom `onError` can reuse the same shape.
 # (`err` is an arbitrary thrown value — untyped by nature, like a catch binding.)
-export errorEnvelope = (err: any): { status: number, error: ApiError } ->
+export errorEnvelope = (err): { status: number, error: ApiError } ->
   raw = err?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
   error =
@@ -492,12 +514,12 @@ addRoute = (method, path, ...handlers) ->
       inputSchema: null,
     }
 
-export get:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
-export post:  (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
-export put:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
-export patch: (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
-export del:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
-export all:   (path: string, ...handlers: RouteHandler[]) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
+export get:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
+export post:  (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
+export put:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
+export patch: (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
+export del:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
+export all:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
 
 # ==============================================================================
 # OpenAPI generation
@@ -585,7 +607,7 @@ export prefix = (base, fn) ->
   finally
     _prefix = old
 
-export onError:  (handler: RouteHandler) => void = (handler) -> _errorHandler = handler
+export onError:  (handler: ErrorHandler) => void = (handler) -> _errorHandler = handler
 export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler = handler
 
 export raw: (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn
@@ -627,7 +649,7 @@ dispatchRequest = (req) ->
   _rawFilter?.(req) if method in ['POST', 'PUT', 'PATCH']
 
   # Pre-parse body and query for sync read() — baked in, zero ceremony
-  data: any = {}
+  data = {}
   try
     ct = req.headers.get('content-type') or ''
     if method in ['POST', 'PUT', 'PATCH']
@@ -885,7 +907,7 @@ export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator,
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
-export read = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: any) ->
+export read = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper

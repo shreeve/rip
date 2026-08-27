@@ -58,7 +58,7 @@
 
 import path from 'node:path';
 import { generatedSpanToSource } from './translate.js';
-import { bareRipSpecifierTarget } from './mirror.js';
+import { ripSpecifierTarget } from './mirror.js';
 
 // A defect no annotation answers. Reported under every mode — gating one of
 // these would hide a real bug behind "gradual mode", and there is no
@@ -102,6 +102,31 @@ export const ALWAYS_REPORTED_CODES = new Set([
   2632, // cannot assign to an import
   2724, // module has no exported member — did you mean 'Y'?
 ]);
+
+// The SYNTAX class — TypeScript reserves the 1000–1999 band for
+// grammar diagnostics ("Type expected", "';' expected"). One bypasses
+// as a BAND where the codes above are enumerated one by one because
+// the enumeration exists to judge, per code, whether an annotation
+// could silence a TYPE claim — and a grammar error makes no type
+// claim. It says the generated face itself does not parse, which
+// invalidates every conclusion the checker draws from the file, and
+// the malformed bytes are the emitter's, never the author's: no
+// annotation reaches them, so no scope can hold them.
+//
+// A few band members are TYPE claims in disguise — inference-driven
+// judgments on the author's own bytes, published on a face that
+// parses fine — and those stay behind the gate, enumerated with the
+// same per-code discipline as the set above: 1345 (a void-typed
+// expression tested for truthiness — silenced by annotating the
+// callee's return) and 1360 (a `satisfies` mismatch — a stated type
+// relation on the author's value). The import-shape advice codes
+// (1192/1259/1479) stay IN the band: like the enumerated 2613/2614
+// they name a module boundary that does not fit, and no annotation
+// answers them.
+const TYPE_CLAIMS_IN_SYNTAX_BAND = new Set([1345, 1360]);
+export const isSyntaxClass = (code) =>
+  code >= 1000 && code < 2000 && !TYPE_CLAIMS_IN_SYNTAX_BAND.has(code);
+export const alwaysReported = (code) => isSyntaxClass(code) || ALWAYS_REPORTED_CODES.has(code);
 
 // offset → 0-based line, over one pass of the source. Every pass here works
 // in offsets (tokens, node spans, mapped diagnostic positions) and reports in
@@ -199,13 +224,35 @@ export function scopeRegionsOf(stores) {
   const regions = [];
   if (!stores?.nodes) return regions;
   for (const n of stores.nodes) {
-    if (n.semanticKind !== 'def' && n.semanticKind !== 'func') continue;
+    if (!FUNCTION_KINDS.has(n.semanticKind)) continue;
     if (typeof n.sourceStart !== 'number') continue;
     const name = stores.role(n.nodeId, 'name');
     const hole = typeof name?.sourceStart === 'number' ? [name.sourceStart, name.sourceEnd] : null;
     regions.push({ start: n.sourceStart, end: n.sourceEnd, hole });
   }
   return regions;
+}
+
+// The node kinds that ARE functions: `def`, and `func` for every lambda
+// spelling — parenthesized, bare `->`/`=>`, typed, or not. One set, because
+// three passes depend on agreeing about it: scopeRegionsOf (where bindings
+// live), declarationHeadersOf (what a header is), and assignmentFlowsOf
+// (what a value reads).
+const FUNCTION_KINDS = new Set(['def', 'func']);
+
+// Every function in the file with the span of its body, for the passes that
+// subtract bodies. `kinds` widens the set where a caller's notion of "body"
+// is wider — declarationHeadersOf adds `render`.
+export function functionBodiesOf(stores, kinds = FUNCTION_KINDS) {
+  const out = [];
+  if (!stores?.nodes) return out;
+  for (const n of stores.nodes) {
+    if (!kinds.has(n.semanticKind) || typeof n.sourceStart !== 'number') continue;
+    const body = stores.role(n.nodeId, 'body');
+    if (typeof body?.sourceStart !== 'number') continue;
+    out.push({ start: n.sourceStart, end: n.sourceEnd, bodyStart: body.sourceStart, bodyEnd: body.sourceEnd });
+  }
+  return out;
 }
 
 // The DECLARATION HEADERS a source spells, each with the span of the name it
@@ -253,12 +300,7 @@ export function declarationHeadersOf(stores) {
   // contain it. `render` joins them: a component's view is its body in
   // exactly the sense that matters here — the part an annotation on the
   // component's shape governs rather than the part that spells it.
-  const bodies = [];
-  for (const n of stores.nodes) {
-    if (!['def', 'func', 'render'].includes(n.semanticKind)) continue;
-    const body = stores.role(n.nodeId, 'body');
-    if (typeof body?.sourceStart === 'number') bodies.push([body.sourceStart, body.sourceEnd]);
-  }
+  const bodies = functionBodiesOf(stores, new Set([...FUNCTION_KINDS, 'render'])).map((b) => [b.bodyStart, b.bodyEnd]);
   for (const n of stores.nodes) {
     if (!KINDS.has(n.semanticKind) || typeof n.sourceStart !== 'number') continue;
     const name = stores.role(n.nodeId, 'name') ?? conferred.get(`${n.sourceStart}:${n.sourceEnd}`);
@@ -328,6 +370,11 @@ function scopeAt(regions, off) {
 // the useful neighbours: `def filterBy(query: string)` types both the
 // parameter and the function, so call sites are checked too.
 //
+// IDENTIFIERS only. A PROPERTY token — a member name, an object key — is
+// text, not a binding: `cache: Map<K, V> = Map.new()` says nothing about
+// `new`, and seeding it would make every `Error.new …` in the file a typed
+// read and type whatever it is assigned to.
+//
 // Residual: an unannotated INNER binding that shadows a typed outer one
 // still reads as typed, because this pass places a binding by where its
 // declaration sits and never asks whether an inner scope redeclares the
@@ -337,7 +384,7 @@ function typedBindingsOf(tokens, source, typedLines, regions) {
   if (!tokens) return bindings;
   const lineAt = lineIndexer(source);
   for (const t of tokens) {
-    if (t.kind !== 'IDENTIFIER' && t.kind !== 'PROPERTY') continue;
+    if (t.kind !== 'IDENTIFIER') continue;
     if (typeof t.start !== 'number' || typeof t.value !== 'string') continue;
     if (!typedLines.has(lineAt(t.start))) continue;
     const scope = scopeAt(regions, t.start);
@@ -359,10 +406,30 @@ function typedBindingsOf(tokens, source, typedLines, regions) {
 // the binding DOES, never in whether a type flows into it. A target that is
 // not a plain identifier (`@field`, a destructure, an index) is skipped —
 // there is no single name to carry, and skipping only withholds checking.
+//
+// Every FUNCTION BODY inside the value is a HOLE in it — the same
+// subtraction declarationHeadersOf makes for headers. A function's type is
+// its signature, and a body that reads a typed binding is a fact about one
+// local inside it: it types neither the name the function lands in nor the
+// rest of the body. Subtraction is by CONTAINMENT, never by the value being
+// a bare literal: `f = (x) -> …`, `f = ((x) -> …)`, `f = memo((x) -> …)`,
+// and the method in `handlers = run: (x) -> …` all lose their bodies and
+// keep their headers. Without it a 1,000-line `main = -> …` is typed whole
+// because one line of it calls a typed helper — outward from a body, the
+// direction the gate promises never to reach. What remains of the value —
+// the header, the call, the object's keys — is what the value reads:
+// `r = typedFn(x)` still types `r`. An annotation left standing in that
+// remainder is type information too (scopeGateOf reads it), so
+// `f = (x: T) -> …` and `api = fetch: (): number -> 42` type their names.
+//
+// Residual: a header's parameter names are identifiers, so a body-local
+// annotation that mentions a parameter seeds it into the function's scope
+// and the header reads it — more checking, the safe direction.
 export function assignmentFlowsOf(stores, source) {
   const flows = [];
   if (!stores?.nodes) return flows;
   const KINDS = new Set(['assign', 'state', 'computed', 'readonly', 'typedvar']);
+  const bodies = functionBodiesOf(stores);
   for (const n of stores.nodes) {
     if (!KINDS.has(n.semanticKind)) continue;
     const target = stores.role(n.nodeId, 'target');
@@ -370,16 +437,48 @@ export function assignmentFlowsOf(stores, source) {
     if (typeof target?.sourceStart !== 'number' || typeof value?.sourceStart !== 'number') continue;
     const name = source.slice(target.sourceStart, target.sourceEnd);
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) continue;
-    flows.push({ name, at: target.sourceStart, value: [value.sourceStart, value.sourceEnd] });
+    const holes = bodies
+      .filter((b) => b.bodyStart >= value.sourceStart && b.bodyEnd <= value.sourceEnd)
+      .map((b) => [b.bodyStart, b.bodyEnd]);
+    flows.push({ name, at: target.sourceStart, value: [value.sourceStart, value.sourceEnd], holes });
   }
   return flows;
 }
 
-// True when a span reads some binding that is typed where the read sits.
-function readsTyped(tokens, bindings, [start, end]) {
-  for (const t of tokens ?? []) {
-    if (t.kind !== 'IDENTIFIER' && t.kind !== 'PROPERTY') continue;
-    if (typeof t.start !== 'number' || t.start < start || t.start >= end) continue;
+// Reads and mentions are IDENTIFIER tokens alone, the mirror of seeding: a
+// PROPERTY token spells a member name or an object key, and a name is not a
+// reference. `styles = { position: 'fixed' }` reads no binding called
+// `position`, whatever annotated function of that name the file declares.
+//
+// The file's identifier tokens, ordered by offset — the tape itself is not
+// promised to be (a synthesized identifier can follow a token it precedes
+// in the text), and the span lookup below is a binary search over this.
+function identifierIndexOf(tokens) {
+  const out = [];
+  for (const t of tokens ?? []) if (t.kind === 'IDENTIFIER' && typeof t.start === 'number') out.push(t);
+  return out.sort((a, b) => a.start - b.start);
+}
+
+// The identifier tokens a value span reads — the span's tokens minus its
+// holes — collected ONCE per flow. The fixpoint asks the same question of
+// the same span every round while only the bindings change, so the reads
+// are indexed up front and each round tests those few tokens alone.
+function readerTokensOf(identifiers, [start, end], holes = []) {
+  const out = [];
+  let lo = 0, hi = identifiers.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (identifiers[mid].start < start) lo = mid + 1; else hi = mid; }
+  for (let i = lo; i < identifiers.length; i++) {
+    const t = identifiers[i];
+    if (t.start >= end) break;
+    if (holes.some(([s, e]) => t.start >= s && t.start < e)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+// True when one of the reader tokens names a binding typed where it sits.
+function readsTyped(readers, bindings) {
+  for (const t of readers) {
     if (!bindings.has(t.value)) continue;
     const spans = bindings.get(t.value);
     if (!spans || spans.some((s) => t.start >= s.start && t.start < s.end)) return true;
@@ -395,7 +494,7 @@ function linesMentioning(tokens, source, bindings) {
   if (!tokens || bindings.size === 0) return lines;
   const lineAt = lineIndexer(source);
   for (const t of tokens) {
-    if (t.kind !== 'IDENTIFIER' && t.kind !== 'PROPERTY') continue;
+    if (t.kind !== 'IDENTIFIER') continue;
     if (typeof t.start !== 'number' || !bindings.has(t.value)) continue;
     const spans = bindings.get(t.value);
     if (spans && !spans.some(s => t.start >= s.start && t.start < s.end)) continue;
@@ -442,14 +541,26 @@ export function exportedNamesOf(stores, source) {
 // A namespace import (`* as ns`) is skipped — its uses are member accesses
 // through `ns`, not occurrences of a bare local, so there is no name for the
 // gate to match. Skipping withholds checking, never grants it.
-export function importBindingsOf(stores, source) {
-  const out = [];
-  if (!stores?.nodes) return out;
+// One reader for the import NODES themselves — the module specifier
+// (quotes stripped) and the clause text — consumed by both binding readers
+// below. Their RESULTS stay apart on purpose (a namespace alias is not a
+// binding of a typed export), but the iteration is one rule: how the
+// compiler stores an import's source role is a fact with one spelling.
+function* importNodesOf(stores, source) {
+  if (!stores?.nodes) return;
   for (const node of stores.nodesByKind('import')) {
     const src = stores.role(node.nodeId, 'source');
     if (typeof src?.sourceStart !== 'number') continue;
-    const module = source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, '');
-    const text = source.slice(node.sourceStart, node.sourceEnd);
+    yield {
+      module: source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''),
+      text: source.slice(node.sourceStart, node.sourceEnd),
+    };
+  }
+}
+
+export function importBindingsOf(stores, source) {
+  const out = [];
+  for (const { module, text } of importNodesOf(stores, source)) {
     const braced = /\{([^}]*)\}/.exec(text);
     for (const part of (braced?.[1] ?? '').split(',')) {
       const [imported, local] = part.trim().split(/\s+as\s+/).map((s) => s.trim());
@@ -461,6 +572,26 @@ export function importBindingsOf(stores, source) {
     const head = text.replace(/\{[^}]*\}/, '').replace(/^import\s+/, '');
     const def = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,|from\b)/.exec(head);
     if (def) out.push({ local: def[1], imported: 'default', module });
+  }
+  return out;
+}
+
+// The NAMESPACE imports a file makes: `import * as ns from '…'`.
+//
+// Kept apart from `importBindingsOf` rather than folded into it, because
+// that function's result is what `scopeGateOf` reads as `typedImports`, and
+// a namespace alias is not a binding of a typed export — it is a binding of
+// the whole module. Callers that want it ask for it.
+//
+// Anchored on the STAR, not on the start of the clause: a default binding
+// may precede it (`import def, * as ns`) and the space after it is optional
+// (`import *as ns`). Both compile to a real namespace import, so both bind
+// the module here.
+export function namespaceImportsOf(stores, source) {
+  const out = [];
+  for (const { module, text } of importNodesOf(stores, source)) {
+    const ns = /\*\s*as\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+from\b/.exec(text);
+    if (ns) out.push({ local: ns[1], module });
   }
   return out;
 }
@@ -486,7 +617,7 @@ export function importBindingsOf(stores, source) {
 //   (withholding checking, the safe direction).
 //
 //   Bare, landing on a workspace `.rip` (`@rip/util`, resolved the way the
-//   runtime resolves it — bareRipSpecifierTarget) — the same module as a
+//   runtime resolves it — ripSpecifierTarget) — the same module as a
 //   relative `.rip` spelled through its package name, asked the same
 //   question. Any other bare specifier is some other ecosystem's module
 //   and carries nothing here.
@@ -494,15 +625,10 @@ export function typedImportsOf(stores, source, fromDir, typedExportsAt) {
   const local = new Set();
   if (!stores) return local;
   for (const b of importBindingsOf(stores, source)) {
-    let target;
-    if (b.module.startsWith('./') || b.module.startsWith('../')) {
-      if (/\.(ts|tsx|mts|cts)$/.test(b.module)) { local.add(b.local); continue; }
-      if (!b.module.endsWith('.rip')) continue;
-      target = path.resolve(fromDir, b.module);
-    } else {
-      target = bareRipSpecifierTarget(b.module, fromDir);
-      if (target === null) continue;
-    }
+    if ((b.module.startsWith('./') || b.module.startsWith('../'))
+      && /\.(ts|tsx|mts|cts)$/.test(b.module)) { local.add(b.local); continue; }
+    const target = ripSpecifierTarget(b.module, fromDir);
+    if (target === null) continue;
     let exports;
     try { exports = typedExportsAt(target); } catch { continue; }
     if (exports?.has(b.imported)) local.add(b.local);
@@ -586,11 +712,21 @@ export function scopeGateOf(tokens, source, face, typedImports = null) {
   // annotation that typed it.
   for (const local of typedImports ?? []) bindings.set(local, null);
   const flows = assignmentFlowsOf(face?.stores, source);
-  for (const flow of flows) flow.pending = true;
+  // An annotation standing in a value, outside every subtracted body, is
+  // type information the author wrote INTO the value: `api = fetch: ():
+  // number -> 42` types `api`, and the method's callers are reached through
+  // the object that carries it.
+  const typeOffsets = [];
+  for (const t of tokens ?? []) if (t.kind === 'TYPE' && typeof t.start === 'number') typeOffsets.push(t.start);
+  const annotatedWithin = (flow) => typeOffsets.some((o) =>
+    o >= flow.value[0] && o < flow.value[1] && !flow.holes.some(([s, e]) => o >= s && o < e));
+  const identifiers = identifierIndexOf(tokens);
+  for (const flow of flows) { flow.pending = true; flow.readers = readerTokensOf(identifiers, flow.value, flow.holes); }
   for (;;) {
     let grew = false;
     for (const flow of flows) {
-      if (!flow.pending || !readsTyped(tokens, bindings, flow.value)) continue;
+      if (!flow.pending) continue;
+      if (!annotatedWithin(flow) && !readsTyped(flow.readers, bindings)) continue;
       flow.pending = false;
       grew = true;
       const scope = scopeAt(regions, flow.at);
