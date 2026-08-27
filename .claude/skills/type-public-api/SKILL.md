@@ -54,7 +54,7 @@ Deriving from what an API ought to accept is how a type ends up wrong and confid
 
 ## 5 — Minimality: remove each annotation and re-run
 
-Take out each annotation in turn and run `--public`. Keep only those whose removal degrades the report.
+Take out each annotation in turn and re-run BOTH checks. Keep the ones whose removal degrades the report, and the ones the report does not need but `rip check` does — an annotation can be invisible to the audit and still be what makes the package compile.
 
 Do this over every annotated position — lambda parameters and return types, not just `def` signatures. Reading cannot find these: a single return-type annotation can propagate backward into the binding a composed value is built from, typing the whole thing and making several parameter annotations redundant. When two forms both reach 100%, take the one with fewer annotations; a return annotation with bare parameters usually wins.
 
@@ -67,4 +67,12 @@ rip check --public <pkg>     # 100%, exit 0
 rip check <pkg>              # no type errors, test file included
 ```
 
-Annotations are erased, so a pure annotation pass emits the same JavaScript and cannot break a runtime test — those two checks are the whole verification. Run the package's own suite when step 1 changed what it exports, since un-exporting a name does change runtime. Run the full gate (`bun run test:all`) when the package is part of the stdlib, since annotations can still move a type-level pin elsewhere in the repo.
+Annotating a signature breaks any test that deliberately passes a wrong value to prove the runtime rejects it. Mark that line `# @ts-expect-error`, which asserts the error is there and fails if the signature ever stops forbidding it; `as any` would go quiet instead, and quiet is what those tests exist to prevent.
+
+Annotations are erased, so a pure annotation pass emits the same JavaScript and cannot break a runtime test. Confirm the pass WAS pure — a fix that rides along is invisible to both checks above and to a green suite:
+
+```
+diff <(git show HEAD:<pkg>/<entry>.rip | rip -c) <(rip -c <pkg>/<entry>.rip)
+```
+
+Identical output means the two checks are the whole verification. A difference is a behavior change wearing an annotation pass, and belongs in its own commit ahead of this one. Run the package's own suite when step 1 changed what it exports, since un-exporting a name does change runtime. Run the full gate (`bun run test:all`) when the package is part of the stdlib, since annotations can still move a type-level pin elsewhere in the repo.
