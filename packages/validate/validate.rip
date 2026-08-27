@@ -301,7 +301,7 @@ define name, fn, RAW.has(name) for own name, fn of BUILTIN
 
 export def registerValidator(name, fn, opts = {})
   unless opts.raw is undefined or typeof opts.raw is 'boolean'
-    fail "validator '#{name}' raw flag must be boolean"
+    fail "validator '#{nameOf name}' raw flag must be boolean"
   define nameOf(name), fn, opts.raw is true
 
 export def getValidator(name)
