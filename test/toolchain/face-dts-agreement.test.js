@@ -59,6 +59,15 @@ const HEAD = /(?:^|[\s;}])(?:export\s+)?(?:declare\s+)?(?:async\s+)?function\*?\
 // The characters after which a `{` opens a TYPE rather than a body.
 const TYPE_EXPECTED = ':|&,<(';
 
+// The `>` of an arrow, which closes nothing. Both scans below count
+// angle brackets, and a type spells `=>` wherever it names a callable —
+// in a constraint (`<T extends (...a: any[]) => any>`) and as a return
+// (`: (x: number) => void`). Read as a close, it ends the clause early:
+// the generic scan then finds no `(` and DROPS the signature, and the
+// return scan stops mid-type. Both failures are silent, and a gate that
+// silently declines to compare is worse than one that never claimed to.
+const arrowTail = (text, i) => text[i] === '>' && text[i - 1] === '=';
+
 function signatures(text) {
   const out = new Map(); // name -> array of {generics, optionals, ret}
   for (const m of text.matchAll(HEAD)) {
@@ -70,7 +79,7 @@ function signatures(text) {
       let depth = 0;
       do {
         if (text[i] === open) depth++;
-        else if (text[i] === close) depth--;
+        else if (text[i] === close && !arrowTail(text, i)) depth--;
         i++;
       } while (i < text.length && depth > 0);
       return text.slice(start, i);
@@ -97,8 +106,10 @@ function signatures(text) {
           // else a `{` is the function body, and the type ended.
           if (!(before === '' || TYPE_EXPECTED.includes(prev) || before.endsWith('=>'))) break;
         }
-        if ('<([{'.includes(c)) depth++;
-        else if ('>)]}'.includes(c)) { if (depth === 0) break; depth--; }
+        if (!arrowTail(text, i)) {
+          if ('<([{'.includes(c)) depth++;
+          else if ('>)]}'.includes(c)) { if (depth === 0) break; depth--; }
+        }
         i++;
       }
       ret = text.slice(start, i).trim();
@@ -148,8 +159,15 @@ function facts(src, path = 'agreement.rip') {
 // the same generic head, and the same return type in the face. (The face
 // may hold names the .d.ts does not — non-exported locals have no
 // declaration form.)
+//
+// Returns how many rows it actually COMPARED. A scan that cannot parse a
+// signature yields no rows to disagree, so every failure of the scanner
+// itself reads as agreement — the callers that know a comparison was owed
+// check the count, and the corpus sweep, where a file may legitimately
+// declare no callable at all, does not.
 function expectAgreement(src, path) {
   const { face, dts } = facts(src, path);
+  let compared = 0;
   for (const [name, dtsRows] of dts) {
     const faceRows = face.get(name);
     if (!faceRows) continue; // not a callable the face spells as `function`
@@ -157,10 +175,12 @@ function expectAgreement(src, path) {
     // same signature must exist on both sides.
     const key = (r) => `${r.generics}|${r.optionals}|${r.ret}`;
     for (const row of dtsRows) {
+      compared++;
       expect({ name, sig: key(row), seenInFace: faceRows.map(key) })
         .toEqual({ name, sig: key(row), seenInFace: expect.arrayContaining([key(row)]) });
     }
   }
+  return compared;
 }
 
 describe('the face and the .d.ts describe the same API', () => {
@@ -191,13 +211,45 @@ describe('the face and the .d.ts describe the same API', () => {
     'a generator keeps its author-spelled iterator': 'export def numbers(): Generator<number>\n  yield 1\n',
     'an async generator takes no Promise wrap': 'export def drain(s: number): AsyncGenerator<number>\n  yield await s\n',
     'a sync def is wrapped by neither': 'export def plain(a: number): number\n  a\n',
+    // A type spells `=>` wherever it names a callable, and both places it
+    // can appear in a signature sat in the angle-bracket scans' path.
+    // These rows are here for the SCANNER: each was dropped or truncated
+    // silently, which is the one failure a comparison gate cannot report.
+    'a generic constrained by a function type': 'export def memo<T extends (...args: any[]) => any>(fn: T): T\n  await fn\n  fn\n',
+    'a return type that is a function type': 'export def adder(n: number): (x: number) => number\n  (x) -> x + n\n',
   };
 
   for (const [label, src] of Object.entries(ROWS)) {
     test(`${label} — params, generic head, and return type survive into BOTH`, () => {
-      expectAgreement(src, `${label.replace(/\W+/g, '-')}.rip`);
+      // Every row here exports a def, so every row owes at least one
+      // comparison. Asserting that is what keeps a row honest: a scanner
+      // that stops parsing this shape would otherwise pass it in silence.
+      expect(expectAgreement(src, `${label.replace(/\W+/g, '-')}.rip`)).toBeGreaterThan(0);
     });
   }
+
+  // The SCANNER, on hand-written text. Both artifacts spell a type the
+  // same way, so a scan that stops early stops early on both and the
+  // comparison agrees — which is why neither of these can be pinned by
+  // compiling a row and comparing. The scan is read directly instead.
+  test('an `=>` in a type closes nothing: the return is whole, the constraint is scanned', () => {
+    // The `>` of an arrow, read as a closing angle, ended this return
+    // type at the `=` and made two different types one string.
+    const face = 'export function make(a: number): (x: number) => void {\n  return () => {};\n}\n';
+    const dts = 'export declare function make(a: number): (x: number) => string;\n';
+    expect(signatures(face).get('make')[0].ret).toBe('(x: number) => void');
+    expect(signatures(dts).get('make')[0].ret).toBe('(x: number) => string');
+    // The same read ended this generic clause early, left the scan short
+    // of the `(`, and DROPPED the signature — a name compared zero times
+    // while the gate reported green.
+    const generic = 'export declare function memo<T extends (...args: any[]) => any>(fn: T): Promise<T>;\n';
+    const rows = signatures(generic).get('memo');
+    expect(rows?.[0]).toEqual({
+      generics: '<T extends (...args: any[]) => any>',
+      optionals: '',
+      ret: 'Promise<T>',
+    });
+  });
 
   test('the overload row keeps `?` — the regression this gate was written for', () => {
     const { faceText, dtsText } = facts(ROWS['an optional param in an OVERLOAD row'], 'ovl.rip');
