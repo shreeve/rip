@@ -36,7 +36,7 @@ import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
 import { importBindingsOf, namespaceImportsOf } from '../../packages/vscode/src/scopes.js';
-import { ripSpecifierTarget } from '../../packages/vscode/src/mirror.js';
+import { ripSpecifierTarget, anchorStdlib } from '../../packages/vscode/src/mirror.js';
 
 // The two trees whose build identity the editor and this CLI must agree
 // on. Computed once: they were spelled twice, and a hash that disagrees
@@ -529,6 +529,9 @@ if (targets.length === 0 && !publicAudit) {
   process.exit(0);
 }
 const workspaceRoot = findWorkspaceRoot(targets);
+// The workspace decides which checkout's stdlib `rip/*` names resolve
+// to, for resolution and the generated `paths` map alike.
+anchorStdlib(workspaceRoot);
 // One run = one consistent view of the disk, so stash discovery
 // memoizes per directory — files sharing a dirname share one walk.
 const stashMemo = new Map();

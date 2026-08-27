@@ -73,7 +73,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, closureImportsOf, isStdlibPath } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, closureImportsOf, isStdlibPath, anchorStdlib } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -926,11 +926,12 @@ function mirrorIntact(file, entry) {
 // Created event pulls them in; targets resolving OUTSIDE the workspace
 // truncate the closure loudly (a `../` chain must not walk the whole
 // disk into __external__) — EXCEPT the stdlib tree: `rip/<pkg>`
-// specifiers resolve into STDLIB_DIR, a bounded tree whose faces the
-// generated tsconfig already maps by name (stdlibRipPaths), so
-// materializing them completes a mapping the config promised rather
-// than opening the disk walk. Returns the counters (the scaling gate
-// pins them) and the created/changed mirror paths for tsgo notification.
+// specifiers resolve into the one this server is anchored on, a bounded
+// tree whose faces the generated tsconfig already maps by name
+// (stdlibRipPaths), so materializing them completes a mapping the config
+// promised rather than opening the disk walk. Returns the counters (the
+// scaling gate pins them) and the created/changed mirror paths for tsgo
+// notification.
 function materializeClosure(seeds) {
   ensureMirrorRoot();
   const queue = [...seeds];
@@ -1477,6 +1478,10 @@ connection.onInitialize(async (params) => {
   compile = await loadCompiler();
   readProjectConfig = await loadProjectConfigReader();
   workspaceRoot = detectWorkspaceRoot(params);
+  // Before any mirror is planned: the workspace decides which checkout's
+  // stdlib `rip/*` names resolve to, for resolution and the generated
+  // `paths` map alike.
+  anchorStdlib(workspaceRoot);
   planMirrorRoot();
   loadCache();
   clientSupportsWatchers = !!params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;

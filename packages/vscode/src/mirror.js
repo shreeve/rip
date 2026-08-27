@@ -237,7 +237,7 @@ export function appStashImportOf(fsPath, workspaceRoot, memo = null) {
   // never source-imports either would otherwise leave a face
   // unmaterialized and the splice resolving against a stub or nothing.
   const deps = [path.resolve(path.dirname(fsPath), spec)];
-  if (REAL_STDLIB_APP_ENTRY !== null) deps.push(REAL_STDLIB_APP_ENTRY);
+  if (stdlibAppEntry !== null) deps.push(stdlibAppEntry);
   return deps;
 }
 
@@ -927,21 +927,30 @@ export function ripSpecifierTarget(spec, fromDir) {
   return bareRipSpecifierTarget(spec, fromDir);
 }
 
-// The rip checkout's packages/ — the stdlib the runtime loader serves
-// as `rip/<pkg>` with no node_modules
-// anywhere. Checking resolves the same names: bare-specifier targets
-// fall back here when no node_modules provides the package, and
-// tsconfig paths point each name at the entry's mirror face — or, for an
-// entry that is JavaScript, at its declaration.
+// A rip checkout's packages/ — the stdlib the runtime loader serves as
+// `rip/<pkg>` with no node_modules anywhere. Checking resolves the same
+// names: bare-specifier targets fall back here when no node_modules
+// provides the package, and tsconfig paths point each name at the
+// entry's mirror face — or, for an entry that is JavaScript, at its
+// declaration.
 //
-// Finding the checkout follows the runtime's ownership rule: the
-// stdlib lives in whichever checkout owns the `rip` bin. In-repo, this
-// server IS in that checkout (../../../packages); the installed .vsix
-// carries no stdlib, so it follows the `rip` bin's symlink home — PATH
-// plus the standard bin dirs, because an extension host's PATH can be
-// narrower than a shell's. A candidate counts only if it actually
-// holds the stdlib (packages/vscode/package.json), so a stray
-// `packages` dir near an installed extension never wins.
+// What makes a `packages` directory a stdlib rather than any other
+// directory of that name: rip's OWN editor package sits in it. The test
+// reads the manifest's name — a monorepo that merely has a
+// `packages/vscode/` of its own (a common way to ship an extension) is
+// not a rip checkout, and mistaking one for a rip checkout would serve
+// it a stdlib that holds none of the `rip/*` names.
+const holdsStdlib = (packagesDir) => {
+  try { return JSON.parse(fs.readFileSync(path.join(packagesDir, 'vscode', 'package.json'), 'utf8')).name === 'vscode-rip'; }
+  catch { return false; }
+};
+
+// The stdlib the RUNNING BINARY carries — where a name lands when the
+// file asking for it sits in no rip checkout, which is every consumer
+// app. In-repo, this server IS in a checkout (../../../packages); the
+// installed .vsix carries no stdlib, so it follows the `rip` bin's
+// symlink home — PATH plus the standard bin dirs, because an extension
+// host's PATH can be narrower than a shell's.
 const STDLIB_DIR = (() => {
   const candidates = [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages')];
   const binDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
@@ -955,32 +964,62 @@ const STDLIB_DIR = (() => {
       candidates.push(path.join(repo, 'packages'));
     } catch { /* no rip bin here */ }
   }
-  return candidates.find((c) => fs.existsSync(path.join(c, 'vscode', 'package.json'))) ?? candidates[0];
+  return candidates.find(holdsStdlib) ?? candidates[0];
 })();
+
+// The stdlib THIS PROCESS serves, and the spellings read off it. ONE
+// stdlib, not one per file: a workspace generates a single tsconfig
+// carrying a single `paths` map, so the stdlib a name resolves to and the
+// stdlib that map points at have to be the same directory, or the closure
+// materializes faces the config never names and every `rip/*` import
+// squiggles TS2307. Deriving them separately — resolution from the
+// importing file, the map from the workspace root — lets the two
+// disagree whenever a checkout sits inside a workspace that is not
+// itself one. All three are set together, by anchorStdlib alone.
+let stdlibDir;
+let realStdlibDir;
+let stdlibAppEntry;
+
+// Point this process at the stdlib of the checkout enclosing `root`, the
+// local-first rule the runtime loader applies: a workspace inside a rip
+// checkout is checked against THAT checkout's stdlib, so two checkouts
+// holding the same source answer the same instead of answering by
+// whichever binary happened to run. A root enclosed by no checkout —
+// every consumer app — keeps STDLIB_DIR, the stdlib the running binary
+// carries. Hosts call this once, before any mirror is generated.
+export function anchorStdlib(root) {
+  let found = STDLIB_DIR;
+  if (typeof root === 'string' && root !== '') {
+    for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+      const packagesDir = path.join(dir, 'packages');
+      if (holdsStdlib(packagesDir)) { found = packagesDir; break; }
+      if (path.dirname(dir) === dir) break;
+    }
+  }
+  stdlibDir = found;
+  try { realStdlibDir = fs.realpathSync(found); } catch { realStdlibDir = found; }
+  // Realpath'd, the spelling stdlibRipPaths' targets use, so the face and
+  // the tsconfig `paths` mapping land at one mirror path.
+  try { stdlibAppEntry = fs.realpathSync(path.join(found, 'app', 'index.rip')); } catch { stdlibAppEntry = null; }
+}
+anchorStdlib(null);
 
 // The one subtree OUTSIDE a workspace whose files are sanctioned closure
 // members: the generated tsconfig already points `rip/*` at the stdlib's
 // mirror faces, and the stash splice reaches `rip/app` with no source
 // import — so a closure walker that refuses everything outside the
 // workspace strands the mapping against faces nobody wrote. Compared
-// realpath'd, the same spelling appStashImportOf and stdlibRipPaths use.
-const REAL_STDLIB_DIR = (() => {
-  try { return fs.realpathSync(STDLIB_DIR); } catch { return STDLIB_DIR; }
-})();
-// The `rip/app` entry the stash splice depends on, realpath'd once —
-// the same spelling stdlibRipPaths' realpath'd targets use, so the
-// face and the tsconfig `paths` mapping land at one mirror path.
-const REAL_STDLIB_APP_ENTRY = (() => {
-  try { return fs.realpathSync(path.join(STDLIB_DIR, 'app', 'index.rip')); } catch { return null; }
-})();
+// realpath'd against the ONE stdlib this process serves — a tree this
+// process was never anchored on is not a sanctioned closure member, so
+// the bound the fence exists to enforce still holds everywhere else.
 export const isStdlibPath = (fsPath) =>
-  fsPath === REAL_STDLIB_DIR || fsPath.startsWith(REAL_STDLIB_DIR + path.sep);
+  fsPath === realStdlibDir || fsPath.startsWith(realStdlibDir + path.sep);
 
 function stdlibRipTarget(spec) {
   if (!spec.startsWith('rip/')) return null;
   const rest = spec.slice('rip/'.length);
   const [name, ...deeper] = rest.split('/');
-  const pkgDir = path.join(STDLIB_DIR, name);
+  const pkgDir = path.join(stdlibDir, name);
   let manifest;
   try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return null; }
   const target = ripManifestTarget(manifest, '.' + (deeper.length ? '/' + deeper.join('/') : ''));
@@ -998,10 +1037,10 @@ function stdlibRipTarget(spec) {
 export function stdlibRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
   const paths = {};
   let entries;
-  try { entries = fs.readdirSync(STDLIB_DIR, { withFileTypes: true }); } catch { return paths; }
+  try { entries = fs.readdirSync(stdlibDir, { withFileTypes: true }); } catch { return paths; }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    const dir = path.join(STDLIB_DIR, e.name);
+    const dir = path.join(stdlibDir, e.name);
     let manifest;
     try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { continue; }
     const subpaths = ['.'];
