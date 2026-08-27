@@ -568,6 +568,9 @@ edgeEnv = (launcher, control) ->
     RIP_EDGE_HTTP_BIND: if launcher is 'launchd' then 'fd/3' else bindHost()
     RIP_EDGE_BIND: if launcher is 'launchd' then 'fd/4' else bindHost()
     RIP_EDGE_CONTROL: control
+    # The on_demand_tls ask URL must dial the real HTTP port — hardwiring
+    # :80 under --http-port would fail every mint (and so every handshake).
+    RIP_EDGE_HTTP_PORT: String(state.edge.httpPort or 80)
     RIP_EDGE_STATUS: paths.edgeStatus
   }
 
@@ -600,6 +603,7 @@ launchdPlist = (caddy, config, control) ->
     TMPDIR: process.env.TMPDIR
     RIP_EDGE_ADMIN: paths.edgeAdmin
     RIP_EDGE_CONTROL: control
+    RIP_EDGE_HTTP_PORT: String(state.edge.httpPort or 80)
     RIP_EDGE_STATUS: paths.edgeStatus
   argumentXml = argv.map((value) -> "<string>#{xml value}</string>").join('')
   environmentXml = Object.keys(environment).sort().filter((key) -> environment[key]?).map((key) -> xmlEntry(key, environment[key])).join('')
@@ -629,12 +633,17 @@ launchctl = (args, missing = false) ->
   return false if missing and (detail.includes('Could not find service') or detail.includes('No such process') or detail.includes('service not found'))
   fail "launchctl #{args[0]} failed#{if detail then ": #{detail}" else ''}", 503
 
-bootoutLaunchd = (missing = false) -> launchctl ['bootout', LAUNCHD_SERVICE], missing
+# Boot out the retired label too, on EVERY path: the edge is socket-
+# activated, so a lingering old-label job resurrects on the next stray
+# connection to 80/443 and wedges start (early-return "running") against
+# stop (409 not-owned) until someone boots it out by hand.
+bootoutLaunchd = (missing = false) ->
+  launchctl ['bootout', "#{LAUNCHD_DOMAIN}/#{LAUNCHD_RETIRED}"], true if LAUNCHD_DOMAIN?
+  launchctl ['bootout', LAUNCHD_SERVICE], missing
 
 startLaunchd = (caddy, config, control) ->
   fail 'launchd user domain is unavailable', 503 unless LAUNCHD_SERVICE?
   bootoutLaunchd true
-  launchctl ['bootout', "#{LAUNCHD_DOMAIN}/#{LAUNCHD_RETIRED}"], true
   writeSecure paths.edgePlist, launchdPlist(caddy, config, control)
   launchctl ['bootstrap', LAUNCHD_DOMAIN, paths.edgePlist]
 
@@ -749,7 +758,11 @@ reloadEdge = ->
 # app this call stopped — even when the edge start fails, so a broken
 # posture never strands the apps.
 restartEdge = ->
-  wasRunning = state.apps.filter (app) -> managerStatus!(app)?
+  # For-loop, not .filter — an async predicate returns a Promise, which is
+  # always truthy, and every cataloged app would restart.
+  wasRunning = []
+  for app in state.apps
+    wasRunning.push app if managerStatus!(app)?
   for app in wasRunning
     stopApp! app
   stopEdge! if state.edge.managed
