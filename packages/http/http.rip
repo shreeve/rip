@@ -18,10 +18,47 @@ RETRY_LIMIT   =! 2
 BACKOFF_BASE  =! 0.3
 TIMEOUT_MS    =! 10000
 
+# ==[ Types ]==
+
+type Awaitable<T> = T | Promise<T>
+
+type Options =
+  method?: string
+  prefixUrl?: string
+  searchParams?: URLSearchParams | string | Record<string, unknown>
+  headers?: HeadersInit
+  json?: unknown
+  body?: BodyInit | null
+  timeout?: number | false
+  retry?: number | false | {
+    limit?: number,
+    methods?: string[],
+    statusCodes?: number[],
+    backoffLimit?: number,
+    delay?: (attempt: number) => number
+  }
+  throwHttpErrors?: boolean
+  hooks?:
+    beforeRequest?: ((request: Request, options: Options) => Awaitable<Request | Response | void>)[]
+    afterResponse?: ((request: Request, options: Options, response: Response) => Awaitable<Response | void>)[]
+    beforeRetry?: ((state: { request: Request, options: Options, error: unknown, retryCount: number }) => Awaitable<void>)[]
+    beforeError?: ((error: HTTPError) => Awaitable<HTTPError | undefined>)[]
+  signal?: AbortSignal | null
+  mode?: RequestMode
+  credentials?: RequestCredentials
+  cache?: RequestCache
+  redirect?: RequestRedirect
+  referrer?: string
+  referrerPolicy?: ReferrerPolicy
+  integrity?: string
+  keepalive?: boolean
+
+type Fetcher = (input: string | URL, opts?: Options) => Promise<Response>
+
 # ==[ Error Classes ]==
 
 export class HTTPError extends Error
-  constructor: (response, request, options) ->
+  constructor: (response: Response, request: Request, options: Options) ->
     super("Request failed with status #{response.status}")
     @response = response
     @request  = request
@@ -29,7 +66,7 @@ export class HTTPError extends Error
     @name     = 'HTTPError'
 
 export class TimeoutError extends Error
-  constructor: (request) ->
+  constructor: (request: Request) ->
     super('Request timed out')
     @request = request
     @name    = 'TimeoutError'
@@ -240,11 +277,11 @@ def request(input, opts = {})
 # shape: a function that also carries the method shortcuts, instance
 # builders, and error classes.
 
-def buildMethod(call, method)
+def buildMethod(call, method): Fetcher
   (input, opts = {}) -> call(input, { ...opts, method })
 
 def makeInstance(defaults = {})
-  call = (input, opts = {}) -> request(input, mergeOptions(defaults, opts))
+  call: Fetcher = (input, opts = {}) -> request(input, mergeOptions(defaults, opts))
   Object.assign call,
     get:          buildMethod(call, 'GET')
     post:         buildMethod(call, 'POST')
@@ -252,8 +289,8 @@ def makeInstance(defaults = {})
     patch:        buildMethod(call, 'PATCH')
     del:          buildMethod(call, 'DELETE')
     head:         buildMethod(call, 'HEAD')
-    create:       (opts = {}) -> makeInstance(opts)
-    extend:       (opts = {}) -> makeInstance(mergeOptions(defaults, opts))
+    create:       (opts: Options = {}) -> makeInstance(opts)
+    extend:       (opts: Options = {}) -> makeInstance(mergeOptions(defaults, opts))
     HTTPError:    HTTPError
     TimeoutError: TimeoutError
 
