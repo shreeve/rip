@@ -43,7 +43,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   transports, both public — `http://host:port` (TCP) and
   `unix:///path.sock` (Bun's fetch `unix` option) — with `harbor:<name>`
   as pure resolution sugar, never a third transport: it reads
-  `$HARBOR_HOME/<name>.json` (default `~/.harbor`), desugars to
+  `$HARBOR_HOME/runtime/<name>.json` (default `~/.config/harbor/runtime`), desugars to
   whichever spelling the berth registered (socket preferred, port
   otherwise), and resolves the bearer token from `<name>.token`.
   Precedence: explicit option → registry → `RIP_DB_TOKEN`. One resolver

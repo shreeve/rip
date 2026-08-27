@@ -3,7 +3,7 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { readFileSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'fs'
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -1322,8 +1322,9 @@ test "resolveTarget: unix:// spelling carries the socket path, dummy base", ->
 test "resolveTarget: harbor:<name> desugars from the registry — socket preferred, token read", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
-    writeFileSync join(home, 'demo.json'), JSON.stringify { socket: '/tmp/demo.sock', port: null }
-    writeFileSync join(home, 'demo.token'), "sekret\n"
+    mkdirSync join(home, 'runtime')
+    writeFileSync join(home, 'runtime', 'demo.json'), JSON.stringify { socket: '/tmp/demo.sock', port: null }
+    writeFileSync join(home, 'runtime', 'demo.token'), "sekret\n"
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
     eq t, { base: 'http://harbor', unix: '/tmp/demo.sock', token: 'sekret', shown: 'harbor:demo (unix:///tmp/demo.sock)' }
   finally
@@ -1332,7 +1333,8 @@ test "resolveTarget: harbor:<name> desugars from the registry — socket preferr
 test "resolveTarget: harbor:<name> falls back to the registered TCP port", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
-    writeFileSync join(home, 'demo.json'), JSON.stringify { socket: null, port: 9500, bind: null }
+    mkdirSync join(home, 'runtime')
+    writeFileSync join(home, 'runtime', 'demo.json'), JSON.stringify { socket: null, port: 9500, bind: null }
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
     eq t, { base: 'http://127.0.0.1:9500', unix: null, token: null, shown: 'harbor:demo (http://127.0.0.1:9500)' }
   finally
