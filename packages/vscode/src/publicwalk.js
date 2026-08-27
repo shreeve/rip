@@ -446,18 +446,26 @@ async function returnIsStated(params, origin, synthesized) {
 // One published name, walked breadth-first to its first defect.
 //
 // Breadth-first so the shallowest leak is the one reported: the path a
-// consumer meets first is the one worth printing. The depth limit bounds
-// COST, and what it cuts is unexamined rather than clean — that count
-// leaves with the verdict, never discarded.
-async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, siblings, functionTypeId, caches, synthesized) {
+// consumer meets first is the one worth printing.
+//
+// Nothing bounds the number of levels. The `seen` pair below ends every
+// cycle, which is what a self-containing type is — but a generic that
+// instantiates itself with a growing argument (`Chain<T>` answering
+// `Chain<T[]>`) mints a type per level, and a pair that never repeats is
+// no cycle to end. That surface has no bottom and this loop does not
+// return. Two CLI paths arrive here and a hang wears either name: the
+// `--public` audit, and the inherited-`any` advisory an ordinary `rip
+// check` runs over the published surface of a strict package's
+// dependencies.
+async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, functionTypeId, caches, synthesized) {
   const seen = new Set();
   const found = [];
   // Positions the CHECKER had no type for. The async API is allowed to
   // answer a symbol with undefined, and a thread lost there is unexamined
-  // surface, not clean surface — it leaves with the floor.
+  // surface, not clean surface — it leaves as the walk's floor.
   let lost = 0;
   let level = [{ type: rootType, at: rootName, bare: false, stated: await isStatedExport(rootSymbol, synthesized), origin: rootSymbol }];
-  for (let depth = 0; depth < maxDepth && level.length; depth++) {
+  while (level.length) {
     const next = [];
     for (const item of level) {
       const width = await widthCached(ck, item.type, owns, functionTypeId, caches);
@@ -493,9 +501,10 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
       // position the report would have placed somewhere new is dropped as
       // already covered.
       //
-      // The pair still bounds the walk. A type that contains itself
-      // re-arrives through the same declaration that holds it, and stops
-      // there; types and declarations are both finite, so every cycle is.
+      // The pair ends every CYCLE. A type that contains itself re-arrives
+      // through the same declaration that holds it, and stops there. It
+      // ends nothing else: a type made on demand is a pair that has never
+      // been seen, and there is no cycle in an arrival that never returns.
       const arrival = item.site
         ? `${item.type.id}|${item.site.path}:${item.site.start}`
         : `${item.type.id}|${item.origin?.id ?? 0}`;
@@ -648,8 +657,8 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
   }
   const defects = [...bySite.values()];
   return defects.length === 0
-    ? { kind: 'typed', why: null, at: null, origin: null, defects: [], unexplored: level.length + lost }
-    : { kind: 'leak', why: defects[0].why, at: defects[0].at, origin: defects[0].origin, defects, unexplored: level.length + lost };
+    ? { kind: 'typed', why: null, at: null, origin: null, defects: [], lost }
+    : { kind: 'leak', why: defects[0].why, at: defects[0].at, origin: defects[0].origin, defects, lost };
 }
 
 // Every name one entry publishes, with the type a consumer resolves for it.
@@ -657,12 +666,12 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
 // took, rather than everything the module publishes. A count of the whole
 // surface says the same thing to every consumer of a package and so says
 // nothing about any of them.
-export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10, only = null, siblingIds = null, synthesized = () => false }) {
+export async function walkPublicEntry(session, { mirrorFile, owns, only = null, siblingIds = null, synthesized = () => false }) {
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
-    if (ck === null) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
+    if (ck === null) return { rows: [], lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
     const moduleSymbol = source === undefined ? undefined : await ck.getSymbolAtLocation(source);
-    if (!moduleSymbol) return { rows: [], unexplored: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
+    if (!moduleSymbol) return { rows: [], lost: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
 
     // The global `Function` type, resolved ONCE and held as an identity for
     // the width check: two files may each declare a `Function`, and only the
@@ -675,7 +684,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
     const caches = { members: new Map(), width: new Map() };
 
     const rows = [];
-    let unexplored = 0, forwarded = 0;
+    let lost = 0, forwarded = 0;
     const { entries: exported, unfollowed } = await exportsOfModule(ck, moduleSymbol);
     forwarded = unfollowed;
     // What else this entry publishes, so the walk can stop at it. Under
@@ -718,8 +727,8 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
       const printed = ((type.flags & TypeFlags.Any) !== 0 && written !== 'any')
         ? `any (written: ${written})`
         : written;
-      const found = await walkOne(ck, type, name, owns, maxDepth, rootSym, siblings, functionTypeId, caches, synthesized);
-      unexplored += found.unexplored;
+      const found = await walkOne(ck, type, name, owns, rootSym, siblings, functionTypeId, caches, synthesized);
+      lost += found.lost;
       // Q3: three states, and the third is a fact about this AUDIT rather than
       // about the code. A name declared in another package is published here
       // all the same, but ownership rejects every position beneath it, so the
@@ -730,7 +739,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, maxDepth = 10
       rows.push({ name, type: printed, kind, defects: found.defects });
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
-    return { rows, unexplored, forwarded, unresolved: null };
+    return { rows, lost, forwarded, unresolved: null };
   } finally {
     await snapshot.dispose?.();
   }

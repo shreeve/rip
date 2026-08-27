@@ -215,9 +215,9 @@ function printPublicReport(report, unreadable = []) {
     }
     const lines = [];
     const unaudited = [];
-    let unexplored = 0, forwarded = 0;
-    for (const { entryFile, rows, unexplored: u, forwarded: f } of entries) {
-      unexplored += u ?? 0;
+    let lost = 0, forwarded = 0;
+    for (const { entryFile, rows, lost: l, forwarded: f } of entries) {
+      lost += l ?? 0;
       forwarded += f ?? 0;
       if (rows.length === 0) continue;
       const w = Math.min(28, rows.reduce((m, r) => Math.max(m, r.name.length), 0));
@@ -272,7 +272,7 @@ function printPublicReport(report, unreadable = []) {
         }
       }
     }
-    if (total === 0 && unaudited.length === 0 && forwarded === 0 && unexplored === 0) continue;
+    if (total === 0 && unaudited.length === 0 && forwarded === 0 && lost === 0) continue;
     sawEntry = true;                       // a package spoke, whatever it said
     console.log('');
     if (lines.length) { console.log(lines.join('\n')); console.log(''); }
@@ -285,15 +285,17 @@ function printPublicReport(report, unreadable = []) {
     if (unaudited.length) { anyUnaudited = true; console.log(''); }
     const typed = total - leaks;
     const pct = total === 0 ? '0.0' : (100 * typed / total).toFixed(1);
-    // Two gaps with two remedies: a limit the walk hit, and names an
-    // `export *` forwards without naming. Either makes the count a floor,
-    // and each is reported as itself so the line says what to do about it.
+    // Two gaps, and only one of them has a remedy: names an `export *`
+    // forwards without naming, and positions the checker was asked about
+    // and answered nothing for. Either makes the count a floor, and each is
+    // reported as itself rather than summed — a reader who can act on one
+    // of them should not have to guess which one they have.
     if (forwarded > 0) {
       anyUnaudited = true;
       console.log(`${advise('!')} ${forwarded} \`export *\` re-export${forwarded === 1 ? '' : 's'} not enumerated — every count below is a floor`);
     }
-    if (unexplored > 0) {
-      console.log(`${advise('!')} ${unexplored} branch${unexplored === 1 ? '' : 'es'} not explored (walk limit) — every count below is a floor`);
+    if (lost > 0) {
+      console.log(`${advise('!')} ${lost} position${lost === 1 ? '' : 's'} the checker could not type — every count below is a floor`);
     }
     if (total === 0) console.log(`${advise('!')} ${bold(name)}: nothing here could be audited`);
     else if (leaks === 0) console.log(`${green('\u2713')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%).`);
@@ -322,9 +324,8 @@ function printPublicReport(report, unreadable = []) {
       : 'rip check --public: the published entry exports nothing');
   }
   // 1 for defects found, 2 for surface this audit never saw, 0 only for
-  // checked-and-clean. The walk's own depth budget is this tool's cost
-  // ceiling and no edit to the package clears it, so it annotates without
-  // deciding.
+  // checked-and-clean. A position the checker would not type is neither:
+  // no edit to the package clears it, so it annotates without deciding.
   //
   // RETURNED, not exited: this verdict speaks for the report alone. The
   // run-completeness flags (incompleteCheck, tsgoUnavailable) are the
@@ -1034,7 +1035,7 @@ if (compiled.size > 0) {
             // carried once per package: riding each entry's row would
             // multiply it by however many entries the package has.
             if (patterns > 0) {
-              report.push({ dir, entryFile: dir, rows: [], unexplored: 0, forwarded: patterns });
+              report.push({ dir, entryFile: dir, rows: [], forwarded: patterns });
             }
             for (const entryFile of pkgEntries) {
               const entry = compiled.get(entryFile);
@@ -1089,7 +1090,7 @@ if (compiled.size > 0) {
                 // is. The mapped position is for display.
                 for (const d of row.defects ?? []) d.site = toSite(d.origin);
               }
-              report.push({ dir, entryFile, rows: walked.rows, unexplored: walked.unexplored, forwarded: walked.forwarded });
+              report.push({ dir, entryFile, rows: walked.rows, lost: walked.lost, forwarded: walked.forwarded });
             }
           }
         } finally {
@@ -1393,7 +1394,7 @@ if (publicAudit) {
       unreadable.push({ entryFile: path.join(dir, spec), reason: null, outside: spec });
     }
     if (patterns > 0) {
-      report.push({ dir, entryFile: dir, rows: [], unexplored: 0, forwarded: patterns });
+      report.push({ dir, entryFile: dir, rows: [], forwarded: patterns });
     }
     for (const entryFile of pkgEntries) {
       unreadable.push({ entryFile, reason: compileFailureOf(entryFile) ?? 'could not be compiled this run' });

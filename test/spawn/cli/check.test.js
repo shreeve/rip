@@ -1726,14 +1726,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  // The walk's depth limit bounds COST. What it cuts is unexamined rather
-  // than clean: an audit that conflates the two reports best on the deepest
-  // surfaces, which are the ones most likely to leak.
-  test('--public says so when a walk limit cut the search short', () => {
-    // A chain longer than the depth limit, with the `any` past the end.
-    // Only the head is published: every link is a link of ONE walk that
-    // way, where a published chain is a row per link and each stops at the
-    // next, which reaches no depth at all.
+  // Depth costs the walk nothing it reports: it descends until the surface
+  // runs out, so a leak's distance from the export changes where it is
+  // NAMED and never whether it is found. An audit that stopped short would
+  // read cleanest on the surfaces that type deepest, which are the ones a
+  // silent stop hides most.
+  test('--public walks a deep chain to its end, however far the any sits', () => {
+    // A chain 14 links long with the `any` at the bottom. Only the head is
+    // published: every link is a link of ONE walk that way, where a
+    // published chain is a row per link and each stops at the next, which
+    // reaches no depth at all.
     const depth = 14;
     const lines = [];
     for (let i = 0; i < depth; i++) {
@@ -1745,8 +1747,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       JSON.stringify({ name: 'deep-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
       const out = check(dir, ['--public']);
-      expect(out.stdout).toContain('not explored (walk limit)');
-      expect(out.stdout).toContain('every count below is a floor');
+      // Named at its full path, and counted as the leak it is — no floor
+      // stands between the reader and it.
+      expect(out.stdout).toContain(`any at: deep${'.next'.repeat(depth)}`);
+      expect(out.stdout).toContain('0/1 exports fully typed (0.0%)');
+      expect(out.stdout).not.toContain('every count below is a floor');
+      expect(out.status).toBe(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
