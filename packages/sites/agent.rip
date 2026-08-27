@@ -51,7 +51,10 @@ preferredHost = (hosts) ->
     return match if match?
   hosts[0]
 
-bindHost = -> if state.edge.mode is 'local' then '0.0.0.0' else '127.0.0.1'
+# default keeps the edge on loopback; local (LAN) and public (a real host
+# behind a firewall) open every interface — reachability scope is then the
+# network's business, not the bind's.
+bindHost = -> if state.edge.mode in ['local', 'public'] then '0.0.0.0' else '127.0.0.1'
 
 fail = (message, status = 400) ->
   error = Error.new message
@@ -104,7 +107,7 @@ validateState = (state) ->
     names.add app.name
     roots.add app.root
   edge = state.edge
-  valid = edge.desired in ['running', 'stopped'] and typeof edge.managed is 'boolean' and (edge.pid is null or Number.isInteger(edge.pid)) and (edge.caddy is null or typeof edge.caddy is 'string') and (edge.config is null or typeof edge.config is 'string') and typeof edge.control is 'string' and edge.control.length > 0 and (edge.admin is null or typeof edge.admin is 'string') and typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local'] and Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535 and Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535 and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
+  valid = edge.desired in ['running', 'stopped'] and typeof edge.managed is 'boolean' and (edge.pid is null or Number.isInteger(edge.pid)) and (edge.caddy is null or typeof edge.caddy is 'string') and (edge.config is null or typeof edge.config is 'string') and typeof edge.control is 'string' and edge.control.length > 0 and (edge.admin is null or typeof edge.admin is 'string') and typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local', 'public'] and Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535 and Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535 and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
@@ -134,7 +137,7 @@ migrateState = (raw) ->
     { ...app, options }
   edge = if isRecord(raw.edge) then { ...raw.edge } else null
   if edge?
-    unless edge.mode in ['default', 'local']
+    unless edge.mode in ['default', 'local', 'public']
       edge.mode = 'default'
       changed = true
     unless Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535
@@ -649,7 +652,7 @@ xml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').
 xmlEntry = (key, value) -> "<key>#{xml key}</key><string>#{xml value}</string>"
 
 launchdSocket = (name, port) ->
-  node = if state.edge.mode is 'local' then '' else '<key>SockNodeName</key><string>127.0.0.1</string>'
+  node = if state.edge.mode in ['local', 'public'] then '' else '<key>SockNodeName</key><string>127.0.0.1</string>'
   """
         <key>#{xml name}</key><dict>
           <key>SockFamily</key><string>IPv4</string>
@@ -853,7 +856,7 @@ restartEdge = ->
 
 # Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
 setEdgeMode = (mode) ->
-  fail "edge mode must be default or local, got #{JSON.stringify(mode)}" unless mode in ['default', 'local']
+  fail "edge mode must be default, local, or public, got #{JSON.stringify(mode)}" unless mode in ['default', 'local', 'public']
   fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
   return snapshotEdge! if state.edge.mode is mode and (not state.edge.config? or state.edge.config is packagedConfigForMode(mode))
   current = snapshotEdge!
@@ -1174,8 +1177,7 @@ route = (request) ->
         return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
-        if parts[2] is 'public'
-          fail 'public edge posture is not available yet — use default (`rip sites expose loopback`) or `rip sites expose local`', 501
+        return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'public')) if parts[2] is 'public'
     if parts[0] is '1.0' and parts[1] is 'agent'
       if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
         # Graceful recycle: answer first, then exit. Edge and apps are

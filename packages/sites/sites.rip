@@ -585,12 +585,12 @@ switch verb
     posture = noun
     abort 'rip-sites: expose requires a posture (local | public | loopback)' unless posture?
     abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length
-    if posture is 'public'
-      abort 'rip-sites: public posture is not available yet — use `rip sites expose loopback` or `rip sites expose local`'
     if posture in ['loopback', 'default']
       printEdge edgePost!('/1.0/edge/local', { off: true }, true)
     else if posture is 'local'
       printEdge edgePost!('/1.0/edge/local', { off: false }, true)
+    else if posture is 'public'
+      printEdge edgePost!('/1.0/edge/public', { off: false }, true)
     else
       abort "rip-sites: unknown posture #{JSON.stringify(posture)} — use local | public | loopback"
 
