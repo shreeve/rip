@@ -48,7 +48,7 @@ Deriving from what an API ought to accept is how a type ends up wrong and confid
 
 **Export nothing a consumer will not name.** Types stay internal by default — an object literal gets contextual typing and never needs the name. Exporting one makes its shape a breaking-change surface.
 
-**An alias needs two or more callers.** Otherwise inline it. An object shape nests under a bare `:` on its own indented block, so inlining never forces an over-long line.
+**An alias needs two or more callers.** Otherwise inline it.
 
 **No comments** on the types or the annotations. A trap worth warning about belongs somewhere that fails when violated, not in prose that cannot.
 
