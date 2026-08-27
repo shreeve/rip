@@ -45,7 +45,7 @@ directory (or pass `--name` / `--host` explicitly):
 ```bash
 rip sites add packages/sites/demos/pulse
 rip sites start pulse
-rip sites open pulse          # https://pulse.ripdev.io/
+rip sites open pulse          # https://pulse.via.rip/
 ```
 
 One-shot without the catalog:

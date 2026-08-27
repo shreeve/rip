@@ -21,7 +21,7 @@ The system-wide ownership, reload, migration, and cache contract is
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  rip sites             one CLI: apps · edge · tray          │
-│                    HTTPS *.ripdev.io → files / Hub / /api   │
+│                    HTTPS *.via.rip → files / Hub / /api     │
 └────────────────────────────┬────────────────────────────────┘
                              │ Janus control socket
 ┌────────────────────────────▼────────────────────────────────┐
@@ -51,7 +51,7 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
 | Sites tray | Menu-bar UI over `rip sites` | Click instead of typing |
 
-Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**.
+Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**, **`agent`**.
 Durable catalog is
 `sites.json` (Rip-owned). The control plane starts with the edge / desired
 apps and exits when nothing remains to supervise — Janus stays live-only.
@@ -68,24 +68,25 @@ rip sites start edge
 rip sites status edge
 # ● Edge  running (Rip-owned)
 #   Control: …/rip-agent-…/janus.sock
-#   Caddy:   …/packages/sites/bin/caddy-janus
+#   Caddy:   …/packages/sites/bin/janus
 #   Config:  …/packages/sites/Caddyfile
 ```
 
-That binds `ripdev.io` and `*.ripdev.io` on loopback **HTTP→HTTPS** (ports
-**80/443** by default) with the development certificate beside this README.
-Those names resolve only to `127.0.0.1`. Browser status is at
-`https://sites.ripdev.io/` / `https://ripdev.io/` (Rip-owned page — not Bonjour).
+That binds `via.rip` and `*.via.rip` on loopback **HTTP→HTTPS** (ports
+**80/443** by default) with exact-host certificates minted on demand by the
+local CA — run `rip sites trust edge` once and every `*.via.rip` and
+`*.local` name verifies. Those names resolve only to `127.0.0.1`. Browser
+status is at `https://via.rip/` (Rip-owned page — not Bonjour).
 
 Three postures:
 
 | | **Default** (`rip sites start edge`) | **`local`** | **`public`** |
 | --- | --- | --- | --- |
 | Bind | `127.0.0.1` | all interfaces | phase 2 |
-| Bonjour | off | shared `sites.local` (apps use `{name}.local` hosts) | — |
-| Apps | `https://{name}.ripdev.io/` (+ `.local` twin claimed) | `https://{name}.local/` (dual-claim with ripdev.io) | — |
-| Status | `https://sites.ripdev.io/` | `https://sites.local/` (Rip catalog + `/trust`) | — |
-| TLS | packaged `*.ripdev.io` | `tls internal` (trust first) | — |
+| Bonjour | off | shared `rip.local` (apps use `{name}.local` hosts) | — |
+| Apps | `https://{name}.via.rip/` (+ `.local` twin claimed) | `https://{name}.local/` (dual-claim with via.rip) | — |
+| Status | `https://via.rip/` | `https://rip.local/` (Rip catalog + `/trust`) | — |
+| TLS | `tls internal` on-demand (trust first) | `tls internal` on-demand (trust first) | — |
 
 ```bash
 rip sites trust edge                 # install the local CA (required before local)
@@ -94,15 +95,16 @@ rip sites expose local               # LAN / Bonjour posture (stop+recreate)
 rip sites expose loopback            # back to default
 rip sites trust edge --export ca.crt # share the CA with a phone / peer
 # phone bootstrap without temporary HTTPS accept:
-#   http://sites.local/trust
+#   http://rip.local/trust
 rip sites expose public              # refuses until phase 2
 ```
 
-`*.ripdev.io` names still resolve only to `127.0.0.1`, so phones on the LAN
-need `{name}.local` hosts (and the trusted local CA), not the ripdev.io URLs.
-Catalog adds and `rip sites expose local` dual-claim every `*.ripdev.io` host with a
-matching `*.local` twin; demos declare both in `serve.rip`. After a mode flip,
-restart sites so managers re-register the hosts.
+`*.via.rip` names resolve only to `127.0.0.1` — by design, forever — so
+phones on the LAN need `{name}.local` hosts (and the trusted local CA), not
+the via.rip URLs. Catalog adds and `rip sites expose local` dual-claim every
+`*.via.rip` host with a matching `*.local` twin; demos declare both in
+`serve.rip`. After a mode flip, restart sites so managers re-register the
+hosts.
 
 Phone walkthrough (hello):
 
@@ -110,16 +112,16 @@ Phone walkthrough (hello):
 rip sites stop hello
 rip sites trust edge && rip sites expose local
 rip sites start hello
-# http://sites.local/trust  → install CA on the phone
+# http://rip.local/trust  → install CA on the phone
 # https://hello.local/      → the app
-# https://sites.local/      → Rip catalog (Start/Stop/Restart)
+# https://rip.local/      → Rip catalog (Start/Stop/Restart)
 ```
 
 Overrides when needed:
 
 ```bash
-rip sites start edge --caddy /path/to/caddy-janus --config /path/to/Caddyfile
-# or: JANUS_CADDY=/path/to/caddy-janus rip sites start edge
+rip sites start edge --caddy /path/to/janus --config /path/to/Caddyfile
+# or: JANUS_CADDY=/path/to/janus rip sites start edge
 ```
 
 `rip sites status edge` also reports an **external** edge Rip did not start — Rip
@@ -128,11 +130,11 @@ will not stop or reload a process it does not own.
 ### 2. Remember and start a demo site
 
 ```bash
-rip sites add packages/sites/demos/hello --name hello --host hello.ripdev.io
+rip sites add packages/sites/demos/hello --name hello --host hello.via.rip
 rip sites start hello
-rip sites open hello          # https://hello.ripdev.io/
+rip sites open hello          # https://hello.via.rip/
 rip sites list
-# ● hello  running  https://hello.ripdev.io/
+# ● hello  running  https://hello.via.rip/
 ```
 
 Packaged demos (hello → pulse → cart): [`demos/`](demos/README.md).
@@ -185,7 +187,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 **Grammar**
 
 - Most spells are `<verb> <noun>`.
-- Reserved nouns (never app names): **`edge`**, **`all`**, **`tray`**.
+- Reserved nouns (never app names): **`edge`**, **`all`**, **`tray`**, **`agent`**.
 - App selectors: catalog **id**, unique **name**, or canonical **root**.
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
@@ -221,8 +223,8 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 | `rip sites reload edge` | Reload the Rip-owned Caddyfile without tearing down sockets. |
 | `rip sites trust edge` | Install the local CA (required before LAN posture). |
 | `rip sites trust edge --export [PATH]` | Write the CA PEM (default: `rip-edge-local-ca.crt`). |
-| `rip sites expose local` | LAN / Bonjour posture (all interfaces, `sites.local` / `{app}.local`, `tls internal`). Recreates the edge — stop sites first. |
-| `rip sites expose loopback` | Back to default loopback `*.ripdev.io` posture (same recreate rule). |
+| `rip sites expose local` | LAN / Bonjour posture (all interfaces, `rip.local` / `{app}.local`, `tls internal`). Recreates the edge — stop sites first. |
+| `rip sites expose loopback` | Back to default loopback `*.via.rip` posture (same recreate rule). |
 | `rip sites expose public` | Public internet posture — **refuses until phase 2**. |
 
 External Janus (something else already listening on the control socket) shows as
@@ -233,7 +235,7 @@ External Janus (something else already listening on the control socket) shows as
 | Command | What it does |
 | --- | --- |
 | `rip sites open <app>` | Open the app URL in the default browser. |
-| `rip sites open edge` | Open the status dashboard (`sites.ripdev.io` or `sites.local`). |
+| `rip sites open edge` | Open the status dashboard (`via.rip` or `rip.local`). |
 | `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
 | `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
 | `rip sites logs edge` | Print paths to the edge and control log files. |
@@ -294,7 +296,7 @@ Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
 **Using the menu**
 
 1. **Edge → Start** if the shared edge is down
-2. **Edge → Open Dashboard** for the Rip status page (`sites.ripdev.io` or `sites.local`)
+2. **Edge → Open Dashboard** for the Rip status page (`via.rip` or `rip.local`)
 3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour (stop sites first)
 4. **Add Site…** and pick a project directory
 5. Site submenu → **Start** → **Open**
@@ -314,7 +316,7 @@ Output: add `--json` on most verbs for machine-readable responses.
 
 ```bash
 rip sites start edge
-rip sites add packages/sites/demos/pulse --name pulse --host pulse.ripdev.io
+rip sites add packages/sites/demos/pulse --name pulse --host pulse.via.rip
 rip sites start pulse
 rip sites open pulse
 # …develop…
@@ -329,7 +331,7 @@ rip sites start edge
 rip sites start hello
 rip sites start pulse
 rip sites start cart
-# https://hello.ripdev.io/  https://pulse.ripdev.io/  https://cart.ripdev.io/
+# https://hello.via.rip/  https://pulse.via.rip/  https://cart.via.rip/
 rip sites stop hello && rip sites stop pulse && rip sites stop cart
 rip sites stop edge
 ```
@@ -1350,7 +1352,7 @@ managers after a restart, and exits when the edge is stopped and no app
 remains desired-running. Janus never writes the catalog.
 
 `rip sites start edge` finds Caddy through `--caddy`, the remembered configuration,
-`JANUS_CADDY`, the packaged `bin/caddy-janus`, or `PATH`, in that order, and
+`JANUS_CADDY`, the packaged `bin/janus`, or `PATH`, in that order, and
 verifies that the binary contains Janus before starting it. `--config` selects
 another Caddyfile; the packaged baseline beside this README is the default. An
 external reachable edge is observable but never silently adopted as a
@@ -1591,7 +1593,7 @@ bun run test:janus
 ```
 
 `test:janus` resolves an already-built Janus Caddy binary — `JANUS_CADDY`
-first, then the packaged `bin/caddy-janus`, then `caddy` on `PATH`, erroring
+first, then the packaged `bin/janus`, then `caddy` on `PATH`, erroring
 if none exists — and asserts a non-replaced released Janus module. `bun run
 test` discovers and runs every `test/*/test.rip` fixture.
 

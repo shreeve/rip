@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { agentPaths } from './appliance.rip'
 import { managerRuntime, resolveProject } from './control.rip'
 
-RESERVED = ['edge', 'all', 'tray']
+RESERVED = ['edge', 'all', 'tray', 'agent']
 
 export catalogPaths = (label = 'rip-sites') ->
   paths = agentPaths label
@@ -52,14 +52,14 @@ export defaultCatalog = ->
   apps: []
   edge: defaultEdge()
 
-defaultAppHosts = (name) -> ["#{name}.ripdev.io", "#{name}.local"]
+defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
 
 ensureLanHosts = (hosts) ->
   out = [...hosts]
   seen = Set.new out
   for host in hosts
-    continue unless host.endsWith '.ripdev.io'
-    twin = "#{host.slice(0, -'.ripdev.io'.length)}.local"
+    continue unless host.endsWith '.via.rip'
+    twin = "#{host.slice(0, -'.via.rip'.length)}.local"
     continue if seen.has twin
     fail "invalid LAN twin host #{JSON.stringify(twin)}" unless validHost twin
     out.push twin
@@ -128,19 +128,44 @@ readOwnerPid = (root, label) ->
   catch then null
 
 # Live manager probe without the control plane — keeps list/status honest after crash.
+# Hosts mirror the agent's effective order (manager → catalog pin → serve.rip);
+# this runs in a one-shot CLI process, so importing serve.rip directly is
+# always fresh — the module-cache staleness the agent must dodge cannot occur.
 export snapshotCatalogApp = (app, label = 'rip-sites') ->
-  host = app.hosts?.find((h) -> h.endsWith '.ripdev.io') or app.hosts?[0]
-  urlHint = if host? then "https://#{host}/" else null
   manager = null
   try
     response = fetch! 'http://manager/status', { method: 'GET', unix: managerRuntime(app.root, label).socket, signal: AbortSignal.timeout(500) }
     manager = response.json! if response.ok
   catch then null
+  hosts = app.hosts or []
+  site = manager?.site or null
+  serveError = null
+  if manager?.hosts?.length
+    hosts = manager.hosts
+  else if site?
+    hosts = Object.keys site.aliases or {}
+  else if not hosts.length and existsSync join(app.root, 'serve.rip')
+    try
+      # Lazy: manager.rip's module graph is heavy and only this offline
+      # serve.rip branch needs it — keep it off the common CLI path.
+      { loadServeConfig } = import!(join(import.meta.dir, 'manager.rip'))
+      serve = loadServeConfig! app.root
+      site = serve?.site or null
+      hosts = serve?.hosts or []
+      hosts = Object.keys site.aliases or {} if not hosts.length and site?
+      # A bare serve.rip makes the manager serve the app name as its host.
+      hosts = [app.name] unless hosts.length
+    catch error
+      serveError = error?.message or String(error)
+  host = hosts.find((h) -> h.endsWith '.via.rip') or hosts[0]
   {
     ...app
     state: if manager? then (if manager.stopping then 'stopping' else 'running') else 'stopped'
     pid: if manager? then readOwnerPid(app.root, label) else null
-    url: urlHint
+    url: if host? then "https://#{host}/" else null
+    hosts
+    sitePattern: site?.host or null
+    serveError
     manager
   }
 
@@ -150,7 +175,7 @@ export addCatalogApp = (body, label = 'rip-sites') ->
   project = resolveProject root, 'rip-sites'
   name = body.name or basename(project.root).replace /\.[^.]+$/, ''
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
-  fail "#{JSON.stringify(name)} is reserved (edge | all | tray) — not an app name" if name in RESERVED
+  fail "#{JSON.stringify(name)} is reserved (edge | all | tray | agent) — not an app name" if name in RESERVED
   fail "app name is already registered: #{name}" if doc.apps.some((app) -> app.name is name)
   fail "project is already registered: #{project.root}" if doc.apps.some((app) -> app.root is project.root)
   hosts = body.hosts

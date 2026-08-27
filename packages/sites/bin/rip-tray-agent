@@ -3,7 +3,7 @@
 # Closing this shell (or Cursor) does not stop the tray, edge, or sites.
 #
 # Expected:
-#   bin/rip, packages/sites/bin/caddy-janus, packages/sites/tray-sites.rip
+#   bin/rip, packages/sites/bin/janus, packages/sites/tray-sites.rip
 #   packages/tray/macos/.build/release/rip-tray-host  (swift build -c release)
 #
 # Ordinary CLI: from packages/sites, `rip tray` discovers tray-sites.rip.
@@ -15,9 +15,12 @@ SITES="$(cd "$SITES_BIN/.." && pwd)"
 ROOT="$(cd "$SITES/../.." && pwd)"
 HOST="${RIP_TRAY_HOST:-$ROOT/packages/tray/macos/.build/release/rip-tray-host}"
 RIP="$ROOT/bin/rip"
-CADDY="$SITES_BIN/caddy-janus"
+CADDY="$SITES_BIN/janus"
 PROVIDER="$SITES/tray-sites.rip"
-LABEL="io.ripdev.apps.tray"
+LABEL="rip.via.apps.tray"
+# Pre-via.rip label — booted out (and its plist removed) on start so exactly
+# one tray job exists.
+RETIRED_LABEL="io.ripdev.apps.tray"
 UID_NUM="$(/usr/bin/id -u)"
 DOMAIN="gui/$UID_NUM"
 HOME_DIR="${HOME:-$(/usr/bin/dscl . -read "/Users/$(/usr/bin/id -un)" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')}"
@@ -129,6 +132,8 @@ case "$cmd" in
     if is_loaded; then
       /bin/launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     fi
+    /bin/launchctl bootout "$DOMAIN/$RETIRED_LABEL" 2>/dev/null || true
+    /bin/rm -f "$HOME_DIR/Library/LaunchAgents/$RETIRED_LABEL.plist"
     write_plist
     /bin/launchctl bootstrap "$DOMAIN" "$PLIST"
     echo "Rip tray started (launchd $LABEL)"

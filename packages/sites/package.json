@@ -42,8 +42,10 @@
     "bin/rip-tray-agent",
     "Caddyfile",
     "Caddyfile.local",
-    "ripdev.io.crt",
-    "ripdev.io.key",
+    "serve-hosts.rip",
+    "status.html",
+    "trust.html",
+    "trust-safari.html",
     "monitor.rip",
     "README.md",
     "assets"
