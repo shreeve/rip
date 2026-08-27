@@ -548,3 +548,75 @@ test! 'API-only watch swaps workers without App Hub publication', ->
     await proc.exited if proc?
     control.stop true
     rmSync dir, { recursive: true, force: true }
+
+test! 'static edits ding /assets with URL paths: one coalesced frame per burst, never content', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-assets-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  # Two declared roots: a plain one and a '{site}' template — each watcher
+  # must strip its OWN root prefix (a regression here once leaked the last
+  # root's mapping into every callback).
+  mkdirSync join(project, 'public', 'docs'), { recursive: true }
+  writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>one</h1>'
+  mkdirSync join(project, 'pods', 'acme', 'public'), { recursive: true }
+  writeFileSync join(project, 'pods', 'acme', 'public', 'deep.css'), 'em {}'
+  writeFileSync join(project, 'serve.rip'), """
+  export default
+    app: { root: 'app' }
+    files:
+      roots: [
+        { path: 'public' }
+        { path: 'pods/{site}/public' }
+      ]
+      shell: 'public/docs/api.html'
+  """
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  messages = []
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'assets-registration' }, { status: 201 })
+      if request.method is 'POST' and url.pathname is '/1.0/apps/assets-registration/hub/publish'
+        messages.push ...(request.json!)
+        return Response.json({ deliveries: 0 })
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'assets.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'inherit'
+    waitFor! -> registration?
+    # endsWith, not equality: the manager realpaths the project root and
+    # macOS tmpdirs live behind a /var → /private/var symlink.
+    ok registration.files.roots.some((root) -> root.path.endsWith('/public')), 'public root registered'
+
+    # A save burst inside one debounce window lands as ONE touched frame;
+    # the '{site}' root strips its tenant segment, so every root's edit
+    # arrives as the URL path a browser would actually be looking at.
+    touched = -> messages.filter (message) -> message.touched?
+    writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>two</h1>'
+    writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>three</h1>'
+    writeFileSync join(project, 'public', 'style.css'), 'body { color: red }'
+    writeFileSync join(project, 'pods', 'acme', 'public', 'deep.css'), 'em { color: blue }'
+    waitFor! -> touched().length > 0
+    sleep! 400
+    eq touched().length, 1
+    eq touched()[0], { '@': ['/assets'], touched: ['/deep.css', '/docs/api.html', '/style.css'] }
+
+    # A later burst is its own frame; paths are URL paths, no content ever.
+    writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>four</h1>'
+    waitFor! -> touched().length is 2
+    eq touched()[1], { '@': ['/assets'], touched: ['/docs/api.html'] }
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }

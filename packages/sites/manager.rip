@@ -696,8 +696,8 @@ sourceHashes = (paths) ->
 # their identity rides in the App hash. The Brotli sidecars are not
 # identity: each must decompress to its sibling, and a set that does not
 # (mid-regeneration) is torn and refused, never served to half the clients.
-SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js']
-SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br']
+SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js', 'observe.js']
+SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br', 'observe.js']
 SHIP_ID = '/@rip'
 SHIP_SETTLE_MS = positiveEnv 'RIP_SHIP_SETTLE_MS', 2000
 
@@ -1053,6 +1053,11 @@ export main = (argv) ->
   appChain = Promise.resolve()
   appDependencyWatchers = Map.new()
   appWatchReady = false
+  assetsWatchers = []
+  touchedPaths = Set.new()
+  touchedTimer = null
+  touchedDeadline = null
+  touchedChain = Promise.resolve()
   apiWatcher = null
   apiTimer = null
   apiChain = Promise.resolve()
@@ -1347,6 +1352,26 @@ export main = (argv) ->
       sleep! delay
       delay = Math.min delay * 2, 1000
 
+  # Asset dings are notifications, never deliveries: URL paths only, no
+  # content — the page refetches itself over HTTP. Same publish plane and
+  # retry shape as publishChange.
+  publishTouched = (paths) ->
+    return unless paths.length > 0
+    while not appId? and not stopping
+      sleep! 5
+    return if stopping
+    delay = 25
+    loop
+      try
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/assets'], touched: paths }]
+        return if response.ok
+        warn "rip-site: Janus touched publish failed (#{response.status}); retrying"
+      catch error
+        warn "rip-site: Janus touched publish failed: #{String(error)}; retrying"
+      return if stopping
+      sleep! delay
+      delay = Math.min delay * 2, 1000
+
   changedAppIds = (prior, current) ->
     before = Map.new((prior?.graph?.entries or []).map((entry) -> [entry.id, entry.hash]))
     after = Map.new(current.graph.entries.map((entry) -> [entry.id, entry.hash]))
@@ -1425,6 +1450,36 @@ export main = (argv) ->
         appReconcile = true
         warn "rip-site: App publication failed: #{String(error)}"
     , delay
+    return
+
+  # Same trailing-50ms / 250ms-cap shape as scheduleAppReconcile; one
+  # touched frame per settled save burst, ordered through touchedChain so
+  # a retrying publish never interleaves with the next burst's frame. A
+  # hold fences client messages, touched dings included: while not Active
+  # the flush keeps its paths and re-arms, so edits made during a hold
+  # ding once on release instead of leaking through the fence.
+  flushTouched = ->
+    touchedTimer = null
+    touchedDeadline = null
+    unless operation is 'Active'
+      touchedDeadline = Date.now() + 250
+      touchedTimer = setTimeout flushTouched, 250
+      return
+    paths = [...touchedPaths].sort()
+    touchedPaths.clear()
+    touchedChain = touchedChain.then(-> publishTouched paths).catch (error) ->
+      warn "rip-site: touched publish failed: #{String(error)}"
+    return
+
+  scheduleTouchedPublish = ->
+    now = Date.now()
+    if touchedTimer?
+      clearTimeout touchedTimer
+      delay = Math.max 0, Math.min(50, touchedDeadline - now)
+    else
+      touchedDeadline = now + 250
+      delay = 50
+    touchedTimer = setTimeout flushTouched, delay
     return
 
   diskInputsCheck = (paths) ->
@@ -1593,6 +1648,49 @@ export main = (argv) ->
       return unless appPublication?
       scheduleAppReconcile() if appReconcile or not appSettled()
     ), APP_SWEEP_MS
+
+  # Watch every registered static root (the served set IS the watched set)
+  # and ding /assets with URL paths on change. Two roots are excluded: the
+  # dist root — the manager writes there on every reconcile, and watching
+  # our own output would ding a save-storm per publication — and the App
+  # root, whose edits already reach every page as first-class change and
+  # reload frames on /hub. A '{site}' root is watched at its static prefix
+  # with the site segment stripped, so every tenant's edit dings the same
+  # URL path.
+  # One helper call per root: dir/drop/suffix must live in a fresh scope —
+  # a rip for-loop rebinds its loop VARIABLE each pass, but body locals are
+  # function-scoped, and a callback closing over them would read the last
+  # root's values for every event.
+  watchAssetsRoot = (rootPath) ->
+    segments = rootPath.split '/'
+    index = segments.indexOf '{site}'
+    dir = if index >= 0 then segments.slice(0, index).join('/') else rootPath
+    drop = if index >= 0 then segments.length - index else 0
+    suffix = if index >= 0 then segments.slice(index + 1) else []
+    watcher = watch dir, { recursive: true }, (_event, filename) ->
+      return if stopping or not filename?
+      parts = String(filename).replaceAll('\\', '/').split '/'
+      return if parts.some (part) -> not part or part.startsWith '.'
+      return unless parts.length > drop and suffix.every (part, i) -> parts[i + 1] is part
+      touchedPaths.add "/#{parts.slice(drop).join '/'}"
+      scheduleTouchedPublish()
+    assetsWatchers.push watcher
+    dir
+
+  startAssetsWatchers = ->
+    return unless args.watchApp and files?.roots?
+    dist = join project.root, 'dist'
+    seen = Set.new()
+    for root in files.roots
+      prefix = root.path.split('/{site}')[0]
+      continue if prefix is dist or prefix.startsWith("#{dist}/") or seen.has prefix
+      continue if project.appRoot? and prefix is project.appRoot
+      seen.add prefix
+      try
+        watchAssetsRoot root.path
+      catch error
+        warn "rip-site: cannot watch assets root '#{prefix}': #{String(error)}"
+    return
 
   bootPrepared = ->
     return bootPromise if bootPromise?
@@ -2050,14 +2148,19 @@ export main = (argv) ->
       clearTimeout appTimer if appTimer?
       appTimer = null
       appDeadline = null
+      clearTimeout touchedTimer if touchedTimer?
+      touchedTimer = null
+      touchedDeadline = null
       clearTimeout apiTimer if apiTimer?
       appWatcher?.close()
       watcher.close() for [_, watcher] in appDependencyWatchers
+      watcher.close() for watcher in assetsWatchers
       apiWatcher?.close()
       try migrationChild?.kill('SIGTERM')
       try await operationPromise if operationPromise?
       await appChain
       await apiChain
+      await touchedChain
       try await heartbeatTask if heartbeatTask?
       try doorbell?.stop true
       accessStop = null
@@ -2115,6 +2218,7 @@ export main = (argv) ->
       startAppWatcher() if project.appRoot?
     files = registrationFiles project, serve?.files, publication
     files = ensureProxyFirst files, hubBridge
+    startAssetsWatchers()
     if project.entry?
       startApiWatcher()
       workerArtifact = join runDir, 'worker.js'
