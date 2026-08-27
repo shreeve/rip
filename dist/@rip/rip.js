@@ -27492,15 +27492,15 @@ var check = function(files) {
   }));
   return rash(new TextEncoder().encode(inventory));
 };
-// src/observe.js
+// src/watch.js
 (() => {
   if (typeof document === "undefined" || typeof WebSocket === "undefined")
     return;
   const self = document.currentScript;
-  const armed = self ? /\bobserve\.js\b/.test(self.src || "") : !!document.querySelector("script[watch]");
-  if (!armed || globalThis.__ripObserve)
+  const armed = self ? /\bwatch\.js\b/.test(self.src || "") : !!document.querySelector("script[watch]");
+  if (!armed || globalThis.__ripWatch)
     return;
-  globalThis.__ripObserve = true;
+  globalThis.__ripWatch = true;
   const page = location.pathname;
   const hits = (paths) => Array.isArray(paths) && (paths.includes(page) || page.endsWith("/") && paths.includes(page + "index.html"));
   const tag = (r) => r.headers.get("etag") || r.headers.get("last-modified") || "";

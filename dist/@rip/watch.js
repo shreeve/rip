@@ -1,6 +1,6 @@
-// Asset observer: reload a static page when the edge dings /assets with its
+// Watch: reload a static page when the edge dings /assets with its
 // URL path. One source, two deliveries — served standalone at
-// /@rip/observe.js (including it IS the opt-in), and bundled into the
+// /@rip/watch.js (including it IS the opt-in), and bundled into the
 // browser runtime, where it arms only when a script tag carries the `watch`
 // attribute: <script type="module" src="/@rip/rip.min.js" watch></script>.
 // A page that doesn't ask isn't listening. Dev-only by nature: where no
@@ -9,9 +9,9 @@
 (() => {
   if (typeof document === 'undefined' || typeof WebSocket === 'undefined') return;
   const self = document.currentScript; // set for the classic standalone include, null in modules
-  const armed = self ? /\bobserve\.js\b/.test(self.src || '') : !!document.querySelector('script[watch]');
-  if (!armed || globalThis.__ripObserve) return; // both deliveries present: one observer is plenty
-  globalThis.__ripObserve = true;
+  const armed = self ? /\bwatch\.js\b/.test(self.src || '') : !!document.querySelector('script[watch]');
+  if (!armed || globalThis.__ripWatch) return; // both deliveries present: one observer is plenty
+  globalThis.__ripWatch = true;
 
   const page = location.pathname;
   const hits = (paths) => Array.isArray(paths) &&

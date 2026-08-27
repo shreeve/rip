@@ -696,8 +696,8 @@ sourceHashes = (paths) ->
 # their identity rides in the App hash. The Brotli sidecars are not
 # identity: each must decompress to its sibling, and a set that does not
 # (mid-regeneration) is torn and refused, never served to half the clients.
-SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js', 'observe.js']
-SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br', 'observe.js']
+SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js', 'watch.js']
+SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br', 'watch.js']
 SHIP_ID = '/@rip'
 SHIP_SETTLE_MS = positiveEnv 'RIP_SHIP_SETTLE_MS', 2000
 
