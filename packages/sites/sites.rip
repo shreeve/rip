@@ -434,12 +434,12 @@ switch verb
           runTray! 'stop'
           # Full recreate includes the control agent — otherwise a code
           # change rides the old process until someone kills it by hand.
-          stopAgentProcess!()
+          stopAgentProcess!
           runTray! 'start'
         else
           runTray! if verb is 'start' then 'start' else 'stop'
       else if noun is 'agent'
-        stopped = if verb is 'start' then false else stopAgentProcess!()
+        stopped = if verb is 'start' then false else stopAgentProcess!
         if verb is 'stop'
           if json then printJson { stopped } else console.log(if stopped then 'Control agent stopped — the next control request boots a fresh one.' else 'Control agent is not running.')
         else

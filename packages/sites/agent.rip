@@ -767,7 +767,7 @@ restartEdge = ->
     stopApp! app
   stopEdge! if state.edge.managed
   try
-    startEdge!()
+    startEdge!
   finally
     for app in wasRunning
       try
