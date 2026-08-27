@@ -31,6 +31,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { decodeSemanticTokens } from '../../src/tsgo.js';
 import { SCAFFOLD_FAMILIES } from '../../src/translate.js';
 
@@ -509,6 +510,34 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       const impls = await api.implementation('app.rip', 0, 12);
       expect(impls.length).toBeGreaterThanOrEqual(1);
       expect(impls[0].uri).toBe(api.uriOf('util.rip'));
+    });
+  }, 30000);
+
+  // The stdlib sits OUTSIDE the workspace, so its face mirrors under
+  // __external__ — and a definition answer is only as good as the
+  // inverse that spells the mirror back as a source. The stdlib's rel
+  // IS its source path, so both the symbol and the specifier must land
+  // on the real `.rip`; the sanitized (non-file uri) __external__
+  // spellings are the ones with no inverse.
+  test('definition crosses into the stdlib, naming the real .rip source', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', 'import { check } from "rip/validate"\nk = check("1", "int")\n');
+
+      const defs = await api.definition('app.rip', 1, 6); // check at its use
+      expect(defs).toHaveLength(1);
+      expect(defs[0].uri.endsWith('/packages/validate/validate.rip')).toBe(true);
+      // The SOURCE, not the mirror face it resolved through.
+      expect(defs[0].uri).not.toContain('__external__');
+      // An exact Rip range: the answer names the declaration's own span.
+      const source = fs.readFileSync(fileURLToPath(defs[0].uri), 'utf8').split('\n');
+      const { start, end } = defs[0].range;
+      expect(start.line).toBe(end.line);
+      expect(source[start.line].slice(start.character, end.character)).toBe('check');
+
+      // The specifier answers the same file, at its start.
+      const spec = await api.definition('app.rip', 0, 28);
+      expect(spec.length).toBeGreaterThanOrEqual(1);
+      expect(spec[0].targetUri.endsWith('/packages/validate/validate.rip')).toBe(true);
     });
   }, 30000);
 

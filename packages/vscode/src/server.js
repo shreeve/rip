@@ -846,15 +846,48 @@ function faceOf(fsPath) {
   return face;
 }
 
-// The inverse of mirrorPathOf for workspace files. __external__ mirrors
-// have no faithful inverse (sanitized names) — their results drop.
+// Every out-of-workspace source this server has mirrored: the live
+// closure, and the manifest a warm start restored before the closure
+// walk reached anything. Bounded by what actually mirrors externally —
+// in practice the stdlib faces a `rip/*` specifier pulled in.
+function* externalMirroredSources() {
+  const seen = new Set();
+  const inWorkspace = workspaceRoot + path.sep;
+  for (const source of [materializedMirrors.keys(), Object.keys(cacheManifest.entries)]) {
+    for (const file of source) {
+      if (file.startsWith(inWorkspace) || seen.has(file)) continue;
+      seen.add(file);
+      yield file;
+    }
+  }
+}
+
+// The inverse of mirrorPathOf. A workspace file's mirror rel IS its
+// source's rel, so it inverts by construction. An __external__ rel does
+// NOT, and re-deriving one from a candidate path proves nothing:
+// mirrorRelForFsPath strips colons on the way in, so its output is a
+// fixed point of itself, and on Windows the drive letter's colon goes
+// with it. The faithful inverse is a LOOKUP over the sources actually
+// mirrored — the answer is then a path this server itself put there, in
+// its own spelling, on every platform. Ambiguity refuses: a mirror two
+// sources claim (the collision warnOnMirrorCollision reports) names
+// neither. A mirror no source claims — a non-file uri under the
+// sanitizer, which nothing invertible ever produced — drops.
 function sourcePathOfMirror(mirrorFsPath) {
   if (!workspaceRoot || mirrorRootIsFallback) return null;
   if (!mirrorFsPath.endsWith('.rip.ts')) return null;
   const mirrorRel = mirrorRelOf(mirrorFsPath);
   if (mirrorRel === null) return null;
   const rel = mirrorRel.slice(0, -'.ts'.length);
-  if (rel.split(path.sep)[0] === '__external__') return null;
+  if (rel.split(path.sep)[0] === '__external__') {
+    let found = null;
+    for (const file of externalMirroredSources()) {
+      if (mirrorPathOf('file://' + file) !== mirrorFsPath) continue;
+      if (found !== null) return null;
+      found = file;
+    }
+    return found;
+  }
   return path.join(workspaceRoot, rel);
 }
 
