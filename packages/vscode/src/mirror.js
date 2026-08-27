@@ -12,16 +12,21 @@ import { fileURLToPath } from 'node:url';
 // `../compiler/src/` in the staged .vsix. A static relative import knows
 // only the repo layout — installed, it reaches outside the extension and
 // the server dies at import time.
-const { identifierRunAt } = await (async () => {
+const compilerModule = async (rel, what) => {
   const candidates = [
-    new URL('../../../src/ident.js', import.meta.url),   // in-repo
-    new URL('../compiler/src/ident.js', import.meta.url), // staged vsix
+    new URL(`../../../src/${rel}`, import.meta.url),   // in-repo
+    new URL(`../compiler/src/${rel}`, import.meta.url), // staged vsix
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) return import(candidate.href);
   }
-  throw new Error('rip identifier vocabulary not found (looked for ../../../src/ident.js and ../compiler/src/ident.js)');
-})();
+  throw new Error(`rip ${what} not found (looked for ../../../src/${rel} and ../compiler/src/${rel})`);
+};
+const { identifierRunAt } = await compilerModule('ident.js', 'identifier vocabulary');
+// One spelling of which checkout owns a path, shared with the runtime
+// loader: a second copy here could drift, and then a file would type
+// against one tree and execute against another.
+const { holdsStdlib, enclosingStdlib } = await compilerModule('checkout.js', 'checkout vocabulary');
 
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -934,17 +939,6 @@ export function ripSpecifierTarget(spec, fromDir) {
 // entry's mirror face — or, for an entry that is JavaScript, at its
 // declaration.
 //
-// What makes a `packages` directory a stdlib rather than any other
-// directory of that name: rip's OWN editor package sits in it. The test
-// reads the manifest's name — a monorepo that merely has a
-// `packages/vscode/` of its own (a common way to ship an extension) is
-// not a rip checkout, and mistaking one for a rip checkout would serve
-// it a stdlib that holds none of the `rip/*` names.
-const holdsStdlib = (packagesDir) => {
-  try { return JSON.parse(fs.readFileSync(path.join(packagesDir, 'vscode', 'package.json'), 'utf8')).name === 'vscode-rip'; }
-  catch { return false; }
-};
-
 // The stdlib the RUNNING BINARY carries — where a name lands when the
 // file asking for it sits in no rip checkout, which is every consumer
 // app. In-repo, this server IS in a checkout (../../../packages); the
@@ -988,14 +982,7 @@ let stdlibAppEntry;
 // every consumer app — keeps STDLIB_DIR, the stdlib the running binary
 // carries. Hosts call this once, before any mirror is generated.
 export function anchorStdlib(root) {
-  let found = STDLIB_DIR;
-  if (typeof root === 'string' && root !== '') {
-    for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-      const packagesDir = path.join(dir, 'packages');
-      if (holdsStdlib(packagesDir)) { found = packagesDir; break; }
-      if (path.dirname(dir) === dir) break;
-    }
-  }
+  const found = enclosingStdlib(root) ?? STDLIB_DIR;
   stdlibDir = found;
   try { realStdlibDir = fs.realpathSync(found); } catch { realStdlibDir = found; }
   // Realpath'd, the spelling stdlibRipPaths' targets use, so the face and

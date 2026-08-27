@@ -496,7 +496,10 @@ if (showTsFace) {
 const run = (path, argv) => {
   const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',
-    env: process.env,
+    // The ENTRY decides which checkout's stdlib `rip/<pkg>` names serve,
+    // so a file executes against the same tree `rip check` types it
+    // against — not against whichever checkout owns the `rip` on PATH.
+    env: { ...process.env, RIP_STDLIB_ANCHOR: dirname(resolve(path)) },
   });
   process.exit(r.status ?? 1);
 };

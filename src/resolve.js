@@ -3,13 +3,13 @@
 // one enumeration, two consumers, so `rip/<pkg>` means the same file
 // everywhere.
 //
-// Stdlib namespace: `rip/<pkg>` resolves to this checkout's
-// packages/<pkg> — no node_modules, no per-project install: whoever
-// has rip has the whole stdlib. Each package's manifest is
-// honored: the exports map (string or import/default conditions, and
-// every "./subpath" key becomes `rip/<pkg>/<subpath>`), then main,
-// then <pkg>.rip / index.rip. Packages with no resolvable entry
-// (editor extensions) are skipped.
+// Stdlib namespace: `rip/<pkg>` resolves to the packages/<pkg> of the
+// checkout enclosing the ENTRY being run — no node_modules, no
+// per-project install: whoever has rip has the whole stdlib. Each
+// package's manifest is honored: the exports map (string or
+// import/default conditions, and every "./subpath" key becomes
+// `rip/<pkg>/<subpath>`), then main, then <pkg>.rip / index.rip.
+// Packages with no resolvable entry (editor extensions) are skipped.
 //
 // Global-install fallback: bare specifiers can also resolve from bun's
 // global node_modules (`bun add -g <pkg>`), which Bun's own resolver
@@ -21,8 +21,25 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { builtinModules } from 'module';
 import { homedir } from 'os';
 import { basename, dirname, join } from 'path';
+import { enclosingStdlib } from './checkout.js';
 
-const packagesDir = join(import.meta.dir, '..', 'packages');
+// The stdlib THIS PROCESS serves. `rip <file>` names the entry's
+// directory in RIP_STDLIB_ANCHOR, so a file executes against the same
+// tree `rip check` types it against: with two checkouts holding the same
+// package, this file's own location answers by which binary was invoked,
+// and the same source then ran against one copy and type-checked against
+// another.
+//
+// Nothing else names an anchor, and the cwd is deliberately NOT one. A
+// bunfig `preload` loads the cwd checkout's OWN copy of this file, so
+// that context already resolves to that checkout through the fallback —
+// while a spawn that preloads some other checkout's copy (`rip sites`
+// and friends, whose entry ships beside it) keeps serving the tree its
+// entry ships in. Reading the cwd here would instead point an entry from
+// one checkout at another checkout's stdlib.
+const packagesDir =
+  enclosingStdlib(process.env.RIP_STDLIB_ANCHOR)
+  ?? join(import.meta.dir, '..', 'packages');
 const globalDir = join(process.env.BUN_INSTALL ?? join(homedir(), '.bun'), 'install', 'global', 'node_modules');
 
 const packageEntries = (pkgDir, name) => {
