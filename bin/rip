@@ -36,7 +36,7 @@ Usage:
   rip schema <verb> [args...]        Schema evolution: status | plan | dump | make | migrate
                                      (run 'rip schema --help' for the full surface)
   rip sites <verb> [noun] [args...]  Rip Sites: catalog, apps, edge, tray, manager
-                                     Reserved nouns: edge | all | tray
+                                     Reserved nouns: edge | all | tray | agent
                                      (run 'rip sites --help' for the full surface)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)

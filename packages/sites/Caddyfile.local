@@ -37,21 +37,34 @@
 		}
 		browse
 		mdns {
-			name sites.local
+			name rip.local
 			apps on
+			# Dedicated front-door listener: :80 belongs to the HTTPS
+			# redirect, so the Janus mdns dashboard serves on its own port.
+			listen :7680
 		}
 	}
 }
 
-# Janus mdns front door stays plain HTTP. /trust is the CA bootstrap without
-# needing a temporary HTTPS accept (phones / peers).
-http://sites.local {
+# Front door with a brain: plain-HTTP "/" serves the trust probe page — its
+# JS checks whether this device already trusts the local CA (an https fetch
+# to /trust/check survives the handshake only if trusted) and either hops
+# straight to the HTTPS dashboard or walks the user through installing the
+# CA. /trust* stays plain HTTP — it is the CA bootstrap, and a phone cannot
+# pass certificate validation for the very cert /trust hands it (chicken
+# and egg). A blind 308 here would shove untrusted phones into the browser
+# interstitial before any onboarding could happen; deep links still bounce.
+http://rip.local {
 	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	handle /trust* {
 		reverse_proxy unix/{$RIP_EDGE_STATUS}
 	}
+	handle / {
+		rewrite * /trust
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
 	handle {
-		janus
+		redir https://{host}{uri} 308
 	}
 }
 
@@ -68,14 +81,14 @@ http://*.local {
 	redir https://{host}{uri} 308
 }
 
-http://ripdev.io, http://sites.ripdev.io, http://*.ripdev.io {
+http://via.rip, http://*.via.rip {
 	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	redir https://{host}{uri} 308
 }
 
-# Product status + /trust on HTTPS (same Rip page as sites.ripdev.io).
-# on_demand so we mint DNS:sites.local — not a leftover *.local wildcard.
-sites.local {
+# Product status + /trust on HTTPS (same Rip page as via.rip).
+# on_demand so we mint DNS:rip.local — not a leftover *.local wildcard.
+rip.local {
 	tls {
 		issuer internal
 		on_demand
@@ -96,16 +109,29 @@ sites.local {
 	}
 }
 
-sites.ripdev.io, ripdev.io {
-	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+# via.rip and *.via.rip publicly resolve to 127.0.0.1 — same local CA and
+# on-demand exact-host certs as the .local family; one trust ceremony.
+via.rip {
+	tls {
+		issuer internal
+		on_demand
+	}
 	reverse_proxy unix/{$RIP_EDGE_STATUS}
 }
 
-*.ripdev.io {
-	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+*.via.rip {
+	tls {
+		issuer internal
+		on_demand
+	}
 	janus
 	log {
 		output stderr
 		format janus
 	}
 }
+
+# Machine-local site blocks (domains + certs owned by this operator, e.g.
+# *.medlabs.health). One small .caddy snippet per project; the packaged
+# posture files stay canonical and platform updates flow without copy-drift.
+import {$HOME}/.config/janus/sites.d/*.caddy

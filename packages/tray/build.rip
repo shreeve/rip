@@ -55,7 +55,7 @@ export optionsFor = (argv, cwd = process.cwd()) ->
   fail 'name must not be empty or contain a slash' unless name and not name.includes('/')
   slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '')
   fail 'name must contain a letter or number' unless slug
-  identifier or= "io.ripdev.tray.#{slug}"
+  identifier or= "rip.via.tray.#{slug}"
   fail 'identifier must use dot-separated bundle-safe labels' unless /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test identifier
   if icon?
     fail 'icon must be an existing .icns file' unless extname(icon) is '.icns' and existsSync(icon) and statSync(icon).isFile()

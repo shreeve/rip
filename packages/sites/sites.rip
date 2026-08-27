@@ -1,7 +1,7 @@
 #!/usr/bin/env rip
 
 # Unified Sites CLI: rip sites <verb> [noun]
-# Reserved nouns: edge, all, tray — never real app names.
+# Reserved nouns: edge, all, tray, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
 import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
@@ -12,14 +12,14 @@ import { join, resolve } from 'node:path'
 
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
-RESERVED = ['edge', 'all', 'tray']
+RESERVED = ['edge', 'all', 'tray', 'agent']
 TRAY_AGENT = join(import.meta.dir, 'bin', 'rip-tray-agent')
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
 
   Grammar: rip sites <verb> <noun>
-  Reserved nouns (not app names): edge · all · tray
+  Reserved nouns (not app names): edge · all · tray · agent
   Path nouns default to the current directory when omitted.
 
   Catalog:
@@ -27,10 +27,10 @@ HELP = '''
     add [project] [options]              Remember a project (default: cwd)
     remove <app>                         Forget a stopped app
 
-  Lifecycle (noun: <app> | all | edge | tray | <path>):
-    start <app|all|edge|tray>            Start supervised app(s), edge, or tray
+  Lifecycle (noun: <app> | all | edge | tray | agent | <path>):
+    start <app|all|edge|tray|agent>      Start supervised app(s), edge, tray, or agent
     stop [noun]                          Stop (default: manager at cwd)
-    restart <app|all|edge|tray>          Restart (edge/tray = full recreate)
+    restart <app|all|edge|tray|agent>    Restart (edge = recreate incl. its apps; tray/agent = recycle)
     status [noun]                        Summary, or one target (default: edge+apps)
 
   Edge:
@@ -118,7 +118,7 @@ runManager = (argv, options = {}) ->
 takeAppNoun = ->
   abort "rip-sites: #{verb} requires an app noun (id | name | root)" unless args.length and not args[0].startsWith('-')
   selector = args.shift()
-  abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | tray) — not an app name" if selector in RESERVED
+  abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | tray | agent) — not an app name" if selector in RESERVED
   findCatalogApp loadCatalog(), selector
 
 # Path forms keep manager flags intact — handle before Sites option parsing.
@@ -245,7 +245,7 @@ requireApp = ->
   noun
 
 reservedAsApp = (label) ->
-  abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | tray) — not an app name" if label in RESERVED
+  abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | tray | agent) — not an app name" if label in RESERVED
 
 catalogHas = (selector) ->
   try
@@ -290,7 +290,7 @@ eachApp = (action) ->
   results
 
 dashboardUrl = (edge) ->
-  host = if edge.mode is 'local' then 'sites.local' else 'sites.ripdev.io'
+  host = if edge.mode is 'local' then 'rip.local' else 'via.rip'
   port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
   "https://#{host}#{port}/"
 
@@ -312,6 +312,17 @@ runTray = (action) ->
 
 edgePost = (path, body = {}, start = true) ->
   requestAgent! 'rip-sites', 'POST', path, body, { start }
+
+# Graceful control-plane recycle. The agent exits after replying; edge and
+# apps are detached and survive. Waits for the socket to clear so the next
+# ensureAgent spawns a replacement instead of adopting the dying process.
+stopAgentProcess = ->
+  return false unless probeAgent!('rip-sites')?
+  requestAgent! 'rip-sites', 'POST', '/1.0/agent/stop', {}, { start: false }
+  deadline = Date.now() + 5000
+  while Date.now() < deadline and probeAgent!('rip-sites')?
+    sleep! 50
+  true
 
 wantsControl = ->
   doc = loadCatalog()
@@ -408,21 +419,32 @@ switch verb
     else if verb is 'stop' and noun? and noun not in RESERVED and noun isnt 'all' and not catalogHas!(noun) and (noun is '.' or existsSync(noun))
       runManager! ['stop', pathNoun!(noun)]
     else
-      requireNoun ['<app>', 'all', 'edge', 'tray']
+      requireNoun ['<app>', 'all', 'edge', 'tray', 'agent']
       if noun is 'edge'
         abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
         if verb is 'restart'
-          edgePost! '/1.0/edge/stop', {}, true
-          edge = edgePost! '/1.0/edge/start', {}, true
+          # One orchestrated call: the agent stops running apps, recreates
+          # the edge, and starts them again — no hand choreography.
+          edge = edgePost! '/1.0/edge/restart', {}, true
         else
           edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
         printEdge edge
       else if noun is 'tray'
         if verb is 'restart'
           runTray! 'stop'
+          # Full recreate includes the control agent — otherwise a code
+          # change rides the old process until someone kills it by hand.
+          stopAgentProcess!()
           runTray! 'start'
         else
           runTray! if verb is 'start' then 'start' else 'stop'
+      else if noun is 'agent'
+        stopped = if verb is 'start' then false else stopAgentProcess!()
+        if verb is 'stop'
+          if json then printJson { stopped } else console.log(if stopped then 'Control agent stopped — the next control request boots a fresh one.' else 'Control agent is not running.')
+        else
+          info = requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: true }
+          if json then printJson info else console.log "Control agent running (pid #{info.pid})."
       else if noun is 'all'
         results = eachApp! verb
         if json then printJson results else console.log results.map(renderApp).join('\n')

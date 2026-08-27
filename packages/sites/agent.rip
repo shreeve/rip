@@ -1,7 +1,7 @@
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, join, resolve } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
@@ -12,6 +12,9 @@ paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
 PACKAGED_DEFAULT = realpathSync join(import.meta.dir, 'Caddyfile')
 PACKAGED_LOCAL = realpathSync join(import.meta.dir, 'Caddyfile.local')
+STATUS_HTML = join(import.meta.dir, 'status.html')
+TRUST_HTML = join(import.meta.dir, 'trust.html')
+TRUST_SAFARI_HTML = join(import.meta.dir, 'trust-safari.html')
 PACKAGED_CADDYFILES = Set.new [PACKAGED_DEFAULT, PACKAGED_LOCAL]
 CADDY_PKI_ROOT = if platform() is 'darwin'
   join process.env.HOME, 'Library', 'Application Support', 'Caddy', 'pki', 'authorities', 'local', 'root.crt'
@@ -23,15 +26,15 @@ usesLaunchd = (config) -> platform() is 'darwin' and PACKAGED_CADDYFILES.has(con
 packagedConfigForMode = (mode) -> if mode is 'local' then PACKAGED_LOCAL else PACKAGED_DEFAULT
 
 # Dual-claim so default (loopback) and local (LAN) stay reachable without remapping.
-defaultAppHosts = (name) -> ["#{name}.ripdev.io", "#{name}.local"]
+defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
 
-# For every *.ripdev.io host, ensure the matching *.local twin is present.
+# For every *.via.rip host, ensure the matching *.local twin is present.
 ensureLanHosts = (hosts) ->
   out = [...hosts]
   seen = Set.new out
   for host in hosts
-    continue unless host.endsWith '.ripdev.io'
-    twin = "#{host.slice(0, -'.ripdev.io'.length)}.local"
+    continue unless host.endsWith '.via.rip'
+    twin = "#{host.slice(0, -'.via.rip'.length)}.local"
     continue if seen.has twin
     fail "invalid LAN twin host #{JSON.stringify(twin)}" unless validHost twin
     out.push twin
@@ -44,7 +47,7 @@ preferredHost = (hosts) ->
     match = hosts.find (host) -> host.endsWith '.local'
     return match if match?
   else
-    match = hosts.find (host) -> host.endsWith '.ripdev.io'
+    match = hosts.find (host) -> host.endsWith '.via.rip'
     return match if match?
   hosts[0]
 
@@ -95,7 +98,7 @@ validateState = (state) ->
   for app in state.apps
     valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
     fail("malformed app record at #{paths.state}", 500) unless valid
-    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'tray']
+    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'tray', 'agent']
     fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
     ids.add app.id
     names.add app.name
@@ -217,8 +220,86 @@ edgeHealth = ->
     response.json!
   catch then null
 
-appUrl = (app, manager = null) ->
-  hosts = if app.hosts.length then app.hosts else manager?.hosts or []
+# ── serve.rip host declarations ──────────────────────────────────────
+#
+# serve.rip owns its app's hosts: the catalog stores [] for such apps
+# and the manager re-reads the file on every start. Display needs that
+# same truth while an app is STOPPED, so the agent reads it through a
+# fresh subprocess per change — this process's module cache would mask
+# edits forever — and caches the result by serve.rip mtime. Successes
+# stay cached until the file changes; failures retry after a TTL
+# because validation also reads paths (sites dir, files roots) whose
+# repair never touches serve.rip's mtime.
+SERVE_PROBE_MARK = 'rip-serve-hosts:'
+SERVE_PROBE_TIMEOUT = 5000
+SERVE_FAIL_TTL = 30000
+serveDecls = Map.new()
+serveProbes = Set.new()
+
+readServeDecl = (root) ->
+  child = null
+  try
+    child = Bun.spawn [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'serve-hosts.rip'), root], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: { ...process.env, NO_COLOR: '1' } }
+  catch error
+    return { error: error?.message or String(error) }
+  serveProbes.add child
+  timer = setTimeout (-> try child.kill 'SIGKILL'), SERVE_PROBE_TIMEOUT
+  try
+    stdout = Response.new(child.stdout).text!
+    stderr = Response.new(child.stderr).text!
+    code = await child.exited
+    line = stdout.split('\n').findLast (candidate) -> candidate.startsWith SERVE_PROBE_MARK
+    return JSON.parse line.slice(SERVE_PROBE_MARK.length) if code is 0 and line?
+    { error: stderr.trim().split('\n')[0]?.trim() or "serve.rip probe exited #{code}" }
+  catch error
+    { error: error?.message or String(error) }
+  finally
+    clearTimeout timer
+    serveProbes.delete child
+
+# Returns a promise for { name, hosts, site } | { error } | null (no
+# serve.rip). The entry lands in the cache before the first await so
+# concurrent status polls share one probe.
+serveDecl = (app) ->
+  path = join app.root, 'serve.rip'
+  mtime = try statSync(path).mtimeMs catch then null
+  unless mtime?
+    serveDecls.delete app.root
+    return null
+  cached = serveDecls.get app.root
+  if cached? and cached.mtime is mtime
+    return cached.promise unless cached.failedAt? and Date.now() - cached.failedAt >= SERVE_FAIL_TTL
+  entry = { mtime, promise: null, failedAt: null }
+  entry.promise = readServeDecl(app.root).then (decl) ->
+    entry.failedAt = Date.now() if decl?.error?
+    decl
+  serveDecls.set app.root, entry
+  entry.promise
+
+# Effective hosts in serving-truth order: what a live manager claims
+# (a site-template manager claims hosts: [] — its concrete alias hosts
+# stand in), then an operator pin in the catalog, then the serve.rip
+# declaration read from disk. Built into snapshots ONLY — never assign
+# the result to app.hosts: the catalog feeds serverArgv --host flags,
+# and a site-template manager aborts on any --host.
+effectiveHosts = (app, manager) ->
+  if manager?
+    site = manager.site or null
+    return { hosts: manager.hosts, site, error: null } if manager.hosts?.length
+    return { hosts: Object.keys(site.aliases or {}), site, error: null } if site?
+  return { hosts: app.hosts, site: null, error: null } if app.hosts.length
+  decl = serveDecl! app
+  return { hosts: [], site: null, error: null } unless decl?
+  return { hosts: [], site: null, error: decl.error } if decl.error?
+  site = decl.site or null
+  hosts = decl.hosts or []
+  hosts = Object.keys(site.aliases or {}) if not hosts.length and site?
+  # A bare serve.rip (neither hosts nor sites) makes the manager serve
+  # the app name as its host — mirror that.
+  hosts = [app.name] unless hosts.length
+  { hosts, site, error: null }
+
+appUrl = (hosts) ->
   host = preferredHost hosts
   return null unless host?
   template = state.edge.baseUrl or 'https://{host}/'
@@ -226,6 +307,7 @@ appUrl = (app, manager = null) ->
 
 snapshotApp = (app) ->
   manager = managerStatus! app
+  { hosts, site, error } = effectiveHosts! app, manager
   {
     id: app.id
     name: app.name
@@ -233,8 +315,10 @@ snapshotApp = (app) ->
     desired: app.desired
     state: if manager? then (if manager.stopping then 'stopping' else if manager.ready is false then 'starting' else 'running') else 'stopped'
     pid: if manager? then readOwnerPid(app.root) else null
-    url: appUrl(app, manager)
-    hosts: app.hosts
+    url: appUrl(hosts)
+    hosts: hosts
+    sitePattern: site?.host or null
+    serveError: error
     manager
     lastError: app.lastError or null
     lastExit: app.lastExit or null
@@ -262,7 +346,7 @@ addApp = (body) ->
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
-  fail "#{JSON.stringify(name)} is reserved (edge | all | tray) — not an app name" if name in ['edge', 'all', 'tray']
+  fail "#{JSON.stringify(name)} is reserved (edge | all | tray | agent) — not an app name" if name in ['edge', 'all', 'tray', 'agent']
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
@@ -420,6 +504,7 @@ restartApp = (app) ->
 removeApp = (app) ->
   fail "app #{app.name} is running — stop it before removal", 409 if managerStatus!(app)? or app.desired is 'running'
   state.apps = state.apps.filter (candidate) -> candidate isnt app
+  serveDecls.delete app.root
   saveState()
   { removed: app.id, name: app.name, root: app.root }
 
@@ -466,7 +551,7 @@ resolveFile = (value, description) ->
   path
 
 resolveCaddy = (explicit = null) ->
-  packagedCaddy = join(import.meta.dir, 'bin', 'caddy-janus')
+  packagedCaddy = join(import.meta.dir, 'bin', 'janus')
   caddyInput = explicit or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('caddy')
   fail 'no Janus-enabled Caddy binary — pass --caddy PATH or set JANUS_CADDY', 503 unless caddyInput?
   caddy = resolveFile caddyInput, 'Caddy binary'
@@ -483,12 +568,12 @@ edgeEnv = (launcher, control) ->
     RIP_EDGE_HTTP_BIND: if launcher is 'launchd' then 'fd/3' else bindHost()
     RIP_EDGE_BIND: if launcher is 'launchd' then 'fd/4' else bindHost()
     RIP_EDGE_CONTROL: control
-    RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt')
-    RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key')
     RIP_EDGE_STATUS: paths.edgeStatus
   }
 
-LAUNCHD_LABEL = 'io.ripdev.edge'
+LAUNCHD_LABEL = 'rip.via.edge'
+# Pre-via.rip label — boot it out on start so exactly one edge job exists.
+LAUNCHD_RETIRED = 'io.ripdev.edge'
 LAUNCHD_DOMAIN = if typeof process.getuid is 'function' then "gui/#{process.getuid!}" else null
 LAUNCHD_SERVICE = if LAUNCHD_DOMAIN? then "#{LAUNCHD_DOMAIN}/#{LAUNCHD_LABEL}" else null
 
@@ -514,9 +599,7 @@ launchdPlist = (caddy, config, control) ->
     PATH: '/usr/bin:/bin:/usr/sbin:/sbin'
     TMPDIR: process.env.TMPDIR
     RIP_EDGE_ADMIN: paths.edgeAdmin
-    RIP_EDGE_CERT: join(import.meta.dir, 'ripdev.io.crt')
     RIP_EDGE_CONTROL: control
-    RIP_EDGE_KEY: join(import.meta.dir, 'ripdev.io.key')
     RIP_EDGE_STATUS: paths.edgeStatus
   argumentXml = argv.map((value) -> "<string>#{xml value}</string>").join('')
   environmentXml = Object.keys(environment).sort().filter((key) -> environment[key]?).map((key) -> xmlEntry(key, environment[key])).join('')
@@ -551,6 +634,7 @@ bootoutLaunchd = (missing = false) -> launchctl ['bootout', LAUNCHD_SERVICE], mi
 startLaunchd = (caddy, config, control) ->
   fail 'launchd user domain is unavailable', 503 unless LAUNCHD_SERVICE?
   bootoutLaunchd true
+  launchctl ['bootout', "#{LAUNCHD_DOMAIN}/#{LAUNCHD_RETIRED}"], true
   writeSecure paths.edgePlist, launchdPlist(caddy, config, control)
   launchctl ['bootstrap', LAUNCHD_DOMAIN, paths.edgePlist]
 
@@ -660,6 +744,26 @@ reloadEdge = ->
   fail "Caddy reload failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   snapshotEdge!
 
+# Full recreate with the choreography built in: stop the running apps (the
+# ordering stopEdge's guard protects), recreate the edge, then start every
+# app this call stopped — even when the edge start fails, so a broken
+# posture never strands the apps.
+restartEdge = ->
+  wasRunning = state.apps.filter (app) -> managerStatus!(app)?
+  for app in wasRunning
+    stopApp! app
+  stopEdge! if state.edge.managed
+  try
+    startEdge!()
+  finally
+    for app in wasRunning
+      try
+        startApp! app
+      catch error
+        app.lastError = error.message
+        saveState()
+  snapshotEdge!
+
 # Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
 setEdgeMode = (mode) ->
   fail "edge mode must be default or local, got #{JSON.stringify(mode)}" unless mode in ['default', 'local']
@@ -719,6 +823,59 @@ exportEdgeCa = ->
   fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip sites trust edge` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
   { path: CADDY_PKI_ROOT, pem: readFileSync(CADDY_PKI_ROOT, 'utf8') }
 
+# iOS installs CA trust only through a configuration profile — a bare .crt
+# saved from Chrome is a dead file in the Files app. Wrap the root in a
+# .mobileconfig (payload is base64 DER, which is exactly the PEM body).
+# UUIDs derive from the cert digest so reinstalling replaces the profile
+# instead of stacking duplicates.
+caMobileconfig = ->
+  pem = readFileSync CADDY_PKI_ROOT, 'utf8'
+  der = pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')
+  hex = createHash('sha256').update(der).digest('hex')
+  uuidAt = (offset) ->
+    "#{hex.slice(offset, offset + 8)}-#{hex.slice(offset + 8, offset + 12)}-#{hex.slice(offset + 12, offset + 16)}-#{hex.slice(offset + 16, offset + 20)}-#{hex.slice(offset + 20, offset + 32)}".toUpperCase()
+  """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>PayloadContent</key>
+\t<array>
+\t\t<dict>
+\t\t\t<key>PayloadCertificateFileName</key>
+\t\t\t<string>rip-edge-local-ca.crt</string>
+\t\t\t<key>PayloadContent</key>
+\t\t\t<data>#{der}</data>
+\t\t\t<key>PayloadDescription</key>
+\t\t\t<string>Trusts the Rip local edge CA so https://*.local and https://*.via.rip sites verify on this device.</string>
+\t\t\t<key>PayloadDisplayName</key>
+\t\t\t<string>Rip Local Edge CA</string>
+\t\t\t<key>PayloadIdentifier</key>
+\t\t\t<string>rip.via.edge.ca</string>
+\t\t\t<key>PayloadType</key>
+\t\t\t<string>com.apple.security.root</string>
+\t\t\t<key>PayloadUUID</key>
+\t\t\t<string>#{uuidAt 0}</string>
+\t\t\t<key>PayloadVersion</key>
+\t\t\t<integer>1</integer>
+\t\t</dict>
+\t</array>
+\t<key>PayloadDisplayName</key>
+\t<string>Rip Local HTTPS (rip.local · via.rip)</string>
+\t<key>PayloadIdentifier</key>
+\t<string>rip.via.edge.trust</string>
+\t<key>PayloadRemovalDisallowed</key>
+\t<false/>
+\t<key>PayloadType</key>
+\t<string>Configuration</string>
+\t<key>PayloadUUID</key>
+\t<string>#{uuidAt 32}</string>
+\t<key>PayloadVersion</key>
+\t<integer>1</integer>
+</dict>
+</plist>
+"""
+
 escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
 statusActions = (app) ->
@@ -737,7 +894,7 @@ statusPage = ->
   # Trailing `.join` after an indented `map ->` body binds to the last
   # expression (the string), not the array — parenthesize the map call.
   rows = (apps.map (app) ->
-    hosts = if app.hosts.length then app.hosts else app.manager?.hosts or []
+    hosts = app.hosts or []
     url = if app.url? then "<a href=\"#{escapeHtml app.url}\">#{escapeHtml app.url}</a>" else '—'
     extras = (hosts.filter((host) -> not app.url? or not app.url.includes(host)).map (host) ->
       "<div class=\"alt\"><a href=\"https://#{escapeHtml host}/\">https://#{escapeHtml host}/</a></div>"
@@ -751,9 +908,9 @@ statusPage = ->
     </tr>
     """
   ).join ''
-  statusHost = if edge.mode is 'local' then 'https://sites.local/' else 'https://sites.ripdev.io/'
+  statusHost = if edge.mode is 'local' then 'https://rip.local/' else 'https://via.rip/'
   trustHint = if edge.mode is 'local'
-    'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://sites.local/trust">http://sites.local/trust</a>'
+    'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://rip.local/trust">http://rip.local/trust</a>'
   else
     'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status edge</code>'
   """<!doctype html>
@@ -780,17 +937,66 @@ statusPage = ->
 </body></html>
 """
 
+# Janus's redacted per-app view (workers, heartbeats, counters, launch
+# links) rides the mdns front door; Caddyfile.local pins `name rip.local`
+# and `listen :7680`. null when unavailable (default mode, edge down).
+janusStatus = ->
+  return null unless state.edge.mode is 'local' and state.edge.pid?
+  try
+    response = fetch! 'http://127.0.0.1:7680/status.json', { headers: { host: 'rip.local' }, signal: AbortSignal.timeout(1200) }
+    return null unless response.ok
+    response.json!
+  catch
+    null
+
 handleStatus = (request) ->
   url = URL.new request.url
   try
     if request.method is 'GET' and (url.pathname is '/' or url.pathname is '')
+      if existsSync STATUS_HTML
+        return Response.new readFileSync(STATUS_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } }
       return Response.new statusPage!, { headers: { 'content-type': 'text/html; charset=utf-8' } }
-    # Caddy on_demand_tls ask — allow only single-label *.local names.
+    if request.method is 'GET' and url.pathname is '/status.json'
+      apps = Promise.all! state.apps.map (app) -> snapshotApp! app
+      return Response.json { edge: snapshotEdge!, apps: apps, janus: janusStatus! }
+    # Caddy on_demand_tls ask — allow single-label *.local names, the
+    # via.rip apex (the loopback dashboard), and single-label *.via.rip
+    # app names. Both families are minted by the same local CA.
     if request.method is 'GET' and url.pathname is '/tls-ask'
       domain = String(url.searchParams.get('domain') or '').toLowerCase()
-      allowed = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local$/.test(domain)
+      allowed = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(local|via\.rip)$/.test(domain) or domain is 'via.rip'
       return Response.new null, { status: if allowed then 200 else 404 }
+    # Trust onboarding. The page itself rides both plain HTTP (the CA
+    # bootstrap — an untrusted device cannot load anything over https) and
+    # HTTPS (informational once trusted). /trust/check is the probe target:
+    # an https fetch from the http-served page resolves only when this
+    # device already trusts the CA — surviving the handshake is the signal.
+    if request.method is 'GET' and url.pathname is '/trust/check'
+      return Response.new null, { status: 204, headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' } }
+    # Safari-side landing for the x-safari-https jump: auto-starts the
+    # profile download but keeps the remaining Settings steps on screen —
+    # a raw-file target strands the user on a blank page after the prompts.
+    if request.method is 'GET' and url.pathname is '/trust/safari'
+      return Response.new readFileSync(TRUST_SAFARI_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } } if existsSync TRUST_SAFARI_HTML
+      return Response.new null, { status: 302, headers: { location: '/trust' } }
+    if request.method is 'GET' and url.pathname is '/trust/ca.crt'
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose local`', 404 unless existsSync CADDY_PKI_ROOT
+      return Response.new readFileSync(CADDY_PKI_ROOT), {
+        headers:
+          'content-type': 'application/x-x509-ca-cert'
+          'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
+      }
+    if request.method is 'GET' and url.pathname is '/trust/ca.mobileconfig'
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose local`', 404 unless existsSync CADDY_PKI_ROOT
+      return Response.new caMobileconfig!, {
+        headers:
+          'content-type': 'application/x-apple-aspen-config'
+          'content-disposition': 'attachment; filename="rip-local-edge.mobileconfig"'
+      }
     if request.method is 'GET' and (url.pathname is '/trust' or url.pathname is '/trust/')
+      if existsSync TRUST_HTML
+        return Response.new readFileSync(TRUST_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } }
+      # Fallback when the page file is missing: hand over the raw CA.
       if existsSync CADDY_PKI_ROOT
         return Response.new readFileSync(CADDY_PKI_ROOT), {
           headers:
@@ -862,12 +1068,20 @@ route = (request) ->
       if request.method is 'POST' and parts.length is 3
         return Response.json(mutate!(-> startEdge! jsonBody! request)) if parts[2] is 'start'
         return Response.json(mutate!(-> stopEdge!)) if parts[2] is 'stop'
+        return Response.json(mutate!(-> restartEdge!)) if parts[2] is 'restart'
         return Response.json(mutate!(-> reloadEdge!)) if parts[2] is 'reload'
         return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
         if parts[2] is 'public'
           fail 'public edge posture is not available yet — use default (`rip sites expose loopback`) or `rip sites expose local`', 501
+    if parts[0] is '1.0' and parts[1] is 'agent'
+      if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
+        # Graceful recycle: answer first, then exit. Edge and apps are
+        # detached and survive; the next control request boots a fresh
+        # agent running current code.
+        setTimeout shutdown, 100
+        return Response.json { pid: process.pid, stopping: true }
     Response.json({ error: 'not found' }, { status: 404 })
   catch error
     Response.json({ error: error?.message or String(error) }, { status: error?.status or 500 })
@@ -905,6 +1119,7 @@ stopping = false
 shutdown = ->
   return if stopping
   stopping = true
+  serveProbes.forEach (child) -> try child.kill 'SIGKILL'
   try server?.stop true
   try statusServer?.stop true
   try unlinkSync paths.socket

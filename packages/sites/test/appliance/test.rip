@@ -1,6 +1,5 @@
 import { test, eq, ok } from 'rip/testing'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -46,16 +45,9 @@ stopAgent = (runtime) ->
   try process.kill pid, 'SIGTERM'
   waitFor! 'agent shutdown', -> not existsSync(owner)
 
-test! 'the packaged ripdev.io pair is publicly trusted, current, matching, and development-only', ->
-  certificate = X509Certificate.new readFileSync(join(import.meta.dir, '..', '..', 'ripdev.io.crt'))
-  privateKey = createPrivateKey readFileSync(join(import.meta.dir, '..', '..', 'ripdev.io.key'))
-  eq certificate.subject, 'CN=*.ripdev.io'
-  ok certificate.issuer.includes 'GlobalSign'
-  ok certificate.subjectAltName.includes 'DNS:*.ripdev.io'
-  ok certificate.subjectAltName.includes 'DNS:ripdev.io'
-  ok Date.parse(certificate.validTo) > Date.now()
-  eq createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }), certificate.publicKey.export({ type: 'spki', format: 'pem' })
-
+# via.rip replaced the purchased ripdev.io wildcard: both postures mint
+# exact-host certs from the LOCAL CA on demand (dogfooding — we run exactly
+# what users run; no packaged public certificate, no renewal treadmill).
 test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bonjour', ->
   caddyfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile'), 'utf8'
   localfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile.local'), 'utf8'
@@ -65,12 +57,17 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok caddyfile.includes 'protocols h1 h2'
   ok caddyfile.includes 'bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}'
   ok caddyfile.includes 'redir https://{host}{uri} 308'
-  ok caddyfile.includes 'sites.ripdev.io, ripdev.io'
+  ok caddyfile.includes 'http://via.rip, http://*.via.rip'
   ok caddyfile.includes 'reverse_proxy unix/{$RIP_EDGE_STATUS}'
+  # Both postures mint from the local CA — no packaged certificate.
+  ok caddyfile.includes 'issuer internal'
+  ok caddyfile.includes 'ask http://127.0.0.1/tls-ask'
+  ok not caddyfile.includes 'RIP_EDGE_CERT'
+  ok not localfile.includes 'RIP_EDGE_CERT'
   ok not /\bmdns\b/.test(caddyfile)
   ok not caddyfile.includes '7680'
   ok localfile.includes 'mdns'
-  ok localfile.includes 'name sites.local'
+  ok localfile.includes 'name rip.local'
   ok localfile.includes 'apps on'
   # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards.
   ok localfile.includes 'on_demand_tls'
@@ -80,7 +77,7 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok localfile.includes 'http://127.0.0.1'
   ok agent.includes "/tls-ask"
   # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
-  ok /sites\.local \{[\s\S]*?reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/.test(localfile)
+  ok /rip\.local \{[\s\S]*?reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/.test(localfile)
   ok localfile.includes 'handle /trust*'
   ok not localfile.includes 'RIP_EDGE_JANUS_HTTP'
   ok launcher.includes "activate('HTTP')"
@@ -99,7 +96,7 @@ test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bon
   ok agent.includes '(apps.map (app) ->'
   ok /\)\.join ''/.test(agent)
   helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
-  ok helloServe.includes 'hello.ripdev.io'
+  ok helloServe.includes 'hello.via.rip'
   ok helloServe.includes 'hello.local'
 
 startJanus = (socket, calls) ->
@@ -138,12 +135,12 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq idle.edge.managed, false
     ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
-    added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.ripdev.io', '--json'], env
+    added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.via.rip', '--json'], env
     eq added.code, 0
     app = JSON.parse added.out
     eq app.name, 'fixture'
     eq app.state, 'stopped'
-    eq app.url, 'https://fixture.ripdev.io/'
+    eq app.url, 'https://fixture.via.rip/'
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
 
@@ -253,6 +250,36 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     stopAgent! site.runtime
     janus.stop true
     rmSync site.root, { recursive: true, force: true }
+
+# serve.rip owns its app's hosts: the catalog stores [] and snapshots read
+# the declaration itself. The effective hosts must never be persisted back
+# into sites.json — stored hosts become manager --host flags, and a
+# site-template manager refuses --host outright.
+test! 'offline snapshots derive hosts from serve.rip without persisting them', ->
+  site = fixture 'rip-serve-hosts-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime }
+  hostsProject = join site.root, 'probe'
+  mkdirSync join(hostsProject, 'app'), { recursive: true }
+  writeFileSync join(hostsProject, 'app', 'index.rip'), "export default -> 'ok'\n"
+  writeFileSync join(hostsProject, 'serve.rip'), "export default\n  name: 'probe'\n  hosts: ['probe.via.rip', 'probe.local']\n"
+  siteProject = join site.root, 'tenants'
+  mkdirSync join(siteProject, 'app'), { recursive: true }
+  mkdirSync join(siteProject, 'sites'), { recursive: true }
+  writeFileSync join(siteProject, 'app', 'index.rip'), "export default -> 'ok'\n"
+  writeFileSync join(siteProject, 'app', 'index.html'), '<!doctype html><title>t</title>\n'
+  writeFileSync join(siteProject, 'serve.rip'), "export default\n  sites:\n    host: '{site}.probe.dev'\n    dir: 'sites'\n    aliases: { 'beta.probe.dev': 'ola' }\n  files:\n    roots: ['app']\n    shell: 'app/index.html'\n"
+  added = JSON.parse (cli!(APP, ['add', hostsProject, '--name', 'probe', '--json'], env)).out
+  eq added.hosts, ['probe.via.rip', 'probe.local']
+  eq added.url, 'https://probe.via.rip/'
+  tenants = JSON.parse (cli!(APP, ['add', siteProject, '--name', 'tenants', '--json'], env)).out
+  eq tenants.hosts, ['beta.probe.dev']
+  eq tenants.sitePattern, '{site}.probe.dev'
+  eq tenants.url, 'https://beta.probe.dev/'
+  stored = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+  eq (app.hosts for app in stored.apps), [[], []]
+  listed = JSON.parse (cli!(APP, ['list', '--json'], env)).out
+  eq (app.hosts.length for app in listed), [2, 1]
+  ok not existsSync(join(site.runtime, 'agent.json')), 'offline serve.rip reads must not spawn the control plane'
 
 test! 'rip sites distinguishes an external edge from one owned by Rip', ->
   external = fixture 'rip-agent-external-edge-'

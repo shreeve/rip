@@ -31,7 +31,7 @@ openLog = (site) ->
 
 # Browser status host for the current edge posture (portless when on 443).
 dashboardUrl = (edge) ->
-  host = if edge.mode is 'local' then 'sites.local' else 'sites.ripdev.io'
+  host = if edge.mode is 'local' then 'rip.local' else 'via.rip'
   port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
   "https://#{host}#{port}/"
 

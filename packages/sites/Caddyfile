@@ -1,6 +1,8 @@
 # Rip development edge — DEFAULT posture (loopback, no Bonjour).
 # Ports default to 80/443 via launchd fds or RIP_EDGE_*_BIND.
-# Status at ripdev.io / sites.ripdev.io is Rip-owned (not Janus Bonjour).
+# Status at via.rip is Rip-owned (not Janus Bonjour). via.rip and *.via.rip
+# publicly resolve to 127.0.0.1 forever; certs come from the LOCAL CA — one
+# `rip sites trust edge` ceremony covers *.via.rip and *.local alike.
 {
 	admin unix/{$RIP_EDGE_ADMIN}
 	persist_config off
@@ -9,6 +11,11 @@
 	skip_install_trust
 	servers {
 		protocols h1 h2
+	}
+	# Exact-host certs minted per SNI name by the local CA — the ask
+	# endpoint allowlists via.rip and single-label *.via.rip names.
+	on_demand_tls {
+		ask http://127.0.0.1/tls-ask
 	}
 
 	janus {
@@ -32,21 +39,40 @@
 	}
 }
 
-http://ripdev.io, http://sites.ripdev.io, http://*.ripdev.io {
+http://via.rip, http://*.via.rip {
 	bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}
 	redir https://{host}{uri} 308
 }
 
-sites.ripdev.io, ripdev.io {
-	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+# on_demand_tls ask target (loopback; plain-HTTP URL required by Caddy).
+http://127.0.0.1 {
+	bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}
+	handle /tls-ask* {
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
+}
+
+via.rip {
+	tls {
+		issuer internal
+		on_demand
+	}
 	reverse_proxy unix/{$RIP_EDGE_STATUS}
 }
 
-*.ripdev.io {
-	tls {$RIP_EDGE_CERT} {$RIP_EDGE_KEY}
+*.via.rip {
+	tls {
+		issuer internal
+		on_demand
+	}
 	janus
 	log {
 		output stderr
 		format janus
 	}
 }
+
+# Machine-local site blocks (domains + certs owned by this operator, e.g.
+# *.medlabs.health). One small .caddy snippet per project; the packaged
+# posture files stay canonical and platform updates flow without copy-drift.
+import {$HOME}/.config/janus/sites.d/*.caddy

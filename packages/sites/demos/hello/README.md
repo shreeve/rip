@@ -25,7 +25,7 @@ rip sites add packages/sites/demos/hello
 rip sites start hello
 ```
 
-`serve.rip` declares the `hello` name, dual hosts (`hello.ripdev.io` for
+`serve.rip` declares the `hello` name, dual hosts (`hello.via.rip` for
 loopback, `hello.local` for LAN after `rip sites expose local`), conventional
 `app/` root, and explicit default change policy.
 
@@ -37,11 +37,11 @@ rip sites trust edge
 rip sites expose local
 rip sites start hello
 # Mac:     https://hello.local/
-# Phone:   install CA from http://sites.local/trust (then Full Trust on iOS)
+# Phone:   install CA from http://rip.local/trust (then Full Trust on iOS)
 #          open https://hello.local/
 ```
 
-`*.ripdev.io` still resolves only to `127.0.0.1` — phones need the `.local`
+`*.via.rip` still resolves only to `127.0.0.1` — phones need the `.local`
 host and the trusted local CA.
 
 ## Server publication
