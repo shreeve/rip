@@ -332,21 +332,21 @@ appUrl = (hosts) ->
   template = defaultBaseUrl() if template is 'https://{host}/'
   template.replace '{host}', host
 
-SITES_D = join homedir(), '.config', 'janus', 'sites.d'
+SITES_DIR = join homedir(), '.config', 'janus', 'sites'
 
 # Hosts beyond the packaged postures (*.local, via.rip) answer only when
-# a sites.d snippet declares them — and Caddy's import glob is silent
+# a sites snippet declares them — and Caddy's import glob is silent
 # when nothing matches, so an app advertising its own domain with no
 # snippet looks healthy everywhere while its URL answers nothing
 # (observed in the field). The snapshot carries the warning instead.
 hostCovered = (host) ->
   return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
   names = try
-    readdirSync(SITES_D).filter (name) -> name.endsWith '.caddy'
+    readdirSync(SITES_DIR).filter (name) -> name.endsWith '.caddy'
   catch then []
   for name in names
     text = try
-      readFileSync join(SITES_D, name), 'utf8'
+      readFileSync join(SITES_DIR, name), 'utf8'
     catch then ''
     return true if text.includes host
     for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
@@ -368,7 +368,7 @@ snapshotApp = (app) ->
     hosts: hosts
     sitePattern: site?.host or null
     serveError: error
-    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add ~/.config/janus/sites.d/#{app.name}.caddy (or any *.caddy declaring these hosts)" else null
+    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add ~/.config/janus/sites/#{app.name}.caddy (or any *.caddy declaring these hosts)" else null
     manager
     lastError: app.lastError or null
     lastExit: app.lastExit or null
@@ -742,7 +742,7 @@ startEdge = (body = {}, automatic = false) ->
     prior = { caddy: state.edge.caddy, config: state.edge.config, control: state.edge.control, admin: state.edge.admin, baseUrl: state.edge.baseUrl }
     # Machine-local site snippets import from here; the directory existing
     # from day one makes `ls` discovery and drop-in creation obvious.
-    try mkdirSync SITES_D, { recursive: true }
+    try mkdirSync SITES_DIR, { recursive: true }
     launcher = if usesLaunchd(config) then 'launchd' else 'direct'
     environment = edgeEnv launcher, control
     # These paths belong exclusively to a Rip-owned edge. An unclean exit can
