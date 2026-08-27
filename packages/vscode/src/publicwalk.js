@@ -83,6 +83,64 @@ async function resolveAlias(ck, symbol) {
   try { return await ck.getAliasedSymbol(symbol); } catch { return symbol; }
 }
 
+// The width of a type, asked once per type however many paths arrive at it:
+// it is a fact about the TYPE, fixed for the whole entry. (A Map holds null
+// verdicts apart from absent ones.)
+async function widthCached(ck, type, owns, functionTypeId, caches) {
+  let width = caches.width.get(type.id);
+  if (width === undefined) {
+    width = await widthOf(ck, type, owns, functionTypeId, caches.members);
+    caches.width.set(type.id, width);
+  }
+  return width;
+}
+
+// Does this position's type name another export the package publishes?
+//
+// A member that IS another published export stops the walk. It has its own
+// row, its own verdict, and one edit fixes it there; repeating its defects
+// under everything that happens to expose it reports one piece of work as
+// several.
+//
+// Membership is the whole question. Every row applies one verdict — `any`
+// and `Function` wherever they sit, anything else only where nothing claimed
+// the position — so a sibling's row reports what this position would,
+// whatever either was reached from, and the stop hands the work to a row
+// that will do it.
+//
+// A name is a name however the type was spelled, and the checker holds two
+// of them apart: `symbol` is where a type was declared, `aliasSymbol` the
+// alias that named it. A class declaration produces one symbol serving both
+// the constructor and the instance type, so asking for the symbol alone
+// answers for a class — but an alias to an object literal answers with the
+// anonymous object's symbol and carries its own name only as the alias, so
+// one question sees every such alias as nothing the package published.
+//
+// Asked wherever a position is OPENED — a member, a signature's parameter,
+// a signature's return. Which of the three a position is says nothing about
+// whose edit its defects are, and the edit is what a row reports.
+//
+// The export currently being walked is never a stop for itself: its row is
+// the one already open, and deferring to it hands the position to nobody.
+// That is silent under-reporting, which is the one direction of error this
+// walk exists to avoid.
+//
+// So is a stop where the sibling's row has no answer to give, and only a
+// type that CARRIES something is safe to defer. A row applies one verdict,
+// and two of its three grounds — `any` and `Function` — are facts about the
+// type, which a sibling's row reaches identically however it was arrived
+// at. The third is not: a type carrying nothing is a defect exactly where
+// nothing claimed the position, and what claimed a position is a fact about
+// the POSITION. `type Empty = {}` states itself, so its own row is clean,
+// while an unannotated binding resolving to it is a defect that row will
+// never raise.
+async function namesSibling(ck, type, siblings, rootSymbol, owns, functionTypeId, caches) {
+  const named = [await type.getSymbol(), await type.getAliasSymbol()];
+  if (rootSymbol != null && named.some((sym) => sym != null && sym.id === rootSymbol.id)) return false;
+  if (!named.some((sym) => sym != null && siblings.has(sym.id))) return false;
+  return await widthCached(ck, type, owns, functionTypeId, caches) === null;
+}
+
 // A name that is only ever a type has no value to take the type OF, so its
 // type is the one it DECLARES — a distinction the checker draws with two
 // different calls, and answering it with the wrong one resolves nothing.
@@ -402,14 +460,7 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
   for (let depth = 0; depth < maxDepth && level.length; depth++) {
     const next = [];
     for (const item of level) {
-      // The verdict is a fact about the TYPE, fixed for the whole entry, so
-      // it is asked once per type however many paths arrive at it. (A Map
-      // holds null verdicts apart from absent ones.)
-      let width = caches.width.get(item.type.id);
-      if (width === undefined) {
-        width = await widthOf(ck, item.type, owns, functionTypeId, caches.members);
-        caches.width.set(item.type.id, width);
-      }
+      const width = await widthCached(ck, item.type, owns, functionTypeId, caches);
       // `any` and `Function` are unchecked in either direction. Anything
       // else that carries nothing is a defect only where it arrived
       // without an annotation to claim it.
@@ -470,6 +521,11 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
           for (const p of params) {
             const pType = await ck.getTypeOfSymbol(p);
             if (pType === undefined) { lost++; continue; }
+            // Recorded before the stop: the ledger is what the constructor
+            // TAKES, and a parameter whose defects belong to another row is
+            // still a parameter a field was fed from.
+            if (isCtor) ctorParams.push({ name: p.name, id: pType.id });
+            if (await namesSibling(ck, pType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
             next.push({
               type: pType,
               at: isCtor ? `${item.at}.new(${p.name})` : `${item.at}(${p.name})`,
@@ -477,10 +533,10 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
               stated: await isStated(p, synthesized),
               origin: p,
             });
-            if (isCtor) ctorParams.push({ name: p.name, id: pType.id });
           }
           const returnType = await ck.getReturnTypeOfSignature(sig);
           if (returnType === undefined) { lost++; continue; }
+          if (await namesSibling(ck, returnType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
           next.push({
             type: returnType,
             at: isCtor ? `${item.at}#` : `${item.at}()`,
@@ -502,21 +558,9 @@ async function walkOne(ck, rootType, rootName, owns, maxDepth, rootSymbol, sibli
       }
       for (const prop of props) {
         if (!declaredUnder(prop, owns)) continue;
-        // A member that IS another published export stops the walk. It has
-        // its own row, its own verdict, and one edit fixes it there;
-        // repeating its defects under everything that happens to expose it
-        // reports one piece of work as several.
-        //
-        // Membership is the whole question. Every row applies one verdict —
-        // `any` and `Function` wherever they sit, anything else only where
-        // nothing claimed the position — so a sibling's row reports what
-        // this position would, whatever either was reached from, and the
-        // stop hands the work to a row that will do it.
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
-        const propSymbol = await propType.getSymbol();
-        if (propSymbol != null && propSymbol.id !== rootSymbol?.id
-          && siblings.has(propSymbol.id)) continue;
+        if (await namesSibling(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
         // A field that is the shadow of a constructor parameter is not its
         // own work: annotating the parameter answers both, and reporting it
         // twice overstates the edits. Decided on name AND type, never on

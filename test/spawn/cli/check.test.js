@@ -909,9 +909,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     });
     fs.writeFileSync(path.join(clean, 'package.json'),
       JSON.stringify({ name: 'clean-pkg', exports: { '.': './index.rip' } }, null, 2));
+    // `Inner` is NOT published, so `Outer` is the only row that can report
+    // it and the path is the whole finding. A published inner type is a row
+    // of its own and stops the walk, which is a different case.
     const leaky = workspace({
       'index.rip': [
-        'export type Inner =',
+        'type Inner =',
         '  limit: number',
         '  extra: any',
         '',
@@ -938,7 +941,6 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const bad = check(leaky, ['--public']);
       // The path names the member that leaks, through the type that owns it.
       expect(bad.stdout).toContain('any at: Outer.inner.extra');
-      expect(bad.stdout).toContain('any at: Inner.extra');
       expect(bad.stdout).toMatch(/\u2713 fine/);      // foreign types stay opaque
       expect(bad.status).toBe(1);                       // gate-able
     } finally {
@@ -956,7 +958,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   test('--public opens signatures: constructor and call parameters, returns, and the instance a constructor yields', () => {
     const dir = workspace({
       'index.rip': [
-        'export type Opts =',
+        'type Opts =',                       // NOT published: no row but `run`'s
         '  extra: any',
         '',
         'export class Boom extends Error',   // no members: the .d.ts drops it entirely
@@ -999,7 +1001,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(out.stdout).toContain('any at: Chatty#describe(detail)');
       // A return type, named as the return and not as the function.
       expect(out.stdout).toContain('any at: parse()');
-      // A parameter typed as one of ours is walked THROUGH, not stopped at.
+      // A parameter is walked THROUGH: the leak is inside the type it names,
+      // and no position on the way to it says so.
       expect(out.stdout).toContain('any at: run(o).extra');
       // The leak names the parameter that leaks. `cb` is fully typed and is
       // itself a function, which is the neighbor a parameter list is most
@@ -1007,7 +1010,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(out.stdout).toContain('any at: pick(tail)');
       // Annotating both positions answers it — no false leak on the way.
       expect(out.stdout).toMatch(/✓ Solid/);
-      expect(out.stdout).toContain('1/7 exports fully typed (14.3%)');
+      expect(out.stdout).toContain('1/6 exports fully typed (16.7%)');
       expect(out.status).toBe(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1293,6 +1296,95 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally {
       for (const w of [typeOnly, twoEntry]) fs.rmSync(w, { recursive: true, force: true });
     }
+  }, 90_000);
+
+  // The stop is a fact about the POSITION, not about how the position was
+  // reached: a signature's parameter and its return each name another
+  // published export exactly as a property does, and a name is a name
+  // however the type was spelled. Both shapes below put one declaration
+  // under several rows, and every row but one has no edit to offer.
+  test('--public stops at a sibling reached through a return, a parameter, or an alias', () => {
+    // (a) One class, three arrivals: `holder` reads it as a property,
+    // `makeThing` returns it, `useThing` takes it. Only one of the four may
+    // keep the instance's defects, and it is `Thing`'s own row.
+    const returned = workspace({
+      'package.json': JSON.stringify({ name: '@sib/ret', exports: { '.': './index.rip' } }),
+      'index.rip': ['export class Thing', '  constructor: (x) ->', '    @val = x', '',
+        'export holder: { thing: Thing } = { thing: Thing.new(1) }', '',
+        'export def makeThing(): Thing', '  Thing.new(1)', '',
+        'export def useThing(t: Thing): string', "  'x'"].join('\n') + '\n',
+    });
+    // (b) A type alias and a class, side by side under one export. The
+    // checker answers `getSymbol` on an alias-to-object-literal with the
+    // anonymous object's symbol and carries the alias apart, so a stop that
+    // asks only the one question sees `Box` as nothing the package
+    // published — and re-reports what `Box`'s own row already owns.
+    const aliased = workspace({
+      'package.json': JSON.stringify({ name: '@sib/alias', exports: { '.': './index.rip' } }),
+      'index.rip': ['export type Box =', '  val: any', '',
+        'export class Thing', '  constructor: (x) ->', '    @val = x', '',
+        'export both: { box: Box, thing: Thing } = { box: { val: 1 }, thing: Thing.new(1) }'].join('\n') + '\n',
+    });
+    // Every printed finding is a position the summary counted. The printer
+    // prints one line per defect and the summary counts declarations, so
+    // the two agree exactly when no declaration is reported twice — which
+    // is the property the stop exists to hold.
+    const printed = (out) => (out.match(/ at: /g) ?? []).length;
+    const counted = (out) => Number(out.match(/(\d+) positions? needs? a type/)[1]);
+    try {
+      const a = check(returned, ['--public']).stdout;
+      expect(a).toMatch(/any at: Thing#val/);            // the row that owns the edit
+      expect(a).not.toMatch(/at: makeThing\(\)/);        // and only that row
+      expect(a).not.toMatch(/at: useThing\(t\)/);
+      expect(a).toMatch(/\u2713 makeThing/);
+      expect(a).toMatch(/\u2713 useThing/);
+      expect(a).toMatch(/\u2713 holder/);                 // the property path, unchanged
+      expect(a).toContain('3/4 exports fully typed');
+      expect(printed(a)).toBe(counted(a));
+
+      const b = check(aliased, ['--public']).stdout;
+      expect(b).toMatch(/any at: Box\.val/);              // the alias's own row
+      expect(b).not.toMatch(/at: both\./);                // neither member under `both`
+      expect(b).toMatch(/\u2713 both/);
+      expect(b).toContain('1/3 exports fully typed');
+      expect(printed(b)).toBe(counted(b));
+    } finally {
+      for (const w of [returned, aliased]) fs.rmSync(w, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  // The stop defers a position to a sibling's row, so it may only fire
+  // where that row can ANSWER. Two of the three grounds for a verdict are
+  // facts about the type and travel with it; the third is not, and a stop
+  // that ignores the difference drops a defect no row will ever raise —
+  // which is the direction of error that reads as a clean surface.
+  test('--public defers to a sibling only where the sibling\'s row can answer', () => {
+    // `Empty` carries nothing, and a published alias STATES itself: its own
+    // row is clean and has nothing to say about anyone else. Every other
+    // position here resolves to it, and each must answer for itself.
+    const dir = workspace({
+      'package.json': JSON.stringify({ name: '@sib/empty', exports: { '.': './index.rip' } }),
+      'index.rip': ['export type Empty = {}', '',
+        'export class Box', '  constructor: () ->', '    @slot = ({} as Empty)', '',
+        'export def gives()', '  ({} as Empty)', '',
+        'export holds: { e: Empty } = { e: ({} as Empty) }'].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir, ['--public']);
+      // A property and a return, each unclaimed, each reached through a
+      // sibling that reports nothing.
+      expect(out.stdout).toContain('{} at: Box#slot');
+      expect(out.stdout).toContain('{} at: gives()');
+      // The sibling itself: an alias IS its own claim, so it leaks nothing
+      // — which is precisely why it cannot cover the two above.
+      expect(out.stdout).toMatch(/\u2713 Empty/);
+      // And the control: a position that DOES claim its type is clean here
+      // whether the walk stopped at `Empty` or not, so it isolates the
+      // stated-ness of a position from the width of the type it names.
+      expect(out.stdout).toMatch(/\u2713 holds/);
+      expect(out.stdout).toContain('2/4 exports fully typed');
+      expect(out.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
   // Q2a — what a package publishes is its MANIFEST's answer, and the mirror
@@ -1639,10 +1731,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // surfaces, which are the ones most likely to leak.
   test('--public says so when a walk limit cut the search short', () => {
     // A chain longer than the depth limit, with the `any` past the end.
+    // Only the head is published: every link is a link of ONE walk that
+    // way, where a published chain is a row per link and each stops at the
+    // next, which reaches no depth at all.
     const depth = 14;
     const lines = [];
     for (let i = 0; i < depth; i++) {
-      lines.push(`export type L${i} =`, `  next: ${i + 1 === depth ? 'any' : `L${i + 1}`}`, '');
+      lines.push(`type L${i} =`, `  next: ${i + 1 === depth ? 'any' : `L${i + 1}`}`, '');
     }
     lines.push('export deep: L0 = ({} as L0)');
     const dir = workspace({ 'index.rip': lines.join('\n') + '\n' });
