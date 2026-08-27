@@ -1,8 +1,8 @@
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, join, resolve } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { platform } from 'node:os'
+import { homedir, platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 
@@ -189,6 +189,23 @@ readLog = (path, lines, after) ->
     return { path, text: bytes.subarray(start).toString('utf8'), next: bytes.length, truncated: after > bytes.length }
   { path, text: tail(path, lines), next: bytes.length, truncated: false }
 
+# Managers get a CLEAN environment, never the agent's. The long-lived
+# agent carries whatever Bun auto-loaded from the directory it happened
+# to boot in — including that project's .env — and `{ ...process.env }`
+# stamped those secrets into every app it spawned (observed in the field:
+# one demo's workers holding another project's RIP_DB_TOKEN, and stale
+# tokens outliving the .env that minted them). The manager runs with cwd
+# at its own app root, so Bun loads that project's .env into it; the
+# agent forwards process basics only.
+MANAGER_ENV_KEEP = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TERM', 'LANG', 'TZ']
+managerEnv = ->
+  env = {}
+  for key in MANAGER_ENV_KEEP
+    env[key] = process.env[key] if process.env[key]?
+  for key of process.env
+    env[key] = process.env[key] if key.startsWith 'LC_'
+  env
+
 readOwnerPid = (root) ->
   owner = managerRuntime(root, 'rip-agent').owner
   return null unless existsSync owner
@@ -299,15 +316,47 @@ effectiveHosts = (app, manager) ->
   hosts = [app.name] unless hosts.length
   { hosts, site, error: null }
 
+# The default URL template carries the real HTTPS port: on a non-443 edge
+# a portless https://{host}/ refuses to connect while the app serves fine
+# one port over (observed in the field). An explicit baseUrl is honored
+# verbatim; the bare default self-corrects from the port the agent
+# already tracks and validates.
+defaultBaseUrl = ->
+  port = state.edge.httpsPort
+  if Number.isInteger(port) and port isnt 443 then "https://{host}:#{port}/" else 'https://{host}/'
+
 appUrl = (hosts) ->
   host = preferredHost hosts
   return null unless host?
-  template = state.edge.baseUrl or 'https://{host}/'
+  template = state.edge.baseUrl or defaultBaseUrl()
+  template = defaultBaseUrl() if template is 'https://{host}/'
   template.replace '{host}', host
+
+SITES_D = join homedir(), '.config', 'janus', 'sites.d'
+
+# Hosts beyond the packaged postures (*.local, via.rip) answer only when
+# a sites.d snippet declares them — and Caddy's import glob is silent
+# when nothing matches, so an app advertising its own domain with no
+# snippet looks healthy everywhere while its URL answers nothing
+# (observed in the field). The snapshot carries the warning instead.
+hostCovered = (host) ->
+  return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
+  names = try
+    readdirSync(SITES_D).filter (name) -> name.endsWith '.caddy'
+  catch then []
+  for name in names
+    text = try
+      readFileSync join(SITES_D, name), 'utf8'
+    catch then ''
+    return true if text.includes host
+    for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
+      return true if host.endsWith ".#{match[1]}"
+  false
 
 snapshotApp = (app) ->
   manager = managerStatus! app
   { hosts, site, error } = effectiveHosts! app, manager
+  uncovered = (host for host in hosts when not hostCovered(host))
   {
     id: app.id
     name: app.name
@@ -319,6 +368,7 @@ snapshotApp = (app) ->
     hosts: hosts
     sitePattern: site?.host or null
     serveError: error
+    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add ~/.config/janus/sites.d/#{app.name}.caddy (or any *.caddy declaring these hosts)" else null
     manager
     lastError: app.lastError or null
     lastExit: app.lastExit or null
@@ -436,7 +486,7 @@ startApp = (app, automatic = false) ->
           cwd: app.root
           detached: true
           stdio: ['ignore', log, log]
-          env: { ...process.env, JANUS_CONTROL: state.edge.control }
+          env: { ...managerEnv(), JANUS_CONTROL: state.edge.control }
         children.set app.id, child
         child.on 'exit', (code, signal) ->
           children.delete app.id
@@ -486,6 +536,18 @@ stopApp = (app) ->
   runtime = managerRuntime app.root, 'rip-agent'
   live = managerStatus! app
   unless live?
+    # A dead control socket is not a dead manager: the probe can miss a
+    # live process (observed in the field: status said 'stopped' while a
+    # manager and two workers ran on). The owner pid is the backstop —
+    # SIGTERM lets the manager stop its own workers, SIGKILL is last.
+    pid = readOwnerPid app.root
+    if processAlive pid
+      try process.kill pid, 'SIGTERM'
+      deadline = Date.now() + 5000
+      while processAlive(pid) and Date.now() < deadline
+        sleep! 100
+      if processAlive pid
+        try process.kill pid, 'SIGKILL'
     snap = snapshotApp! app
     maybeExitIdle()
     return snap
@@ -532,6 +594,7 @@ snapshotEdge = ->
     caddy: state.edge.caddy
     config: state.edge.config
     control: state.edge.control
+    admin: state.edge.admin
     baseUrl: state.edge.baseUrl
     mode: state.edge.mode
     httpPort: state.edge.httpPort
@@ -666,11 +729,20 @@ startEdge = (body = {}, automatic = false) ->
     configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
     config = resolveFile configInput, 'Caddyfile'
     control = body.control or paths.edgeControl
-    baseUrl = body.baseUrl or state.edge.baseUrl or 'https://{host}/'
     httpPort = if body.httpPort? then body.httpPort else state.edge.httpPort
     httpsPort = if body.httpsPort? then body.httpsPort else state.edge.httpsPort
     state.edge.httpPort = httpPort
     state.edge.httpsPort = httpsPort
+    baseUrl = body.baseUrl or state.edge.baseUrl or defaultBaseUrl()
+    # Identity fields persist only on a start that SUCCEEDS: a rejected
+    # --config or a renamed binary must not poison later bare starts by
+    # being silently remembered and failing identically (observed in the
+    # field). The mid-boot write below is still needed — health checks
+    # and stop-during-boot read it — so failure restores these.
+    prior = { caddy: state.edge.caddy, config: state.edge.config, control: state.edge.control, admin: state.edge.admin, baseUrl: state.edge.baseUrl }
+    # Machine-local site snippets import from here; the directory existing
+    # from day one makes `ls` discovery and drop-in creation obvious.
+    try mkdirSync SITES_D, { recursive: true }
     launcher = if usesLaunchd(config) then 'launchd' else 'direct'
     environment = edgeEnv launcher, control
     # These paths belong exclusively to a Rip-owned edge. An unclean exit can
@@ -713,7 +785,7 @@ startEdge = (body = {}, automatic = false) ->
     message = if code? then "Caddy exited #{code}" else 'Caddy readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
     bootoutLaunchd true if launcher is 'launchd'
-    state.edge = { ...state.edge, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
+    state.edge = { ...state.edge, ...prior, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
     saveState()
     fail message, 503
   edgeStarting = task
@@ -827,7 +899,20 @@ trustEdge = ->
   fail 'edge must be running to trust the CA — run `rip sites start edge` first', 503 unless existsSync(admin)
   result = Bun.spawnSync [caddy, 'trust', '--address', edgeAddress(admin)], { stdout: 'pipe', stderr: 'pipe' }
   detail = result.stderr.toString().trim() or result.stdout.toString().trim()
-  fail "Caddy trust failed#{if detail then ": #{detail}" else ''}", 503 unless result.exitCode is 0
+  unless result.exitCode is 0
+    # The install escalates via sudo, and this daemon has no terminal to
+    # prompt with — the CLI runs the install itself for exactly that
+    # reason. Anyone landing here through the HTTP API gets the way out.
+    hint = 'the agent cannot prompt for sudo — run `rip sites trust edge` from a terminal, or export the CA (`rip sites trust edge --export ca.crt`) and add it to the system trust store yourself'
+    fail "Caddy trust failed#{if detail then ": #{detail}" else ''} (#{hint})", 503
+  markEdgeTrusted()
+
+# The CLI performs the certificate install in the user's terminal (sudo
+# can prompt there) and then records the outcome here. Recording requires
+# a live edge so the flag can never precede a CA existing to trust.
+markEdgeTrusted = ->
+  admin = state.edge.admin or paths.edgeAdmin
+  fail 'edge must be running to trust the CA — run `rip sites start edge` first', 503 unless existsSync(admin)
   state.edge.localCaTrusted = true
   saveState()
   { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
@@ -1084,6 +1169,7 @@ route = (request) ->
         return Response.json(mutate!(-> restartEdge!)) if parts[2] is 'restart'
         return Response.json(mutate!(-> reloadEdge!)) if parts[2] is 'reload'
         return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
+        return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
         if parts[2] is 'public'
