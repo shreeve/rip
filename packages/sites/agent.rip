@@ -615,7 +615,9 @@ resolveFile = (value, description) ->
 
 resolveCaddy = (explicit = null) ->
   packagedCaddy = join(import.meta.dir, 'bin', 'janus')
-  caddyInput = explicit or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('caddy')
+  # `janus` on PATH is the normal install (alongside harbor and pilot in
+  # /usr/local/bin); JANUS_CADDY only overrides that for a dev build.
+  caddyInput = explicit or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('janus') or Bun.which('caddy')
   fail 'no Janus-enabled Caddy binary — pass --caddy PATH or set JANUS_CADDY', 503 unless caddyInput?
   caddy = resolveFile caddyInput, 'Caddy binary'
   modules = Bun.spawnSync [caddy, 'list-modules'], { stdout: 'pipe', stderr: 'pipe' }
