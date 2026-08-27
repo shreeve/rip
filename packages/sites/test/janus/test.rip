@@ -53,7 +53,9 @@ certification = ->
   build = info.stdout.toString()
   eq info.exitCode, 0, info.stderr.toString()
   lines = build.split '\n'
-  janusAt = lines.findIndex (line) -> line.startsWith 'dep\tgithub.com/shreeve/janus\t'
+  # v1.8.0's repo-owned main (cmd/janus) makes janus the MAIN module — a
+  # `mod` line, not `dep`. Accept both so xcaddy-era binaries still pass.
+  janusAt = lines.findIndex (line) -> line.startsWith('mod\tgithub.com/shreeve/janus\t') or line.startsWith('dep\tgithub.com/shreeve/janus\t')
   ok janusAt >= 0, build
   replaced = lines[janusAt].includes('=>') or (lines[janusAt + 1] or '').startsWith('=>')
   ok not replaced, 'integration requires the published module, not a local replacement'
