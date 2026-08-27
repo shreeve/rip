@@ -65,6 +65,17 @@ const awaitsIn = (x) => {
   return x.some(awaitsIn);
 };
 
+// containsYield's shape, on the same boundaries: a generator method
+// returns its ITERATOR, so neither the void spelling nor the Promise
+// wrap below names what its caller receives.
+const yieldsIn = (x) => {
+  if (!isNode(x)) return false;
+  const h = x[0];
+  if (h === 'yield' || h === 'yield-from') return true;
+  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' || h === 'class') return false;
+  return x.some(yieldsIn);
+};
+
 // ── the walker ───────────────────────────────────────────────────────
 // Reads a VALID component node (JS emission has already accepted it —
 // every rejection class fires before any type story renders) into the
@@ -870,8 +881,18 @@ export function instanceTypeLines(info, selfType) {
     if (m.name === 'children') hasChildren = true;
     if (m.kind === 'method' || m.kind === 'hook') {
       const declared = info.roleText(m.func, 'returnType');
-      const base = declared ?? (m.isVoid ? 'void' : 'any');
-      const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
+      // A generator takes neither the void spelling nor the async wrap
+      // — the same rule the class declare emits under
+      // (tsReturnAnnotation). This companion is what a CONSUMER reads,
+      // so a wrong type here is not a diagnostic on the component at
+      // all: it lands on every call site instead, where `void` has no
+      // `.next` and the iterator the method really returns is
+      // unreachable. `any` is what an unannotated member already
+      // publishes; a generator joins them rather than claiming a
+      // return it does not make.
+      const isGen = yieldsIn(m.func[2]);
+      const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
+      const ret = awaitsIn(m.func[2]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
       const firstType = m.name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
       lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, firstType)}: ${ret};` }] });
       continue;

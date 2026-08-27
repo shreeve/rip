@@ -267,6 +267,36 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // this helper, never a hand-maintained head pair (a site that listed
 // only 'def' would silently misclassify void defs).
 const isDefHead = (h) => h === 'def' || h === 'void-def';
+// Does this subtree await — i.e. is the function owning it ASYNC? A
+// `dammit` call (`f!`) awaits, and an awaited for-as carries its await
+// in a flag slot rather than a nested node. Nested function and class
+// bodies own their own awaits, so the walk stops at them. Exported for
+// the same reason as containsYield below: the return type it decides is
+// spelled independently by the face and by the declarations.
+export function containsAwait(sexpr) {
+  if (!isNode(sexpr)) return false;
+  const head = sexpr[0];
+  if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
+  if (head === 'for-as' && sexpr[3] === true) return true;
+  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  return sexpr.some((item) => containsAwait(item));
+}
+
+// Does this subtree yield — i.e. is the function owning it a GENERATOR?
+// Nested function and class bodies own their own yields, so the walk
+// stops at them. Exported because a generator's return type is decided
+// in three places that must agree: the TS face (tsReturnAnnotation), the
+// shipped declarations (src/ts/dts.js), and the component companion
+// (src/ts/components.js, which mirrors this rather than importing it —
+// the emitter imports THAT module, so the edge cannot run both ways).
+export function containsYield(sexpr) {
+  if (!isNode(sexpr)) return false;
+  const head = sexpr[0];
+  if (head === 'yield' || head === 'yield-from') return true;
+  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  return sexpr.some((item) => containsYield(item));
+}
+
 const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 // What may be a BINDING NAME. One spelling, read by the pattern walker and
 // by captureScan's own occurrence recorder — a walker that returned names
@@ -1995,15 +2025,26 @@ class Emitter {
   // generated manifestation (arrows registered void through their
   // owning definition carry no voidMarker role of their own; their
   // `: void` emits unmarked inside the enclosing $self cover).
-  tsReturnAnnotation(node, isAsync, isVoid, voidOwner = node) {
+  //
+  // A GENERATOR takes NEITHER treatment, because neither names what
+  // its caller receives: TS rejects `: void` on one outright (TS2505),
+  // and the async wrap would promise a value that an async generator
+  // hands back through its iterator instead. Both spellings are
+  // GENERATED, so a wrong one is unanswerable — the author annotated
+  // nothing in the void case, and gets their own annotation mangled in
+  // the async one. Emitting no annotation leaves TS to infer the exact
+  // iterator (`Generator<T, void, unknown>`); an author who wants it
+  // spelled writes it (`: Generator<T>`, `: AsyncGenerator<T>`) and
+  // that text passes through untouched, like any other annotation.
+  tsReturnAnnotation(node, isAsync, isVoid, isGen, voidOwner = node) {
     if (!this.ts) return;
     const text = this.annotationText(node, 'returnType');
     if (text !== null) {
-      const spelled = isAsync && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
+      const spelled = isAsync && !isGen && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
       this.b.tsOnly(() => this.mark(node, 'returnType', () => this.emitTypeText(node, 'returnType', `: ${spelled}`)));
       return;
     }
-    if (isVoid) {
+    if (isVoid && !isGen) {
       const spelled = isAsync ? 'Promise<void>' : 'void';
       this.b.tsOnly(() => this.mark(voidOwner, 'voidMarker', () => this.b.emit(`: ${spelled}`)));
     }
@@ -6484,12 +6525,13 @@ class Emitter {
     // mark() is a no-op for rows without the role.
     const isVoid = node[0] === 'void-def';
     const isAsync = Emitter.containsAwait(node[3]);
+    const isGen = Emitter.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
     this.tsOverloadSigs(node, ind);
     this.mark(node, 'voidMarker', () => this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
       if (isAsync) this.b.emit('async ');
-      this.b.emit(Emitter.containsYield(node[3]) ? 'function* ' : 'function ');
+      this.b.emit(isGen ? 'function* ' : 'function ');
       this.mark(node, 'name', () => this.b.emit(node[1]));
       // Generic def: the TYPE_PARAMS side-band role
       // re-emits after the name, TS-only (`function wrap<T extends
@@ -6506,7 +6548,7 @@ class Emitter {
         this.mark(node[2], '$self', () => this.emitParams(node[2]));
         this.b.emit(')');
       });
-      this.tsReturnAnnotation(node, isAsync, isVoid);
+      this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(' ');
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
@@ -6570,14 +6612,7 @@ class Emitter {
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
   static containsAwait(sexpr) {
-    if (!isNode(sexpr)) return false;
-    const head = sexpr[0];
-    if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
-    // An awaited for-as (`for await x as it`) is an await by
-    // construction — its flag slot, not a nested node, carries it.
-    if (head === 'for-as' && sexpr[3] === true) return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return sexpr.some((item) => Emitter.containsAwait(item));
+    return containsAwait(sexpr);
   }
 
   // the implicit `it`: a ZERO-param arrow whose body
@@ -6603,11 +6638,7 @@ class Emitter {
 
   // Generator marking, symmetric with containsAwait.
   static containsYield(sexpr) {
-    if (!isNode(sexpr)) return false;
-    const head = sexpr[0];
-    if (head === 'yield' || head === 'yield-from') return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return sexpr.some((item) => Emitter.containsYield(item));
+    return containsYield(sexpr);
   }
 
   // ── The grouping lattice: ONE source of truth ──────────────────────
@@ -8762,7 +8793,7 @@ class Emitter {
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
+          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {
@@ -12414,7 +12445,9 @@ class Emitter {
               const inArgs = this.ts && this.contextuallyTyped(pair[2]);
               this.b.emit('(');
               this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
-              this.b.emit(') ');
+              this.b.emit(')');
+              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
+              this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
               });
@@ -12907,7 +12940,7 @@ class Emitter {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (mName !== 'constructor') {
-              this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, pair);
+              this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
@@ -13442,7 +13475,7 @@ class Emitter {
         this.b.emit('(');
         this.mark(node, 'params', () => this.emitParams(params, null, !inArgs));
         this.b.emit(')');
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.funcBlock(node, block, stmts, ind, hoist, isVoid);
       } else {
@@ -13473,7 +13506,7 @@ class Emitter {
             this.b.emit(')');
           }
         });
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.mark(node, 'kind', () => this.b.emit('=>'));
         this.b.emit(' ');

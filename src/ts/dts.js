@@ -44,7 +44,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields } from '../emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED,
   segmentsText,
@@ -139,9 +139,38 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return source.slice(row.sourceStart, row.sourceEnd);
   };
 
+  // A callable's declared return type, spelled the way the TS face
+  // spells it (Emitter's tsReturnAnnotation). The two artifacts describe
+  // ONE API, and every rule here is a rule there:
+  //
+  //   · async wraps as Promise<T> — a caller awaits what the annotation
+  //     names, and a declaration carries no `async` keyword to imply it.
+  //     An author who already spelled the Promise keeps their spelling.
+  //   · a GENERATOR takes neither the wrap nor the void spelling: it
+  //     returns its iterator, which a Promise and a `void` both misname.
+  //     Unspelled, it publishes `any` — the face lets TS infer the exact
+  //     iterator, which a declaration has no way to compute.
+  //   · a void definition without an annotation declares `void`
+  //     (`Promise<void>` when async).
+  //
+  // Returning null means "no return type to declare", which the callers
+  // read as a reason to emit NO declaration at all — so every branch
+  // that has something to say answers with a type, never null.
+  const returnTypeOf = (fnNode, body, isVoid) => {
+    const declared = roleType(fnNode, 'returnType');
+    const isGen = containsYield(body);
+    const isAsync = containsAwait(body);
+    if (declared !== null) {
+      return isAsync && !isGen && !/^Promise\s*</.test(declared) ? `Promise<${declared}>` : declared;
+    }
+    if (!isVoid) return null;
+    if (isGen) return 'any';
+    return isAsync ? 'Promise<void>' : 'void';
+  };
+
   const defDecl = (node, exported) => {
     const [head, name, params] = node;
-    const returnType = roleType(node, 'returnType') ?? (head === 'void-def' ? 'void' : null);
+    const returnType = returnTypeOf(node, node[3], head === 'void-def');
     if (returnType === null && !params.some(paramTyped)) return;
     lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
@@ -161,7 +190,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       return;
     }
     if (!isFunc(value)) return;
-    const returnType = roleType(value, 'returnType') ?? (head === 'void-assign' ? 'void' : null);
+    const returnType = returnTypeOf(value, value[2], head === 'void-assign');
     if (returnType === null && !value[1].some(paramTyped)) return;
     lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(value[1], isOptionalParam))}: ${returnType ?? 'any'};`);
   };
@@ -219,7 +248,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
           const mName = memberName(key);
           if (typeof mName !== 'string') continue;
           let params = value[1];
-          const returnType = roleType(value, 'returnType') ?? (pair[0] === 'void-pair' ? 'void' : null);
+          const returnType = returnTypeOf(value, value[2], pair[0] === 'void-pair');
           if (mName === 'constructor') {
             // The fields the constructor implies, exactly as the TS
             // face declares them (the emitter's own walkers, not a

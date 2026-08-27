@@ -8472,6 +8472,28 @@ var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length 
 var isObject = (x) => isNode(x) && x[0] === "object";
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
 var isDefHead = (h) => h === "def" || h === "void-def";
+function containsAwait(sexpr) {
+  if (!isNode(sexpr))
+    return false;
+  const head = sexpr[0];
+  if (head === "await" || head === "dammit!" || head === "dammit?")
+    return true;
+  if (head === "for-as" && sexpr[3] === true)
+    return true;
+  if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
+    return false;
+  return sexpr.some((item) => containsAwait(item));
+}
+function containsYield(sexpr) {
+  if (!isNode(sexpr))
+    return false;
+  const head = sexpr[0];
+  if (head === "yield" || head === "yield-from")
+    return true;
+  if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
+    return false;
+  return sexpr.some((item) => containsYield(item));
+}
 var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
 var IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 var patternBindings = (node, base = "", out = []) => {
@@ -9546,16 +9568,16 @@ class Emitter {
   tsAnnotate(node, role, text) {
     this.b.tsOnly(() => this.mark(node, role, () => this.emitTypeText(node, role, `: ${text}`)));
   }
-  tsReturnAnnotation(node, isAsync, isVoid, voidOwner = node) {
+  tsReturnAnnotation(node, isAsync, isVoid, isGen, voidOwner = node) {
     if (!this.ts)
       return;
     const text = this.annotationText(node, "returnType");
     if (text !== null) {
-      const spelled = isAsync && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
+      const spelled = isAsync && !isGen && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
       this.b.tsOnly(() => this.mark(node, "returnType", () => this.emitTypeText(node, "returnType", `: ${spelled}`)));
       return;
     }
-    if (isVoid) {
+    if (isVoid && !isGen) {
       const spelled = isAsync ? "Promise<void>" : "void";
       this.b.tsOnly(() => this.mark(voidOwner, "voidMarker", () => this.b.emit(`: ${spelled}`)));
     }
@@ -12910,11 +12932,12 @@ ${pad ?? ""}`);
   defStatement(node, ind) {
     const isVoid = node[0] === "void-def";
     const isAsync = Emitter.containsAwait(node[3]);
+    const isGen = Emitter.containsYield(node[3]);
     this.tsOverloadSigs(node, ind);
     this.mark(node, "voidMarker", () => this.mark(node, "returnType", () => this.mark(node, "$self", () => {
       if (isAsync)
         this.b.emit("async ");
-      this.b.emit(Emitter.containsYield(node[3]) ? "function* " : "function ");
+      this.b.emit(isGen ? "function* " : "function ");
       this.mark(node, "name", () => this.b.emit(node[1]));
       if (this.ts) {
         const tp = this.annotationText(node, "typeParams");
@@ -12926,7 +12949,7 @@ ${pad ?? ""}`);
         this.mark(node[2], "$self", () => this.emitParams(node[2]));
         this.b.emit(")");
       });
-      this.tsReturnAnnotation(node, isAsync, isVoid);
+      this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(" ");
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
       const { entries, names } = this.scopedHoist([node[3]], node[2]);
@@ -12970,16 +12993,7 @@ ${pad ?? ""}`);
     });
   }
   static containsAwait(sexpr) {
-    if (!isNode(sexpr))
-      return false;
-    const head = sexpr[0];
-    if (head === "await" || head === "dammit!" || head === "dammit?")
-      return true;
-    if (head === "for-as" && sexpr[3] === true)
-      return true;
-    if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
-      return false;
-    return sexpr.some((item) => Emitter.containsAwait(item));
+    return containsAwait(sexpr);
   }
   static containsBareIt(n) {
     if (n === "it")
@@ -12998,14 +13012,7 @@ ${pad ?? ""}`);
     return n.some((item) => Emitter.containsBareIt(item));
   }
   static containsYield(sexpr) {
-    if (!isNode(sexpr))
-      return false;
-    const head = sexpr[0];
-    if (head === "yield" || head === "yield-from")
-      return true;
-    if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
-      return false;
-    return sexpr.some((item) => Emitter.containsYield(item));
+    return containsYield(sexpr);
   }
   static jsTier(x) {
     if (!isNode(x))
@@ -14614,7 +14621,7 @@ ${pad ?? ""}`);
           this.b.emit("(");
           this.emitParams(params, evParamType);
           this.b.emit(")");
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
+          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(" ");
           this.mark(owner, "value", () => {
             this.methodBlock(func, block, ind + 1, {
@@ -17471,7 +17478,9 @@ ${this.replayPad}}` : " }");
               const inArgs = this.ts && this.contextuallyTyped(pair[2]);
               this.b.emit("(");
               this.mark(pair[2], "params", () => this.emitParams(params, null, !inArgs));
-              this.b.emit(") ");
+              this.b.emit(")");
+              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
+              this.b.emit(" ");
               this.mark(pair, "value", () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" });
               });
@@ -17815,7 +17824,7 @@ ${this.replayPad}}` : " }");
               this.emitParams(params);
               this.b.emit(")");
               if (mName !== "constructor") {
-                this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, pair);
+                this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
               }
               this.b.emit(" ");
               this.mark(pair, "value", () => {
@@ -18205,7 +18214,7 @@ ${"  ".repeat(ind)}`);
         this.b.emit("(");
         this.mark(node, "params", () => this.emitParams(params, null, !inArgs));
         this.b.emit(")");
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(" ");
         this.funcBlock(node, block, stmts, ind, hoist, isVoid);
       } else {
@@ -18228,7 +18237,7 @@ ${"  ".repeat(ind)}`);
             this.b.emit(")");
           }
         });
-        this.tsReturnAnnotation(node, isAsync, isVoid);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(" ");
         this.mark(node, "kind", () => this.b.emit("=>"));
         this.b.emit(" ");

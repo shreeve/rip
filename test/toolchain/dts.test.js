@@ -83,6 +83,27 @@ const ROWS = [
   ['def tick!\n  1', 'declare function tick(): void;\nexport {};\n'],
   ['save! = (x) -> x', 'declare function save(x?: any): void;\nexport {};\n'],
   ['export save! = (x: number) -> x', 'export declare function save(x: number): void;\n'],
+  // ASYNC wraps as Promise<T>, exactly as the face spells it: a caller
+  // awaits what the annotation names, and a declaration carries no
+  // `async` keyword to imply the wrap. Unwrapped, the .d.ts told a
+  // consumer a number came back where a Promise does — a lie that
+  // type-checks and fails at runtime.
+  ['def go(a: number): number\n  await a', 'declare function go(a: number): Promise<number>;\nexport {};\n'],
+  ['go! = (a: number) ->\n  await a', 'declare function go(a: number): Promise<void>;\nexport {};\n'],
+  ['export class K\n  load: (a: number): number ->\n    await a', 'export declare class K {\n  load(a: number): Promise<number>;\n}\n'],
+  // an author who already spelled the Promise keeps their spelling
+  ['def already(a: number): Promise<number>\n  await a', 'declare function already(a: number): Promise<number>;\nexport {};\n'],
+  // a void GENERATOR returns its iterator, so the void spelling would
+  // misdeclare it — a consumer told `void` cannot call `.next()` on
+  // what it gets back. It stays DECLARED (`any`, matching the face and
+  // the component companion): dropping the return type here would drop
+  // the whole declaration for a paramless def, and a vanished export is
+  // worse than a wide one.
+  ['def pump!()\n  yield 1', 'declare function pump(): any;\nexport {};\n'],
+  ['pump! = ->\n  yield 1', 'declare function pump(): any;\nexport {};\n'],
+  ['export class A\n  step!: ->\n    yield 1', 'export declare class A {\n  step(): any;\n}\n'],
+  // the author-spelled iterator still wins, exactly as any annotation does
+  ['def numbers(): Generator<number>\n  yield 1', 'declare function numbers(): Generator<number>;\nexport {};\n'],
   // an explicit return type on a void def wins (the rule; the marker
   // still suppresses the implicit return at runtime)
   ['def typed!(x): Number\n  bump(x)', 'declare function typed(x?: any): Number;\nexport {};\n'],

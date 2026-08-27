@@ -115,6 +115,30 @@ const CLEAN_ROWS = [
  'count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\ncount = total + ro.length',
     // void definitions
  'def save!(x: number)\n  x\nsave(1)',
+    // generators: the void spelling and the async wrap are both
+    // WRONG for one (TS2505 / a Promise the iterator never yields), so
+    // neither is emitted — every surface that annotates a return has a
+    // row here, and each was red before the rule reached it
+ 'def pump!()\n  yield 1\npump()',
+ 'pump! = ->\n  yield 1\npump()',
+ 'class A\n  pump!: ->\n    yield 1\na = new A()\na.pump()',
+ 'o =\n  pump!: ->\n    yield 1\no.pump()',
+    // the author-spelled iterator passes through unwrapped, which is
+    // the escape hatch that makes emitting nothing above sufficient
+ 'def numbers(): Generator<number>\n  yield 1\nn: number = numbers().next().value\nn = 2',
+ 'def drain(s: number): AsyncGenerator<number>\n  yield await s\ndrain(1)',
+ 'o =\n  drain: (s: number): AsyncGenerator<number> ->\n    yield await s\no.drain(1)',
+    // the component companion renders each member's type a SECOND
+    // time, and IT is what a consumer reads — so the use site here
+    // CONSUMES the generator (`.next()`), which a companion still
+    // publishing `void` cannot satisfy. Calling it and dropping the
+    // result would pass against either spelling and pin nothing.
+ 'C = component\n  pump! = ->\n    yield 1\n  drain = (s: number): AsyncGenerator<number> ->\n    yield await s\n  render\n    div "x"\nuse = (c: C) -> c.pump().next()\nconsole.log C, use',
+    // object-literal methods: the return annotation types the CALL,
+    // in the standalone literal and in the argument position where a
+    // literal is contextually typed (`Object.assign`)
+ 'o =\n  lit: (x: number): string ->\n    String(x)\nn: number = o.lit(1).length\nn = 2',
+ 'a = Object.assign((->),\n  inner: (x: number): string ->\n    String(x)\n)\nn: number = a.inner(1).length\nn = 2',
     // casts: the assertion reaches the checker — `items`
     // evolves to string[] from the cast, so the member chain types
  'raw = JSON.parse("[]")\nitems = raw as string[]\nk = items[0].length\nk = 2',
@@ -344,6 +368,24 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2322');
+  }, TSC_TIMEOUT);
+
+  test('object-literal method returns have teeth: the annotation reaches the checker (TS2322)', () => {
+    // The bodies return a CONCRETE 42, never `any`: a wrong return
+    // type over an `any` body checks clean whether the annotation is
+    // honored or dropped, so such a probe passes vacuously and pins
+    // nothing. Both literal positions are here — the standalone one
+    // and the contextually-typed argument — because the method
+    // shorthand is emitted once for both.
+    for (const src of [
+      'o =\n  lit: (x: number): string ->\n    42\n',
+      'a = Object.assign((->),\n  inner: (x: number): string ->\n    42\n)\n',
+    ]) {
+      const faced = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, `tsc accepted a violated return annotation:\n${faced.code}`).not.toBe(0);
+      expect(output).toContain('TS2322');
+    }
   }, TSC_TIMEOUT);
 
   test('casts have teeth: an `as` assertion the erased face would hide FAILS the check (TS2322)', () => {

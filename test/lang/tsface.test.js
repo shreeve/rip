@@ -377,6 +377,30 @@ describe('TS-face emission pins', () => {
       .toBe('async function flush(x?): Promise<void> {\n  await x;\n  return;\n}' + MARKER);
   });
 
+  test('a GENERATOR takes neither the void spelling nor the async wrap — on every surface that emits one', () => {
+    // Both spellings are GENERATED, and both name something a
+    // generator's caller never receives: TS rejects `: void` outright
+    // (TS2505), and an async generator hands its values back through
+    // the iterator, not a promise. Nothing is emitted instead, which
+    // leaves TS the exact iterator to infer.
+    expect(ts('def pump!()\n  yield 1\n').code)
+      .toBe('function* pump() {\n  yield 1;\n  return;\n}' + MARKER);
+    expect(ts('pump! = ->\n  yield 1\n').code)
+      .toBe('let pump = function*() {\n  yield 1;\n  return;\n};' + MARKER);
+    expect(ts('class A\n  pump!: ->\n    yield 1\n').code)
+      .toBe('class A {\n  *pump() {\n    yield 1;\n    return;\n  }\n}' + MARKER);
+    expect(ts('o =\n  pump!: ->\n    yield 1\n').code)
+      .toBe('let o = {*pump() {\n  yield 1;\n  return;\n}};' + MARKER);
+    // An author who wants the iterator spelled writes it, and that
+    // text passes through untouched — no Promise wrap around it.
+    expect(ts('def drain(s: number): AsyncGenerator<number>\n  yield await s\n').code)
+      .toBe('async function* drain(s: number): AsyncGenerator<number> {\n  return yield await s;\n}' + MARKER);
+    expect(ts('o =\n  drain: (s: number): AsyncGenerator<number> ->\n    yield await s\n').code)
+      .toBe('let o = {async *drain(s: number): AsyncGenerator<number> {\n  return yield await s;\n}};' + MARKER);
+    expect(ts('def numbers(): Generator<number>\n  yield 1\n').code)
+      .toBe('function* numbers(): Generator<number> {\n  return yield 1;\n}' + MARKER);
+  });
+
   test('structured aliases: one-line, generic, block union, block object, wrapped single', () => {
     expect(ts('type ID = string\nz = 1\n').code).toBe('type ID = string;\nlet z = 1;' + MARKER);
     expect(ts('type Pair<A, B> = [A, B]\nz = 1\n').code).toBe('type Pair<A, B> = [A, B];\nlet z = 1;' + MARKER);
@@ -484,6 +508,28 @@ describe('TS-face emission pins', () => {
   test('typed class fields, methods, and void methods', () => {
     expect(ts('class A\n  x: number = 5\n  y: string\n  m: (v: number): number -> v\n  save!: (v) ->\n    v\n').code)
       .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v?): void {\n    v;\n    return;\n  }\n}' + MARKER);
+  });
+
+  test('an object-literal method carries its return annotation, exactly as a class method does', () => {
+    // The shorthand method is the class member's twin: same pair
+    // node, same void marker, same async wrapping — so the return
+    // annotation prints on the same terms. Its absence was silent
+    // (the JS emission is identical either way), which is what let a
+    // declared return type sit inert.
+    expect(ts('o =\n  lit: (x: number): string ->\n    x\n').code)
+      .toBe('let o = {lit(x: number): string {\n  return x;\n}};' + MARKER);
+    // A void method annotates `: void` under the voidMarker role —
+    // the pair's `!`, not a recorded returnType.
+    expect(ts('o =\n  quiet!: (v) ->\n    v\n').code)
+      .toBe('let o = {quiet(v?): void {\n  v;\n  return;\n}};' + MARKER);
+    // async wraps both spellings (TS1064), same as every other face.
+    expect(ts('o =\n  go: (a: number): number ->\n    await a\n').code)
+      .toBe('let o = {async go(a: number): Promise<number> {\n  return await a;\n}};' + MARKER);
+    expect(ts('o =\n  flush!: (a) ->\n    await a\n').code)
+      .toBe('let o = {async flush(a?): Promise<void> {\n  await a;\n  return;\n}};' + MARKER);
+    // An unannotated, non-void method takes no return annotation.
+    expect(ts('o =\n  bare: (y) ->\n    y\n').code)
+      .toBe('let o = {bare(y?) {\n  return y;\n}};' + MARKER);
   });
 
   test('a field an instance METHOD assigns is declared, wherever the constructor put it', () => {
