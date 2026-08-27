@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rip Sites — Secure Setup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50" x-data="trust()">
+
+  <!-- Header -->
+  <div class="border-b border-white/20 bg-white/30 backdrop-blur-sm">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4">
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-[0_15px_30px_-8px_rgba(0,0,0,0.2)] border border-gray-100">
+          <svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-9 h-9">
+            <path d="M55.6822 169.86L41.8222 175.88L1.64219 109.8L41.8222 43.72L55.6822 49.74L19.1422 109.8L55.6822 169.86ZM164.318 169.86L200.858 109.8L164.318 49.74L178.178 43.72L218.358 109.8L178.178 175.88L164.318 169.86Z" fill="black"/>
+            <path d="M69.8047 163V61.1818H113.754C121.31 61.1818 127.923 62.5573 133.59 65.3082C139.258 68.0592 143.666 72.0199 146.815 77.1903C149.963 82.3608 151.538 88.5587 151.538 95.7841C151.538 103.076 149.914 109.224 146.665 114.229C143.451 119.233 138.926 123.012 133.093 125.564C127.293 128.116 120.515 129.392 112.759 129.392H86.5092V107.915H107.191C110.439 107.915 113.207 107.517 115.494 106.722C117.814 105.893 119.587 104.584 120.813 102.794C122.073 101.004 122.702 98.6676 122.702 95.7841C122.702 92.8674 122.073 90.4976 120.813 88.6747C119.587 86.8187 117.814 85.4598 115.494 84.598C113.207 83.7031 110.439 83.2557 107.191 83.2557H97.4467V163H69.8047ZM129.464 116.267L154.918 163H124.89L100.032 116.267H129.464Z" fill="#BB0000"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Rip Sites</h1>
+          <p class="text-sm text-gray-600">Secure connection setup</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- Probing -->
+    <div x-show="state === 'probing'" x-cloak class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-8 text-center">
+      <svg class="animate-spin w-8 h-8 mx-auto text-indigo-500" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+      </svg>
+      <p class="mt-4 text-gray-700 font-medium">Checking whether this device is set up…</p>
+    </div>
+
+    <!-- Already trusted (page deliberately opened over HTTPS) -->
+    <div x-show="state === 'trusted'" x-cloak class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-8 text-center">
+      <div class="w-14 h-14 mx-auto rounded-full bg-green-100 flex items-center justify-center">
+        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+        </svg>
+      </div>
+      <h2 class="mt-4 text-xl font-bold text-gray-900">This device is all set</h2>
+      <p class="mt-2 text-gray-600">It already trusts the local certificate authority, so every <span class="font-mono text-sm">https://*.local</span> site here verifies cleanly.</p>
+      <a href="/" class="mt-6 inline-block px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow transition-colors">Open the dashboard</a>
+      <p class="mt-6 text-sm text-gray-500">Setting up another device? On that device just open <span class="font-mono">http://rip.local</span> — it walks itself through this.</p>
+    </div>
+
+    <!-- Onboarding -->
+    <div x-show="state === 'onboard'" x-cloak class="space-y-6">
+
+      <div class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+        <div class="flex items-start space-x-3">
+          <div class="w-10 h-10 shrink-0 rounded-full bg-amber-100 flex items-center justify-center">
+            <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0h.01M6.6 20h10.8a2 2 0 001.9-2.6l-5.4-12a2 2 0 00-3.8 0l-5.4 12A2 2 0 006.6 20z"></path>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-gray-900">One-time setup for this device</h2>
+            <p class="mt-1 text-sm text-gray-600">
+              Sites here use a private certificate authority that lives only on this network.
+              Teach this device to trust it once, and every local site gets a real
+              <span class="inline-block align-text-bottom"><svg class="w-4 h-4 inline text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></span>
+              lock — no warnings, in any browser.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- iOS -->
+      <div x-show="show === 'ios'" class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+        <h3 class="font-bold text-gray-900 mb-4">iPhone / iPad</h3>
+
+        <!-- Non-Safari browser: iOS only lets Safari hand a profile to Settings. -->
+        <div x-show="!safari" class="mb-5 rounded-xl bg-indigo-50 border border-indigo-100 p-4 text-sm text-gray-700">
+          <p><span class="font-semibold">One-time Safari step.</span> iOS only lets <span class="font-semibold">Safari</span> hand a trust profile to Settings — every other browser can only save it as a dead file. The button below jumps you there.</p>
+        </div>
+
+        <ol class="space-y-4 text-sm text-gray-700">
+          <li class="flex space-x-3"><span class="step-badge w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">1</span>
+            <div x-show="safari">
+              <a href="/trust/ca.mobileconfig" class="inline-block px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow transition-colors">Download trust profile</a>
+              <span class="block mt-1.5 text-gray-500">Safari asks to allow a configuration profile — tap <span class="font-semibold">Allow</span>.</span>
+            </div>
+            <div x-show="!safari">
+              <a :href="safariHref" class="inline-block px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow transition-colors">Open in Safari &amp; download</a>
+              <span class="block mt-1.5 text-gray-500">Tap <span class="font-semibold">Open</span> when Chrome asks. Safari will warn <span class="italic">“This Connection Is Not Private”</span> — that’s expected (the trust you’re installing is exactly what fixes it): tap <span class="font-semibold">Show Details → visit this website</span>, then <span class="font-semibold">Allow</span> the download.</span>
+              <span class="block mt-1.5 text-gray-400">Nothing happen? Open Safari yourself and go to <span class="font-mono">rip.local</span> — this page appears there with a direct button.</span>
+            </div>
+          </li>
+          <!-- No Settings deep-link buttons: the App-Prefs scheme errors on
+               current iOS from both Safari and Chrome — written steps only. -->
+          <li class="flex space-x-3"><span class="step-badge w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">2</span>
+            <div>Open the <span class="font-semibold">Settings</span> app and tap the downloaded profile — under <span class="font-semibold">Profile Downloaded</span> near the top, or in <span class="font-semibold">General → VPN &amp; Device Management</span> — then <span class="font-semibold">Install</span>.</div>
+          </li>
+          <li class="flex space-x-3"><span class="step-badge w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">3</span>
+            <div>Still in Settings: <span class="font-semibold">General → About</span>, scroll to <span class="font-semibold">Certificate Trust Settings</span>, and switch <span class="font-semibold">on</span> “Caddy Local Authority”. <span class="text-gray-400">(This is the step everyone misses — HTTPS won’t work without it.)</span></div>
+          </li>
+          <li class="flex space-x-3"><span class="step-badge w-6 h-6 shrink-0 rounded-full bg-green-100 text-green-700 font-bold flex items-center justify-center text-xs">✓</span>
+            <div>Open any browser you like — this page notices automatically and takes you in.</div>
+          </li>
+        </ol>
+      </div>
+
+      <!-- Android -->
+      <div x-show="show === 'android'" class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+        <h3 class="font-bold text-gray-900 mb-4">Android</h3>
+        <ol class="space-y-4 text-sm text-gray-700">
+          <li class="flex space-x-3"><span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">1</span>
+            <div><a href="/trust/ca.crt" class="inline-block px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow transition-colors">Download CA certificate</a></div>
+          </li>
+          <li class="flex space-x-3"><span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">2</span>
+            <div>Open <span class="font-semibold">Settings → Security &amp; privacy → More security settings → Encryption &amp; credentials → Install a certificate → CA certificate</span>, then pick the downloaded file. <span class="text-gray-500">(Menu names vary slightly by phone.)</span></div>
+          </li>
+          <li class="flex space-x-3"><span class="w-6 h-6 shrink-0 rounded-full bg-green-100 text-green-700 font-bold flex items-center justify-center text-xs">✓</span>
+            <div>Come back here — this page notices automatically and takes you in.</div>
+          </li>
+        </ol>
+      </div>
+
+      <!-- Mac -->
+      <div x-show="show === 'mac'" class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+        <h3 class="font-bold text-gray-900 mb-4">Mac</h3>
+        <ol class="space-y-4 text-sm text-gray-700">
+          <li class="flex space-x-3"><span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">1</span>
+            <div>On the machine running Rip Sites: <span class="font-mono bg-gray-100 rounded px-1.5 py-0.5 text-xs">rip sites trust edge</span></div>
+          </li>
+          <li class="flex space-x-3"><span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">2</span>
+            <div>On any other Mac: <a href="/trust/ca.crt" class="text-indigo-600 font-medium underline">download the CA certificate</a>, double-click it into Keychain Access, then set it to <span class="font-semibold">Always Trust</span>.</div>
+          </li>
+        </ol>
+      </div>
+
+      <!-- Other -->
+      <div x-show="show === 'other'" class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+        <h3 class="font-bold text-gray-900 mb-4">Other devices</h3>
+        <p class="text-sm text-gray-700"><a href="/trust/ca.crt" class="text-indigo-600 font-medium underline">Download the CA certificate</a> and import it as a trusted root certificate in your system or browser settings.</p>
+      </div>
+
+      <!-- Platform switcher + live probe -->
+      <div class="flex items-center justify-between text-sm">
+        <div class="text-gray-500">
+          Not this device?
+          <template x-for="p in ['ios','android','mac','other']" :key="p">
+            <button x-show="show !== p" @click="show = p" class="ml-2 text-indigo-600 font-medium hover:underline" x-text="labels[p]"></button>
+          </template>
+        </div>
+        <div class="flex items-center space-x-2 text-gray-500">
+          <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+          <span x-text="checking ? 'checking…' : 'watching for trust'"></span>
+          <button @click="recheck()" class="text-indigo-600 font-medium hover:underline">Check now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="mt-auto border-t border-white/20 bg-white/30 backdrop-blur-sm">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4 text-center text-xs text-gray-500">
+      The certificate authority’s private key never leaves the host machine. Trust is per-device and can be removed at any time in your device settings.
+    </div>
+  </div>
+
+  <style>[x-cloak]{display:none!important}</style>
+  <script>
+    function trust() {
+      return {
+        state: 'probing',
+        show: null,
+        checking: false,
+        // Real Safari only: Chrome/Firefox/Edge on iOS all carry "Safari/"
+        // in their UA but cannot hand a profile to Settings.
+        safari: /Safari\//.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS|GSA|OPT\//.test(navigator.userAgent),
+        // Force-open Safari from any iOS browser (undocumented scheme; iOS
+        // 15/17/18 yes, 16 no — hence the typed fallback below the button).
+        // Must target the profile FILE: a page loaded via a cert-exception
+        // would wrongly report this device as already trusted.
+        safariHref: 'x-safari-https://' + location.hostname + '/trust/safari',
+        labels: { ios: 'iPhone/iPad', android: 'Android', mac: 'Mac', other: 'Other' },
+        init() {
+          this.show = this.detect();
+          if (location.protocol === 'https:') { this.state = 'trusted'; return; }
+          this.recheck();
+          setInterval(() => { if (this.state === 'onboard' && !this.checking) this.recheck(); }, 4000);
+          addEventListener('focus', () => { if (this.state === 'onboard' && !this.checking) this.recheck(); });
+        },
+        detect() {
+          const ua = navigator.userAgent;
+          if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+          if (/Android/.test(ua)) return 'android';
+          if (/Macintosh/.test(ua)) return 'mac';
+          return 'other';
+        },
+        // From this plain-HTTP page, an https fetch to the same host resolves
+        // only if the device already trusts the local CA (no-cors: the opaque
+        // response is irrelevant — surviving the TLS handshake is the signal).
+        async probe() {
+          try {
+            await fetch(`https://${location.hostname}/trust/check`, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(3000) });
+            return true;
+          } catch { return false; }
+        },
+        async recheck() {
+          this.checking = true;
+          const ok = await this.probe();
+          this.checking = false;
+          if (ok) location.replace(`https://${location.hostname}/`);
+          else this.state = 'onboard';
+        },
+      }
+    }
+  </script>
+</body>
+</html>

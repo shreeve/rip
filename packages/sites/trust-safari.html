@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rip Sites — Install Trust</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
+  <div class="max-w-md mx-auto px-4 py-8">
+    <div class="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-white/50 p-6">
+      <h1 class="text-xl font-bold text-gray-900">Almost there</h1>
+      <p class="mt-1 text-sm text-gray-600">The trust profile is downloading — allow it, then two quick steps in Settings.</p>
+
+      <ol class="mt-5 space-y-5 text-sm text-gray-700">
+        <li class="flex space-x-3">
+          <span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">1</span>
+          <div>
+            Tap <span class="font-semibold">Allow</span> when Safari asks about the configuration profile.
+            <a href="/trust/ca.mobileconfig" class="block mt-2 text-indigo-600 font-medium underline">Didn’t see it? Download again</a>
+          </div>
+        </li>
+        <!-- No Settings deep-link buttons here: Safari refuses the App-Prefs
+             scheme ("address is invalid") — those buttons only work from
+             Chrome-family browsers, i.e. on the main trust page. -->
+        <li class="flex space-x-3">
+          <span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">2</span>
+          <div>Open the <span class="font-semibold">Settings</span> app and tap the <span class="font-semibold">Rip Local HTTPS</span> profile — under <span class="font-semibold">Profile Downloaded</span> near the top, or <span class="font-semibold">General → VPN &amp; Device Management</span> — then <span class="font-semibold">Install</span>.</div>
+        </li>
+        <li class="flex space-x-3">
+          <span class="w-6 h-6 shrink-0 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">3</span>
+          <div>Still in Settings: <span class="font-semibold">General → About</span>, scroll to <span class="font-semibold">Certificate Trust Settings</span>, and switch <span class="font-semibold">on</span> “Caddy Local Authority”. <span class="text-gray-400">(The step everyone misses.)</span></div>
+        </li>
+        <li class="flex space-x-3">
+          <span class="w-6 h-6 shrink-0 rounded-full bg-green-100 text-green-700 font-bold flex items-center justify-center text-xs">✓</span>
+          <div>Go back to your browser — it notices within seconds and takes you straight to the dashboard, green lock and all.</div>
+        </li>
+      </ol>
+    </div>
+    <p class="mt-4 text-center text-xs text-gray-500">Heads up: iOS discards a downloaded profile after 8 minutes — if you wandered off, just download again.</p>
+  </div>
+  <script>
+    // Kick off the profile download once the page has painted, so the
+    // instructions stay visible underneath Safari's prompts.
+    setTimeout(function () { location.href = '/trust/ca.mobileconfig'; }, 700);
+  </script>
+</body>
+</html>
