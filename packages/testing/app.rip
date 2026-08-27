@@ -67,7 +67,7 @@ export scratchDb = (migrationsDir, opts = {}) ->
       stdout: 'ignore'
       stderr: 'ignore'
       # Registry litter (name.lock/name.token) lands in the scratch dir
-      # and is removed with it — never in the user's ~/.harbor.
+      # and is removed with it — never in the user's ~/.config/harbor.
       env: { ...process.env, HARBOR_HOME: dir }
     # A live child must not hold the test process's event loop open —
     # the tally prints at exit, and exit is what kills harbor.

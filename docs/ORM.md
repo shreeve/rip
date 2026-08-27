@@ -962,7 +962,18 @@ rip schema dump                   write schema.sql — the declared shape of eve
                                   instead of writing, the CI seam)
 rip schema make add_partners      write migrations/NNNN_add_partners.sql from the diff
 rip schema migrate                apply pending files in order
+rip schema push                   diff, write migrations/YYYYMMDD-HHMMSS.sql, and apply
+                                  it — one motion, for rapid iteration; refuses when
+                                  pending/edited/conflicting migrations make the state
+                                  unclear, and gates lossy/destructive exactly like make
 ```
+
+`push` is the rapid-iteration verb: edit the model, `rip schema push`,
+keep working. Unlike Prisma's `db push` / Drizzle's `drizzle-kit push`,
+it still writes the migration artifact — the timestamped file joins the
+same checksummed history `make` uses, so a push session leaves no drift
+to reconcile and teammates just `rip schema migrate`. A plan that is
+only informational notes (FK facts, sequence starts) pushes nothing.
 
 Every planned step is classified: `safe` applies freely; `lossy` (type
 changes, `SET NOT NULL`) and `destructive` (`DROP TABLE`,

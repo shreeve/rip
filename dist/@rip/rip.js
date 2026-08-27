@@ -27687,6 +27687,67 @@ var check = function(files) {
   }));
   return rash(new TextEncoder().encode(inventory));
 };
+// src/watch.js
+(() => {
+  if (typeof document === "undefined" || typeof WebSocket === "undefined")
+    return;
+  const self = document.currentScript;
+  const armed = self ? /\bwatch\.js\b/.test(self.src || "") : !!document.querySelector("script[watch]");
+  if (!armed || globalThis.__ripWatch)
+    return;
+  globalThis.__ripWatch = true;
+  const page = location.pathname;
+  const hits = (paths) => Array.isArray(paths) && (paths.includes(page) || page.endsWith("/") && paths.includes(page + "index.html"));
+  const tag = (r) => r.headers.get("etag") || r.headers.get("last-modified") || "";
+  let mark = null;
+  fetch(location.href, { method: "HEAD", cache: "no-store" }).then((r) => {
+    mark = tag(r);
+  }).catch(() => {});
+  const recheck = () => {
+    if (mark === null)
+      return;
+    fetch(location.href, { method: "HEAD", cache: "no-store" }).then((r) => {
+      if (tag(r) !== mark)
+        location.reload();
+    }).catch(() => {});
+  };
+  let everOpen = false;
+  let attempts = 0;
+  const connect = () => {
+    const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+    const ws = new WebSocket(scheme + location.host + "/hub");
+    ws.onopen = () => ws.send('{"+":["/assets"],"?":"observe"}');
+    ws.onmessage = (event) => {
+      let frame;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      for (const obj of Array.isArray(frame) ? frame : [frame]) {
+        if (!obj || typeof obj !== "object" || "<" in obj)
+          continue;
+        if ("!" in obj) {
+          if (everOpen)
+            recheck();
+          everOpen = true;
+          attempts = 0;
+        }
+        if (hits(obj.touched))
+          location.reload();
+      }
+    };
+    ws.onclose = () => {
+      attempts += 1;
+      if (!everOpen && attempts >= 6)
+        return;
+      setTimeout(connect, Math.min(8000, 500 * 2 ** (attempts - 1)));
+    };
+    ws.onerror = () => {};
+  };
+  connect();
+})();
+
 // src/browser.js
 var { __hmrEmit: __hmrEmit2 } = exports_components;
 function compile3(source2, options = {}) {

@@ -131,7 +131,7 @@ Three URL spellings dial two transports:
 | `harbor:<name>` | resolution sugar — never a third transport |
 
 `harbor:<name>` reads the berth registry `harbor serve` maintains
-(`$HARBOR_HOME/<name>.json`, default `~/.harbor`) and desugars to
+(`$HARBOR_HOME/runtime/<name>.json`, default `~/.config/harbor/runtime`) and desugars to
 whichever spelling the berth registered — socket preferred, TCP port
 otherwise. It also resolves the bearer token from `<name>.token`, the
 one thing a raw spelling cannot carry, so `RIP_DB_URL=harbor:medlabs`

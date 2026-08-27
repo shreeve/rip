@@ -172,12 +172,20 @@ const brBytes = brotliCompressSync(minBytes, {
   },
 });
 
+// Watch ships twice from one source: bundled into the runtime
+// above (armed by a `watch` script attribute) and copied verbatim as the
+// standalone /@rip/watch.js include. No compile step — the source is
+// plain browser JS with no imports, valid as a classic script.
+const watchBytes = readFileSync(resolve(root, 'src/watch.js'));
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(resolve(outDir, 'rip.js'), code);
 writeFileSync(resolve(outDir, 'rip.min.js'), minBytes);
 writeFileSync(resolve(outDir, 'rip.min.js.br'), brBytes);
+writeFileSync(resolve(outDir, 'watch.js'), watchBytes);
 
 const kb = n => (n / 1024).toFixed(1);
 console.log(`browser: dist/@rip/rip.js ${kb(Buffer.byteLength(code))} KB`);
 console.log(`browser: dist/@rip/rip.min.js ${kb(minBytes.length)} KB`);
 console.log(`browser: dist/@rip/rip.min.js.br ${kb(brBytes.length)} KB`);
+console.log(`browser: dist/@rip/watch.js ${kb(watchBytes.length)} KB`);

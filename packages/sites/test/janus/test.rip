@@ -29,6 +29,7 @@ MISSING = """
 releasedCaddy = ->
   binary = process.env.JANUS_CADDY or
     (existsSync(PACKAGED_CADDY) and PACKAGED_CADDY) or
+    Bun.which('janus') or
     Bun.which('caddy')
   return null unless binary
   throw Error.new("Janus binary is not an existing file: #{binary}") unless existsSync binary

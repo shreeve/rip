@@ -53,7 +53,8 @@ function envToken() {
 // domain socket — Bun's fetch `unix` option; the dummy hostname in the
 // URL is never resolved. `harbor:<name>` is resolution sugar, never a
 // third transport: it reads the berth registry `harbor serve` maintains
-// ($HARBOR_HOME/<name>.json, default ~/.harbor) and desugars to
+// ($HARBOR_HOME/runtime/<name>.json, default ~/.config/harbor/runtime)
+// and desugars to
 // whichever spelling the berth registered — socket preferred, TCP port
 // otherwise. It also resolves the bearer token from <name>.token, the
 // one thing a raw spelling cannot carry; precedence stays caller's
@@ -76,7 +77,8 @@ function resolveHarborName(name, env) {
       `db: harbor:${name} needs filesystem access to read the berth registry — ` +
       'use an http:// or unix:// url in this runtime');
   }
-  const home = env.HARBOR_HOME || `${env.HOME || ''}/.harbor`;
+  const root = env.HARBOR_HOME || `${env.HOME || ''}/.config/harbor`;
+  const home = `${root}/runtime`;
   const registryPath = `${home}/${name}.json`;
   let berth;
   try {

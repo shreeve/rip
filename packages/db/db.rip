@@ -963,7 +963,11 @@ if import.meta.main
     process.exit 1
 
   runTar = (args, opts = {}) ->
-    r = spawnSync 'tar', args, { encoding: 'utf8', ...opts }
+    # COPYFILE_DISABLE stops macOS bsdtar from synthesizing an AppleDouble
+    # `._name` sidecar for every file's xattrs — pure junk in a database
+    # archive, and confusing next to the real per-table CSVs. Harmless
+    # everywhere else.
+    r = spawnSync 'tar', args, { encoding: 'utf8', ...opts, env: { ...process.env, COPYFILE_DISABLE: '1' } }
     throw r.error if r.error
     if r.status isnt 0
       throw Error.new "tar #{args.join(' ')} exited #{r.status}: #{(r.stderr or '').trim()}"

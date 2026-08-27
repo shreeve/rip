@@ -1121,6 +1121,11 @@ export function dump() {
 // ── migration files & history ─────────────────────────────────────────
 
 const MIGRATION_FILE_RE = /^(\d{4,})_(.+)\.sql$/;
+// Push migrations are named by the second they were made:
+// 20260827-063412.sql. The dash keeps the timestamp out of the
+// NNNN_name namespace, so make's sequential numbering never mistakes
+// a push for migration number twenty million.
+const PUSH_FILE_RE = /^(\d{8}-\d{6})\.sql$/;
 
 export async function migrationFiles(dir) {
   const fs = await import('node:fs');
@@ -1129,12 +1134,12 @@ export async function migrationFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const f of fs.readdirSync(dir).sort()) {
-    const m = f.match(MIGRATION_FILE_RE);
+    const m = f.match(MIGRATION_FILE_RE) || f.match(PUSH_FILE_RE);
     if (!m) continue;
     const content = fs.readFileSync(path.join(dir, f), 'utf8');
     out.push({
       version: m[1],
-      name: m[2],
+      name: m[2] ?? 'push',
       file: path.join(dir, f),
       checksum: crypto.createHash('sha256').update(content).digest('hex'),
       content,
@@ -1376,19 +1381,15 @@ export async function status(opts = {}) {
   return { steps, files, applied, pending, mismatched, missing, duplicates };
 }
 
-export async function make(name, opts = {}) {
-  if (!name || typeof name !== 'string') {
-    throw new Error("schema.make: a migration name is required, e.g. `rip schema make add_orders`");
-  }
-  const dir = opts.dir || 'migrations';
-  const steps = await plan();
-  if (!steps.length) return null;
-
+// The shared safety gate: blocked steps never pass, lossy/destructive
+// need their flags. `who` keeps every message naming the verb that hit
+// the gate (schema.make vs schema.push).
+function gatePlan(steps, opts, who) {
   const blocked = steps.filter((s) => s.class === 'blocked');
   if (blocked.length) {
     const list = blocked.map((s) => '  [blocked] ' + s.kind + ' ' + s.table + '\n    ' + s.notes.join('\n    ')).join('\n');
     throw new Error(
-      'schema.make: the plan contains steps DuckDB cannot execute while other entries (foreign keys, ' +
+      who + ': the plan contains steps DuckDB cannot execute while other entries (foreign keys, ' +
       'indexes) depend on the table:\n' +
       list + '\nThese need the dependent entries dropped or rebuilt around the change by hand; no flag overrides this.');
   }
@@ -1400,14 +1401,27 @@ export async function make(name, opts = {}) {
   if (gated.length) {
     const list = gated.map((s) => '  [' + s.class + '] ' + s.kind + ' ' + s.table).join('\n');
     throw new Error(
-      'schema.make: the plan contains gated steps:\n' + list +
+      who + ': the plan contains gated steps:\n' + list +
       '\nPass --allow-lossy / --allow-destructive to include them.');
   }
+}
+
+export async function make(name, opts = {}) {
+  if (!name || typeof name !== 'string') {
+    throw new Error("schema.make: a migration name is required, e.g. `rip schema make add_orders`");
+  }
+  const dir = opts.dir || 'migrations';
+  const steps = await plan();
+  if (!steps.length) return null;
+  gatePlan(steps, opts, 'schema.make');
 
   const fs = await import('node:fs');
   const path = await import('node:path');
   const files = await migrationFiles(dir);
-  const next = files.length ? Math.max(...files.map((f) => parseInt(f.version, 10))) + 1 : 1;
+  // Sequential numbering counts only NNNN_name files: a timestamped
+  // push in the directory must not turn the next make into 20260828.
+  const sequential = files.filter((f) => !f.version.includes('-'));
+  const next = sequential.length ? Math.max(...sequential.map((f) => parseInt(f.version, 10))) + 1 : 1;
   const version = String(next).padStart(4, '0');
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'migration';
   const file = path.join(dir, version + '_' + slug + '.sql');
@@ -1421,6 +1435,71 @@ export async function make(name, opts = {}) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, body);
   return { file, version, steps };
+}
+
+// push: plan → timestamped file → apply, one motion. The rapid-iteration
+// verb — nothing to ponder when the plan is clean. Unlike Prisma/Drizzle
+// `push`, the artifact is still written: history stays continuous, so a
+// push session never ends with "now reconcile your migrations". Any
+// conflict (pending files, edited history, missing files, duplicate
+// versions) refuses BEFORE anything is written or applied — push never
+// guesses about a directory in an unclear state.
+export async function push(opts = {}) {
+  const dir = opts.dir || 'migrations';
+  const st = await status({ dir });
+  const conflicts = [];
+  if (st.pending.length) {
+    conflicts.push('pending migrations: ' + st.pending.map((f) => f.version + '_' + f.name).join(', ') +
+      ' — apply them first with `rip schema migrate`');
+  }
+  if (st.mismatched.length) {
+    conflicts.push('edited after apply: ' + st.mismatched.join(', ') +
+      ' — restore the files or run `rip schema migrate --repair`');
+  }
+  if (st.missing.length) {
+    conflicts.push('applied but file missing: ' + st.missing.join(', '));
+  }
+  if (st.duplicates.length) {
+    conflicts.push('conflicting versions: ' + st.duplicates.join('; '));
+  }
+  if (conflicts.length) {
+    throw new Error('schema.push: the migration state is not clean:\n  ' + conflicts.join('\n  '));
+  }
+  const steps = st.steps;
+  if (!steps.length) return null;
+  gatePlan(steps, opts, 'schema.push');
+  // Note steps are facts, not migrations (FKs DuckDB cannot add, sequence
+  // starts it cannot alter) — they never resolve, so writing them would
+  // mint a fresh comment-only migration on every push forever. A plan
+  // that is ALL notes pushes nothing; the notes still print.
+  if (steps.every((s) => s.kind.startsWith('note-'))) {
+    return { file: null, version: null, steps, ran: [] };
+  }
+
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const now = opts.now ? new Date(opts.now) : new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  const version = '' + now.getFullYear() + two(now.getMonth() + 1) + two(now.getDate()) +
+    '-' + two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());
+  const file = path.join(dir, version + '.sql');
+  if (fs.existsSync(file)) {
+    throw new Error('schema.push: ' + file + ' already exists (two pushes inside one second) — try again');
+  }
+  const body =
+    '-- ' + version + '.sql\n' +
+    '-- Generated and applied by `rip schema push`.\n\n' +
+    renderPlan(steps);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, body);
+  try {
+    const out = await migrate({ dir });
+    return { file, version, steps, ran: out.ran };
+  } catch (e) {
+    e.message = (e?.message || String(e)) +
+      '\n(the migration file ' + file + ' was written; fix and apply with `rip schema migrate`, or delete it)';
+    throw e;
+  }
 }
 
 export async function migrate(opts = {}) {

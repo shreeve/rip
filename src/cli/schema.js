@@ -44,6 +44,9 @@ Usage:
                      [--allow-lossy] [--allow-destructive]
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
                      [--repair] [--force]
+  rip schema push    [entry.rip] [--dir DIR]        diff, write migrations/YYYYMMDD-HHMMSS.sql,
+                     [--allow-lossy] [--allow-destructive]   and apply it — one motion (rapid iteration;
+                     refuses when pending/edited/conflicting migrations make the state unclear)
 
 entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDIDATES.join(' | ')})
 --dir DIR       migrations directory (default: migrations/ beside the models entry —
@@ -72,8 +75,8 @@ if (!cmd || cmd === '--help' || cmd === '-h') {
   console.log(USAGE);
   process.exit(0);
 }
-if (!['status', 'plan', 'dump', 'make', 'migrate'].includes(cmd)) {
-  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, or migrate\n\n${USAGE}`, 2);
+if (!['status', 'plan', 'dump', 'make', 'migrate', 'push'].includes(cmd)) {
+  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, migrate, or push\n\n${USAGE}`, 2);
 }
 
 const rest = args.slice(1);
@@ -114,8 +117,8 @@ for (let i = 0; i < rest.length; i++) {
 }
 if (flags.out && cmd !== 'dump') die('--out only applies to dump', 2);
 if (flags.check && cmd !== 'dump') die('--check only applies to dump', 2);
-if (flags.allowLossy && cmd !== 'make') die('--allow-lossy only applies to make', 2);
-if (flags.allowDestructive && cmd !== 'make') die('--allow-destructive only applies to make', 2);
+if (flags.allowLossy && cmd !== 'make' && cmd !== 'push') die('--allow-lossy only applies to make and push', 2);
+if (flags.allowDestructive && cmd !== 'make' && cmd !== 'push') die('--allow-destructive only applies to make and push', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
 if (flags.force && cmd !== 'migrate') die('--force only applies to migrate', 2);
 if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
@@ -247,6 +250,28 @@ try {
       printSteps(out.steps);
       console.log(`\nwrote ${out.file}`);
       console.log('review the file, then apply with: rip schema migrate');
+    }
+
+  } else if (cmd === 'push') {
+    const adapter = adapterFor(null);
+    if (typeof adapter.begin !== 'function') {
+      console.error(
+        'rip schema: warning — the adapter has no begin(): migrations apply WITHOUT transactions, ' +
+        'so an interrupted run leaves partial state (the failure report will say exactly what applied).');
+    }
+    const out = await migration.push({
+      dir: flags.dir,
+      allowLossy: flags.allowLossy,
+      allowDestructive: flags.allowDestructive,
+    });
+    if (!out) {
+      console.log('database matches the declared models — nothing to push');
+    } else if (!out.file) {
+      printSteps(out.steps);
+      console.log('\nnothing to apply — informational notes only, no migration written');
+    } else {
+      printSteps(out.steps);
+      console.log(`\npushed ${out.file} (written and applied)`);
     }
 
   } else if (cmd === 'migrate') {

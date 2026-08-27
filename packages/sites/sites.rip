@@ -260,7 +260,8 @@ pathNoun = (selector = null) ->
 renderApp = (app) ->
   marker = if app.state is 'running' then '●' else '○'
   url = if app.url then "  #{app.url}" else ''
-  "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}"
+  warning = if app.hostWarning then "\n  ⚠ #{app.hostWarning}" else ''
+  "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}#{warning}"
 
 renderEdge = (edge) ->
   marker = if edge.state is 'running' then '●' else '○'
@@ -568,19 +569,28 @@ switch verb
       writeFileSync target, edge.pem, { mode: 0o600 }
       if json then printJson { path: target, source: edge.path } else console.log "Exported edge CA → #{target}"
     else
-      edge = edgePost! '/1.0/edge/trust', {}, true
+      # `caddy trust` escalates via sudo, which needs THIS terminal to
+      # prompt — the agent daemon has neither a TTY nor a way to ask, so
+      # the install runs here and only the outcome is recorded with the
+      # agent.
+      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
+      abort 'rip-sites: edge must be running to trust the CA — run `rip sites start edge` first' unless edge.state is 'running' and edge.caddy and edge.admin
+      result = Bun.spawnSync [edge.caddy, 'trust', '--address', "unix/#{edge.admin}"], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
+      unless result.exitCode is 0
+        abort "rip-sites: certificate install failed (exit #{result.exitCode}) — manual fallback:\n  rip sites trust edge --export /tmp/rip-local-ca.crt\n  # then add that certificate to your system trust store (macOS:\n  # sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/rip-local-ca.crt)"
+      edge = edgePost! '/1.0/edge/trusted', {}, true
       if json then printJson edge else console.log "● Edge CA trusted for local mode#{if edge.root then "\n  Root: #{edge.root}" else ''}"
 
   when 'expose'
     posture = noun
     abort 'rip-sites: expose requires a posture (local | public | loopback)' unless posture?
     abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length
-    if posture is 'public'
-      abort 'rip-sites: public posture is not available yet — use `rip sites expose loopback` or `rip sites expose local`'
     if posture in ['loopback', 'default']
       printEdge edgePost!('/1.0/edge/local', { off: true }, true)
     else if posture is 'local'
       printEdge edgePost!('/1.0/edge/local', { off: false }, true)
+    else if posture is 'public'
+      printEdge edgePost!('/1.0/edge/public', { off: false }, true)
     else
       abort "rip-sites: unknown posture #{JSON.stringify(posture)} — use local | public | loopback"
 

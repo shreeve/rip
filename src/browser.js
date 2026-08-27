@@ -18,6 +18,9 @@ import * as schema from './runtime/schema.js';
 import * as reactive from './runtime/reactive.js';
 import * as components from './runtime/components.js';
 import * as app from '../packages/app/index.rip';
+// Side-effect: watch arms itself only when a script tag
+// carries the `watch` attribute — a page that doesn't ask isn't listening.
+import './watch.js';
 
 const { __hmrEmit } = components;
 

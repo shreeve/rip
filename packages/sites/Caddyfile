@@ -75,4 +75,4 @@ via.rip {
 # Machine-local site blocks (domains + certs owned by this operator, e.g.
 # *.medlabs.health). One small .caddy snippet per project; the packaged
 # posture files stay canonical and platform updates flow without copy-drift.
-import {$HOME}/.config/janus/sites.d/*.caddy
+import {$HOME}/.config/janus/sites/*.caddy
