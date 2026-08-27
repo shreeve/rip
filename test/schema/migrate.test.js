@@ -1661,6 +1661,115 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
   });
 });
 
+describe('migrate: push — one-motion timestamped migrations', () => {
+  const withDir = async (fn) => {
+    const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-push-'));
+    try { return await fn(mdir); } finally { rmSync(mdir, { recursive: true, force: true }); }
+  };
+
+  test('clean state: writes YYYYMMDD-HHMMSS.sql, applies it, records history', async () => {
+    await withDir(async (mdir) => {
+      const adapter = migrateAdapter({ tables: [] });
+      const out = await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        return mig.push({ dir: mdir });
+      });
+      expect(out.file).toMatch(/\d{8}-\d{6}\.sql$/);
+      expect(out.version).toMatch(/^\d{8}-\d{6}$/);
+      expect(out.ran).toEqual([out.version + '_push']);
+      expect(adapter.history.map((h) => h.version)).toEqual([out.version]);
+      const content = readFileSync(out.file, 'utf8');
+      expect(content).toContain('CREATE TABLE "users"');
+      expect(content).toContain('rip schema push');
+    });
+  });
+
+  test('matching database: null, nothing written, nothing applied', async () => {
+    await withDir(async (mdir) => {
+      const adapter = migrateAdapter({ tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] });
+      const out = await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        return mig.push({ dir: mdir });
+      });
+      expect(out).toBe(null);
+      expect(adapter.history).toEqual([]);
+    });
+  });
+
+  test('a notes-only plan pushes nothing: facts are not migrations', async () => {
+    await withDir(async (mdir) => {
+      const adapter = migrateAdapter({ tables: [table('users', [col('name', 'VARCHAR', { notNull: true })], { start: 1 })] });
+      const out = await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name'), dir('idStart', { value: 5000 })));
+        return mig.push({ dir: mdir });
+      });
+      expect(out.file).toBe(null);
+      expect(out.steps.map((s) => s.kind)).toEqual(['note-sequence']);
+      expect(adapter.history).toEqual([]);
+      const { readdirSync } = await import('node:fs');
+      expect(readdirSync(mdir)).toEqual([]);
+    });
+  });
+
+  test('gates hold: destructive refuses without its flag, applies with it', async () => {
+    const scenario = (opts) => withDir((mdir) => K4.scope(async () => {
+      K4.setAdapter(migrateAdapter({ tables: [table('users', [
+        col('name', 'VARCHAR', { notNull: true }), col('legacy'),
+      ])] }));
+      K4.__schema(model('User', field('name')));
+      return mig.push({ dir: mdir, ...opts });
+    }));
+    await expect(scenario({})).rejects.toThrow(/schema\.push: the plan contains gated steps[\s\S]*\[destructive\] drop-column users/);
+    const out = await scenario({ allowDestructive: true });
+    expect(out.ran).toEqual([out.version + '_push']);
+  });
+
+  test('an unclear directory refuses before writing: pending file named, nothing new appears', async () => {
+    await withDir(async (mdir) => {
+      writeFileSync(join(mdir, '0001_pending.sql'), '-- unapplied\nSELECT 1;\n');
+      await expect(K4.scope(async () => {
+        K4.setAdapter(migrateAdapter({ tables: [] }));
+        K4.__schema(model('User', field('name')));
+        return mig.push({ dir: mdir });
+      })).rejects.toThrow(/migration state is not clean[\s\S]*pending migrations: 0001_pending/);
+      const { readdirSync } = await import('node:fs');
+      expect(readdirSync(mdir)).toEqual(['0001_pending.sql']);
+    });
+  });
+
+  test('two pushes inside one second: the second refuses on the existing file', async () => {
+    await withDir(async (mdir) => {
+      const adapter = migrateAdapter({ tables: [] });
+      await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        await mig.push({ dir: mdir, now: '2026-08-27T06:34:12' });
+        // The fake database never changes shape, so the plan still has
+        // steps — the filename collision is what must refuse.
+        await expect(mig.push({ dir: mdir, now: '2026-08-27T06:34:12' }))
+          .rejects.toThrow(/already exists \(two pushes inside one second\)/);
+      });
+    });
+  });
+
+  test('make numbering ignores timestamped pushes: next sequential is still 0001', async () => {
+    await withDir(async (mdir) => {
+      writeFileSync(join(mdir, '20260827-063412.sql'), '-- a prior push\nSELECT 1;\n');
+      const out = await K4.scope(async () => {
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.history.push({ version: '20260827-063412', name: 'push', checksum: (await import('node:crypto')).createHash('sha256').update('-- a prior push\nSELECT 1;\n').digest('hex') });
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        return mig.make('init', { dir: mdir });
+      });
+      expect(out.version).toBe('0001');
+    });
+  });
+});
+
 describe('migrate: migrate — history, checksums, conflicts, idempotence', () => {
   const withDir = async (fn) => {
     const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-run-'));

@@ -33,7 +33,7 @@ Usage:
   rip [options]                      Read source from stdin (when piped)
   rip check [paths...]               Type-check .rip files/dirs headlessly, no editor
                                      (default: the current directory; 'rip check --help')
-  rip schema <verb> [args...]        Schema evolution: status | plan | dump | make | migrate
+  rip schema <verb> [args...]        Schema evolution: status | plan | dump | make | migrate | push
                                      (run 'rip schema --help' for the full surface)
   rip sites <verb> [noun] [args...]  Rip Sites: catalog, apps, edge, tray, manager
                                      Reserved nouns: edge | all | tray | agent
