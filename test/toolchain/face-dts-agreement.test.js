@@ -5,21 +5,31 @@
 // `dts.js` (the `.d.ts`, which consumers of a published package see) are
 // two independent walks over the same sexpr. Nothing structurally forces
 // them to agree, and every type-level detail that rides a side-band ROLE
-// — the optional `?` marker, a generic head's `<T, …>` clause — has to be
-// read separately by each. Forgetting is the failure mode, and it has now
-// happened in BOTH directions:
+// — the optional `?` marker, a generic head's `<T, …>` clause — or that
+// each emitter GENERATES for itself — the async `Promise<T>` wrap, a void
+// definition's `void`, a generator's iterator — has to be decided
+// separately by each. Forgetting is the failure mode, in both directions
+// and on every axis:
 //
 //   · dts.js forgot the optionalMarker role → declarations emitted
 //     `title: string` (or a malformed `title: `) where the face said
 //     `title?: string`.
 //   · emitter.js's overload rows (tsOverloadSigs) forgot it → the face
 //     emitted `b: string` where the .d.ts said `b?: string`.
+//   · dts.js had no async wrap → a `.d.ts` published `number` where the
+//     face said `Promise<number>`, telling consumers a value comes back
+//     where a promise does. That one type-checks and fails at RUNTIME.
 //
-// Neither is catchable downstream. `title?: string` degrading to
+// None is catchable downstream. `title?: string` degrading to
 // `title: string` is PERFECTLY VALID TypeScript — both artifacts compile
 // clean under `tsc --strict` in isolation, so no tsc gate, however
 // thorough, can see it. The defect is only visible as a DISAGREEMENT
 // between rip's own two outputs, which is what this gate compares.
+//
+// The converse is its standing limit: where BOTH emitters make the same
+// mistake they agree, and this gate stays green. A generator declaring
+// `: void` on both sides passed here until a tsc gate rejected the face
+// (TS2505). Agreement is necessary, never sufficient.
 //
 // It runs in the DEFAULT tier on purpose: it spawns nothing, needs no
 // tsc, and costs milliseconds. An invalid-or-wrong `.d.ts` is a defect
@@ -35,15 +45,64 @@ const corpusDir = join(import.meta.dir, '../corpus');
 // Signatures, from either artifact. Both spell a callable the same way
 // once `declare`/`export` are stripped: NAME <T,…>? ( params ) : ret
 //
-// Captured per name: the type-param clause, and the set of params
-// carrying `?`. Those are exactly the two role-borne details, and the
-// two that have actually drifted.
-const SIG = /(?:^|\s)(?:export\s+)?(?:declare\s+)?function\s+([A-Za-z_$][\w$]*)\s*(<[^(]*>)?\s*\(([^)]*)\)/gm;
+// Captured per name: the type-param clause, the set of params carrying
+// `?`, and the RETURN type. All three ride side-band roles or generated
+// rules that each emitter applies for itself, and all three have drifted.
+//
+// A regex cannot find the end of a parameter list that contains its own
+// parens (`cb: (x: number) => void`) or the end of a return type that is
+// an object (`: { a: number }`), so the scan is BALANCED. `function*` is
+// matched too: a generator's return type is exactly one of the rules
+// that drifted, and a scan that skipped the star could not see it.
+const HEAD = /(?:^|[\s;}])(?:export\s+)?(?:declare\s+)?(?:async\s+)?function\*?\s+([A-Za-z_$][\w$]*)/g;
+
+// The characters after which a `{` opens a TYPE rather than a body.
+const TYPE_EXPECTED = ':|&,<(';
 
 function signatures(text) {
-  const out = new Map(); // name -> array of {generics, optionals}
-  for (const m of text.matchAll(SIG)) {
-    const [, name, generics = '', params = ''] = m;
+  const out = new Map(); // name -> array of {generics, optionals, ret}
+  for (const m of text.matchAll(HEAD)) {
+    const name = m[1];
+    let i = m.index + m[0].length;
+    const skipSpace = () => { while (i < text.length && /\s/.test(text[i])) i++; };
+    const balanced = (open, close) => {
+      const start = i;
+      let depth = 0;
+      do {
+        if (text[i] === open) depth++;
+        else if (text[i] === close) depth--;
+        i++;
+      } while (i < text.length && depth > 0);
+      return text.slice(start, i);
+    };
+    skipSpace();
+    const generics = text[i] === '<' ? balanced('<', '>') : '';
+    skipSpace();
+    if (text[i] !== '(') continue; // not a callable head after all
+    const params = balanced('(', ')').slice(1, -1);
+    // The return type runs from `:` to the body's `{` or the row's `;`.
+    let ret = null;
+    skipSpace();
+    if (text[i] === ':') {
+      i++;
+      const start = i;
+      let depth = 0;
+      while (i < text.length) {
+        const c = text[i];
+        if (depth === 0 && c === ';') break;
+        if (depth === 0 && c === '{') {
+          const before = text.slice(start, i).trimEnd();
+          const prev = before.slice(-1);
+          // An object TYPE opens where a type is expected; anywhere
+          // else a `{` is the function body, and the type ended.
+          if (!(before === '' || TYPE_EXPECTED.includes(prev) || before.endsWith('=>'))) break;
+        }
+        if ('<([{'.includes(c)) depth++;
+        else if ('>)]}'.includes(c)) { if (depth === 0) break; depth--; }
+        i++;
+      }
+      ret = text.slice(start, i).trim();
+    }
     const optionals = params
       .split(',')
       .map((p) => p.trim())
@@ -63,7 +122,16 @@ function signatures(text) {
       .filter((p) => /^[.\w$[\]{}\s]*\?\s*(:|$)/.test(p) || /=/.test(p))
       .map((p) => p.split(/[?:=]/)[0].trim());
     const rows = out.get(name) ?? [];
-    rows.push({ generics: generics.replace(/\s+/g, ' ').trim(), optionals: optionals.sort().join(',') });
+    // A face with NO return annotation lets TypeScript infer from the
+    // body; a declaration has no body, so its honest spelling of that
+    // same signature is `any`. Normalizing both to `any` is what makes
+    // "the face inferred it" and "the .d.ts widened it" one answer —
+    // every OTHER difference between the two is a real divergence.
+    rows.push({
+      generics: generics.replace(/\s+/g, ' ').trim(),
+      optionals: optionals.sort().join(','),
+      ret: (ret ?? 'any').replace(/\s+/g, ' '),
+    });
     out.set(name, rows);
   }
   return out;
@@ -76,9 +144,10 @@ function facts(src, path = 'agreement.rip') {
   return { face: signatures(face), dts: signatures(dts), faceText: face, dtsText: dts };
 }
 
-// Every name the .d.ts declares must carry the same optional-param set
-// and the same generic head in the face. (The face may hold names the
-// .d.ts does not — non-exported locals have no declaration form.)
+// Every name the .d.ts declares must carry the same optional-param set,
+// the same generic head, and the same return type in the face. (The face
+// may hold names the .d.ts does not — non-exported locals have no
+// declaration form.)
 function expectAgreement(src, path) {
   const { face, dts } = facts(src, path);
   for (const [name, dtsRows] of dts) {
@@ -86,7 +155,7 @@ function expectAgreement(src, path) {
     if (!faceRows) continue; // not a callable the face spells as `function`
     // Compare as sets: overload rows may be ordered differently, but the
     // same signature must exist on both sides.
-    const key = (r) => `${r.generics}|${r.optionals}`;
+    const key = (r) => `${r.generics}|${r.optionals}|${r.ret}`;
     for (const row of dtsRows) {
       expect({ name, sig: key(row), seenInFace: faceRows.map(key) })
         .toEqual({ name, sig: key(row), seenInFace: expect.arrayContaining([key(row)]) });
@@ -112,10 +181,20 @@ describe('the face and the .d.ts describe the same API', () => {
       '',
     ].join('\n'),
     'a generic def with an optional param': 'export def both<T>(v: T, tag?: string): T\n  v\n',
+    // The RETURN-type rules. Each emitter decides these for itself, so
+    // each is a place the two can disagree — and `void`/`Promise<T>`
+    // are GENERATED spellings no author can correct downstream.
+    'an async def wraps its annotation': 'export def go(a: number): number\n  await a\n',
+    'an async def keeps an author-spelled Promise': 'export def already(a: number): Promise<number>\n  await a\n',
+    'an async VOID def': 'export def flush!(x: number)\n  await x\n',
+    'a void GENERATOR takes no void spelling': 'export def pump!()\n  yield 1\n',
+    'a generator keeps its author-spelled iterator': 'export def numbers(): Generator<number>\n  yield 1\n',
+    'an async generator takes no Promise wrap': 'export def drain(s: number): AsyncGenerator<number>\n  yield await s\n',
+    'a sync def is wrapped by neither': 'export def plain(a: number): number\n  a\n',
   };
 
   for (const [label, src] of Object.entries(ROWS)) {
-    test(`${label} — the marker and the generic head survive into BOTH`, () => {
+    test(`${label} — params, generic head, and return type survive into BOTH`, () => {
       expectAgreement(src, `${label.replace(/\W+/g, '-')}.rip`);
     });
   }
