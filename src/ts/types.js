@@ -449,13 +449,41 @@ const memberLines = (body) => {
   return members;
 };
 
-// The first depth-0 '=' of an alias header line (a generic
-// parameter default's '=' sits inside its angles).
-const aliasEq = (text) => {
-  let depth = 0;
+// A declaration header with its trailing comment dropped. The header
+// is one line, so a '#' outside a string literal opens trivia that
+// runs to its end. Stripped HERE, at the one place the header is
+// read, so no branch can emit it: the header text lands verbatim in
+// the interface line and in a block alias's head, and '#' is not
+// TypeScript.
+const stripHeaderComment = (text) => {
+  let inStr = null;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if ('<([{'.includes(c)) depth++;
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+    } else if (c === '"' || c === "'") inStr = c;
+    else if (c === '#') return text.slice(0, i).trimEnd();
+  }
+  return text;
+};
+
+// The first depth-0 '=' of an alias header line (a generic
+// parameter default's '=' sits inside its angles). String-aware, like
+// every other depth walk here: a bracket inside a string-literal type
+// is TEXT, and counting it leaves the depth standing where the real
+// '=' reads as nested — `type X<K extends "a(b"> = T` would report no
+// '=' at all, and the caller slices the declaration against -1.
+const aliasEq = (text) => {
+  let depth = 0;
+  let inStr = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+    } else if (c === '"' || c === "'") inStr = c;
+    else if ('<([{'.includes(c)) depth++;
     else if ('>)]}'.includes(c) && text[i - 1] !== '=') depth--;
     else if (c === '=' && depth === 0 && text[i + 1] !== '>') return i;
   }
@@ -474,7 +502,7 @@ export const renderTypeDecl = (rawText) => {
     text = text.slice('export '.length);
   }
   const nl = text.indexOf('\n');
-  const header = (nl === -1 ? text : text.slice(0, nl)).trimEnd();
+  const header = stripHeaderComment((nl === -1 ? text : text.slice(0, nl)).trimEnd());
   const body = nl === -1 ? null : text.slice(nl + 1);
 
   if (header.startsWith('interface')) {
@@ -496,6 +524,9 @@ export const renderTypeDecl = (rawText) => {
   // joined as a union, over `b: B` silently braced into an object,
   // over `B &` rejected outright.
   const eq = aliasEq(header);
+  // Every alias the lexer claims carries its '='; slicing against -1
+  // would silently emit a truncated, doubled declaration instead.
+  if (eq === -1) throw new TypeTextError(`a type alias needs '=' — '${header}' declares no type`);
   const headRhs = normalizeTypeText(header.slice(eq + 1));
   if (body === null || headRhs !== '') {
     const wrapped = body === null ? headRhs : normalizeTypeText(text.slice(eq + 1));

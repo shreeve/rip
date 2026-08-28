@@ -458,6 +458,33 @@ describe('TS-face emission pins', () => {
       .toBe('type I = {\n  get: F;\n  put: F;\n};\nlet z = 1;' + MARKER);
   });
 
+  test('a header comment is trivia, and a string literal in the head is not depth', () => {
+    // '#' is not TypeScript. The header lands verbatim in an interface
+    // line and in a block alias's head, so the comment is dropped where
+    // the header is read, once, rather than per branch.
+    expect(ts('type X = # note\n  a: number\nz = 1\n').code)
+      .toBe('type X = {\n  a: number;\n};\nlet z = 1;' + MARKER);
+    expect(ts('interface P # note\n  x: number\nz = 1\n').code)
+      .toBe('interface P {\n  x: number;\n}\nlet z = 1;' + MARKER);
+    // A '#' inside a string-literal type is content, not a comment.
+    expect(ts('type X = "a#b" | "c"\nz = 1\n').code)
+      .toBe('type X = "a#b" | "c";\nlet z = 1;' + MARKER);
+    expect(ts('type X = "a#b" | C # real note\nz = 1\n').code)
+      .toBe('type X = "a#b" | C;\nlet z = 1;' + MARKER);
+    // A BRACKET inside a string-literal type is content too: counted as
+    // depth it hides the alias '=', and the declaration then slices
+    // against -1 — a truncated, doubled head. Every alias form reads
+    // the same '=' through it.
+    expect(ts('type X<K extends "a(b"> = number\nz = 1\n').code)
+      .toBe('type X<K extends "a(b"> = number;\nlet z = 1;' + MARKER);
+    expect(ts('type X<K extends "a(b"> = A & {\n  c: number\n}\nz = 1\n').code)
+      .toBe('type X<K extends "a(b"> = A & { c: number };\nlet z = 1;' + MARKER);
+    expect(ts('type X<K extends "a(b"> =\n  c: K\nz = 1\n').code)
+      .toBe('type X<K extends "a(b"> = {\n  c: K;\n};\nlet z = 1;' + MARKER);
+    expect(ts('type X<K extends "a>b"> = A & {\n  c: K\n}\nz = 1\n').code)
+      .toBe('type X<K extends "a>b"> = A & { c: K };\nlet z = 1;' + MARKER);
+  });
+
   test('bare-colon members open nested layout blocks: object, union, wrapped single, recursive', () => {
     // The value-level bare-colon nesting, at the type level: a member
     // whose line ends at its ':' takes its type from the indented
