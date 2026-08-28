@@ -12,7 +12,7 @@
 // case here uses a package BOTH fixtures carry, differing only in what it
 // exports.
 import { test, expect, afterAll } from 'bun:test';
-import { spawnSync } from 'child_process';
+import { spawnSync } from '../../support/spawn.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
