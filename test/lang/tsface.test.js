@@ -415,6 +415,49 @@ describe('TS-face emission pins', () => {
     expect(ts('export type Q = number\nz = 1\n').code).toBe('export type Q = number;\nlet z = 1;' + MARKER);
   });
 
+  test('the alias `=` is the only block opener: a type wrapped PAST it rejoins as one alias', () => {
+    // What the parser claims as ONE type run — a bracket holding the
+    // run open across lines, or a trailing operator continuing it —
+    // renders as one alias. Read as block MEMBERS instead, the same
+    // wrap classified by its CONTENT and rendered three ways.
+    const pin = (src, decl) => {
+      expect(ts(src).code).toBe(`${decl}\nlet z = 1;` + MARKER);
+      // JS mode erases the declaration; the face adds only type bytes.
+      expect(stripFace(ts(src).code, ts(src).tsRegions)).toBe(js(src).code);
+    };
+    // An intersection with a braced object — the shape a RECURSIVE
+    // callable type takes, stating its call signature once by
+    // intersecting an existing alias rather than restating it.
+    pin('type I = F & {\n  get: F,\n  create: (o?: O) => I\n}\nz = 1\n',
+        'type I = F & { get: F, create: (o?: O) => I };');
+    // Members separated by the layout newline alone take the brace
+    // seam's ';' — the same separator a one-line structural type gets.
+    pin('type I = F & {\n  get: F\n  put: F\n}\nz = 1\n', 'type I = F & { get: F; put: F };');
+    // The brace need not close the line, nor open it.
+    pin('type I = {\n  get: F\n} & F\nz = 1\n', 'type I = { get: F } & F;');
+    pin('type I = (F & {\n  get: F\n})\nz = 1\n', 'type I = (F & { get: F });');
+    // A trailing operator continues the run with no bracket at all,
+    // across as many lines as keep trailing one.
+    pin('type I = A &\n  B &\n  C\nz = 1\n', 'type I = A & B & C;');
+    pin('type I = F |\n  string\nz = 1\n', 'type I = F | string;');
+    // Comments are trivia on every line of the wrap, and take the
+    // whitespace that introduced them with them — a dropped comment
+    // leaves no seam of its own for the brace separator to fill.
+    pin('type I = A & {   # head\n  get: F  # member\n  # whole line\n  put: F\n}\nz = 1\n',
+        'type I = A & { get: F; put: F };');
+    // The `export` prefix rides the wrap.
+    expect(ts('export type I = F & {\n  get: F\n}\nz = 1\n').code)
+      .toBe('export type I = F & { get: F };\nlet z = 1;' + MARKER);
+    // The declaration consumer renders the same wrap — the two
+    // surfaces share one renderer and cannot drift on it.
+    expect(compile('export type I = F & {\n  get: F\n}\n').declarations)
+      .toBe('export type I = F & { get: F };\n');
+    // A header ending AT the '=' still opens a block: the wrap
+    // reading takes nothing from the block alias form.
+    expect(ts('type I =\n  get: F\n  put: F\nz = 1\n').code)
+      .toBe('type I = {\n  get: F;\n  put: F;\n};\nlet z = 1;' + MARKER);
+  });
+
   test('bare-colon members open nested layout blocks: object, union, wrapped single, recursive', () => {
     // The value-level bare-colon nesting, at the type level: a member
     // whose line ends at its ':' takes its type from the indented
@@ -1295,6 +1338,40 @@ describe('TS-face negatives', () => {
     // flatten into the parent and the line would emit a dangling operator.
     rejects('type T =\n  inner?: number | false |\n    limit?: number\nz = 1\n', /opens only from a bare/);
     rejects('type T =\n  inner?: Fetcher &\n    limit?: number\nz = 1\n', /opens only from a bare/);
+    // The SAME judgment at the top level: an alias head that already
+    // carries a type takes no block either. The head reads as a
+    // wrapped type, and a member's colon is left stranded at depth 0
+    // where no type expression puts one — so it rejects here rather
+    // than shipping a face that does not parse, or guessing braces
+    // around the lines that happen to look like members.
+    rejects('type T = Fetcher &\n  limit?: number\nz = 1\n', /opens only from the alias '='/);
+    rejects('type T = number | false |\n  limit?: number\nz = 1\n', /opens only from the alias '='/);
+    // On one line the stray member colon has no block to blame.
+    rejects('type T = a: number\nz = 1\n', /'a: number' is a member — brace it as '\{ a: number \}'/);
+    // Inside BRACES the indentation is layout and no path folds it —
+    // the type run collapses INDENT/OUTDENT there, and the annotation
+    // and member paths render those lines as siblings. A bare colon
+    // there carries no type: it rejects, naming the rule, rather than
+    // emitting the dangling ':' TypeScript cannot parse.
+    rejects('type T = A & {\n  inner:\n    a: number\n}\nz = 1\n',
+            /member 'inner' carries no type — .*brace-free block body/);
+    rejects('type T = A & {\n  inner?:\n}\nz = 1\n',
+            /member 'inner\?' carries no type/);
+  });
+
+  test('the wrapped alias reads every member shape — the untyped-colon guard has no false positives', () => {
+    // Index and call signatures, method shorthand, quoted keys, nested
+    // function types, a conditional's else, an empty object, generic
+    // arguments, a string literal CONTAINING a colon, and a labeled
+    // tuple all carry types and pass.
+    const src = 'type X = A & {\n  [k: string]: number\n  (): void\n  m(v: number): void\n' +
+                '  "a-b": string\n  fn: (a: { b: number }) => { c: string }\n' +
+                '  cond: T extends U ? A : B\n  empty: {}\n  arr: Array<{ x: number }>\n' +
+                '  lit: "a: b"\n  tup: [x: string, y: number]\n}\nz = 1\n';
+    expect(ts(src).code).toBe(
+      'type X = A & { [k: string]: number; (): void; m(v: number): void; "a-b": string; ' +
+      'fn: (a: { b: number }) => { c: string }; cond: T extends U ? A : B; empty: {}; ' +
+      'arr: Array<{ x: number }>; lit: "a: b"; tup: [x: string, y: number] };\nlet z = 1;' + MARKER);
   });
 
   test("every `: type` block spelling rejects with the pointer — none flattens silently", () => {

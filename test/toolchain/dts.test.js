@@ -121,6 +121,13 @@ const ROWS = [
   ['type R =\n  | Ok\n  # note between variants\n  | Err\nz = 1', 'type R = Ok | Err;\nexport {};\n'],
   ['type Shape =\n  kind: string\n  size: number\nz = 1', 'type Shape = {\n  kind: string;\n  size: number;\n};\nexport {};\n'],
   ['type T =\n  Map<K,\n  V>\ny = 2', 'type T = Map<K, V>;\nexport {};\n'],
+  // a type WRAPPED past the alias '=' — a bracket holding the run
+  // open, or a trailing operator continuing it — rejoins as one
+  // alias; only a header ending AT the '=' opens a member block
+  ['type I = F & {\n  get: F,\n  create: (o?: O) => I\n}\nz = 1', 'type I = F & { get: F, create: (o?: O) => I };\nexport {};\n'],
+  ['type I = F & {\n  get: F\n  put: F\n}\nz = 1', 'type I = F & { get: F; put: F };\nexport {};\n'],
+  ['type I = {\n  get: F\n} & F\nz = 1', 'type I = { get: F } & F;\nexport {};\n'],
+  ['type I = A &\n  B &\n  C\nz = 1', 'type I = A & B & C;\nexport {};\n'],
   // the block-body OBJECT-MEMBER grammar: index signatures, call
   // signatures, quoted/numeric keys, readonly modifiers — each a
   // recognized member shape, braced like the interface path

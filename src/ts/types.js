@@ -140,6 +140,14 @@ export const normalizeTypeText = (raw) => {
       continue;
     }
     if (ch === '#') {
+      // A comment and the whitespace that introduced it are ONE run of
+      // trivia: dropping the comment alone would leave that space
+      // standing as the preceding character, and the field-separator
+      // rule below reads the character before a newline to decide
+      // whether the seam needs a ';' — against a space it always does,
+      // so a braced type wrapped with commented lines would collect a
+      // stray separator per comment ('{ ; a: T ; ; b: U }').
+      out = out.trimEnd();
       while (i < raw.length && raw[i] !== '\n') i++;
       continue;
     }
@@ -247,6 +255,43 @@ const hasMemberColon = (m) => {
     }
   }
   return false;
+};
+
+// The KEY of a member colon at `at` — the run back to whatever opened
+// or separated the member. Reported as-is; the caller owns the fix.
+const memberKeyBefore = (t, at) => {
+  let start = 0;
+  for (let i = 0; i < at; i++) if ('{;,'.includes(t[i])) start = i + 1;
+  return t.slice(start, at).trim();
+};
+
+// A member colon with NOTHING after it — the normalized text puts the
+// field separator, the closing brace, or the end of the type straight
+// against the ':'. Inside brackets an indented run beneath such a
+// colon is LAYOUT and not structure (the type run collapses
+// INDENT/OUTDENT there, and the annotation and member paths render
+// those lines as siblings), so the colon takes no block and simply
+// carries no type. Returns the offending key, or null.
+const untypedMemberColon = (t) => {
+  let depth = 0;
+  let inStr = null;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") inStr = c;
+    else if ('([{<'.includes(c)) depth++;
+    else if (')]}'.includes(c) || (c === '>' && t[i - 1] !== '=')) depth--;
+    else if (c === ':') {
+      let j = i + 1;
+      while (j < t.length && t[j] === ' ') j++;
+      if (j >= t.length || ';,}'.includes(t[j])) return memberKeyBefore(t, i);
+    }
+  }
+  return null;
 };
 
 // ── type/interface declaration rendering ─────────────────────────────
@@ -439,14 +484,51 @@ export const renderTypeDecl = (rawText) => {
     return lines;
   }
 
-  if (body === null) {
-    const eq = aliasEq(header);
-    lines.push(`${exp}${header.slice(0, eq).trimEnd()} = ${normalizeTypeText(header.slice(eq + 1))};`);
+  // The alias '=' is the ONE block opener — the top-level reading of a
+  // member's bare ':'. A header carrying type text PAST the '=' has
+  // already begun the type: what follows is that one expression
+  // WRAPPED across lines — an open bracket holding the run together
+  // (`= A & {` … `}`), or a trailing operator continuing it (`= A &`
+  // … ) — and rejoins as a single-line alias. Only a header that ends
+  // AT the '=' opens a block whose lines are members. Reading the
+  // wrapped forms as members instead would classify them by their
+  // CONTENT, so one shape rendered three ways: `= A &` over `| B`
+  // joined as a union, over `b: B` silently braced into an object,
+  // over `B &` rejected outright.
+  const eq = aliasEq(header);
+  const headRhs = normalizeTypeText(header.slice(eq + 1));
+  if (body === null || headRhs !== '') {
+    const wrapped = body === null ? headRhs : normalizeTypeText(text.slice(eq + 1));
+    // A member left without a type never reaches TypeScript as one.
+    // The block-body remedy does NOT apply inside a wrap — that is the
+    // whole point of the message — so it names the rule the wrap obeys
+    // instead of pointing at a block that opens nothing.
+    const untyped = untypedMemberColon(wrapped);
+    if (untyped !== null) {
+      throw new TypeTextError(
+        `member '${untyped}' carries no type — write one after ':'; an indented block ` +
+        'beneath it opens a type only in a brace-free block body',
+      );
+    }
+    // A type EXPRESSION carries no depth-0 member colon: a property's
+    // sits inside braces, a parameter's inside parens, and the one
+    // bare colon type syntax has — a conditional's else — is spoken
+    // for by its '?'. A colon left at depth 0 means the lines were
+    // written as block members under a head that already carries a
+    // type, and joining them would ship a face that does not parse.
+    if (hasMemberColon(wrapped)) {
+      throw new TypeTextError(body === null
+        ? `a type alias takes a type after '=', and '${wrapped}' is a member — brace it as ` +
+          `'{ ${wrapped} }'`
+        : `the block under '${header}' opens only from the alias '=' — ` +
+          'finish the type on this line, or brace the block');
+    }
+    lines.push(`${exp}${text.slice(0, eq).trimEnd()} = ${wrapped};`);
     return lines;
   }
 
   const members = memberLines(body);
-  const head = header.trimEnd(); // ends with the alias '='
+  const head = header; // ends AT the alias '=' — the block opener
 
   // The body reads through the shared classifyMembers judgment: a
   // union joins its variants onto one line, an object braces one
