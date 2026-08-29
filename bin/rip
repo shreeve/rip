@@ -28,7 +28,9 @@ Usage:
                                      a ./repl.rip auto-loads — its exports, the
                                      app's registered schemas, and the rip/db
                                      toolkit become your starting bindings
-  rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
+  rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively);
+                                     a #!/usr/bin/env rip shebang script runs
+                                     the same way, no .rip extension needed
   rip [options] dir [args...]        Run dir/index.rip
   rip [options]                      Read source from stdin (when piped)
   rip check [paths...]               Type-check .rip files/dirs headlessly, no editor
@@ -494,12 +496,26 @@ if (showTsFace) {
 // reporter shows generated-JS coordinates for plugin-loaded modules;
 // src/stackmap.js). The child's exit status is ours.
 const run = (path, argv) => {
+  // The ENTRY decides which checkout's stdlib `rip/<pkg>` names serve,
+  // so a file executes against the same tree `rip check` types it
+  // against — not against whichever checkout owns the `rip` on PATH.
+  const env = { ...process.env, RIP_STDLIB_ANCHOR: dirname(resolve(path)) };
+  // A `#!/usr/bin/env rip` shebang names the language, so an executable
+  // script needs no .rip extension — the loader's extension filter
+  // can't claim such an entry, so its resolved path is nominated
+  // through RIP_SHEBANG_ENTRY for an exact-path onLoad (src/loader.js).
+  // (`#` opens a comment, so the shebang line compiles as-is.) The
+  // realpath is what the run harness imports and what Bun hands the
+  // plugin; a symlink whose target already ends in .rip needs nothing.
+  if (!path.endsWith('.rip')) {
+    const entry = realpathSync(resolve(path));
+    if (!entry.endsWith('.rip') && /^#!.*\brip\b/.test(readFileSync(entry, 'utf8').split('\n', 1)[0])) {
+      env.RIP_SHEBANG_ENTRY = entry;
+    }
+  }
   const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',
-    // The ENTRY decides which checkout's stdlib `rip/<pkg>` names serve,
-    // so a file executes against the same tree `rip check` types it
-    // against — not against whichever checkout owns the `rip` on PATH.
-    env: { ...process.env, RIP_STDLIB_ANCHOR: dirname(resolve(path)) },
+    env,
   });
   process.exit(r.status ?? 1);
 };

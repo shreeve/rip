@@ -249,6 +249,21 @@ describe('cli: run surface (loader end-to-end)', () => {
     expect(r.stdout).toBe('42\n');
   });
 
+  test('a rip-shebang script runs without a .rip extension — imports and argv intact', () => {
+    write('shebang-dep.rip', 'export answer = 6 * 7\n');
+    write('shebang-script', '#!/usr/bin/env rip\nimport {answer} from "./shebang-dep.rip"\nconsole.log "#{answer} #{process.argv[2]}"\n');
+    const r = rip(['shebang-script', 'arg1']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('42 arg1\n');
+  });
+
+  test('an extensionless file without the rip shebang is not claimed as Rip', () => {
+    write('no-shebang-script', 'console.log("plain js runs as js")\n');
+    const r = rip(['no-shebang-script']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('plain js runs as js\n');
+  });
+
   test('a directory input runs its index.rip; one without rejects precisely', () => {
     const sub = join(dir, 'dir-entry');
     mkdirSync(sub, { recursive: true });

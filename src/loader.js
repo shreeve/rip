@@ -97,7 +97,7 @@ export default __configs;
 `,
     }));
 
-    build.onLoad({ filter: /\.rip$/ }, async (args) => {
+    const loadRip = async (args) => {
       const source = readFileSync(args.path, 'utf8');
       // The loader is a toolchain path: feature runtimes arrive
       // as ONE injected import of the shared runtime module — every
@@ -115,6 +115,26 @@ export default __configs;
         contents: `${code}${sep}${toInlineMapComment(map)}\n`,
         loader: 'js',
       };
-    });
+    };
+    build.onLoad({ filter: /\.rip$/ }, loadRip);
+
+    // One exact non-.rip path may be nominated by the CLI
+    // (RIP_SHEBANG_ENTRY): an executable script whose
+    // `#!/usr/bin/env rip` shebang names the language instead of the
+    // extension (bin/rip's run()). It must be a VIRTUAL module, not an
+    // onLoad filter: Bun's native JS loader claims extensionless files
+    // before plugins are consulted (measured on 1.4.0 — the same class
+    // of gap as onResolve above), but the virtual-module registry is
+    // checked first, and a file: URL import normalizes to the
+    // registered path. Relative imports inside the compiled code still
+    // resolve against the script's own directory. One known cost: Bun
+    // reports virtual-module stack frames with the path but NO
+    // line/column, so runtime errors in the script name it without a
+    // position (nothing for stackmap to remap). Consumed here —
+    // deleted before the program body runs — so the program's own
+    // children never inherit it.
+    const shebangEntry = process.env.RIP_SHEBANG_ENTRY;
+    delete process.env.RIP_SHEBANG_ENTRY;
+    if (shebangEntry) build.module(shebangEntry, () => loadRip({ path: shebangEntry }));
   },
 });
