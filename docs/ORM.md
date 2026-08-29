@@ -1038,12 +1038,30 @@ rip schema plan                   print the classified diff (no files touched)
 rip schema dump                   write schema.sql — the declared shape of every
                                   table (no database touched; --check verifies
                                   instead of writing, the CI seam)
-rip schema make add_partners      write migrations/NNNN_add_partners.sql from the diff
+rip schema make add partners      write migrations/<UTC>_add_partners.sql from the
+                                  diff; bare words are joined into the description,
+                                  which is optional — with none the file is just
+                                  migrations/<UTC>.sql
 rip schema migrate                apply pending files in order
-rip schema push                   diff, write migrations/YYYYMMDD-HHMMSS.sql, and apply
+rip schema push [name…]           diff, write migrations/<UTC>_<name>.sql (the name
+                                  optional, as for make), and apply
                                   it — one motion, for rapid iteration; refuses when
                                   pending/edited/conflicting migrations make the state
                                   unclear, and gates lossy/destructive exactly like make
+
+Migration files are named `YYYYMMDDHHMMSS_description.sql` — the timestamp in **UTC**,
+the description optional (`20260829175839.sql` is a complete name; the timestamp is
+already unique, so a description is there for whoever reads the directory).
+The version is the sort key and the sort is the apply order, so the clock has to be one
+everybody shares: local time reorders a directory the moment two people in different
+zones, or one laptop crossing a DST boundary, generate migrations the same afternoon.
+Fixed width means a plain lexicographic sort stays correct forever, and two branches
+never mint the same version, so a merge needs no renumbering.
+
+Legacy `NNNN_name.sql` files still apply. Do not rename them — the version is the
+identity recorded in the `schema` table, so a rename reads as one deleted migration
+plus one pending. They sort ahead of every timestamp (`'0'` precedes `'2'`), which is
+where they belong, so both shapes coexist in one directory with the order still right.
 ```
 
 `push` is the rapid-iteration verb: edit the model, `rip schema push`,

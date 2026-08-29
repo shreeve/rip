@@ -16,7 +16,7 @@
 //
 //   plan()                 → classified diff steps (pure, no files)
 //   status(opts)           → steps + applied/pending/mismatched/missing/duplicates
-//   make(name, opts)       → write migrations/NNNN_name.sql from the diff
+//   make(name, opts)       → write migrations/<UTC>_name.sql from the diff
 //   migrate(opts)          → apply pending migration files in order
 //   introspect()           → DeployedSchema (canonical table specs)
 //
@@ -1324,12 +1324,54 @@ export function dump() {
 
 // ── migration files & history ─────────────────────────────────────────
 
-const MIGRATION_FILE_RE = /^(\d{4,})_(.+)\.sql$/;
-// Push migrations are named by the second they were made:
-// 20260827-063412.sql. The dash keeps the timestamp out of the
-// NNNN_name namespace, so make's sequential numbering never mistakes
-// a push for migration number twenty million.
+// A migration is named for the UTC second it was made:
+//
+//   20260829174501_add_partner_emails.sql
+//
+// UTC, always, because the version IS the sort key and the sort is the
+// apply order. Local time would reorder a directory the moment two
+// people in different zones — or one laptop crossing a DST boundary —
+// generated migrations the same afternoon.
+//
+// Fixed width is what makes a plain lexicographic sort correct forever;
+// sequential numbering was not, since '0010' sorts before '0009' only
+// by the padding nobody can widen later. Timestamps also never collide
+// across branches, so two people generating migrations the same day
+// merge without renumbering.
+//
+// The pattern still admits the legacy NNNN_name files, and it must:
+// they are recorded in history under those versions, and renaming one
+// would read as a deleted migration plus a pending one. They sort
+// first, which is where they belong — '0' precedes '2' — so old and
+// new coexist in one directory with the order still correct.
+// The description is OPTIONAL. The timestamp alone is already unique
+// and already sorts, so requiring a slug would be the tool insisting on
+// prose it cannot check — `20260829175839.sql` is a complete name. It
+// stays the normal thing to write, because it is the only part of the
+// filename a human reads.
+const MIGRATION_FILE_RE = /^(\d{4,})(?:_(.+))?\.sql$/;
+// Retired: push used to write a dashed, description-less
+// 20260827-063412.sql. The dash existed only to keep timestamps out of
+// the NNNN_name namespace, and that namespace is gone. Still READ, so
+// databases that applied one keep matching their file.
 const PUSH_FILE_RE = /^(\d{8}-\d{6})\.sql$/;
+
+// The version, and the only thing that mints one. UTC to the second,
+// via toISOString so there is no arithmetic to get the zone wrong in.
+function migrationVersion(now = new Date()) {
+  return now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+}
+
+// A description the filesystem and the sort key can both hold: lowercase,
+// words joined by underscores. `make add partner emails` and
+// `make "Add Partner Emails"` land on the same slug.
+function migrationSlug(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'migration';
+}
+
+// version_description, or just the version when there is no
+// description. Spelled once so no message ever prints a dangling '_'.
+export const migrationLabel = (f) => f.name ? f.version + '_' + f.name : f.version;
 
 export async function migrationFiles(dir) {
   const fs = await import('node:fs');
@@ -1338,12 +1380,19 @@ export async function migrationFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const f of fs.readdirSync(dir).sort()) {
-    const m = f.match(MIGRATION_FILE_RE) || f.match(PUSH_FILE_RE);
-    if (!m) continue;
+    // Order matters only for the name: a dashed push file cannot match
+    // MIGRATION_FILE_RE (a '-' is neither '_' nor '.'), so the two
+    // patterns partition the directory rather than overlap on it.
+    const m = f.match(MIGRATION_FILE_RE);
+    const p = m ? null : f.match(PUSH_FILE_RE);
+    if (!m && !p) continue;
     const content = fs.readFileSync(path.join(dir, f), 'utf8');
     out.push({
-      version: m[1],
-      name: m[2] ?? 'push',
+      version: (m ?? p)[1],
+      // '' is a real answer — a migration with no description. The
+      // retired dashed form had no slot for one, so those read as
+      // 'push', which is what they were.
+      name: m ? (m[2] ?? '') : 'push',
       file: path.join(dir, f),
       checksum: crypto.createHash('sha256').update(content).digest('hex'),
       content,
@@ -1380,7 +1429,26 @@ function rejectDuplicateVersions(files, who) {
 // connection or a bad credential must still reach the caller — a
 // migrate that silently believes nothing is applied would re-apply
 // everything.
-const ABSENT = /does not exist|not found|Catalog Error/i;
+//
+// NARROW ON PURPOSE, and it took two near-misses to get here. This
+// used to also match /Catalog Error/ and /not found/, and DuckDB puts
+// both phrasings on failures that are the OPPOSITE of absent:
+//
+//   Catalog Error: Could not rename "_rip_migrations" to ""schema"":
+//                  another entry with this name already exists!
+//   Binder Error: Referenced column "version" not found in FROM clause!
+//
+// The first is the collision that means somebody else owns the table —
+// swallowed, adoption silently never happened. The second is a
+// wrong-shaped table — swallowed, appliedMigrations() answers "nothing
+// is applied" and every migration re-runs against a populated
+// database. /not found/ additionally matched the harbor adapter's own
+// "db request failed: 404 Not Found", turning an unreachable database
+// into an empty history.
+//
+// Absence has exactly one phrasing here — "… does not exist!" — so
+// that is the whole pattern. Anything else reaches the caller.
+const ABSENT = /\bdoes not exist\b/i;
 
 async function tryRun(sql, params = []) {
   try {
@@ -1436,10 +1504,28 @@ async function appliedMigrations() {
 // (the lock row, the history rows, the '@op:…' rows) assumes the table
 // is already there.
 async function ensureMigrationsTable() {
-  await tryRun('ALTER TABLE ' + LEGACY_STATE_TABLE + ' RENAME TO ' + STATE_TABLE);
+  try {
+    await tryRun('ALTER TABLE ' + LEGACY_STATE_TABLE + ' RENAME TO ' + STATE_TABLE);
+  } catch (e) {
+    // The legacy table is there AND something already holds the new
+    // name. Adoption cannot proceed and must not be swallowed: the
+    // history is in one table and every write would go to the other.
+    if (/already exists/i.test(e?.message || '')) {
+      throw new Error(
+        'schema.migrate: cannot adopt ' + LEGACY_STATE_TABLE + ' — a table named ' + STATE_TABLE +
+        ' already exists. If it is a leftover from an interrupted adoption, compare the two and ' +
+        'drop the empty one; if it is your own table, rename it — ' + STATE_TABLE +
+        ' is the migration runner\'s state.', { cause: e });
+    }
+    throw e;
+  }
   await runSQL('CREATE TABLE IF NOT EXISTS ' + STATE_TABLE +
     ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, detail VARCHAR,' +
     ' applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
+  // BEFORE the ADD COLUMN below, and that order is the whole point:
+  // the check exists to stop us writing to a table that is not ours,
+  // so it has to run before the first write.
+  await assertStateTableIsOurs();
   // An adopted table predates `detail`; already-there is not an error.
   try {
     await runSQL('ALTER TABLE ' + STATE_TABLE + ' ADD COLUMN detail VARCHAR', []);
@@ -1448,6 +1534,56 @@ async function ensureMigrationsTable() {
   }
   await tryRun('DROP TABLE ' + LEGACY_LOCK_TABLE);
   await tryRun('DROP TABLE ' + LEGACY_OPS_TABLE);
+}
+
+// Every column the runner ever names, and the one that has to be the
+// PRIMARY KEY.
+const STATE_COLUMNS = ['version', 'name', 'checksum', 'detail', 'applied_at'];
+
+// `schema` is a name a stranger could plausibly own — a form builder's
+// JSON-Schema registry, a data catalog, a hand-rolled migration tool
+// that got here first — and CREATE TABLE IF NOT EXISTS cannot tell
+// "mine, already made" from "someone else's, same name". Every
+// statement downstream assumes the first. Measured against DuckDB
+// v2.0.0, all four consequences of assuming wrong are SILENT:
+//
+//   · ALTER TABLE schema ADD COLUMN detail  mutates their table
+//   · SELECT version, … FROM schema         raises a Binder Error that
+//                                           used to read as "absent",
+//                                           so every migration re-ran
+//   · INSERT '@lock'                        succeeds for EVERY racer,
+//                                           because their `version` is
+//                                           no PRIMARY KEY — the mutex
+//                                           quietly stops being one
+//   · the history                           lands in their rows
+//
+// The PRIMARY KEY is the load-bearing half: it IS the mutex
+// (acquireMigrationLock leans on exactly one INSERT landing), so a
+// table without it is not a table this runner can be safe in.
+//
+// A catalog that does not report the table at all is not an error —
+// only a document that predates the CREATE above, or an adapter whose
+// catalog omits it. There is nothing to verify and nothing to warn
+// about; the writes below fail loudly on their own if it is truly
+// missing.
+async function assertStateTableIsOurs() {
+  const doc = await adapterFor(null).catalog(UNBOUNDED);
+  const t = (doc?.tables ?? []).find((x) => x.schema === 'main' && x.name === STATE_TABLE);
+  if (!t) return;
+  const columns = new Set((t.columns ?? []).map((c) => c.name));
+  const missing = STATE_COLUMNS.filter((c) => !columns.has(c));
+  const pk = t.primaryKey ?? [];
+  const pkOk = pk.length === 1 && pk[0] === 'version';
+  if (!missing.length && pkOk) return;
+  const why = [];
+  if (missing.length) why.push('missing column' + (missing.length > 1 ? 's' : '') + ' ' + missing.join(', '));
+  if (!pkOk) why.push('its primary key is ' + (pk.length ? pk.join(', ') : 'not set') + ', not version');
+  throw new Error(
+    'schema.migrate: the table named ' + STATE_TABLE + ' in this database is not the migration ' +
+    'runner\'s (' + why.join('; ') + '). ' + STATE_TABLE + ' holds the migration history, the lock ' +
+    'and run outcomes; writing to somebody else\'s table would corrupt it and would leave the lock ' +
+    'unenforced, so nothing has been applied. Rename that table (or point RIP_DB_URL at the right ' +
+    'database) and run again.');
 }
 
 // Write-only by design: nothing in the runner reads these back. The
@@ -1644,11 +1780,11 @@ export async function status(opts = {}) {
   const mismatched = files.filter((f) => {
     const a = appliedByVersion.get(f.version);
     return a && a.checksum !== f.checksum;
-  }).map((f) => f.version + '_' + f.name);
+  }).map(migrationLabel);
   // Applied history rows whose file is gone: deleted history —
   // reported, never silently absent.
   const missing = applied.filter((a) => !fileByVersion.has(a.version))
-    .map((a) => a.version + '_' + a.name);
+    .map(migrationLabel);
   const duplicates = duplicateVersions(files)
     .map(([a, b]) => a.version + ': ' + a.name + ' <-> ' + b.name);
   return { steps, files, applied, pending, mismatched, missing, duplicates };
@@ -1680,9 +1816,6 @@ function gatePlan(steps, opts, who) {
 }
 
 export async function make(name, opts = {}) {
-  if (!name || typeof name !== 'string') {
-    throw new Error("schema.make: a migration name is required, e.g. `rip schema make add_orders`");
-  }
   const dir = opts.dir || 'migrations';
   const steps = await plan();
   if (!steps.length) return null;
@@ -1690,17 +1823,20 @@ export async function make(name, opts = {}) {
 
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const files = await migrationFiles(dir);
-  // Sequential numbering counts only NNNN_name files: a timestamped
-  // push in the directory must not turn the next make into 20260828.
-  const sequential = files.filter((f) => !f.version.includes('-'));
-  const next = sequential.length ? Math.max(...sequential.map((f) => parseInt(f.version, 10))) + 1 : 1;
-  const version = String(next).padStart(4, '0');
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'migration';
-  const file = path.join(dir, version + '_' + slug + '.sql');
+  // The clock names the file — nothing is read from the directory to
+  // pick it. That is the point of timestamps: two branches generating
+  // migrations the same week produce two versions that merge, where
+  // `max + 1` produced the same number twice.
+  const version = migrationVersion(opts.now ? new Date(opts.now) : new Date());
+  const slug = name ? migrationSlug(name) : '';
+  const stem = slug ? version + '_' + slug : version;
+  const file = path.join(dir, stem + '.sql');
+  if (fs.existsSync(file)) {
+    throw new Error('schema.make: ' + file + ' already exists (two makes inside one second) — try again');
+  }
 
   const body =
-    '-- ' + version + '_' + slug + '.sql\n' +
+    '-- ' + stem + '.sql\n' +
     '-- Generated by `rip schema make` — review (and edit) before applying.\n' +
     '-- Apply with `rip schema migrate`.\n\n' +
     renderPlan(steps);
@@ -1722,7 +1858,7 @@ export async function push(opts = {}) {
   const st = await status({ dir });
   const conflicts = [];
   if (st.pending.length) {
-    conflicts.push('pending migrations: ' + st.pending.map((f) => f.version + '_' + f.name).join(', ') +
+    conflicts.push('pending migrations: ' + st.pending.map(migrationLabel).join(', ') +
       ' — apply them first with `rip schema migrate`');
   }
   if (st.mismatched.length) {
@@ -1751,16 +1887,21 @@ export async function push(opts = {}) {
 
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const now = opts.now ? new Date(opts.now) : new Date();
-  const two = (n) => String(n).padStart(2, '0');
-  const version = '' + now.getFullYear() + two(now.getMonth() + 1) + two(now.getDate()) +
-    '-' + two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());
-  const file = path.join(dir, version + '.sql');
+  // Same naming as make, optional description and all: a push you named
+  // keeps its name, a push you didn't is just the timestamp. It does NOT
+  // get a stand-in slug — 'push' would be the tool writing a description
+  // on your behalf, and one that says how the file was made rather than
+  // what it does. The retired dashed form still reads back as 'push',
+  // because those files genuinely had nowhere else to put it.
+  const version = migrationVersion(opts.now ? new Date(opts.now) : new Date());
+  const slug = opts.name ? migrationSlug(opts.name) : '';
+  const stem = slug ? version + '_' + slug : version;
+  const file = path.join(dir, stem + '.sql');
   if (fs.existsSync(file)) {
     throw new Error('schema.push: ' + file + ' already exists (two pushes inside one second) — try again');
   }
   const body =
-    '-- ' + version + '.sql\n' +
+    '-- ' + stem + '.sql\n' +
     '-- Generated and applied by `rip schema push`.\n\n' +
     renderPlan(steps);
   fs.mkdirSync(dir, { recursive: true });
@@ -1833,7 +1974,7 @@ async function migrateApply(opts, files) {
         [f.checksum, f.version]);
     } else {
       throw new Error(
-        'schema.migrate: checksum mismatch on applied migration ' + f.version + '_' + f.name +
+        'schema.migrate: checksum mismatch on applied migration ' + migrationLabel(f) +
         ' — the file changed after it was applied. Restore the original file, or re-record with --repair.');
     }
   }
@@ -1868,7 +2009,7 @@ async function migrateApply(opts, files) {
       if (transactional) await transaction(apply);
       else await apply();
     } catch (e) {
-      const label = f.version + '_' + f.name;
+      const label = migrationLabel(f);
       const where = at >= statements.length
         ? 'recording its history row (every statement applied' +
           (/violates (unique|primary key) constraint|already taken/i.test(e?.message || '')
@@ -1901,7 +2042,7 @@ async function migrateApply(opts, files) {
             : 'unknown';
       throw err;
     }
-    ran.push(f.version + '_' + f.name);
+    ran.push(migrationLabel(f));
   }
   return {
     outcome: ran.length ? 'committed' : 'confirmed-none',

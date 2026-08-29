@@ -1811,19 +1811,60 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
     try { return await fn(mdir); } finally { rmSync(mdir, { recursive: true, force: true }); }
   };
 
-  test('writes NNNN_slug.sql from the plan; numbering continues from the max; slug normalizes', async () => {
+  test('writes <UTC>_slug.sql from the plan; the clock names it, not the directory; slug normalizes', async () => {
     await withDir(async (mdir) => {
+      // A legacy file with a HIGHER sequential number must not influence
+      // the name at all — timestamps are minted from the clock, never
+      // from the max of what is already there.
       writeFileSync(join(mdir, '0007_old.sql'), '-- placeholder\nSELECT 1;\n');
       const out = await K4.scope(async () => {
         K4.setAdapter(migrateAdapter({ tables: [] }));
         K4.__schema(model('User', field('name')));
-        return mig.make('Add Users!', { dir: mdir });
+        return mig.make('Add Users!', { dir: mdir, now: '2026-08-29T17:45:01Z' });
       });
-      expect(out.file).toBe(join(mdir, '0008_add_users.sql'));
+      expect(out.file).toBe(join(mdir, '20260829174501_add_users.sql'));
       const content = readFileSync(out.file, 'utf8');
-      expect(content).toContain('-- 0008_add_users.sql');
+      expect(content).toContain('-- 20260829174501_add_users.sql');
       expect(content).toContain('CREATE TABLE "users"');
       expect(content).toContain('-- [safe] create-table users');
+    });
+  });
+
+  test('the stamp is UTC, not the local zone', async () => {
+    // 2026-01-01T23:30:00Z is still 2025 in the Americas and already the
+    // 2nd in Asia. A version built from local parts would disagree with
+    // its peers about both the day and the year; the sort is the apply
+    // order, so it has to be one clock.
+    await withDir(async (mdir) => {
+      const out = await K4.scope(async () => {
+        K4.setAdapter(migrateAdapter({ tables: [] }));
+        K4.__schema(model('User', field('name')));
+        return mig.make('newyear', { dir: mdir, now: '2026-01-01T23:30:00Z' });
+      });
+      expect(out.version).toBe('20260101233000');
+    });
+  });
+
+  test('bare words join into one slug: make add partner emails', async () => {
+    await withDir(async (mdir) => {
+      const out = await K4.scope(async () => {
+        K4.setAdapter(migrateAdapter({ tables: [] }));
+        K4.__schema(model('User', field('name')));
+        return mig.make('add partner emails', { dir: mdir, now: '2026-08-29T17:45:01Z' });
+      });
+      expect(out.file).toBe(join(mdir, '20260829174501_add_partner_emails.sql'));
+    });
+  });
+
+  test('two makes inside one second: the second refuses on the existing file', async () => {
+    await withDir(async (mdir) => {
+      await K4.scope(async () => {
+        K4.setAdapter(migrateAdapter({ tables: [] }));
+        K4.__schema(model('User', field('name')));
+        await mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
+        await expect(mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' }))
+          .rejects.toThrow(/already exists \(two makes inside one second\)/);
+      });
     });
   });
 
@@ -1833,14 +1874,14 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
         K4.setAdapter(migrateAdapter({ tables: [] }));
         K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
         K4.__schema(model('User', field('name'), field('email', 'email', { unique: true })));
-        return mig.make('init', { dir: mdir });
+        return mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
       });
       return readFileSync(out.file, 'utf8');
     });
     expect(await bodyOf()).toBe(await bodyOf());
   });
 
-  test('no steps → null, nothing written; a missing name rejects', async () => {
+  test('no steps → null, nothing written', async () => {
     await withDir(async (mdir) => {
       const out = await K4.scope(async () => {
         K4.setAdapter(migrateAdapter({ tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] }));
@@ -1848,11 +1889,40 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
         return mig.make('noop', { dir: mdir });
       });
       expect(out).toBe(null);
-      await expect(K4.scope(async () => {
-        K4.setAdapter(migrateAdapter({ tables: [] }));
+    });
+  });
+
+  // The description is a courtesy to whoever reads the directory, not a
+  // uniqueness mechanism — the timestamp already is one — so the tool
+  // does not insist on it.
+  test('no description: the file is the bare timestamp, and it still applies', async () => {
+    await withDir(async (mdir) => {
+      const adapter = migrateAdapter({ tables: [] });
+      const r = await K4.scope(async () => {
+        K4.setAdapter(adapter);
         K4.__schema(model('User', field('name')));
-        return mig.make(undefined, { dir: mdir });
-      })).rejects.toThrow(/a migration name is required/);
+        const out = await mig.make(undefined, { dir: mdir, now: '2026-08-29T17:45:01Z' });
+        return { out, run: await mig.migrate({ dir: mdir }) };
+      });
+      expect(r.out.file).toBe(join(mdir, '20260829174501.sql'));
+      expect(readFileSync(r.out.file, 'utf8')).toContain('-- 20260829174501.sql');
+      // No dangling underscore anywhere a human reads it.
+      expect(r.run.ran).toEqual(['20260829174501']);
+      expect(adapter.history.map((h) => h.version + '|' + h.name)).toEqual(['20260829174501|']);
+    });
+  });
+
+  test('a nameless file and a named one coexist, and status labels both cleanly', async () => {
+    await withDir(async (mdir) => {
+      writeFileSync(join(mdir, '20260829174501.sql'), 'SELECT 1;\n');
+      writeFileSync(join(mdir, '20260829174502_add_orders.sql'), 'SELECT 2;\n');
+      const st = await K4.scope(async () => {
+        K4.setAdapter(migrateAdapter({ tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] }));
+        K4.__schema(model('User', field('name')));
+        return mig.status({ dir: mdir });
+      });
+      expect(st.pending.map(mig.migrationLabel))
+        .toEqual(['20260829174501', '20260829174502_add_orders']);
     });
   });
 
@@ -1866,7 +1936,7 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
     }));
     await expect(scenario({})).rejects.toThrow(/gated steps[\s\S]*\[destructive\] drop-column users[\s\S]*--allow-lossy \/ --allow-destructive/);
     const out = await scenario({ allowDestructive: true });
-    expect(out.version).toBe('0001');
+    expect(out.version).toMatch(/^\d{14}$/);
 
     await expect(withDir((mdir) => K4.scope(async () => {
       K4.setAdapter(migrateAdapter({ tables: [
@@ -1890,7 +1960,7 @@ describe('migrate: push — one-motion timestamped migrations', () => {
     try { return await fn(mdir); } finally { rmSync(mdir, { recursive: true, force: true }); }
   };
 
-  test('clean state: writes YYYYMMDD-HHMMSS.sql, applies it, records history', async () => {
+  test('clean state: writes <UTC>.sql, applies it, records history', async () => {
     await withDir(async (mdir) => {
       const adapter = migrateAdapter({ tables: [] });
       const out = await K4.scope(async () => {
@@ -1898,9 +1968,10 @@ describe('migrate: push — one-motion timestamped migrations', () => {
         K4.__schema(model('User', field('name')));
         return mig.push({ dir: mdir });
       });
-      expect(out.file).toMatch(/\d{8}-\d{6}\.sql$/);
-      expect(out.version).toMatch(/^\d{8}-\d{6}$/);
-      expect(out.ran).toEqual([out.version + '_push']);
+      // No description asked for, so none invented — not even 'push'.
+      expect(out.file).toMatch(/\d{14}\.sql$/);
+      expect(out.version).toMatch(/^\d{14}$/);
+      expect(out.ran).toEqual([out.version]);
       expect(adapter.history.map((h) => h.version)).toEqual([out.version]);
       const content = readFileSync(out.file, 'utf8');
       expect(content).toContain('CREATE TABLE "users"');
@@ -1947,7 +2018,7 @@ describe('migrate: push — one-motion timestamped migrations', () => {
     }));
     await expect(scenario({})).rejects.toThrow(/schema\.push: the plan contains gated steps[\s\S]*\[destructive\] drop-column users/);
     const out = await scenario({ allowDestructive: true });
-    expect(out.ran).toEqual([out.version + '_push']);
+    expect(out.ran).toEqual([out.version]);
   });
 
   test('an unclear directory refuses before writing: pending file named, nothing new appears', async () => {
@@ -1978,17 +2049,46 @@ describe('migrate: push — one-motion timestamped migrations', () => {
     });
   });
 
-  test('make numbering ignores timestamped pushes: next sequential is still 0001', async () => {
+  test('a named push carries its description into the filename and history', async () => {
     await withDir(async (mdir) => {
-      writeFileSync(join(mdir, '20260827-063412.sql'), '-- a prior push\nSELECT 1;\n');
+      const adapter = migrateAdapter({ tables: [] });
       const out = await K4.scope(async () => {
-        const adapter = migrateAdapter({ tables: [] });
-        adapter.history.push({ version: '20260827-063412', name: 'push', checksum: (await import('node:crypto')).createHash('sha256').update('-- a prior push\nSELECT 1;\n').digest('hex') });
         K4.setAdapter(adapter);
         K4.__schema(model('User', field('name')));
-        return mig.make('init', { dir: mdir });
+        return mig.push({ dir: mdir, name: 'Add Partner Emails', now: '2026-08-29T17:45:01Z' });
       });
-      expect(out.version).toBe('0001');
+      expect(out.file).toBe(join(mdir, '20260829174501_add_partner_emails.sql'));
+      expect(adapter.history.map((h) => h.version + '_' + h.name)).toEqual(['20260829174501_add_partner_emails']);
+    });
+  });
+
+  // The retired dashed shape still READS: a database that applied one
+  // matches its file forever, so it must keep parsing.
+  test('a legacy dashed push file still parses and still matches its history row', async () => {
+    await withDir(async (mdir) => {
+      const body = '-- a prior push\nSELECT 1;\n';
+      writeFileSync(join(mdir, '20260827-063412.sql'), body);
+      const st = await K4.scope(async () => {
+        const adapter = migrateAdapter({ tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] });
+        adapter.history.push({ version: '20260827-063412', name: 'push', checksum: (await import('node:crypto')).createHash('sha256').update(body).digest('hex') });
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        return mig.status({ dir: mdir });
+      });
+      expect(st.applied.map((a) => a.version)).toEqual(['20260827-063412']);
+      expect(st.pending).toEqual([]);
+      expect(st.mismatched).toEqual([]);
+    });
+  });
+
+  // '0' sorts before '2', so a legacy baseline stays ahead of every
+  // timestamp — the reason both shapes can share one directory.
+  test('legacy NNNN files sort ahead of timestamps', async () => {
+    await withDir(async (mdir) => {
+      writeFileSync(join(mdir, '20260829174501_later.sql'), 'SELECT 2;\n');
+      writeFileSync(join(mdir, '0001_initial.sql'), 'SELECT 1;\n');
+      const files = await mig.migrationFiles(mdir);
+      expect(files.map((f) => f.version)).toEqual(['0001', '20260829174501']);
     });
   });
 });
@@ -2008,16 +2108,16 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
     await withDir(async (mdir) => {
       const adapter = migrateAdapter({ tables: [] });
       const r = await scoped(adapter, async () => {
-        const out = await mig.make('init', { dir: mdir });
+        const out = await mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
         const first = await mig.migrate({ dir: mdir });
         const second = await mig.migrate({ dir: mdir });
         return { out, first, second };
       });
-      expect(r.out.file.endsWith('0001_init.sql')).toBe(true);
-      expect(r.first.ran).toEqual(['0001_init']);
+      expect(r.out.file.endsWith('20260829174501_init.sql')).toBe(true);
+      expect(r.first.ran).toEqual(['20260829174501_init']);
       expect(r.first.transactional).toBe(false);
       expect(r.second.ran).toEqual([]);
-      expect(adapter.history.map((h) => h.version + '_' + h.name)).toEqual(['0001_init']);
+      expect(adapter.history.map((h) => h.version + '_' + h.name)).toEqual(['20260829174501_init']);
       // The file's header comments attach to the FIRST statement (the
       // splitter's design: a leading TODO is visible in errors), so
       // the sequence statement carries them as a prefix.
@@ -2030,10 +2130,10 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
     await withDir(async (mdir) => {
       const adapter = migrateAdapter({ tables: [] });
       await scoped(adapter, async () => {
-        const out = await mig.make('init', { dir: mdir });
+        const out = await mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
         await mig.migrate({ dir: mdir });
         appendFileSync(out.file, '\n-- edited after apply\n');
-        await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/checksum mismatch on applied migration 0001_init.*--repair/s);
+        await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/checksum mismatch on applied migration 20260829174501_init.*--repair/s);
         await mig.migrate({ dir: mdir, repair: true });
       });
       expect(adapter.calls.some((c) => c.sql.startsWith('UPDATE schema SET checksum'))).toBe(true);
@@ -2062,9 +2162,12 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(r.transactional).toBe(true);
       // The lock and the table-ensure are orthogonal infrastructure: the
       // lock rows are addressed by the reserved '@lock' key, and the
-      // ensure is the adopt-rename / create / add-column / drop-legacy
-      // sequence that runs once before anything else.
+      // ensure is the adopt-rename / create / verify / add-column /
+      // drop-legacy sequence that runs once before anything else. The
+      // catalog read is that verify — one per migrate, before the first
+      // write, confirming the schema table is the runner's own.
       const infra = (c) => /@lock/.test(JSON.stringify(c.params ?? [])) ||
+        c.sql === '<CATALOG>' ||
         /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS schema|DROP TABLE)/.test(c.sql);
       const stream = adapter.calls
         .filter((c) => !infra(c))
@@ -2089,7 +2192,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(err.message).toContain('Parser Error');
       expect(err.message).toContain('ROLLED BACK whole');
       expect(err.message).toContain('Migrations applied earlier in this run remain applied');
-      expect(adapter.calls.map((c) => c.sql).filter((s) => s.startsWith('<'))).toEqual(['<BEGIN>', '<COMMIT>', '<BEGIN>', '<ROLLBACK>']);
+      expect(adapter.calls.map((c) => c.sql).filter((s) => /^<(BEGIN|COMMIT|ROLLBACK)>$/.test(s))).toEqual(['<BEGIN>', '<COMMIT>', '<BEGIN>', '<ROLLBACK>']);
       expect(adapter.history.map((h) => h.version)).toEqual(['0001']);
 
       // The fix: edit the failing statement. The file was never
@@ -2119,7 +2222,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(err.message).toContain('engines that auto-commit DDL may retain earlier statements');
       expect(err.message).toContain('rip schema status');
       expect(err.message).not.toContain('ROLLED BACK whole');
-      expect(adapter.calls.map((c) => c.sql).filter((s) => s.startsWith('<'))).toEqual(['<BEGIN>', '<ROLLBACK>']);
+      expect(adapter.calls.map((c) => c.sql).filter((s) => /^<(BEGIN|COMMIT|ROLLBACK)>$/.test(s))).toEqual(['<BEGIN>', '<ROLLBACK>']);
     });
   });
 
@@ -2173,22 +2276,142 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
     await withDir(async (mdir) => {
       const adapter = migrateAdapter({ tables: [] });
       const st = await scoped(adapter, async () => {
-        await mig.make('init', { dir: mdir });
+        await mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
         await mig.migrate({ dir: mdir });
         // Now: edit the applied file, add a pending one, a duplicate
         // pair, and a phantom history row.
-        appendFileSync(join(mdir, '0001_init.sql'), '\n-- edited\n');
+        appendFileSync(join(mdir, '20260829174501_init.sql'), '\n-- edited\n');
         writeFileSync(join(mdir, '0002_next.sql'), 'SELECT 1;\n');
         writeFileSync(join(mdir, '0003_x.sql'), 'SELECT 1;\n');
         writeFileSync(join(mdir, '0003_y.sql'), 'SELECT 2;\n');
         adapter.history.push({ version: '0099', name: 'ghost', checksum: 'zz' });
         return mig.status({ dir: mdir });
       });
-      expect(st.applied.map((a) => a.version)).toEqual(['0001', '0099']);
+      expect(st.applied.map((a) => a.version)).toEqual(['20260829174501', '0099']);
       expect(st.pending.map((f) => f.version + '_' + f.name)).toEqual(['0002_next', '0003_x', '0003_y']);
-      expect(st.mismatched).toEqual(['0001_init']);
+      expect(st.mismatched).toEqual(['20260829174501_init']);
       expect(st.missing).toEqual(['0099_ghost']);
       expect(st.duplicates).toEqual(['0003: x <-> y']);
+    });
+  });
+
+  // ── the state table is verified before it is written to ──────────
+  //
+  // 'schema' is a name a stranger could already own. Everything the
+  // runner does to that table assumes it made it; measured against
+  // DuckDB v2.0.0, assuming wrong is silent in four separate ways at
+  // once (ADD COLUMN mutates their table, the history reads as empty,
+  // the lock INSERT stops being exclusive, and history rows land in
+  // their data). These pin the refusal that replaces all four.
+  describe('a foreign table named schema', () => {
+    // A raw contract entry, NOT the table() helper: the helper forces
+    // an id primary key, and the whole point is a table shaped like
+    // somebody else's.
+    const foreign = (columns, primaryKey = null) => ({
+      name: 'schema', primaryKey, indexes: [], foreignKeys: [],
+      columns: columns.map((name) => ({ name, type: 'VARCHAR' })),
+    });
+
+    test('refuses by name, says what is wrong, and applies NOTHING', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [foreign(['id', 'body'], 'id')] });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(
+            /the table named schema in this database is not the migration runner's[\s\S]*missing columns version, name, checksum, detail, applied_at[\s\S]*its primary key is id, not version[\s\S]*nothing has been applied/);
+        });
+        expect(adapter.history).toEqual([]);
+        // and — the part that matters — no write ever reached it.
+        expect(adapter.calls.some((c) => /^ALTER TABLE schema ADD COLUMN/.test(c.sql))).toBe(false);
+        expect(adapter.calls.some((c) => (c.params ?? []).includes('@lock'))).toBe(false);
+      });
+    });
+
+    test('the primary key alone is enough to refuse: right columns, no PK', async () => {
+      // The PK is the mutex. A table carrying every column but no
+      // PRIMARY KEY on version accepts every racer's lock INSERT, so
+      // the columns matching is not sufficient.
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [foreign(['version', 'name', 'checksum', 'detail', 'applied_at'])] });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/its primary key is not set, not version/);
+        });
+        expect(adapter.history).toEqual([]);
+      });
+    });
+
+    test('the runner own table passes and migrate proceeds', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [
+          foreign(['version', 'name', 'checksum', 'detail', 'applied_at'], 'version'),
+        ] });
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        expect(r.ran).toEqual(['0001_a']);
+      });
+    });
+  });
+
+  // ── ABSENT means absent, and nothing else ────────────────────────
+  describe('failures that are not absence reach the caller', () => {
+    test('a wrong-shaped table raises instead of reading as "nothing applied"', async () => {
+      // DuckDB's phrasing verbatim. This used to match /not found/ and
+      // be swallowed, and appliedMigrations() would answer [] — so
+      // every migration re-ran against a populated database.
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] }, {
+          failOn: /^SELECT version, name, checksum/,
+          failMessage: 'Binder Error: Referenced column "version" not found in FROM clause!',
+        });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/Referenced column "version" not found/);
+        });
+        expect(adapter.history).toEqual([]);
+      });
+    });
+
+    test('an unreachable database is not an empty history', async () => {
+      // The harbor adapter's own wording. /not found/ used to match it.
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] }, {
+          failOn: /^SELECT version, name, checksum/,
+          failMessage: 'db request failed: 404 Not Found',
+        });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/404 Not Found/);
+        });
+        expect(adapter.history).toEqual([]);
+      });
+    });
+
+    test('adoption onto an occupied name refuses, naming both tables', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] }, {
+          failOn: /RENAME TO schema/,
+          failMessage: 'Catalog Error: Could not rename "_rip_migrations" to ""schema"": another entry with this name already exists!',
+        });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(
+            /cannot adopt _rip_migrations — a table named schema already exists[\s\S]*drop the empty one/);
+        });
+        expect(adapter.history).toEqual([]);
+      });
+    });
+
+    test('a genuinely absent table is still swallowed: a fresh database migrates', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] }, {
+          failOn: /RENAME TO schema|DROP TABLE _rip_migration/,
+          failMessage: 'Catalog Error: Table with name _rip_migrations does not exist!',
+        });
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        expect(r.ran).toEqual(['0001_a']);
+      });
     });
   });
 

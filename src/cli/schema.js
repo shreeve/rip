@@ -8,7 +8,7 @@
 //   rip schema status  [entry.rip] [--dir DIR]
 //   rip schema plan    [entry.rip]
 //   rip schema dump    [entry.rip] [--out FILE] [--check]
-//   rip schema make <name> [entry.rip] [--dir DIR] [--allow-lossy] [--allow-destructive]
+//   rip schema make [name…] [entry.rip] [--dir DIR] [--allow-lossy] [--allow-destructive]
 //   rip schema migrate [entry.rip] [--dir DIR] [--repair]
 //
 // `entry.rip` is a file whose import registers every :model schema
@@ -40,13 +40,21 @@ Usage:
   rip schema plan    [entry.rip]                    print the classified diff (no files touched)
   rip schema dump    [entry.rip] [--out FILE]       write schema.sql — the declared shape of every table
                      [--check]                      (no database touched; --check verifies instead of writing)
-  rip schema make <name> [entry.rip] [--dir DIR]    write migrations/NNNN_<name>.sql from the diff
-                     [--allow-lossy] [--allow-destructive]
+  rip schema make [name…] [entry.rip] [--dir DIR]   write migrations/<UTC>_<name>.sql from the diff
+                     [--allow-lossy] [--allow-destructive]   (bare words are joined:
+                     make add partner emails -> 20260829174501_add_partner_emails.sql)
+                     the name is optional; without one the file is just 20260829174501.sql
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
                      [--repair] [--force]
-  rip schema push    [entry.rip] [--dir DIR]        diff, write migrations/YYYYMMDD-HHMMSS.sql,
+  rip schema push    [name…] [entry.rip] [--dir DIR]  diff, write migrations/<UTC>_<name>.sql,
                      [--allow-lossy] [--allow-destructive]   and apply it — one motion (rapid iteration;
-                     refuses when pending/edited/conflicting migrations make the state unclear)
+                     refuses when pending/edited/conflicting migrations make the state unclear;
+                     the name is optional, exactly as for make)
+
+Migration files are named <YYYYMMDDHHMMSS>_<description>.sql, the timestamp in UTC.
+UTC because the version is the sort key and the sort is the apply order — local
+time would reorder the directory across zones or a DST boundary. Legacy NNNN_name
+files still apply, and sort ahead of every timestamp, which is where they belong.
 
 entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDIDATES.join(' | ')})
 --dir DIR       migrations directory (default: migrations/ beside the models entry —
@@ -124,20 +132,25 @@ if (flags.force && cmd !== 'migrate') die('--force only applies to migrate', 2);
 if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
 if (flags.operationId && cmd !== 'migrate') die('--operation-id only applies to migrate', 2);
 
-// `make` takes a migration name first; every command takes an
-// optional models entry. Disambiguate by file existence: a
-// positional that names an existing file is the entry, anything else
-// (for make) is the name.
-let name = null;
+// `make` and `push` take a migration description; every command takes
+// an optional models entry. Disambiguate by file existence: a
+// positional that names an existing file is the entry, and the rest
+// are description words.
+//
+// The words are JOINED rather than requiring one quoted argument, so
+// `rip schema make add partner emails` works — the shell alias people
+// write for every other migration tool, built in instead.
 let entry = null;
+const words = [];
 for (const p of positional) {
   if (existsSync(p) && /\.(rip|js|ts)$/.test(p)) entry = p;
-  else if (cmd === 'make' && !name) name = p;
+  else if (cmd === 'make' || cmd === 'push') words.push(p);
   else die(`unexpected argument: ${p} (no such file)`, 2);
 }
-if (cmd === 'make' && !name) {
-  die('a migration name is required — rip schema make <name> [entry.rip]', 2);
-}
+// Optional for both verbs: the timestamp already names the file
+// uniquely, so a description is something you add because a human will
+// read it, not something the tool can insist on.
+const name = words.length ? words.join(' ') : null;
 if (!entry) entry = ENTRY_CANDIDATES.find((c) => existsSync(c)) || null;
 if (!entry) {
   die(
@@ -206,8 +219,9 @@ try {
 
   } else if (cmd === 'status') {
     const st = await migration.status({ dir: flags.dir });
-    console.log(`applied:  ${st.applied.length ? st.applied.map((a) => a.version + '_' + a.name).join(', ') : '(none)'}`);
-    console.log(`pending:  ${st.pending.length ? st.pending.map((f) => f.version + '_' + f.name).join(', ') : '(none)'}`);
+    const label = migration.migrationLabel;
+    console.log(`applied:  ${st.applied.length ? st.applied.map(label).join(', ') : '(none)'}`);
+    console.log(`pending:  ${st.pending.length ? st.pending.map(label).join(', ') : '(none)'}`);
     if (st.mismatched.length) {
       console.log(`edited after apply: ${st.mismatched.join(', ')} — restore the files or migrate --repair`);
     }
@@ -260,6 +274,7 @@ try {
         'so an interrupted run leaves partial state (the failure report will say exactly what applied).');
     }
     const out = await migration.push({
+      name,
       dir: flags.dir,
       allowLossy: flags.allowLossy,
       allowDestructive: flags.allowDestructive,
