@@ -1043,6 +1043,9 @@ rip schema make add partners      write migrations/<UTC>_add_partners.sql from t
                                   which is optional — with none the file is just
                                   migrations/<UTC>.sql
 rip schema migrate                apply pending files in order
+rip schema unlock                 break a stale migration lock — applies NOTHING, and prints
+                                  exactly whom it displaced; refuses a holder it can prove is
+                                  alive on this host (--force overrides)
 rip schema push [name…]           diff, write migrations/<UTC>_<name>.sql (the name
                                   optional, as for make), and apply
                                   it — one motion, for rapid iteration; refuses when

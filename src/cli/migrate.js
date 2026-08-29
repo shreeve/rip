@@ -1504,6 +1504,14 @@ async function appliedMigrations() {
 // (the lock row, the history rows, the '@op:…' rows) assumes the table
 // is already there.
 async function ensureMigrationsTable() {
+  // BEFORE the rename, because the rename is the destructive half.
+  if (await legacyLockHeld()) {
+    throw new Error(
+      'schema.migrate: an older `rip schema migrate` holds the lock in ' + LEGACY_LOCK_TABLE +
+      ' — this database has not been adopted yet, and adopting it now would take that run\'s ' +
+      'history table away mid-apply. Wait for it to finish (or clear that row if it crashed), then ' +
+      'run again. Nothing was adopted and nothing was applied.');
+  }
   try {
     await tryRun('ALTER TABLE ' + LEGACY_STATE_TABLE + ' RENAME TO ' + STATE_TABLE);
   } catch (e) {
@@ -1532,8 +1540,40 @@ async function ensureMigrationsTable() {
   } catch (e) {
     if (!/already exists|duplicate column/i.test(e?.message || '')) throw e;
   }
+}
+
+// The legacy tables outlive adoption ON PURPOSE, until the lock is
+// held. Dropping them here — before anything is locked — is how a new
+// binary destroys an OLD binary's live mutex mid-apply during a
+// rollout, which is the one window where two runners are guaranteed to
+// exist. migrate() calls this under '@lock' instead.
+async function dropLegacyTables() {
   await tryRun('DROP TABLE ' + LEGACY_LOCK_TABLE);
   await tryRun('DROP TABLE ' + LEGACY_OPS_TABLE);
+}
+
+// Is a runner from before the rename holding its own mutex right now?
+//
+// Adoption renames the history table and (later, under the lock) drops
+// the legacy lock table, and BOTH of those are destructive to a run
+// already in flight under the old code: the rename takes its history
+// table away mid-apply, so it applies every statement and then cannot
+// record a single one, and the drop takes its mutex. The two runners
+// arbitrate through different tables and cannot see each other at all,
+// so nothing else in this file would notice.
+//
+// One SELECT closes it. A row in the legacy lock table means an older
+// `rip schema migrate` is mid-flight, and the only safe move is to
+// refuse before touching anything.
+async function legacyLockHeld() {
+  try {
+    const res = await runSQL('SELECT count(*) AS n FROM ' + LEGACY_LOCK_TABLE, []);
+    return Number(migrateRows(res)[0]?.n ?? 0) > 0;
+  } catch (e) {
+    // No legacy table is the normal case and means nobody holds it.
+    if (ABSENT.test(e?.message || '')) return false;
+    throw e;
+  }
 }
 
 // Every column the runner ever names, and the one that has to be the
@@ -1612,49 +1652,376 @@ async function recordMigrationOperation(id, outcome, detail = null) {
 // One reserved row serializes concurrent `migrate` runs so two
 // processes never both compute "pending" and apply the same files. The
 // PRIMARY KEY on '@lock' is the atomic gate: exactly one racer's INSERT
-// succeeds, the rest hit the constraint and fail fast with a named
-// remedy rather than racing. A crashed run leaves the row behind —
-// `--force` clears a stale lock before acquiring. Applies run UNDER the
-// lock; status/plan are read-only and take none.
+// lands, the rest hit the constraint and fail fast with a named remedy
+// rather than racing. Applies run UNDER the lock; status and plan are
+// read-only and take none.
 //
 // It shares a table with the history, so every statement here names the
 // row it means. `name` carries the owner token and `applied_at` — which
 // already defaults to now — is the moment it was taken.
+
+// A lock's whole job, once a run has crashed, is to answer one question
+// for the next human: is the thing that took me still alive? A bare
+// randomUUID answers nothing — it names no machine and no process, so
+// every stale lock looks exactly like every live one, and `--force`
+// becomes the only move anyone has.
+//
+// So the token is a small RECORD, in a shape that stays legible in a
+// plain `SELECT * FROM schema`:
+//
+//   rip1 host=pop pid=50487 run=9f3a1c7e
+//
+//   host  which machine to go look at — and the only thing that makes
+//         `pid` mean anything, since a pid is meaningless off its host
+//   pid   `ps -p 50487` is the liveness test, and on the SAME host this
+//         process can run it itself
+//   run   a random nonce, and it is LOAD-BEARING rather than
+//         decoration: releaseMigrationLock deletes `WHERE name = <token>`,
+//         so two runs agreeing on host and pid — a crash, then a reused
+//         pid, which containers do in seconds — must still carry
+//         distinguishable tokens, or one run's release deletes the
+//         other run's lock. Descriptive fields are ADDED to a unique
+//         id; they never replace it.
+//
+// DELIBERATELY ABSENT — the username, and the migrations path:
+//   `rip-db dump` is EXPORT DATABASE with no table filter, so whatever
+//   is in this row is in every backup tarball, and the same database is
+//   reachable through an MCP SQL tool and an auth-gated web UI. This
+//   toolchain migrates medical-lab schemas. A hostname is the minimum
+//   that makes `pid` actionable; an operator's account name and home
+//   directory are not, and the contended-migrate report would print
+//   them into CI logs besides.
+//
+// Also absent: a start time. `applied_at` already records it, in the
+// DATABASE's clock — the only clock every party to this lock shares.
+const OWNER_TAG = 'rip1';
+
+// Whitespace and '=' are the format's own separators, so a value
+// carrying either collapses them to '-' and can never split one field
+// into two or forge a second.
+const tokenField = (v) => String(v ?? '?').replace(/[\s=]+/g, '-') || '?';
+
+async function makeOwnerToken() {
+  // The nonce is the only field correctness depends on, so it is minted
+  // first and unconditionally; the rest is best-effort context that must
+  // never be able to fail an acquire.
+  const run = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const fields = [];
+  try {
+    const os = await import('node:os');
+    fields.push('host=' + tokenField(os.hostname()));
+    if (typeof process !== 'undefined' && process.pid) fields.push('pid=' + process.pid);
+  } catch {
+    // No node:os here (a browser, an edge runtime) — fewer fields, and
+    // the token is still unique, which is the part that matters.
+  }
+  fields.push('run=' + tokenField(run));
+  return OWNER_TAG + ' ' + fields.join(' ');
+}
+
+// Tolerant on purpose: the row may hold a pre-rip1 UUID, something
+// hand-written, or a token from a format that does not exist yet. Every
+// one of those still has to PRINT, so anything unparseable comes back
+// with `tag: null` and the report says it verbatim rather than
+// pretending to know less than it does.
+function parseOwnerToken(token) {
+  const raw = String(token ?? '');
+  const out = { raw, tag: null, host: null, pid: null, run: null };
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts[0] !== OWNER_TAG) return out;
+  out.tag = parts[0];
+  for (const part of parts.slice(1)) {
+    const eq = part.indexOf('=');
+    if (eq < 1) continue;
+    const k = part.slice(0, eq);
+    if (k === 'host' || k === 'pid' || k === 'run') out[k] = part.slice(eq + 1);
+  }
+  return out;
+}
+
+// THE AGE IS COMPUTED IN SQL, and that is not a style preference.
+// `applied_at` is a naive TIMESTAMP written by CURRENT_TIMESTAMP, so
+// DuckDB stores the DATABASE host's local wall clock — measured on
+// v2.0.0-alpha38195 in America/Denver, a row stamped at true UTC
+// 18:56:50Z stores `12:56:50`. The adapter's decode seam then defines a
+// naive TIMESTAMP as UTC and appends a `Z` (runtime/duckdb.js,
+// decodeTemporal). Subtracting that Date from Date.now() on the CLI
+// host is therefore wrong by the database host's UTC offset: a lock
+// taken ZERO seconds ago reads as six hours old. Six hours of error on
+// the one number whose entire job is telling a crash from a live run.
+//
+// date_diff() inside the database compares two values from one clock
+// and cannot be wrong that way. Verified: 0 for the same row.
+const LOCK_READ_SQL =
+  'SELECT name AS owner, applied_at,' +
+  " date_diff('second', applied_at, now()) AS age_seconds" +
+  ' FROM ' + STATE_TABLE + ' WHERE version = ?';
+
+// One shape for a holder, wherever the row came from — the SELECT
+// above, or the DELETE … RETURNING that unlock displaces it with.
+function lockHolderFrom(row) {
+  if (!row) return null;
+  return {
+    owner: row.owner,
+    appliedAt: row.applied_at,
+    ageSeconds: row.age_seconds == null ? null : Number(row.age_seconds),
+    fields: parseOwnerToken(row.owner),
+  };
+}
+
+async function readLockHolder() {
+  return lockHolderFrom(migrateRows(await runSQL(LOCK_READ_SQL, [LOCK_KEY]))[0]);
+}
+
+// Coarse above a minute on purpose. The question this answers is
+// "twenty minutes ago, or right now"; a spurious second of precision
+// invites the reader to treat the number as a timeout policy, and it is
+// not one — nothing in this file breaks a lock because of its age.
+function humanAge(seconds) {
+  if (seconds == null || !Number.isFinite(seconds)) return 'at an unknown time';
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 90) return s + ' second' + (s === 1 ? '' : 's') + ' ago';
+  const m = Math.round(s / 60);
+  if (m < 90) return m + ' minutes ago';
+  const h = Math.floor(s / 3600);
+  if (h < 48) return h + ' hour' + (h === 1 ? '' : 's') + ' ago';
+  return Math.floor(s / 86400) + ' days ago';
+}
+
+// The one liveness question this process can actually answer, asked
+// only where the answer means something: a pid identifies a process on
+// ONE machine, so a pid from another host is not a fact we hold.
+// Signal 0 delivers nothing and only asks "may I signal this?" — ESRCH
+// is "no such process", EPERM is "there is one and it is not mine",
+// which is still alive.
+//
+// 'alive' is EVIDENCE, never PROOF: pids are reused, so the process
+// answering may be an unrelated one that inherited the number after the
+// migrate died. Every message built on this says so, and names `ps` as
+// the check that settles it.
+async function holderLiveness(fields) {
+  const pid = Number(fields?.pid);
+  if (!fields?.host || !Number.isInteger(pid) || pid <= 0) return 'unknown';
+  let here = null;
+  try { here = (await import('node:os')).hostname(); } catch { return 'unknown'; }
+  if (tokenField(here) !== fields.host) return 'elsewhere';
+  if (typeof process?.kill !== 'function') return 'unknown';
+  try { process.kill(pid, 0); return 'alive'; }
+  catch (e) { return e?.code === 'EPERM' ? 'alive' : e?.code === 'ESRCH' ? 'gone' : 'unknown'; }
+}
+
+// Everything a human needs in order to choose between waiting and
+// unlocking, in the order they need it: WHO, WHEN, and then — only
+// where this process can actually check — whether that process still
+// exists. A token this runner did not write prints verbatim: an
+// unrecognized format is a fact about the row, not a licence to say
+// less about it.
+export function describeLockHolder(holder, liveness = 'unknown') {
+  if (!holder) return 'nothing holds it';
+  const f = holder.fields;
+  const who = f.tag
+    ? ['host ' + (f.host ?? '?'), f.pid && 'pid ' + f.pid].filter(Boolean).join(', ')
+    : holder.owner;
+  const life =
+    liveness === 'alive' ? '\n  that pid IS alive on this host right now — but pids get reused, so settle it ' +
+      'with `ps -p ' + f.pid + '` before breaking anything'
+    : liveness === 'gone' ? '\n  that pid is GONE on this host — the run that took this lock is dead'
+    : liveness === 'elsewhere' ? '\n  the holder is on another machine, so this process cannot tell whether it ' +
+      'is still running — check `ps -p ' + f.pid + '` on ' + f.host
+    : '';
+  return 'held by ' + who + ', taken ' + humanAge(holder.ageSeconds) + life;
+}
+
+// "Somebody else has it" wears two different faces, and both are the
+// same news. The PRIMARY KEY produces a constraint violation; harbor's
+// pooled connections produce DuckDB's optimistic-concurrency error when
+// two writes land on one tuple. Measured live: eight concurrent racers
+// yield exactly one winner and losers of BOTH shapes.
+const LOCK_TAKEN =
+  /violates (unique|primary key) constraint|constraint violation|already taken|Duplicate key|Conflict on tuple/i;
+
+// ONE statement, and it replaces a DELETE-then-INSERT pair that had a
+// hole in the middle of it.
+//
+// The old force deleted '@lock' and then inserted its own — two round
+// trips, no transaction. Two forcers interleaved as
+// delete/delete/insert/insert and BOTH came away believing they held
+// the lock; on an adapter that does not declare
+// capabilities.ddlTransactional the loser's DDL is already committed by
+// the time its history INSERT dies on the version PRIMARY KEY, so a data
+// migration runs twice and the history records it once. Worse, the gap
+// between the two statements is a window in which the lock is VACANT: a
+// third party takes it, and the forcer has then destroyed a live peer's
+// mutex without acquiring one. Measured through harbor, that window was
+// hit 67 times in 100.
+//
+// The upsert has no gap and no crash window. `DO UPDATE SET detail =
+// schema.name` stashes the outgoing token before overwriting it, so
+// RETURNING can say who was displaced — a force is never silent about
+// what it took. Verified over both a held lock and an empty one.
+//
+// It is UNCONDITIONAL on purpose. A compare-and-swap against a holder
+// the operator read seconds earlier sounds safer and is not: in the
+// case that actually motivates --force, a live-but-slow peer, the
+// observed owner IS that peer's token and the swap matches and proceeds.
+// Meanwhile a crash-looping supervisor rotates the token faster than an
+// operator can round-trip, so a mandatory CAS makes --force permanently
+// unable to break the lock — the escape hatch failing in exactly the
+// situation that needs it. The protection people want from a CAS comes
+// instead from `unlock` refusing a demonstrably live holder, and from
+// this reporting what it displaced.
+//
+// `now()` and not CURRENT_TIMESTAMP: inside DO UPDATE SET, DuckDB binds
+// the bare keyword as a column name. The VALUES half uses the same
+// spelling so both halves stamp one clock.
+const STEAL_LOCK_SQL =
+  'INSERT INTO ' + STATE_TABLE + ' (version, name, detail, applied_at) VALUES (?, ?, NULL, now())' +
+  ' ON CONFLICT (version) DO UPDATE SET detail = ' + STATE_TABLE + '.name,' +
+  ' name = excluded.name, applied_at = excluded.applied_at' +
+  ' RETURNING detail AS displaced';
+
+// Returns {owner, displaced}: the token this run holds, and — when
+// --force took the lock off somebody — the holder it displaced.
 async function acquireMigrationLock(opts = {}) {
-  // --force takes over a lock a crashed run never released. It deletes
-  // unconditionally, so it also steals a LIVE peer's lock — the CLI
-  // documents it as safe only when no migration is running.
   if (opts.coordinated && (opts.force || opts.repair)) {
     throw new Error('schema.migrate: coordinated migration rejects --force and --repair');
   }
-  // QUALIFIED, and it must stay that way: an unqualified DELETE here
-  // would take the entire migration history with the lock.
-  if (opts.force) await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ?', [LOCK_KEY]);
-  const owner = opts.ownerToken || (
-    (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? crypto.randomUUID()
-      : ((typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid + ':' + Date.now() : 'rip-schema:' + Date.now())
-  );
+  const owner = opts.ownerToken || await makeOwnerToken();
+
+  if (opts.force) {
+    const res = await runSQL(STEAL_LOCK_SQL, [LOCK_KEY, owner]);
+    const displaced = migrateRows(res)[0]?.displaced ?? null;
+    return { owner, displaced };
+  }
+
   try {
     await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name) VALUES (?, ?)', [LOCK_KEY, owner]);
+    return { owner, displaced: null };
   } catch (e) {
-    if (/violates (unique|primary key) constraint|already taken|Duplicate key/i.test(e?.message || '')) {
-      const err = new Error(
-        'schema.migrate: the migration lock is held — another `rip schema migrate` is running, ' +
-        'or a previous run crashed before releasing it. If no migration is running, clear the stale ' +
-        'lock and retry with `rip schema migrate --force`.');
-      err.cause = e;
-      throw err;
+    if (!LOCK_TAKEN.test(e?.message || '')) throw e;
+
+    // The collision and this read are two moments, and under contention
+    // they disagree far more often than you would guess: measured with a
+    // holder taking the lock for three milliseconds, 24% of failed
+    // acquisitions found NO row here — the lock had already been
+    // released. Reporting "held by (unknown), age unknown, clear it with
+    // --force" in that case would be confidently wrong a quarter of the
+    // time, and would point the operator at the most dangerous verb in
+    // the tool over a lock that is simply free.
+    //
+    // So an empty read is not a report, it is a retry. Once — a second
+    // collision followed by a second empty read is a busy database, not
+    // a stale lock, and looping here would just spin.
+    let holder = null;
+    try { holder = await readLockHolder(); } catch { /* the collision is the news */ }
+    if (!holder && !opts._retried) {
+      return acquireMigrationLock({ ...opts, ownerToken: owner, _retried: true });
     }
-    throw e;
+
+    let liveness = 'unknown';
+    if (holder) { try { liveness = await holderLiveness(holder.fields); } catch { /* best effort */ } }
+    const remedy = liveness === 'alive'
+      ? 'Wait for it. If `ps` shows something that is not a `rip schema migrate`, break the lock ' +
+        'deliberately with `rip schema unlock --force`.'
+      : liveness === 'gone'
+        ? 'That run is dead: break the lock with `rip schema unlock`, then migrate again.'
+        : 'If nothing is running, break the lock with `rip schema unlock` — it applies nothing and ' +
+          'prints exactly what it displaced — then migrate again.';
+    const err = new Error(
+      'schema.migrate: the migration lock is held.\n  ' +
+      describeLockHolder(holder, liveness) + '\n' + remedy);
+    err.cause = e;
+    err.lockHolder = holder;
+    throw err;
   }
-  return owner;
+}
+
+// ── unlock ────────────────────────────────────────────────────────────
+//
+// Breaking a stale lock and deploying every pending migration used to be
+// the same button. They are not the same decision: the first is "I have
+// established that nothing is running", the second is "and now change
+// the database". `migrate --force` made an operator who wanted only the
+// first take the second as well, which is how a stuck lock at 2am
+// becomes an unplanned deploy.
+//
+// So: a verb that applies NOTHING. One DELETE … RETURNING, which both
+// breaks the lock and reports what it displaced — a read-then-delete
+// pair would report a holder that is not necessarily the one it deleted.
+// An empty result means nothing was held, and that is an OBSERVATION
+// rather than an assumption.
+//
+// It refuses exactly one thing: a holder this process can positively
+// show is alive, which it can only do for a pid on its own host.
+// Refusing on AGE instead would mean inventing a staleness timeout, and
+// a migration that legitimately runs for forty minutes — a 200M-row
+// CREATE INDEX; see UNBOUNDED — would then be breakable by a tool that
+// decided on the operator's behalf. Nothing here decides that.
+//
+// A holder on ANOTHER host does not refuse: this process cannot see that
+// machine's process table, so a refusal there would be a guess dressed
+// as a safeguard, and it would make unlock useless for the commonest
+// stale lock there is, a killed CI job.
+export async function unlock(opts = {}) {
+  // Deliberately NOT ensureMigrationsTable(): unlocking must not create
+  // a table, adopt a legacy database, or drop anything. It is the
+  // narrowest verb in this file and its side effects should match. The
+  // ownership check still runs, because this DELETEs from `schema` and
+  // `schema` is a name a stranger could own.
+  requireCatalog('schema.unlock');
+  await assertStateTableIsOurs();
+
+  let holder = null;
+  try {
+    holder = await readLockHolder();
+  } catch (e) {
+    // An ABSENT state table is NOT "no lock is held" — on a database
+    // that predates the rename the real lock is in the legacy table, and
+    // reporting "nothing held" there would be a lie the operator acts on.
+    if (!ABSENT.test(e?.message || '')) throw e;
+    throw new Error(
+      'schema.unlock: this database has no ' + STATE_TABLE + ' table, so there is no lock here to ' +
+      'break. If it predates the rename, its lock lives in ' + LEGACY_LOCK_TABLE + ' — clear that ' +
+      'row instead, or run `rip schema migrate` once to adopt the database.');
+  }
+  if (!holder) return { released: false, holder: null, liveness: 'unknown' };
+
+  const liveness = await holderLiveness(holder.fields);
+  if (liveness === 'alive' && !opts.force) {
+    throw new Error(
+      'schema.unlock: refusing — the lock is ' + describeLockHolder(holder, liveness) + '\n' +
+      'Breaking a LIVE migration\'s lock lets a second one start beside it, and on an adapter that ' +
+      'does not declare capabilities.ddlTransactional the two can each apply half a file with no ' +
+      'history row to show for it. If `ps -p ' + holder.fields.pid + '` shows something that is not ' +
+      'a `rip schema migrate` — pids get reused — re-run with `rip schema unlock --force`.');
+  }
+
+  // QUALIFIED, and it must stay that way: an unqualified DELETE here
+  // would take the entire migration history with the lock.
+  const res = await runSQL(
+    'DELETE FROM ' + STATE_TABLE + ' WHERE version = ?' +
+    " RETURNING name AS owner, applied_at, date_diff('second', applied_at, now()) AS age_seconds",
+    [LOCK_KEY]);
+  const gone = lockHolderFrom(migrateRows(res)[0]);
+  return gone
+    ? { released: true, holder: gone, liveness, describe: describeLockHolder(gone, liveness) }
+    : { released: false, holder: null, liveness };
 }
 
 async function releaseMigrationLock(owner) {
-  // Best-effort: a failed release (e.g. the connection dropped after a
-  // successful apply) leaves a stale lock the next run clears with
-  // --force; it must never mask the migration's own outcome.
+  // Best-effort, and it must STAY that way. Measured: a release racing
+  // a concurrent force on the same row throws DuckDB's "Conflict on
+  // tuple deletion" 35 times in 100 — after a fully successful
+  // migration. Letting that escape would turn a successful migrate into
+  // a reported failure. A stale lock is what the next run's `unlock`
+  // is for.
+  //
+  // Owner-scoped, and the token's `run=` nonce is what makes that
+  // sound: a run whose lock was stolen mid-apply deletes nothing here,
+  // which is right — the row belongs to the thief now, and taking it
+  // would leave the live run unlocked.
   try {
     await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ? AND name = ?', [LOCK_KEY, owner]);
   } catch {
@@ -1787,7 +2154,13 @@ export async function status(opts = {}) {
     .map(migrationLabel);
   const duplicates = duplicateVersions(files)
     .map(([a, b]) => a.version + ': ' + a.name + ' <-> ' + b.name);
-  return { steps, files, applied, pending, mismatched, missing, duplicates };
+  // Read-only, and best-effort: a lock is worth seeing in status —
+  // it is the difference between "the deploy is stuck" and "the deploy
+  // is running" — but a database that cannot answer must still be able
+  // to report its migrations.
+  let lock = null;
+  try { lock = await readLockHolder(); } catch { /* nothing to say */ }
+  return { steps, files, applied, pending, mismatched, missing, duplicates, lock };
 }
 
 // The shared safety gate: blocked steps never pass, lossy/destructive
@@ -1928,8 +2301,12 @@ export async function migrate(opts = {}) {
   // Applies run under the migration lock; it is released even when a
   // file fails, so a stuck lock always means a crashed process, not a
   // caught error.
-  const owner = await acquireMigrationLock(opts);
+  const { owner, displaced } = await acquireMigrationLock(opts);
   try {
+    // Under the lock, never before it: dropping the legacy lock table
+    // is destructive to an OLD runner mid-apply, and holding '@lock'
+    // is the only thing that establishes no such run is in flight.
+    await dropLegacyTables();
     if (opts.coordinated) {
       if (!opts.operationId) throw new Error('schema.migrate: coordinated migration requires an operation id');
       await recordMigrationOperation(opts.operationId, 'unknown', 'migration started');
@@ -1937,7 +2314,10 @@ export async function migrate(opts = {}) {
     try {
       const result = await migrateApply(opts, files);
       if (opts.coordinated) await recordMigrationOperation(opts.operationId, result.outcome, JSON.stringify(result.ran));
-      return result;
+      // A --force that took the lock off somebody says so, all the way
+      // out to the CLI. A silent theft is how two operators each end up
+      // believing they were the only one running.
+      return { ...result, displaced };
     } catch (e) {
       if (opts.coordinated) {
         try {

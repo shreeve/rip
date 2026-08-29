@@ -10,6 +10,7 @@
 //   rip schema dump    [entry.rip] [--out FILE] [--check]
 //   rip schema make [name…] [entry.rip] [--dir DIR] [--allow-lossy] [--allow-destructive]
 //   rip schema migrate [entry.rip] [--dir DIR] [--repair]
+//   rip schema unlock  [entry.rip] [--force]
 //
 // `entry.rip` is a file whose import registers every :model schema
 // (your models file — it may also call schema.setAdapter()/connect()
@@ -46,6 +47,9 @@ Usage:
                      the name is optional; without one the file is just 20260829174501.sql
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
                      [--repair] [--force]
+  rip schema unlock  [entry.rip] [--force]          break a stale migration lock — applies NOTHING,
+                                                    prints exactly what it displaced; refuses when the
+                                                    holder is a live pid on THIS host (--force overrides)
   rip schema push    [name…] [entry.rip] [--dir DIR]  diff, write migrations/<UTC>_<name>.sql,
                      [--allow-lossy] [--allow-destructive]   and apply it — one motion (rapid iteration;
                      refuses when pending/edited/conflicting migrations make the state unclear;
@@ -66,8 +70,11 @@ entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDID
 --allow-lossy   include steps that may lose data on existing rows (type changes, SET NOT NULL)
 --allow-destructive   include DROP TABLE / DROP COLUMN steps
 --repair        re-record checksums for applied migrations whose files changed
---force         take over the migration lock — use ONLY when no migration is running;
-                it steals the lock even from a live run, so a concurrent migrate is unsafe
+--force         migrate: take the migration lock in ONE atomic statement and then deploy every
+                pending migration. It cannot leave the lock vacant and it reports whom it
+                displaced, but it does NOT wait for a live run — when all you want is the lock
+                back, use “rip schema unlock”, which applies nothing.
+                unlock: override the refusal to break a lock whose pid is alive on this host
 
 Connection: the entry's schema.setAdapter()/connect() call, or RIP_DB_URL / RIP_DB_TOKEN.`;
 
@@ -83,8 +90,8 @@ if (!cmd || cmd === '--help' || cmd === '-h') {
   console.log(USAGE);
   process.exit(0);
 }
-if (!['status', 'plan', 'dump', 'make', 'migrate', 'push'].includes(cmd)) {
-  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, migrate, or push\n\n${USAGE}`, 2);
+if (!['status', 'plan', 'dump', 'make', 'migrate', 'push', 'unlock'].includes(cmd)) {
+  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, migrate, push, or unlock\n\n${USAGE}`, 2);
 }
 
 const rest = args.slice(1);
@@ -128,7 +135,7 @@ if (flags.check && cmd !== 'dump') die('--check only applies to dump', 2);
 if (flags.allowLossy && cmd !== 'make' && cmd !== 'push') die('--allow-lossy only applies to make and push', 2);
 if (flags.allowDestructive && cmd !== 'make' && cmd !== 'push') die('--allow-destructive only applies to make and push', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
-if (flags.force && cmd !== 'migrate') die('--force only applies to migrate', 2);
+if (flags.force && cmd !== 'migrate' && cmd !== 'unlock') die('--force only applies to migrate and unlock', 2);
 if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
 if (flags.operationId && cmd !== 'migrate') die('--operation-id only applies to migrate', 2);
 
@@ -182,8 +189,21 @@ if (cmd === 'dump' && !flags.out) {
 try {
   await import(pathToFileURL(resolve(entry)).href);
 } catch (e) {
-  if (e instanceof CompileError) die(`the models entry failed to compile\n${e.message}`);
-  die(`the models entry threw while loading (${entry}):\n${e?.message || String(e)}`);
+  // `unlock` is the exception, and the reason is the whole point of the
+  // verb: a models entry that fails to compile or throws on import is
+  // one of the commonest ways a migrate dies and leaves its lock
+  // behind. Refusing to unlock until the entry is fixed would gate the
+  // recovery on the thing that broke. It needs no models — it deletes
+  // one row by key — so it degrades to RIP_DB_URL and says so.
+  if (cmd === 'unlock') {
+    console.error(
+      `rip schema: the models entry could not be loaded (${entry}) — continuing anyway, ` +
+      'because unlock needs no models. The database comes from RIP_DB_URL.');
+  } else if (e instanceof CompileError) {
+    die(`the models entry failed to compile\n${e.message}`);
+  } else {
+    die(`the models entry threw while loading (${entry}):\n${e?.message || String(e)}`);
+  }
 }
 
 // Pre-flight: an unconfigured adapter means every database-touching
@@ -222,6 +242,10 @@ try {
     const label = migration.migrationLabel;
     console.log(`applied:  ${st.applied.length ? st.applied.map(label).join(', ') : '(none)'}`);
     console.log(`pending:  ${st.pending.length ? st.pending.map(label).join(', ') : '(none)'}`);
+    if (st.lock) {
+      console.log(`lock:     ${migration.describeLockHolder(st.lock)}`);
+      console.log('          break it with `rip schema unlock` (applies nothing)');
+    }
     if (st.mismatched.length) {
       console.log(`edited after apply: ${st.mismatched.join(', ')} — restore the files or migrate --repair`);
     }
@@ -303,9 +327,25 @@ try {
       coordinated: flags.coordinated,
       operationId: flags.operationId,
     });
+    // A force that took the lock off somebody is never silent, and it
+    // goes to stderr: it is a warning about what this run did, not part
+    // of the applied-migrations report a script may be parsing.
+    if (out.displaced) {
+      console.error('rip schema: --force displaced the migration lock, which was held by ' + out.displaced);
+    }
     if (!out.ran.length) console.log('no pending migrations');
     else for (const r of out.ran) console.log(`applied ${r}`);
     if (flags.coordinated) console.log('RIP_MIGRATION_OUTCOME=' + JSON.stringify(out));
+
+  } else if (cmd === 'unlock') {
+    const out = await migration.unlock({ force: flags.force });
+    if (!out.released) {
+      console.log('no migration lock is held — nothing to break');
+    } else {
+      console.log('broke the migration lock');
+      console.log('  it was ' + out.describe);
+      console.log('  nothing was applied; run `rip schema migrate` when you are ready');
+    }
   }
   process.exit(0);
 } catch (e) {

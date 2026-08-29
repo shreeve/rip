@@ -84,7 +84,10 @@ function migrateAdapter(deployed, opts = {}) {
   // The single-row migration lock, PK-guarded: a second acquire while
   // held raises the duplicate-key error the runner classifies as
   // "lock held"; release clears it; --force deletes then re-acquires.
-  const lock = { held: false };
+  // The lock row, not just a boolean: the runner now reads the holder
+  // back to report WHO has it and for HOW LONG, and a fake that cannot
+  // answer that would let every one of those messages go untested.
+  const lock = { held: false, owner: null, ageSeconds: 0 };
   let operations = [];   // the '@op:…' rows, kept aside so a test can read them back
   // Serve the deployed spec as the `GET /catalog` contract document —
   // the mapping duckdb-harbor performs — so the runner's introspect()
@@ -138,16 +141,45 @@ function migrateAdapter(deployed, opts = {}) {
     // apart — so the fake exercises the real discrimination rather than
     // a table name that would make any mix-up invisible.
     const ok = (n) => ({ columns: [], data: [], rowCount: n });
+    const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
+    // unlock's DELETE … RETURNING shares a prefix with the plain
+    // release, so RETURNING is tested FIRST — the whole point of the
+    // RETURNING form is that it reports the row it actually deleted.
+    if (sql.startsWith('DELETE FROM schema WHERE version = ?') && sql.includes('RETURNING')) {
+      if (params[0] !== '@lock' || !lock.held) return res(['owner', 'applied_at', 'age_seconds'], []);
+      const gone = lock.owner;
+      lock.held = false; lock.owner = null;
+      return res(['owner', 'applied_at', 'age_seconds'], [[gone, null, lock.ageSeconds]]);
+    }
     if (sql.startsWith('DELETE FROM schema WHERE version = ?')) {
-      if (params[0] === '@lock') lock.held = false;
+      // Owner-scoped release: a run whose lock was stolen must delete
+      // nothing, or it unlocks the thief's live migration.
+      if (params[0] === '@lock') {
+        if (params.length > 1 && params[1] !== lock.owner) return ok(0);
+        lock.held = false; lock.owner = null;
+      }
       return ok(1);
+    }
+    if (sql.startsWith('SELECT name AS owner')) {
+      if (params[0] !== '@lock' || !lock.held) return res(['owner', 'applied_at', 'age_seconds'], []);
+      return res(['owner', 'applied_at', 'age_seconds'], [[lock.owner, null, lock.ageSeconds]]);
     }
     if (sql.startsWith('INSERT INTO schema (version, name) VALUES')) {
       if (params[0] === '@lock') {
         if (lock.held) throw new Error('Duplicate key "version: @lock" violates primary key constraint');
-        lock.held = true;
+        lock.held = true; lock.owner = params[1]; lock.ageSeconds = 0;
       }
       return ok(1);
+    }
+    // The --force steal. It shares its opening with the run-outcome
+    // upsert below, so it is told apart by what it RETURNS — and what
+    // it returns is the token it displaced, which is the property the
+    // whole design turns on.
+    if (sql.startsWith('INSERT INTO schema (version, name, detail, applied_at)') &&
+        sql.includes('RETURNING detail AS displaced')) {
+      const displaced = lock.held ? lock.owner : null;
+      lock.held = true; lock.owner = params[1]; lock.ageSeconds = 0;
+      return res(['displaced'], [[displaced]]);
     }
     // One upsert, not a delete-then-insert: the row must never be
     // momentarily absent, since it only matters when a process dies.
@@ -2168,6 +2200,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       // write, confirming the schema table is the runner's own.
       const infra = (c) => /@lock/.test(JSON.stringify(c.params ?? [])) ||
         c.sql === '<CATALOG>' ||
+        /_rip_migration/.test(c.sql) ||
         /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS schema|DROP TABLE)/.test(c.sql);
       const stream = adapter.calls
         .filter((c) => !infra(c))
@@ -2511,8 +2544,11 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
         adapter.lock.held = true; // a peer run holds it
+        adapter.lock.owner = 'rip1 host=peerbox pid=4242 run=abc12345';
+        adapter.lock.ageSeconds = 600;
         await scoped(adapter, async () => {
-          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/migration lock is held.*--force/s);
+          await expect(mig.migrate({ dir: mdir }))
+            .rejects.toThrow(/migration lock is held[\s\S]*held by[\s\S]*rip schema unlock/);
         });
         // it never touched the migration files while locked out
         expect(adapter.calls.some((c) => /CREATE TABLE a/.test(c.sql))).toBe(false);
@@ -2527,6 +2563,166 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         const r = await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
         expect(r.ran).toEqual(['0001_a']);
         expect(adapter.lock.held).toBe(false); // cleared, applied, released
+      });
+    });
+
+    test('--force is ONE statement and it names whom it displaced', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = 'rip1 host=deadbox pid=999 run=cafe1234';
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
+        expect(r.ran).toEqual(['0001_a']);
+        expect(r.displaced).toBe('rip1 host=deadbox pid=999 run=cafe1234');
+        // The steal is an upsert, never a DELETE followed by an INSERT:
+        // the gap between those two is a window where the lock is
+        // VACANT, and a third party that takes it leaves the forcer
+        // having destroyed a live peer's mutex without acquiring one.
+        const lockCalls = adapter.calls.filter((c) => (c.params ?? []).includes('@lock'));
+        const stole = lockCalls.filter((c) => /RETURNING detail AS displaced/.test(c.sql));
+        expect(stole.length).toBe(1);
+        expect(lockCalls.some((c) => /^DELETE/.test(c.sql) && !/RETURNING/.test(c.sql) &&
+          adapter.calls.indexOf(c) < adapter.calls.indexOf(stole[0]))).toBe(false);
+      });
+    });
+
+    test('the held-lock report names the holder, its age, and unlock — not --force', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = 'rip1 host=ci-runner-4 pid=812 run=99887766';
+        adapter.lock.ageSeconds = 2460;
+        await scoped(adapter, async () => {
+          const e = await mig.migrate({ dir: mdir }).catch((x) => x);
+          expect(e.message).toContain('host ci-runner-4');
+          expect(e.message).toContain('pid 812');
+          expect(e.message).toContain('41 minutes ago');
+          expect(e.message).toContain('rip schema unlock');
+          expect(e.lockHolder.fields.host).toBe('ci-runner-4');
+        });
+      });
+    });
+
+    test('a lock released between the collision and the read is retried, not reported', async () => {
+      // Measured against a real database: with a holder taking the lock
+      // for three milliseconds, 24% of failed acquisitions found NO row
+      // when the diagnostic ran — the lock was already free. Reporting
+      // "held by (unknown)" there is confidently wrong a quarter of the
+      // time, and the remedy it used to name was the most dangerous verb
+      // in the tool.
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;          // the INSERT will collide …
+        adapter.lock.owner = null;
+        const original = adapter.query.bind(adapter);
+        adapter.query = async (sql, params = []) => {
+          // … and the peer releases just before the diagnostic read.
+          if (sql.startsWith('SELECT name AS owner')) adapter.lock.held = false;
+          return original(sql, params);
+        };
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        expect(r.ran).toEqual(['0001_a']);
+      });
+    });
+
+    test('an unrecognized owner token prints verbatim rather than being summarized away', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = '8a7d1e40-0000-4000-8000-000000000000'; // a pre-rip1 UUID
+        adapter.lock.ageSeconds = 30;
+        await scoped(adapter, async () => {
+          const e = await mig.migrate({ dir: mdir }).catch((x) => x);
+          expect(e.message).toContain('8a7d1e40-0000-4000-8000-000000000000');
+          expect(e.message).toContain('30 seconds ago');
+        });
+      });
+    });
+
+    test('unlock breaks the lock, applies nothing, and reports what went', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = 'rip1 host=ci-runner-4 pid=812 run=99887766';
+        adapter.lock.ageSeconds = 2460;
+        const out = await scoped(adapter, () => mig.unlock());
+        expect(out.released).toBe(true);
+        expect(out.describe).toContain('host ci-runner-4');
+        expect(adapter.lock.held).toBe(false);
+        // The point of the verb: nothing was applied.
+        expect(adapter.history).toEqual([]);
+        expect(adapter.calls.some((c) => /CREATE TABLE a/.test(c.sql))).toBe(false);
+        // And it does not adopt, create or drop anything on its way.
+        expect(adapter.calls.some((c) => /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS|DROP TABLE)/.test(c.sql))).toBe(false);
+      });
+    });
+
+    test('unlock on a free lock reports nothing held, and says so from a read', async () => {
+      const adapter = migrateAdapter({ tables: [] });
+      const out = await scoped(adapter, () => mig.unlock());
+      expect(out.released).toBe(false);
+      expect(out.holder).toBe(null);
+    });
+
+    test('unlock refuses a holder it can prove is alive, unless forced', async () => {
+      const adapter = migrateAdapter({ tables: [] });
+      const os = await import('node:os');
+      // This process, on this host: the one liveness question a runner
+      // can actually answer.
+      adapter.lock.held = true;
+      adapter.lock.owner = 'rip1 host=' + os.hostname().replace(/[\s=]+/g, '-') +
+        ' pid=' + process.pid + ' run=deadbeef';
+      adapter.lock.ageSeconds = 5;
+      await scoped(adapter, async () => {
+        await expect(mig.unlock()).rejects.toThrow(/refusing[\s\S]*alive on this host[\s\S]*--force/);
+      });
+      expect(adapter.lock.held).toBe(true);
+      const out = await scoped(adapter, () => mig.unlock({ force: true }));
+      expect(out.released).toBe(true);
+    });
+
+    // Adoption is destructive to a run already in flight under the OLD
+    // code: the rename takes its history table away mid-apply, and the
+    // drop takes its mutex. The two runners arbitrate through different
+    // tables and cannot see each other, so nothing else would notice.
+    test('adoption refuses while an older runner holds the legacy lock', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        const original = adapter.query.bind(adapter);
+        adapter.query = async (sql, params = []) => {
+          if (/count\(\*\) AS n FROM _rip_migration_lock/.test(sql)) {
+            return { columns: [{ name: 'n' }], data: [[1]], rowCount: 1 };
+          }
+          return original(sql, params);
+        };
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir }))
+            .rejects.toThrow(/an older `rip schema migrate` holds the lock[\s\S]*Nothing was adopted/);
+        });
+        // Refused BEFORE the rename, which is the destructive half.
+        expect(adapter.calls.some((c) => /RENAME TO schema/.test(c.sql))).toBe(false);
+        expect(adapter.calls.some((c) => /DROP TABLE _rip_migration/.test(c.sql))).toBe(false);
+        expect(adapter.history).toEqual([]);
+      });
+    });
+
+    test('the legacy tables are dropped only under the lock', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        const at = (re) => adapter.calls.findIndex((c) => re.test(c.sql));
+        const acquired = adapter.calls.findIndex(
+          (c) => /^INSERT INTO schema \(version, name\) VALUES/.test(c.sql) && (c.params ?? []).includes('@lock'));
+        expect(acquired).toBeGreaterThan(-1);
+        expect(at(/DROP TABLE _rip_migration_lock/)).toBeGreaterThan(acquired);
+        expect(at(/DROP TABLE _rip_migration_operations/)).toBeGreaterThan(acquired);
       });
     });
 
