@@ -63,8 +63,20 @@ import {
 // keep: appliedMigrations() filters on it in the one place the table is
 // ever read, and no caller can forget.
 const STATE_TABLE = 'schema';
-const LOCK_KEY = '@lock';
-const OP_PREFIX = '@op:';
+
+// The one character that separates bookkeeping from history, spelled
+// ONCE. Every reserved key derives from it and so does the filter that
+// hides them, so the three can never drift apart.
+//
+// It is sound because a version can never begin with it: both file
+// patterns below (MIGRATION_FILE_RE, PUSH_FILE_RE) start with a digit.
+// That is the guarantee this whole scheme rests on — if either regex
+// ever admits a leading '@', a migration disappears from its own
+// history.
+const RESERVED = '@';
+const LOCK_KEY = RESERVED + 'lock';
+const OP_PREFIX = RESERVED + 'op:';
+const NOT_RESERVED = "version NOT LIKE '" + RESERVED + "%'";
 
 // What the runner used to be called. Kept for two jobs: adopting a
 // database that predates the rename, and keeping the old names out of
@@ -1387,8 +1399,8 @@ async function tryRun(sql, params = []) {
 async function appliedMigrations() {
   const read = async (table) => {
     const res = await runSQL(
-      "SELECT version, name, checksum, applied_at FROM " + table +
-      " WHERE version NOT LIKE '@%' ORDER BY version", []);
+      'SELECT version, name, checksum, applied_at FROM ' + table +
+      ' WHERE ' + NOT_RESERVED + ' ORDER BY version', []);
     return migrateRows(res);
   };
   try {
@@ -1446,10 +1458,17 @@ async function recordMigrationOperation(id, outcome, detail = null) {
   // No ensure here: every caller is inside migrate(), which ensured the
   // table before it took the lock. Re-running the adoption dance per
   // write would triple the statements a migration issues for nothing.
-  const key = OP_PREFIX + id;
-  await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ?', [key]);
-  await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name, detail) VALUES (?, ?, ?)',
-    [key, outcome, detail]);
+  // ONE statement. It used to be DELETE-then-INSERT, which leaves a
+  // window where a crash loses the previous outcome and records nothing
+  // in its place — in the one function whose entire reason to exist is
+  // surviving a crash.
+  //
+  // `now()` and not CURRENT_TIMESTAMP: inside DO UPDATE SET, DuckDB
+  // binds the bare keyword as a column name and fails.
+  await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name, detail, applied_at)' +
+    ' VALUES (?, ?, ?, now()) ON CONFLICT (version) DO UPDATE' +
+    ' SET name = excluded.name, detail = excluded.detail, applied_at = excluded.applied_at',
+    [OP_PREFIX + id, outcome, detail]);
 }
 
 // ── the migration lock ────────────────────────────────────────────────

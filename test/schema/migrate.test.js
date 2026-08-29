@@ -140,7 +140,6 @@ function migrateAdapter(deployed, opts = {}) {
     const ok = (n) => ({ columns: [], data: [], rowCount: n });
     if (sql.startsWith('DELETE FROM schema WHERE version = ?')) {
       if (params[0] === '@lock') lock.held = false;
-      else operations = operations.filter((o) => o.key !== params[0]);
       return ok(1);
     }
     if (sql.startsWith('INSERT INTO schema (version, name) VALUES')) {
@@ -150,8 +149,12 @@ function migrateAdapter(deployed, opts = {}) {
       }
       return ok(1);
     }
-    if (sql.startsWith('INSERT INTO schema (version, name, detail)')) {
+    // One upsert, not a delete-then-insert: the row must never be
+    // momentarily absent, since it only matters when a process dies.
+    if (sql.startsWith('INSERT INTO schema (version, name, detail, applied_at)')) {
+      operations = operations.filter((o) => o.key !== params[0]);
       operations.push({ key: params[0], outcome: params[1], detail: params[2] });
+      expect(sql).toContain('ON CONFLICT (version) DO UPDATE');
       return ok(1);
     }
     if (sql.startsWith('SELECT version')) {
@@ -2231,6 +2234,24 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
           expect(d.params).toContain('@lock');
         }
         expect(adapter.history.length).toBe(1);           // the applied row stands
+      });
+    });
+
+    // Why the reserved marker is '@' and not a number-shaped sentinel
+    // like '0000': a version can never begin with '@', because both
+    // file patterns start with a digit. '0000_baseline.sql' IS a legal
+    // migration filename — a sentinel that looks like a version is a
+    // collision waiting for the first person who numbers from zero.
+    test('a reserved key cannot collide with a real migration version', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0000_baseline.sql'), 'CREATE TABLE z (x INTEGER);\n');
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        // Both files applied, and neither was mistaken for bookkeeping.
+        expect(adapter.history.map((h) => h.version)).toEqual(['0000', '0001']);
+        const st = await scoped(adapter, () => mig.status({ dir: mdir }));
+        expect(st.applied.map((a) => a.version)).toEqual(['0000', '0001']);
       });
     });
 
