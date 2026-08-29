@@ -12,11 +12,10 @@
 # options on a runtime call — nothing binds their `this`; use `=>` to
 # capture a component lexically.
 
-# The action itself, carrying its reactive flags.
-export type Mutation<R> =
-  ((...args: any[]) => Promise<R | undefined>) & { readonly pending: boolean, readonly succeeded: boolean, readonly error: unknown }
+type Mutation<R, A extends unknown[]> =
+  ((...args: A) => Promise<R | undefined>) & { readonly pending: boolean, readonly succeeded: boolean, readonly error: unknown }
 
-export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R>
+export def createMutation<R, A extends unknown[]>(fn: (...args: A) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R, A>
   unless typeof fn is 'function'
     throw TypeError.new 'Rip App: createMutation expects a function'
   _pending   = __state false
@@ -24,7 +23,7 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
   _error     = __state null
   generation = 0
 
-  mutation = (...args) ->
+  mutation = (...args: A) ->
     me = ++generation
     __batch ->
       _pending.value = true
@@ -65,4 +64,4 @@ export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onS
   Object.defineProperty mutation, 'error',     { get: -> _error.value }
   # The flags are the accessors defined above; a recovering onError's
   # return flows through as the result, untyped.
-  mutation as Mutation<R>
+  mutation as Mutation<R, A>

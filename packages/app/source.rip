@@ -258,7 +258,7 @@ makeSourceFamily = (fetchFn, staleTime) ->
     return
   family
 
-export def source<T extends NonNullSourceValue, A extends SourceArgs>(opts: SourceOpts<T, A> | SingletonSourceOpts<T> | KeyedSourceOpts<T, any>): SourceDeclaration<T, A>
+export def source<T extends NonNullSourceValue, A extends SourceArgs, K>(opts: SourceOpts<T, A> | SingletonSourceOpts<T> | KeyedSourceOpts<T, K>): SourceDeclaration<T, A>
   unless opts? and typeof opts is 'object' and not Array.isArray(opts)
     throw TypeError.new 'Rip App: source expects an options object'
   unless typeof opts.fetch is 'function'
