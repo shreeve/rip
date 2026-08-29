@@ -213,6 +213,22 @@ test! 'raw filters run before body parsing on write requests only', ->
   handle! request('GET', '/raw-get')
   eq calls, ['POST']
 
+# `error`, `notice` and `bail` are declared `never`, and a guard spelled
+# WITHOUT the bang — `error 'nope', 404 unless row` — depends on them
+# throwing synchronously. Put an await inside any of them and rip emits
+# an async function: the call would hand back a REJECTED PROMISE instead
+# of throwing, every bare guard would fall through to the next line with
+# the value it just refused, and the only symptom would be an unhandled
+# rejection somewhere else entirely.
+#
+# The `: never` annotation does NOT catch that — an async function with
+# an await inside still type-checks against it. Nothing else would
+# notice either, so this does.
+test! 'the never-returning helpers are synchronous, and must stay that way', ->
+  for fn in [error, notice, bail]
+    eq fn.constructor.name, 'Function',
+      "#{fn.name} went async — a bare `#{fn.name} …` guard now returns a rejected promise instead of throwing"
+
 test! 'error helpers, terminal handlers, and masking follow the contract', ->
   resetGlobals()
   get '/bad' -> error! 'invalid', 422

@@ -873,9 +873,15 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 #
 # ONE CAVEAT, and it is TypeScript's, not ours: the analysis is
 # syntactic on the call expression, so an `await` in front of it hides
-# the call and NOTHING narrows. `error! …` compiles to `await error(…)`
-# and therefore narrows nothing — write these two without the bang.
-# They are synchronous; the bang was only ever decoration on them.
+# the call. `error! …` compiles to `await error(…)`, so as a GUARD —
+# the call standing alone as the statement — the bang costs the
+# narrowing and should be dropped. These are synchronous; the bang was
+# only decoration there anyway.
+#
+# As an OPERAND the bang is free and reads better: `await` of a `never`
+# is still `never`, so `auth.sessionUser!() or bail!` narrows the left
+# side exactly like `bail()` would. Statement position is the only
+# place the spelling matters.
 #
 # What `error` throws: an Error with an HTTP status, plus the
 # machine-readable trio when a code was given. errorEnvelope reads all
