@@ -538,6 +538,14 @@ const STMT_PAIRS = [
   // inside a string literal type never opens a generic
   ['type R =\n  | Ok\n  # note between variants\n  | Err\nz = 1', 'z = 1'],
   ['type S = "a>b" | C<D>\nz = 1', 'z = 1'],
+  // template-literal types: the backticked text erases with the
+  // declaration, interpolations and adversarial angles included
+  ['type T = `a${B}`\nz = 1', 'z = 1'],
+  ['type D = number | `${number}${U}` | `${number} ${U}`\nz = 1', 'z = 1'],
+  ['type T = `a>b${C<D>}`\nz = 1', 'z = 1'],
+  ['type N = `a${`b${C}`}`\nz = 1', 'z = 1'],
+  ['export type D = `${number}${U}`\nz = 1', 'z = 1'],
+  ['interface P\n  k: `a${B}`\nz = 1', 'z = 1'],
   // block-body TAILS ending in a generic close (the scanner's
   // unfinished-`>` rule must end the body, not glue the next
   // statement into it): both union orderings, a `>>` tail, a
@@ -1033,12 +1041,47 @@ describe('structured-type validation', () => {
     }
   });
 
-  test('template-literal types reject with a type-positioned message', () => {
-    expect(() => tokenize('type T = `a${B}`')).toThrow(/template-literal types are not supported/);
-    expect(() => tokenize('type T =\n  `a`')).toThrow(/template-literal types are not supported/);
-    // Value-position backticks keep the raw rejection — the message is
-    // for TYPE positions only.
+  test('template-literal types are admitted in TYPE positions only', () => {
+    // A backticked type scans to ONE opaque TYPE_TEMPLATE token, so
+    // the declaration's raw text carries it through verbatim.
+    for (const ok of [
+      'type T = `a${B}`\nz = 1',
+      'type T =\n  `a`\nz = 1',
+      'type D = number | `${number}${U}` | `${number} ${U}`\nz = 1',
+      'type S =\n  key: `x${Y}`\nz = 1',
+      'interface P\n  k: `a${B}`\nz = 1',
+      'type N = `a${`b${C}`}`\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    expect(tokenize('type T = `a${B}`').tokens[0].value).toBe('type T = `a${B}`');
+    // The other polarity: Rip strings are quote-based, so a backtick
+    // in VALUE position is not syntax at all and keeps the raw
+    // rejection — the admission is scoped to type positions.
     expect(() => tokenize('x = `nope`')).toThrow(/cannot tokenize '`'/);
+    // The literal stays on one line: consuming a newline would carry
+    // the scan past an indentation boundary the indent stack never
+    // sees, and the type-body floor reads that stack.
+    expect(() => tokenize('type T = `a\nz = 1')).toThrow(/stays on one line/);
+    expect(() => tokenize('type T = `abc')).toThrow(/never closes/);
+  });
+
+  test('a type body\'s balance scanners do not read inside a backtick', () => {
+    // The angle/brace tracking that makes `a >` loud must not see the
+    // characters inside a literal or its interpolations — the same
+    // treatment quoted string types already get.
+    for (const ok of [
+      'type S = `a>b` | C<D>\nz = 1',
+      'type S = `a<b` | C<D>\nz = 1',
+      'type S = `a{b` | C<D>\nz = 1',
+      'type S = `a}b` | C<D>\nz = 1',
+      'type T = `a>b${C<D>}`\nz = 1',
+      'type Q = `a${"x}y"}`\nz = 1',
+    ]) {
+      expect(parser.parse(ok).diagnostics).toEqual([]);
+    }
+    // Still loud when the angle is genuinely unbalanced OUTSIDE one.
+    expect(() => tokenize('type R =\n  | `a`\n  a >\nz = 1')).toThrow(/unbalanced '>' in a type body/);
   });
 
   test('interface method shorthand parses, erases, and stays interface-only', () => {

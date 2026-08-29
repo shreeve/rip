@@ -1048,6 +1048,63 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     return false;
   };
 
+  // ── Template-literal types ─────────────────────────────────────────
+  // A backticked TYPE (`` `${number}${Unit}` ``) is scanned whole and
+  // pushed as ONE opaque token. The declaration re-slices its text
+  // from source, so the interior never needs tokens of its own — and
+  // keeping it unsplit is what stops a `>` or `{` inside a chunk from
+  // reaching the angle-balance and brace scanners that read the tape.
+  // Each of the three returns the offset PAST the construct it scans.
+  // The literal stays on one line: consuming a newline here would
+  // carry the scan past an indentation boundary the indent stack
+  // never sees, and `insideTypeBody` reads that stack.
+  const scanTypeTemplateEnd = (start) => {
+    let i = start + 1;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') return i + 1;
+      if (c === '\n' || c === '\r') {
+        fail('a template-literal type stays on one line', start, i);
+      }
+      if (c === '$' && text[i + 1] === '{') { i = scanTypeInterpEnd(i + 2); continue; }
+      i++;
+    }
+    failOpenAtEnd("unclosed '`' — the template-literal type never closes", start, start + 1);
+  };
+
+  // One `${…}` interpolation: ends past the brace matching its opener.
+  // Quoted strings and nested template literals are skipped whole, so
+  // a brace inside either never counts toward the depth.
+  const scanTypeInterpEnd = (start) => {
+    let i = start, depth = 1;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') { i = scanTypeTemplateEnd(i); continue; }
+      if (c === '"' || c === "'") { i = scanTypeQuoteEnd(i); continue; }
+      if (c === '{') { depth++; i++; continue; }
+      if (c === '}') { if (--depth === 0) return i + 1; i++; continue; }
+      if (c === '\n' || c === '\r') {
+        fail('a template-literal type stays on one line', start - 2, i);
+      }
+      i++;
+    }
+    failOpenAtEnd("unclosed '${' — the interpolation never closes", start - 2, start);
+  };
+
+  const scanTypeQuoteEnd = (start) => {
+    const quote = text[start];
+    let i = start + 1;
+    while (i < text.length) {
+      if (text[i] === '\\') { i += 2; continue; }
+      if (text[i] === quote) return i + 1;
+      if (text[i] === '\n' || text[i] === '\r') break;
+      i++;
+    }
+    fail('unterminated string', start, start + 1);
+  };
+
   const closeBracket = () => {
     const frame = parens.pop();
     if (!frame) return null;
@@ -1894,15 +1951,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       continue;
     }
 
-    // A backtick in a TYPE position is a template-literal type — a TS
-    // form Rip's structured types do not carry; the rejection names
-    // the construct instead of surfacing the raw scanner error. Type
-    // positions are the scanner-known ones: inside a type-body block,
-    // or on a `type Name =` alias head's own line.
-    if (ch === '`') {
-      if (insideTypeBody() || aliasHeadOpen()) {
-        fail("template-literal types are not supported — a Rip type cannot contain '`'", pos);
-      }
+    // A backtick in a TYPE position opens a template-literal type —
+    // TS type text Rip carries through verbatim. Type positions are
+    // the scanner-known ones: inside a type-body block, or on a
+    // `type Name =` alias head's own line. In VALUE position a
+    // backtick is not Rip syntax at all — strings are quote-based —
+    // and falls through to the raw rejection below.
+    if (ch === '`' && (insideTypeBody() || aliasHeadOpen())) {
+      const end = scanTypeTemplateEnd(pos);
+      push('TYPE_TEMPLATE', text.slice(pos, end), pos, end);
+      pos = end;
+      continue;
     }
 
     fail(`cannot tokenize '${ch}'`, pos);

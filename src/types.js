@@ -119,7 +119,7 @@ const ALIAS_STOPS = new Set([
 // reject loudly (`this.foo()` still rejects: the CALL is the code
 // shape, not the word).
 const TYPE_VOCAB = new Set([
-  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
+  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS',
   '.', ',', ':', '?', 'TERNARY', '...', '|', '&', '=>', 'EXTENDS',
   '(', ')', 'PARAM_START', 'PARAM_END', '[', ']', 'INDEX_START',
@@ -143,7 +143,7 @@ const TYPE_VOCAB = new Set([
 // close; the parameter list's interior stays under this same
 // vocabulary (a nested call still rejects).
 const TYPE_ATOM_ENDERS = new Set([
-  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
+  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
 ]);
 // Does tokens[at] begin a MEMBER ROW of a type body? True at a layout
