@@ -607,15 +607,22 @@ describe('staleTime durations', () => {
     }
   });
 
-  test('numbers, bare numeric strings, and "forever" are accepted', () => {
+  test('numbers and "forever" are accepted; a duration string carries a unit', () => {
     accepts(0);
     accepts(250);
     accepts(5000);
-    accepts('5000');
     accepts('forever');
     accepts('2.5 min');
     accepts('1.5 days');
     accepts('1e3 sec');
+    // No bare numeric string: `5000` is the number, and a second
+    // spelling of it could only disagree with this parse — the type's
+    // `${number}` matches decimals and signs no stale time may mean.
+    rejects('5000');
+    rejects('2.5');
+    rejects('0.1');
+    rejects('1e3');
+    rejects('-5');
   });
 
   test('a misspelled unit is refused, not read as zero', () => {

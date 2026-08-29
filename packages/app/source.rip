@@ -1,14 +1,18 @@
 export type NonNullSourceValue = object | string | number | boolean | symbol | bigint
 
-# A stale time: milliseconds as a number, or a duration string in the
-# ONE canonical casing DURATION_RE accepts. The unit list and the
-# regex are the same language and must move together; the parse stays
-# the authority on what a duration MEANS.
-# `${number}` is wider than the regex's numeric part, so a sign, a hex
-# literal, or a leading space types clean and throws at parse — the
-# residual TypeScript's placeholder cannot express.
+# A stale time: milliseconds as a NUMBER, or a duration STRING that
+# always carries a unit, in the one canonical casing DURATION_RE
+# accepts. There is no bare numeric string — `5000` is the number, and
+# a second spelling of it could only disagree with the parse, since
+# `${number}` matches decimals, signs, and hex that no stale time may
+# mean. The unit list and the regex are the same language and must
+# move together; the parse stays the authority on what a duration
+# MEANS.
+# A unit-bearing spelling still inherits that wider `${number}`: the
+# residual is `'-5min'`, `'0x10min'`, `'.5min'` and their like, which
+# type clean and throw at parse.
 export type DurationUnit = 's' | 'sec' | 'second' | 'seconds' | 'm' | 'min' | 'minute' | 'minutes' | 'h' | 'hr' | 'hour' | 'hours' | 'd' | 'day' | 'days' | 'w' | 'week' | 'weeks' | 'y' | 'year' | 'years'
-export type Duration = number | `${number}` | `${number}${DurationUnit}` | `${number} ${DurationUnit}`
+export type Duration = number | `${number}${DurationUnit}` | `${number} ${DurationUnit}`
 
 export type SourceArgs = [] | [unknown]
 
@@ -77,7 +81,6 @@ parseStaleTime = (value) ->
     return value
   if typeof value is 'string'
     return Infinity if value is 'forever'
-    return +value if /^\d+$/.test(value)
     parts = value.match DURATION_RE
     if parts
       amount = parseFloat parts[1]
