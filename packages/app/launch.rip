@@ -32,6 +32,7 @@ import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter, RouterAdapter, Router } from './router.rip'
 import { createRenderer, Renderer, GateFailure } from './renderer.rip'
 import { interceptClicks, preloadLinks, LinkHost } from './links.rip'
+import { ariaCurrent } from './aria.rip'
 import { persistStash, StashStorage } from './persist.rip'
 
 export type LaunchOpts =
@@ -166,6 +167,15 @@ export def launch(opts: LaunchOpts): LaunchResult
       removePreload()
       return
 
+  # `aria-current` stays truthful by default: the walker installs
+  # whenever a usable document exists (its own browser-host
+  # precondition) and disposes with the launch. Marks the application
+  # manages itself are never set over and never removed — the walker's
+  # own contract (aria.rip).
+  disposeAria = null
+  if typeof document isnt 'undefined' and typeof document.querySelectorAll is 'function'
+    disposeAria = ariaCurrent router
+
   disposePersist = null
   if opts.persist
     disposePersist = persistStash app,
@@ -188,6 +198,7 @@ export def launch(opts: LaunchOpts): LaunchResult
       catch e
         errors.push e
       return
+    run -> disposeAria?()
     run -> disposeLinks?()
     run -> renderer.stop()
     run -> router.destroy()

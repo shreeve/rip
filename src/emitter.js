@@ -422,7 +422,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -442,6 +442,25 @@ class Emitter {
     // project-anchor walk; the compiler stays pure). Types the `app`
     // ambience and the render gates; null leaves both `any`.
     this.appStashSpec = appStashSpec;
+    // The project's route-union TS text and this module's own params
+    // shape, when the CALLER discovered them (the same anchor walk as
+    // the stash; the compiler stays pure). The union arms href /
+    // push / replace literal checking and the ambient `RoutePath`;
+    // null leaves every route surface unchecked. `routeParams` is
+    // non-null only when THIS module is a route file with named
+    // params — it tightens the component's `params` ambience.
+    this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
+    this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
+    // Generated spans of each `__ripRoute` wrap on an ATTRIBUTE surface
+    // (intrinsic `a href:`, a child component's `href:` prop): the
+    // KEY's emitted bytes and the wrapped VALUE's. The diagnostics road
+    // re-anchors a mismatch covering the whole value onto the key —
+    // every other mistyped attribute reports on its name (the
+    // props-object road, TS's own property convention), and the wrap
+    // must not make `href` the one value-anchored attribute. Recorded
+    // at emission, TS face only; `push`/`replace` are call arguments,
+    // never wrapped, and keep TS's argument anchor.
+    this.routeWrapSpans = [];
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
     // production emission must stay byte-identical when hmr is false.
@@ -3576,6 +3595,8 @@ class Emitter {
       if (this.annotationText(write, 'typeParams') !== null) continue;
       const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
       info.appStashSpec = this.appStashSpec;
+      info.routesUnion = this.routesUnion;
+      info.routeParams = this.routeParams;
       kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(' ')} }`);
     }
     kept.pinnable = new Map();
@@ -8346,7 +8367,11 @@ class Emitter {
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === 'string'
       ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
-    if (tsInfo) tsInfo.appStashSpec = this.appStashSpec;
+    if (tsInfo) {
+      tsInfo.appStashSpec = this.appStashSpec;
+      tsInfo.routesUnion = this.routesUnion;
+      tsInfo.routeParams = this.routeParams;
+    }
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
@@ -10177,6 +10202,9 @@ class Emitter {
               const start = this.b.offset;
               fn();
               if (this.ts) this.attrNames.push([start, this.b.offset]);
+              // A route-wrapped href prop pairs its key span with the
+              // value span its fn records (see addChildProp).
+              if ('routeKey' in p) p.routeKey = [start, this.b.offset];
             };
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
@@ -10327,7 +10355,33 @@ class Emitter {
       return;
     }
     this.checkCrossScopeLocals(value, pair);
-    props.push({ pair, key, fn: () => this.renderExpr(value) });
+    // An `href:` prop on a child component route-checks the same way an
+    // intrinsic anchor's does. A component's tag is invisible
+    // cross-module, so the PROP NAME is the key — `href` is a URL
+    // wherever it appears (a forwarding component types it plain
+    // `string`, which would otherwise let every literal escape). Only
+    // the ctor-object emission wraps; the `_updateProp` re-emission
+    // stays unwrapped — the construction site already reported the
+    // literal, once.
+    const routeWrap = this.ts && this.routesUnion !== null && cleanKey === 'href' && this.isRouteLiteralValue(value);
+    if (routeWrap) {
+      this._needsRouteHelper = true;
+      // `routeKey` is filled by the ctor-object emission when it emits
+      // this prop's key (emitPair's recordAttr), BEFORE fn runs — the
+      // two spans pair up into one routeWrapSpans entry here.
+      const rec = { pair, key, routeKey: null };
+      rec.fn = () => {
+        this.b.tsOnly(() => this.b.emit('__ripRoute('));
+        const valStart = this.b.offset;
+        this.renderExpr(value);
+        const valEnd = this.b.offset;
+        this.b.tsOnly(() => this.b.emit(')'));
+        if (rec.routeKey !== null) this.routeWrapSpans.push({ key: rec.routeKey, value: [valStart, valEnd] });
+      };
+      props.push(rec);
+    } else {
+      props.push({ pair, key, fn: () => this.renderExpr(value) });
+    }
     if (!isFunc(value) && this.renderReactive(value)) updaters.push({ pair, key, value });
   }
 
@@ -10354,6 +10408,18 @@ class Emitter {
       };
     }
     return null;
+  }
+
+  // A SYNTACTICALLY `/`-leading string value — a quoted literal, or an
+  // interpolated template whose leading chunk is `/`-leading text.
+  // These alone wrap in `__ripRoute(...)` for route checking; anything
+  // dynamic (a binding, a computed expression, a template opening on an
+  // interpolation) must pass unchecked BY CONSTRUCTION — never wrapped,
+  // so no inference can tighten it. External URLs (`https:`, `mailto:`,
+  // `#frag`) fail the leading-`/` test and pass the same way.
+  isRouteLiteralValue(value) {
+    const leads = (s) => typeof s === 'string' && /^["'`]\//.test(s);
+    return leads(value) || (isNode(value) && value[0] === 'str' && leads(value[1]));
   }
 
   // Attributes, events, and class merges on one element.
@@ -10586,6 +10652,15 @@ class Emitter {
       }
 
       const isPresence = isNode(value) && value[0] === 'presence' && value.length === 2;
+      // An anchor's `href:` given as a syntactic route literal wraps in
+      // `__ripRoute(...)` — TS-only, so the shipping bytes are the
+      // untouched value — and checks against the project's route union.
+      // Armed only when the caller discovered routes; the wrap replaces
+      // nothing at runtime and the trailing `as any` keeps the coercive
+      // setAttribute view quiet either way.
+      const routeWrap = this.ts && this.routesUnion !== null && key === 'href' &&
+        this.rstate.tags?.get(el) === 'a' && this.isRouteLiteralValue(value);
+      if (routeWrap) this._needsRouteHelper = true;
       if (this.renderReactive(value)) {
         if (isPresence) {
           this.renderEffect(pair, () => {
@@ -10595,12 +10670,31 @@ class Emitter {
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.setAttribute(`);
-            this.emitQuotedPrimitive(key);
-            this.b.emit(', ');
+            // The receiver cast is what makes completions INSIDE the
+            // literal work: the scaffold var is `any` (quiet-TS-only
+            // doctrine), and inside an any-receiver call tsgo stops
+            // computing the inner __ripRoute argument's contextual
+            // string-literal completions. `Element` is the narrowest
+            // type that owns setAttribute.
+            if (routeWrap) this.b.tsOnly(() => this.b.emit('('));
+            this.b.emit(el);
+            if (routeWrap) this.b.tsOnly(() => this.b.emit(' as Element)'));
+            this.b.emit(`.setAttribute('`);
+            const keyStart = this.b.offset;
+            this.emitPrimitive(key);
+            const keyEnd = this.b.offset;
+            this.b.emit("', ");
+            if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
+            const valStart = this.b.offset;
             this.renderExpr(value);
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
+            const valEnd = this.b.offset;
+            // The wrap CLOSES WITHOUT the cast: __ripRoute returns a
+            // string-literal type setAttribute already accepts, and an
+            // `as any` here collapses tsgo's string-literal completions
+            // inside the value to the current literal alone.
+            if (this.ts) this.b.tsOnly(() => this.b.emit(routeWrap ? ')' : ' as any'));
             this.b.emit(');');
+            if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
           }, value);
         }
       } else if (isPresence) {
@@ -10611,15 +10705,32 @@ class Emitter {
         }, false);
       } else {
         this.renderLine(pair, () => {
-          this.b.emit(`${el}.setAttribute(`);
-          this.emitQuotedPrimitive(key);
-          this.b.emit(', ');
+          // Same receiver cast as the reactive branch above: an
+          // any-receiver call suppresses the inner argument's
+          // contextual completions.
+          if (routeWrap) this.b.tsOnly(() => this.b.emit('('));
+          this.b.emit(el);
+          if (routeWrap) this.b.tsOnly(() => this.b.emit(' as Element)'));
+          this.b.emit(`.setAttribute('`);
+          const keyStart = this.b.offset;
+          this.emitPrimitive(key);
+          const keyEnd = this.b.offset;
+          this.b.emit("', ");
+          if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
+          const valStart = this.b.offset;
           this.renderExpr(value);
+          const valEnd = this.b.offset;
           // Rip DOM attributes are coercive by design (numbers,
           // booleans stringify); TS's string-only setAttribute view
-          // is scaffold noise — quiet it TS-only (quiet-TS-only doctrine).
-          if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
+          // is scaffold noise — quiet it TS-only (quiet-TS-only
+          // doctrine). The wrap closes WITHOUT the cast: __ripRoute
+          // returns a string-literal type setAttribute already
+          // accepts, and an `as any` here collapses tsgo's
+          // string-literal completions inside the value to the
+          // current literal alone.
+          if (this.ts) this.b.tsOnly(() => this.b.emit(routeWrap ? ')' : ' as any'));
           this.b.emit(')');
+          if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
         });
       }
     }
@@ -11924,6 +12035,11 @@ class Emitter {
           this.b.emit(')');
         });
       } else {
+        const sourceKey = this.sourceKeyArgOf(n);
+        if (sourceKey !== null) {
+          (this._sourceKeyArgs ??= new Set()).add(sourceKey);
+          this._needsSourceKeyHelper = true;
+        }
         this.mark(n, 'args', () => {
           this.b.emit('(');
           n.slice(1).forEach((arg, i) => {
@@ -12026,9 +12142,44 @@ class Emitter {
 
   // One call argument: picks emit bare (the `bare` stripping above);
   // everything else is a plain expression.
+  // A literal key argument of `@app.data.source(...)`: the chain driver
+  // registered it (sourceKeyArgOf), and the TS-only `__ripSourceKey`
+  // wrap checks it against the stash's key union — the strict overload
+  // pair the ambience must not inline (an anonymous type literal echoes
+  // its import() splices in every `@app` hover) and the package cannot
+  // spell (Rip's structured types carry no template-literal types). A
+  // module-scope declare renders in no hover, so this is where the
+  // template lives. Dynamic keys are never registered and pass by
+  // construction.
   callArg(arg) {
+    if (this._sourceKeyArgs?.has(arg)) {
+      this._sourceKeyArgs.delete(arg);
+      this.b.tsOnly(() => this.b.emit('__ripSourceKey('));
+      this.expr(arg);
+      this.b.tsOnly(() => this.b.emit(')'));
+      return;
+    }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
     this.expr(arg);
+  }
+
+  // The one checked spelling of a stash-handle ask: a call whose callee
+  // chain is EXACTLY `this.app.data.source` (`@app.data.source(...)`)
+  // and whose first argument is a plain quoted string literal. A bound
+  // alias (`d = @app.data; d.source(...)`) or a computed key stays on
+  // the package's permissive overload — the same syntactic-gate
+  // doctrine as the href wrap.
+  sourceKeyArgOf(node) {
+    if (!this.ts || this.appStashSpec === null) return null;
+    const arg = node[1];
+    if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
+    const callee = node[0];
+    if (!isNode(callee) || callee[0] !== '.' || callee.length !== 3 || callee[2] !== 'source') return null;
+    const data = callee[1];
+    if (!isNode(data) || data[0] !== '.' || data.length !== 3 || data[2] !== 'data') return null;
+    const app = data[1];
+    if (!isNode(app) || app[0] !== '.' || app.length !== 3 || app[1] !== 'this' || app[2] !== 'app') return null;
+    return arg;
   }
 
   // Binary emission is ITERATIVE over the left spine: a flat
@@ -15220,7 +15371,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -15230,7 +15381,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -15573,6 +15724,20 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       builder.tsOnly(() => builder.emit(`\nexport type __RipStash = typeof ${stashLocal};\n`));
     }
   }
+  // Ambient `RoutePath` — the route union under a clean public name, so
+  // app code can annotate data-driven hrefs (a nav array, props
+  // forwarded to an anchor) without reaching any internal spelling.
+  // Injected only when this module REFERENCES the name and neither
+  // declares nor imports its own — a user-defined `RoutePath` always
+  // wins, so no duplicate-identifier clash is possible. The tests run
+  // against the rip SOURCE: the face's own emissions never introduce
+  // the name. TS-only through the recorded region.
+  if (face === 'ts' && emitter.routesUnion !== null
+      && /\bRoutePath\b/.test(source)
+      && !/\b(?:type|interface)\s+RoutePath\b/.test(source)
+      && !/\bimport\b[^;\n]*\bRoutePath\b/.test(source)) {
+    builder.tsOnly(() => builder.emit(`\ntype RoutePath = ${emitter.routesUnion};\n`));
+  }
   // The ambience helper's ONE declaration per module, at module scope —
   // where every class that emitted `app = __ripAmbientApp(...)` can
   // reach it (declares hoist; nested and expression-valued components
@@ -15581,6 +15746,23 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // the recorded region.
   if (emitter._needsAmbienceHelper === true) {
     builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };\n'));
+  }
+  // The route helper's ONE declaration per module, at module scope —
+  // where every `__ripRoute(...)` wrap can reach it (declares hoist).
+  // The union is INLINED, not aliased: the error and the hover then
+  // read as the actual list of routes instead of a helper's name. The
+  // `const T` keeps a literal argument literal, so a typo reports
+  // against the union rather than widening to `string` and passing.
+  if (emitter._needsRouteHelper === true) {
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;\n`));
+  }
+  // The stash-key helper's ONE declaration per module — the strict
+  // source() constraint: a top-level stash key, or a DOTTED path under
+  // one (legal, untyped at the package surface). Spelled off the stash
+  // splice so it tracks the stash by reference, never by copied text.
+  if (emitter._needsSourceKeyHelper === true) {
+    const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
   }
   // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
   // spelling is the boundary: `??=` says "install unless someone already
@@ -15665,7 +15847,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

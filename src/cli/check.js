@@ -31,7 +31,7 @@ import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
@@ -536,6 +536,16 @@ anchorStdlib(workspaceRoot);
 // One run = one consistent view of the disk, so stash discovery
 // memoizes per directory — files sharing a dirname share one walk.
 const stashMemo = new Map();
+// Route discovery memoizes the same way, and BOTH compile passes — the
+// main compile and the pin-pass recompile — derive their route options
+// through this one helper over the one memo: the pin pass must hand
+// compile() identical options, or a pinned file's face would re-emit
+// against a different route view than the one its diagnostics map onto.
+const routesMemo = new Map();
+const routeOptionsFor = (fsPath) => {
+  const { union, params } = appRoutesFor(fsPath, workspaceRoot, routesMemo);
+  return { routesUnion: union, routeParams: params };
+};
 
 
 // ── mirror root ─────────────────────────────────────────────────────
@@ -724,7 +734,7 @@ while (queue.length) {
   const srcLineStarts = lineStartsOf(source);
   let result;
   try {
-    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo) });
+    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     const { reason, start, end } = compileErrorInfo(err, source.length);
@@ -739,6 +749,10 @@ while (queue.length) {
       source, code: result.code, mappings: result.mappings,
       echoSpans: result.echoSpans ?? [],
       pinSpans: result.pinSpans ?? [],
+      routeWraps: result.routeWraps ?? [],
+      // Display-side route-union prettifying (mapTsDiagnostic): the CLI
+      // reads the same words the editor does.
+      routeEntries: appRoutesFor(fsPath, workspaceRoot, routesMemo).entries,
       srcLineStarts, genLineStarts: lineStartsOf(result.code),
       strict: cfg.strict === true,
       dir: path.dirname(fsPath),
@@ -930,11 +944,12 @@ if (compiled.size > 0) {
       // importer's queued hovers against its dependency's didOpen, and
       // which pinnables land would then depend on timing, not source.
       const repin = (fsPath, entry, pins) => {
-        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo) });
+        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];
         entry.good.pinSpans = r.pinSpans ?? [];
+        entry.good.routeWraps = r.routeWraps ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });

@@ -8598,7 +8598,7 @@ function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
     this.stores = stores;
     this.b = builder;
     this.repl = repl;
@@ -8606,6 +8606,9 @@ class Emitter {
     this.replImportResolver = null;
     this.script = script;
     this.appStashSpec = appStashSpec;
+    this.routesUnion = typeof routesUnion === "string" && routesUnion.length > 0 ? routesUnion : null;
+    this.routeParams = typeof routeParams === "string" && routeParams.length > 0 ? routeParams : null;
+    this.routeWrapSpans = [];
     this.browserModule = browserModule;
     this.hmr = hmr === true;
     this.modulePath = typeof modulePath === "string" && modulePath.length > 0 ? modulePath : null;
@@ -10535,6 +10538,8 @@ class Emitter {
         continue;
       const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
       info.appStashSpec = this.appStashSpec;
+      info.routesUnion = this.routesUnion;
+      info.routeParams = this.routeParams;
       kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(" ")} }`);
     }
     kept.pinnable = new Map;
@@ -14286,8 +14291,11 @@ ${pad ?? ""}`);
     }
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === "string" ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
-    if (tsInfo)
+    if (tsInfo) {
       tsInfo.appStashSpec = this.appStashSpec;
+      tsInfo.routesUnion = this.routesUnion;
+      tsInfo.routeParams = this.routeParams;
+    }
     if (tsInfo !== null)
       this.componentInfo.set(node, tsInfo);
     const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map, renderPlainReads: new Set };
@@ -15720,6 +15728,8 @@ ${pad ?? ""}`);
               fn();
               if (this.ts)
                 this.attrNames.push([start, this.b.offset]);
+              if ("routeKey" in p)
+                p.routeKey = [start, this.b.offset];
             };
             const mid = isNode(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
@@ -15843,7 +15853,23 @@ ${this.replayPad}}` : " }");
       return;
     }
     this.checkCrossScopeLocals(value, pair);
-    props.push({ pair, key, fn: () => this.renderExpr(value) });
+    const routeWrap = this.ts && this.routesUnion !== null && cleanKey === "href" && this.isRouteLiteralValue(value);
+    if (routeWrap) {
+      this._needsRouteHelper = true;
+      const rec = { pair, key, routeKey: null };
+      rec.fn = () => {
+        this.b.tsOnly(() => this.b.emit("__ripRoute("));
+        const valStart = this.b.offset;
+        this.renderExpr(value);
+        const valEnd = this.b.offset;
+        this.b.tsOnly(() => this.b.emit(")"));
+        if (rec.routeKey !== null)
+          this.routeWrapSpans.push({ key: rec.routeKey, value: [valStart, valEnd] });
+      };
+      props.push(rec);
+    } else {
+      props.push({ pair, key, fn: () => this.renderExpr(value) });
+    }
     if (!isFunc(value) && this.renderReactive(value))
       updaters.push({ pair, key, value });
   }
@@ -15868,6 +15894,10 @@ ${this.replayPad}}` : " }");
       };
     }
     return null;
+  }
+  isRouteLiteralValue(value) {
+    const leads = (s) => typeof s === "string" && /^["'`]\//.test(s);
+    return leads(value) || isNode(value) && value[0] === "str" && leads(value[1]);
   }
   renderAttributes(el, objExpr) {
     const R = this.rstate;
@@ -16034,6 +16064,9 @@ ${this.replayPad}}` : " }");
         continue;
       }
       const isPresence = isNode(value) && value[0] === "presence" && value.length === 2;
+      const routeWrap = this.ts && this.routesUnion !== null && key === "href" && this.rstate.tags?.get(el) === "a" && this.isRouteLiteralValue(value);
+      if (routeWrap)
+        this._needsRouteHelper = true;
       if (this.renderReactive(value)) {
         if (isPresence) {
           this.renderEffect(pair, () => {
@@ -16043,13 +16076,26 @@ ${this.replayPad}}` : " }");
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.setAttribute(`);
-            this.emitQuotedPrimitive(key);
-            this.b.emit(", ");
+            if (routeWrap)
+              this.b.tsOnly(() => this.b.emit("("));
+            this.b.emit(el);
+            if (routeWrap)
+              this.b.tsOnly(() => this.b.emit(" as Element)"));
+            this.b.emit(`.setAttribute('`);
+            const keyStart = this.b.offset;
+            this.emitPrimitive(key);
+            const keyEnd = this.b.offset;
+            this.b.emit("', ");
+            if (routeWrap)
+              this.b.tsOnly(() => this.b.emit("__ripRoute("));
+            const valStart = this.b.offset;
             this.renderExpr(value);
+            const valEnd = this.b.offset;
             if (this.ts)
-              this.b.tsOnly(() => this.b.emit(" as any"));
+              this.b.tsOnly(() => this.b.emit(routeWrap ? ")" : " as any"));
             this.b.emit(");");
+            if (routeWrap)
+              this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
           }, value);
         }
       } else if (isPresence) {
@@ -16060,13 +16106,26 @@ ${this.replayPad}}` : " }");
         }, false);
       } else {
         this.renderLine(pair, () => {
-          this.b.emit(`${el}.setAttribute(`);
-          this.emitQuotedPrimitive(key);
-          this.b.emit(", ");
+          if (routeWrap)
+            this.b.tsOnly(() => this.b.emit("("));
+          this.b.emit(el);
+          if (routeWrap)
+            this.b.tsOnly(() => this.b.emit(" as Element)"));
+          this.b.emit(`.setAttribute('`);
+          const keyStart = this.b.offset;
+          this.emitPrimitive(key);
+          const keyEnd = this.b.offset;
+          this.b.emit("', ");
+          if (routeWrap)
+            this.b.tsOnly(() => this.b.emit("__ripRoute("));
+          const valStart = this.b.offset;
           this.renderExpr(value);
+          const valEnd = this.b.offset;
           if (this.ts)
-            this.b.tsOnly(() => this.b.emit(" as any"));
+            this.b.tsOnly(() => this.b.emit(routeWrap ? ")" : " as any"));
           this.b.emit(")");
+          if (routeWrap)
+            this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
         });
       }
     }
@@ -17143,6 +17202,11 @@ ${this.replayPad}}` : " }");
           this.b.emit(")");
         });
       } else {
+        const sourceKey = this.sourceKeyArgOf(n);
+        if (sourceKey !== null) {
+          (this._sourceKeyArgs ??= new Set).add(sourceKey);
+          this._needsSourceKeyHelper = true;
+        }
         this.mark(n, "args", () => {
           this.b.emit("(");
           n.slice(1).forEach((arg, i) => {
@@ -17223,9 +17287,33 @@ ${this.replayPad}}` : " }");
     });
   }
   callArg(arg) {
+    if (this._sourceKeyArgs?.has(arg)) {
+      this._sourceKeyArgs.delete(arg);
+      this.b.tsOnly(() => this.b.emit("__ripSourceKey("));
+      this.expr(arg);
+      this.b.tsOnly(() => this.b.emit(")"));
+      return;
+    }
     if (isNode(arg) && (arg[0] === ".{}" || arg[0] === "?.{}") && arg.length >= 3)
       return this.pick(arg, true);
     this.expr(arg);
+  }
+  sourceKeyArgOf(node) {
+    if (!this.ts || this.appStashSpec === null)
+      return null;
+    const arg = node[1];
+    if (typeof arg !== "string" || !/^["']/.test(arg))
+      return null;
+    const callee = node[0];
+    if (!isNode(callee) || callee[0] !== "." || callee.length !== 3 || callee[2] !== "source")
+      return null;
+    const data = callee[1];
+    if (!isNode(data) || data[0] !== "." || data.length !== 3 || data[2] !== "data")
+      return null;
+    const app = data[1];
+    if (!isNode(app) || app[0] !== "." || app.length !== 3 || app[1] !== "this" || app[2] !== "app")
+      return null;
+    return arg;
   }
   binary(node) {
     if (Emitter.returnGuard(node)) {
@@ -19571,7 +19659,7 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -19581,7 +19669,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -19857,9 +19945,25 @@ export type __RipStash = typeof ${stashLocal};
 `));
     }
   }
+  if (face === "ts" && emitter.routesUnion !== null && /\bRoutePath\b/.test(source) && !/\b(?:type|interface)\s+RoutePath\b/.test(source) && !/\bimport\b[^;\n]*\bRoutePath\b/.test(source)) {
+    builder.tsOnly(() => builder.emit(`
+type RoutePath = ${emitter.routesUnion};
+`));
+  }
   if (emitter._needsAmbienceHelper === true) {
     builder.tsOnly(() => builder.emit(`
 declare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };
+`));
+  }
+  if (emitter._needsRouteHelper === true) {
+    builder.tsOnly(() => builder.emit(`
+declare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;
+`));
+  }
+  if (emitter._needsSourceKeyHelper === true) {
+    const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
+    builder.tsOnly(() => builder.emit(`
+declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;
 `));
   }
   const globalDecls = [];
@@ -19923,7 +20027,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -20023,7 +20127,7 @@ var diagnosticError = (file, path, d) => {
   (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null } = {}) {
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -20061,7 +20165,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path, appStashSpec });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -20098,6 +20202,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     classDecls: emitted.classDecls,
     loopVars: emitted.loopVars,
     attrNames: emitted.attrNames,
+    routeWraps: emitted.routeWraps,
     importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
@@ -26832,6 +26937,10 @@ function launch(opts) {
       return;
     };
   }
+  let disposeAria = null;
+  if (typeof document !== "undefined" && typeof document.querySelectorAll === "function") {
+    disposeAria = ariaCurrent(router);
+  }
   let disposePersist = null;
   if (opts.persist) {
     disposePersist = persistStash(app, { local: opts.persist === "local", key: "__rip_app", storage: opts.storage });
@@ -26850,6 +26959,9 @@ function launch(opts) {
       }
       return;
     };
+    run(function() {
+      return disposeAria?.();
+    });
     run(function() {
       return disposeLinks?.();
     });

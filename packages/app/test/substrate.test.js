@@ -552,3 +552,50 @@ describe('invalid calls', () => {
     expect(() => components.write('app.rip', null)).toThrow('must be a string');
   });
 });
+
+describe('staleTime durations', () => {
+  // The duration vocabulary is behavioral, not just parsed: a fresh
+  // cell's ensure() answers without refetching, a stale one refetches
+  // in the background. `'forever'` rides every suite above; these pin
+  // the number and duration-string forms.
+  const counting = staleTime => {
+    let calls = 0;
+    const stash = createStash({
+      user: source({ fetch: async () => ({ n: ++calls }), staleTime }),
+    });
+    return { cell: unwrapStash(stash).user, calls: () => calls };
+  };
+
+  test("a duration string ('5 min') keeps a fresh cell from refetching", async () => {
+    const { cell, calls } = counting('5 min');
+    await cell.ensure();
+    await cell.ensure();
+    expect(calls()).toBe(1);
+  });
+
+  test('a millisecond number keeps the same freshness window', async () => {
+    const { cell, calls } = counting(60_000);
+    await cell.ensure();
+    await cell.ensure();
+    expect(calls()).toBe(1);
+  });
+
+  test('zero staleness refetches on the next ensure', async () => {
+    const { cell, calls } = counting(0);
+    await cell.ensure();
+    await cell.ensure();
+    await new Promise(next => setTimeout(next, 0));
+    expect(calls()).toBe(2);
+  });
+
+  test('every documented spelling is accepted at declaration', () => {
+    for (const staleTime of ['2h', '1.5 days', '90 SEC', '500', 0, 250]) {
+      expect(() => source({ fetch: async () => ({}), staleTime })).not.toThrow();
+    }
+  });
+
+  test("a typo'd unit rejects at declaration", () => {
+    expect(() => source({ fetch: async () => ({}), staleTime: '5 mins' })).toThrow('staleTime');
+    expect(() => source({ fetch: async () => ({}), staleTime: -1 })).toThrow('staleTime');
+  });
+});

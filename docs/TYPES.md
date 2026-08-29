@@ -220,6 +220,32 @@ It produces:
 
 The face and declaration paths consume the same model.
 
+## Typed routes
+
+Route checking is a discovery/compile split, like the stash: the editor server and `rip check` discover the project's route tree (`appRoutesFor` in `packages/vscode/src/mirror.js` — the fixed contract `<root>/app/routes`, walked under the same project-root anchor as the stash), and the compiler takes the answers as the pure options `routesUnion` and `routeParams`. The walker re-implements `buildRoutes`' conventions in pure JS; the differential test in `packages/app/test/routes-discovery.test.js` is the drift guard.
+
+The union is TS text over the routable files: statics as string literals, dynamic segments as `${string}` template holes, `[[optional]]` segments contributing both expansions, catch-alls excluded (they are fallbacks, not navigation targets — `/${string}` would defeat every other member) but still contributing params. Zero members leaves checking **unarmed** — never `never`, which would reject every literal in a catch-all-only project.
+
+Three surfaces check against the union, and the gate is **syntactic**: only a value that is syntactically a `/`-leading string literal or a `/`-leading interpolated template wraps in the TS-only `__ripRoute(...)` helper (strengthened to the union at the emit tail). Anything dynamic — a binding, a computed expression, a template opening on an interpolation — and anything external (`https:`, `mailto:`, `#frag`) passes by construction, never by inference.
+
+- Intrinsic `<a href:>` — both the plain and reactive attribute branches.
+- A child component's `href:` prop — keyed on the prop NAME, because a component's tag is invisible cross-module; only the constructor-object emission wraps, the `_updateProp` re-emission stays bare.
+- `router.push` / `router.replace` — via the ambient router type (`routerAmbienceType` in `src/ts/components.js`): `Omit` the two members and re-add them in method syntax with a `const P` conditional. Not a generic `Router<R>` (arrow-typed properties make the instantiations mutually unassignable under strictFunctionTypes) and not an intersection (which unions the overloaded parameter).
+
+Diagnostics anchor on the surface's MEANINGFUL TOKEN (v3 parity). A mismatch on the two attribute surfaces re-anchors on the pair's KEY — the anchor every other mistyped attribute in the render DSL reports on, since ordinary props flow through the props-object road and TS anchors property errors on the name — via the `routeWraps` channel (the emitter records each wrap's key/value generated spans; `mapTsDiagnostic` re-maps a diagnostic covering exactly the wrapped value). A mismatch in a `push`/`replace` argument re-anchors on the METHOD NAME, double-gated so an ordinary `.push(` — an array's — can never snap: the diagnostic must sit in the argument slot of the call in the face, and its parameter type must be composed entirely of route-union members. An error interior to a wrapped value (an interpolated expression's own defect) keeps its exact position.
+
+The ambient `RoutePath` alias (the union under a public name, for data-driven hrefs like a nav array) injects only when the module references the name and neither declares nor imports its own — a user's `RoutePath` always wins. Route files with named params get `@params` tightened to their exact shape (`{ id: string }`, optionals as `page?: string`, catch-alls as `rest: string`), by exact file identity; every other file keeps `Record<string, string>`.
+
+Gating mirrors v3: router and `@params` typing require a discovered stash; href checking and `RoutePath` work stash-free. The escape hatches are the ordinary ones — a `string`-typed binding or an `as string` cast — and the CLI's pin-pass recompile receives identical route options through the same memo as the main pass.
+
+## Typed source handles
+
+`@app.data.source(path, key?)` answers a typed handle: the ambience splice (`stashMethodsType`, `src/ts/components.js`) instantiates the package's `StashMethods` at the AppData-projected shape, whose keyed overload answers `SourceHandleFor<D[K]>` for a top-level key (a keyed family's element type, anything else `NonNullable`d, with the handle re-nulling as `value: T | null`); any other string — dotted paths included — stays legal on the permissive overload and answers the untyped handle.
+
+The strict check lives in a THIRD home, because the obvious two can't hold it: the template-literal constraint that separates a dotted path from a typo is unspellable in Rip source (structured types carry no template-literal types), and inlining it into the ambience as an anonymous type literal echoes its `import(...)` splices on every `@app` hover — the leak the `__ripAmbientApp` indirection exists to prevent. So it rides the same construction as route checking: the emitter wraps a SYNTACTIC string-literal first argument of exactly `@app.data.source(...)` in the TS-only `__ripSourceKey(...)`, declared once per module at the emit tail with the constraint `(keyof __RipStash & string) | \`${keyof __RipStash & string}.${string}\`` — a module-scope declare renders in no hover. A typo'd key (flat or dotted-under-a-typo'd-prefix) errors at the literal with the key union; a legal dotted path matches the template arm and stays untyped; a dynamic key or a bound alias (`d = @app.data; d.source(k)`) is never wrapped and lands on the package's permissive overload — the same syntactic-gate doctrine as hrefs.
+
+The remaining template-literal casualty is `Duration`: it stays `number | string` (the runtime `DURATION_RE` parse is the sole authority on duration strings) rather than v3's template-literal form.
+
 ## Declared globals
 
 A top-level `globalThis.NAME ??= expr` declares the global. The `??=`

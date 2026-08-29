@@ -12,7 +12,7 @@ import {
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SCAFFOLD_FAMILIES,
+  SCAFFOLD_FAMILIES, prettifyRouteUnion,
 } from '../../src/translate.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -621,5 +621,46 @@ describe('SCAFFOLD_FAMILIES', () => {
     for (const m of emitterSrc.matchAll(/newRenderVar\('([a-z]+)'\)/g)) hints.add(m[1]);
     const families = new Set(SCAFFOLD_FAMILIES.split('|'));
     for (const hint of hints) expect(families.has(hint)).toBe(true);
+  });
+});
+
+// Route-union prettifying is DISPLAY-ONLY rewriting: each dynamic
+// member's checked form re-labels as its parameterized display; static
+// members, unrelated text, and messages without entries pass untouched.
+describe('prettifyRouteUnion', () => {
+  const entries = [
+    { shape: '/', text: '"/"', display: '/' },
+    { shape: '/orders', text: '"/orders"', display: '/orders' },
+    { shape: '/orders/${string}', text: '`/orders/${string}`', display: '/orders/:id' },
+    { shape: '/profile', text: '"/profile"', display: '/profile' },
+  ];
+
+  test('a dynamic member re-labels; statics and the rest stay', () => {
+    const msg = 'Argument of type \'"/orderz"\' is not assignable to parameter of type \'"/" | "/orders" | `/orders/:id`\'.';
+    expect(prettifyRouteUnion(
+      'Argument of type \'"/orderz"\' is not assignable to parameter of type \'"/" | "/orders" | `/orders/${string}`\'.',
+      entries,
+    )).toBe(msg);
+  });
+
+  test('a tsgo-normalized run (templates dumped last) rewrites back into walker order', () => {
+    expect(prettifyRouteUnion('\'"/" | "/orders" | "/profile" | `/orders/${string}`\'.', entries))
+      .toBe('\'"/" | "/orders" | `/orders/:id` | "/profile"\'.');
+  });
+
+  test('a run mixing in a non-member keeps that tail where TS put it', () => {
+    expect(prettifyRouteUnion('\'"/orders" | "/profile" | `/orders/${string}` | undefined\'.', entries))
+      .toBe('\'"/orders" | `/orders/:id` | "/profile" | undefined\'.');
+  });
+
+  test('every occurrence rewrites, not just the first', () => {
+    expect(prettifyRouteUnion('`/orders/${string}` vs `/orders/${string}`', entries))
+      .toBe('`/orders/:id` vs `/orders/:id`');
+  });
+
+  test('no entries, or a non-string, answers identity', () => {
+    expect(prettifyRouteUnion('text', [])).toBe('text');
+    expect(prettifyRouteUnion('text', undefined)).toBe('text');
+    expect(prettifyRouteUnion(null, entries)).toBe(null);
   });
 });

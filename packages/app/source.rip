@@ -1,5 +1,11 @@
 export type NonNullSourceValue = object | string | number | boolean | symbol | bigint
 
+# Milliseconds, or a duration string in the shapes DURATION_RE accepts
+# (`'5 min'`, `'2h'`). The v3-style template-literal tightening (catch a
+# typo'd unit like `'5 mins'` at the type level) is unspellable here:
+# Rip's structured types deliberately carry no template-literal types,
+# so the runtime parse below stays the sole authority on duration
+# strings.
 export type Duration = number | string
 
 export type SourceArgs = [] | [unknown]

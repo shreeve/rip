@@ -58,6 +58,10 @@ the path (a keyed family takes the key as the second argument); `value`,
 and a path that does not reach a source key throws. `peek`, `reset`, and
 `source` are reserved stash methods and shadow data keys of the same name.
 
+In checked projects the handle is typed. A path naming a top-level stash entry answers that entry's typed handle (`SourceHandleFor`: a keyed family's element type, anything else un-nulled, with the handle re-nulling as `value: T | null`), and a literal key passed to `@app.data.source(...)` is CHECKED: a typo errors at the key, naming the stash's keys, while a dotted path under a real key stays legal (untyped handle) and a dynamic key always passes (docs/TYPES.md § Typed source handles). Direct `createStash` consumers get the exported vocabulary — `StashMethods<D>`, `SourceHandle<T>`, `SourceHandleFor<V>` — with a permissive string overload: only the compiler's face can spell the dotted-vs-typo distinction.
+
+`staleTime` takes milliseconds, a duration string (`'5 min'`, `'2h'`, `'1.5 days'` — seconds through years, case-insensitive), or `'forever'`; a spelling the duration grammar does not recognize rejects at declaration.
+
 Source kind follows JavaScript runtime arity exactly:
 
 - `fetch: -> ...` is a singleton.
@@ -277,6 +281,8 @@ to browser delivery. Every host concern (target, router adapter,
 storage) is an option with the browser default applied only when
 omitted, so launch tests under Node.
 
+Launch also wires the navigation chrome: the owned-link listeners (click interception and preloading) install whenever a `links` host is injected or a document exists, and the `ariaCurrent` walker installs whenever a usable document exists — `destroy()` disposes all of them. Under Node with no document and no injected host, none install.
+
 `persistStash(app, { local?, key?, debounce?, storage? })` projects the
 stash into Web Storage: plain keys persist, source keys are skipped at
 every depth, restore merges around live cells, saving debounces on the
@@ -300,6 +306,8 @@ spellings are never owned, catch-all routes included. Marks the
 application manages itself are never set over and never removed, and a
 walker's own marks are cleaned when the anchor stops earning them and
 when the walker disposes.
+
+`launch()` installs this walker by default; call it directly only for a custom host or a router running outside launch.
 
 ## Owned links
 

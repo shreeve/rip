@@ -134,7 +134,7 @@ const diagnosticError = (file, path, d) => {
 // fabricate, and inventing a closing quote would change what every
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null } = {}) {
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -185,7 +185,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path, appStashSpec });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other
@@ -298,6 +298,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // plain prop and a two-way-bound prop read alike (the TextMate
     // attribute scope). TS face only.
     attrNames: emitted.attrNames,
+    // Generated key/value spans of the `__ripRoute` ATTRIBUTE wraps —
+    // the diagnostics road re-anchors a whole-value route mismatch on
+    // the pair's key, the anchor every other attribute reports on.
+    // TS face only; empty otherwise.
+    routeWraps: emitted.routeWraps,
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and

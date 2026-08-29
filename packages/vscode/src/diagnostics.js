@@ -11,7 +11,7 @@
 import path from 'node:path';
 import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
-  SUPPRESSED_TS_CODES, diagnosticTagsFor,
+  SUPPRESSED_TS_CODES, diagnosticTagsFor, prettifyRouteUnion,
 } from './translate.js';
 import { alwaysReported, isSyntaxClass } from './scopes.js';
 import { declaredButUninstalled } from './mirror.js';
@@ -58,7 +58,40 @@ export function mapTsDiagnostic(good, d) {
   }
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
-  const span = generatedSpanToSource(good.mappings, s, e);
+  let span = generatedSpanToSource(good.mappings, s, e);
+  // An attribute-shaped route check re-anchors on the pair's KEY:
+  // every other mistyped attribute in the render DSL reports on its
+  // name (the props-object road, TS's own property convention), so the
+  // `__ripRoute` wrap must not make `href` the one value-anchored
+  // attribute. Only a diagnostic covering EXACTLY the wrapped value —
+  // the argument-level mismatch — re-anchors; an error interior to the
+  // value (an interpolated expression's own defect) keeps its exact
+  // position. `push`/`replace` arguments are never wrapped and keep
+  // TS's argument anchor.
+  if (span && good.routeWraps?.length) {
+    const wrap = good.routeWraps.find((w) => s === w.value[0] && e === w.value[1]);
+    if (wrap) span = generatedSpanToSource(good.mappings, wrap.key[0], wrap.key[1]) ?? span;
+  }
+  // A router-method route check re-anchors on the METHOD NAME — the
+  // route feature's meaningful-token rule, completing the attribute
+  // half above: `href` for the attribute surfaces, `push`/`replace`
+  // for the programmatic ones. The gate is twofold so no ordinary
+  // `.push(` — an array's — can ever snap: the diagnostic must sit in
+  // the argument slot of a `.push(`/`.replace(` call in the face, AND
+  // its parameter type must be composed entirely of route-union
+  // members.
+  if (span && d.code === 2345 && good.routeEntries?.length) {
+    const windowStart = Math.max(0, s - 64);
+    const call = /\.(push|replace)\([^()]*$/.exec(good.code.slice(windowStart, s));
+    if (call) {
+      const param = /not assignable to parameter of type '([^']+)'/.exec(d.message)?.[1];
+      const members = new Set(good.routeEntries.map((w) => w.text));
+      if (param && param.split(' | ').every((p) => members.has(p))) {
+        const nameStart = windowStart + call.index + 1;
+        span = generatedSpanToSource(good.mappings, nameStart, nameStart + call[1].length) ?? span;
+      }
+    }
+  }
   // A generated span with no source mapping lives in a purely
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the
@@ -145,6 +178,10 @@ export function mapTsDiagnostic(good, d) {
     const spanText = good.source.slice(span[0], span[1]);
     if (/^[A-Za-z_$][\w$]*$/.test(spanText)) message = message.replace(/^'[^']*'/, `'${spanText}'`);
   }
+  // A route union in the message renders for READING: each dynamic
+  // member re-labels as the parameterized display its route file
+  // spells. Display-only; spans and the checked union are untouched.
+  message = prettifyRouteUnion(message, good.routeEntries);
   return {
     severity: d.severity ?? 1,
     code: d.code,

@@ -306,3 +306,85 @@ describe('launch reconciliation', () => {
     boot();
   });
 });
+
+describe('aria-current installs with launch', () => {
+  // launch owns the walker's lifetime the way it owns link
+  // interception: present whenever a usable document exists, gone with
+  // destroy(). The walker's own semantics (exact vs ancestor marks,
+  // rewritten hrefs) are pinned in aria.test.js; here the contract is
+  // the INSTALLATION — and that an app-managed mark stays app-managed
+  // through a full launch/destroy cycle.
+  const anchor = (href, managed = null) => {
+    const attrs = new Map([['href', href]]);
+    if (managed) attrs.set('aria-current', managed);
+    return {
+      getAttribute: key => (attrs.has(key) ? attrs.get(key) : null),
+      setAttribute: (key, value) => attrs.set(key, String(value)),
+      removeAttribute: key => attrs.delete(key),
+      hasAttribute: key => attrs.has(key),
+      attrs,
+    };
+  };
+
+  const withDocument = (anchors, fn) => {
+    const prevDocument = globalThis.document;
+    const prevObserver = globalThis.MutationObserver;
+    globalThis.document = {
+      querySelectorAll: () => anchors,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      documentElement: {},
+    };
+    globalThis.MutationObserver = class {
+      observe() {}
+      disconnect() {}
+    };
+    try {
+      return fn();
+    } finally {
+      if (prevDocument === undefined) delete globalThis.document;
+      else globalThis.document = prevDocument;
+      if (prevObserver === undefined) delete globalThis.MutationObserver;
+      else globalThis.MutationObserver = prevObserver;
+    }
+  };
+
+  test('anchors mark on launch, follow navigation, and clear on destroy', () => {
+    const home = anchor('/');
+    const about = anchor('/about');
+    const foreign = anchor('/nowhere');
+    withDocument([home, about, foreign], () => {
+      const result = boot();
+      expect(home.getAttribute('aria-current')).toBe('page');
+      expect(about.getAttribute('aria-current')).toBeNull();
+      expect(foreign.getAttribute('aria-current')).toBeNull();
+
+      result.router.push('/about');
+      expect(about.getAttribute('aria-current')).toBe('page');
+      expect(home.getAttribute('aria-current')).toBeNull();
+
+      result.destroy();
+      running.pop();
+      expect(about.getAttribute('aria-current')).toBeNull();
+    });
+  });
+
+  test('an app-managed mark is never set over and never removed', () => {
+    const managed = anchor('/about', 'step');
+    withDocument([managed], () => {
+      const result = boot();
+      result.router.push('/about');
+      expect(managed.getAttribute('aria-current')).toBe('step');
+      result.destroy();
+      running.pop();
+      expect(managed.getAttribute('aria-current')).toBe('step');
+    });
+  });
+
+  test('without a document the walker simply does not install', () => {
+    const result = boot();
+    expect(typeof result.destroy).toBe('function');
+    result.destroy();
+    running.pop();
+  });
+});
