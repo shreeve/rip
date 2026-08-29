@@ -852,10 +852,39 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # onError keys on to reshape the envelope — so system errors that
 # happen to carry a `code` (ENOENT and friends) can never impersonate
 # an intentional API error.
-# Typed `any`, not `never`: the empty-map no-op means error! can
-# return, and `never` would mark everything after `error! errs` —
-# the whole process stanza — unreachable to the checker.
-export error = (message: string | Record<string, string> = 'Bad request', status = 400, code = null, field = null): any ->
+# TWO signatures, and the split is the whole point. The STRING form
+# always throws, so it is `never`. The MAP form CAN return — an empty
+# map is a no-op — so it is `void` and the stanza after it stays live.
+# One `never` over both would have made the whole process stanza
+# unreachable, which is why this was `any` for a long time; overloads
+# are how to have both.
+#
+# `never` on the string form buys a guard that NARROWS:
+#
+#   error 'No such patient', 404 unless patient
+#   patient.id        # checker knows it is not null
+#
+# It has to be a `def` for that: TypeScript treats a call as
+# never-returning only when the CALLEE ITSELF carries the type, and an
+# arrow assigned to a name does not — `error = (…): never ->` checks
+# fine and narrows nothing. The declaration form is also the only one
+# that takes an overload list, so these three export through a list at
+# the end rather than inline.
+#
+# ONE CAVEAT, and it is TypeScript's, not ours: the analysis is
+# syntactic on the call expression, so an `await` in front of it hides
+# the call and NOTHING narrows. `error! …` compiles to `await error(…)`
+# and therefore narrows nothing — write these two without the bang.
+# They are synchronous; the bang was only ever decoration on them.
+#
+# What `error` throws: an Error with an HTTP status, plus the
+# machine-readable trio when a code was given. errorEnvelope reads all
+# four back off it.
+type HttpError = Error & { status: number, code?: string, api?: boolean, field?: string }
+
+def error(message: string, status?: number, code?: string, field?: string): never
+def error(message: Record<string, string>, status?: number, code?: string, field?: string): void
+def error(message: string | Record<string, string> = 'Bad request', status = 400, code: string | null = null, field: string | null = null): any
   # Object form — a field→message map, for collected validation:
   #
   #   errs = {}
@@ -869,17 +898,23 @@ export error = (message: string | Record<string, string> = 'Bad request', status
     return unless Object.keys(message).length
     status = 422 if status is 400
     throw Object.assign(Error.new('Validation failed'), { status, errors: message })
-  err = Object.assign(Error.new(message), { status })
+  # The string branch: the object branch above has already returned or
+  # thrown. The empty-map `return` is what stops the checker proving
+  # it, so the cast says what the control flow already guarantees.
+  err: HttpError = Object.assign(Error.new(message as string), { status })
   if code?
     err.code = code
     err.api = true
     err.field = field if field?
   throw err
 
-export notice = (message = 'Something went wrong', status = 400) ->
+def notice(message: string = 'Something went wrong', status = 400): never
   throw Object.assign(Error.new(message), { status, notice: message })
 
-export bail = ->
+# Always throws — no map form, no no-op, so a plain `never`, and
+# `bail() unless …` narrows what follows. `bail!` does not: see the
+# await caveat above.
+def bail(): never
   store = requestContext.getStore()
   if store?.env?.session?
     for key of store.env.session
@@ -888,6 +923,11 @@ export bail = ->
   # which is "(re)authenticate" — and it just cleared the session. 403
   # (authenticated-but-refused) stays with `error! '…', 403`.
   throw Object.assign(Error.new('Unauthorized'), { status: 401 })
+
+# Declaration form does not take `export` inline (the overload list
+# must sit in the same block as its implementation), so the three
+# error helpers export here.
+export { error, notice, bail }
 
 # ==============================================================================
 # Utility Functions
