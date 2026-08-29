@@ -1240,20 +1240,8 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (tokens[j]?.kind !== 'IDENTIFIER') return -1;
     j++;
     // Optional generic parameter list on the name: balanced `<…>`.
-    if (tokens[j]?.kind === 'COMPARE' && tokens[j].value === '<' && !tokens[j].spaced) {
-      let depth = 0;
-      while (j < tokens.length) {
-        if (counter.on) counter.n++;
-        const t = tokens[j];
-        if (t.kind === 'COMPARE' && t.value === '<') depth++;
-        else if (t.kind === 'COMPARE' && t.value === '>') depth--;
-        else if (t.kind === 'SHIFT' && t.value === '>>') depth -= 2;
-        else if (t.kind === 'SHIFT' && t.value === '>>>') depth -= 3;
-        else if (t.kind === 'TERMINATOR' || t.kind === 'INDENT' || t.kind === 'OUTDENT') return -1;
-        j++;
-        if (depth === 0) break;
-      }
-    }
+    j = skipAngleGroup(tokens, j);
+    if (j < 0) return -1;
     if (tokens[j]?.kind !== '=') return -1;
     j++;
     // Block body (structural type / block union): INDENT … OUTDENT,
@@ -1396,19 +1384,11 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (kd === 'COMPARE' && tok.value === '<' && !tok.spaced &&
         prev && prev.kind === 'IDENTIFIER') {
       const beforeName = out[out.length - 2] ?? null;
-      let depth = 0;
-      let j = i;
-      while (j < tokens.length) {
-        const t = tokens[j];
-        if (t.kind === 'COMPARE' && t.value === '<') depth++;
-        else if (t.kind === 'COMPARE' && t.value === '>') depth--;
-        else if (t.kind === 'SHIFT' && t.value === '>>') depth -= 2;
-        else if (t.kind === 'SHIFT' && t.value === '>>>') depth -= 3;
-        else if (t.kind === 'TERMINATOR' || t.kind === 'INDENT' || t.kind === 'OUTDENT') { j = -1; break; }
-        if (depth === 0) break;
-        j++;
-      }
-      if (j > i) {
+      // skipAngleGroup's -1 also covers a list left unclosed at end of
+      // input, where no token past the tape has an `.end` to slice to.
+      const afterGroup = skipAngleGroup(tokens, i);
+      if (afterGroup > i) {
+        const j = afterGroup - 1;
         const afterClose = tokens[j + 1]?.kind;
         const isDefName = beforeName?.kind === 'DEF';
         const isComponentTarget = afterClose === '=' && tokens[j + 2]?.kind === 'COMPONENT';

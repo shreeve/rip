@@ -910,6 +910,15 @@ describe('negative: malformed declarations reject loudly', () => {
     }
   });
 
+  test('an unclosed def generic at end of input is loud, never a crash', () => {
+    // No trailing newline: the tape ends mid-line, so the TYPE_PARAMS
+    // collapse must fail closed at end of input instead of reading a
+    // token past the tape.
+    const r = parser.parse('def foo<Bar');
+    expect(r.sexpr).toBeNull();
+    expect(r.diagnostics).not.toHaveLength(0);
+  });
+
   test('optional params emit the TS-only `?` and erase from JS', () => {
     const ts = emit(parser.parse('def f(a?: number)\n  a'), { source: 'def f(a?: number)\n  a', face: 'ts' }).code;
     expect(ts).toContain('function f(a?: number)');
