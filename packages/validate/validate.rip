@@ -34,7 +34,7 @@ fail = (message) -> throw Error.new "Rip Validate: #{message}"
 # Utilities
 # ==============================================================================
 
-export def isBlank(obj: unknown)
+export def isBlank(obj: unknown): boolean
   return true unless obj?
   return true if obj is false
   return true if typeof obj is 'string' and /^\s*$/.test obj
@@ -65,7 +65,7 @@ toMoney = (value, even = false) ->
 
 # US-English title casing for names and addresses. The optional flags
 # enable the name-specific and address-specific rule packs.
-export def toName(str: unknown, ...type: ('name' | 'address')[])
+export def toName(str: unknown, ...type: ('name' | 'address')[]): string
   s = String(str)
   s = s.toLowerCase().replace(/\s+/g, ' ').trim()
   s = s.replace /(^|(?<=\P{L}))(\p{L})/gu, (m, pre, ch) -> pre + ch.toUpperCase()
@@ -91,7 +91,7 @@ export def toName(str: unknown, ...type: ('name' | 'address')[])
 
 # NANP phone normalizer with extension parsing; a `+`-prefixed number
 # with enough digits passes through as international.
-export def toPhone(str: unknown)
+export def toPhone(str: unknown): string | null
   return "" if isBlank(str)
   num = String(str).replace(/\s+/g, ' ').trim()
   [num, ext] = num.split(/\s*(?:, ?)?(?:ext?\.?|x|#|:|,)\s*/i, 2)
@@ -114,7 +114,7 @@ export def toPhone(str: unknown)
 # Format integer cents for display: 129222 -> "$1,292.22". Rounds
 # defensively so a stray float still renders; a nullish amount renders
 # as "$0.00" instead of "$NaN.NaN".
-export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: boolean } = {})
+export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: boolean } = {}): string
   fail 'formatMoney expects finite cents' unless not cents? or Number.isFinite(cents)
   symbol  = opts.symbol ?? '$'
   commas  = opts.commas ?? true
@@ -306,15 +306,15 @@ export def registerValidator(name: string | symbol, fn: Validator, opts: { raw?:
     fail "validator '#{nameOf name}' raw flag must be boolean"
   define nameOf(name), fn, opts.raw is true
 
-export def getValidator(name: string | symbol)
+export def getValidator(name: string | symbol): Validator | undefined
   registry.get(nameOf name)?.prepared
 
 # Whether a validator takes its value untouched: the seam callers
 # consult instead of hardcoding the raw set. Unknown names answer false.
-export def isRawType(name: string | symbol)
+export def isRawType(name: string | symbol): boolean
   registry.get(nameOf name)?.raw is true
 
-export def validatorNames()
+export def validatorNames(): string[]
   Array.from(registry.keys()).sort()
 
 # Apply a validator to a value in hand. Raw validators receive the value
