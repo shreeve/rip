@@ -84,9 +84,11 @@ function migrateAdapter(deployed, opts = {}) {
   // The single-row migration lock, PK-guarded: a second acquire while
   // held raises the duplicate-key error the runner classifies as
   // "lock held"; release clears it; --force deletes then re-acquires.
-  // The lock row, not just a boolean: the runner now reads the holder
-  // back to report WHO has it and for HOW LONG, and a fake that cannot
-  // answer that would let every one of those messages go untested.
+  // The lock is a LEASE, so the fake models one: who holds it and how
+  // long since they last renewed. `ageSeconds` is the whole mechanism —
+  // every acquire, refusal and takeover in the runner turns on it — so a
+  // fake carrying only a boolean would let all of it go untested.
+  const LEASE_STALE = 30;
   const lock = { held: false, owner: null, ageSeconds: 0 };
   let operations = [];   // the '@op:…' rows, kept aside so a test can read them back
   // Serve the deployed spec as the `GET /catalog` contract document —
@@ -164,12 +166,23 @@ function migrateAdapter(deployed, opts = {}) {
       if (params[0] !== '@lock' || !lock.held) return res(['owner', 'applied_at', 'age_seconds'], []);
       return res(['owner', 'applied_at', 'age_seconds'], [[lock.owner, null, lock.ageSeconds]]);
     }
-    if (sql.startsWith('INSERT INTO schema (version, name) VALUES')) {
-      if (params[0] === '@lock') {
-        if (lock.held) throw new Error('Duplicate key "version: @lock" violates primary key constraint');
-        lock.held = true; lock.owner = params[1]; lock.ageSeconds = 0;
-      }
-      return ok(1);
+    // The lease acquire: one statement covering absent, expired and
+    // live. The fake implements the same three-way decision the WHERE
+    // clause makes, so a test can drive each branch by setting an age.
+    if (sql.startsWith('INSERT INTO schema (version, name, applied_at)')) {
+      expect(sql).toContain('ON CONFLICT (version) DO UPDATE');
+      const takeable = !lock.held ||
+        (lock.ageSeconds > LEASE_STALE && String(lock.owner ?? '').startsWith('rip2 '));
+      if (!takeable) return res(['version'], []);
+      lock.held = true; lock.owner = params[1]; lock.ageSeconds = 0;
+      return res(['version'], [['@lock']]);
+    }
+    // Renewal. A beat that matches no row is how a run learns its lease
+    // was taken while it was still working.
+    if (sql.startsWith('UPDATE schema SET applied_at = now()')) {
+      if (!lock.held || lock.owner !== params[1]) return res(['version'], []);
+      lock.ageSeconds = 0;
+      return res(['version'], [['@lock']]);
     }
     // The --force steal. It shares its opening with the run-outcome
     // upsert below, so it is told apart by what it RETURNS — and what
@@ -2468,21 +2481,23 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
         await scoped(adapter, () => mig.migrate({ dir: mdir }));
-        expect(lockCalls(adapter).some((s) => s.startsWith('INSERT INTO schema (version, name) VALUES'))).toBe(true);
+        expect(lockCalls(adapter).some((s) => s.startsWith('INSERT INTO schema (version, name, applied_at)'))).toBe(true);
         expect(lockCalls(adapter).some((s) => s.startsWith('DELETE FROM schema WHERE version = ?'))).toBe(true);
         expect(adapter.lock.held).toBe(false); // released
       });
     });
 
-    // The whole migration history and the lock now live in one table, so
-    // the statement that clears a stale lock is one careless WHERE away
-    // from deleting every applied-migration row. This is that WHERE.
-    test('--force clears the lock by its key, never the whole table', async () => {
+    // The whole migration history and the lock live in one table, so
+    // every statement that clears a lock is one careless WHERE away from
+    // deleting every applied-migration row. This is that WHERE.
+    test('every lock DELETE names the lock row, never the whole table', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
-        adapter.lock.held = true;                       // a crashed run left it
-        await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
+        await scoped(adapter, async () => {
+          await mig.migrate({ dir: mdir });   // acquires and releases
+          await mig.unlock();                 // and the unlock path
+        });
         const deletes = adapter.calls.filter((c) => /^DELETE FROM schema/.test(c.sql));
         expect(deletes.length).toBeGreaterThan(0);
         for (const d of deletes) {
@@ -2555,35 +2570,89 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       });
     });
 
-    test('--force takes over a stale lock and applies', async () => {
-      await withDir(async (mdir) => {
-        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] });
-        adapter.lock.held = true; // a crashed run left it behind
-        const r = await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
-        expect(r.ran).toEqual(['0001_a']);
-        expect(adapter.lock.held).toBe(false); // cleared, applied, released
-      });
-    });
-
-    test('--force is ONE statement and it names whom it displaced', async () => {
+    // The headline: the commonest incident in this whole subsystem — a
+    // crashed deploy left its lock behind — now resolves itself. No
+    // flag, no human, and the run says whose lease it inherited.
+    test('an expired lease is taken over automatically, and named', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
         adapter.lock.held = true;
-        adapter.lock.owner = 'rip1 host=deadbox pid=999 run=cafe1234';
-        const r = await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
+        adapter.lock.owner = 'rip2 host=deadbox pid=999 run=cafe1234';
+        adapter.lock.ageSeconds = 600;   // nobody has renewed it in ten minutes
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
         expect(r.ran).toEqual(['0001_a']);
-        expect(r.displaced).toBe('rip1 host=deadbox pid=999 run=cafe1234');
-        // The steal is an upsert, never a DELETE followed by an INSERT:
-        // the gap between those two is a window where the lock is
-        // VACANT, and a third party that takes it leaves the forcer
-        // having destroyed a live peer's mutex without acquiring one.
-        const lockCalls = adapter.calls.filter((c) => (c.params ?? []).includes('@lock'));
-        const stole = lockCalls.filter((c) => /RETURNING detail AS displaced/.test(c.sql));
-        expect(stole.length).toBe(1);
-        expect(lockCalls.some((c) => /^DELETE/.test(c.sql) && !/RETURNING/.test(c.sql) &&
-          adapter.calls.indexOf(c) < adapter.calls.indexOf(stole[0]))).toBe(false);
+        expect(r.tookOver).toBe('rip2 host=deadbox pid=999 run=cafe1234');
+        expect(adapter.lock.held).toBe(false); // applied, then released
+      });
+    });
+
+    test('acquiring is ONE statement — never a DELETE followed by an INSERT', async () => {
+      // The gap between a delete and an insert is a window in which the
+      // lock belongs to nobody; a third party takes it there, and the
+      // process that opened the gap has destroyed a live peer's mutex
+      // without acquiring one. An upsert has no such moment.
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = 'rip2 host=deadbox pid=999 run=cafe1234';
+        adapter.lock.ageSeconds = 600;
+        await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        const lockSql = adapter.calls.filter((c) => (c.params ?? []).includes('@lock'));
+        const acquire = lockSql.findIndex((c) => /^INSERT INTO schema \(version, name, applied_at\)/.test(c.sql));
+        expect(acquire).toBeGreaterThan(-1);
+        // Nothing deleted the lock row before it was acquired.
+        expect(lockSql.slice(0, acquire).some((c) => /^DELETE/.test(c.sql))).toBe(false);
+      });
+    });
+
+    test('a LIVE lease is never taken over, however impatient the caller', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = 'rip2 host=peerbox pid=4242 run=abc12345';
+        adapter.lock.ageSeconds = 3;     // renewed three seconds ago
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/lease is LIVE/);
+        });
+        expect(adapter.calls.some((c) => /CREATE TABLE a/.test(c.sql))).toBe(false);
+        expect(adapter.lock.owner).toBe('rip2 host=peerbox pid=4242 run=abc12345');
+      });
+    });
+
+    // The rollout rule. A runner from before leases never renews, so its
+    // lock would look expired the instant it was taken — and taking it
+    // would put two migrations on one database, which is the failure
+    // this whole file exists to prevent.
+    test('a pre-lease holder is never expired out, however old it looks', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;
+        adapter.lock.owner = '8a7d1e40-0000-4000-8000-000000000000'; // pre-lease, pre-rip1
+        adapter.lock.ageSeconds = 86400;
+        await scoped(adapter, async () => {
+          const e = await mig.migrate({ dir: mdir }).catch((x) => x);
+          expect(e.message).toContain('predates leases');
+          expect(e.message).toContain('rip schema unlock');
+        });
+        expect(adapter.calls.some((c) => /CREATE TABLE a/.test(c.sql))).toBe(false);
+      });
+    });
+
+    test('the holder renews its lease while it works, and stops when it is done', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        expect(r.ran).toEqual(['0001_a']);
+        // Nothing renews after release: a timer outliving its migration
+        // would keep a dead run's lease alive forever, which is the one
+        // way a lease is worse than a flag.
+        expect(r.leaseLost).toBe(false);
+        expect(adapter.lock.held).toBe(false);
       });
     });
 
@@ -2669,21 +2738,34 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(out.holder).toBe(null);
     });
 
-    test('unlock refuses a holder it can prove is alive, unless forced', async () => {
+    // The refusal is a MEASUREMENT now, not a guess about a pid on a
+    // machine this process cannot see: something renewed this lease
+    // five seconds ago, so something is running. It works identically
+    // for a holder on the other side of the world.
+    test('unlock refuses a lease that is still being renewed, unless forced', async () => {
       const adapter = migrateAdapter({ tables: [] });
-      const os = await import('node:os');
-      // This process, on this host: the one liveness question a runner
-      // can actually answer.
       adapter.lock.held = true;
-      adapter.lock.owner = 'rip1 host=' + os.hostname().replace(/[\s=]+/g, '-') +
-        ' pid=' + process.pid + ' run=deadbeef';
+      adapter.lock.owner = 'rip2 host=ci-runner-4 pid=812 run=deadbeef';
       adapter.lock.ageSeconds = 5;
       await scoped(adapter, async () => {
-        await expect(mig.unlock()).rejects.toThrow(/refusing[\s\S]*alive on this host[\s\S]*--force/);
+        await expect(mig.unlock()).rejects.toThrow(/refusing[\s\S]*renewing this lease[\s\S]*--force/);
       });
       expect(adapter.lock.held).toBe(true);
       const out = await scoped(adapter, () => mig.unlock({ force: true }));
       expect(out.released).toBe(true);
+    });
+
+    // And an expired one needs no deliberation: migrate would take it
+    // over anyway, so making a human type --force for it would be
+    // ceremony over a lock nobody holds.
+    test('unlock breaks an expired lease without a flag', async () => {
+      const adapter = migrateAdapter({ tables: [] });
+      adapter.lock.held = true;
+      adapter.lock.owner = 'rip2 host=ci-runner-4 pid=812 run=deadbeef';
+      adapter.lock.ageSeconds = 900;
+      const out = await scoped(adapter, () => mig.unlock());
+      expect(out.released).toBe(true);
+      expect(out.describe).toContain('EXPIRED');
     });
 
     // Adoption is destructive to a run already in flight under the OLD
@@ -2719,7 +2801,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         await scoped(adapter, () => mig.migrate({ dir: mdir }));
         const at = (re) => adapter.calls.findIndex((c) => re.test(c.sql));
         const acquired = adapter.calls.findIndex(
-          (c) => /^INSERT INTO schema \(version, name\) VALUES/.test(c.sql) && (c.params ?? []).includes('@lock'));
+          (c) => /^INSERT INTO schema \(version, name, applied_at\)/.test(c.sql) && (c.params ?? []).includes('@lock'));
         expect(acquired).toBeGreaterThan(-1);
         expect(at(/DROP TABLE _rip_migration_lock/)).toBeGreaterThan(acquired);
         expect(at(/DROP TABLE _rip_migration_operations/)).toBeGreaterThan(acquired);
@@ -2732,7 +2814,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         const adapter = migrateAdapter({ tables: [] });
         await scoped(adapter, async () => {
           await expect(mig.migrate({ dir: mdir, coordinated: true })).rejects.toThrow(/requires an operation id/);
-          await expect(mig.migrate({ dir: mdir, coordinated: true, operationId: 'op', force: true })).rejects.toThrow(/rejects --force and --repair/);
+          await expect(mig.migrate({ dir: mdir, coordinated: true, operationId: 'op', repair: true })).rejects.toThrow(/rejects --repair/);
           const out = await mig.migrate({ dir: mdir, coordinated: true, operationId: '0123456789abcdef0123456789abcdef' });
           expect(out.outcome).toBe('committed');
         });

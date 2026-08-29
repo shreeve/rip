@@ -1043,9 +1043,9 @@ rip schema make add partners      write migrations/<UTC>_add_partners.sql from t
                                   which is optional — with none the file is just
                                   migrations/<UTC>.sql
 rip schema migrate                apply pending files in order
-rip schema unlock                 break a stale migration lock — applies NOTHING, and prints
-                                  exactly whom it displaced; refuses a holder it can prove is
-                                  alive on this host (--force overrides)
+rip schema unlock                 break a migration lock — applies NOTHING, and prints exactly
+                                  whom it displaced; refuses a lease still being renewed
+                                  (--force overrides). Rarely needed — see below
 rip schema push [name…]           diff, write migrations/<UTC>_<name>.sql (the name
                                   optional, as for make), and apply
                                   it — one motion, for rapid iteration; refuses when
@@ -1060,6 +1060,17 @@ everybody shares: local time reorders a directory the moment two people in diffe
 zones, or one laptop crossing a DST boundary, generate migrations the same afternoon.
 Fixed width means a plain lexicographic sort stays correct forever, and two branches
 never mint the same version, so a merge needs no renumbering.
+
+The migration lock is a **lease**, not a flag. Whichever process is applying renews it
+every few seconds, so a lock nobody has renewed for 30 seconds is one whose holder is
+gone — and the next `migrate` takes it over on its own, saying whose it was. A crashed
+deploy therefore clears itself, and `unlock` exists only for the rarer case where a lease
+IS being renewed and you want that run stopped anyway.
+
+That makes liveness a measurement rather than a guess. There is no `migrate --force`: with
+a lease there is nothing to force. A holder from a runner too old to renew is never expired
+out — it never renews, so an expired-looking lease would be indistinguishable from a live
+one — and those still need `unlock`.
 
 Legacy `NNNN_name.sql` files still apply. Do not rename them — the version is the
 identity recorded in the `schema` table, so a rename reads as one deleted migration

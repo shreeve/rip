@@ -46,10 +46,11 @@ Usage:
                      make add partner emails -> 20260829174501_add_partner_emails.sql)
                      the name is optional; without one the file is just 20260829174501.sql
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
-                     [--repair] [--force]
-  rip schema unlock  [entry.rip] [--force]          break a stale migration lock — applies NOTHING,
-                                                    prints exactly what it displaced; refuses when the
-                                                    holder is a live pid on THIS host (--force overrides)
+                     [--repair]
+  rip schema unlock  [entry.rip] [--force]          break a migration lock — applies NOTHING, and
+                                                    prints exactly what it displaced. Rarely needed: a
+                                                    crashed run's lease expires by itself. Refuses a
+                                                    lease still being renewed (--force overrides)
   rip schema push    [name…] [entry.rip] [--dir DIR]  diff, write migrations/<UTC>_<name>.sql,
                      [--allow-lossy] [--allow-destructive]   and apply it — one motion (rapid iteration;
                      refuses when pending/edited/conflicting migrations make the state unclear;
@@ -70,11 +71,9 @@ entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDID
 --allow-lossy   include steps that may lose data on existing rows (type changes, SET NOT NULL)
 --allow-destructive   include DROP TABLE / DROP COLUMN steps
 --repair        re-record checksums for applied migrations whose files changed
---force         migrate: take the migration lock in ONE atomic statement and then deploy every
-                pending migration. It cannot leave the lock vacant and it reports whom it
-                displaced, but it does NOT wait for a live run — when all you want is the lock
-                back, use “rip schema unlock”, which applies nothing.
-                unlock: override the refusal to break a lock whose pid is alive on this host
+--force         unlock only: break a lock whose lease is still being renewed. Without it,
+                unlock breaks only a lock nobody is renewing — and that case now resolves
+                itself, since migrate takes over an expired lease on its own
 
 Connection: the entry's schema.setAdapter()/connect() call, or RIP_DB_URL / RIP_DB_TOKEN.`;
 
@@ -135,7 +134,14 @@ if (flags.check && cmd !== 'dump') die('--check only applies to dump', 2);
 if (flags.allowLossy && cmd !== 'make' && cmd !== 'push') die('--allow-lossy only applies to make and push', 2);
 if (flags.allowDestructive && cmd !== 'make' && cmd !== 'push') die('--allow-destructive only applies to make and push', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
-if (flags.force && cmd !== 'migrate' && cmd !== 'unlock') die('--force only applies to migrate and unlock', 2);
+// migrate no longer takes --force, and the refusal explains why rather
+// than just listing the verbs that do.
+if (flags.force && cmd === 'migrate') {
+  die('migrate no longer takes --force. A crashed run\'s lock is a LEASE that expires on its own, ' +
+      'and the next migrate takes it over and says so — there is nothing to force. To break a lock ' +
+      'that is still being renewed, use `rip schema unlock --force`, which applies nothing.', 2);
+}
+if (flags.force && cmd !== 'unlock') die('--force only applies to unlock', 2);
 if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
 if (flags.operationId && cmd !== 'migrate') die('--operation-id only applies to migrate', 2);
 
@@ -323,15 +329,18 @@ try {
     const out = await migration.migrate({
       dir: flags.dir,
       repair: flags.repair,
-      force: flags.force,
       coordinated: flags.coordinated,
       operationId: flags.operationId,
     });
-    // A force that took the lock off somebody is never silent, and it
-    // goes to stderr: it is a warning about what this run did, not part
-    // of the applied-migrations report a script may be parsing.
-    if (out.displaced) {
-      console.error('rip schema: --force displaced the migration lock, which was held by ' + out.displaced);
+    // Both of these go to stderr: they are warnings about what this run
+    // found, not part of the applied-migrations report a script parses.
+    if (out.tookOver) {
+      console.error('rip schema: took over an expired migration lease left by ' + out.tookOver +
+        ' — that run died before it finished; check `rip schema status` afterwards');
+    }
+    if (out.leaseLost) {
+      console.error('rip schema: WARNING — this run lost its migration lease while applying, so ' +
+        'another migrate may have been running beside it. Verify with `rip schema status`.');
     }
     if (!out.ran.length) console.log('no pending migrations');
     else for (const r of out.ran) console.log(`applied ${r}`);
