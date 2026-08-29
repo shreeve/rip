@@ -549,7 +549,7 @@ test! 'API-only watch swaps workers without App Hub publication', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
-test! 'static edits ding /assets with URL paths: one coalesced frame per burst, never content', ->
+test! 'static edits ding /assets with URL paths: every edit once per burst, never content', ->
   dir = mkdtempSync join(tmpdir(), 'rip-reloads-assets-')
   project = join dir, 'project'
   cpSync join(import.meta.dir, 'project'), project, { recursive: true }
@@ -595,23 +595,37 @@ test! 'static edits ding /assets with URL paths: one coalesced frame per burst, 
     # macOS tmpdirs live behind a /var → /private/var symlink.
     ok registration.files.roots.some((root) -> root.path.endsWith('/public')), 'public root registered'
 
-    # A save burst inside one debounce window lands as ONE touched frame;
-    # the '{site}' root strips its tenant segment, so every root's edit
-    # arrives as the URL path a browser would actually be looking at.
+    # A save burst arrives as one frame or several: the debounce fires 50ms
+    # after the latest event and caps at 250ms after the first, so writes
+    # that straddle a window are SPLIT, never dropped or merged with the
+    # next burst. The union is what holds — each edited file dings once, as
+    # the URL path a browser would be looking at, with the '{site}' root
+    # stripping its tenant segment. A frame COUNT would assert the
+    # scheduler instead, and fails whenever the burst is descheduled.
     touched = -> messages.filter (message) -> message.touched?
+    dinged = (from = 0) -> [...Set.new(touched().slice(from).flatMap((frame) -> frame.touched))].sort()
+    # `dinged` unions ACROSS frames, because a split burst may name the same
+    # file in two of them. A file named twice INSIDE one frame is a defect
+    # that union hides, so each frame answers for itself here.
+    wellFormed = (from = 0) ->
+      touched().slice(from).every (frame) ->
+        frame['@'].length is 1 and frame['@'][0] is '/assets' and Set.new(frame.touched).size is frame.touched.length
     writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>two</h1>'
     writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>three</h1>'
     writeFileSync join(project, 'public', 'style.css'), 'body { color: red }'
     writeFileSync join(project, 'pods', 'acme', 'public', 'deep.css'), 'em { color: blue }'
     waitFor! -> touched().length > 0
     sleep! 400
-    eq touched().length, 1
-    eq touched()[0], { '@': ['/assets'], touched: ['/deep.css', '/docs/api.html', '/style.css'] }
+    ok wellFormed(), 'every frame dings /assets, naming each path once'
+    eq dinged(), ['/deep.css', '/docs/api.html', '/style.css']
 
     # A later burst is its own frame; paths are URL paths, no content ever.
+    settled = touched().length
     writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>four</h1>'
-    waitFor! -> touched().length is 2
-    eq touched()[1], { '@': ['/assets'], touched: ['/docs/api.html'] }
+    waitFor! -> touched().length > settled
+    sleep! 400
+    ok wellFormed(settled), 'the later burst dings /assets, naming each path once'
+    eq dinged(settled), ['/docs/api.html']
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
