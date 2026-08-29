@@ -1302,7 +1302,7 @@ describe('orm: paired reference — upsert and insertMany', () => {
     });
     expect(r.calls[0].sql).toBe(
  'INSERT INTO "users" ("name", "email") VALUES (?, ?) ON CONFLICT ("email") ' +
- 'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = now() RETURNING *');
+ 'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = timezone(\'UTC\', now()) RETURNING *');
     expect(r.value.hooks).toEqual(['afterSave', 'afterCommit']);
     expect(r.value.persisted).toBe(true);
     expect([...r.value.saved]).toEqual([]);
@@ -2096,10 +2096,44 @@ describe('orm: paired reference — DDL', () => {
     expect(r.value.sql).toContain('"name" VARCHAR(100) NOT NULL');
     expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL');
     expect(r.value.sql).toContain('"coupon_id" INTEGER,');   // optional relation: nullable column, no constraint
-    expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_email" ON "trades" ("email");');
+    // single-column unique: inline constraint, no index object
+    expect(r.value.sql).toMatch(/"email" [^\n]*UNIQUE/);
+    expect(r.value.sql).not.toContain('idx_trades_email');
+    // composite unique: still an index (the differ cannot see a composite constraint)
     expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_name_email" ON "trades" ("name", "email");');
     expect(r.value.dropped).toContain('DROP TABLE IF EXISTS "trades" CASCADE;');
     expect(r.value.dropped).toContain('START 9000');
+  });
+
+  // Single-column uniqueness renders INLINE, never as a separate index
+  // object. In DuckDB an index is a catalog dependency that blocks
+  // ALTER on the WHOLE table, so one unique index would freeze every
+  // column against migration; an inline constraint enforces the same
+  // invariant without the dependency. Composites have no such option —
+  // a deployed composite CONSTRAINT is invisible to duckdb_indexes(),
+  // so the differ would plan the index anyway and re-freeze the table.
+  test('single-column uniqueness renders inline; composite stays an index; the pk is never doubled', async () => {
+    const r = await paired(async (k) => {
+      const T = k.__schema(model('Badge',
+        field('code', 'string', { unique: true }),          // field-level @unique
+        field('tag', 'string'),
+        field('slot', 'integer'),
+        dir('unique', { fields: ['tag'] }),                 // directive form, one column
+        dir('unique', { fields: ['slot', 'tag'] }),         // composite
+      ));
+      return T.toSQL();
+    });
+    const sql = r.value;
+    // both single-column spellings land inline, and neither leaves an index
+    expect(sql).toMatch(/"code" [^\n]*UNIQUE/);
+    expect(sql).toMatch(/"tag" [^\n]*UNIQUE/);
+    expect(sql).not.toContain('idx_badges_code');
+    expect(sql).not.toContain('idx_badges_tag ');
+    // the composite is untouched
+    expect(sql).toContain('CREATE UNIQUE INDEX "idx_badges_slot_tag" ON "badges" ("slot", "tag");');
+    // PRIMARY KEY already implies uniqueness — never render both
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY');
+    expect(sql).not.toMatch(/"id" [^\n]*PRIMARY KEY[^\n]*UNIQUE/);
   });
 
   test('duplicate index declarations on one column set reject', async () => {
@@ -2448,6 +2482,81 @@ describe('orm: names that reach SQL as text, not as identifiers', () => {
   });
 });
 
+// ONE sequence for the whole database: `schema.sequence 'id'` makes
+// every surrogate key draw from the same counter, so an integer id
+// names a row database-wide instead of only within its table. The
+// setting is the DATABASE's, so these tests clear it again — it is
+// module state, not registry state, and SchemaRegistry.scope does not
+// unwind it.
+describe('orm: the shared sequence', () => {
+  const shared = (name, fn) => {
+    orm4.schema.sequence(name);
+    try { return fn(); } finally { orm4.schema.sequence(null); }
+  };
+
+  test('every table defaults from the one sequence, and no table creates it', async () => {
+    await K4.scope(() => shared('id', () => {
+      const U = K4.__schema(model('User', field('name')));
+      const O = K4.__schema(model('Order', field('total', 'integer')));
+      for (const sql of [U.toSQL(), O.toSQL()]) {
+        expect(sql).toContain("DEFAULT nextval('id')");
+        // The sequence outlives every table drawing from it, so a
+        // table's own DDL never claims to own it...
+        expect(sql).not.toContain('CREATE SEQUENCE "users_seq"');
+        expect(sql).not.toContain('CREATE SEQUENCE "orders_seq"');
+        // ...but standalone DDL still has to RUN, so it carries the
+        // sequence guarded, never bare.
+        expect(sql).toContain('CREATE SEQUENCE IF NOT EXISTS "id" START 1;');
+      }
+      expect(U._tableSpec().sequence).toEqual({ name: 'id', start: 1, shared: true });
+    }));
+  });
+
+  test('dropFirst never drops the shared sequence out from under the other tables', async () => {
+    await K4.scope(() => shared('id', () => {
+      const U = K4.__schema(model('User', field('name')));
+      expect(U.toSQL({ dropFirst: true })).not.toContain('DROP SEQUENCE');
+    }));
+    // the per-table default is unchanged: that sequence IS the table's
+    await K4.scope(() => {
+      const U = K4.__schema(model('User', field('name')));
+      expect(U.toSQL({ dropFirst: true })).toContain('DROP SEQUENCE IF EXISTS "users_seq";');
+    });
+  });
+
+  test('@idStart is refused under a shared sequence — one table cannot seed the database', async () => {
+    await K4.scope(() => shared('id', () => {
+      const U = K4.__schema(model('User', field('name'), dir('idStart', { value: 5000 })));
+      expect(() => U.toSQL()).toThrow(/shares one sequence/);
+      expect(() => U.toSQL()).toThrow(/schema\.sequence\('id', \{ start: 5000 \}\)/);
+    }));
+  });
+
+  test('the seed rides the sequence, not the model', async () => {
+    await K4.scope(() => {
+      orm4.schema.sequence('id', { start: 10001 });
+      try {
+        const U = K4.__schema(model('User', field('name')));
+        expect(U.toSQL()).toContain('CREATE SEQUENCE IF NOT EXISTS "id" START 10001;');
+        expect(orm4.schema.sequence()).toEqual({ name: 'id', start: 10001 });
+      } finally { orm4.schema.sequence(null); }
+    });
+  });
+
+  test('declaring it twice agrees or throws; a bad name is refused', () => {
+    try {
+      expect(orm4.schema.sequence('id')).toEqual({ name: 'id', start: 1 });
+      expect(orm4.schema.sequence('id')).toEqual({ name: 'id', start: 1 });   // idempotent
+      expect(() => orm4.schema.sequence('seq')).toThrow(/already declared as 'id'/);
+      expect(() => orm4.schema.sequence('id', { start: 7 })).toThrow(/already declared/);
+    } finally { orm4.schema.sequence(null); }
+    expect(orm4.schema.sequence()).toBe(null);
+    expect(() => orm4.schema.sequence('')).toThrow(/takes the sequence name/);
+    expect(() => orm4.schema.sequence('id', { start: 1.5 })).toThrow(/start must be an integer/);
+    orm4.schema.sequence(null);
+  });
+});
+
 describe('orm:  unit tier', () => {
   test('an anonymous :model rejects (its table name derives from the name)', async () => {
     await K4.scope(() => {
@@ -2481,7 +2590,7 @@ describe('orm:  unit tier', () => {
 
   test('the schema namespace: the M11-A surface plus the M11-C CLI-pointing migration stubs', () => {
     expect(Object.keys(orm4.schema).sort()).toEqual([
- 'connect', 'introspect', 'make', 'migrate', 'plan', 'registerCoercer', 'setAdapter', 'status', 'transaction',
+ 'connect', 'introspect', 'make', 'migrate', 'plan', 'registerCoercer', 'sequence', 'setAdapter', 'status', 'transaction',
     ]);
     expect(orm4.schema.registerCoercer).toBe(rt4.registerCoercer);
     // The migration machinery is CLI-only: the delivered
@@ -3009,7 +3118,8 @@ describe('orm: runtime delivery', () => {
       expect(spec.columns.find((c) => c.name === 'first_name').was).toBe('given_name');
       const sql = P.toSQL();
       expect(sql).toContain('CREATE SEQUENCE "ps_seq" START 5000;');
-      expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_email" ON "ps" ("email");');
+      expect(sql).toMatch(/"email" [^\n]*UNIQUE/);
+      expect(sql).not.toContain('idx_ps_email');
       expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_first_name_email" ON "ps" ("first_name", "email");');
     });
   });
@@ -3036,7 +3146,8 @@ describe('orm: runtime delivery', () => {
       expect(sql).toContain('CREATE SEQUENCE "user_profile_seq" START 7;');
       expect(sql).toContain('CREATE TABLE "user_profile"');
       expect(sql).toContain("DEFAULT nextval('user_profile_seq')");
-      expect(sql).toContain('CREATE UNIQUE INDEX "idx_user_profile_nick" ON "user_profile" ("nick");');
+      expect(sql).toMatch(/"nick" [^\n]*UNIQUE/);
+      expect(sql).not.toContain('idx_user_profile_nick');
     });
   });
 
@@ -3535,8 +3646,9 @@ describe('orm: runtime delivery', () => {
       // same answer the array form has always given
       expect(ddl(field('a', 'Point'))).toContain('"a" JSON');
       expect(ddl(field('a', 'Point', { array: true }))).toContain('"a" JSON');
-      // an enum materializes to its member value
-      expect(ddl(field('a', 'Role'))).toContain('"a" VARCHAR');
+      // an enum materializes to its member values, as the closed set
+      // the column is allowed to hold
+      expect(ddl(field('a', 'Role'))).toContain(`"a" ENUM('admin')`);
       // a row does not nest inside a column
       expect(ddl(field('a', 'Addr'))).toMatch(/is a :model.*@belongsTo Addr/s);
       expect(ddl(field('a', 'Mx'))).toMatch(/is a :mixin, which has no column form/);
@@ -3851,13 +3963,41 @@ function throughWorld(k, ...joinExtras) {
 }
 
 describe('orm: the column-mapping gates', () => {
-  test('an inline literal-union field renders VARCHAR and still validates', async () => {
+  test('an inline literal-union field renders ENUM and still validates', async () => {
     await K4.scope(() => {
       const T = K4.__schema(model('Ticket',
         field('state', 'literal-union', { literals: ['open', 'closed'] })));
-      expect(T.toSQL()).toContain('"state" VARCHAR NOT NULL');
+      // the closed set reaches the column, so the database enforces
+      // the same membership the parse does — a VARCHAR would have
+      // taken any string
+      expect(T.toSQL()).toContain(`"state" ENUM('open', 'closed') NOT NULL`);
       expect(T.parse({ state: 'open' }).state).toBe('open');
       expect(() => T.parse({ state: 'nope' })).toThrow();
+    });
+  });
+
+  test('an ENUM column renders DuckDB\'s own spelling, escapes included', async () => {
+    await K4.scope(() => {
+      // matches what duckdb_columns() reports back verbatim —
+      // comma-space between members, a doubled quote for an embedded
+      // one — so an unchanged column never reads as changed
+      const T = K4.__schema(model('Odd',
+        field('state', 'literal-union', { literals: ["it's", 'a, b'], constraints: { default: 'a, b' } })));
+      expect(T.toSQL()).toContain(`"state" ENUM('it''s', 'a, b') NOT NULL DEFAULT 'a, b'`);
+    });
+  });
+
+  test('an enum whose members are not strings stays VARCHAR', async () => {
+    await K4.scope(() => {
+      // DuckDB enum members are strings; restating 1 and 2 as
+      // ENUM('1','2') would name a set the values are not in
+      const L = K4.__schema({ kind: 'enum', name: 'Level', entries: [
+        { tag: 'enum-member', name: 'low', value: 1 },
+        { tag: 'enum-member', name: 'high', value: 2 },
+      ] });
+      expect([...L._normalize().enumMembers.values()]).toEqual([1, 2]);
+      const T = K4.__schema(model('Alarm', field('level', 'Level')));
+      expect(T.toSQL()).toContain('"level" VARCHAR');
     });
   });
 

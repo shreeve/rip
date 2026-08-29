@@ -321,7 +321,41 @@ through the model's property↔column map. Unique tuples are also what
 @idStart 10001
 ```
 
-Seeds the surrogate-key sequence. Refused on natural keys.
+Seeds the surrogate-key sequence. Refused on natural keys, and refused
+under a shared sequence (see below) — there the seed belongs to the
+sequence, not to any one table.
+
+### `schema.sequence` — one counter for the whole database
+
+By default each table's surrogate key draws from its own
+`<table>_seq`, so ids collide across tables: patient 1 and order 1 both
+exist, and an integer alone never says which row it names. A database
+can declare one counter for all of them instead:
+
+```rip
+schema.sequence 'id'                 # once, beside the models
+schema.sequence 'id', start: 10001   # …with a seed
+```
+
+Every surrogate key then defaults from `nextval('id')` and no two rows
+in the database share an id. The column stays `INTEGER`, each table
+still has its own `id`, and the values are merely sparse per table —
+they were never a count of anything.
+
+It is stated once, for the database, and deliberately not as a
+per-model directive: a shared counter holds only if every table draws
+from it, and a per-model spelling would offer a way to get that half
+right. Declaring it twice with the same name is idempotent; with a
+different one it throws. `schema.sequence()` reads it back;
+`schema.sequence null` clears it.
+
+The sequence is the database's object, not any table's, so `rip schema
+dump` states it once at the top of the file and `rip schema plan`
+creates it in its own `create-sequence` step ahead of the tables that
+default from it. Dropping a table never drops it. Moving an EXISTING
+database onto a shared sequence plans one `alter-default` per table —
+which governs new rows only, so ids become unique from that point
+forward, not retroactively.
 
 ### Relations: `@belongsTo`, `@hasOne`, `@hasMany`
 

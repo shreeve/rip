@@ -45,6 +45,7 @@ const field = (name, typeName = 'string', opts = {}) => ({
   ...(opts.unique ? { unique: true } : {}),
   ...(opts.attrs ? { attrs: opts.attrs } : {}),
   ...(opts.constraints ? { constraints: opts.constraints } : {}),
+  ...(opts.literals ? { literals: opts.literals } : {}),
 });
 const dir = (name, ...args) => ({ tag: 'directive', name, args });
 const model = (name, ...entries) => ({ kind: 'model', name, entries });
@@ -238,8 +239,8 @@ describe('migrate: the differ — step kinds and classes', () => {
       deployedRef.value = { tables: [table('users', [
         col('name'), // VARCHAR — length hints never round-trip (DuckDB erases them)
         col('email', 'VARCHAR', { notNull: true, unique: true }),
-        col('created_at', 'TIMESTAMP', { default: 'CURRENT_TIMESTAMP' }),
-        col('updated_at', 'TIMESTAMP', { default: 'now()' }),
+        col('created_at', 'TIMESTAMP', { default: "timezone('UTC', now())" }),
+        col('updated_at', 'TIMESTAMP', { default: "timezone('UTC', now())" }),
       ], { indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }] })] };
       deployedRef.value.tables[0].columns[1].notNull = true;
       return mig.plan();
@@ -278,7 +279,12 @@ describe('migrate: the differ — step kinds and classes', () => {
     ]);
     expect(byCol.code.notes[0]).toContain('the SET NOT NULL is withheld');
     expect(mig.splitStatements(byCol.code.sql.join('\n')).some((s) => s.trimStart().startsWith('ALTER TABLE users ALTER COLUMN'))).toBe(false);
-    expect(byCol.tag.sql).toContain('CREATE UNIQUE INDEX "idx_users_tag" ON "users" ("tag");');
+    // ADD COLUMN cannot carry UNIQUE and adding it after the fact is a
+    // table rebuild, which cannot be rendered for a column the deployed
+    // shape does not have yet — so the uniqueness is WITHHELD and the
+    // next plan emits add-unique. Same convergence as SET NOT NULL.
+    expect(byCol.tag.sql.some((x) => x.startsWith('CREATE UNIQUE INDEX'))).toBe(false);
+    expect(byCol.tag.notes.some((n) => n.includes('the UNIQUE is withheld'))).toBe(true);
     expect(r.every((s) => s.kind === 'add-column')).toBe(true);
   });
 
@@ -314,7 +320,23 @@ describe('migrate: the differ — step kinds and classes', () => {
       return mig.plan();
     });
     expect(dropUnique.map((s) => s.kind + ':' + s.class)).toEqual(['drop-unique:safe']);
-    expect(dropUnique[0].sql).toEqual(['DROP INDEX IF EXISTS "idx_users_tag";']);
+    // A REBUILD, not a DROP INDEX: uniqueness renders inline now, and
+    // an inline constraint has no index name to drop — the old
+    // statement matched nothing and silently left the constraint
+    // standing. DuckDB has no working DROP CONSTRAINT either.
+    expect(dropUnique[0].sql).toEqual([
+      'CREATE TABLE "users__rip_rebuild" (\n' +
+        '  "id" INTEGER PRIMARY KEY DEFAULT nextval(\'users_seq\'),\n' +
+        '  "tag" VARCHAR\n);',
+      // every column named on BOTH sides — same-typed columns cannot
+      // transpose the way INSERT ... SELECT * allows
+      'INSERT INTO "users__rip_rebuild" ("id", "tag") SELECT "id", "tag" FROM "users";',
+      'DROP TABLE "users";',
+      'ALTER TABLE "users__rip_rebuild" RENAME TO "users";',
+    ]);
+    // the sequence outlives DROP TABLE with its counter intact, but the
+    // column's DEFAULT nextval() must be re-declared or ids stop minting
+    expect(dropUnique[0].sql[0]).toContain("DEFAULT nextval('users_seq')");
   });
 
   test('index diffs: composite create, definition change (drop + recreate), stray drop', async () => {
@@ -653,15 +675,33 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
     expect(add.notes.some((n) => n.includes('the SET NOT NULL is withheld') && n.includes('idx_users_email'))).toBe(true);
   });
 
-  test('an added unique column WITH a default is lossy: the DEFAULT backfills duplicates under the unique index', async () => {
+  // An added unique column withholds its uniqueness, so the ADD itself
+  // is safe — and the duplicate risk the DEFAULT creates lands on the
+  // step that can actually fail: the rebuild the NEXT plan emits, whose
+  // INSERT ... SELECT copies into a table already carrying the
+  // constraint. The two plans converge; neither hides the risk.
+  test('an added unique column withholds its UNIQUE, and the next plan rebuilds for it', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('User', field('name'), field('code', 'string', { optional: true, unique: true, constraints: { default: 'x' } })));
       deployedRef.value = { tables: [table('users', [col('name', 'VARCHAR', { notNull: true })])] };
       return mig.plan();
     });
-    expect(r.map((s) => s.kind + ':' + s.class)).toEqual(['add-column:lossy']);
-    expect(r[0].sql.some((s) => s.startsWith('CREATE UNIQUE INDEX'))).toBe(true);
-    expect(r[0].notes.some((n) => n.includes('fails if existing rows hold duplicates') && n.includes('DEFAULT backfills'))).toBe(true);
+    expect(r.map((s) => s.kind + ':' + s.class)).toEqual(['add-column:safe']);
+    expect(r[0].sql.some((s) => s.startsWith('CREATE UNIQUE INDEX'))).toBe(false);
+    expect(r[0].notes.some((n) => n.includes('the UNIQUE is withheld'))).toBe(true);
+    // second plan: the column is deployed now, still not unique
+    const next = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), field('code', 'string', { optional: true, unique: true, constraints: { default: 'x' } })));
+      deployedRef.value = { tables: [table('users', [
+        col('name', 'VARCHAR', { notNull: true }),
+        col('code', 'VARCHAR', { default: "'x'" }),
+      ])] };
+      return mig.plan();
+    });
+    expect(next.map((s) => s.kind + ':' + s.class)).toEqual(['add-unique:lossy']);
+    expect(next[0].sql.join('\n')).toContain('"code" VARCHAR UNIQUE');
+    expect(next[0].sql.some((x) => x.startsWith('DROP TABLE'))).toBe(true);
+    expect(next[0].notes.some((n) => n.includes('fails if existing rows hold duplicates'))).toBe(true);
   });
 
   // ── default comparison: literal payloads are data ─────────────────
@@ -675,16 +715,33 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
     expect(drift.map((s) => s.kind + ':' + s.class)).toEqual(['alter-default:safe']);
     expect(drift[0].sql).toEqual(['ALTER TABLE "users" ALTER COLUMN "status" SET DEFAULT \'Active\';']);
 
+    // @times defaults are UTC (TIMESTAMP is zone-naive, so the session's
+    // zone must never decide what a row's clock means). Spelling and case
+    // are noise; the EXPRESSION is the fact.
     const noise = await run4(async (deployedRef) => {
       K4.__schema(model('User', field('name'), dir('times')));
       deployedRef.value = { tables: [table('users', [
         col('name', 'VARCHAR', { notNull: true }),
-        col('created_at', 'TIMESTAMP', { default: 'NOW()' }),
-        col('updated_at', 'TIMESTAMP', { default: 'now()' }),
+        col('created_at', 'TIMESTAMP', { default: "TIMEZONE('UTC', NOW())" }),
+        col('updated_at', 'TIMESTAMP', { default: "timezone('UTC', now())" }),
       ])] };
       return mig.plan();
     });
     expect(noise).toEqual([]);
+
+    // A database created before the UTC rule still carries the
+    // session-local default; the plan is how it catches up.
+    const legacy = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('name'), dir('times')));
+      deployedRef.value = { tables: [table('users', [
+        col('name', 'VARCHAR', { notNull: true }),
+        col('created_at', 'TIMESTAMP', { default: 'CURRENT_TIMESTAMP' }),
+        col('updated_at', 'TIMESTAMP', { default: 'now()' }),
+      ])] };
+      return mig.plan();
+    });
+    expect(legacy.map((s) => s.kind)).toEqual(['alter-default', 'alter-default']);
+    expect(legacy[0].sql).toEqual(['ALTER TABLE "users" ALTER COLUMN "created_at" SET DEFAULT timezone(\'UTC\', now());']);
   });
 
   // ── FK-reference names that need quoting ──────────────────────────
@@ -793,7 +850,13 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
 
   // ── the ALTERs the engine permits on an FK-referenced table ───────
 
-  test('add-unique, drop-unique, and alter-default plan on an FK-referenced table instead of dead-ending blocked', async () => {
+  // alter-default is still a permitted in-place ALTER on an
+  // FK-referenced table. Uniqueness is NOT, any more: it is a table
+  // rebuild now, and DuckDB refuses to DROP a table another table's FK
+  // references (even CASCADE). Blocking is the honest answer — the old
+  // plan emitted index DDL that ran, but bought the uniqueness with an
+  // index that then froze the table against every later migration.
+  test('on an FK-referenced table alter-default still plans, while the uniqueness rebuilds block', async () => {
     const declared = { tables: [
       table('orders', [col('user_id', 'INTEGER')], { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] }),
       table('users', [
@@ -810,8 +873,11 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
     ] };
     const steps = mig.diffSchemas(declared, deployed);
     expect(steps.map((s) => s.kind + ':' + s.class).sort()).toEqual([
-      'add-unique:lossy', 'alter-default:safe', 'drop-unique:safe',
+      'add-unique:blocked', 'alter-default:safe', 'drop-unique:blocked',
     ]);
+    for (const s of steps.filter((x) => x.kind.endsWith('-unique'))) {
+      expect(s.notes.some((n) => n.includes('reference(s) this table'))).toBe(true);
+    }
   });
 
   // ── the adapter note on the matched-table diff path ───────────────
@@ -965,6 +1031,88 @@ describe('migrate: the differ — determinism and ordering', () => {
   });
 });
 
+// A shared sequence (`schema.sequence 'id'`) is the database's own
+// object rather than any table's: it heads the dump once, the planner
+// creates it once ahead of the tables that default from it, and
+// dropping a table never takes it down.
+describe('migrate: one sequence for the whole database', () => {
+  const shared = async (fn) => {
+    orm4.schema.sequence('id');
+    try { return await fn(); } finally { orm4.schema.sequence(null); }
+  };
+  const declare = () => {
+    K4.__schema(model('User', field('name')));
+    K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
+  };
+
+  test('the dump states it once, before every table that draws from it', async () => {
+    const text = await shared(() => K4.scope(() => { declare(); return mig.dump(); }));
+    expect(text.match(/CREATE SEQUENCE/g)).toEqual(['CREATE SEQUENCE']);
+    expect(text).toContain('CREATE SEQUENCE "id" START 1;');
+    expect(text.indexOf('CREATE SEQUENCE "id"')).toBeLessThan(text.indexOf('CREATE TABLE "users"'));
+    expect(text).toContain("DEFAULT nextval('id')");
+    expect(text).not.toContain('users_seq');
+    // Determinism is the dump's own contract, shared sequence included.
+    const again = await shared(() => K4.scope(() => { declare(); return mig.dump(); }));
+    expect(again).toBe(text);
+  });
+
+  // The fake's catalog derives its sequence list from the deployed
+  // tables, so a shared one is stated by every table that draws from
+  // it — exactly what the database reports.
+  const onShared = (t) => {
+    t.sequence = { name: 'id', start: 1 };
+    t.columns[0].default = "nextval('id')";
+    return t;
+  };
+  const planAgainst = (tables, declare) => K4.scope(async () => {
+    K4.setAdapter(migrateAdapter({ tables }));
+    declare();
+    return mig.plan();
+  });
+
+  test('a plan against an empty database creates it once, ahead of the tables', async () => {
+    const steps = await shared(() => planAgainst([], declare));
+    expect(steps.map((s) => [s.kind, s.table])).toEqual([
+      ['create-sequence', 'id'], ['create-table', 'users'], ['create-table', 'orders'],
+    ]);
+    expect(steps[0].sql).toEqual(['CREATE SEQUENCE "id" START 1;']);
+    // A bare CREATE SEQUENCE touches no table, so nothing can freeze it.
+    expect(steps[0].class).toBe('safe');
+  });
+
+  test('a database that already has it plans nothing; dropping a table leaves it alone', async () => {
+    const users = onShared(table('users', [col('name', 'VARCHAR', { notNull: true })]));
+    const legacy = onShared(table('legacy', [col('n')]));
+    const steps = await shared(() => planAgainst([users, legacy], () => {
+      K4.__schema(model('User', field('name')));
+    }));
+    // No create-sequence: the database has it. No note-sequence: every
+    // table's pk default names it, so nothing reads as missing.
+    expect(steps.map((s) => s.kind)).toEqual(['drop-table']);
+    // The shared sequence outlives the table — `users` still draws from it.
+    expect(steps[0].sql).toEqual(['DROP TABLE "legacy";']);
+  });
+
+  test('a table still on its own sequence is repointed, and the plan says what that does NOT fix', async () => {
+    const users = table('users', [col('name', 'VARCHAR', { notNull: true })]);
+    const steps = await shared(() => planAgainst([users], () => {
+      K4.__schema(model('User', field('name')));
+    }));
+    expect(steps.map((s) => [s.kind, s.table])).toEqual([
+      ['create-sequence', 'id'], ['alter-default', 'users'],
+    ]);
+    expect(steps[1].sql).toEqual(['ALTER TABLE "users" ALTER COLUMN "id" SET DEFAULT nextval(\'id\');']);
+    // Two surrogates of the same shape drawing from different
+    // sequences is a DIFFERENCE, not a match — and repointing the
+    // default only governs new rows, which the plan states.
+    expect(steps[1].notes.join(' ')).toContain('not retroactively');
+    // No sequence-start note: `users_seq` and `id` are two different
+    // sequences, so comparing their starts would say nothing true.
+    expect(steps.some((s) => s.kind === 'note-sequence')).toBe(false);
+  });
+});
+
 describe('migrate: the declared-schema dump', () => {
   const declare = () => {
     K4.__schema(model('User', field('name'), field('email', 'email', { unique: true })));
@@ -1032,7 +1180,10 @@ describe('migrate: the declared-schema dump', () => {
     expect(text).toContain('CREATE SEQUENCE "users_seq" START 1;');
     expect(text).toContain('"user_id" INTEGER NOT NULL');
     expect(text).not.toContain('REFERENCES');
-    expect(text).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
+    // Single-column uniqueness is INLINE — no index object is emitted
+    // for it (an index would freeze the whole table against ALTER).
+    expect(text).toMatch(/"email" [^\n]*UNIQUE/);
+    expect(text).not.toContain('idx_users_email');
     expect(text.endsWith(');\n')).toBe(true);
   });
 
@@ -1207,7 +1358,7 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
     expect(deployed.tables.find((t) => t.name === 'links').foreignKeys)
       .toEqual([{ column: 'a, b', refTable: 'users', refColumn: 'id' }]);
     expect(deployed.tables.find((t) => t.name === 'users').sequence)
-      .toEqual({ name: 'users_seq', start: 1 });
+      .toEqual({ name: 'users_seq', start: 1, shared: false });
 
     // The multi-column FK freezes its referenced table like any other:
     // an in-place ALTER on users blocks, named by the joined columns.
@@ -1239,15 +1390,19 @@ describe('migrate: the catalog contract — the one door to the deployed schema'
       return mig.plan();
     });
     expect(parity).toEqual([]);
-    // Dropping @unique against the constraint plans drop-unique, whose
-    // note names the inline-UNIQUE limit.
+    // Dropping @unique against the constraint plans drop-unique — a
+    // REBUILD. This is the case the old DROP INDEX could never serve:
+    // a constraint has no index name, so the statement matched nothing
+    // and left the uniqueness in force.
     const dropped = await K4.scope(async () => {
       K4.setAdapter(migrateAdapter({ tables: deployedTables }));
       K4.__schema(model('User', field('email', 'email')));
       return mig.plan();
     });
     expect(dropped.map((s) => s.kind + ':' + s.class)).toEqual(['drop-unique:safe']);
-    expect(dropped[0].notes.some((n) => n.includes('UNIQUE declared inline'))).toBe(true);
+    expect(dropped[0].notes.some((n) => n.includes('REBUILDS users'))).toBe(true);
+    expect(dropped[0].sql.some((x) => x.startsWith('DROP TABLE'))).toBe(true);
+    expect(dropped[0].sql.join('\n')).not.toContain('UNIQUE');
   });
 
   // A COMPOSITE entry has no per-column home — the unique flag is
@@ -1505,6 +1660,54 @@ describe('migrate: rename-signal rejections — ambiguity is loud, never a silen
     );
     expect(steps.map((x) => [x.table, x.kind, x.class]))
       .toEqual([['countries', 'alter-type', 'lossy']]);
+  });
+
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Unit tier — ENUM columns in the differ
+// ════════════════════════════════════════════════════════════════════
+
+describe('migrate: ENUM columns compare by their member list', () => {
+  const plan4 = (declare, deployedTables) => K4.scope(async () => {
+    K4.setAdapter(migrateAdapter({ tables: deployedTables }));
+    declare();
+    return mig.plan();
+  });
+
+  // An ENUM's members are its type, not a width hint: the normalizer
+  // strips `VARCHAR(2)` down to VARCHAR, and doing the same to an
+  // ENUM would let a new union member ship with no migration at all.
+  test('adding a member to a literal union diffs as an alter-type', async () => {
+    const steps = await plan4(
+      () => K4.__schema(model('Ticket',
+        field('state', 'literal-union', { literals: ['open', 'closed', 'void'] }))),
+      [table('tickets', [col('state', "ENUM('open', 'closed')", { notNull: true })])],
+    );
+    expect(steps.map((x) => [x.table, x.kind, x.class]))
+      .toEqual([['tickets', 'alter-type', 'lossy']]);
+    expect(steps[0].sql.join(' ')).toContain(`TYPE ENUM('open', 'closed', 'void')`);
+  });
+
+  // DuckDB reports an ENUM back with a comma-space between members;
+  // spelling it any other way must still compare equal, while the
+  // member payloads stay case-sensitive (they are data).
+  test('an unchanged ENUM column diffs as nothing, whatever its spacing', async () => {
+    const steps = await plan4(
+      () => K4.__schema(model('Ticket',
+        field('state', 'literal-union', { literals: ['Open', 'closed'] }))),
+      [table('tickets', [col('state', "enum(  'Open','closed'  )", { notNull: true })])],
+    );
+    expect(steps).toEqual([]);
+  });
+
+  test('a member that differs only in case is a different type', async () => {
+    const steps = await plan4(
+      () => K4.__schema(model('Ticket',
+        field('state', 'literal-union', { literals: ['open', 'closed'] }))),
+      [table('tickets', [col('state', "ENUM('OPEN', 'closed')", { notNull: true })])],
+    );
+    expect(steps.map((x) => [x.table, x.kind])).toEqual([['tickets', 'alter-type']]);
   });
 });
 

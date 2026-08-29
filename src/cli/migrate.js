@@ -42,7 +42,7 @@
 import { SchemaRegistry } from '../runtime/schema.js';
 import {
   runSQL as rawSQL, adapterFor, adapterConfigured,
-  transaction, quoteIdent, renderCreate, renderIndex,
+  transaction, quoteIdent, renderCreate, renderIndex, sqlEnumType, sqlEnumMembers,
 } from '../runtime/orm.js';
 
 const MIGRATIONS_TABLE = '_rip_migrations';
@@ -95,6 +95,10 @@ function requireCatalog(who) {
   }
   return adapter;
 }
+
+// `nextval('id')` — the sequence a surrogate primary key draws from,
+// as DuckDB reports the column default.
+const NEXTVAL_RE = /nextval\(\s*'((?:[^']|'')*)'\s*\)/i;
 
 // Build the DeployedSchema — an array of canonical table specs in the
 // same shape `_tableSpec()` produces — from the adapter's `catalog()`:
@@ -186,18 +190,34 @@ export async function introspect() {
     });
   }
 
+  // A table's sequence is the one its primary key actually DEFAULTS
+  // from — read out of `nextval('…')` rather than guessed from a name.
+  // The `<table>_seq` convention held only while each table owned its
+  // own sequence; under a shared one (`schema.sequence 'id'`) every
+  // table defaults from the same name, and a convention lookup would
+  // report all of them as missing.
+  const sequences = new Map();
   for (const s of doc?.sequences ?? []) {
-    // Attach by the `<table>_seq` naming convention the DDL emitter
-    // uses.
-    const name = String(s.name);
-    const t = tables.get(name.replace(/_seq$/, ''));
-    if (t && name.endsWith('_seq')) {
-      t.sequence = { name, start: Number(s.start) };
-    }
+    sequences.set(String(s.name), { name: String(s.name), start: Number(s.start) });
+  }
+  for (const t of tables.values()) {
+    const pk = t.primaryKey && t.columns.find((c) => c.name === t.primaryKey);
+    // The default names the sequence outright. Falling back to the
+    // convention keeps a table matched to its own `<table>_seq` when
+    // the pk carries no default to read — the sequence is in the
+    // database either way, and saying it is missing would be false.
+    const named = NEXTVAL_RE.exec(String(pk?.default ?? ''))?.[1]?.replace(/''/g, "'");
+    const seqName = named ?? t.name + '_seq';
+    const seq = sequences.get(seqName);
+    // `shared` is what the drop-table path reads: a sequence named for
+    // this table dies with it, one named anything else is the
+    // database's and other tables still default from it.
+    if (seq) t.sequence = { ...seq, shared: seq.name !== t.name + '_seq' };
   }
 
-  return { tables: [...tables.values()] };
+  return { tables: [...tables.values()], sequences: [...sequences.values()] };
 }
+
 
 // Canonical declared schema: one table spec per registered :model,
 // NAME-SORTED — the determinism contract's first leg (registration
@@ -244,6 +264,16 @@ const TYPE_ALIASES = {
 };
 
 function typeKey(t) {
+  // An ENUM is the exception: its member list is not a width hint to
+  // be stripped, it IS the type — `ENUM('draft','sent')` and
+  // `ENUM('draft','sent','void')` are two different column types, and
+  // folding them together would let a new union member ship with no
+  // migration. Re-render the members canonically so spelling and
+  // spacing don't matter, but compare their payloads case-sensitively:
+  // a member is string data, the same rule defaultKey applies to a
+  // literal default.
+  const members = sqlEnumMembers(t);
+  if (members) return sqlEnumType(members);
   const k = String(t || '').toUpperCase().replace(/\(.*\)\s*$/, '').trim();
   return TYPE_ALIASES[k] || k;
 }
@@ -368,8 +398,8 @@ function validateSchemaIdentifiers(schema, side) {
 // index DDL under the fold), SET/DROP DEFAULT — plus the note kinds,
 // which execute nothing.
 const UNBLOCKED_KINDS = new Set([
-  'create-table', 'add-column', 'create-index', 'drop-index',
-  'add-unique', 'drop-unique', 'alter-default',
+  'create-table', 'create-sequence', 'add-column', 'create-index', 'drop-index',
+  'alter-default',
   'note-fk', 'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case', 'note-unique',
 ]);
 
@@ -588,6 +618,30 @@ export function diffSchemas(declared, deployed) {
     }
   }
 
+  // Shared sequences the database does not have yet. A per-table
+  // sequence rides its table's CREATE; a shared one is the database's
+  // own object, outliving every table that draws from it, so it is
+  // created up front — ahead of the create-table steps whose id
+  // columns default from it, and equally for a table that already
+  // exists and lost it. `madeSequences` then tells diffTable which
+  // "sequence missing" facts this plan already fixes, so the note
+  // states what the plan does NOT handle.
+  const pSeqNames = new Set([
+    ...(deployed.sequences ?? []).map((q) => String(q.name)),
+    ...deployed.tables.map((t) => t.sequence?.name).filter((n) => n != null),
+  ]);
+  const madeSequences = new Map();
+  for (const [, d] of dTables) {
+    const seq = d.sequence;
+    if (!seq?.shared || pSeqNames.has(seq.name) || madeSequences.has(seq.name)) continue;
+    madeSequences.set(seq.name, seq);
+    steps.push({
+      table: seq.name, kind: 'create-sequence', class: 'safe',
+      sql: ['CREATE SEQUENCE ' + quoteIdent(seq.name, null, 'sequence') + ' START ' + seq.start + ';'],
+      notes: [],
+    });
+  }
+
   // Matched tables next: column / index / FK diffs. Alters run BEFORE
   // create-table steps on purpose — a new child table's FOREIGN KEY
   // freezes its parent the moment it exists, so a migration that both
@@ -605,6 +659,7 @@ export function diffSchemas(declared, deployed) {
       fkRefs: fkRefsOn.get(name) || [],
       indexNames: indexNamesOn.get(name) || [],
       unknownFkRefs,
+      madeSequences,
     });
     if (d.ownAdapter && steps.length > before) steps.push(adapterNote(name, d.ownAdapter));
   }
@@ -646,7 +701,11 @@ export function diffSchemas(declared, deployed) {
   for (const name of orderedDrops) {
     const p = pTables.get(name);
     const sql = ['DROP TABLE ' + quoteIdent(name, null, 'table') + ';'];
-    if (p.sequence) sql.push('DROP SEQUENCE ' + quoteIdent(p.sequence.name, null, 'sequence') + ';');
+    // A sequence named for this table dies with it; a shared one is
+    // the database's and other tables still default from it.
+    if (p.sequence && !p.sequence.shared) {
+      sql.push('DROP SEQUENCE ' + quoteIdent(p.sequence.name, null, 'sequence') + ';');
+    }
     steps.push({ table: name, kind: 'drop-table', class: 'destructive', sql, notes: [] });
   }
 
@@ -664,10 +723,57 @@ const adapterNote = (table, ownAdapter) => ({
   notes: [],
 });
 
+// Uniqueness on an EXISTING table is a table REBUILD, not an index.
+//
+// DuckDB offers no working instrument for either direction:
+// `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE` reports success and then
+// CORRUPTS the table — every following statement, INSERT / ALTER / even
+// `SELECT count(*)`, throws `INTERNAL Error: Attempted to access index N
+// within vector of size N`, and the catalog stops reporting the table's
+// constraints. Measured on v2.0.0-alpha38195 over CLEAN data as well as
+// duplicate, so it is total breakage, not a validation gap.
+// `DROP CONSTRAINT` throws the same error outright.
+//
+// A unique INDEX does work, and was what this planner emitted — but an
+// index is a catalog object the table DEPENDS on, and DuckDB then
+// refuses to ALTER that table at all: the WHOLE table, not merely the
+// indexed column, for DROP, RENAME and type changes alike. Buying
+// uniqueness with an index costs every future migration on that table.
+//
+// So: create the table in its target shape, copy, drop, rename,
+// recreate the surviving indexes. Rendered from the DEPLOYED shape with
+// only the unique flags moved, so it changes exactly uniqueness and
+// nothing else; spliced AHEAD of this table's other steps so those
+// still apply, in order, to the rebuilt table.
+//
+// The duplicate check comes free and stays loud: the INSERT ... SELECT
+// lands in a table that already carries the constraint, so existing
+// duplicates fail the copy the same way CREATE UNIQUE INDEX failed.
+function rebuildForUnique(p, wanted) {
+  const tmp = p.name + '__rip_rebuild';
+  const columns = p.columns.map((c) => (wanted.has(c.name) ? { ...c, unique: wanted.get(c.name) } : c));
+  // Every column named on BOTH sides of the copy: same-typed columns
+  // cannot silently transpose the way `INSERT ... SELECT *` allows.
+  const names = columns.map((c) => quoteIdent(c.name, null, 'column')).join(', ');
+  return [
+    ...renderCreate({ ...p, name: tmp, sequence: null, indexes: [], notes: [], columns }),
+    'INSERT INTO ' + quoteIdent(tmp, null, 'table') + ' (' + names + ') SELECT ' + names +
+      ' FROM ' + quoteIdent(p.name, null, 'table') + ';',
+    'DROP TABLE ' + quoteIdent(p.name, null, 'table') + ';',
+    'ALTER TABLE ' + quoteIdent(tmp, null, 'table') +
+      ' RENAME TO ' + quoteIdent(p.name, null, 'table') + ';',
+    ...p.indexes.map((ix) => renderIndex(p, ix)),
+  ];
+}
+
 function diffTable(d, p, steps, deps) {
   const t = d.name;
   const dCols = new Map(d.columns.map((c) => [c.name, c]));
   const pCols = new Map(p.columns.map((c) => [c.name, c]));
+  // Where this table's steps start — the uniqueness rebuild is spliced
+  // in here at the end, ahead of everything else planned for the table.
+  const mark = steps.length;
+  const uniqueChanges = [];
 
   // A moved PRIMARY KEY is not a column diff, and the column diff's
   // answer to it is actively wrong: it reads as one column added and
@@ -807,17 +913,17 @@ function diffTable(d, p, steps, deps) {
       }
     }
     if (col.unique) {
-      if (col.default != null) {
-        // The DEFAULT backfills every existing row with the same
-        // value, so the piggybacked unique index fails on any table
-        // holding more than one row.
-        cls = 'lossy';
-        notes.push('fails if existing rows hold duplicates — and the DEFAULT backfills every existing ' +
-          'row with the same value, so any table holding 2+ rows fails the CREATE UNIQUE INDEX');
-      }
-      sql.push('CREATE UNIQUE INDEX ' + quoteIdent('idx_' + t + '_' + name, null, 'index') +
-        ' ON ' + quoteIdent(t, null, 'table') +
-        ' (' + quoteIdent(name, null, 'index column') + ');');
+      // ADD COLUMN cannot carry UNIQUE, and uniqueness after the fact
+      // is a table rebuild (see rebuildForUnique) — which cannot be
+      // planned here, because this column does not exist in the
+      // deployed shape the rebuild is rendered from. So the uniqueness
+      // is WITHHELD, the way SET NOT NULL is withheld above: the column
+      // lands now, the next plan sees the flag differ and emits
+      // add-unique as its own rebuilding step. The workflow converges.
+      sql.push('-- UNIQUE withheld: ADD COLUMN cannot carry it and adding it needs a table ' +
+        'rebuild; the next plan emits add-unique for ' + t + '.' + name + '.');
+      notes.push('the UNIQUE is withheld — ADD COLUMN cannot carry a constraint, and adding one to a ' +
+        'live table means rebuilding it; the next plan emits add-unique as its own step');
     }
     const fk = d.foreignKeys.find((f) => f.column === name);
     if (fk) {
@@ -854,12 +960,38 @@ function diffTable(d, p, steps, deps) {
     // a primary key in place, and the column diff's answer (add +
     // drop) rewrites row identities; so it blocks and says so.
     const surrogate = (c) => c.primary === true && /nextval\(/i.test(String(c.default ?? ''));
+    const seqOf = (c) => NEXTVAL_RE.exec(String(c.default ?? ''))?.[1]?.replace(/''/g, "'") ?? null;
     const dPk = dc.primary === true;
     const pPk = pc.primary === true;
     if (dPk || pPk) {
       const dSur = surrogate(dc);
       const pSur = surrogate(pc);
-      if (dSur && pSur && typeKey(dc.type) === typeKey(pc.type) && dc.notNull === pc.notNull) continue;
+      if (dSur && pSur && typeKey(dc.type) === typeKey(pc.type) && dc.notNull === pc.notNull) {
+        // Same shape, but two surrogates can still draw from DIFFERENT
+        // sequences — a database moving its tables onto one shared
+        // counter. Repointing the default is an ordinary ALTER (DuckDB
+        // allows SET DEFAULT even on a frozen table), so it plans
+        // rather than blocking.
+        //
+        // Only toward a SHARED sequence, which is a database-level
+        // object this plan creates or already found. A per-table name
+        // that differs is a RENAMED table — `ALTER TABLE … RENAME` does
+        // not rename the sequence, so the table rightly keeps drawing
+        // from the old one and there is nothing to repoint it to.
+        const dSeqName = d.sequence?.shared ? seqOf(dc) : null;
+        const pSeqName = seqOf(pc);
+        if (dSeqName != null && dSeqName !== pSeqName) {
+          steps.push({
+            table: t, kind: 'alter-default', class: 'safe',
+            sql: ['ALTER TABLE ' + quoteIdent(t, null, 'table') +
+              ' ALTER COLUMN ' + quoteIdent(name, null, 'column') + ' SET DEFAULT ' + dc.default + ';'],
+            notes: ['new rows draw from ' + dSeqName + ' instead of ' + pSeqName +
+              '; ids ALREADY assigned keep the values the old sequence gave them, so a shared ' +
+              'sequence makes ids unique from here forward, not retroactively'],
+          });
+        }
+        continue;
+      }
       if (dPk !== pPk || dSur || pSur) {
         const pkShape = (c, sur, isPk) => sur
           ? 'a surrogate primary key (' + c.type + ' + ' + c.default + ')'
@@ -912,23 +1044,7 @@ function diffTable(d, p, steps, deps) {
         notes: [],
       });
     }
-    if (dc.unique !== pc.unique) {
-      if (dc.unique) {
-        steps.push({
-          table: t, kind: 'add-unique', class: 'lossy',
-          sql: ['CREATE UNIQUE INDEX ' + quoteIdent('idx_' + t + '_' + name, null, 'index') +
-            ' ON ' + quoteIdent(t, null, 'table') +
-            ' (' + quoteIdent(name, null, 'index column') + ');'],
-          notes: ['fails if existing rows hold duplicates'],
-        });
-      } else {
-        steps.push({
-          table: t, kind: 'drop-unique', class: 'safe',
-          sql: ['DROP INDEX IF EXISTS ' + quoteIdent('idx_' + t + '_' + name, null, 'index') + ';'],
-          notes: ['a UNIQUE declared inline in CREATE TABLE cannot be dropped by index name; recreate the table if this fails'],
-        });
-      }
-    }
+    if (dc.unique !== pc.unique) uniqueChanges.push({ name, adding: !!dc.unique });
   }
 
   // Index diffs (auto-unique indexes already folded into column
@@ -1020,20 +1136,57 @@ function diffTable(d, p, steps, deps) {
   // deployed sequence is missing outright.
   const dSeq = d.sequence || null;
   const pSeq = p.sequence || null;
-  if (dSeq && !pSeq) {
+  const made = dSeq && deps.madeSequences?.has(dSeq.name);
+  if (dSeq && !pSeq && !made) {
     steps.push({
       table: t, kind: 'note-sequence', class: 'safe',
       sql: ['-- NOTE: ' + t + ' has no ' + dSeq.name + ' sequence in the database (the model expects one, START ' +
             dSeq.start + '); id assignment via nextval will fail — recreate the sequence manually'],
       notes: [],
     });
-  } else if (dSeq && pSeq && dSeq.start !== pSeq.start) {
+  } else if (dSeq && pSeq && dSeq.name === pSeq.name && dSeq.start !== pSeq.start) {
+    const seed = dSeq.shared
+      ? "schema.sequence('" + dSeq.name + "', { start: " + dSeq.start + ' })'
+      : '@idStart';
     steps.push({
       table: t, kind: 'note-sequence', class: 'safe',
       sql: ['-- NOTE: ' + pSeq.name + ' starts at ' + pSeq.start + ' in the database but the model declares ' +
-            dSeq.start + ' (@idStart); DuckDB has no ALTER SEQUENCE RESTART — recreate the sequence manually if the start matters'],
+            dSeq.start + ' (' + seed + '); DuckDB has no ALTER SEQUENCE RESTART — recreate the sequence manually if the start matters'],
       notes: [],
     });
+  }
+
+  // The uniqueness rebuild, spliced AHEAD of everything else planned
+  // for this table: it is rendered from the deployed shape, so any
+  // add-column / drop-column / alter-type that follows must apply to
+  // the rebuilt table, never the other way round.
+  //
+  // One rebuild serves every uniqueness change on the table, so it
+  // rides the FIRST step and the rest carry a comment naming it —
+  // running the same rebuild twice would be redundant, not wrong, but
+  // a plan that says what it does beats one that repeats itself.
+  // Adds sort first so the SQL always rides the strongest class: an
+  // add can fail on existing duplicates (lossy), a drop cannot (safe).
+  if (uniqueChanges.length) {
+    uniqueChanges.sort((a, b) => (a.adding === b.adding ? 0 : a.adding ? -1 : 1));
+    const wanted = new Map(uniqueChanges.map((u) => [u.name, u.adding]));
+    const rebuild = rebuildForUnique(p, wanted);
+    const cols = uniqueChanges.map((u) => u.name).join(', ');
+    steps.splice(mark, 0, ...uniqueChanges.map((u, i) => ({
+      table: t,
+      kind: u.adding ? 'add-unique' : 'drop-unique',
+      class: u.adding ? 'lossy' : 'safe',
+      sql: i === 0
+        ? rebuild
+        : ['-- ' + t + '.' + u.name + ': UNIQUE ' + (u.adding ? 'added' : 'dropped') +
+           ' by the table rebuild in the step above'],
+      notes: i === 0
+        ? ['DuckDB cannot add or drop a constraint on a live table (ALTER TABLE ADD CONSTRAINT ' +
+           'corrupts it; DROP CONSTRAINT throws), so this REBUILDS ' + t + ' around the change to ' +
+           cols + ': create, copy, drop, rename, recreate indexes' +
+           (u.adding ? '. The copy fails if existing rows hold duplicates' : '')]
+        : ['carried by the ' + t + ' rebuild in the first uniqueness step'],
+    })));
   }
 }
 
@@ -1094,6 +1247,19 @@ export function renderDump(declared) {
       .map((fk) => fk.refTable)
       .filter((ref) => ref !== n && byTableName.has(ref)), 'dump');
   const sections = [DUMP_HEADER];
+  // A shared sequence (`schema.sequence 'id'`) is the database's own
+  // object, not any table's, so it heads the file once — before every
+  // table whose id column defaults from it. Per-table sequences stay
+  // inside their table's section, where renderCreate emits them.
+  const shared = new Map();
+  for (const t of tables) {
+    if (t.sequence?.shared && !shared.has(t.sequence.name)) shared.set(t.sequence.name, t.sequence);
+  }
+  for (const name of [...shared.keys()].sort()) {
+    const seq = shared.get(name);
+    sections.push('-- ' + name + ' — one sequence for every table: an id is unique database-wide\n' +
+      'CREATE SEQUENCE ' + quoteIdent(name, null, 'sequence') + ' START ' + seq.start + ';');
+  }
   for (const name of ordered) {
     const t = byTableName.get(name);
     const lines = ['-- ' + t.name];

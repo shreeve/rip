@@ -2999,12 +2999,12 @@ SchemaDef.prototype.upsert = async function (data, opts) {
       const quoted = quoteIdent(c, norm.callerWritableColumns, 'upsert column');
       return quoted + ' = EXCLUDED.' + quoted;
     });
+    // UTC, like every other writer of these columns (see UTC_NOW).
     // now(), not CURRENT_TIMESTAMP: DuckDB resolves a bare keyword in a
     // DO UPDATE SET target list as a COLUMN reference, so the standard
     // spelling fails here with "table has no column named
-    // CURRENT_TIMESTAMP" — while remaining correct as a column DEFAULT,
-    // which is why the DDL below still emits it.
-    if (norm.timestamps) sets.push('"updated_at" = now()');
+    // CURRENT_TIMESTAMP".
+    if (norm.timestamps) sets.push('"updated_at" = ' + UTC_NOW);
     conflict += ' DO UPDATE SET ' + sets.join(', ');
   } else {
     conflict += ' DO NOTHING';
@@ -3423,6 +3423,48 @@ const SQL_TYPES = {
   url: 'VARCHAR', uuid: 'UUID', phone: 'VARCHAR', zip: 'VARCHAR', json: 'JSON', any: 'JSON',
 };
 
+// DuckDB spells an inline ENUM `ENUM('a', 'b')`, and reports it back
+// from `duckdb_columns()` in exactly that spelling — comma-space
+// between members, a doubled quote for an embedded one. Render it
+// byte-identically so a column the schema did not change never reads
+// as changed to the migration differ.
+function sqlEnumType(values) {
+  return 'ENUM(' + values.map((v) => "'" + String(v).replace(/'/g, "''") + "'").join(', ') + ')';
+}
+
+// Split `ENUM('a', 'b''c')` back into its member values, or null when
+// the type is not an ENUM at all. SQL string literals only, `''`
+// being one escaped quote — the only form DuckDB emits and the only
+// form sqlEnumType writes. The differ needs this because an ENUM's
+// members ARE its type: `ENUM('draft','sent')` and
+// `ENUM('draft','sent','void')` are two different column types, so
+// the member list must survive normalization rather than be folded
+// away the way a VARCHAR width hint is.
+function sqlEnumMembers(type) {
+  const s = String(type == null ? '' : type).trim();
+  if (!/^enum\s*\(/i.test(s) || !s.endsWith(')')) return null;
+  const body = s.slice(s.indexOf('(') + 1, -1);
+  const members = [];
+  let i = 0;
+  while (i < body.length) {
+    while (i < body.length && body[i] !== "'") i++;
+    if (i >= body.length) break;
+    i++;
+    let v = '';
+    for (;;) {
+      if (i >= body.length) return null; // unterminated literal
+      if (body[i] === "'") {
+        if (body[i + 1] === "'") { v += "'"; i += 2; continue; }
+        i++;
+        break;
+      }
+      v += body[i++];
+    }
+    members.push(v);
+  }
+  return members.length ? members : null;
+}
+
 // A field's declared type → its column type. Every answer is
 // DELIBERATE: there is no catch-all, because the catch-all was
 // `VARCHAR` and it turned a typo'd type name into a shipped column
@@ -3437,11 +3479,20 @@ function columnType(field, def) {
   if (field.array) return 'JSON';
   const intrinsic = SQL_TYPES[field.typeName];
   if (intrinsic) return intrinsic;
-  // An inline literal union (`status! "draft" | "published"`)
-  // materializes to its member value — the same VARCHAR a registered
-  // :enum renders. It lives on the field itself, never in the
-  // registry, so it answers before the registry is asked.
-  if (field.typeName === 'literal-union') return 'VARCHAR';
+  // An inline literal union (`status! "draft" | ["published"]`) is a
+  // closed set of strings — which is exactly what a DuckDB ENUM is,
+  // so the column enforces the set instead of taking any string a
+  // VARCHAR would have accepted. The parser admits string members
+  // only, so every member has an ENUM rendering. It lives on the
+  // field itself, never in the registry, so it answers before the
+  // registry is asked.
+  if (field.typeName === 'literal-union') {
+    if (!field.literals?.length) {
+      throw new Error("schema: field type 'literal-union'" + ' (on ' + (def?.name || 'model') +
+        ') has no members — a closed set with nothing in it has no column it could render');
+    }
+    return sqlEnumType(field.literals);
+  }
   const nested = SchemaRegistry.get(field.typeName);
   const where = ' (on ' + (def?.name || 'model') + ')';
   if (!nested) {
@@ -3451,9 +3502,17 @@ function columnType(field, def) {
       '. A type Rip cannot map has no column it could honestly render');
   }
   switch (nested.kind) {
-    // An enum materializes to its member value, which is what the
-    // column holds — not the enum.
-    case 'enum': return 'VARCHAR';
+    // An enum materializes to its member VALUE, which is what the
+    // column holds — not the member name. A closed set of strings is
+    // a DuckDB ENUM. A set holding a number or a boolean has no ENUM
+    // form (DuckDB enum members are strings), so it stays the VARCHAR
+    // it has always been rather than being silently restated as
+    // something the values are not.
+    case 'enum': {
+      const values = [...new Set(nested._normalize().enumMembers.values())];
+      if (!values.length || !values.every((v) => typeof v === 'string')) return 'VARCHAR';
+      return sqlEnumType(values);
+    }
     // A nested schema is an object, so it is a JSON document — the
     // same answer the array form has always given.
     case 'shape': case 'input': case 'union': return 'JSON';
@@ -3493,6 +3552,65 @@ function columnSpec(column, field, def) {
   };
 }
 
+// ── the shared sequence ───────────────────────────────────────────────
+//
+// By default each table's surrogate key draws from its OWN
+// `<table>_seq`, so ids collide across tables: patient 1 and order 1
+// both exist, and an integer alone never says which row it names. A
+// database can declare one counter for all of them instead:
+//
+//   schema.sequence 'id'                 -- once, beside the models
+//
+// after which every surrogate key defaults from `nextval('id')` and no
+// two rows in the database share an id. Nothing else changes: the
+// column stays INTEGER, each table still has its own `id`, and the ids
+// are merely sparse rather than dense per table.
+//
+// It is stated ONCE, for the database, and deliberately not as a
+// per-model directive: a shared counter holds only if EVERY table
+// draws from it, and a per-model spelling would offer a way to get
+// that half right — one model keeps its own sequence, its ids overlap
+// everyone else's, and nothing anywhere says so.
+let sharedSequence = null;
+
+// `schema.sequence 'id'` sets it; `schema.sequence()` reads it back;
+// `schema.sequence null` clears it, back to a sequence per table.
+// Setting it twice with the same name is idempotent (two model files
+// may each state the database's rule); with a different one it throws,
+// because the second name would silently re-key every table declared
+// under the first.
+function sequenceSetting(name, options) {
+  if (name === undefined) return sharedSequence && { ...sharedSequence };
+  if (name === null) { sharedSequence = null; return null; }
+  if (typeof name !== 'string' || !name.length) {
+    throw new Error('schema.sequence(): takes the sequence name, e.g. schema.sequence(\'id\')');
+  }
+  const start = options?.start ?? 1;
+  if (!Number.isInteger(start)) {
+    throw new Error('schema.sequence(): start must be an integer; got ' + String(start));
+  }
+  if (sharedSequence && (sharedSequence.name !== name || sharedSequence.start !== start)) {
+    throw new Error("schema.sequence(): already declared as '" + sharedSequence.name + "' START " +
+      sharedSequence.start + " — a database has one shared sequence; declare it once.");
+  }
+  sharedSequence = { name, start };
+  return { ...sharedSequence };
+}
+
+// TIMESTAMP is zone-NAIVE: it stores whatever wall clock wrote it and
+// remembers nothing about which one. Three writers touch these columns
+// — the column DEFAULT, the ORM's own JS Date on save, and upsert's DO
+// UPDATE SET — and a bare CURRENT_TIMESTAMP or now() resolves in the
+// SESSION's zone while a JS Date serializes as UTC. One table then
+// holds two clocks, and created_at/updated_at on the same row disagree
+// by the machine's offset: a row created and updated seconds apart
+// reads as hours apart, and any ordering across the two is fiction.
+//
+// So every writer states UTC explicitly. The rule is UTC in the
+// database, local at the edge — the only one that survives a server
+// moving zones, two servers in different zones, and daylight saving.
+const UTC_NOW = "timezone('UTC', now())";
+
 // The canonical table spec — one structure for DDL rendering (and,
 // for the migration differ, its comparison shape).
 SchemaDef.prototype._tableSpec = function (options) {
@@ -3500,7 +3618,8 @@ SchemaDef.prototype._tableSpec = function (options) {
   const opts = options || {};
   const norm = this._normalize();
   const table = norm.tableName;
-  const seq = table + '_seq';
+  const shared = sharedSequence;
+  const seq = shared ? shared.name : table + '_seq';
 
   // Sequence seed: explicit option wins over @idStart wins over 1.
   let idStart = 1;
@@ -3513,6 +3632,17 @@ SchemaDef.prototype._tableSpec = function (options) {
     }
     idStart = opts.idStart;
   }
+  // A shared sequence is the DATABASE's counter, so no one table gets
+  // to seed it — @idStart on any model would set where EVERY table
+  // starts, which is not what the model says. The database-wide seed
+  // is `schema.sequence 'id', start: 10001`.
+  if (shared && idStart !== 1) {
+    throw new Error("schema: " + (this.name || table) + " declares @idStart " + idStart +
+      ", but this database shares one sequence ('" + shared.name + "') across every table — " +
+      'one table cannot seed it. Set the seed on the sequence: ' +
+      "schema.sequence('" + shared.name + "', { start: " + idStart + ' })');
+  }
+  if (shared) idStart = shared.start;
 
   const columns = [];
   if (!norm.naturalKey) {
@@ -3567,8 +3697,8 @@ SchemaDef.prototype._tableSpec = function (options) {
   }
 
   if (norm.timestamps) {
-    columns.push({ name: 'created_at', type: 'TIMESTAMP', notNull: false, unique: false, default: 'CURRENT_TIMESTAMP', was: null });
-    columns.push({ name: 'updated_at', type: 'TIMESTAMP', notNull: false, unique: false, default: 'CURRENT_TIMESTAMP', was: null });
+    columns.push({ name: 'created_at', type: 'TIMESTAMP', notNull: false, unique: false, default: UTC_NOW, was: null });
+    columns.push({ name: 'updated_at', type: 'TIMESTAMP', notNull: false, unique: false, default: UTC_NOW, was: null });
   }
   if (norm.softDelete) {
     columns.push({ name: 'deleted_at', type: 'TIMESTAMP', notNull: false, unique: false, default: null, was: null });
@@ -3646,22 +3776,23 @@ SchemaDef.prototype._tableSpec = function (options) {
 
   return {
     name: table,
-    sequence: norm.naturalKey ? null : { name: seq, start: idStart },
+    sequence: norm.naturalKey ? null : { name: seq, start: idStart, shared: shared != null },
     primaryKey: norm.primaryKeyColumn,
     columns, indexes, foreignKeys, notes,
     tableWas: norm.tableWas || null,
   };
 };
 
-function renderColumn(spec, col) {
+function renderColumn(spec, col, inlineUnique) {
   const column = quoteIdent(col.name, null, 'column');
   const parts = ['  ' + column + ' ' + col.type];
   if (col.primary) {
     parts[0] = '  ' + column + ' ' + col.type + ' PRIMARY KEY';
   } else {
     if (col.notNull) parts.push('NOT NULL');
-    // Uniqueness renders as a named index below, never inline column
-    // UNIQUE — one index shape for declaration and introspection.
+    // Single-column uniqueness renders INLINE; renderCreate decides
+    // which columns qualify and drops their indexes. See the note there.
+    if (inlineUnique) parts.push('UNIQUE');
   }
   // No REFERENCES clause, deliberately. DuckDB's FK enforcement is a
   // net loss for an app database: an UPDATE of any indexed column on a
@@ -3685,16 +3816,60 @@ function renderIndex(spec, ix) {
     ' (' + ix.columns.map((c) => quoteIdent(c, null, 'index column')).join(', ') + ');';
 }
 
+// Single-column uniqueness is emitted as an inline UNIQUE constraint;
+// everything else stays a named index.
+//
+// Not cosmetic. In DuckDB a standalone index is a catalog object the
+// table DEPENDS on, and DuckDB refuses to ALTER any table something
+// depends on — the WHOLE table, not merely the indexed column, and for
+// DROP, RENAME and type changes alike ("Dependency Error: Cannot alter
+// entry"). So one unique index freezes every column of its table
+// against migration. An inline constraint enforces the same invariant,
+// is still ART-index-backed for lookups and still serves ON CONFLICT,
+// but carries no dependency — the table stays alterable. (Uniqueness
+// is not what costs: a plain @index blocks identically.)
+//
+// COMPOSITE uniques deliberately stay indexes. The differ models
+// composite uniqueness as a unique index — a deployed composite
+// CONSTRAINT is invisible to duckdb_indexes(), so it would plan the
+// index anyway and re-freeze the table. Single-column uniqueness has
+// no such gap: foldSpec folds an auto-named single-column unique index
+// into the column's `unique` flag, and the contract folds a deployed
+// single-column UNIQUE constraint into that SAME flag, so both shapes
+// compare equal. The predicate below is foldSpec's, exactly — the two
+// must agree or the differ would plan an index that already exists.
+//
+// Uniqueness ADDED to a table that already exists still renders as
+// CREATE UNIQUE INDEX (see the add-unique step in the migration
+// planner): DuckDB has no working ALTER TABLE ADD CONSTRAINT, so the
+// index is the only instrument available after creation.
 function renderCreate(spec) {
   const blocks = [];
-  if (spec.sequence) {
+  // A per-table sequence is part of the table's own DDL. A SHARED one
+  // outlives every table that draws from it, so it is rendered once
+  // for the database (renderDump, and the planner's create-sequence
+  // step) rather than repeated here for each table.
+  if (spec.sequence && !spec.sequence.shared) {
     blocks.push('CREATE SEQUENCE ' + quoteIdent(spec.sequence.name, null, 'sequence') +
       ' START ' + spec.sequence.start + ';');
   }
-  const lines = spec.columns.map((c) => renderColumn(spec, c));
+  const inlineUnique = new Set();
+  const indexes = [];
+  for (const ix of spec.indexes) {
+    const auto = ix.unique && ix.columns.length === 1 &&
+      ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
+    const col = auto ? spec.columns.find((c) => c.name === ix.columns[0]) : null;
+    if (col && !col.primary) { inlineUnique.add(col.name); continue; }
+    indexes.push(ix);
+  }
+  // A FOLDED spec (the differ's) carries that same fact as the column's
+  // own flag with no index left to read, so honour both spellings —
+  // renderCreate is what rebuilds a table from its deployed shape.
+  for (const c of spec.columns) if (c.unique && !c.primary) inlineUnique.add(c.name);
+  const lines = spec.columns.map((c) => renderColumn(spec, c, inlineUnique.has(c.name)));
   blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
-  const ix = spec.indexes.map((i) => renderIndex(spec, i));
+  const ix = indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
   if (spec.notes && spec.notes.length) blocks.push(spec.notes.join('\n'));
   return blocks;
@@ -3717,10 +3892,19 @@ SchemaDef.prototype.toSQL = function (options) {
   const blocks = [];
   if (header) blocks.push(header);
   if (dropFirst) {
+    // A shared sequence survives the table: other tables draw from it,
+    // and dropping it would strip their defaults too.
     blocks.push('DROP TABLE IF EXISTS ' + quoteIdent(spec.name, null, 'table') + ' CASCADE;' +
-      (spec.sequence
+      (spec.sequence && !spec.sequence.shared
         ? '\nDROP SEQUENCE IF EXISTS ' + quoteIdent(spec.sequence.name, null, 'sequence') + ';'
         : ''));
+  }
+  // Standalone DDL for one model still has to RUN, so it carries the
+  // shared sequence it defaults from — IF NOT EXISTS, because the
+  // sequence is the database's and another table may have made it.
+  if (spec.sequence?.shared) {
+    blocks.push('CREATE SEQUENCE IF NOT EXISTS ' + quoteIdent(spec.sequence.name, null, 'sequence') +
+      ' START ' + spec.sequence.start + ';');
   }
   blocks.push(...renderCreate(spec));
   return blocks.join('\n\n') + '\n';
@@ -3755,6 +3939,7 @@ const schema = {
   transaction: transaction,
   connect: connect,
   setAdapter: __schemaSetAdapter,
+  sequence: sequenceSetting,
   registerCoercer,
   plan: migrationStub('plan'),
   status: migrationStub('status'),
@@ -3766,7 +3951,7 @@ const schema = {
 // The last two are the build-an-unsaved-instance seam rip/fake's
 // Model.factory() augmentation composes with — normalize caller
 // input, construct without saving.
-export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, normalizePersistenceInput, constructInputInstance };
+export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and

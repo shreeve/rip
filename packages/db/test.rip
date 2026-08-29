@@ -2216,8 +2216,11 @@ test! "a deployed schema matching the model plans nothing", ->
         { name: 'id', type: 'INTEGER', notNull: true, default: "nextval('users_seq')" }
         { name: 'name', type: 'VARCHAR', notNull: true, default: null }
         { name: 'email', type: 'VARCHAR', notNull: true, default: null }
-        { name: 'created_at', type: 'TIMESTAMP', notNull: false, default: 'CURRENT_TIMESTAMP' }
-        { name: 'updated_at', type: 'TIMESTAMP', notNull: false, default: 'now()' }
+        # @times defaults are UTC — TIMESTAMP is zone-naive, so the
+        # session's zone must never decide what a row's clock means.
+        # Spelling and case are noise; the EXPRESSION is the fact.
+        { name: 'created_at', type: 'TIMESTAMP', notNull: false, default: "TIMEZONE('UTC', NOW())" }
+        { name: 'updated_at', type: 'TIMESTAMP', notNull: false, default: "timezone('UTC', now())" }
       ]
       indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }]
       foreignKeys: []

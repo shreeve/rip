@@ -207,7 +207,9 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('[safe] create-table users');
     expect(r.stdout).toContain('[safe] create-table orders');
-    expect(r.stdout).toContain('CREATE UNIQUE INDEX "idx_users_email"');
+    // Single-column uniqueness is an inline constraint, not an index —
+    // a standalone index would freeze the table against every later ALTER.
+    expect(r.stdout).toContain('"email" VARCHAR NOT NULL UNIQUE');
     expect(r.stdout.indexOf('create-table users')).toBeLessThan(r.stdout.indexOf('create-table orders'));
     expect(r.stdout).toContain('2 safe');
   });
@@ -366,7 +368,7 @@ export Order = schema :model
       expect(first).toContain('rip schema dump'); // the generated header
       expect(first).toContain('CREATE TABLE "users"');
       expect(first).toContain('CREATE TABLE "orders"');
-      expect(first).toContain('CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");');
+      expect(first).toContain('"email" VARCHAR NOT NULL UNIQUE');
       // FK-dependency order: users (the parent) renders before orders.
       expect(first.indexOf('-- users')).toBeLessThan(first.indexOf('-- orders'));
       expect(first.endsWith('\n')).toBe(true);
