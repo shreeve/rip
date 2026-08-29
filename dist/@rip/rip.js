@@ -17207,6 +17207,10 @@ ${this.replayPad}}` : " }");
           (this._sourceKeyArgs ??= new Set).add(sourceKey);
           this._needsSourceKeyHelper = true;
         }
+        const routerArg = this.routerArgOf(n);
+        if (routerArg !== null) {
+          (this._routerArgs ??= new Map).set(routerArg.arg, [this.b.offset - routerArg.method.length, this.b.offset]);
+        }
         this.mark(n, "args", () => {
           this.b.emit("(");
           n.slice(1).forEach((arg, i) => {
@@ -17294,6 +17298,14 @@ ${this.replayPad}}` : " }");
       this.b.tsOnly(() => this.b.emit(")"));
       return;
     }
+    const routerKey = this._routerArgs?.get(arg);
+    if (routerKey !== undefined) {
+      this._routerArgs.delete(arg);
+      const valStart = this.b.offset;
+      this.expr(arg);
+      this.routeWrapSpans.push({ key: routerKey, value: [valStart, this.b.offset] });
+      return;
+    }
     if (isNode(arg) && (arg[0] === ".{}" || arg[0] === "?.{}") && arg.length >= 3)
       return this.pick(arg, true);
     this.expr(arg);
@@ -17313,7 +17325,25 @@ ${this.replayPad}}` : " }");
     const app = data[1];
     if (!isNode(app) || app[0] !== "." || app.length !== 3 || app[1] !== "this" || app[2] !== "app")
       return null;
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("app"))
+      return null;
     return arg;
+  }
+  routerArgOf(node) {
+    if (!this.ts || this.routesUnion === null)
+      return null;
+    const arg = node[1];
+    if (typeof arg !== "string" || !/^["']/.test(arg))
+      return null;
+    const callee = node[0];
+    if (!isNode(callee) || callee[0] !== "." || callee.length !== 3 || callee[2] !== "push" && callee[2] !== "replace")
+      return null;
+    const router = callee[1];
+    if (!isNode(router) || router[0] !== "." || router.length !== 3 || router[1] !== "this" || router[2] !== "router")
+      return null;
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("router"))
+      return null;
+    return { arg, method: callee[2] };
   }
   binary(node) {
     if (Emitter.returnGuard(node)) {
@@ -19945,10 +19975,13 @@ export type __RipStash = typeof ${stashLocal};
 `));
     }
   }
-  if (face === "ts" && emitter.routesUnion !== null && /\bRoutePath\b/.test(source) && !/\b(?:type|interface)\s+RoutePath\b/.test(source) && !/\bimport\b[^;\n]*\bRoutePath\b/.test(source)) {
-    builder.tsOnly(() => builder.emit(`
+  if (face === "ts" && emitter.routesUnion !== null) {
+    const faceText = builder.code;
+    if (/\bRoutePath\b/.test(faceText) && !/\b(?:type|interface)\s+RoutePath\b/.test(faceText) && !/\bimport\b[^;\n]*\bRoutePath\b/.test(faceText)) {
+      builder.tsOnly(() => builder.emit(`
 type RoutePath = ${emitter.routesUnion};
 `));
+    }
   }
   if (emitter._needsAmbienceHelper === true) {
     builder.tsOnly(() => builder.emit(`
@@ -26630,6 +26663,8 @@ browserHost = function() {
       return Array.from(document.querySelectorAll("a[href]"));
     },
     observe(fn) {
+      if (typeof MutationObserver === "undefined")
+        return null;
       let scheduled = false;
       let observer = new MutationObserver(function() {
         if (scheduled)
@@ -26652,20 +26687,28 @@ function ariaCurrent(router, host = null) {
     throw new TypeError("Rip App: ariaCurrent requires a router");
   }
   host = host ?? browserHost();
-  let owned = new WeakSet;
+  let owned = new WeakMap;
   let markCurrent = function() {
-    let hit, state;
+    let hit, mark, state, wrote;
     let current = router.path;
     for (let anchor of host.anchors()) {
       hit = excluded(anchor) ? null : router.claims(_anchorHref(anchor) ?? "");
       state = !(hit != null) || !(current != null) ? null : hit.path === current ? "page" : hit.path !== "/" && current.startsWith(hit.path + "/") ? "true" : null;
-      if (state != null) {
-        if (!owned.has(anchor) && anchor.getAttribute?.("aria-current") != null)
+      mark = anchor.getAttribute?.("aria-current") ?? null;
+      wrote = owned.get(anchor);
+      if (wrote !== undefined && mark !== wrote) {
+        owned.delete(anchor);
+        if (mark != null)
           continue;
-        if (!(anchor.getAttribute?.("aria-current") === state))
+        wrote = undefined;
+      }
+      if (state != null) {
+        if (wrote === undefined && mark != null)
+          continue;
+        if (!(mark === state))
           anchor.setAttribute("aria-current", state);
-        owned.add(anchor);
-      } else if (owned.has(anchor)) {
+        owned.set(anchor, state);
+      } else if (wrote !== undefined) {
         anchor.removeAttribute("aria-current");
         owned.delete(anchor);
       }
@@ -26695,7 +26738,8 @@ function ariaCurrent(router, host = null) {
     try {
       for (let anchor of host.anchors()) {
         if (owned.has(anchor)) {
-          anchor.removeAttribute("aria-current");
+          if ((anchor.getAttribute?.("aria-current") ?? null) === owned.get(anchor))
+            anchor.removeAttribute("aria-current");
           owned.delete(anchor);
         }
       }

@@ -227,6 +227,20 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     const faced = compile(declared, routed({ runtimeDelivery: 'none', face: 'ts' }));
     expect(faced.code).not.toContain(`type RoutePath = ${ROUTES};`);
   });
+
+  test('an imported RoutePath wins in every spelling — multi-line lists included', () => {
+    // The guards run over the GENERATED face, where an import list is
+    // one statement whatever the source's line breaks — a formatter's
+    // multi-line list must suppress the alias exactly like the
+    // single-line spelling, or the face carries a TS2440 clash.
+    for (const importText of [
+      "import { RoutePath } from './nav.rip'\n",
+      "import {\n  RoutePath,\n} from './nav.rip'\n",
+    ]) {
+      const faced = compile(importText + "nav: RoutePath = '/cart'\n", routed({ runtimeDelivery: 'none', face: 'ts' }));
+      expect(faced.code).not.toContain(`type RoutePath = ${ROUTES};`);
+    }
+  });
 });
 
 // ── 1b. captures leave no trace ──────────────────────────────────────

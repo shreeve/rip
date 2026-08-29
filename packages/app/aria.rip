@@ -5,10 +5,15 @@
 # `"true"`, and a mark this walker set is removed the moment its anchor
 # stops earning it — including an href rewritten to somewhere the
 # router no longer claims. A mark the application manages itself is
-# never set over and never removed. The DOM arrives through an
-# injectable host, so the walker tests under Node; the browser default
-# walks `document` and re-runs on childList and link-attribute
-# mutations.
+# never set over and never removed — WHENEVER it appears: the walker
+# remembers the value it wrote per anchor, and an anchor whose mark is
+# not that value has been taken over by the application, so the walker
+# disowns it on sight (clearing the walker's mark releases the anchor
+# to be re-earned instead). The DOM arrives through an injectable
+# host, so the walker tests under Node; the browser default walks
+# `document` and — when MutationObserver exists — re-runs on childList
+# and link-attribute mutations; without it, marks refresh on every
+# navigation.
 #
 # `ownsAnchor` is the one shared predicate for anchor ownership —
 # `aria-current`, link preloading, and click interception must never
@@ -50,6 +55,10 @@ browserHost = ->
     throw Error.new 'Rip App: ariaCurrent requires a browser or an injected host'
   anchors: -> Array.from document.querySelectorAll('a[href]')
   observe: (fn) ->
+    # A partial DOM (an SSR or test shim with querySelectorAll but no
+    # MutationObserver) still hosts the walker: marks refresh on every
+    # navigation, they just do not chase DOM mutations between them.
+    return null if typeof MutationObserver is 'undefined'
     scheduled = false
     observer = MutationObserver.new ->
       return if scheduled
@@ -68,7 +77,10 @@ export def ariaCurrent(router, host: { anchors: () => any[], observe?: (fn: () =
   unless router? and typeof router.claims is 'function'
     throw TypeError.new 'Rip App: ariaCurrent requires a router'
   host = host ?? browserHost()
-  owned = WeakSet.new()
+  # Anchor → the exact value this walker last wrote there. Ownership is
+  # conditional on that value surviving: a different mark means the
+  # application took the anchor over, and the walker backs off.
+  owned = WeakMap.new()
 
   markCurrent = ->
     current = router.path
@@ -78,12 +90,22 @@ export def ariaCurrent(router, host: { anchors: () => any[], observe?: (fn: () =
       else if hit.path is current then 'page'
       else if hit.path isnt '/' and current.startsWith(hit.path + '/') then 'true'
       else null
+      mark = anchor.getAttribute?('aria-current') ?? null
+      wrote = owned.get anchor
+      # A claimed anchor whose mark is no longer the walker's own has
+      # been taken over by the application: disown it, and touch it
+      # again only if the app CLEARED the mark (nothing to protect —
+      # the anchor is free to be re-earned this same walk).
+      if wrote isnt undefined and mark isnt wrote
+        owned.delete anchor
+        continue if mark?
+        wrote = undefined
       if state?
         # Never set over a mark the application manages itself.
-        continue if not owned.has(anchor) and anchor.getAttribute?('aria-current')?
-        anchor.setAttribute 'aria-current', state unless anchor.getAttribute?('aria-current') is state
-        owned.add anchor
-      else if owned.has anchor
+        continue if wrote is undefined and mark?
+        anchor.setAttribute 'aria-current', state unless mark is state
+        owned.set anchor, state
+      else if wrote isnt undefined
         anchor.removeAttribute 'aria-current'
         owned.delete anchor
     return
@@ -107,11 +129,12 @@ export def ariaCurrent(router, host: { anchors: () => any[], observe?: (fn: () =
     disposed = true
     disposeEffect()
     unobserve?()
-    # Marks must not outlive their walker.
+    # Marks must not outlive their walker — but only the walker's own:
+    # a mark the application overwrote since is theirs to keep.
     try
       for anchor in host.anchors()
         if owned.has anchor
-          anchor.removeAttribute 'aria-current'
+          anchor.removeAttribute 'aria-current' if (anchor.getAttribute?('aria-current') ?? null) is owned.get(anchor)
           owned.delete anchor
     catch error
       null

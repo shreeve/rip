@@ -730,7 +730,11 @@ function mirrorBytesOf(fsPath) {
 // started annotating them would corrupt its siblings.
 const rawCompileCache = new Map(); // fsPath → { sourceHash, stashSpec, routesUnion, routeParams, result }, insertion = recency
 const RAW_COMPILE_CAP = 32;
-function rawCompile(fsPath, source, sourceHash) {
+// Answers the whole cache entry — result plus the discovery the face
+// was compiled under — so a caller recording those inputs (the
+// manifest) records the walk this compile actually used, never a
+// second walk's view of a disk that may have changed in between.
+function rawCompileEntry(fsPath, source, sourceHash) {
   // The stash and route discoveries are COMPILE INPUTS (the face
   // splices by them), so they join the cache key — a hit on source
   // bytes alone would keep serving a face compiled before
@@ -739,13 +743,15 @@ function rawCompile(fsPath, source, sourceHash) {
   const { union: routesUnion, params: routeParams } = appRoutesFor(fsPath, workspaceRoot);
   const hit = rawCompileCache.get(fsPath);
   if (hit && hit.sourceHash === sourceHash && hit.stashSpec === stashSpec &&
-      hit.routesUnion === routesUnion && hit.routeParams === routeParams) return hit.result;
+      hit.routesUnion === routesUnion && hit.routeParams === routeParams) return hit;
   const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts', appStashSpec: stashSpec, routesUnion, routeParams });
+  const entry = { sourceHash, stashSpec, routesUnion, routeParams, result };
   rawCompileCache.delete(fsPath);
-  rawCompileCache.set(fsPath, { sourceHash, stashSpec, routesUnion, routeParams, result });
+  rawCompileCache.set(fsPath, entry);
   if (rawCompileCache.size > RAW_COMPILE_CAP) rawCompileCache.delete(rawCompileCache.keys().next().value);
-  return result;
+  return entry;
 }
+const rawCompile = (fsPath, source, sourceHash) => rawCompileEntry(fsPath, source, sourceHash).result;
 
 // A dependency's ANNOTATED exports, for the declaration-scope gate: an
 // import of one carries that export's type information into the importer.
@@ -907,7 +913,8 @@ const enumNamesOf = (result) =>
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
   if (!mirrorRootIsFallback) linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath);
-  const result = rawCompile(fsPath, source, hashText(source));
+  const compiled = rawCompileEntry(fsPath, source, hashText(source));
+  const result = compiled.result;
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
@@ -929,15 +936,17 @@ function mirrorFromDisk(fsPath, source) {
     }
   }
   const imports = closureImportsOf(result.stores, source, fsPath, workspaceRoot);
-  const routes = appRoutesFor(fsPath, workspaceRoot);
   cacheManifest.entries[fsPath] = {
     sourceHash: hashText(source), codeHash: hashText(result.code), imports,
     // The stash and route discoveries the face was compiled under —
     // COMPILE INPUTS the source bytes cannot vouch for, so revalidation
     // compares them against the live discovery (materializeClosure's
-    // cached road).
-    stashSpec: appStashSpecFor(fsPath, workspaceRoot),
-    routesUnion: routes.union, routeParams: routes.params,
+    // cached road). Taken from the compile's OWN entry, never a second
+    // walk: a route file landing between two walks would stamp the
+    // manifest with a union this face was not compiled under, and
+    // revalidation would then certify the stale face as fresh.
+    stashSpec: compiled.stashSpec,
+    routesUnion: compiled.routesUnion, routeParams: compiled.routeParams,
     // The names this module declares as enums — what an IMPORTER needs to
     // color its own uses, and the one fact it cannot compute for itself.
     // Cheap to carry (names, no spans) and invalidated with the entry; a
@@ -1576,7 +1585,14 @@ connection.onInitialized(async () => {
   clientInitialized = true;
   if (clientSupportsWatchers) {
     connection.client.register(DidChangeWatchedFilesNotification.type, {
-      watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' }],
+      // The two routes-dir patterns exist for DIRECTORY events: a
+      // folder rename or delete under app/routes commonly arrives as
+      // one event for the folder path — which '**/*.rip' can never
+      // match — yet flips route-existence facts for the whole subtree.
+      watchers: [
+        { globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' },
+        { globPattern: '**/app/routes' }, { globPattern: '**/app/routes/**' },
+      ],
     });
   }
   // The build hash is `rip check --build`'s twin — same content hash over
@@ -2236,7 +2252,17 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       }
       continue;
     }
-    if (!fsPath.endsWith('.rip')) continue;
+    if (!fsPath.endsWith('.rip')) {
+      // A DIRECTORY event under (or of) a routes tree: a folder
+      // rename/delete arrives as one event for the folder path, with
+      // no per-file `.rip` events, yet route-existence facts flipped
+      // for the whole subtree. The routes-dir watchers deliver it.
+      if (fsPath.includes(`${path.sep}app${path.sep}routes${path.sep}`) ||
+          fsPath.endsWith(`${path.sep}app${path.sep}routes`)) {
+        discoveryChanged = true;
+      }
+      continue;
+    }
     if (change.type !== FileChangeType.Changed &&
         (path.basename(fsPath) === 'index.rip' ||
          (path.basename(fsPath) === 'stash.rip' && path.basename(path.dirname(fsPath)) === 'app') ||
@@ -3047,17 +3073,18 @@ function ripCompletionItem(ctx, raw, index) {
 // gets a textEdit replacing the literal's interior — and it offers only
 // the union's string-literal members, so the DYNAMIC members ride in as
 // our own items, labeled by their display (`/orders/:id`) and inserting
-// their static prefix (`/orders/`). Everything is gated on the literal
-// really being route-constrained: the mapped face offset sits inside a
-// recorded `__ripRoute` wrap, or every tsgo item is a route member (the
-// push/replace argument, which no wrap records). All items take
+// their static prefix (`/orders/`). The gate is a RECORDED FACT, never
+// an inference: the mapped face offset sits inside a routeWraps value
+// span — the emitter records one per checked surface, attribute wraps
+// and `push`/`replace` arguments alike — so a user-authored literal
+// union that happens to be a subset of the route statics is never
+// rewritten or fed members its type rejects. All items take
 // walker-order sortText, so the popup reads like the diagnostics do.
 function finishRouteStringItems(ctx, genOffset, items) {
   const entries = ctx.good.routeEntries;
   if (!entries?.length || items.length === 0) return;
-  const statics = new Set(entries.filter((e) => e.text.startsWith('"')).map((e) => JSON.parse(e.text)));
   const inWrap = (ctx.good.routeWraps ?? []).some((w) => genOffset >= w.value[0] && genOffset <= w.value[1]);
-  if (!inWrap && !items.every((i) => statics.has(i.label))) return;
+  if (!inWrap) return;
 
   // The enclosing SOURCE string literal — the innermost cover row that
   // is a quoted string around the cursor. Without one (mid-edit, an
@@ -3163,14 +3190,14 @@ async function dotProbeCompletion(params) {
   // face document (a project member by construction — a freshly minted
   // probe file answers before tsgo has admitted it to the project, and
   // an unadmitted file resolves no imports). The overlay swaps in, one
-  // completion asks against it, and the last-good face swaps back —
-  // stream order makes the sequence atomic from tsgo's point of view,
-  // and the version counter is the state's own so refresh stays
-  // monotonic. A buffer that has NEVER compiled has no face document
-  // yet: the probe face becomes its first (mirror written so the
-  // project holds a real file), stays open, and the next good compile
-  // didChanges over it.
-  const restore = state.tsOpen && state.lastGood ? state.lastGood.code : null;
+  // completion asks against it, and the CURRENT last-good face swaps
+  // back in the finally — read at restore time, because a refresh can
+  // complete while the probe awaits tsgo. The version counter is the
+  // state's own so both roads stay monotonic. A buffer that has NEVER
+  // compiled has no face document yet: the probe face becomes its
+  // first (mirror written so the project holds a real file), stays
+  // open, and the next good compile didChanges over it.
+  const coldOpen = !(state.tsOpen && state.lastGood);
   try {
     state.tsVersion += 1;
     if (!state.tsOpen) {
@@ -3192,7 +3219,7 @@ async function dotProbeCompletion(params) {
     // A COLD-opened face (this probe was the document's first) can
     // answer null while tsgo settles its project association — one
     // beat, one retry.
-    if (res === null && restore === null) {
+    if (res === null && coldOpen) {
       await new Promise((r) => setTimeout(r, 400));
       res = await tsgoRequest('textDocument/completion', {
         textDocument: { uri: state.tsUri }, position,
@@ -3214,11 +3241,19 @@ async function dotProbeCompletion(params) {
     }
     return items.length ? { isIncomplete: false, items } : null;
   } finally {
-    if (restore !== null) {
+    // Restore the face CURRENT at this moment, never the pre-probe
+    // snapshot: a debounced refresh may have completed while the probe
+    // awaited tsgo (nothing orders the two), and re-sending its output
+    // is a harmless duplicate where re-sending the old snapshot would
+    // desync tsgo from lastGood until the next keystroke. A buffer
+    // still without a good compile restores nothing — the probe face
+    // stays its first document by design.
+    const current = state.lastGood ? state.lastGood.code : null;
+    if (current !== null) {
       state.tsVersion += 1;
       tsgo.client.notify('textDocument/didChange', {
         textDocument: { uri: state.tsUri, version: state.tsVersion },
-        contentChanges: [{ text: restore }],
+        contentChanges: [{ text: current }],
       });
     }
   }

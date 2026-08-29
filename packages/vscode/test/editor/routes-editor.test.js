@@ -237,6 +237,14 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       const single = await api.completion('app/routes/index.rip', 5, 15);
       expect((single?.items ?? []).map((i) => i.label)).toEqual(expect.arrayContaining(['/cart', '/orders', '/orders/:id']));
 
+      // A push ARGUMENT serves the same finished list: the emitter
+      // records the router-call span, so the slot is a recorded fact —
+      // the gate never infers route-ness from the labels tsgo happens
+      // to return (a user union that subsets the statics stays
+      // untouched by construction).
+      const push = await api.completion('app/routes/index.rip', 1, "  go: -> @router.push('/".length);
+      expect((push?.items ?? []).map((i) => i.label)).toEqual(expect.arrayContaining(['/cart', '/orders', '/orders/:id']));
+
       // A typo'd href anchors on the pair's KEY — the anchor every
       // other mistyped attribute reports on — and the dynamic member
       // reads as its display form; `${string}` never surfaces.

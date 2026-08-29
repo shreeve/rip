@@ -4485,6 +4485,27 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
+  test('a defaulted-D stash handle answers unknown — a consumer narrows, never receives any', () => {
+    // Bare `createStash()` types its handles off StashMethods' DEFAULT
+    // `D`; the untyped arm of SourceHandleFor must answer the bare
+    // handle (`value: unknown`) so an unnarrowed use is an error — the
+    // defaulted surface must never silently widen to `any`.
+    const dir = workspace({
+      'stash-consumer.rip': [
+        "import { createStash } from 'rip/app'",
+        'stash = createStash()',
+        "n: number = stash.source('x').value",
+        '',
+      ].join('\n'),
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout)
+        .filter((d) => d.file.endsWith('stash-consumer.rip'));
+      expect(diags.map((d) => d.code)).toEqual([2322]);
+      expect(diags[0].message).toContain("'unknown'");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
   test('a user-declared RoutePath wins over the ambient alias', () => {
     const dir = workspace({
       ...ROUTE_FILES,

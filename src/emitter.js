@@ -451,15 +451,18 @@ class Emitter {
     // params — it tightens the component's `params` ambience.
     this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
     this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
-    // Generated spans of each `__ripRoute` wrap on an ATTRIBUTE surface
-    // (intrinsic `a href:`, a child component's `href:` prop): the
-    // KEY's emitted bytes and the wrapped VALUE's. The diagnostics road
-    // re-anchors a mismatch covering the whole value onto the key —
-    // every other mistyped attribute reports on its name (the
-    // props-object road, TS's own property convention), and the wrap
-    // must not make `href` the one value-anchored attribute. Recorded
-    // at emission, TS face only; `push`/`replace` are call arguments,
-    // never wrapped, and keep TS's argument anchor.
+    // Generated spans of each route-checked surface, KEY and VALUE: on
+    // an ATTRIBUTE surface (intrinsic `a href:`, a child component's
+    // `href:` prop) the key is the pair's key and the value is the
+    // `__ripRoute`-wrapped literal; on a ROUTER surface
+    // (`this.router.push`/`.replace` with a literal argument) the key
+    // is the METHOD NAME and the value is the argument literal — no
+    // wrap is emitted there, the ambience's const conditional does the
+    // checking, but the spans still record so a mismatch re-anchors on
+    // its meaningful token and completions know the slot is
+    // route-constrained. The diagnostics road moves a mismatch covering
+    // EXACTLY the value onto the key; an unrecorded call (an array's
+    // `.push`) can never match. Recorded at emission, TS face only.
     this.routeWrapSpans = [];
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
@@ -12040,6 +12043,12 @@ class Emitter {
           (this._sourceKeyArgs ??= new Set()).add(sourceKey);
           this._needsSourceKeyHelper = true;
         }
+        // A router call's method name was the last thing the callee
+        // frames emitted, so its generated span ends exactly here.
+        const routerArg = this.routerArgOf(n);
+        if (routerArg !== null) {
+          (this._routerArgs ??= new Map()).set(routerArg.arg, [this.b.offset - routerArg.method.length, this.b.offset]);
+        }
         this.mark(n, 'args', () => {
           this.b.emit('(');
           n.slice(1).forEach((arg, i) => {
@@ -12159,6 +12168,18 @@ class Emitter {
       this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
+    // A registered router argument emits UNCHANGED — the ambience's
+    // const conditional does the checking — but its generated span
+    // pairs with the method name recorded at registration, the same
+    // key/value shape the attribute wraps publish.
+    const routerKey = this._routerArgs?.get(arg);
+    if (routerKey !== undefined) {
+      this._routerArgs.delete(arg);
+      const valStart = this.b.offset;
+      this.expr(arg);
+      this.routeWrapSpans.push({ key: routerKey, value: [valStart, this.b.offset] });
+      return;
+    }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
     this.expr(arg);
   }
@@ -12168,7 +12189,10 @@ class Emitter {
   // and whose first argument is a plain quoted string literal. A bound
   // alias (`d = @app.data; d.source(...)`) or a computed key stays on
   // the package's permissive overload — the same syntactic-gate
-  // doctrine as the href wrap.
+  // doctrine as the href wrap. A component declaring its OWN `app`
+  // member shadows the ambient app (the ambience splice skips the name
+  // too), so its `.data.source(...)` calls are not stash asks and stay
+  // unwrapped.
   sourceKeyArgOf(node) {
     if (!this.ts || this.appStashSpec === null) return null;
     const arg = node[1];
@@ -12179,7 +12203,28 @@ class Emitter {
     if (!isNode(data) || data[0] !== '.' || data.length !== 3 || data[2] !== 'data') return null;
     const app = data[1];
     if (!isNode(app) || app[0] !== '.' || app.length !== 3 || app[1] !== 'this' || app[2] !== 'app') return null;
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('app')) return null;
     return arg;
+  }
+
+  // The router surface's twin: a call whose callee chain is EXACTLY
+  // `this.router.push` / `this.router.replace` with a quoted string
+  // literal first argument. Nothing is emitted for it — the ambience's
+  // const conditional checks the literal — but the method-name and
+  // argument spans join routeWrapSpans so the mismatch re-anchors on
+  // the METHOD NAME and completions know the slot. A component
+  // declaring its own `router` member shadows the ambient router; its
+  // calls stay unrecorded, as does every non-router `.push`.
+  routerArgOf(node) {
+    if (!this.ts || this.routesUnion === null) return null;
+    const arg = node[1];
+    if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
+    const callee = node[0];
+    if (!isNode(callee) || callee[0] !== '.' || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
+    const router = callee[1];
+    if (!isNode(router) || router[0] !== '.' || router.length !== 3 || router[1] !== 'this' || router[2] !== 'router') return null;
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
+    return { arg, method: callee[2] };
   }
 
   // Binary emission is ITERATIVE over the left spine: a flat
@@ -15730,13 +15775,18 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // Injected only when this module REFERENCES the name and neither
   // declares nor imports its own — a user-defined `RoutePath` always
   // wins, so no duplicate-identifier clash is possible. The tests run
-  // against the rip SOURCE: the face's own emissions never introduce
-  // the name. TS-only through the recorded region.
-  if (face === 'ts' && emitter.routesUnion !== null
-      && /\bRoutePath\b/.test(source)
-      && !/\b(?:type|interface)\s+RoutePath\b/.test(source)
-      && !/\bimport\b[^;\n]*\bRoutePath\b/.test(source)) {
-    builder.tsOnly(() => builder.emit(`\ntype RoutePath = ${emitter.routesUnion};\n`));
+  // against the GENERATED face, where a multi-line import list has
+  // been flattened to one statement, so the line-bounded import regex
+  // sees every spelling; the face's own emissions never introduce the
+  // name (this injection is the only one, and it has not run yet).
+  // TS-only through the recorded region.
+  if (face === 'ts' && emitter.routesUnion !== null) {
+    const faceText = builder.code;
+    if (/\bRoutePath\b/.test(faceText)
+        && !/\b(?:type|interface)\s+RoutePath\b/.test(faceText)
+        && !/\bimport\b[^;\n]*\bRoutePath\b/.test(faceText)) {
+      builder.tsOnly(() => builder.emit(`\ntype RoutePath = ${emitter.routesUnion};\n`));
+    }
   }
   // The ambience helper's ONE declaration per module, at module scope —
   // where every class that emitted `app = __ripAmbientApp(...)` can

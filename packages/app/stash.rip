@@ -10,8 +10,11 @@ export type SourceHandle<T = unknown> =
 # The handle for one stash entry: a keyed family answers its element
 # type; anything else answers the entry itself, un-nulled — the handle
 # re-nulls it (`value: T | null`), so a singleton's `T | null` does not
-# double up.
-export type SourceHandleFor<V> = V extends SourceFamily<infer T, any> ? SourceHandle<T> : SourceHandle<NonNullable<V>>
+# double up. An UNTYPED entry (`any`/`unknown` — the defaulted-`D`
+# surface every bare `StashMethods`/`createStash()` consumer sees)
+# answers the bare handle, whose `value` is `unknown`: the consumer
+# must narrow before using it, never receive a silent `any`.
+export type SourceHandleFor<V> = unknown extends V ? SourceHandle : V extends SourceFamily<infer T, any> ? SourceHandle<T> : SourceHandle<NonNullable<V>>
 
 # `D` is the data shape `source()` paths resolve against (the ambience
 # splices the AppData projection here). A path naming a top-level entry
