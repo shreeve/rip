@@ -3889,6 +3889,7 @@ var TYPE_VOCAB = new Set([
   "RESERVED",
   "NUMBER",
   "STRING",
+  "TYPE_TEMPLATE",
   "BOOL",
   "NULL",
   "UNDEFINED",
@@ -3923,6 +3924,7 @@ var TYPE_ATOM_ENDERS = new Set([
   "RESERVED",
   "NUMBER",
   "STRING",
+  "TYPE_TEMPLATE",
   "BOOL",
   "NULL",
   "UNDEFINED",
@@ -4433,23 +4435,8 @@ var beforeAngleGroupBack = (tokens, k) => {
   return depth === 0 ? k : -1;
 };
 var typeAliasEq = (tokens, eqIdx) => {
-  let k = eqIdx - 1;
-  if (tokens[k]?.kind === "COMPARE" && tokens[k].value === ">") {
-    let d = 1;
-    k--;
-    while (k >= 0 && d > 0) {
-      if (counter.on)
-        counter.n++;
-      if (tokens[k].kind === "COMPARE" && tokens[k].value === ">")
-        d++;
-      else if (tokens[k].kind === "SHIFT" && tokens[k].value === ">>")
-        d += 2;
-      else if (tokens[k].kind === "COMPARE" && tokens[k].value === "<")
-        d--;
-      k--;
-    }
-  }
-  if (tokens[k]?.kind !== "IDENTIFIER")
+  const k = beforeAngleGroupBack(tokens, eqIdx - 1);
+  if (k < 0 || tokens[k]?.kind !== "IDENTIFIER")
     return false;
   const head = tokens[k - 1];
   if (!(head?.kind === "IDENTIFIER" && head.value === "type"))
@@ -4821,27 +4808,9 @@ function rewriteTypes(tokens, mintId, text, fail) {
     if (tokens[j]?.kind !== "IDENTIFIER")
       return -1;
     j++;
-    if (tokens[j]?.kind === "COMPARE" && tokens[j].value === "<" && !tokens[j].spaced) {
-      let depth = 0;
-      while (j < tokens.length) {
-        if (counter.on)
-          counter.n++;
-        const t = tokens[j];
-        if (t.kind === "COMPARE" && t.value === "<")
-          depth++;
-        else if (t.kind === "COMPARE" && t.value === ">")
-          depth--;
-        else if (t.kind === "SHIFT" && t.value === ">>")
-          depth -= 2;
-        else if (t.kind === "SHIFT" && t.value === ">>>")
-          depth -= 3;
-        else if (t.kind === "TERMINATOR" || t.kind === "INDENT" || t.kind === "OUTDENT")
-          return -1;
-        j++;
-        if (depth === 0)
-          break;
-      }
-    }
+    j = skipAngleGroup(tokens, j);
+    if (j < 0)
+      return -1;
     if (tokens[j]?.kind !== "=")
       return -1;
     j++;
@@ -4935,27 +4904,9 @@ function rewriteTypes(tokens, mintId, text, fail) {
     }
     if (kd === "COMPARE" && tok.value === "<" && !tok.spaced && prev && prev.kind === "IDENTIFIER") {
       const beforeName = out[out.length - 2] ?? null;
-      let depth = 0;
-      let j = i;
-      while (j < tokens.length) {
-        const t = tokens[j];
-        if (t.kind === "COMPARE" && t.value === "<")
-          depth++;
-        else if (t.kind === "COMPARE" && t.value === ">")
-          depth--;
-        else if (t.kind === "SHIFT" && t.value === ">>")
-          depth -= 2;
-        else if (t.kind === "SHIFT" && t.value === ">>>")
-          depth -= 3;
-        else if (t.kind === "TERMINATOR" || t.kind === "INDENT" || t.kind === "OUTDENT") {
-          j = -1;
-          break;
-        }
-        if (depth === 0)
-          break;
-        j++;
-      }
-      if (j > i) {
+      const afterGroup = skipAngleGroup(tokens, i);
+      if (afterGroup > i) {
+        const j = afterGroup - 1;
         const afterClose = tokens[j + 1]?.kind;
         const isDefName = beforeName?.kind === "DEF";
         const isComponentTarget = afterClose === "=" && tokens[j + 2]?.kind === "COMPONENT";
@@ -6019,6 +5970,79 @@ ${baseline}`).join(`
     }
     return false;
   };
+  const lineBreakAt = (j) => text[j] === `
+` || text[j] === "\r";
+  const scanTypeTemplateEnd = (start) => {
+    let i = start + 1;
+    while (i < text.length) {
+      const c = text[i];
+      if (lineBreakAt(i) || c === "\\" && lineBreakAt(i + 1)) {
+        fail("a template-literal type stays on one line", start, i);
+      }
+      if (c === "\\") {
+        i += 2;
+        continue;
+      }
+      if (c === "`")
+        return i + 1;
+      if (c === "$" && text[i + 1] === "{") {
+        i = scanTypeInterpEnd(i + 2);
+        continue;
+      }
+      i++;
+    }
+    failOpenAtEnd("unclosed '`' — the template-literal type never closes", start, start + 1);
+  };
+  const scanTypeInterpEnd = (start) => {
+    let i = start, depth = 1;
+    while (i < text.length) {
+      const c = text[i];
+      if (lineBreakAt(i) || c === "\\" && lineBreakAt(i + 1)) {
+        fail("a template-literal type stays on one line", start - 2, i);
+      }
+      if (c === "\\") {
+        i += 2;
+        continue;
+      }
+      if (c === "`") {
+        i = scanTypeTemplateEnd(i);
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        i = scanTypeQuoteEnd(i);
+        continue;
+      }
+      if (c === "{") {
+        depth++;
+        i++;
+        continue;
+      }
+      if (c === "}") {
+        if (--depth === 0)
+          return i + 1;
+        i++;
+        continue;
+      }
+      i++;
+    }
+    failOpenAtEnd("unclosed '${' — the interpolation never closes", start - 2, start);
+  };
+  const scanTypeQuoteEnd = (start) => {
+    const quote = text[start];
+    let i = start + 1;
+    while (i < text.length) {
+      if (lineBreakAt(i) || text[i] === "\\" && lineBreakAt(i + 1))
+        break;
+      if (text[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (text[i] === quote)
+        return i + 1;
+      i++;
+    }
+    fail("unterminated string", start, start + 1);
+  };
   const closeBracket = () => {
     const frame = parens.pop();
     if (!frame)
@@ -6615,10 +6639,11 @@ ${baseline}`).join(`
       pos++;
       continue;
     }
-    if (ch === "`") {
-      if (insideTypeBody() || aliasHeadOpen()) {
-        fail("template-literal types are not supported — a Rip type cannot contain '`'", pos);
-      }
+    if (ch === "`" && (insideTypeBody() || aliasHeadOpen())) {
+      const end = scanTypeTemplateEnd(pos);
+      push("TYPE_TEMPLATE", text.slice(pos, end), pos, end);
+      pos = end;
+      continue;
     }
     fail(`cannot tokenize '${ch}'`, pos);
   }
@@ -23767,7 +23792,7 @@ var SOURCE = Symbol.for("rip.source");
 var SOURCE_FAMILY = Symbol.for("rip.source.family");
 var SOURCE_FAMILY_CAP = 64;
 var PRELOAD_FRESH_MS = 30000;
-var DURATION_RE = /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i;
+var DURATION_RE = /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/;
 function _isSourceCell(value) {
   return value != null && (typeof value === "object" || typeof value === "function") && (value[SOURCE] === true || value[SOURCE_FAMILY] === true);
 }
@@ -23787,13 +23812,11 @@ parseStaleTime = function(value) {
   if (typeof value === "string") {
     if (value === "forever")
       return Infinity;
-    if (/^\d+$/.test(value))
-      return +value;
     parts = value.match(DURATION_RE);
     if (parts) {
       amount = parseFloat(parts[1]);
       return (() => {
-        switch (parts[2][0].toLowerCase()) {
+        switch (parts[2][0]) {
           case "s":
             return amount * 1000;
           case "m":
