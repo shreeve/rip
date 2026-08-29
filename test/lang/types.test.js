@@ -525,6 +525,14 @@ const STMT_PAIRS = [
   ['interface P\n  inner:\n    x: number\nz = 1', 'z = 1'],
   ['export type ID = string\nz = 1', 'z = 1'],
   ['export type Pair<A, B> = [A, B]\nz = 1', 'z = 1'],
+  // generic parameter DEFAULTS whose nested generics merge the param
+  // list's closers into one `>>`/`>>>` token: the head must still be
+  // recognized, so the trailing `>` ends the line instead of gluing
+  // the follower in — code, another alias, and an export follow
+  ['export type B<D extends Record<string, any> = Record<string, any>> = Other<D>\nx = 1', 'x = 1'],
+  ['type T<D extends Map<string, Set<number>> = Map<string, Set<number>>> = Other<D>\nx = 1', 'x = 1'],
+  ['type B<D extends Array<any> = Array<any>> = Other<D>\ntype C<E extends Array<any> = Array<any>> = Other<E>\nx = 1', 'x = 1'],
+  ['type B<D extends Array<any> = Array<any>> = Other<D>\nexport x = 1', 'export x = 1'],
   // adversarial characters inside alias text: a `#` comment BETWEEN
   // block-union variants erases with the body; an angle bracket
   // inside a string literal type never opens a generic

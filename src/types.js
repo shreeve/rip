@@ -663,19 +663,11 @@ export const beforeAngleGroupBack = (tokens, k) => {
 // a statement boundary? Skips a balanced generic-parameter list back
 // to the name.
 export const typeAliasEq = (tokens, eqIdx) => {
-  let k = eqIdx - 1;
-  if (tokens[k]?.kind === 'COMPARE' && tokens[k].value === '>') {
-    let d = 1;
-    k--;
-    while (k >= 0 && d > 0) {
-      if (counter.on) counter.n++;
-      if (tokens[k].kind === 'COMPARE' && tokens[k].value === '>') d++;
-      else if (tokens[k].kind === 'SHIFT' && tokens[k].value === '>>') d += 2;
-      else if (tokens[k].kind === 'COMPARE' && tokens[k].value === '<') d--;
-      k--;
-    }
-  }
-  if (tokens[k]?.kind !== 'IDENTIFIER') return false;
+  // A param list ending in nested generics closes with a merged
+  // `>>`/`>>>` token — the rewind must weigh those, so it shares
+  // beforeAngleGroupBack rather than counting single `>`s itself.
+  const k = beforeAngleGroupBack(tokens, eqIdx - 1);
+  if (k < 0 || tokens[k]?.kind !== 'IDENTIFIER') return false;
   const head = tokens[k - 1];
   if (!(head?.kind === 'IDENTIFIER' && head.value === 'type')) return false;
   return atStatementBoundary(tokens, k - 2);
