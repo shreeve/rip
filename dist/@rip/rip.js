@@ -3467,6 +3467,7 @@ function collectObjects(tokens, mintId) {
   const insertions = [];
   const pendingTernary = [0];
   let lastReal = null;
+  let continuationComma = -1;
   const top = () => stack[stack.length - 1];
   const makeBrace = (kind, at, origin, flags = {}) => ({
     id: mintId(),
@@ -3484,6 +3485,18 @@ function collectObjects(tokens, mintId) {
     insertions.push({ at, token: makeBrace("}", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
   };
   const looksObjectish = (j) => looksObjectishAt(tokens, j);
+  const listObjectFrame = () => {
+    for (let d = stack.length - 1;d >= 0; d--) {
+      if (counter.on)
+        counter.n++;
+      const fr = stack[d];
+      if (fr.kind === "object")
+        return fr;
+      if (!(fr.kind === "INDENT" && fr.listContinuation))
+        return null;
+    }
+    return null;
+  };
   const pendingIndentedObjectCallAt = (indentAt) => {
     const before = tokens[indentAt - 1];
     return Boolean(before && IMPLICIT_FUNC.has(before.kind) && looksObjectish(indentAt + 1) && !controlHeadBackwards(tokens, indentAt - 1));
@@ -3552,7 +3565,8 @@ function collectObjects(tokens, mintId) {
       }
       if (top()?.kind === "CONTROL")
         stack.pop();
-      stack.push({ kind: "INDENT", at: i });
+      const listContinuation = continuationComma === i - 1 && Boolean(listObjectFrame());
+      stack.push({ kind: "INDENT", at: i, listContinuation });
       pendingTernary.push(0);
       continue;
     }
@@ -3603,8 +3617,10 @@ function collectObjects(tokens, mintId) {
       const under = stack[stack.length - 2];
       const isBraceFrame = (fr) => fr && (fr.kind === "{" || fr.kind === "PICK_START" || fr.kind === "OPTPICK_START" || fr.kind === "object");
       const isBraceKind = (kd) => kd === "{" || kd === "PICK_START" || kd === "OPTPICK_START";
-      const callFrom = f?.kind === "INDENT" && under ? under.at : f?.at;
-      if (f && (isBraceFrame(f) || f.kind === "INDENT" && isBraceKind(under?.kind)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
+      const listFrame = f?.kind === "INDENT" && f.listContinuation ? listObjectFrame() : null;
+      const underContinuedList = Boolean(listFrame);
+      const callFrom = listFrame ? listFrame.at : f?.kind === "INDENT" && under ? under.at : f?.at;
+      if (f && (isBraceFrame(f) || f.kind === "INDENT" && (isBraceKind(under?.kind) || underContinuedList)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
         continue;
       }
       stack.push({ kind: "object", at: s, sameLine: true, startsLine });
@@ -3647,10 +3663,17 @@ function collectObjects(tokens, mintId) {
       }
       continue;
     }
-    if (k === "," && top()?.kind === "object" && !openCallBetween(top().at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
-      const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
-      while (top()?.kind === "object")
-        closeObject(i + offset);
+    if (k === ",") {
+      const list = listObjectFrame();
+      if (list && !openCallBetween(list.at, i) && !looksObjectish(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !looksObjectish(i + 2))) {
+        if (tokens[i + 1]?.kind === "INDENT" && looksObjectish(i + 2)) {
+          continuationComma = i;
+        } else if (top()?.kind === "object") {
+          const offset = tokens[i + 1]?.kind === "OUTDENT" ? 1 : 0;
+          while (top()?.kind === "object")
+            closeObject(i + offset);
+        }
+      }
     }
   }
   if (tokens.length && !tokens[tokens.length - 1].generated)
