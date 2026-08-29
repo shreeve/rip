@@ -1187,6 +1187,7 @@ if (compiled.size > 0) {
                 owns: ownedBy(dir),
                 only: names,
                 synthesized,
+                claims: false,
               }).catch(() => null);
               if (walked === null || walked.unresolved !== null) continue;
               const leaks = walked.rows.filter((r) => r.kind === 'leak').map((r) => r.name);

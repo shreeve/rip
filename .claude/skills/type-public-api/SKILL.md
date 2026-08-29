@@ -12,7 +12,7 @@ description: Type a Rip package's public API until `rip check --public` reports 
 
 The public surface, nothing else. Do not annotate internals to make them checkable — that task is unbounded and is not this one. `--public` is the arbiter throughout, and step 5 removes anything the report turns out not to need.
 
-Know what the audit cannot do. It asks only whether a position carries a type that says nothing, never whether the type is TRUE, so 100% is not proof of correctness. And because internals stay unannotated, a public value entering one becomes `any` a call later, where nothing can contradict what you declared. Step 3 is the whole defense against both.
+Know what the audit cannot do. It asks whether a position carries a type that says nothing, and whether a type was claimed there at all — never whether the claim is TRUE, so 100% is not proof of correctness. And because internals stay unannotated, a public value entering one becomes `any` a call later, where nothing can contradict what you declared. Step 3 is the whole defense against both.
 
 ## 1 — Reconcile the exported surface
 
@@ -31,7 +31,7 @@ Never decide minimality by who imports a name. A package may be consumed through
 rip check --public <pkg>
 ```
 
-Each leaking export lists its positions and the path to each. Read a path as the walk order: a call's parameter, a member, an array element, a callback's own parameter. A position is reported when it carries `any` or `Function`, which are unchecked wherever they sit, or when nothing was written there at all. A width that is WRITTEN is a claim, and the audit takes it: `unknown`, `object` and `{}` stop a consumer until they narrow, so a deliberate one is a finished answer rather than a position to fix.
+Each leaking export lists its positions and the path to each. Read a path as the walk order: a call's parameter, a member, an array element, a callback's own parameter. A position is reported when it carries `any` or `Function`, which are unchecked wherever they sit, or when nothing was written there at all — a signature position with no width of its own reports that as `inferred`. A width that is WRITTEN is a claim, and the audit takes it: `unknown`, `object` and `{}` stop a consumer until they narrow, so a deliberate one is a finished answer rather than a position to fix.
 
 ## 3 — Derive each type from a named consuming line
 
@@ -40,7 +40,7 @@ The step that makes the result repeatable, and the only one that takes judgment.
 - A value handed to a constructor or stdlib call takes that signature's parameter type. A package wrapping a familiar API does not necessarily accept everything that API accepts.
 - A value that only reaches a stringifying or serializing call accepts anything. Say so rather than inventing a narrower union the code does not enforce.
 - A value discriminated by `typeof` or identity branches is exactly the union those branches test, and nothing more.
-- A consuming line that guards with `??` or a null check is telling you the type admits `undefined` or `null`. Read those carefully: gradual mode has strictNullChecks off, so a type that wrongly forbids either still reports 100%.
+- A consuming line that guards with `??` or a null check is telling you the type admits `undefined` or `null`. So does a body carrying `return null`, `else undefined`, or a `?.` on what it returns. Read those hardest: gradual mode has strictNullChecks off, so inference drops the union and the audit takes the collapsed type. A doc comment above the def may already say so.
 
 Deriving from what an API ought to accept is how a type ends up wrong and confident. Over-wide licenses a call that crashes; over-narrow rejects code that works. Read the line.
 
@@ -49,6 +49,8 @@ Deriving from what an API ought to accept is how a type ends up wrong and confid
 **Export nothing a consumer will not name.** Types stay internal by default — an object literal gets contextual typing and never needs the name. Exporting one makes its shape a breaking-change surface.
 
 **An alias needs two or more callers.** Otherwise inline it.
+
+**A public export states its return type.** It is a contract the body gets checked against, not an annotation that quiets the audit — and where a body ends in a cast or a `defineProperty` the checker cannot see through, it is the only thing standing between an unchecked assertion and the published surface.
 
 **No comments** on the types or the annotations. A trap worth warning about belongs somewhere that fails when violated, not in prose that cannot.
 

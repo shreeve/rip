@@ -996,18 +996,20 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // A construct signature's parameter, on a class that declares no
       // annotated member of its own — nothing about a class's own surface
       // decides whether its constructor is read.
-      expect(out.stdout).toContain('any at: Boom.new(payload)');
+      expect(out.stdout).toMatch(/any\s+at: Boom\.new\(payload\)/);
       // The instance a constructor RETURNS, then a parameter of its method.
-      expect(out.stdout).toContain('any at: Chatty#describe(detail)');
+      expect(out.stdout).toMatch(/any\s+at: Chatty#describe\(detail\)/);
+      // And that method's own return, which no annotation claims.
+      expect(out.stdout).toMatch(/inferred\s+at: Chatty#describe\(\)/);
       // A return type, named as the return and not as the function.
-      expect(out.stdout).toContain('any at: parse()');
+      expect(out.stdout).toMatch(/any\s+at: parse\(\)/);
       // A parameter is walked THROUGH: the leak is inside the type it names,
       // and no position on the way to it says so.
-      expect(out.stdout).toContain('any at: run(o).extra');
+      expect(out.stdout).toMatch(/any\s+at: run\(o\)\.extra/);
       // The leak names the parameter that leaks. `cb` is fully typed and is
       // itself a function, which is the neighbor a parameter list is most
       // likely to be misattributed to.
-      expect(out.stdout).toContain('any at: pick(tail)');
+      expect(out.stdout).toMatch(/any\s+at: pick\(tail\)/);
       // Annotating both positions answers it — no false leak on the way.
       expect(out.stdout).toMatch(/✓ Solid/);
       expect(out.stdout).toContain('1/6 exports fully typed (16.7%)');
@@ -1919,11 +1921,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(out.stdout).toMatch(/✓ statedObj/);
       // Unstated AND wide: a missing annotation, one edit away.
       expect(out.stdout).toMatch(/\{\}\s+at: unstated\(opts\)/);
-      // Unstated but inferred to something real: nothing to report.
-      expect(out.stdout).toMatch(/✓ inferred/);
+      // Unstated and inferred to something REAL: still an absence of a
+      // claim. The type is a snapshot of today's default — change the
+      // default and the published type moves with no consumer told.
+      expect(out.stdout).toMatch(/inferred\s+at: inferred\(n\)/);
       // The callback's own argument is read by the consumer, and claimed.
       expect(out.stdout).toMatch(/✓ withCb/);
-      expect(out.stdout).toContain('4/5 exports fully typed (80.0%)');
+      expect(out.stdout).toContain('3/5 exports fully typed (60.0%)');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -2034,7 +2038,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'authored: () => Bag = -> ({ hole: 1 })',
         "guessed = -> ({ hole: (JSON.parse('1') as unknown) })",
         '',
-        'export def fromAuthored()',
+        'export def fromAuthored(): Bag',
         '  return authored()',
         '',
         'export def fromGuessed()',
@@ -2115,7 +2119,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       const out = check(dir, ['--public']);
       // Surfaces at the export…
-      expect(out.stdout).toContain('any at: thing(input)');
+      expect(out.stdout).toMatch(/any\s+at: thing\(input\)/);
       // …and carries the lambda's parameter position, column and all.
       expect(out.stdout).toMatch(/index\.rip:5:11\s+any\s+at: thing\(input\)/);
       // Not the typed helper it calls, nor the export it surfaced on.
@@ -2183,7 +2187,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'package.json': JSON.stringify({ name: '@ret/inside', rip: { strict: true }, exports: { '.': './index.rip' } }),
       'index.rip': [
         'def build()',
-        '  call = (input: string) -> Promise.resolve(null as any)',
+        '  call = (input: string): Promise<any> -> Promise.resolve(null as any)',
         '  Object.assign call, { get: call, post: call }',
         '',
         'export thing = build()',

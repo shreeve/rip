@@ -457,7 +457,7 @@ async function returnIsStated(params, origin, synthesized) {
 // `--public` audit, and the inherited-`any` advisory an ordinary `rip
 // check` runs over the published surface of a strict package's
 // dependencies.
-async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, functionTypeId, caches, synthesized) {
+async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, functionTypeId, caches, synthesized, claims) {
   const seen = new Set();
   const found = [];
   // Positions the CHECKER had no type for. The async API is allowed to
@@ -469,6 +469,15 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
     const next = [];
     for (const item of level) {
       const width = await widthCached(ck, item.type, owns, functionTypeId, caches);
+      // A signature position that states nothing publishes whatever the
+      // body or the default produced, however specific that looks. An
+      // inferred type is a snapshot of an implementation rather than a
+      // contract offered to anyone: it moves when the implementation
+      // moves, and a consumer who compiled against it is told nothing.
+      // The two positions where inference answers with something specific
+      // enough to hide behind are a return and a parameter carrying a
+      // default — a parameter with neither is `any`, and caught below.
+      const unclaimed = claims && item.signature === true && !item.stated;
       // `any` and `Function` are unchecked in either direction. Anything
       // else that carries nothing is a defect only where it arrived
       // without an annotation to claim it.
@@ -485,6 +494,13 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
       if (width !== null && (width === 'any' || width === 'Function' || !item.stated)) {
         found.push({ why: width, at: item.at, origin: item.site ?? await declarationSiteOf(item.origin) });
         continue;
+      }
+      // A position that states nothing still HAS a type, and everything
+      // under it is surface a consumer meets. Recorded and then walked
+      // into: a missing annotation names itself without hiding what a
+      // stated one would have been checked against.
+      if (unclaimed) {
+        found.push({ why: 'inferred', at: item.at, origin: item.site ?? await declarationSiteOf(item.origin) });
       }
       // This very type, already opened from this very declaration. The
       // pair is the unit because the pair is what a finding names: one
@@ -539,6 +555,7 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
               type: pType,
               at: isCtor ? `${item.at}.new(${p.name})` : `${item.at}(${p.name})`,
               bare: false,
+              signature: true,
               stated: await isStated(p, synthesized),
               origin: p,
             });
@@ -558,6 +575,10 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
             // falls through rather than an opaque token. Answering here
             // the way every other return does reports exactly that case
             // and no other.
+            // A constructor states its return by being one: the class body
+            // is the claim, and there is no annotation to leave off. Only
+            // the width test below answers for the instance.
+            signature: !isCtor,
             stated: await returnIsStated(params, item.origin, synthesized),
             origin: item.origin,
             site: await signatureSiteOf(params),
@@ -666,7 +687,12 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
 // took, rather than everything the module publishes. A count of the whole
 // surface says the same thing to every consumer of a package and so says
 // nothing about any of them.
-export async function walkPublicEntry(session, { mirrorFile, owns, only = null, siblingIds = null, synthesized = () => false }) {
+// `claims` asks the CONTRACT question — a published position that states
+// no type is a defect, whatever inference put there. A caller asking only
+// what ARRIVES in a consumer's hands turns it off: an unstated position
+// still hands over a real type, and stopping the walk there would hide an
+// `any` further down that the consumer does meet.
+export async function walkPublicEntry(session, { mirrorFile, owns, only = null, siblingIds = null, synthesized = () => false, claims = true }) {
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
     if (ck === null) return { rows: [], lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
@@ -727,7 +753,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
       const printed = ((type.flags & TypeFlags.Any) !== 0 && written !== 'any')
         ? `any (written: ${written})`
         : written;
-      const found = await walkOne(ck, type, name, owns, rootSym, siblings, functionTypeId, caches, synthesized);
+      const found = await walkOne(ck, type, name, owns, rootSym, siblings, functionTypeId, caches, synthesized, claims);
       lost += found.lost;
       // Q3: three states, and the third is a fact about this AUDIT rather than
       // about the code. A name declared in another package is published here
