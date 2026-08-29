@@ -357,6 +357,50 @@ database onto a shared sequence plans one `alter-default` per table —
 which governs new rows only, so ids become unique from that point
 forward, not retroactively.
 
+#### After a load that supplied its own ids
+
+A sequence is an object in its own right, independent of the rows in
+the tables that draw from it, so an INSERT carrying an explicit id does
+not advance it:
+
+```
+sequence before                     305
+INSERT … VALUES (999999, …)         305    ← unchanged
+next default-assigned id            306
+```
+
+Any restore, import, or bulk load that supplies ids therefore leaves
+the counter sitting behind them, and the next ordinary insert collides.
+A shared sequence makes this better, not worse: one counter covers the
+whole load, so there is one thing to put right rather than one per
+table.
+
+Putting it right is not a reset. DuckDB refuses to drop or replace a
+sequence while a column still defaults from it:
+
+```
+CREATE OR REPLACE SEQUENCE id START 10002
+→ Dependency Error: Cannot drop entry "id" because there are entries
+  that depend on it
+```
+
+Advance it instead — one statement, nothing dropped:
+
+```sql
+SELECT max(nextval('id')) FROM range(500);   -- 306 becomes 806
+```
+
+`range(N)` draws N values and throws them away; size N at or above
+`highest id the load wrote − where the counter sits`. The gap that
+leaves costs nothing, because ids under a shared sequence were never a
+count of anything.
+
+The alternative is to not supply ids at all: insert in dependency
+order, let the sequence assign each row, and carry an old→new map to
+rewrite the foreign keys with. That leaves the counter correctly
+positioned for free, and is usually the better shape for a renumbering
+load.
+
 ### Relations: `@belongsTo`, `@hasOne`, `@hasMany`
 
 ```rip
