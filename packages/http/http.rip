@@ -55,6 +55,19 @@ type Options =
 
 type Fetcher = (input: string | URL, opts?: Options) => Promise<Response>
 
+type Instance = Fetcher & {
+  get: Fetcher
+  post: Fetcher
+  put: Fetcher
+  patch: Fetcher
+  del: Fetcher
+  head: Fetcher
+  create: (opts?: Options) => Instance
+  extend: (opts?: Options) => Instance
+  HTTPError: typeof HTTPError
+  TimeoutError: typeof TimeoutError
+}
+
 # ==[ Error Classes ]==
 
 export class HTTPError extends Error
@@ -280,7 +293,7 @@ def request(input, opts = {})
 def buildMethod(call, method): Fetcher
   (input, opts = {}) -> call(input, { ...opts, method })
 
-def makeInstance(defaults = {})
+def makeInstance(defaults: Options = {}): Instance
   call: Fetcher = (input, opts = {}) -> request(input, mergeOptions(defaults, opts))
   Object.assign call,
     get:          buildMethod(call, 'GET')
