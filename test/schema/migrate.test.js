@@ -85,6 +85,7 @@ function migrateAdapter(deployed, opts = {}) {
   // held raises the duplicate-key error the runner classifies as
   // "lock held"; release clears it; --force deletes then re-acquires.
   const lock = { held: false };
+  let operations = [];   // the '@op:…' rows, kept aside so a test can read them back
   // Serve the deployed spec as the `GET /catalog` contract document —
   // the mapping duckdb-harbor performs — so the runner's introspect()
   // round-trips through the same document shape the live adapter
@@ -132,14 +133,26 @@ function migrateAdapter(deployed, opts = {}) {
   };
   const answer = (sql, params, staged) => {
     if (opts.failOn && opts.failOn.test(sql)) throw new Error(opts.failMessage || ('injected failure: ' + sql));
-    if (sql.startsWith('DELETE FROM _rip_migration_lock')) {
-      lock.held = false;
-      return { columns: [], data: [], rowCount: 1 };
+    // History, lock and run outcomes share the `schema` table, told
+    // apart by the reserved '@' key exactly as the runner tells them
+    // apart — so the fake exercises the real discrimination rather than
+    // a table name that would make any mix-up invisible.
+    const ok = (n) => ({ columns: [], data: [], rowCount: n });
+    if (sql.startsWith('DELETE FROM schema WHERE version = ?')) {
+      if (params[0] === '@lock') lock.held = false;
+      else operations = operations.filter((o) => o.key !== params[0]);
+      return ok(1);
     }
-    if (sql.startsWith('INSERT INTO _rip_migration_lock')) {
-      if (lock.held) throw new Error('Duplicate key "id: 1" violates primary key constraint');
-      lock.held = true;
-      return { columns: [], data: [], rowCount: 1 };
+    if (sql.startsWith('INSERT INTO schema (version, name) VALUES')) {
+      if (params[0] === '@lock') {
+        if (lock.held) throw new Error('Duplicate key "version: @lock" violates primary key constraint');
+        lock.held = true;
+      }
+      return ok(1);
+    }
+    if (sql.startsWith('INSERT INTO schema (version, name, detail)')) {
+      operations.push({ key: params[0], outcome: params[1], detail: params[2] });
+      return ok(1);
     }
     if (sql.startsWith('SELECT version')) {
       return {
@@ -148,23 +161,23 @@ function migrateAdapter(deployed, opts = {}) {
         rowCount: history.length,
       };
     }
-    if (sql.startsWith('INSERT INTO _rip_migrations')) {
+    if (sql.startsWith('INSERT INTO schema (version, name, checksum)')) {
       const all = [...history, ...(staged || [])];
       if (all.some((h) => h.version === params[0])) {
         throw new Error('Duplicate key "version: ' + params[0] + '" violates primary key constraint');
       }
       (staged || history).push({ version: params[0], name: params[1], checksum: params[2] });
-      return { columns: [], data: [], rowCount: 1 };
+      return ok(1);
     }
-    if (sql.startsWith('UPDATE _rip_migrations')) {
+    if (sql.startsWith('UPDATE schema')) {
       const h = history.find((x) => x.version === params[1]);
       if (h) h.checksum = params[0];
-      return { columns: [], data: [], rowCount: h ? 1 : 0 };
+      return ok(h ? 1 : 0);
     }
-    return { columns: [], data: [], rowCount: 0 };
+    return ok(0);
   };
   const adapter = {
-    history, calls, lock,
+    history, calls, lock, operations: () => operations,
     async query(sql, params = []) {
       calls.push({ sql, params });
       return answer(sql, params, null);
@@ -505,9 +518,13 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(deployed.tables).toEqual([]);
   });
 
-  test('the history table never enters the diff: filtered at the introspect() branch AND inside diffSchemas', async () => {
+  // Both names: `schema` is where the runner keeps its state now, and
+  // the retired names still exist in databases nobody has migrated yet.
+  // Either one reaching a diff would be planned as drop-table.
+  test.each(['schema', '_rip_migrations', '_rip_migration_lock', '_rip_migration_operations'])(
+    'the runner state table %s never enters the diff: filtered at introspect() AND inside diffSchemas', async (stateName) => {
     const historySpec = {
-      name: '_rip_migrations', sequence: null, primaryKey: 'version',
+      name: stateName, sequence: null, primaryKey: 'version',
       columns: [
         { name: 'version', type: 'VARCHAR', notNull: true, unique: false, primary: true, default: null },
         { name: 'name', type: 'VARCHAR', notNull: false, unique: false, default: null },
@@ -2016,7 +2033,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/checksum mismatch on applied migration 0001_init.*--repair/s);
         await mig.migrate({ dir: mdir, repair: true });
       });
-      expect(adapter.calls.some((c) => c.sql.startsWith('UPDATE _rip_migrations SET checksum'))).toBe(true);
+      expect(adapter.calls.some((c) => c.sql.startsWith('UPDATE schema SET checksum'))).toBe(true);
     });
   });
 
@@ -2040,11 +2057,17 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
       expect(r.ran).toEqual(['0001_a', '0002_b']);
       expect(r.transactional).toBe(true);
+      // The lock and the table-ensure are orthogonal infrastructure: the
+      // lock rows are addressed by the reserved '@lock' key, and the
+      // ensure is the adopt-rename / create / add-column / drop-legacy
+      // sequence that runs once before anything else.
+      const infra = (c) => /@lock/.test(JSON.stringify(c.params ?? [])) ||
+        /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS schema|DROP TABLE)/.test(c.sql);
       const stream = adapter.calls
-        .filter((c) => !/_rip_migration_lock/.test(c.sql)) // lock acquire/release is orthogonal infrastructure
+        .filter((c) => !infra(c))
         .map((c) => (c.sql.startsWith('<') ? c.sql : (c.tx ? 'stmt' : 'main')));
-      // ensure-table + applied-select on main, then two clean transactions.
-      expect(stream.join(' ')).toBe('main main <BEGIN> stmt stmt <COMMIT> <BEGIN> stmt stmt <COMMIT>');
+      // applied-select on main, then two clean transactions.
+      expect(stream.join(' ')).toBe('main <BEGIN> stmt stmt <COMMIT> <BEGIN> stmt stmt <COMMIT>');
       expect(adapter.history.length).toBe(2);
     });
   });
@@ -2128,7 +2151,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
           selected = true;
           return { columns: ['version', 'name', 'checksum', 'applied_at'].map((n) => ({ name: n })), data: [], rowCount: 0 };
         }
-        if (sql.startsWith('INSERT INTO _rip_migrations')) {
+        if (sql.startsWith('INSERT INTO schema (version, name, checksum)')) {
           adapter.history.push({ version: '0001', name: 'a', checksum: 'other' });
         }
         return origQuery(sql, params);
@@ -2174,16 +2197,57 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
   });
 
   describe('the migration lock', () => {
-    const lockCalls = (adapter) => adapter.calls.map((c) => c.sql).filter((s) => /_rip_migration_lock/.test(s));
+    // The lock shares the `schema` table with the history, so a lock
+    // call is one whose params carry the reserved key — matching on the
+    // table name alone would sweep in every history write.
+    const lockCalls = (adapter) => adapter.calls
+      .filter((c) => (c.params ?? []).includes('@lock'))
+      .map((c) => c.sql);
 
     test('migrate acquires the lock and releases it after applying', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
         await scoped(adapter, () => mig.migrate({ dir: mdir }));
-        expect(lockCalls(adapter).some((s) => s.startsWith('INSERT INTO _rip_migration_lock'))).toBe(true);
-        expect(lockCalls(adapter).some((s) => s.startsWith('DELETE FROM _rip_migration_lock'))).toBe(true);
+        expect(lockCalls(adapter).some((s) => s.startsWith('INSERT INTO schema (version, name) VALUES'))).toBe(true);
+        expect(lockCalls(adapter).some((s) => s.startsWith('DELETE FROM schema WHERE version = ?'))).toBe(true);
         expect(adapter.lock.held).toBe(false); // released
+      });
+    });
+
+    // The whole migration history and the lock now live in one table, so
+    // the statement that clears a stale lock is one careless WHERE away
+    // from deleting every applied-migration row. This is that WHERE.
+    test('--force clears the lock by its key, never the whole table', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true;                       // a crashed run left it
+        await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
+        const deletes = adapter.calls.filter((c) => /^DELETE FROM schema/.test(c.sql));
+        expect(deletes.length).toBeGreaterThan(0);
+        for (const d of deletes) {
+          expect(d.sql).toContain('WHERE version = ?');   // never bare
+          expect(d.params).toContain('@lock');
+        }
+        expect(adapter.history.length).toBe(1);           // the applied row stands
+      });
+    });
+
+    // Create-before-rename would win: the legacy table would keep the
+    // history, `schema` would be empty, and the next run would re-apply
+    // every file against a populated database.
+    test('adoption renames the legacy table BEFORE creating the new one', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        const at = (re) => adapter.calls.findIndex((c) => re.test(c.sql));
+        const rename = at(/^ALTER TABLE _rip_migrations RENAME TO schema/);
+        const create = at(/^CREATE TABLE IF NOT EXISTS schema/);
+        expect(rename).toBeGreaterThanOrEqual(0);
+        expect(create).toBeGreaterThanOrEqual(0);
+        expect(rename).toBeLessThan(create);
       });
     });
 
@@ -2232,7 +2296,8 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
           const out = await mig.migrate({ dir: mdir, coordinated: true, operationId: '0123456789abcdef0123456789abcdef' });
           expect(out.outcome).toBe('committed');
         });
-        const operationCalls = adapter.calls.filter((c) => /_rip_migration_operations/.test(c.sql));
+        const operationCalls = adapter.calls
+          .filter((c) => (c.params ?? []).some((v) => typeof v === 'string' && v.startsWith('@op:')));
         expect(operationCalls.some((c) => c.params?.includes('unknown'))).toBe(true);
         expect(operationCalls.some((c) => c.params?.includes('committed'))).toBe(true);
       });

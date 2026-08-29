@@ -579,6 +579,14 @@ function validateDirectiveArgs(def, d) {
 // the index-column check. Runs inside
 // _normalize(), so every downstream layer (validator, ORM plan, DDL
 // plan) sees a fully-validated model.
+// The migration runner keeps its whole state in one table of this name
+// (the history, the '@lock' row, the '@op:…' rows). Only the current
+// name is reserved here: the runner's retired names are filtered out of
+// diffs by the runner itself, and naming them in this file — which
+// ships to the browser — would drag CLI-only vocabulary across the
+// delivery boundary the tests defend.
+const RUNNER_TABLE_NAMES = new Set(['schema']);
+
 function finishModelNorm(def, norm) {
   if (!def.name) {
     throw modelError(def, '', 'name', 'a :model needs a name — its table name derives from it');
@@ -668,6 +676,18 @@ function finishModelNorm(def, norm) {
   // table, @table the desired one, and the pluralizer is bypassed
   // entirely when @table is present.
   norm.tableName = table ?? tableName(def.name);
+
+  // The migration runner keeps its whole state — history, lock, run
+  // outcomes — in a table called `schema`, and it must never collide
+  // with one of yours. The runner filters that name out of every diff,
+  // so a model claiming it would be invisible to `plan` and `make`:
+  // never created, never altered, silently absent. Refuse it here,
+  // where the author can see why, rather than there, where nobody can.
+  if (RUNNER_TABLE_NAMES.has(norm.tableName)) {
+    throw modelError(def, norm.tableName, 'collision',
+      "'" + norm.tableName + "' is reserved for the migration runner's own state — " +
+      'rename the model, or give it another table with @table');
+  }
 
   // ── surrogate or natural: DECLARING the pk as a field is the switch ─
   //

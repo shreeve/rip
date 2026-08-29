@@ -26,7 +26,7 @@ db.exec 'PRAGMA busy_timeout = 5000'
 # `IF NOT EXISTS` means an edit to models.rip does not reach a cart.sqlite that
 # already exists; delete the file and let this rebuild it. A demo whose whole
 # point is "nothing to install" does not get rip's real migration machinery
-# (`rip schema plan/push` and the _rip_migrations ledger), which runs against
+# (`rip schema plan/push` and the `schema` ledger), which runs against
 # the DuckDB adapter.
 export createSchema = ->
   # SQLite's flexible typing accepts DuckDB's VARCHAR/DOUBLE/JSON/TIMESTAMP

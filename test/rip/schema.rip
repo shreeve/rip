@@ -3714,6 +3714,27 @@ fail "reserved ORM name as field in :model", '''
   User.toSQL()
 '''
 
+# `schema` is where the migration runner keeps its own state — the
+# applied-migration history, the '@lock' row, the '@op:…' rows. The
+# runner filters that name out of every diff, so a model claiming it
+# would be invisible to plan and make: never created, never altered,
+# silently absent. Refused at the model, where the author can see why.
+
+# The boundary is the TABLE name, not the model name: `Schema`
+# pluralizes to `schemas` and collides with nothing.
+test "a model named Schema is fine — it renders to `schemas`", '''
+  Schema = schema :model
+    name! string
+  Schema.toSQL().includes("schemas")
+  ''', true
+
+fail "@table cannot claim `schema`", '''
+  Thing = schema :model
+    @table schema
+    name! string
+  Thing.toSQL()
+'''
+
 # Implicit-column names (createdAt / updatedAt / deletedAt) are managed
 # by @times and @softDelete. Declaring them as user fields would
 # either shadow the runtime API or produce duplicate SET writes for
@@ -5169,7 +5190,7 @@ migrateHeader = '''
       calls.push {sql, params}
       if sql.startsWith("SELECT version")
         {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
-      else if sql.startsWith("INSERT INTO _rip_migrations")
+      else if sql.startsWith("INSERT INTO schema (version, name, checksum)")
         history.push {version: params[0], name: params[1], checksum: params[2]}
         {columns: [], data: [], rows: 1}
       else

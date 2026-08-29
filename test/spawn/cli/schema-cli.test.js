@@ -3,7 +3,7 @@
 // subprocesses (the cli.test.js conventions: real fixture files in a
 // temp cwd, stdout/stderr/exit-status assertions). The fixture
 // adapter is FILE-BACKED (Contract v2 with catalog()), so state —
-// the `_rip_migrations` history and the statement log — survives
+// the `schema` history and the statement log — survives
 // across the separate `make` and `migrate` processes; it has no
 // begin(), so the non-transactional posture surfaces exactly as a
 // real begin-less adapter would.
@@ -93,13 +93,13 @@ export function fileDB(path) {
           data: s.history.map((h) => [h.version, h.name, h.checksum, null]),
           rowCount: s.history.length,
         };
-      } else if (sql.startsWith('INSERT INTO _rip_migrations')) {
+      } else if (sql.startsWith('INSERT INTO schema (version, name, checksum)')) {
         if (s.history.some((h) => h.version === params[0])) {
           save(s);
           throw new Error('Duplicate key "version: ' + params[0] + '" violates primary key constraint');
         }
         s.history.push({ version: params[0], name: params[1], checksum: params[2] });
-      } else if (sql.startsWith('UPDATE _rip_migrations')) {
+      } else if (sql.startsWith('UPDATE schema')) {
         const h = s.history.find((x) => x.version === params[1]);
         if (h) h.checksum = params[0];
       }

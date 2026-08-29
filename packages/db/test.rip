@@ -2146,17 +2146,19 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
   answer = (sql, params) ->
     if failSql? and failSql.test sql
       return { ok: false, error: "Parser Error: #{sql.split('\n')[0]}", errorCode: 'PARSE_ERROR' }
-    if sql.startsWith 'DELETE FROM _rip_migration_lock'
+    # History, lock and run outcomes share the `schema` table; the
+    # reserved '@lock' key is what tells the lock apart.
+    if sql.startsWith('DELETE FROM schema') and params?[0] is '@lock'
       lock.held = false
       return ack
-    if sql.startsWith 'INSERT INTO _rip_migration_lock'
+    if sql.startsWith('INSERT INTO schema (version, name) VALUES') and params?[0] is '@lock'
       if lock.held
-        return { ok: false, error: 'Duplicate key "id: 1" violates primary key constraint', errorCode: 'CONSTRAINT' }
+        return { ok: false, error: 'Duplicate key "version: @lock" violates primary key constraint', errorCode: 'CONSTRAINT' }
       lock.held = true
       return ack
     if sql.startsWith 'SELECT version'
       return res ['version', 'name', 'checksum', 'applied_at'], history.map (h) -> [h.version, h.name, h.checksum, null]
-    if sql.startsWith 'INSERT INTO _rip_migrations'
+    if sql.startsWith 'INSERT INTO schema (version, name, checksum)'
       if history.some (h) -> h.version is params[0]
         return { ok: false, error: "Duplicate key \"version: #{params[0]}\"", errorCode: 'CONSTRAINT' }
       history.push { version: params[0], name: params[1], checksum: params[2] }
@@ -2242,7 +2244,7 @@ test! "a pending file is applied in one session with history row, then lock rele
   ok fetch.calls.some (c) -> c.sql is 'COMMIT' and c.sessionId is 'sess-1'
   ok fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith '/sql/sessions/sess-1'
   eq fetch.history.map((h) -> h.version), ['0001']
-  ok fetch.calls.some (c) -> c.sql?.startsWith 'INSERT INTO _rip_migration_lock'
+  ok fetch.calls.some (c) -> c.sql?.startsWith('INSERT INTO schema (version, name) VALUES') and c.params?[0] is '@lock'
   eq fetch.lock.held, false
 
 test! "a failing statement rolls back, drops session, records no history", ->

@@ -38,7 +38,7 @@ export const fileDB = (path) => {
         save(state)
         throw new Error('FAIL_NOW tripped')
       }
-      if (sql.startsWith('INSERT INTO _rip_migrations')) {
+      if (sql.startsWith('INSERT INTO schema (version, name, checksum)')) {
         state.history.push({ version: params[0], name: params[1], checksum: params[2] })
       }
       save(state)

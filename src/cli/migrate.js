@@ -23,7 +23,7 @@
 // Migration FILES are plain SQL — numbered, hand-editable, checked
 // into git. The generator writes them; humans may amend them;
 // migrate() applies them and records (version, name, checksum,
-// applied_at) in the `_rip_migrations` table. A checksum mismatch on
+// applied_at) in the `schema` table. A checksum mismatch on
 // an applied file aborts (someone edited history) unless
 // {repair: true} re-records checksums.
 //
@@ -45,14 +45,41 @@ import {
   transaction, quoteIdent, renderCreate, renderIndex, sqlEnumType, sqlEnumMembers,
 } from '../runtime/orm.js';
 
-const MIGRATIONS_TABLE = '_rip_migrations';
-const LOCK_TABLE = '_rip_migration_lock';
-const OPERATIONS_TABLE = '_rip_migration_operations';
+// ONE table holds everything the runner knows, and it is called what it
+// is about: `schema`. Three kinds of row, told apart by the key, which
+// is why the reserved ones wear an '@' no version string can produce:
+//
+//   '0001', '0002', …   an applied migration — the history, and the
+//                       only kind anybody reads back
+//   '@lock'             the mutex, present ONLY while a migrate runs.
+//                       Its arbitration is the PRIMARY KEY itself:
+//                       exactly one racer's INSERT lands, the rest hit
+//                       the constraint and fail fast.
+//   '@op:<id>'          a coordinated run's outcome, recorded durably
+//                       so a child that dies before reporting still
+//                       leaves evidence a human can find.
+//
+// A lock is not history and an outcome is not history, so `@` earns its
+// keep: appliedMigrations() filters on it in the one place the table is
+// ever read, and no caller can forget.
+const STATE_TABLE = 'schema';
+const LOCK_KEY = '@lock';
+const OP_PREFIX = '@op:';
 
-// The runner's own state tables — history and lock — are never part of
-// the schema under management, so they must never reach a diff (where
-// "not declared" would read as drop-table).
-const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE, OPERATIONS_TABLE]);
+// What the runner used to be called. Kept for two jobs: adopting a
+// database that predates the rename, and keeping the old names out of
+// diffs until every database has been adopted — a plan proposing
+// `drop-table _rip_migrations` is the data-loss cousin of silence.
+const LEGACY_STATE_TABLE = '_rip_migrations';
+const LEGACY_LOCK_TABLE = '_rip_migration_lock';
+const LEGACY_OPS_TABLE = '_rip_migration_operations';
+
+// The runner's own state is never part of the schema under management,
+// so it must never reach a diff (where "not declared" reads as
+// drop-table).
+const RUNNER_TABLES = new Set([
+  STATE_TABLE, LEGACY_STATE_TABLE, LEGACY_LOCK_TABLE, LEGACY_OPS_TABLE,
+]);
 
 export { adapterConfigured as adapterConfigured };
 
@@ -107,8 +134,8 @@ const NEXTVAL_RE = /nextval\(\s*'((?:[^']|'')*)'\s*\)/i;
 // never varies with the DuckDB version harbor links. Foreign keys
 // arrive as structural fields (`columns`/`refTable`/`refColumns`),
 // so a referenced table is never recovered from constraint prose.
-// The `_rip_migrations` history table is the runner's own state and
-// is filtered out below.
+// The `schema` table is the runner's own state and is filtered out
+// below.
 export async function introspect() {
   const adapter = requireCatalog('schema.introspect');
   const doc = await adapter.catalog(UNBOUNDED);
@@ -546,9 +573,8 @@ export function diffSchemas(declared, deployed) {
   const dRaw = new Map(declaredSorted.map((t) => [t.name, t]));
   const dTables = new Map(declaredSorted.map((t) => [t.name, foldSpec(t)]));
   // Belt and suspenders with introspect()'s filter: the runner's own
-  // state tables (history and lock) must never enter the diff from ANY
-  // caller — a plan proposing `drop-table _rip_migrations` is the
-  // data-loss cousin of a silent acceptance.
+  // state must never enter the diff from ANY caller — a plan proposing
+  // `drop-table schema` is the data-loss cousin of a silent acceptance.
   const pTables = new Map(deployed.tables
     .filter((t) => !RUNNER_TABLES.has(t.name))
     .map((t) => [t.name, foldSpec(t)]));
@@ -1338,62 +1364,124 @@ function rejectDuplicateVersions(files, who) {
     '\nRenumber one of each pair (two branches generated migrations independently) before applying anything.');
 }
 
-async function appliedMigrations() {
+// "That table isn't there" is the only failure these swallow. A refused
+// connection or a bad credential must still reach the caller — a
+// migrate that silently believes nothing is applied would re-apply
+// everything.
+const ABSENT = /does not exist|not found|Catalog Error/i;
+
+async function tryRun(sql, params = []) {
   try {
-    const res = await runSQL('SELECT version, name, checksum, applied_at FROM ' + MIGRATIONS_TABLE + ' ORDER BY version', []);
-    return migrateRows(res);
+    await runSQL(sql, params);
+    return true;
   } catch (e) {
-    // History table doesn't exist yet — nothing applied. Anything
-    // else (connection refused, auth) should propagate.
-    if (/does not exist|Catalog Error/i.test(e?.message || '')) return [];
+    if (ABSENT.test(e?.message || '')) return false;
     throw e;
   }
 }
 
-async function ensureMigrationsTable() {
-  await runSQL('CREATE TABLE IF NOT EXISTS ' + MIGRATIONS_TABLE +
-    ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
+// The history, and ONLY the history: the reserved '@' keys are a lock
+// and a run outcome, neither of which is a migration. This is the one
+// place the table is read, which is what makes the filter safe to state
+// once.
+async function appliedMigrations() {
+  const read = async (table) => {
+    const res = await runSQL(
+      "SELECT version, name, checksum, applied_at FROM " + table +
+      " WHERE version NOT LIKE '@%' ORDER BY version", []);
+    return migrateRows(res);
+  };
+  try {
+    return await read(STATE_TABLE);
+  } catch (e) {
+    if (!ABSENT.test(e?.message || '')) throw e;
+  }
+  // Not renamed yet. status and plan are read-only and take no lock, so
+  // they must still see the history where it actually lives — reading
+  // an unadopted database as "nothing applied" would report every
+  // migration as pending.
+  try {
+    return await read(LEGACY_STATE_TABLE);
+  } catch (e) {
+    if (ABSENT.test(e?.message || '')) return [];
+    throw e;
+  }
 }
 
+// Idempotent, and the only writer of the table's shape. It also adopts
+// a database from before the rename: the columns are unchanged, so the
+// rename carries the whole history across and nothing is re-applied.
+// The old lock and operations tables have no successor to inherit —
+// a lock is meaningless once the process holding it is gone, and
+// nothing has ever read an operation row back.
+//
+// THE RENAME GOES FIRST, and the order is not cosmetic. Create `schema`
+// before renaming and the CREATE wins: the legacy table keeps the
+// history, the new one is empty, and the very next run reads no applied
+// migrations and re-applies every file against a populated database.
+//
+// Called ONCE per migrate, before the lock — everything downstream
+// (the lock row, the history rows, the '@op:…' rows) assumes the table
+// is already there.
+async function ensureMigrationsTable() {
+  await tryRun('ALTER TABLE ' + LEGACY_STATE_TABLE + ' RENAME TO ' + STATE_TABLE);
+  await runSQL('CREATE TABLE IF NOT EXISTS ' + STATE_TABLE +
+    ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, detail VARCHAR,' +
+    ' applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
+  // An adopted table predates `detail`; already-there is not an error.
+  try {
+    await runSQL('ALTER TABLE ' + STATE_TABLE + ' ADD COLUMN detail VARCHAR', []);
+  } catch (e) {
+    if (!/already exists|duplicate column/i.test(e?.message || '')) throw e;
+  }
+  await tryRun('DROP TABLE ' + LEGACY_LOCK_TABLE);
+  await tryRun('DROP TABLE ' + LEGACY_OPS_TABLE);
+}
+
+// Write-only by design: nothing in the runner reads these back. The
+// manager learns an outcome from the child's stdout, and this row is
+// what survives when the child dies before it can say anything.
 async function recordMigrationOperation(id, outcome, detail = null) {
   if (!id) return;
-  await runSQL('CREATE TABLE IF NOT EXISTS ' + OPERATIONS_TABLE +
-    ' (id VARCHAR PRIMARY KEY, outcome VARCHAR, detail VARCHAR, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
-  await runSQL('DELETE FROM ' + OPERATIONS_TABLE + ' WHERE id = ?', [id]);
-  await runSQL('INSERT INTO ' + OPERATIONS_TABLE + ' (id, outcome, detail) VALUES (?, ?, ?)',
-    [id, outcome, detail]);
+  // No ensure here: every caller is inside migrate(), which ensured the
+  // table before it took the lock. Re-running the adoption dance per
+  // write would triple the statements a migration issues for nothing.
+  const key = OP_PREFIX + id;
+  await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ?', [key]);
+  await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name, detail) VALUES (?, ?, ?)',
+    [key, outcome, detail]);
 }
 
 // ── the migration lock ────────────────────────────────────────────────
 //
-// A single-row lock table serializes concurrent `migrate` runs so two
+// One reserved row serializes concurrent `migrate` runs so two
 // processes never both compute "pending" and apply the same files. The
-// PRIMARY KEY on the lone id=1 row is the atomic gate: exactly one
-// racer's INSERT succeeds, the rest hit the constraint and fail fast
-// with a named remedy rather than racing. A crashed run leaves the row
-// behind — `--force` clears a stale lock before acquiring. Applies run
-// UNDER the lock; status/plan are read-only and take none.
-async function ensureLockTable() {
-  await runSQL('CREATE TABLE IF NOT EXISTS ' + LOCK_TABLE +
-    ' (id INTEGER PRIMARY KEY, acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, owner VARCHAR)', []);
-}
-
+// PRIMARY KEY on '@lock' is the atomic gate: exactly one racer's INSERT
+// succeeds, the rest hit the constraint and fail fast with a named
+// remedy rather than racing. A crashed run leaves the row behind —
+// `--force` clears a stale lock before acquiring. Applies run UNDER the
+// lock; status/plan are read-only and take none.
+//
+// It shares a table with the history, so every statement here names the
+// row it means. `name` carries the owner token and `applied_at` — which
+// already defaults to now — is the moment it was taken.
 async function acquireMigrationLock(opts = {}) {
-  await ensureLockTable();
   // --force takes over a lock a crashed run never released. It deletes
   // unconditionally, so it also steals a LIVE peer's lock — the CLI
   // documents it as safe only when no migration is running.
   if (opts.coordinated && (opts.force || opts.repair)) {
     throw new Error('schema.migrate: coordinated migration rejects --force and --repair');
   }
-  if (opts.force) await runSQL('DELETE FROM ' + LOCK_TABLE, []);
+  // QUALIFIED, and it must stay that way: an unqualified DELETE here
+  // would take the entire migration history with the lock.
+  if (opts.force) await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ?', [LOCK_KEY]);
   const owner = opts.ownerToken || (
     (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : ((typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid + ':' + Date.now() : 'rip-schema:' + Date.now())
   );
   try {
-    await runSQL('INSERT INTO ' + LOCK_TABLE + ' (id, owner) VALUES (1, ?)', [owner]);
+    await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name) VALUES (?, ?)', [LOCK_KEY, owner]);
   } catch (e) {
     if (/violates (unique|primary key) constraint|already taken|Duplicate key/i.test(e?.message || '')) {
       const err = new Error(
@@ -1413,7 +1501,7 @@ async function releaseMigrationLock(owner) {
   // successful apply) leaves a stale lock the next run clears with
   // --force; it must never mask the migration's own outcome.
   try {
-    await runSQL('DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1 AND owner = ?', [owner]);
+    await runSQL('DELETE FROM ' + STATE_TABLE + ' WHERE version = ? AND name = ?', [LOCK_KEY, owner]);
   } catch {
     // swallowed on purpose — see above
   }
@@ -1722,7 +1810,7 @@ async function migrateApply(opts, files) {
     const a = appliedByVersion.get(f.version);
     if (!a || a.checksum === f.checksum) continue;
     if (opts.repair) {
-      await runSQL('UPDATE ' + MIGRATIONS_TABLE + ' SET checksum = ? WHERE version = ?',
+      await runSQL('UPDATE ' + STATE_TABLE + ' SET checksum = ? WHERE version = ?',
         [f.checksum, f.version]);
     } else {
       throw new Error(
@@ -1748,7 +1836,7 @@ async function migrateApply(opts, files) {
       for (at = 0; at < statements.length; at++) {
         await runSQL(statements[at], []);
       }
-      await runSQL('INSERT INTO ' + MIGRATIONS_TABLE + ' (version, name, checksum) VALUES (?, ?, ?)',
+      await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name, checksum) VALUES (?, ?, ?)',
         [f.version, f.name, f.checksum]);
     };
     // Transactional apply when the adapter supports it (the adapter
@@ -1765,7 +1853,7 @@ async function migrateApply(opts, files) {
       const where = at >= statements.length
         ? 'recording its history row (every statement applied' +
           (/violates (unique|primary key) constraint|already taken/i.test(e?.message || '')
-            ? '; the version already exists in ' + MIGRATIONS_TABLE + ' — was another `rip schema migrate` running concurrently?'
+            ? '; the version already exists in ' + STATE_TABLE + ' — was another `rip schema migrate` running concurrently?'
             : '') + ')'
         : 'statement ' + (at + 1) + ' of ' + statements.length + ':\n  ' + statements[at].split('\n')[0];
       const posture = ddlTransactional
