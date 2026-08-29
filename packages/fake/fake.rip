@@ -399,6 +399,11 @@ __factoryDerive = (norm, overrides) ->
   norm.fields.forEach (f, n) ->
     return if skip.has(n) or fkCols.has(n)
     return if f.constraints?.default isnt undefined
+    # A field with a '-> transform' already knows how to fill itself
+    # (minted ids, tokens). Inventing a value here would be handed to
+    # that transform as a caller-supplied one and kept — so a unique
+    # public identifier would silently carry two fake words.
+    return if typeof f.transform is 'function'
     return if f.optional and not chance(0.8)
     if n is 'firstName' and ctx.firstName then attrs[n] = ctx.firstName; return
     if n is 'lastName' and ctx.lastName then attrs[n] = ctx.lastName; return
