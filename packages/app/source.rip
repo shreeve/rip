@@ -1,12 +1,14 @@
 export type NonNullSourceValue = object | string | number | boolean | symbol | bigint
 
-# Milliseconds, or a duration string in the shapes DURATION_RE accepts
-# (`'5 min'`, `'2h'`). The v3-style template-literal tightening (catch a
-# typo'd unit like `'5 mins'` at the type level) is unspellable here:
-# Rip's structured types deliberately carry no template-literal types,
-# so the runtime parse below stays the sole authority on duration
-# strings.
-export type Duration = number | string
+# A stale time: milliseconds as a number, or a duration string in the
+# ONE canonical casing DURATION_RE accepts. The unit list and the
+# regex are the same language and must move together; the parse stays
+# the authority on what a duration MEANS.
+# `${number}` is wider than the regex's numeric part, so a sign, a hex
+# literal, or a leading space types clean and throws at parse — the
+# residual TypeScript's placeholder cannot express.
+export type DurationUnit = 's' | 'sec' | 'second' | 'seconds' | 'm' | 'min' | 'minute' | 'minutes' | 'h' | 'hr' | 'hour' | 'hours' | 'd' | 'day' | 'days' | 'w' | 'week' | 'weeks' | 'y' | 'year' | 'years'
+export type Duration = number | `${number}` | `${number}${DurationUnit}` | `${number} ${DurationUnit}`
 
 export type SourceArgs = [] | [unknown]
 
@@ -55,7 +57,10 @@ SOURCE =! :rip.source
 SOURCE_FAMILY =! :rip.source.family
 SOURCE_FAMILY_CAP =! 64
 PRELOAD_FRESH_MS =! 30_000
-DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i
+# Case-SENSITIVE: `'5 min'` is the one spelling, so the Duration type
+# and this regex accept the same set. A case-insensitive match here
+# would admit a dialect no literal union can describe.
+DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/
 
 export def _isSourceCell(value): boolean
   value? and (typeof value is 'object' or typeof value is 'function') and
@@ -76,7 +81,7 @@ parseStaleTime = (value) ->
     parts = value.match DURATION_RE
     if parts
       amount = parseFloat parts[1]
-      return switch parts[2][0].toLowerCase()
+      return switch parts[2][0]
         when 's' then amount * 1000
         when 'm' then amount * 60000
         when 'h' then amount * 3600000

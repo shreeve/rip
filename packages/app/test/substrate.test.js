@@ -553,11 +553,19 @@ describe('invalid calls', () => {
   });
 });
 
+// The duration language the `Duration` type describes, and what a
+// duration MEANS once parsed. The type is a literal union and the
+// parse is a regex; they accept the same set, so a spelling that
+// belongs in one belongs in both. Anything the parse refuses must
+// THROW rather than silently read as zero.
 describe('staleTime durations', () => {
-  // The duration vocabulary is behavioral, not just parsed: a fresh
-  // cell's ensure() answers without refetching, a stale one refetches
-  // in the background. `'forever'` rides every suite above; these pin
-  // the number and duration-string forms.
+  const parse = value => source({ fetch: async () => ({}), staleTime: value });
+  const accepts = value => expect(() => parse(value)).not.toThrow();
+  const rejects = value => expect(() => parse(value)).toThrow('staleTime');
+
+  // The vocabulary is behavioral, not just parsed: a fresh cell's
+  // ensure() answers without refetching, a stale one refetches.
+  // `'forever'` rides every suite above.
   const counting = staleTime => {
     let calls = 0;
     const stash = createStash({
@@ -588,14 +596,52 @@ describe('staleTime durations', () => {
     expect(calls()).toBe(2);
   });
 
-  test('every documented spelling is accepted at declaration', () => {
-    for (const staleTime of ['2h', '1.5 days', '90 SEC', '500', 0, 250]) {
-      expect(() => source({ fetch: async () => ({}), staleTime })).not.toThrow();
+  test('every unit spelling is accepted, spaced and unspaced', () => {
+    for (const unit of [
+      's', 'sec', 'second', 'seconds', 'm', 'min', 'minute', 'minutes',
+      'h', 'hr', 'hour', 'hours', 'd', 'day', 'days',
+      'w', 'week', 'weeks', 'y', 'year', 'years',
+    ]) {
+      accepts(`5${unit}`);
+      accepts(`5 ${unit}`);
     }
   });
 
-  test("a typo'd unit rejects at declaration", () => {
-    expect(() => source({ fetch: async () => ({}), staleTime: '5 mins' })).toThrow('staleTime');
-    expect(() => source({ fetch: async () => ({}), staleTime: -1 })).toThrow('staleTime');
+  test('numbers, bare numeric strings, and "forever" are accepted', () => {
+    accepts(0);
+    accepts(250);
+    accepts(5000);
+    accepts('5000');
+    accepts('forever');
+    accepts('2.5 min');
+    accepts('1.5 days');
+    accepts('1e3 sec');
+  });
+
+  test('a misspelled unit is refused, not read as zero', () => {
+    rejects('5 minz');
+    rejects('5 mins');
+    rejects('5 mo');
+    rejects('1 yr');
+    rejects('nonsense');
+    rejects('');
+  });
+
+  test('durations are case-sensitive — one canonical spelling', () => {
+    // The single break this tightening makes, pinned in both
+    // polarities: lowercase is the language, and the casings a
+    // literal union could never describe are refused rather than
+    // silently accepted into a dialect.
+    accepts('5 min');
+    rejects('5 Min');
+    rejects('5 MIN');
+    rejects('90 SEC');
+    rejects('2H');
+  });
+
+  test('a negative or non-finite number is refused', () => {
+    rejects(-1);
+    rejects(Infinity);
+    rejects(NaN);
   });
 });
