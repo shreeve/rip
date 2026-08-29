@@ -1,6 +1,6 @@
-import { migrate } from './api/db.rip'
+import { createSchema } from './api/db.rip'
 import { seed } from './api/seed.rip'
 
 export def setup
-  migrate()
+  createSchema()
   seed()

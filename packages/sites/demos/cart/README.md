@@ -13,8 +13,8 @@ path through a real Rip Site.
 | Path | Role |
 | --- | --- |
 | `serve.rip` | Catalog entry: names the site `cart`, hosts `cart.via.rip` / `cart.local`, `hub.bridge: 'hub'` (tray **Add Site…** target) |
-| `index.rip` | API entry: migrate/seed, `use sessions`, the `hub` bridge, `/styles.css`, bare `start!` handoff |
-| `setup.rip` | One-shot `migrate` + `seed` |
+| `index.rip` | API entry: createSchema/seed, `use sessions`, the `hub` bridge, `/styles.css`, bare `start!` handoff |
+| `setup.rip` | One-shot `createSchema` + `seed` |
 | `api/` | SQLite adapter, models, seed, `/api/*` handlers (not a public URL tree) |
 | `app/index.html` | SPA shell (Pico + styles + `bootApp`) |
 | `app/stash.rip` | `stash` — cart + `source` cells for user/products/orders plus the parametric `order` source |
