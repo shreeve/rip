@@ -1,0 +1,111 @@
+# Test: Implicit objects — the trailing-comma continuation.
+#
+# A trailing comma before an indented line CONTINUES the property list.
+# CoffeeScript reads those indented pairs as a SECOND argument
+# (`f({x: 1, y: 2}, {z: 3})`), so for the single-options-object call this
+# form is almost always written as, the continuation line is discarded at
+# run time — no error anywhere, just missing fields. Rip continues the
+# object instead: nobody writes a trailing comma meaning "and now a
+# separate object", and braces say that unambiguously when they do.
+#
+# The rule is narrow on purpose — it fires only when a property list is
+# already open AT the comma. The forms that merely look similar are
+# pinned here next to it, because keeping them apart is the whole job.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+# ==============================================================================
+# The continuation
+# ==============================================================================
+
+code 'trailing comma continues the object', '''
+  f x: 1, y: 2,
+    z: 3
+''', 'f({x: 1, y: 2, z: 3});'
+
+code 'the continuation line may carry several pairs', '''
+  f x: 1, y: 2,
+    z: 3, w: 4
+''', 'f({x: 1, y: 2, z: 3, w: 4});'
+
+code 'and may run for several lines', '''
+  f x: 1,
+    y: 2
+    z: 3
+''', 'f({x: 1, y: 2, z: 3});'
+
+code 'inside explicit call parens too', '''
+  f(x: 1,
+    y: 2)
+''', 'f({x: 1, y: 2});'
+
+# ==============================================================================
+# Continuations chain
+# ==============================================================================
+#
+# A continuation line may itself end in a trailing comma, so the INDENT
+# it pushes has to be transparent to the property list underneath. These
+# used to compile to a fresh object per indent level — three objects for
+# the second row, two of them silently dropped at the call.
+
+code 'a continuation ending in a comma continues again', '''
+  f a: 1,
+    b: 2,
+    c: 3
+''', 'f({a: 1, b: 2, c: 3});'
+
+code 'even when each continuation indents further', '''
+  f a: 1,
+    b: 2,
+      c: 3
+''', 'f({a: 1, b: 2, c: 3});'
+
+# ==============================================================================
+# What the rule must NOT swallow
+# ==============================================================================
+
+code 'no property list open at the comma — a fresh argument', '''
+  f 9,
+    a: 1
+    b: 2
+''', 'f(9, {a: 1, b: 2});'
+
+code 'a plain multi-line argument list is untouched', '''
+  f 1,
+    2
+''', 'f(1, 2);'
+
+code 'a non-objectish continuation is still a separate argument', '''
+  f a: 1,
+    9
+''', 'f({a: 1}, 9);'
+
+code "an indent after ':' is still the pair's value", '''
+  f a:
+    b: 1
+''', 'f({a: {b: 1}});'
+
+code "a call in the pair's value still owns the comma", '''
+  f a: 1, b: g 2,
+    c: 3
+''', 'f({a: 1, b: g(2, {c: 3})});'
+
+# ==============================================================================
+# Runtime — the fields actually arrive
+# ==============================================================================
+#
+# The defect was never visible in the compiled shape alone; it was a
+# one-parameter function quietly ignoring a second argument. These run.
+
+test 'every key reaches a single-options-object call', '''
+  f = (o) -> o
+  f a: 1, b: 2,
+    c: 3
+    d: 4
+''', { a: 1, b: 2, c: 3, d: 4 }
+
+test 'the second parameter really is left unbound', '''
+  f = (o, rest) -> [o, rest?]
+  f a: 1,
+    b: 2
+''', [{ a: 1, b: 2 }, false]

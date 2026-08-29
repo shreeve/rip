@@ -435,7 +435,11 @@ const controlHeadBackwards = (tokens, j) => {
 // multi-line objects (startsLine) stay open
 // across TERMINATOR while the next line looks objectish; a comma whose
 // next element is not objectish closes (`x = a: 1, b` is an object
-// then a syntax error); enclosing closers and INDENT (unless
+// then a syntax error) — but a TRAILING comma before an indented
+// objectish line CONTINUES the list (`f x: 1,` + indent + `y: 2` is
+// one object), where CoffeeScript would start a second one and hand it
+// to the call as an extra argument nobody wrote a parameter for;
+// enclosing closers and INDENT (unless
 // the previous token is `:` — an indented VALUE — a block-argument
 // carrier — or an IMPLICIT_FUNC whose indented body looks objectish,
 // the pending indented-object call the call pass will wrap) close;
@@ -457,6 +461,9 @@ function collectObjects(tokens, mintId) {
   // colon.
   const pendingTernary = [0];
   let lastReal = null;
+  // Index of a comma that kept its property list open for an indented
+  // continuation line; the very next INDENT consumes it.
+  let continuationComma = -1;
 
   const top = () => stack[stack.length - 1];
 
@@ -473,6 +480,21 @@ function collectObjects(tokens, mintId) {
   };
 
   const looksObjectish = (j) => looksObjectishAt(tokens, j);
+
+  // The open property list, seen THROUGH the INDENT frames that earlier
+  // trailing-comma continuations pushed (`a: 1,` / indent / `b: 2,` /
+  // indent / `c: 3`). Those INDENTs are transparent to the list: the
+  // pairs under them belong to the object below, so the comma and `:`
+  // rules have to look past them to find the frame they act on.
+  const listObjectFrame = () => {
+    for (let d = stack.length - 1; d >= 0; d--) {
+      if (counter.on) counter.n++;
+      const fr = stack[d];
+      if (fr.kind === 'object') return fr;
+      if (!(fr.kind === 'INDENT' && fr.listContinuation)) return null;
+    }
+    return null;
+  };
 
   // Is an implicit CALL open between tape position `from` (exclusive)
   // and `i`? The call pass runs after this one, so its frames don't
@@ -566,7 +588,11 @@ function collectObjects(tokens, mintId) {
         while (top()?.kind === 'object' && prev.kind !== ':') closeObject(i);
       }
       if (top()?.kind === 'CONTROL') stack.pop();
-      stack.push({ kind: 'INDENT', at: i });
+      // A trailing comma before this INDENT means the indented pairs
+      // CONTINUE the open property list rather than starting a fresh
+      // object (the trailing-comma continuation; see the `,` rule).
+      const listContinuation = continuationComma === i - 1 && Boolean(listObjectFrame());
+      stack.push({ kind: 'INDENT', at: i, listContinuation });
       pendingTernary.push(0);
       continue;
     }
@@ -640,8 +666,10 @@ function collectObjects(tokens, mintId) {
       // When the top frame is an INDENT under a brace, search from the
       // brace — openCallBetween's walk starts after `from`, so starting
       // at the INDENT itself would never see the callee before it.
-      const callFrom = (f?.kind === 'INDENT' && under) ? under.at : f?.at;
-      if (f && (isBraceFrame(f) || (f.kind === 'INDENT' && isBraceKind(under?.kind))) &&
+      const listFrame = f?.kind === 'INDENT' && f.listContinuation ? listObjectFrame() : null;
+      const underContinuedList = Boolean(listFrame);
+      const callFrom = listFrame ? listFrame.at : (f?.kind === 'INDENT' && under) ? under.at : f?.at;
+      if (f && (isBraceFrame(f) || (f.kind === 'INDENT' && (isBraceKind(under?.kind) || underContinuedList))) &&
           !(callFrom != null && openCallBetween(callFrom, s)) &&
           (startsLine || before?.kind === ',' || isBraceKind(before?.kind) || tokens[s]?.kind === '{')) {
         continue;
@@ -699,11 +727,31 @@ function collectObjects(tokens, mintId) {
     // follows, before it otherwise) — unless an implicit call opened
     // inside the current pair's value: the comma feeds that call, not
     // the property list (`x = a: g 1, 2` is {a: g(1, 2)}).
-    if (k === ',' && top()?.kind === 'object' && !openCallBetween(top().at, i) &&
-        !looksObjectish(i + 1) &&
-        (tokens[i + 1]?.kind !== 'TERMINATOR' || !looksObjectish(i + 2))) {
-      const offset = tokens[i + 1]?.kind === 'OUTDENT' ? 1 : 0;
-      while (top()?.kind === 'object') closeObject(i + offset);
+    //
+    // A TRAILING comma before an indented objectish line is the one
+    // other exception: those pairs continue THIS list. Closing here
+    // instead (CoffeeScript's reading) makes the indented pairs a
+    // second argument, so for the single-options-object call the form
+    // is written as, the continuation line vanishes at run time with
+    // no error anywhere. Left to the INDENT rule from there — `,` is
+    // a block-argument carrier, so the frame already survives — and to
+    // the `:` rule, which reads keys under a continuation INDENT as
+    // pairs of the object below it.
+    if (k === ',') {
+      const list = listObjectFrame();
+      if (list && !openCallBetween(list.at, i) &&
+          !looksObjectish(i + 1) &&
+          (tokens[i + 1]?.kind !== 'TERMINATOR' || !looksObjectish(i + 2))) {
+        if (tokens[i + 1]?.kind === 'INDENT' && looksObjectish(i + 2)) {
+          continuationComma = i;
+        } else if (top()?.kind === 'object') {
+          const offset = tokens[i + 1]?.kind === 'OUTDENT' ? 1 : 0;
+          while (top()?.kind === 'object') closeObject(i + offset);
+        }
+        // Otherwise the list is open UNDER a continuation INDENT and
+        // there is nothing to close here — the OUTDENT/TERMINATOR that
+        // ends the continuation closes it, as it already does.
+      }
     }
   }
 
