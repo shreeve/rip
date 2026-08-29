@@ -202,6 +202,14 @@ function migrateAdapter(deployed, opts = {}) {
       expect(sql).toContain('ON CONFLICT (version) DO UPDATE');
       return ok(1);
     }
+    // The run-outcome read. It shares its opening with the history read
+    // below, and the '@op:' filter is exactly what separates them — the
+    // same partition the runner relies on.
+    if (sql.startsWith('SELECT version') && sql.includes("LIKE '@op:%'")) {
+      const rows = operations.filter((o) => !sql.includes('AND version = ?') || o.key === params[0]);
+      return res(['version', 'name', 'detail', 'applied_at'],
+        rows.map((o) => [o.key, o.outcome, o.detail, null]));
+    }
     if (sql.startsWith('SELECT version')) {
       return {
         columns: ['version', 'name', 'checksum', 'applied_at'].map((n) => ({ name: n })),
@@ -226,6 +234,9 @@ function migrateAdapter(deployed, opts = {}) {
   };
   const adapter = {
     history, calls, lock, operations: () => operations,
+    // Plant a run outcome as if an earlier process had written it —
+    // including one in a shape this runner no longer produces.
+    seedOperation(id, outcome, detail) { operations.push({ key: '@op:' + id, outcome, detail }); },
     async query(sql, params = []) {
       calls.push({ sql, params });
       return answer(sql, params, null);
@@ -2138,6 +2149,187 @@ describe('migrate: push — one-motion timestamped migrations', () => {
   });
 });
 
+// ════════════════════════════════════════════════════════════════════
+// Redaction — what a failure is allowed to write down
+// ════════════════════════════════════════════════════════════════════
+
+describe('migrate: redaction', () => {
+  // The names and numbers below are invented, but the SHAPE is the one
+  // that matters: a data migration carrying literal values is exactly
+  // what a failure report used to copy into a permanent row.
+  const PHI = "INSERT INTO patients (id, name, dob, mrn, ssn) VALUES " +
+    "(2, 'Robert L. Ramirez', '1974-03-02', 'MRN-88213', '541-22-9903')";
+
+  test('sqlSkeleton keeps the statement and drops every literal', () => {
+    expect(mig.sqlSkeleton(PHI))
+      .toBe('INSERT INTO patients (id, name, dob, mrn, ssn) VALUES (?, ?, ?, ?, ?)');
+    for (const secret of ['Ramirez', '1974-03-02', 'MRN-88213', '541-22-9903']) {
+      expect(mig.sqlSkeleton(PHI)).not.toContain(secret);
+    }
+  });
+
+  test('a comment is dropped whole — prose in a migration can say anything', () => {
+    // And it is what the old `split("\n")[0]` showed INSTEAD of the
+    // statement, so a leading comment was the likeliest leak of all.
+    const withNote = "-- backfill Jane Q. Public's address, ticket #4471\n" +
+      "UPDATE patients SET address = '12 Elm St, Provo UT 84604' WHERE mrn = 'MRN-88213'";
+    const out = mig.sqlSkeleton(withNote);
+    expect(out).toBe('UPDATE patients SET address = ? WHERE mrn = ?');
+    expect(out).not.toContain('Jane');
+  });
+
+  test('quoting styles that could smuggle a value past a naive scrubber', () => {
+    // '' escaping inside a string, and a dollar-quoted block that may
+    // span lines — both are values, both must go.
+    expect(mig.sqlSkeleton("INSERT INTO orders (n, note) VALUES ('O''Brien, Sean', $$multi\nline PHI$$)"))
+      .toBe('INSERT INTO orders (n, note) VALUES (?, ?)');
+    expect(mig.sqlSkeleton('/* patient 88213 */ SELECT 1')).toBe('SELECT ?');
+  });
+
+  test('identifiers and DDL survive intact — they are the diagnosis', () => {
+    expect(mig.sqlSkeleton('CREATE UNIQUE INDEX idx_patients_mrn ON patients (mrn);'))
+      .toBe('CREATE UNIQUE INDEX idx_patients_mrn ON patients (mrn);');
+    expect(mig.sqlSkeleton('ALTER TABLE "patients" ADD COLUMN "middle_name" VARCHAR DEFAULT \'unknown\';'))
+      .toBe('ALTER TABLE "patients" ADD COLUMN "middle_name" VARCHAR DEFAULT ?;');
+    // A digit inside a name is part of the name, not a literal.
+    expect(mig.sqlSkeleton('SELECT col3 FROM t1')).toBe('SELECT col3 FROM t1');
+  });
+
+  test('the ENGINE leaks the row too, and that is closed separately', () => {
+    // Verified against DuckDB v2.0.0-alpha38195: it quotes offending
+    // values inline AND echoes the whole statement under "LINE n:".
+    // Redacting only the runner's own text would have fixed nothing.
+    expect(mig.engineComplaint({ message: 'Constraint Error: Duplicate key "mrn: MRN-88213" violates unique constraint.' }))
+      .toBe('Constraint Error: Duplicate key "?" violates unique constraint.');
+    const echoed = 'Conversion Error: invalid date field format: "not-a-date", expected format is (YYYY-MM-DD)\n' +
+      '\nLINE 1: INSERT INTO patients VALUES (4,\'Jane Q. Public\',\'not-a-date\',\'MRN-70001\');\n            ^^^^^^^';
+    const out = mig.engineComplaint({ message: echoed });
+    expect(out).toBe('Conversion Error: invalid date field format: "?", expected format is (YYYY-MM-DD)');
+    expect(out).not.toContain('Jane');
+    expect(out).not.toContain('MRN-70001');
+    // The error CLASS is what diagnoses, and it is untouched.
+    expect(mig.engineComplaint({ message: 'Catalog Error: Table with name patients does not exist!' }))
+      .toBe('Catalog Error: Table with name patients does not exist!');
+  });
+
+  test('end to end: a failed data migration writes no row data anywhere', async () => {
+    const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-phi-'));
+    try {
+      writeFileSync(join(mdir, '20260101000000_seed.sql'),
+        'CREATE TABLE patients (id INTEGER, name VARCHAR);\n' + PHI + ';\n');
+      const adapter = migrateAdapter({ tables: [] }, {
+        tx: true, ddlTx: true,
+        failOn: /INSERT INTO patients/,
+        failMessage: 'Conversion Error: invalid date field format: "1974-03-02", expected format is (MM/DD/YYYY)\n' +
+          '\nLINE 1: ' + PHI + '\n              ^^^^^',
+      });
+      let err = null;
+      await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        try {
+          await mig.migrate({ dir: mdir, coordinated: true, operationId: '0123456789abcdef0123456789abcdef' });
+        } catch (e) { err = e; }
+      });
+      const secrets = ['Ramirez', 'MRN-88213', '541-22-9903', '1974-03-02'];
+
+      // 1. the message a human and every log channel sees
+      for (const secret of secrets) expect(err.message).not.toContain(secret);
+      // it still says which statement failed, and why
+      expect(err.message).toContain('20260101000000_seed failed at statement 2 of 2');
+      expect(err.message).toContain('INSERT INTO patients (id, name, dob, mrn, ssn) VALUES (?, ?, ?, ?, ?)');
+      expect(err.message).toContain('Conversion Error');
+
+      // 2. the durable row — the one with no retention policy, that
+      //    rides along in every database dump
+      const recorded = JSON.stringify(adapter.operations());
+      for (const secret of secrets) expect(recorded).not.toContain(secret);
+
+      // 3. and it is still USEFUL: one JSON shape, queryable
+      const op = adapter.operations()[0];
+      const detail = JSON.parse(op.detail);
+      expect(detail.v).toBe(1);
+      expect(detail.phase).toBe('failed');
+      expect(detail.failed).toBe('20260101000000_seed');
+      expect(detail.stmtNo).toBe(2);
+      expect(detail.of).toBe(2);
+      expect(detail.stmt).toBe('INSERT INTO patients (id, name, dob, mrn, ssn) VALUES (?, ?, ?, ?, ?)');
+    } finally {
+      rmSync(mdir, { recursive: true, force: true });
+    }
+  });
+
+  test('every run outcome is ONE json shape, whatever the phase', async () => {
+    const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-shape-'));
+    try {
+      writeFileSync(join(mdir, '20260101000000_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+      const adapter = migrateAdapter({ tables: [] });
+      await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        await mig.migrate({ dir: mdir, coordinated: true, operationId: 'abcdef0123456789abcdef0123456789' });
+      });
+      // Both the 'started' write and the 'finished' one parse, which is
+      // the property the column never had: it used to hold an English
+      // sentence, a bare array, and a raw error, so nothing could read
+      // a row without first guessing which of the three it was.
+      const written = adapter.calls
+        .filter((c) => (c.params ?? []).some((v) => typeof v === 'string' && v.startsWith('@op:')))
+        .map((c) => c.params[2]);
+      expect(written.length).toBeGreaterThan(1);
+      for (const d of written) {
+        const parsed = JSON.parse(d);
+        expect(parsed.v).toBe(1);
+        expect(typeof parsed.phase).toBe('string');
+      }
+    } finally {
+      rmSync(mdir, { recursive: true, force: true });
+    }
+  });
+
+  test('operations() reads them back, and admits a shape it does not know', async () => {
+    const adapter = migrateAdapter({ tables: [] });
+    adapter.seedOperation('0123456789abcdef0123456789abcdef', 'partial',
+      JSON.stringify({ v: 1, phase: 'failed', failed: '20260101000000_seed', stmtNo: 2, of: 2 }));
+    adapter.seedOperation('ffffffffffffffffffffffffffffffff', 'unknown', 'migration started');
+    const rows = await K4.scope(async () => {
+      K4.setAdapter(adapter);
+      return mig.operations();
+    });
+    const good = rows.find((r) => r.id === '0123456789abcdef0123456789abcdef');
+    expect(good.outcome).toBe('partial');
+    expect(good.failed).toBe('20260101000000_seed');
+    expect(good.stmtNo).toBe(2);
+    // A pre-JSON row from an older runner: reported, never mis-read.
+    const legacy = rows.find((r) => r.id === 'ffffffffffffffffffffffffffffffff');
+    expect(legacy.unreadable).toBe('migration started');
+    expect(legacy.phase).toBeUndefined();
+  });
+
+  test('run outcomes age out; the history never does', async () => {
+    const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-sweep-'));
+    try {
+      writeFileSync(join(mdir, '20260101000000_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+      const adapter = migrateAdapter({ tables: [] });
+      await K4.scope(async () => {
+        K4.setAdapter(adapter);
+        K4.__schema(model('User', field('name')));
+        await mig.migrate({ dir: mdir });
+      });
+      const sweep = adapter.calls.find((c) => /^DELETE FROM schema WHERE version LIKE/.test(c.sql));
+      expect(sweep).toBeTruthy();
+      expect(sweep.sql).toContain("'@op:%'");
+      expect(sweep.sql).toContain('applied_at <');
+      // The history is not swept, and neither is the lock: '@lock' does
+      // not match '@op:%', and no migration version can begin with '@'.
+      expect(sweep.sql).not.toContain('NOT LIKE');
+      expect(adapter.history.map((h) => h.version)).toEqual(['20260101000000']);
+    } finally {
+      rmSync(mdir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('migrate: migrate — history, checksums, conflicts, idempotence', () => {
   const withDir = async (fn) => {
     const mdir = mkdtempSync(join(tmpdir(), 'rip-mig-run-'));
@@ -2214,6 +2406,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       const infra = (c) => /@lock/.test(JSON.stringify(c.params ?? [])) ||
         c.sql === '<CATALOG>' ||
         /_rip_migration/.test(c.sql) ||
+        /^DELETE FROM schema WHERE version LIKE/.test(c.sql) ||
         /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS schema|DROP TABLE)/.test(c.sql);
       const stream = adapter.calls
         .filter((c) => !infra(c))
@@ -2490,7 +2683,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
     // The whole migration history and the lock live in one table, so
     // every statement that clears a lock is one careless WHERE away from
     // deleting every applied-migration row. This is that WHERE.
-    test('every lock DELETE names the lock row, never the whole table', async () => {
+    test('every DELETE names the rows it means, never the whole table', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
         const adapter = migrateAdapter({ tables: [] });
@@ -2500,10 +2693,17 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         });
         const deletes = adapter.calls.filter((c) => /^DELETE FROM schema/.test(c.sql));
         expect(deletes.length).toBeGreaterThan(0);
+        // Exactly two shapes are allowed, and both name `version`: the
+        // lock, addressed by its key, and the retention sweep, addressed
+        // by the '@op:' prefix that no migration version and no lock key
+        // can match. Anything else here would be reaching the history.
         for (const d of deletes) {
-          expect(d.sql).toContain('WHERE version = ?');   // never bare
-          expect(d.params).toContain('@lock');
+          const lock = d.sql.includes('WHERE version = ?') && (d.params ?? []).includes('@lock');
+          const sweep = d.sql.includes("WHERE version LIKE '@op:%'");
+          expect(lock || sweep).toBe(true);
         }
+        expect(deletes.some((d) => (d.params ?? []).includes('@lock'))).toBe(true);
+        expect(deletes.some((d) => d.sql.includes("LIKE '@op:%'"))).toBe(true);
         expect(adapter.history.length).toBe(1);           // the applied row stands
       });
     });

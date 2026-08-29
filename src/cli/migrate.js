@@ -78,6 +78,26 @@ const LOCK_KEY = RESERVED + 'lock';
 const OP_PREFIX = RESERVED + 'op:';
 const NOT_RESERVED = "version NOT LIKE '" + RESERVED + "%'";
 
+// Everything the `detail` column holds, in ONE shape: a JSON object
+// carrying its own version tag. It used to hold three — a bare English
+// sentence, a JSON array, and a raw multi-line error — sharing one
+// column, so no reader could json_extract() a row without first guessing
+// which of the three it had, and two of the three did not parse as JSON
+// at all. One shape means reading a run outcome is a query, not a
+// parser.
+//
+// `v` is not ceremony: these rows outlive the runner that wrote them, so
+// a reader meeting a shape it does not know must be able to SAY so
+// rather than mis-read it.
+const detailJSON = (fields) => JSON.stringify({ v: 1, ...fields });
+
+// How long a run outcome is worth keeping. The row exists for one job —
+// a child died before it could report, and a human is looking for the
+// evidence — and that search happens within days. A constant and not a
+// flag: a retention window operators can vary per invocation is a window
+// nobody can state, and being able to state it is the point.
+const OP_RETENTION_DAYS = 90;
+
 // What the runner used to be called. Kept for two jobs: adopting a
 // database that predates the rename, and keeping the old names out of
 // diffs until every database has been adopted — a plan proposing
@@ -1488,6 +1508,41 @@ async function appliedMigrations() {
   }
 }
 
+// The run outcomes, and only those. This is the SECOND reader of the
+// table, which is worth saying out loud: appliedMigrations() used to be
+// the one place it was read, and that is what made NOT_RESERVED safe to
+// state once. The invariant that replaces it is narrower and still
+// checkable — history and operations PARTITION the non-lock rows, and
+// this filter is the exact complement of that one. Neither reader can
+// see the other's rows, and neither ever sees '@lock'.
+//
+// Newest first: whoever runs this is looking for what just happened.
+export async function operations(opts = {}) {
+  const res = await runSQL(
+    'SELECT version, name, detail, applied_at FROM ' + STATE_TABLE +
+    " WHERE version LIKE '" + OP_PREFIX + "%'" +
+    (opts.id ? ' AND version = ?' : '') +
+    ' ORDER BY applied_at DESC',
+    opts.id ? [OP_PREFIX + opts.id] : []);
+  return migrateRows(res).map((r) => {
+    // A row written by a newer runner, or by hand — say so rather than
+    // mis-read it. That is what the `v` tag is for.
+    let detail = null;
+    try { detail = JSON.parse(r.detail ?? 'null'); } catch { detail = null; }
+    const known = detail != null && typeof detail === 'object' && detail.v === 1;
+    return {
+      id: r.version.slice(OP_PREFIX.length),
+      outcome: r.name,
+      // `recordedAt`, not `at`: the detail payload carries its own
+      // fields, and a name collision here would let a spread quietly
+      // drop one of them.
+      recordedAt: r.applied_at,
+      ...(known ? detail : {}),
+      ...(known ? {} : { unreadable: r.detail ?? null }),
+    };
+  });
+}
+
 // Idempotent, and the only writer of the table's shape. It also adopts
 // a database from before the rename: the columns are unchanged, so the
 // rename carries the whole history across and nothing is re-applied.
@@ -1540,6 +1595,20 @@ async function ensureMigrationsTable() {
   } catch (e) {
     if (!/already exists|duplicate column/i.test(e?.message || '')) throw e;
   }
+  // Retention, and it belongs here for the same reason the ADD COLUMN
+  // does: this is the one function that owns the table's lifecycle, and
+  // it runs AFTER assertStateTableIsOurs, so this DELETE can never land
+  // in a stranger's table.
+  //
+  // A run outcome is evidence for a search that happens in days. It is
+  // not history — history rows are never pruned, because a missing one
+  // reads as an unapplied migration. So the outcomes age out and the
+  // history does not, which is the whole reason the '@' prefix exists.
+  //
+  // QUALIFIED on the '@op:' prefix and nothing else: '@lock' does not
+  // match it, and no migration version can begin with '@'.
+  await runSQL('DELETE FROM ' + STATE_TABLE + " WHERE version LIKE '" + OP_PREFIX +
+    "%' AND applied_at < now() - INTERVAL " + OP_RETENTION_DAYS + ' DAY', []);
 }
 
 // The legacy tables outlive adoption ON PURPOSE, until the lock is
@@ -1626,10 +1695,16 @@ async function assertStateTableIsOurs() {
     'database) and run again.');
 }
 
-// Write-only by design: nothing in the runner reads these back. The
-// manager learns an outcome from the child's stdout, and this row is
-// what survives when the child dies before it can say anything.
-async function recordMigrationOperation(id, outcome, detail = null) {
+// What survives when a coordinated child dies before it can report. The
+// manager normally learns an outcome from the child's stdout; this row
+// is the answer when the child never got that far — and `operations()`
+// below is how a human reads it, which is what makes the row worth
+// writing at all. A durable record nobody can read is not a safety net,
+// it is a liability with a retention question attached.
+//
+// `fields`, never a string: the one-shape rule is enforced by the
+// signature, so no caller can drift back to prose.
+async function recordMigrationOperation(id, outcome, fields = {}) {
   if (!id) return;
   // No ensure here: every caller is inside migrate(), which ensured the
   // table before it took the lock. Re-running the adoption dance per
@@ -1644,7 +1719,7 @@ async function recordMigrationOperation(id, outcome, detail = null) {
   await runSQL('INSERT INTO ' + STATE_TABLE + ' (version, name, detail, applied_at)' +
     ' VALUES (?, ?, ?, now()) ON CONFLICT (version) DO UPDATE' +
     ' SET name = excluded.name, detail = excluded.detail, applied_at = excluded.applied_at',
-    [OP_PREFIX + id, outcome, detail]);
+    [OP_PREFIX + id, outcome, detailJSON(fields)]);
 }
 
 // ── the migration lock ────────────────────────────────────────────────
@@ -2026,6 +2101,141 @@ async function releaseMigrationLock(owner) {
 // attached to the following statement (a leading TODO is visible in
 // errors but never executed alone); fragments with no executable
 // text outside comments are dropped.
+// ── redaction: SQL as evidence, with the row data taken out ───────────
+//
+// A failure report names the failing statement, and for a DATA migration
+// — an INSERT or UPDATE carrying literal values — that text IS the row.
+// This toolchain migrates medical-lab schemas, so "the text" can be a
+// patient's name, date of birth and record number, and it used to land
+// in a permanent database row with no retention policy, inside every
+// `rip-db dump` tarball.
+//
+// Two things leak it, and fixing either alone fixes nothing:
+//
+//   1. the runner's own report, which quoted the failing statement
+//   2. the ENGINE, which echoes the whole statement under a trailing
+//      "LINE n: … ^^^" and quotes offending values inline. Measured on
+//      DuckDB v2.0.0-alpha38195:
+//        Constraint Error: Duplicate key "mrn: MRN-88213" violates …
+//        Conversion Error: invalid date field format: "not-a-date", …
+//
+// So the redaction happens where the message is BUILT, not where it is
+// stored — one place, and every channel it feeds is covered at once:
+// the `detail` column, stderr, the RIP_MIGRATION_OUTCOME line, and the
+// manager's on-disk operation journal.
+//
+// Nothing diagnostic is lost, because the report was never the record.
+// The migration FILE is, it is in git, and the report names the version
+// that finds it. What survives here is WHICH statement and WHAT the
+// engine objected to; the bytes stay where bytes belong.
+
+const SQL_SKELETON_MAX = 200;
+
+// Every literal becomes '?'. Comments are dropped whole — prose in a
+// data migration can say anything, and a leading comment was what the
+// old `split('\n')[0]` showed instead of the statement. Double-quoted
+// IDENTIFIERS survive: they are the schema, which is the part being
+// diagnosed.
+//
+// UNIFORMLY, with no attempt to tell a DDL statement's harmless
+// DEFAULT 'active' from a patient's name. A classifier that gets that
+// distinction wrong retains PHI silently, so unknown fails closed here
+// the way it does everywhere else in this file. The cost is that
+// `nextval('id')` reads as `nextval(?)`, which is a fine price.
+export function sqlSkeleton(sql) {
+  const src = String(sql ?? '');
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // `--` to end of line: gone, and the newline with it.
+    if (ch === '-' && src[i + 1] === '-') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    // `/* … */`, NESTED — the PostgreSQL-family lexing DuckDB follows,
+    // matching splitStatements above.
+    if (ch === '/' && src[i + 1] === '*') {
+      let depth = 1;
+      i += 2;
+      while (i < src.length && depth > 0) {
+        if (src[i] === '/' && src[i + 1] === '*') { depth++; i += 2; continue; }
+        if (src[i] === '*' && src[i + 1] === '/') { depth--; i += 2; continue; }
+        i++;
+      }
+      continue;
+    }
+    // A single-quoted string, '' escaping included.
+    if (ch === "'") {
+      i++;
+      while (i < src.length) {
+        if (src[i] === "'") {
+          if (src[i + 1] === "'") { i += 2; continue; }
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += '?';
+      continue;
+    }
+    // `$$…$$` and `$tag$…$tag$`, closed only by their own tag.
+    if (ch === '$') {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(src.slice(i));
+      if (m) {
+        const end = src.indexOf(m[0], i + m[0].length);
+        i = end < 0 ? src.length : end + m[0].length;
+        out += '?';
+        continue;
+      }
+    }
+    // A quoted identifier is schema, not data — kept whole.
+    if (ch === '"') {
+      out += ch;
+      i++;
+      while (i < src.length) {
+        out += src[i];
+        if (src[i] === '"') {
+          if (src[i + 1] === '"') { out += '"'; i += 2; continue; }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    // A numeric literal — but only where a number can START, so the
+    // `3` in `col3` and the `1` in `"t1"` are left alone.
+    if (ch >= '0' && ch <= '9' && !/[A-Za-z0-9_"$]/.test(src[i - 1] ?? ' ')) {
+      while (i < src.length && /[0-9._eE]/.test(src[i])) i++;
+      out += '?';
+      continue;
+    }
+    out += /\s/.test(ch) ? ' ' : ch;
+    i++;
+  }
+  const line = out.replace(/\s+/g, ' ').trim();
+  return line.length > SQL_SKELETON_MAX ? line.slice(0, SQL_SKELETON_MAX) + '…' : line;
+}
+
+const ENGINE_COMPLAINT_MAX = 240;
+
+// The engine's complaint, same rule. First line only, which drops the
+// "LINE n:" echo of the whole statement; then every double-quoted
+// payload is replaced, because here — unlike in SQL text — a quoted run
+// may be an identifier ("version" not found) or a value ("mrn:
+// MRN-88213"), and telling those apart is exactly the classifier this
+// refuses to build. The error CLASS is what diagnoses, and it survives
+// intact: "Constraint Error: Duplicate key "?" violates unique
+// constraint." still says everything an operator acts on.
+export function engineComplaint(e) {
+  const line = String(e?.message ?? e ?? '')
+    .split('\n')[0]
+    .trim()
+    .replace(/"(?:[^"]|"")*"/g, '"?"');
+  return line.length > ENGINE_COMPLAINT_MAX ? line.slice(0, ENGINE_COMPLAINT_MAX) + '…' : line;
+}
+
 export function splitStatements(sql) {
   const out = [];
   let cur = '';
@@ -2300,11 +2510,14 @@ export async function migrate(opts = {}) {
     await dropLegacyTables();
     if (opts.coordinated) {
       if (!opts.operationId) throw new Error('schema.migrate: coordinated migration requires an operation id');
-      await recordMigrationOperation(opts.operationId, 'unknown', 'migration started');
+      await recordMigrationOperation(opts.operationId, 'unknown', { phase: 'started' });
     }
     try {
       const result = await migrateApply(opts, files);
-      if (opts.coordinated) await recordMigrationOperation(opts.operationId, result.outcome, JSON.stringify(result.ran));
+      if (opts.coordinated) {
+        await recordMigrationOperation(opts.operationId, result.outcome,
+          { phase: 'finished', ran: result.ran });
+      }
       // Taking over an expired lease is never silent: it means a
       // previous run died partway, and the operator is entitled to know
       // that this run inherited its lock rather than started clean.
@@ -2312,7 +2525,15 @@ export async function migrate(opts = {}) {
     } catch (e) {
       if (opts.coordinated) {
         try {
-          await recordMigrationOperation(opts.operationId, e?.migrationOutcome || 'unknown', e?.message || String(e));
+          await recordMigrationOperation(opts.operationId, e?.migrationOutcome || 'unknown',
+            e?.migrationFailure
+              ? { phase: 'failed', ran: e.migrationRan ?? [], ...e.migrationFailure }
+              // Not a per-statement failure — a held lock, a checksum
+              // mismatch, an unreachable database. Those are the
+              // runner's own prose and carry no row data, but they go
+              // through the same redactor anyway: one rule, with no
+              // exception a future message can quietly fall into.
+              : { phase: 'failed', ran: [], err: engineComplaint(e) });
         } catch (markerError) {
           e.migrationOutcome = 'unknown';
           e.message += '\nCould not durably record the migration outcome: ' + (markerError?.message || String(markerError));
@@ -2387,7 +2608,7 @@ async function migrateApply(opts, files) {
           (/violates (unique|primary key) constraint|already taken/i.test(e?.message || '')
             ? '; the version already exists in ' + STATE_TABLE + ' — was another `rip schema migrate` running concurrently?'
             : '') + ')'
-        : 'statement ' + (at + 1) + ' of ' + statements.length + ':\n  ' + statements[at].split('\n')[0];
+        : 'statement ' + (at + 1) + ' of ' + statements.length + ':\n  ' + sqlSkeleton(statements[at]);
       const posture = ddlTransactional
         ? 'This migration ROLLED BACK whole: nothing from ' + label + ' is applied and no history row was ' +
           'recorded. Migrations applied earlier in this run remain applied and recorded. Fix the failing ' +
@@ -2402,9 +2623,27 @@ async function migrateApply(opts, files) {
             Math.max(at, 0) + ' of ' + label + ' ARE applied and its history row was NOT recorded — the ' +
             'database holds partial state. Repair manually (finish or undo the applied statements), then ' +
             're-run; already-applied statements will fail if re-executed as-is.';
+      // Built once and used twice: this message and the structured
+      // record below say the same thing, so they cannot drift into two
+      // different accounts of one failure.
+      const engine = engineComplaint(e);
       const err = new Error(
-        'schema.migrate: ' + label + ' failed at ' + where + '\n' + (e?.message || String(e)) + '\n' + posture);
+        'schema.migrate: ' + label + ' failed at ' + where + '\n' + engine + '\n' + posture);
+      // The unredacted original stays reachable IN MEMORY for a
+      // debugger, and nothing serializes it — the CLI prints
+      // `e.message` only. Redaction is about what gets WRITTEN DOWN.
       err.cause = e;
+      // Fields, not prose: migrate() turns these straight into the
+      // recorded outcome, so a run outcome is a SELECT rather than a
+      // parse of English.
+      err.migrationRan = [...ran];
+      err.migrationFailure = {
+        failed: label,
+        stmtNo: at >= statements.length ? null : at + 1,
+        of: statements.length,
+        stmt: at >= statements.length ? null : sqlSkeleton(statements[at]),
+        err: engine,
+      };
       err.migrationOutcome = ran.length
         ? 'committed'
         : ddlTransactional

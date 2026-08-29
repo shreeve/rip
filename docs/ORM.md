@@ -1061,6 +1061,22 @@ zones, or one laptop crossing a DST boundary, generate migrations the same after
 Fixed width means a plain lexicographic sort stays correct forever, and two branches
 never mint the same version, so a merge needs no renumbering.
 
+A failure report **redacts every literal** from the statement it names, and from the
+engine's own complaint. A data migration that fails is otherwise a copy of the row it
+was writing — and that text reaches the `schema` table (which has no retention policy
+and rides along in every `rip-db dump`), stderr, the `RIP_MIGRATION_OUTCOME` line, and
+the manager's on-disk journal. So the redaction happens where the message is built, and
+covers all of them:
+
+```
+INSERT INTO patients (id, name, dob, mrn, ssn) VALUES (?, ?, ?, ?, ?)
+Conversion Error: invalid date field format: "?", expected format is (YYYY-MM-DD)
+```
+
+Which statement and which error class survive — that is what diagnoses. The bytes stay
+in the migration file, which is in git, named by the version the report gives you.
+`rip schema ops` reads back what coordinated runs recorded (one JSON shape, kept 90 days).
+
 The migration lock is a **lease**, not a flag. Whichever process is applying renews it
 every few seconds, so a lock nobody has renewed for 30 seconds is one whose holder is
 gone — and the next `migrate` takes it over on its own, saying whose it was. A crashed

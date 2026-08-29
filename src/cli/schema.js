@@ -11,6 +11,7 @@
 //   rip schema make [name…] [entry.rip] [--dir DIR] [--allow-lossy] [--allow-destructive]
 //   rip schema migrate [entry.rip] [--dir DIR] [--repair]
 //   rip schema unlock  [entry.rip] [--force]
+//   rip schema ops     [entry.rip] [--operation-id ID] [--json]
 //
 // `entry.rip` is a file whose import registers every :model schema
 // (your models file — it may also call schema.setAdapter()/connect()
@@ -51,6 +52,9 @@ Usage:
                                                     prints exactly what it displaced. Rarely needed: a
                                                     crashed run's lease expires by itself. Refuses a
                                                     lease still being renewed (--force overrides)
+  rip schema ops     [entry.rip] [--json]           what coordinated migration runs recorded — the
+                     [--operation-id ID]            evidence a run leaves when it dies before reporting
+                                                    (kept 90 days; statement text is redacted)
   rip schema push    [name…] [entry.rip] [--dir DIR]  diff, write migrations/<UTC>_<name>.sql,
                      [--allow-lossy] [--allow-destructive]   and apply it — one motion (rapid iteration;
                      refuses when pending/edited/conflicting migrations make the state unclear;
@@ -89,8 +93,8 @@ if (!cmd || cmd === '--help' || cmd === '-h') {
   console.log(USAGE);
   process.exit(0);
 }
-if (!['status', 'plan', 'dump', 'make', 'migrate', 'push', 'unlock'].includes(cmd)) {
-  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, migrate, push, or unlock\n\n${USAGE}`, 2);
+if (!['status', 'plan', 'dump', 'make', 'migrate', 'push', 'unlock', 'ops'].includes(cmd)) {
+  die(`unknown subcommand '${cmd}' — expected status, plan, dump, make, migrate, push, unlock, or ops\n\n${USAGE}`, 2);
 }
 
 const rest = args.slice(1);
@@ -104,11 +108,13 @@ const flags = {
   force: false,
   coordinated: false,
   operationId: null,
+  json: false,
 };
 const positional = [];
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === '--dir') {
+  if (a === '--json') flags.json = true;
+  else if (a === '--dir') {
     flags.dir = rest[++i];
     if (!flags.dir) die('--dir requires a directory argument', 2);
   }
@@ -143,7 +149,8 @@ if (flags.force && cmd === 'migrate') {
 }
 if (flags.force && cmd !== 'unlock') die('--force only applies to unlock', 2);
 if (flags.coordinated && cmd !== 'migrate') die('--coordinated only applies to migrate', 2);
-if (flags.operationId && cmd !== 'migrate') die('--operation-id only applies to migrate', 2);
+if (flags.operationId && cmd !== 'migrate' && cmd !== 'ops') die('--operation-id only applies to migrate and ops', 2);
+if (flags.json && cmd !== 'ops') die('--json only applies to ops', 2);
 
 // `make` and `push` take a migration description; every command takes
 // an optional models entry. Disambiguate by file existence: a
@@ -345,6 +352,27 @@ try {
     if (!out.ran.length) console.log('no pending migrations');
     else for (const r of out.ran) console.log(`applied ${r}`);
     if (flags.coordinated) console.log('RIP_MIGRATION_OUTCOME=' + JSON.stringify(out));
+
+  } else if (cmd === 'ops') {
+    const rows = await migration.operations({ id: flags.operationId });
+    if (flags.json) {
+      console.log(JSON.stringify(rows, null, 2));
+    } else if (!rows.length) {
+      console.log('no recorded migration runs');
+    } else {
+      for (const r of rows) {
+        console.log(`@op:${r.id}  ${r.outcome}  ${r.recordedAt ?? ''}`);
+        if (r.unreadable != null) { console.log(`  (unrecognized detail) ${r.unreadable}`); continue; }
+        if (r.phase) console.log(`  phase   ${r.phase}`);
+        if (r.ran?.length) console.log(`  ran     ${r.ran.join(', ')}`);
+        if (r.failed) {
+          const where = r.stmtNo ? `, statement ${r.stmtNo} of ${r.of}` : '';
+          console.log(`  failed  ${r.failed}${where}`);
+        }
+        if (r.stmt) console.log(`  stmt    ${r.stmt}`);
+        if (r.err) console.log(`  error   ${r.err}`);
+      }
+    }
 
   } else if (cmd === 'unlock') {
     const out = await migration.unlock({ force: flags.force });
