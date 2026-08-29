@@ -1064,6 +1064,13 @@ describe('structured-type validation', () => {
     // sees, and the type-body floor reads that stack.
     expect(() => tokenize('type T = `a\nz = 1')).toThrow(/stays on one line/);
     expect(() => tokenize('type T = `abc')).toThrow(/never closes/);
+    // An ESCAPE must not swallow the line break either. A scan that
+    // stepped over it would run the literal onto the next line, where
+    // a stray backtick closes it — taking that line's statement into
+    // the erased type, out of the program, with no diagnostic.
+    expect(() => tokenize('type T = `a\\\nimportant = `1\nz = 3')).toThrow(/stays on one line/);
+    expect(() => tokenize('type T = `a${B\\\n}`\nz = 1')).toThrow(/stays on one line/);
+    expect(() => tokenize('type T = `a${"x\\\n"}`\nz = 1')).toThrow(/unterminated string/);
   });
 
   test('a type body\'s balance scanners do not read inside a backtick', () => {

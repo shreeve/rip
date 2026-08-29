@@ -1058,15 +1058,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // The literal stays on one line: consuming a newline here would
   // carry the scan past an indentation boundary the indent stack
   // never sees, and `insideTypeBody` reads that stack.
+  // A line break ends every one of these scans, and an ESCAPE can
+  // never swallow it: `i += 2` stepping over a newline would carry the
+  // literal onto the next line, where a stray backtick closes it and
+  // takes a whole statement into the erased type with it.
+  const lineBreakAt = (j) => text[j] === '\n' || text[j] === '\r';
+
   const scanTypeTemplateEnd = (start) => {
     let i = start + 1;
     while (i < text.length) {
       const c = text[i];
-      if (c === '\\') { i += 2; continue; }
-      if (c === '`') return i + 1;
-      if (c === '\n' || c === '\r') {
+      if (lineBreakAt(i) || (c === '\\' && lineBreakAt(i + 1))) {
         fail('a template-literal type stays on one line', start, i);
       }
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') return i + 1;
       if (c === '$' && text[i + 1] === '{') { i = scanTypeInterpEnd(i + 2); continue; }
       i++;
     }
@@ -1080,14 +1086,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     let i = start, depth = 1;
     while (i < text.length) {
       const c = text[i];
+      if (lineBreakAt(i) || (c === '\\' && lineBreakAt(i + 1))) {
+        fail('a template-literal type stays on one line', start - 2, i);
+      }
       if (c === '\\') { i += 2; continue; }
       if (c === '`') { i = scanTypeTemplateEnd(i); continue; }
       if (c === '"' || c === "'") { i = scanTypeQuoteEnd(i); continue; }
       if (c === '{') { depth++; i++; continue; }
       if (c === '}') { if (--depth === 0) return i + 1; i++; continue; }
-      if (c === '\n' || c === '\r') {
-        fail('a template-literal type stays on one line', start - 2, i);
-      }
       i++;
     }
     failOpenAtEnd("unclosed '${' — the interpolation never closes", start - 2, start);
@@ -1097,9 +1103,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     const quote = text[start];
     let i = start + 1;
     while (i < text.length) {
+      if (lineBreakAt(i) || (text[i] === '\\' && lineBreakAt(i + 1))) break;
       if (text[i] === '\\') { i += 2; continue; }
       if (text[i] === quote) return i + 1;
-      if (text[i] === '\n' || text[i] === '\r') break;
       i++;
     }
     fail('unterminated string', start, start + 1);
