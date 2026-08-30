@@ -1,18 +1,11 @@
 import './db.rip'
-import { get, post, patch, read, session } from 'rip/sites'
+import { get, post, patch, read } from 'rip/sites'
 import { User, Product, Order, OrderItem, OrderLine, UserPublic, ProductPublic, OrderPublic } from './models.rip'
 
 def errorResponse(errors: { form?: string, field?: Partial<Record<string, string>> }, status = 400)
   return Response.json({ errors }, { status })
 
-# Demo identity: the seeded user. Mark the session authenticated so the
-# Bam Hub bridge (POST /hub) admits the same cookie the API already uses.
-currentUser = () ->
-  user = User.find!(1)
-  if user
-    session.authenticated = true
-    session.userId = user.id
-  user
+currentUser = () -> User.find!(1)
 
 get '/api/user' ->
   user = currentUser!

@@ -5,15 +5,17 @@ the full App rails — `index.rip` + `app/` + `api/` + SQLite. Products, cart,
 profile, and orders — the canonical full-shape exemplar beside Pulse’s thin
 live-publication demo ([docs/WORKSPACE.md](../../../../docs/WORKSPACE.md)).
 
-It is a runnable example; the browser suite also drives its publication apply
-path through a real Rip Site.
+It is a runnable example — nothing here is wired into CI. Like every demo, it
+is free to change without asking a test suite. The live-Site contracts are
+certified against `test/browser/hmr-app`, a fixture that suite owns
+(`bun run test:live`).
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `serve.rip` | Catalog entry: names the site `cart`, hosts `cart.via.rip` / `cart.local`, `hub.bridge: 'hub'` (tray **Add Site…** target) |
-| `index.rip` | API entry: createSchema/seed, `use sessions`, the `hub` bridge, `/styles.css`, bare `start!` handoff |
+| `serve.rip` | Catalog entry: names the site `cart`, hosts `cart.via.rip` / `cart.local` (tray **Add Site…** target); everything else is default |
+| `index.rip` | API entry: createSchema/seed, the open `hub` bridge Janus needs to admit live watch, bare `start!` handoff |
 | `setup.rip` | One-shot `createSchema` + `seed` |
 | `api/` | SQLite adapter, models, seed, `/api/*` handlers (not a public URL tree) |
 | `app/index.html` | SPA shell (Pico + styles + `bootApp`) |

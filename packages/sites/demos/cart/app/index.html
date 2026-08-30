@@ -22,10 +22,7 @@
     </div>
     <script type="module">
       import { bootApp } from '/@rip/rip.min.js'
-      const debug = new URLSearchParams(location.search).has('debug')
-      // Seed the session cookie before Hub connects (Bam bridge requires it).
-      await fetch('/api/user', { credentials: 'same-origin' })
-      bootApp({ url: '/bundle.json', debug, watch: true })
+      bootApp({ url: '/bundle.json', watch: true })
     </script>
   </body>
 </html>
