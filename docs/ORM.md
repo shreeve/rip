@@ -118,9 +118,10 @@ User = schema :model
 ```
 
 Enum members may carry values (`:pending 0`); either the name or the
-value validates, and parsing materializes the value. Both enum-typed and
-literal-union fields render as `VARCHAR` columns; validation is the
-app-side gate.
+value validates, and parsing materializes the value. A string-membered
+enum or literal union renders as an `ENUM` column, so the database
+enforces the same set the parse does; a non-string one renders as
+`VARCHAR`, where validation is the app-side gate alone.
 
 ### Coercion and transforms
 
