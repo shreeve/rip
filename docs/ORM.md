@@ -963,9 +963,16 @@ column. Every other column stores whatever the adapter returned,
 verbatim. The same goes for JSON columns — the ORM stringifies objects
 written to `json` fields but never parses on read.
 
+**Encoding has no such backstop: every adapter encodes `Date` params
+itself.** The ORM binds a real `Date` for the `@times` `updated_at`
+bump on every UPDATE that writes a column, and hands it to `query`
+untouched — a driver that binds primitives only rejects it there, on
+the first `save()` of an existing row, while `create()` (whose
+timestamps come from the column default) keeps working.
+
 The worked example is the cart demo's adapter, condensed from
 `packages/sites/demos/cart/api/db.rip`, including that json-decode
-step:
+step and the date encode:
 
 ```rip
 import { Database } from 'bun:sqlite'
@@ -981,7 +988,9 @@ jsonCols = Set.new([...(User.toSQL() + Product.toSQL() + Order.toSQL())
 globalThis.__ripSchema.__schemaSetAdapter
   query: (sql, params) ->
     bound = (params or []).map (p) ->
-      if p? and typeof p is 'object' and not (p instanceof Date) then JSON.stringify(p) else p
+      if p instanceof Date then p.toISOString()
+      else if p? and typeof p is 'object' then JSON.stringify(p)
+      else p
     stmt = db.query(sql)
     names = stmt.columnNames
     data = stmt.values(...bound) or []

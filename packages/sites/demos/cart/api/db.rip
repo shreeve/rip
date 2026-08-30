@@ -1,44 +1,16 @@
-# @ts-nocheck — throwaway SQLite shim, never hardened in place; the
-# exemption dies with the file.
-#
-# Local database — a single SQLite file (api/cart.sqlite) via `bun:sqlite`,
-# built into Bun, so there are zero dependencies and nothing to run.
-#
-# This module is imported by every worker and RE-IMPORTED on each hot-reload,
-# so its top level does only the cheap wiring: open the file and route the
-# schema ORM through it. The one-time schema creation lives in `createSchema`
-# and the data seeding in `./seed.rip` — both run by ../setup.rip once at
-# startup under `rip site`, never on reload.
+# @ts-nocheck — throwaway SQLite shim; the exemption dies with the file.
 
 import { Database } from 'bun:sqlite'
 import { User, Product, Order } from './models.rip'
 
 export db = Database.new "#{import.meta.dir}/cart.sqlite"
 
-# Wait for the write lock instead of failing with SQLITE_BUSY when several
-# workers open the file at once on boot.
 db.exec 'PRAGMA busy_timeout = 5000'
 
-# One-time schema creation. Idempotent (IF NOT EXISTS), so the startup call is a
-# no-op against an already-provisioned file. Seeding lives in `./seed.rip`.
-#
-# Creation, NOT migration — there is no ledger, no version, and no ALTER here.
-# `IF NOT EXISTS` means an edit to models.rip does not reach a cart.sqlite that
-# already exists; delete the file and let this rebuild it. A demo whose whole
-# point is "nothing to install" does not get rip's real migration machinery
-# (`rip schema plan/push` and the `schema` ledger), which runs against
-# the DuckDB adapter.
+# Creation, not migration: IF NOT EXISTS means a models.rip edit never reaches
+# an existing cart.sqlite. Delete the file to rebuild it.
 export createSchema = ->
-  # SQLite's flexible typing accepts DuckDB's VARCHAR/DOUBLE/JSON/TIMESTAMP
-  # as-is; DuckDB's sequence-based auto-id needs stripping (INTEGER PRIMARY
-  # KEY auto-increments), a literal-union column's ENUM('a', 'b') needs
-  # flattening (SQLite's type names take numeric arguments only, so the
-  # member list is a syntax error there — the set stays enforced by the
-  # model's parse), @times' `timezone('UTC', now())` default needs the
-  # SQLite spelling (its CURRENT_TIMESTAMP is already UTC, so this is the
-  # same instant, not an approximation), plus IF NOT EXISTS so re-running
-  # is harmless.
-  # (rip's toSQL emits DuckDB DDL by design — these tweaks adapt it to SQLite.)
+  # toSQL emits DuckDB DDL by design; these adapt it to SQLite.
   ddl = (User.toSQL() + '\n' + Product.toSQL() + '\n' + Order.toSQL())
     .replace(/CREATE SEQUENCE[^;]*;/g, '')
     .replace(/ DEFAULT nextval\('[^']*'\)/g, '')
@@ -48,25 +20,22 @@ export createSchema = ->
   for stmt in ddl.split(';') when stmt.trim()
     db.run stmt
 
-# Columns the schema declares as JSON (an order's `items`). Only these are
-# decoded on read, so a VARCHAR value that merely looks like JSON (a name like
-# "[redacted]") is left untouched rather than parsed.
-# toSQL quotes identifiers (`"items" JSON`), so the name may be wrapped.
+# Only declared JSON columns decode, so a VARCHAR that merely looks like JSON is
+# left alone. toSQL quotes identifiers, hence the optional quote in the pattern.
 jsonCols = Set.new([...(User.toSQL() + Product.toSQL() + Order.toSQL()).matchAll(/"?(\w+)"?\s+JSON\b/g)].map((m) -> m[1]))
 
-# Route the schema ORM through SQLite. `.values()` returns row arrays and
-# `.columnNames` the headers — exactly the adapter's result shape. Object
-# params (an order's `items`) serialize into a JSON text column on write, and
-# the JSON columns above decode back on read. Dates come back as strings and
-# are coerced by the schema's own date handling.
+# bun:sqlite binds primitives only, so the Date the ORM binds for @times'
+# updated_at is encoded here. create() takes the column default and never shows
+# this; save() of an existing row fails without it.
 globalThis.__ripSchema.__schemaSetAdapter
   query: (sql, params) ->
     bound = (params or []).map (p) ->
-      if p? and typeof p is 'object' and not (p instanceof Date) then JSON.stringify(p) else p
+      if p instanceof Date then p.toISOString()
+      else if p? and typeof p is 'object' then JSON.stringify(p)
+      else p
     stmt = db.query(sql)
     names = stmt.columnNames
-    # `.values()` runs the statement and returns row arrays — or null for a
-    # write with no RETURNING (the write still executes); coerce that to [].
+    # .values() returns null for a write with no RETURNING; the write still ran.
     data = stmt.values(...bound) or []
     decode = (v, i) ->
       if jsonCols.has(names[i]) and typeof v is 'string'

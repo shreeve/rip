@@ -94,6 +94,8 @@ function classify(kit, e) {
   return { error: true };
 }
 
+const update = (r) => r.calls.find((c) => c.sql.startsWith('UPDATE'));
+
 async function runOn(kit, scenario) {
   return await kit.scope(async () => {
     const adapter = recordingAdapter();
@@ -439,6 +441,23 @@ describe('orm: paired reference — dirty tracking and save', () => {
     });
     const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
     expect(update.sql).toBe('UPDATE "stamps" SET "name" = ?, "updated_at" = ? WHERE "id" = ?');
+  });
+
+  test('the updated_at bump binds a real Date — encoding it is the adapter\'s job', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'created_at', 'updated_at'], [1, 'A', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z']));
+      const U = k.__schema(model('Stamp', field('name'), dir('times')));
+      const inst = await U.first();
+      inst.name = 'B';
+      await inst.save();
+      return null;
+    });
+    // SET "name" = ?, "updated_at" = ? WHERE "id" = ? — the bump is params[1],
+    // and it goes to the adapter as a Date, never pre-serialized. An adapter
+    // over a driver that binds primitives only must encode it itself or every
+    // save() of an existing row fails there (create() takes the column
+    // default and so never shows it). See docs/ORM.md.
+    expect(update(r).params[1]).toBeInstanceOf(Date);
   });
 
   test('markDirty forces an unchanged column into the UPDATE; bogus and unpersisted reject', async () => {
