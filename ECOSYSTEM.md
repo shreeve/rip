@@ -574,10 +574,13 @@ compatible DuckDB 1.5 and 2.0 libraries; the resolved library is the engine.
 
 ### Daemonless fleet
 
-Harbor's filesystem registry defaults to `~/.harbor`:
+Harbor keeps two roots. `~/.config/harbor/config.toml` is the user's to
+edit; the fleet registry is harbor's to write and safe to delete, and
+lives under `~/.local/state/harbor` (or `$XDG_STATE_HOME/harbor`, or an
+absolute `$HARBOR_HOME`, which collapses both roots into one directory):
 
 ```text
-~/.harbor/
+~/.local/state/harbor/runtime/
 ├── medlabs.lock    process-lifetime ownership lock
 ├── medlabs.sock    default local data endpoint
 ├── medlabs.json    identity and dial information
@@ -585,9 +588,9 @@ Harbor's filesystem registry defaults to `~/.harbor`:
 └── log/
 ```
 
-`harbor serve` runs in the foreground. `harbor add` starts a detached berth
-and waits for real readiness. `harbor ls` discovers the fleet, `harbor stop`
-drains and checkpoints, and `harbor rm` clears registry state without deleting
+`harbor serve` runs in the foreground. `harbor start` starts a detached berth
+and waits for real readiness. `harbor show` discovers the fleet, `harbor stop`
+drains and checkpoints, and `harbor forget` clears registry state without deleting
 the database file. Harbor is not a central daemon or supervisor.
 
 UDS is the default local face. Loopback or trusted-network TCP is optional.
@@ -645,10 +648,10 @@ make drift a compile error.
 
 Pilot resolves:
 
-- a live berth name from `~/.harbor`;
+- a live berth name from `~/.local/state/harbor/runtime`;
 - a Unix socket;
 - a plain HTTP endpoint; or
-- a `.duckdb` path, joining its current owner or asking `harbor add` to start
+- a `.duckdb` path, joining its current owner or asking `harbor start` to start
   an idle-exit berth.
 
 It provides a DuckDB-shell-class REPL, syntax highlighting, server-assisted
@@ -701,7 +704,7 @@ save → generation child → prepared artifact → Janus doorbell cut
 ### SQL from a developer terminal
 
 ```text
-pilot medlabs → ~/.harbor/medlabs.{json,sock,token}
+pilot medlabs → ~/.local/state/harbor/runtime/medlabs.{json,sock,token}
               → Harbor protocol → DuckDB
 ```
 
@@ -714,7 +717,7 @@ For a MedLabs-shaped local deployment, start the database owner before the
 site and let it outlive worker reloads:
 
 ```bash
-harbor add api/db/medlabs.duckdb --name medlabs --statement-timeout 30s
+harbor start api/db/medlabs.duckdb --name medlabs --statement-timeout 30s
 rip sites start edge --config Caddyfile
 rip sites add . --name medlabs
 rip sites start medlabs
@@ -874,7 +877,7 @@ Use this map to move from the architecture to the owning code quickly:
 The architecture above reconciles current code and tests. Several older or
 duplicated descriptions should not be copied into new work:
 
-- Current Harbor is a standalone `harbor serve`/`harbor add` binary. The
+- Current Harbor is a standalone `harbor serve`/`harbor start` binary. The
   `INSTALL harbor; LOAD harbor; CALL harbor_serve(...)` extension instructions
   still present in [`packages/db/README.md`](packages/db/README.md) and
   `packages/db/example.rip` are retired.
