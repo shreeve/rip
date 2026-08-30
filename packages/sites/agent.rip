@@ -217,16 +217,27 @@ readOwnerPid = (root) ->
     if Number.isInteger(value.pid) then value.pid else null
   catch then null
 
+# Probe verdicts ride the agent's OWN event loop: AbortSignal.timeout
+# is wall-clock, so with every core busy a healthy peer's reply sits
+# unread past a tight deadline and reads as dead (observed in the field:
+# ~25s of full saturation recreated a healthy edge; both endpoints
+# answer in under 1ms at idle). Generous on purpose — with DOWN_TICKS
+# gating recovery, slow detection costs seconds, while a false verdict
+# costs a running edge.
+PROBE_TIMEOUT = 5000
+# Consecutive failed reconcile ticks before recovery acts.
+DOWN_TICKS = 3
+
 managerStatus = (app) ->
   socket = managerRuntime(app.root, 'rip-agent').socket
   try
-    response = fetch! 'http://manager/status', { method: 'GET', unix: socket, signal: AbortSignal.timeout(1000) }
+    response = fetch! 'http://manager/status', { method: 'GET', unix: socket, signal: AbortSignal.timeout(PROBE_TIMEOUT) }
     return null unless response.ok
     response.json!
   catch then null
 
 edgeFetch = (target, path = '/1.0') ->
-  options = { signal: AbortSignal.timeout(1000) }
+  options = { signal: AbortSignal.timeout(PROBE_TIMEOUT) }
   if target.startsWith('http://') or target.startsWith('https://')
     fetch "#{target}#{path}", options
   else
@@ -239,6 +250,21 @@ edgeHealth = ->
     return null unless response.ok
     response.json!
   catch then null
+
+# Control answering is janus alive, NOT the edge serving: janus owns its
+# control listener, so a teardown caught mid-shutdown can leave a
+# half-dead caddy that answers control forever while 80/443 sit with
+# launchd, unclaimed (observed in the field: apps down for good,
+# `sites status` green throughout). For the packaged launchd posture,
+# assert the plain HTTP port end to end — any HTTP answer proves the
+# inherited listeners live; refusal or silence is down. Custom configs
+# keep control-only health: their port layout is their own business.
+edgeServing = ->
+  return true unless usesLaunchd state.edge.config
+  try
+    fetch! "http://127.0.0.1:#{state.edge.httpPort}/", { redirect: 'manual', signal: AbortSignal.timeout(PROBE_TIMEOUT) }
+    true
+  catch then false
 
 # ── serve.rip host declarations ──────────────────────────────────────
 #
@@ -728,7 +754,9 @@ startEdge = (body = {}, automatic = false) ->
     fail 'httpPort must be an integer from 1 through 65535' if body.httpPort? and (not Number.isInteger(body.httpPort) or body.httpPort < 1 or body.httpPort > 65535)
     fail 'httpsPort must be an integer from 1 through 65535' if body.httpsPort? and (not Number.isInteger(body.httpsPort) or body.httpsPort < 1 or body.httpsPort > 65535)
     current = snapshotEdge!
-    return current if current.state is 'running'
+    # `and edgeServing!` or a zombie wins: an edge that answers control
+    # with dead ports would turn every rescue into this early return.
+    return current if current.state is 'running' and edgeServing!
     fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
     caddy = resolveCaddy! body.caddy
     configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
@@ -750,6 +778,18 @@ startEdge = (body = {}, automatic = false) ->
     try mkdirSync SITES_DIR, { recursive: true }
     launcher = if usesLaunchd(config) then 'launchd' else 'direct'
     environment = edgeEnv launcher, control
+    # A previous edge can survive its own job's bootout (orphaned when a
+    # teardown races its listener's death) and then squat on the control
+    # and front-door listeners — every rebuilt caddy exits on the
+    # conflict while the squatter keeps health green. The pidfile names
+    # it; put it down before handing launchd the ports.
+    stale = readEdgePid! or state.edge.pid
+    if state.edge.managed and processAlive(stale)
+      try process.kill stale, 'SIGTERM'
+      staleDeadline = Date.now() + 3000
+      while processAlive(stale) and Date.now() < staleDeadline
+        sleep! 50
+      try process.kill stale, 'SIGKILL' if processAlive(stale)
     # These paths belong exclusively to a Rip-owned edge. An unclean exit can
     # leave the filesystem entries behind after no listener remains.
     try unlinkSync paths.edgeAdmin
@@ -771,7 +811,10 @@ startEdge = (body = {}, automatic = false) ->
       closeSync log
     state.edge = { ...state.edge, desired: 'running', managed: true, pid: child?.pid or null, caddy, config, control, admin: paths.edgeAdmin, baseUrl, lastError: null }
     saveState()
-    deadline = Date.now() + 10000
+    # 30s, matching app readiness: this stopwatch runs on the agent's
+    # starved event loop too, and a boot judged by a 10s deadline under
+    # machine-wide load flunked healthy edges (observed in the field).
+    deadline = Date.now() + 30000
     loop
       health = edgeHealth!
       if health?
@@ -789,8 +832,16 @@ startEdge = (body = {}, automatic = false) ->
     code = child?.exitCode ?? outcome?.code
     message = if code? then "Caddy exited #{code}" else 'Caddy readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
-    bootoutLaunchd true if launcher is 'launchd'
-    state.edge = { ...state.edge, ...prior, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
+    if code? or outcome?
+      bootoutLaunchd true if launcher is 'launchd'
+      state.edge = { ...state.edge, ...prior, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
+    else
+      # A deadline with no exit evidence is a boot still in flight, not a
+      # corpse. Tearing the job down here is what rebuilt healthy edges
+      # into the teardown race over and over under load — leave it
+      # standing; reconcile keeps watching, and the next recreate's
+      # bootout still sweeps a genuine wedge.
+      state.edge = { ...state.edge, desired: 'running', lastError: message }
     saveState()
     fail message, 503
   edgeStarting = task
@@ -1236,18 +1287,36 @@ process.on 'SIGTERM', shutdown
 try
   server = Bun.serve { unix: paths.socket, fetch: handle }
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
+  # One missed probe is not an outage (see PROBE_TIMEOUT) — recovery
+  # waits for DOWN_TICKS consecutive failed ticks, evidence spread
+  # across seconds rather than one starved instant.
+  appMisses = Map.new()
+  edgeMisses = 0
   reconcile = ->
-    for app in state.apps when app.desired is 'running' and not managerStatus!(app)?
+    for app in state.apps when app.desired is 'running'
+      if managerStatus!(app)?
+        appMisses.delete app.id
+        continue
+      misses = (appMisses.get(app.id) or 0) + 1
+      appMisses.set app.id, misses
+      continue if misses < DOWN_TICKS
+      appMisses.delete app.id
       startApp(app, true).catch (error) ->
         app.lastError = error.message
         saveState()
-    if state.edge.desired is 'running' and not edgeStarting? and not edgeHealth! and Date.now() >= edgeRestartAt
-      edgeRestartCount++
-      delay = Math.min 30000, 500 * 2 ** Math.min(edgeRestartCount - 1, 6)
-      edgeRestartAt = Date.now() + delay
-      startEdge({}, true).catch (error) ->
-        state.edge.lastError = error.message
-        saveState()
+    return unless state.edge.desired is 'running' and not edgeStarting?
+    if edgeHealth! and edgeServing!
+      edgeMisses = 0
+      return
+    edgeMisses++
+    return if edgeMisses < DOWN_TICKS or Date.now() < edgeRestartAt
+    edgeMisses = 0
+    edgeRestartCount++
+    delay = Math.min 30000, 500 * 2 ** Math.min(edgeRestartCount - 1, 6)
+    edgeRestartAt = Date.now() + delay
+    startEdge({}, true).catch (error) ->
+      state.edge.lastError = error.message
+      saveState()
   setTimeout reconcile, 0
   setInterval (->
     reconcile()

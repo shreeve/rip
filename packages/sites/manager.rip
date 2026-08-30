@@ -15,6 +15,7 @@ positiveEnv = (name, fallback) ->
   value
 
 HEARTBEAT_MS = positiveEnv 'RIP_HEARTBEAT_MS', 5000
+CONTROL_TIMEOUT_MS = positiveEnv 'RIP_CONTROL_TIMEOUT_MS', 5000
 APP_SWEEP_MS = positiveEnv 'RIP_APP_SWEEP_MS', 2000
 READY_MS = positiveEnv 'RIP_BOOT_DEADLINE_MS', 30000
 # Janus retains a dead manager's claim for its 15-second heartbeat TTL and
@@ -140,7 +141,14 @@ parseArgs = (argv) ->
   args
 
 controlFetch = (target, method, path, body = null) ->
-  options = { method }
+  # Finite always: `beat` refuses to overlap heartbeats, so ONE control
+  # call that connects and never answers would wedge the loop for good —
+  # heartbeats stop, janus reaps the claim, and the 404 re-register that
+  # would heal a lost registration can never run (observed in the field:
+  # permanent "unknown app id" until a manual restart). Generous because
+  # this clock also measures our own starved event loop; an aborted beat
+  # just warns and retries on the next interval.
+  options = { method, signal: AbortSignal.timeout(CONTROL_TIMEOUT_MS) }
   if body?
     options.body = JSON.stringify body
     options.headers = { 'content-type': 'application/json' }
