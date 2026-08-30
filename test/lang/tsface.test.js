@@ -72,6 +72,12 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
   /^\/\/[ \t]*@ts-(expect-error|ignore|nocheck)(\s|$)/u,        // directive comment line
+  /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
+  /^declare function __ripRoute<const T extends \(.*\)>\(s: T\): T;$/su, // the route helper declare, union inlined
+  /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
+  /^app = __ripAmbientApp\(0 as any as .*\);$/su,           // the stash ambience member (class road)
+  /^declare function __ripAmbientApp<T>\(v: T\): \{ data: T; \[key: string\]: any \};$/u, // the ambience helper declare
+  /^declare function __ripSourceKey<const T extends \(.*\)>\(s: T\): T;$/su, // the stash-key helper declare
 ];
 
 describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-byte', () => {
@@ -108,6 +114,132 @@ describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-b
       path: 'types.rip', runtimeDelivery: 'none', face: 'ts',
     });
     expect(faced.tsRegions.length).toBeGreaterThan(0);
+  });
+});
+
+// ── 1a. the route-checking emissions ────────────────────────────────
+//
+// Compiled WITH the route options (`routesUnion`), the face wraps
+// syntactic route literals in `__ripRoute(...)` on three surfaces —
+// intrinsic `<a href>` (plain and reactive), and a child component's
+// `href:` prop — and declares the helper plus the ambient `RoutePath`
+// at the tail. Every one of those bytes is a recorded TS-only region:
+// the strip gate must hold under the options, and the JS emission must
+// not know they exist.
+
+describe('route options: TS-only wraps, strip identity, JS indifference', () => {
+  const ROUTES = '"/" | "/cart" | `/orders/${string}`';
+  const src = [
+    "nav: RoutePath = '/cart'",
+    '',
+    'Button = component extends a',
+    '  render',
+    '    a',
+    '      slot',
+    '',
+    'Page = component',
+    "  id := '7'",
+    '  render',
+    "    a href: '/cart', 'Cart'",
+    '    a href: "/orders/#{@id}", \'Order\'',
+    "    a href: 'https://example.com', 'External'",
+    "    a href: nav, 'Dynamic'",
+    "    div href: '/cart'",
+    "    Button href: '/cart'",
+    '    Button href: nav',
+  ].join('\n') + '\n';
+  const routed = (opts = {}) => ({ path: 'routes-fixture.rip', routesUnion: ROUTES, ...opts });
+
+  test('the strip gate holds and every region keeps a recognized shape', () => {
+    for (const runtimeDelivery of ['none', 'inline', 'import']) {
+      const faced = compile(src, routed({ runtimeDelivery, face: 'ts' }));
+      const plain = compile(src, routed({ runtimeDelivery }));
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+      for (const [start, end] of faced.tsRegions) {
+        const text = faced.code.slice(start, end).trim();
+        expect(
+          REGION_SHAPES.some((re) => re.test(text)),
+          `unrecognized TS-only region shape under route options: ${JSON.stringify(text)}`,
+        ).toBe(true);
+      }
+      // The options are face-only: the JS emission is byte-identical
+      // with and without them.
+      expect(plain.code).toBe(compile(src, { path: 'routes-fixture.rip', runtimeDelivery }).code);
+    }
+  });
+
+  test('the three checked surfaces wrap; dynamic and external values never do', () => {
+    const faced = compile(src, routed({ runtimeDelivery: 'none', face: 'ts' }));
+    // A wrapped intrinsic href closes WITHOUT the coercive `as any`
+    // (the wrap already returns a string-literal type) and CASTS ITS
+    // RECEIVER — an any-receiver call suppresses the argument's
+    // string-literal completions in tsgo.
+    expect(faced.code).toContain(` as Element).setAttribute('href', __ripRoute("/cart"));`);          // intrinsic, plain
+    expect(faced.code).toContain(` as Element).setAttribute('href', __ripRoute(\`/orders/\${this.id.value}\`));`); // intrinsic, reactive template
+    expect(faced.code).toContain('href: __ripRoute("/cart")');                        // component prop
+    expect(faced.code).toContain('"https://example.com" as any');                     // external passes bare
+    expect(faced.code).toContain("setAttribute('href', nav as any)");                 // dynamic passes bare
+    expect(faced.code).toContain('href: nav');                                        // dynamic prop passes bare
+    expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
+    expect(faced.code).toContain(`type RoutePath = ${ROUTES};`);
+    // A non-anchor element's href is a plain attribute — never wrapped.
+    const divLine = faced.code.split('\n').find((l) => l.includes('_el5.setAttribute'));
+    expect(divLine).toContain('"/cart" as any');
+    expect(divLine).not.toContain('__ripRoute');
+  });
+
+  test('unarmed (no route options): no wraps, no helper, no RoutePath', () => {
+    const faced = compile(src, { path: 'routes-fixture.rip', runtimeDelivery: 'none', face: 'ts' });
+    expect(faced.code).not.toContain('__ripRoute');
+    expect(faced.code).not.toContain('type RoutePath');
+  });
+
+  test('a literal source() key wraps in __ripSourceKey; a dynamic key never does', () => {
+    const stashed = [
+      'Page = component',
+      '  ok: ->',
+      "    @app.data.source('user.name').reset()",
+      "    key = 'user'",
+      '    @app.data.source(key).reset()',
+      '  render null',
+      '',
+    ].join('\n');
+    for (const runtimeDelivery of ['none', 'inline', 'import']) {
+      const opts = { path: 'stash-fixture.rip', runtimeDelivery, appStashSpec: './stash.rip' };
+      const faced = compile(stashed, { ...opts, face: 'ts' });
+      const plain = compile(stashed, opts);
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+      for (const [start, end] of faced.tsRegions) {
+        const text = faced.code.slice(start, end).trim();
+        expect(
+          REGION_SHAPES.some((re) => re.test(text)),
+          `unrecognized TS-only region shape under a stash: ${JSON.stringify(text)}`,
+        ).toBe(true);
+      }
+      expect(faced.code).toContain('source(__ripSourceKey("user.name"))');
+      expect(faced.code).toContain('source(key)');
+      expect(faced.code).toContain('declare function __ripSourceKey<const T extends ((keyof import("./stash.rip").__RipStash & string) | `${keyof import("./stash.rip").__RipStash & string}.${string}`)>(s: T): T;');
+    }
+  });
+
+  test('a user-declared RoutePath wins: the ambient alias stays out', () => {
+    const declared = "type RoutePath = string\n" + src;
+    const faced = compile(declared, routed({ runtimeDelivery: 'none', face: 'ts' }));
+    expect(faced.code).not.toContain(`type RoutePath = ${ROUTES};`);
+  });
+
+  test('an imported RoutePath wins in every spelling — multi-line lists included', () => {
+    // The guards run over the GENERATED face, where an import list is
+    // one statement whatever the source's line breaks — a formatter's
+    // multi-line list must suppress the alias exactly like the
+    // single-line spelling, or the face carries a TS2440 clash.
+    for (const importText of [
+      "import { RoutePath } from './nav.rip'\n",
+      "import {\n  RoutePath,\n} from './nav.rip'\n",
+    ]) {
+      const faced = compile(importText + "nav: RoutePath = '/cart'\n", routed({ runtimeDelivery: 'none', face: 'ts' }));
+      expect(faced.code).not.toContain(`type RoutePath = ${ROUTES};`);
+    }
   });
 });
 

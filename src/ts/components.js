@@ -817,15 +817,55 @@ export const ambientClassDeclares = (info) => {
     // tail), the member's type is INSTANTIATED and prints resolved.
     // TS-only like every line here; the runtime's injection remains the
     // only real assignment.
-    if (name === 'app') lines.push(`app = __ripAmbientApp(0 as any as ${appDataType(info.appStashSpec)} & import('rip/app').StashMethods);`);
-    else if (name === 'router') lines.push(`declare router: import('rip/app').Router;`);
+    if (name === 'app') lines.push(`app = __ripAmbientApp(0 as any as ${appDataType(info.appStashSpec)} & ${stashMethodsType(info.appStashSpec)});`);
+    else if (name === 'router') lines.push(`declare router: ${routerAmbienceType(info)};`);
+    else if (name === 'params') lines.push(`declare params: ${info.routeParams ?? 'Record<string, string>'};`);
     else lines.push(`declare ${name}: Record<string, string>;`);
   }
   return lines;
 };
 
+// The router's ambient type — ONE spelling for the class declare and the
+// companion interface. Plain `import('rip/app').Router` without a route
+// union; with one, the union-checked construction: Omit the two
+// navigation members and re-add them in METHOD syntax. Not a generic
+// `Router<R>` — arrow-typed properties check contravariantly under
+// strictFunctionTypes, so `Router<Union>` and `Router<string>` would be
+// mutually unassignable — and not an intersection, which unions an
+// overloaded parameter and loses the narrowing; method syntax stays
+// bivariant, so the typed router passes wherever a plain Router is
+// expected. The conditional keys off the ARGUMENT'S SYNTAX: a
+// `/`-leading string literal must inhabit the union (inlined, so the
+// error reads as the actual route list), while dynamic strings,
+// external URLs, and query/hash strings built as values fall through
+// to P and pass.
+export const routerAmbienceType = (info) => {
+  if (!info.routesUnion) return `import('rip/app').Router`;
+  const u = `(${info.routesUnion})`;
+  const nav = (name) =>
+    `${name}<const P extends string>(url: P extends \`/\${string}\` ? ${u} : P, opts?: { noScroll?: boolean }): boolean;`;
+  return `Omit<import('rip/app').Router, 'push' | 'replace'> & { ${nav('push')} ${nav('replace')} }`;
+};
+
 export const appDataType = (spec) =>
   `import('rip/app').AppData<import(${JSON.stringify(spec)}).__RipStash>`;
+
+// The stash-method surface, instantiated at the projected data shape so
+// `source()` answers TYPED handles: a top-level key resolves through
+// StashMethods' keyed overload to `SourceHandleFor<D[K]>`, and any
+// other string — dotted paths included — stays legal on the permissive
+// overload and answers the untyped handle. A NAMED reference on
+// purpose, never an inline re-spelling of `source`: an anonymous type
+// literal's signature internals print AS WRITTEN in hover, so an
+// inlined overload pair echoes its `import(...)` splices on every
+// `@app` hover — the same leak the `__ripAmbientApp` indirection
+// exists to prevent, and the editor's no-leak sweep gates it. The cost
+// is that a typo'd top-level key passes untyped instead of erroring:
+// telling a dotted path from a typo needs a template-literal type,
+// which the package cannot spell (Rip's structured types carry none)
+// and this splice must not inline.
+export const stashMethodsType = (spec) =>
+  `import('rip/app').StashMethods<${appDataType(spec)}>`;
 
 // The ambience's `app` member — ONE spelling for the interface road and
 // the class road. `data` is what the runtime delivers: a Stash — the
@@ -833,7 +873,7 @@ export const appDataType = (spec) =>
 // `reset`, …), spelled as an intersection. gateProjection stays on the
 // bare AppData: a gate path names a data entry, never a method.
 export const appAmbienceType = (spec) =>
-  `{ data: ${appDataType(spec)} & import('rip/app').StashMethods; [key: string]: any }`;
+  `{ data: ${appDataType(spec)} & ${stashMethodsType(spec)}; [key: string]: any }`;
 
 // A render gate's member type, projected from the stash the gate reads:
 // `<~` admits only a literal `@app.data.<path>` (the emitter rejects the
@@ -950,11 +990,15 @@ export function instanceTypeLines(info, selfType) {
         continue;
       }
       if (name === 'router') {
-        lines.push({ segs: [{ text: `router?: import('rip/app').Router;` }] });
+        lines.push({ segs: [{ text: `router?: ${routerAmbienceType(info)};` }] });
         continue;
       }
-      if (name === 'params' || name === 'query') {
-        lines.push({ segs: [{ text: `${name}?: Record<string, string>;` }] });
+      if (name === 'params') {
+        lines.push({ segs: [{ text: `params?: ${info.routeParams ?? 'Record<string, string>'};` }] });
+        continue;
+      }
+      if (name === 'query') {
+        lines.push({ segs: [{ text: `query?: Record<string, string>;` }] });
         continue;
       }
     }

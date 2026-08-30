@@ -168,11 +168,7 @@ closure lazily; the feature that requests the expansion owns its cost.
 
 ### Render-DSL intelligence
 
-The TypeScript face currently lowers render-block attributes to string
-literals, leaving no typed position for the language service. Editor
-intelligence for render blocks returns through typed attribute
-positions in the face, so completion and checking are tsgo-native.
-Scheduled with the UI stage.
+The TypeScript face lowers render-block attributes to string literals, leaving no typed position for the language service. The route-checking slice has shipped through a face-region wrapper (typed `<a href:>`, component `href:` props, `router.push`/`replace`, ambient `RoutePath`, per-route `@params` — docs/TYPES.md § Typed routes), which closes the checking half for that one attribute. Full typed-attribute intelligence — every attribute a tsgo-native typed position, completion included — remains open, scheduled with the UI stage.
 
 ## Rip-native hypermedia
 

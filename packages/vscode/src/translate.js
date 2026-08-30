@@ -136,6 +136,44 @@ export function diagnosticTagsFor(code) {
   return [];
 }
 
+// Route-union display prettifying, two passes over the same member
+// list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
+// reads as the parameterized display the route file spells
+// (`/orders/:id`). RE-ORDER: tsgo normalizes union display — string
+// literals first, template literals dumped at the end — so a run of
+// route members is rewritten back into WALKER order (`/` first, then
+// path-lexicographic), which keeps `/orders/:id` beside `/orders`. A
+// run rewrites only when every ` | `-separated piece is a route member,
+// so a union that mixes in anything else (`| undefined` from an
+// optional prop) keeps its tail where TS put it. Display-only — the
+// face text, the union the checker saw, and every span are untouched.
+// Entries come from the route walker (mirror.js appRoutesFor), already
+// in walker order.
+export function prettifyRouteUnion(text, entries) {
+  if (typeof text !== 'string' || !entries?.length) return text;
+  let out = text;
+  const members = [];
+  for (const e of entries) {
+    if (typeof e?.text !== 'string') continue;
+    if (e.text.startsWith('`') && e.display) {
+      const pretty = '`' + e.display + '`';
+      out = out.split(e.text).join(pretty);
+      members.push(pretty);
+    } else {
+      members.push(e.text);
+    }
+  }
+  if (members.length > 1) {
+    const one = `(?:${members.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`;
+    const run = new RegExp(`${one}(?: \\| ${one})+`, 'g');
+    out = out.replace(run, (match) => {
+      const present = new Set(match.split(' | '));
+      return members.filter((m) => present.has(m)).join(' | ');
+    });
+  }
+  return out;
+}
+
 // Line-start offsets of `text`: lineStarts[n] is the offset of line n
 // (0-based). Same construction as SourceFile.lineStarts; duplicated here
 // so this module stays importable in the staged extension, where the
@@ -184,6 +222,24 @@ function preciseSourceToGenerated(mappings, offset, source, code) {
       const delta = offset - r.sourceStart;
       if (r.generatedStart + delta <= r.generatedEnd &&
           source.slice(r.sourceStart, offset) === code.slice(r.generatedStart, r.generatedStart + delta)) {
+        return r.generatedStart + delta;
+      }
+      // A QUOTE-TWIN string literal: rip's `'…'` emits `"…"`, so the
+      // prefix check above dies on the delimiter byte while every
+      // INTERIOR byte is identical — an interior offset maps linearly
+      // with full confidence (this is what serves completions inside an
+      // idiomatic single-quoted href). Clean twins only: any escaping
+      // difference changes the interior bytes or the length and falls
+      // through to the decline. Delimiter positions stay unmapped —
+      // their byte really does differ.
+      const len = r.sourceEnd - r.sourceStart;
+      if (len === r.generatedEnd - r.generatedStart && len >= 2 &&
+          offset > r.sourceStart && offset < r.sourceEnd &&
+          (source[r.sourceStart] === "'" || source[r.sourceStart] === '"') &&
+          (code[r.generatedStart] === "'" || code[r.generatedStart] === '"') &&
+          source[r.sourceEnd - 1] === source[r.sourceStart] &&
+          code[r.generatedEnd - 1] === code[r.generatedStart] &&
+          source.slice(r.sourceStart + 1, r.sourceEnd - 1) === code.slice(r.generatedStart + 1, r.generatedEnd - 1)) {
         return r.generatedStart + delta;
       }
     }

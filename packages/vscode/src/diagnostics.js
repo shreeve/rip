@@ -11,7 +11,7 @@
 import path from 'node:path';
 import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
-  SUPPRESSED_TS_CODES, diagnosticTagsFor,
+  SUPPRESSED_TS_CODES, diagnosticTagsFor, prettifyRouteUnion,
 } from './translate.js';
 import { alwaysReported, isSyntaxClass } from './scopes.js';
 import { declaredButUninstalled } from './mirror.js';
@@ -58,7 +58,21 @@ export function mapTsDiagnostic(good, d) {
   }
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
-  const span = generatedSpanToSource(good.mappings, s, e);
+  let span = generatedSpanToSource(good.mappings, s, e);
+  // A route mismatch re-anchors on its surface's MEANINGFUL TOKEN,
+  // through the one recorded-span mechanism: the emitter's routeWraps
+  // carry a key/value span pair per checked surface — the pair's KEY
+  // for the attribute wraps (every other mistyped attribute reports on
+  // its name — the props-object road, TS's own property convention),
+  // the METHOD NAME for `push`/`replace` arguments. Only a diagnostic
+  // covering EXACTLY the recorded value re-anchors; an error interior
+  // to the value (an interpolated expression's own defect) keeps its
+  // exact position, and an unrecorded call — an array's `.push`,
+  // route-membered element type or not — can never match.
+  if (span && good.routeWraps?.length) {
+    const wrap = good.routeWraps.find((w) => s === w.value[0] && e === w.value[1]);
+    if (wrap) span = generatedSpanToSource(good.mappings, wrap.key[0], wrap.key[1]) ?? span;
+  }
   // A generated span with no source mapping lives in a purely
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the
@@ -145,6 +159,10 @@ export function mapTsDiagnostic(good, d) {
     const spanText = good.source.slice(span[0], span[1]);
     if (/^[A-Za-z_$][\w$]*$/.test(spanText)) message = message.replace(/^'[^']*'/, `'${spanText}'`);
   }
+  // A route union in the message renders for READING: each dynamic
+  // member re-labels as the parameterized display its route file
+  // spells. Display-only; spans and the checked union are untouched.
+  message = prettifyRouteUnion(message, good.routeEntries);
   return {
     severity: d.severity ?? 1,
     code: d.code,

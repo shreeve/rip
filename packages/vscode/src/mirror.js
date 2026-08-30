@@ -213,19 +213,30 @@ export function appStashSpecFor(fsPath, workspaceRoot, memo = null) {
     stashPath = memo.get(fromDir);
   } else {
     stashPath = null;
-    for (let dir = fromDir; ; dir = path.dirname(dir)) {
-      if (fs.existsSync(path.join(dir, 'index.rip')) && fs.existsSync(path.join(dir, 'package.json'))) {
-        const stash = path.join(dir, 'app', 'stash.rip');
-        if (fs.existsSync(stash)) stashPath = path.resolve(stash);
-        break;
-      }
-      if (!workspaceRoot || dir === workspaceRoot || path.dirname(dir) === dir) break;
+    const root = appRootDirFor(fsPath, workspaceRoot);
+    if (root !== null) {
+      const stash = path.join(root, 'app', 'stash.rip');
+      if (fs.existsSync(stash)) stashPath = path.resolve(stash);
     }
     memo?.set(fromDir, stashPath);
   }
   if (stashPath === null || stashPath === path.resolve(fsPath)) return null;
   const rel = path.relative(fromDir, stashPath).split(path.sep).join('/');
   return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+// The anchor walk shared by every `<root>/app/*` framework contract: the
+// nearest directory holding both an `index.rip` and a `package.json`,
+// walking up from the file and stopping at the workspace root (inclusive
+// — a standalone app IS its workspace). Null when nothing in range
+// qualifies. Without a workspace root only the file's own directory is
+// eligible — an unbounded walk would anchor scratch files to whatever
+// enclosing project happens to sit above them.
+export function appRootDirFor(fsPath, workspaceRoot) {
+  for (let dir = path.dirname(fsPath); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'index.rip')) && fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    if (!workspaceRoot || dir === workspaceRoot || path.dirname(dir) === dir) return null;
+  }
 }
 
 // The stash as a CLOSURE DEPENDENCY: a face compiled with an
@@ -256,6 +267,201 @@ export function closureImportsOf(stores, sourceText, fsPath, workspaceRoot, memo
     if (!imports.includes(dep)) imports.push(dep);
   }
   return imports;
+}
+
+// ── Route discovery ──────────────────────────────────────────────────
+//
+// The project's route tree for a source file — the discovery half of
+// typed routes (the compiler takes the answers as `routesUnion` /
+// `routeParams` and stays pure). The anchor is the same project root as
+// the stash walk; the tree is the framework contract `<root>/app/routes`
+// (fixed, matching the server's `serve dir:` convention). The union is a
+// TS union-type text over the routable files, re-implementing the
+// runtime conventions of `packages/app/routes.rip` (`buildRoutes`) in
+// pure JS — the differential test in packages/app/test is the standing
+// guard against drift between the two:
+//
+//   - `_`-prefixed files and directories are not routable
+//   - `(group)` directories contribute no URL segment
+//   - a trailing `index` segment drops (`users/index.rip` → `/users`)
+//   - `[name]` segments become `${string}` template holes
+//   - `[[name]]` segments contribute BOTH expansions (absent + present)
+//   - `[...name]` routes are excluded from the union — they are runtime
+//     fallbacks, not navigation targets, and `/${string}` would make the
+//     union accept every slash-prefixed literal — but still contribute
+//     params
+//
+// Where `buildRoutes` throws (invalid markers, catch-all not last,
+// duplicate params, over the optional limit, group-named files), the
+// walker is LENIENT: the file is silently unroutable. Discovery must
+// answer for a tree mid-edit; a diagnostic for the broken file is the
+// runtime's job.
+//
+// Static members are JSON.stringify'd, dynamic members are template
+// literals with static text escaped for template position — the union is
+// stable, deterministic text (dedupe by member text; `/` first, then
+// lexicographic by path shape), so it can serve as a cache key.
+const ROUTE_NAME = /^\w+$/;
+const ROUTE_OPTIONAL_LIMIT = 8;
+
+const parseRouteSegment = (segment) => {
+  let m;
+  if ((m = /^\[\[(.+)\]\]$/.exec(segment))) return ROUTE_NAME.test(m[1]) ? { kind: 'optional', name: m[1] } : null;
+  if ((m = /^\[\.\.\.(.+)\]$/.exec(segment))) return ROUTE_NAME.test(m[1]) ? { kind: 'catchall', name: m[1] } : null;
+  if (segment.startsWith('[...')) return null;
+  if ((m = /^\[(.+)\]$/.exec(segment))) return ROUTE_NAME.test(m[1]) ? { kind: 'dynamic', name: m[1] } : null;
+  if (/^\(.+\)$/.test(segment)) return { kind: 'group' };
+  if (segment.includes('[') || segment.includes(']')) return null;
+  return { kind: 'static', text: segment };
+};
+
+// Static text in template-literal position: backslash first, then the
+// two sequences TS reads through — a bare backtick and a `${` opener.
+const escapeTemplateText = (text) =>
+  text.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+
+// One route file → its union members and params shape, or null when the
+// runtime would reject the file. Members carry the raw path shape
+// (`shape`, with `${string}` holes) for ordering/dedupe, the rendered TS
+// text, and a human display (`/users/:id`) for diagnostics prettifying.
+const compileRouteRel = (rel) => {
+  const parsed = [];
+  for (const segment of rel.slice(0, -'.rip'.length).split('/')) {
+    const part = parseRouteSegment(segment);
+    if (part === null) return null;
+    parsed.push(part);
+  }
+  if (parsed[parsed.length - 1].kind === 'group') return null;
+  const kept = parsed.filter((part) => part.kind !== 'group');
+  for (let i = 0; i < kept.length; i++) {
+    if (kept[i].kind === 'catchall' && i !== kept.length - 1) return null;
+  }
+  const final = kept[kept.length - 1];
+  if (kept.length && final.kind === 'static' && final.text === 'index') kept.pop();
+
+  const names = [];
+  let optionals = 0;
+  let catchAll = false;
+  for (const part of kept) {
+    if (part.name == null) continue;
+    if (names.includes(part.name)) return null;
+    names.push(part.name);
+    if (part.kind === 'optional') optionals += 1;
+    if (part.kind === 'catchall') catchAll = true;
+  }
+  if (optionals > ROUTE_OPTIONAL_LIMIT) return null;
+
+  const fields = kept
+    .filter((part) => part.name != null)
+    .map((part) => `${part.name}${part.kind === 'optional' ? '?' : ''}: string`);
+  const params = fields.length ? `{ ${fields.join('; ')} }` : null;
+
+  // Pieces: a string for static text, DYNAMIC for a `${string}` hole,
+  // CATCHALL for the tail claim. Every URL shape the file claims is
+  // enumerated (optionals present and absent) so the runtime's
+  // ambiguous-with-itself rejection can be mirrored on the full claim.
+  const DYNAMIC = Symbol('dynamic');
+  const CATCHALL = Symbol('catchall');
+  let expansions = [{ pieces: [], display: '' }];
+  for (const part of kept) {
+    switch (part.kind) {
+      case 'static':
+        expansions = expansions.map((e) => ({ pieces: [...e.pieces, part.text], display: `${e.display}/${part.text}` }));
+        break;
+      case 'dynamic':
+        expansions = expansions.map((e) => ({ pieces: [...e.pieces, DYNAMIC], display: `${e.display}/:${part.name}` }));
+        break;
+      case 'optional':
+        expansions = expansions.flatMap((e) => [e, { pieces: [...e.pieces, DYNAMIC], display: `${e.display}/:${part.name}` }]);
+        break;
+      case 'catchall':
+        expansions = expansions.map((e) => ({ pieces: [...e.pieces, CATCHALL], display: `${e.display}/*${part.name}` }));
+        break;
+    }
+  }
+  const shapeOf = (pieces) =>
+    pieces.map((p) => (p === DYNAMIC ? '/${string}' : p === CATCHALL ? '/*' : `/${p}`)).join('') || '/';
+  // A route ambiguous with itself (optionals collapsing onto the same
+  // claim) rejects at build time, so it contributes nothing.
+  if (new Set(expansions.map((e) => shapeOf(e.pieces))).size < expansions.length) return null;
+
+  const members = catchAll ? [] : expansions.map((e) => {
+    const dynamic = e.pieces.includes(DYNAMIC);
+    const shape = shapeOf(e.pieces);
+    const text = dynamic
+      ? '`' + e.pieces.map((p) => (p === DYNAMIC ? '/${string}' : `/${escapeTemplateText(p)}`)).join('') + '`'
+      : JSON.stringify(shape);
+    return { shape, text, display: e.display || '/' };
+  });
+  return { members, params };
+};
+
+const walkAppRoutes = (routesDir) => {
+  const rels = [];
+  const walk = (dir, rel) => {
+    let dirents;
+    try { dirents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of dirents) {
+      if (e.name.startsWith('_')) continue;
+      if (e.isDirectory()) walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name);
+      else if (e.isFile() && e.name.endsWith('.rip') && e.name !== '.rip') rels.push(rel ? `${rel}/${e.name}` : e.name);
+    }
+  };
+  walk(routesDir, '');
+
+  const members = new Map();       // rendered text → { shape, text, display }
+  const paramsByFile = new Map();  // absolute route file → params shape text
+  for (const rel of rels) {
+    const compiled = compileRouteRel(rel);
+    if (compiled === null) continue;
+    if (compiled.params !== null) paramsByFile.set(path.resolve(routesDir, rel), compiled.params);
+    for (const member of compiled.members) {
+      if (!members.has(member.text)) members.set(member.text, member);
+    }
+  }
+  const sorted = [...members.values()].sort((a, b) => {
+    if (a.shape === '/') return -1;
+    if (b.shape === '/') return 1;
+    return a.shape < b.shape ? -1 : a.shape > b.shape ? 1 : 0;
+  });
+  // Zero members — no routes dir, no routable files, or catch-alls only
+  // — leaves checking UNARMED (null), never `never`: a `never` union
+  // would reject every literal in a project whose only route is a
+  // catch-all fallback.
+  const union = sorted.length ? sorted.map((m) => m.text).join(' | ') : null;
+  return { union, paramsByFile, entries: sorted };
+};
+
+// `memo` caches the discovery the same way the stash memo does — one
+// consistent view of the disk for one run, keyed per directory. Two key
+// spaces share the one Map (the anchor walk per dirname, the tree scan
+// per routes dir), prefixed so a project root that is itself some file's
+// dirname cannot collide. Long-lived callers pass none.
+export function appRoutesFor(fsPath, workspaceRoot, memo = null) {
+  const fromDir = path.dirname(fsPath);
+  const rootKey = `root ${fromDir}`;
+  let root;
+  if (memo?.has(rootKey)) {
+    root = memo.get(rootKey);
+  } else {
+    root = appRootDirFor(fsPath, workspaceRoot);
+    memo?.set(rootKey, root);
+  }
+  if (root === null) return { union: null, params: null, entries: [] };
+  const routesDir = path.join(root, 'app', 'routes');
+  const treeKey = `tree ${routesDir}`;
+  let tree;
+  if (memo?.has(treeKey)) {
+    tree = memo.get(treeKey);
+  } else {
+    tree = walkAppRoutes(routesDir);
+    memo?.set(treeKey, tree);
+  }
+  // `entries` are the union's members in union order ({ shape, text,
+  // display }) — display-side consumers (diagnostic and hover
+  // prettifying) read them; they are DERIVED, never persisted — a cache
+  // or manifest key is the union text alone.
+  return { union: tree.union, params: tree.paramsByFile.get(path.resolve(fsPath)) ?? null, entries: tree.entries };
 }
 
 // A package that INSTALLS its own ambient types. Ambient declarations —

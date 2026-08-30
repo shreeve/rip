@@ -119,7 +119,7 @@ const ALIAS_STOPS = new Set([
 // reject loudly (`this.foo()` still rejects: the CALL is the code
 // shape, not the word).
 const TYPE_VOCAB = new Set([
-  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
+  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS',
   '.', ',', ':', '?', 'TERNARY', '...', '|', '&', '=>', 'EXTENDS',
   '(', ')', 'PARAM_START', 'PARAM_END', '[', ']', 'INDEX_START',
@@ -143,7 +143,7 @@ const TYPE_VOCAB = new Set([
 // close; the parameter list's interior stays under this same
 // vocabulary (a nested call still rejects).
 const TYPE_ATOM_ENDERS = new Set([
-  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'BOOL',
+  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
 ]);
 // Does tokens[at] begin a MEMBER ROW of a type body? True at a layout
@@ -663,19 +663,11 @@ export const beforeAngleGroupBack = (tokens, k) => {
 // a statement boundary? Skips a balanced generic-parameter list back
 // to the name.
 export const typeAliasEq = (tokens, eqIdx) => {
-  let k = eqIdx - 1;
-  if (tokens[k]?.kind === 'COMPARE' && tokens[k].value === '>') {
-    let d = 1;
-    k--;
-    while (k >= 0 && d > 0) {
-      if (counter.on) counter.n++;
-      if (tokens[k].kind === 'COMPARE' && tokens[k].value === '>') d++;
-      else if (tokens[k].kind === 'SHIFT' && tokens[k].value === '>>') d += 2;
-      else if (tokens[k].kind === 'COMPARE' && tokens[k].value === '<') d--;
-      k--;
-    }
-  }
-  if (tokens[k]?.kind !== 'IDENTIFIER') return false;
+  // A param list ending in nested generics closes with a merged
+  // `>>`/`>>>` token — the rewind must weigh those, so it shares
+  // beforeAngleGroupBack rather than counting single `>`s itself.
+  const k = beforeAngleGroupBack(tokens, eqIdx - 1);
+  if (k < 0 || tokens[k]?.kind !== 'IDENTIFIER') return false;
   const head = tokens[k - 1];
   if (!(head?.kind === 'IDENTIFIER' && head.value === 'type')) return false;
   return atStatementBoundary(tokens, k - 2);
@@ -1248,20 +1240,8 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (tokens[j]?.kind !== 'IDENTIFIER') return -1;
     j++;
     // Optional generic parameter list on the name: balanced `<…>`.
-    if (tokens[j]?.kind === 'COMPARE' && tokens[j].value === '<' && !tokens[j].spaced) {
-      let depth = 0;
-      while (j < tokens.length) {
-        if (counter.on) counter.n++;
-        const t = tokens[j];
-        if (t.kind === 'COMPARE' && t.value === '<') depth++;
-        else if (t.kind === 'COMPARE' && t.value === '>') depth--;
-        else if (t.kind === 'SHIFT' && t.value === '>>') depth -= 2;
-        else if (t.kind === 'SHIFT' && t.value === '>>>') depth -= 3;
-        else if (t.kind === 'TERMINATOR' || t.kind === 'INDENT' || t.kind === 'OUTDENT') return -1;
-        j++;
-        if (depth === 0) break;
-      }
-    }
+    j = skipAngleGroup(tokens, j);
+    if (j < 0) return -1;
     if (tokens[j]?.kind !== '=') return -1;
     j++;
     // Block body (structural type / block union): INDENT … OUTDENT,
@@ -1404,19 +1384,11 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (kd === 'COMPARE' && tok.value === '<' && !tok.spaced &&
         prev && prev.kind === 'IDENTIFIER') {
       const beforeName = out[out.length - 2] ?? null;
-      let depth = 0;
-      let j = i;
-      while (j < tokens.length) {
-        const t = tokens[j];
-        if (t.kind === 'COMPARE' && t.value === '<') depth++;
-        else if (t.kind === 'COMPARE' && t.value === '>') depth--;
-        else if (t.kind === 'SHIFT' && t.value === '>>') depth -= 2;
-        else if (t.kind === 'SHIFT' && t.value === '>>>') depth -= 3;
-        else if (t.kind === 'TERMINATOR' || t.kind === 'INDENT' || t.kind === 'OUTDENT') { j = -1; break; }
-        if (depth === 0) break;
-        j++;
-      }
-      if (j > i) {
+      // skipAngleGroup's -1 also covers a list left unclosed at end of
+      // input, where no token past the tape has an `.end` to slice to.
+      const afterGroup = skipAngleGroup(tokens, i);
+      if (afterGroup > i) {
+        const j = afterGroup - 1;
         const afterClose = tokens[j + 1]?.kind;
         const isDefName = beforeName?.kind === 'DEF';
         const isComponentTarget = afterClose === '=' && tokens[j + 2]?.kind === 'COMPONENT';

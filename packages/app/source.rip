@@ -1,6 +1,18 @@
 export type NonNullSourceValue = object | string | number | boolean | symbol | bigint
 
-export type Duration = number | string
+# A stale time: milliseconds as a NUMBER, or a duration STRING that
+# always carries a unit, in the one canonical casing DURATION_RE
+# accepts. There is no bare numeric string — `5000` is the number, and
+# a second spelling of it could only disagree with the parse, since
+# `${number}` matches decimals, signs, and hex that no stale time may
+# mean. The unit list and the regex are the same language and must
+# move together; the parse stays the authority on what a duration
+# MEANS.
+# A unit-bearing spelling still inherits that wider `${number}`: the
+# residual is `'-5min'`, `'0x10min'`, `'.5min'` and their like, which
+# type clean and throw at parse.
+export type DurationUnit = 's' | 'sec' | 'second' | 'seconds' | 'm' | 'min' | 'minute' | 'minutes' | 'h' | 'hr' | 'hour' | 'hours' | 'd' | 'day' | 'days' | 'w' | 'week' | 'weeks' | 'y' | 'year' | 'years'
+export type Duration = number | `${number}${DurationUnit}` | `${number} ${DurationUnit}`
 
 export type SourceArgs = [] | [unknown]
 
@@ -49,7 +61,10 @@ SOURCE =! :rip.source
 SOURCE_FAMILY =! :rip.source.family
 SOURCE_FAMILY_CAP =! 64
 PRELOAD_FRESH_MS =! 30_000
-DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i
+# Case-SENSITIVE: `'5 min'` is the one spelling, so the Duration type
+# and this regex accept the same set. A case-insensitive match here
+# would admit a dialect no literal union can describe.
+DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/
 
 export def _isSourceCell(value): boolean
   value? and (typeof value is 'object' or typeof value is 'function') and
@@ -66,11 +81,10 @@ parseStaleTime = (value) ->
     return value
   if typeof value is 'string'
     return Infinity if value is 'forever'
-    return +value if /^\d+$/.test(value)
     parts = value.match DURATION_RE
     if parts
       amount = parseFloat parts[1]
-      return switch parts[2][0].toLowerCase()
+      return switch parts[2][0]
         when 's' then amount * 1000
         when 'm' then amount * 60000
         when 'h' then amount * 3600000

@@ -4,12 +4,20 @@ export { source }
 # from the shipped JS (type-only use), so the runtime surface is
 # untouched while the face carries AppData for the `@app.data` splice.
 export type AppData<S> = __AppData<S>
-import { createStash, unwrapStash, StashMethods as __StashMethods } from './stash.rip'
+import { createStash, unwrapStash, StashMethods as __StashMethods, SourceHandle as __SourceHandle, SourceHandleFor as __SourceHandleFor } from './stash.rip'
 export { createStash, unwrapStash }
 # Erasure road again: `app.data` IS a Stash at runtime — the projected
 # entries plus this method surface (`source()`, `inc`, `reset`, …) — so
-# the ambience splice intersects the AppData projection with it.
-export type StashMethods = __StashMethods
+# the ambience splice intersects the AppData projection with it,
+# instantiated at the projected shape so `source()` answers typed
+# handles. The handle types ride along for the splice's own overloads.
+# The bound gets a NAME first: an alias-head parameter default carrying
+# nested angle brackets (`<D = Record<string, any>>`) does not survive
+# the alias scanner, while a named bound does.
+type StashData = Record<string, any>
+export type StashMethods<D extends StashData = StashData> = __StashMethods<D>
+export type SourceHandle<T = unknown> = __SourceHandle<T>
+export type SourceHandleFor<V> = __SourceHandleFor<V>
 export { createMutation } from './mutation.rip'
 export { delay, debounce, throttle, hold } from './timing.rip'
 export { createComponents } from './components.rip'
