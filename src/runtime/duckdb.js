@@ -53,8 +53,7 @@ function envToken() {
 // domain socket — Bun's fetch `unix` option; the dummy hostname in the
 // URL is never resolved. `harbor:<name>` is resolution sugar, never a
 // third transport: it reads the berth registry `harbor serve` maintains
-// ($HARBOR_HOME/runtime/<name>.json, default ~/.config/harbor/runtime)
-// and desugars to
+// (see harborRoot below for where that is) and desugars to
 // whichever spelling the berth registered — socket preferred, TCP port
 // otherwise. It also resolves the bearer token from <name>.token, the
 // one thing a raw spelling cannot carry; precedence stays caller's
@@ -70,6 +69,21 @@ function builtinFs() {
   try { return process.getBuiltinModule('node:fs'); } catch { return null; }
 }
 
+// Where harbor keeps the fleet. This mirrors `state_root()` in harbor's
+// crates/common/src/paths.rs and must not drift from it: config is the
+// user's to edit and lives under ~/.config, runtime state is harbor's to
+// write and lives under ~/.local/state, where deleting it is always safe.
+// A relative $HARBOR_HOME is ignored rather than resolved, exactly as
+// harbor ignores it — a relative root would silently look for sockets in
+// whatever directory the process happened to start in, and find none,
+// which reads as an empty fleet rather than a broken environment.
+function harborRoot(env) {
+  const home = env.HARBOR_HOME;
+  if (home && home.startsWith('/')) return home;
+  if (env.XDG_STATE_HOME && env.XDG_STATE_HOME.startsWith('/')) return `${env.XDG_STATE_HOME}/harbor`;
+  return `${env.HOME || ''}/.local/state/harbor`;
+}
+
 function resolveHarborName(name, env) {
   const fs = builtinFs();
   if (!fs) {
@@ -77,8 +91,7 @@ function resolveHarborName(name, env) {
       `db: harbor:${name} needs filesystem access to read the berth registry — ` +
       'use an http:// or unix:// url in this runtime');
   }
-  const root = env.HARBOR_HOME || `${env.HOME || ''}/.config/harbor`;
-  const home = `${root}/runtime`;
+  const home = `${harborRoot(env)}/runtime`;
   const registryPath = `${home}/${name}.json`;
   let berth;
   try {
