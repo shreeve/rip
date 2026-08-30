@@ -2,7 +2,7 @@
 # not again on the post-merge push — the PR already proved the tip.
 # Required checks `test` and `browser` are enforced by the main ruleset
 # so a red gate blocks the merge. Exhaustive certification stays in the
-# manual repository-certification / cart-certification workflows.
+# manual repository-certification / live-certification workflows.
 #
 # `browser` is isolated because its slow part is not ours: Playwright
 # install --with-deps runs apt work the browser cache cannot cover.

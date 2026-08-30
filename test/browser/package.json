@@ -6,7 +6,7 @@
   "scripts": {
     "test": "bun run test:smoke",
     "test:smoke": "playwright test",
-    "test:cart": "RIP_CART_CERTIFICATION=1 playwright test"
+    "test:live": "RIP_SUITE=live playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

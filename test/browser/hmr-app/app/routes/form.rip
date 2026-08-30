@@ -1,0 +1,8 @@
+# Form — focus and caret restoration across a rebuilt view.
+export Form = component
+  text := 'abcdef'
+
+  render
+    h1#title 'form'
+    input#field
+      value <=> text

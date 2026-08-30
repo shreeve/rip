@@ -1,0 +1,8 @@
+# Shared state the tier gates use to prove a remount keeps the stash: the
+# route below the dirty boundary is rebuilt, this is not.
+counter =
+  hits: 0
+  bump: -> @hits += 1
+
+export stash =
+  counter: counter

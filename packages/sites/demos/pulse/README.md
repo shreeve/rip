@@ -6,7 +6,8 @@ handles a small API, saving a component remounts through the Workspace
 feed, and Hub members collaborate with hint-only frames.
 
 It is a runnable example and a demo script — not a test suite. Nothing
-here is wired into CI (cart’s publication path is what `test:cart` drives).
+here is wired into CI; the live-Site gates run against the browser
+suite's own fixture (`test/browser/hmr-app`, `bun run test:live`).
 
 ## Layout
 

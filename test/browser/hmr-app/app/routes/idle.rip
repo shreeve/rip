@@ -1,0 +1,5 @@
+# Idle — never mounted during the noop gate, so an edit here has no living
+# instance to account for.
+export Idle = component
+  render
+    h1#title 'idle'

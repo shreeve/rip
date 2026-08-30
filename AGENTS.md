@@ -428,9 +428,9 @@ the affected final gates again.
   is not the edit loop or an automatic pull-request gate. The ONE
   suite it does not carry is `test/browser` — it needs installed
   Playwright browsers. CI runs its deterministic Chromium/Firefox/WebKit
-  smoke matrix as a required job (`bun run test:browser`); the live Cart
-  Server/Manager certification is explicit through `bun run test:cart`
-  and the manual `cart-certification` workflow. `packages/sites` needs
+  smoke matrix as a required job (`bun run test:browser`); the live
+  Server/Manager suite is explicit through `bun run test:live` and the
+  manual `live-certification` workflow. `packages/sites` needs
   `xcaddy` on PATH — `go install
   github.com/caddyserver/xcaddy/cmd/xcaddy@latest`, PLUS
   `$(go env GOPATH)/bin` on PATH, which it is not by default: without
@@ -449,11 +449,11 @@ the affected final gates again.
   package-local lock).
 - `bun run test:browser` — the required real-DOM Playwright matrix
  (`test/browser`) across Chromium, Firefox, and WebKit. It does not boot
- the live Cart Server/Manager harness and includes the Workspace
+ a live Server/Manager harness and includes the Workspace
  publication-change spec.
-- `bun run test:cart` — the explicit live Cart Server/Manager
- certification in Chromium (`test/browser`). Manual certification, not
- a pull-request gate.
+- `bun run test:live` — Chromium against `test/browser/hmr-app` on a live
+ Server/Manager: every refresh tier in docs/HMR.md, plus API proxying.
+ Manual certification, not a pull-request gate. No demo is a gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus` — regenerate the corpus expected outputs.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and

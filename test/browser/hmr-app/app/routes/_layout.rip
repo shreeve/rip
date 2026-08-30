@@ -1,0 +1,14 @@
+# Layout — the ancestor a route-level remount must keep. `#brand` is the
+# layout's own render-edit target; `#hits` reads the stash.
+export Layout = component
+  counter ~= @app.data.counter
+
+  render
+    nav
+      strong#brand 'fixture'
+      a#nav-home href: '/', 'home'
+      a#nav-form href: '/form', 'form'
+      a#nav-idle href: '/idle', 'idle'
+      span#hits "#{counter.hits}"
+    main
+      div id: 'content'

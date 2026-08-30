@@ -1,28 +1,32 @@
-// Cart publication apply: real `rip site` on packages/sites/demos/cart behind a stub
-// Janus edge. API requests proxy to API-only workers; registered roots serve
-// App/dist bytes; `/hub` fans out ordered Manager publication changes.
+// A real `rip site` behind a stub Janus edge. RIP_HARNESS_APP names the
+// project directory (repo-relative) and RIP_HARNESS_PORT the edge port, so
+// one harness serves both the HMR fixture and the cart demo. API requests
+// proxy to API-only workers; registered roots serve App/dist bytes; `/hub`
+// fans out ordered Manager publication changes.
 import {
   cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
-const cartSrc = join(root, 'packages/sites/demos/cart');
+const appRel = process.env.RIP_HARNESS_APP || 'test/browser/hmr-app';
+const appSrc = join(root, appRel);
+const appName = `${basename(appRel)}-probe`;
 const loaderPath = join(root, 'src/loader.js');
 // Manager entry — `site.rip` is the Sites framework library (not a CLI).
 const serverBin = join(root, 'packages/sites/manager.rip');
-const PORT = Number(process.env.CART_HARNESS_PORT || 4174);
+const PORT = Number(process.env.RIP_HARNESS_PORT || 4175);
 
-const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-cart-harness-${process.pid}-`));
-const cartDir = join(fixtureRoot, 'cart');
-cpSync(cartSrc, cartDir, { recursive: true, filter: (p) => !p.includes('node_modules') });
+const fixtureRoot = mkdtempSync(join(tmpdir(), `rip-site-harness-${process.pid}-`));
+const appDir = join(fixtureRoot, 'app-under-test');
+cpSync(appSrc, appDir, { recursive: true, filter: (p) => !p.includes('node_modules') });
 
-// The cart imports `rip/*` — the loader's stdlib namespace resolves
-// them from this checkout, so a /tmp cart needs no node_modules.
+// The app imports `rip/*` — the loader's stdlib namespace resolves
+// them from this checkout, so a /tmp copy needs no node_modules.
 
 const ctlSock = join(fixtureRoot, 'janus.sock');
 const calls = [];
@@ -57,7 +61,7 @@ const stub = Bun.serve({
     calls.push({ method: rq.method, path: url.pathname, body });
     if (rq.method === 'POST' && url.pathname === '/1.0/apps') {
       registration = body;
-      return Response.json({ id: 'cart-probe' }, { status: 201 });
+      return Response.json({ id: appName }, { status: 201 });
     }
     if (rq.method === 'PUT' && url.pathname.endsWith('/upstreams')) {
       if (registration && body?.upstreams) {
@@ -81,22 +85,22 @@ const stub = Bun.serve({
 });
 
 // Real Janus load-balances across worker upstreams. This stub must too:
-// Cart stash fetches user/products/orders in parallel, and each worker
+// A stash may fetch several sources in parallel, and each worker
 // defaults to concurrency 1. App-only watch matches this suite (it edits
 // app/ files) and avoids API-pool swaps that briefly drop every socket.
 const WORKERS = 4;
 
 // Invoke the manager the same way the sites suite does: bun + loader +
 // site.rip. `rip site` only resolves when cwd can see rip-site on
-// PATH (repo root / linked bins) — a /tmp cart copy cannot.
+// PATH (repo root / linked bins) — a /tmp copy cannot.
 const manager = Bun.spawn(
   [
     process.execPath, `--preload=${loaderPath}`, serverBin,
-    'index.rip', '--control', ctlSock, '--name', 'cart-probe',
+    'index.rip', '--control', ctlSock, '--name', appName,
     '-w', String(WORKERS), '--watch-app', '--no-watch-api', '--access-log=off',
   ],
   {
-    cwd: cartDir,
+    cwd: appDir,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -113,7 +117,7 @@ const manager = Bun.spawn(
   },
 );
 
-const mirrorManager = process.env.CART_HARNESS_LOG || process.env.CI;
+const mirrorManager = process.env.RIP_HARNESS_LOG || process.env.CI;
 const drain = async (stream, label) => {
   if (!stream) return;
   const reader = stream.getReader();
@@ -122,7 +126,7 @@ const drain = async (stream, label) => {
     const { done, value } = await reader.read();
     if (done) break;
     const text = dec.decode(value);
-    if (mirrorManager) process.stderr.write(`[cart-harness:${label}] ${text}`);
+    if (mirrorManager) process.stderr.write(`[site-harness:${label}] ${text}`);
   }
 };
 drain(manager.stdout, 'out');
@@ -150,7 +154,7 @@ const workerSock = async ({ need = 1 } = {}) => {
   const deadline = Date.now() + (process.env.CI ? 55000 : 30000);
   while (Date.now() < deadline) {
     if (manager.exitCode != null) {
-      throw new Error(`cart-harness: manager exited ${manager.exitCode} before registering workers`);
+      throw new Error(`site-harness: manager exited ${manager.exitCode} before registering workers`);
     }
     const paths = liveUpstreams();
     if (paths.length >= need) {
@@ -160,7 +164,7 @@ const workerSock = async ({ need = 1 } = {}) => {
     }
     await Bun.sleep(25);
   }
-  throw new Error(`cart-harness: only ${liveUpstreams().length}/${need} worker sockets registered`);
+  throw new Error(`site-harness: only ${liveUpstreams().length}/${need} worker sockets registered`);
 };
 
 // Wait for the full pool so the first parallel stash fetches do not stampede
@@ -227,8 +231,8 @@ const server = Bun.serve({
     if (url.pathname === '/__test/reloads') {
       return Response.json(reloadFrames);
     }
-    if (url.pathname === '/__test/cart-root') {
-      return Response.json({ cartDir, fixtureRoot });
+    if (url.pathname === '/__test/app-root') {
+      return Response.json({ appDir, fixtureRoot });
     }
     if (url.pathname === '/__test/ready') {
       const paths = liveUpstreams();
@@ -275,4 +279,4 @@ process.on('exit', () => {
   try { rmSync(fixtureRoot, { recursive: true, force: true }); } catch { /* */ }
 });
 
-console.log(`cart-harness: http://127.0.0.1:${PORT} (cart → ${cartDir})`);
+console.log(`site-harness: http://127.0.0.1:${PORT} (${appRel} → ${appDir})`);
