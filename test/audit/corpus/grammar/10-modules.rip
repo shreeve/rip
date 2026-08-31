@@ -21,7 +21,7 @@ import paired, { describe } from './10-modules-lib.rip'
 describe()
 console.log('combined:', combo.theme, whole.host, paired.depth)
 
-# ── type-only heads: named, default, namespace, empty — the statement erases whole, module load included ──
+# ── type-only heads: named, default, namespace, empty ──
 
 import type { Parcel } from './10-modules-lib.rip'
 import type themeShape from './10-modules-lib.rip'
