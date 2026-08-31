@@ -371,6 +371,11 @@ describe('TS-face artifact filters', () => {
     expect(scrubFaceArtifacts('Add import from "./util.rip.ts"')).toBe('Add import from "./util.rip"');
     // A genuine non-null assertion on a call result is not the pattern.
     expect(scrubFaceArtifacts('f()!: never happens')).toBe('f()!: never happens');
+    // The class-vocabulary alias reads back under the clsx ecosystem's
+    // own name — hover and diagnostic messages alike — in the
+    // declaration's scalar-first order, undoing tsgo's display flip.
+    expect(scrubFaceArtifacts("Type '42' is not assignable to type '__RipClassValue[] | __RipClassValue'."))
+      .toBe("Type '42' is not assignable to type 'ClassValue | ClassValue[]'.");
   });
 
   test('ripImportText: inserted import lines drop the semicolon and the mirror extension, and single-quote the specifier', () => {

@@ -8136,6 +8136,31 @@ class Emitter {
       }
       extendsTag = p;
     }
+    // The head's grammar words own no recorded positions, so their
+    // bytes would fall to the class expression's cover row — a hover
+    // there describes (and highlights) the WHOLE lowered class. The
+    // words the grammar spends join the silence channel and decline;
+    // the extends TAG is a real element reference and serves the
+    // intrinsics tag row (RULINGS.md, the element-tag row). Byte
+    // arithmetic on the node's own span, verified before recording —
+    // a head that stops opening on `component` records nothing.
+    if (this.ts) {
+      const id = this.stores.idOf(node) ?? null;
+      const span = id !== null ? this.stores.selfSpan(id) : null;
+      const src = this.b.source;
+      if (span !== null && src !== null && src.startsWith('component', span[0])) {
+        this.silences.push([span[0], span[0] + 'component'.length]);
+        if (extendsTag !== null) {
+          const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
+          if (head !== null && src.startsWith(extendsTag, span[0] + head[0].length)) {
+            const exStart = span[0] + 'component'.length + head[1].length;
+            this.silences.push([exStart, exStart + 'extends'.length]);
+            const tagStart = span[0] + head[0].length;
+            this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: 'tag', tag: extendsTag, svg: false });
+          }
+        }
+      }
+    }
     const stmts = isBlock(body) ? body.slice(1) : [];
 
     // ── Categorization: the member model, total by construction ──
@@ -9978,14 +10003,12 @@ class Emitter {
     const R = this.rstate;
     const rec = R.sink;
     const markNode = isNode(node) ? node : null;
-    // The component's own name at a USE site: a real read that reaches
-    // the face (the constructor reference emits it verbatim), so it
-    // stays in the mapping population — but what tsgo describes there is
-    // the lowered class expression's whole instance surface, props
-    // union and intrinsic passthrough included. RULINGS.md rules the
-    // answer to the component's SIGNATURE and pins silence until one is
-    // minted.
-    if (markNode !== null) this.noteSilence(name, markNode);
+    // The component's own name at a USE site answers: the constructor
+    // reference emits it verbatim, so tsgo describes the component's
+    // construct signature there, and the editor re-dresses that answer
+    // in the author's vocabulary — bind slots and container unions out,
+    // `component <Name>` head on (presentComponentSignatureHover;
+    // RULINGS.md, the component-use row).
 
     // ── The constructor reference ──
     // Loop variables and render locals shadow the module reading (row
@@ -10447,6 +10470,22 @@ class Emitter {
     // Event bindings on the child's root; the listener
     // param mints against the handler's reads.
     for (const { pair, event, value } of eventBindings) {
+      // The event word's record (RULINGS.md, the event-word row): the
+      // child's root element is a runtime fact, so a known DOM event
+      // serves the bare map entry — no host claim — and any other name
+      // is the child's emit channel.
+      if (this.ts) {
+        const keyNode = isNode(pair) && isNode(pair[1]) ? pair[1] : null;
+        const keyId = keyNode !== null ? (this.stores.idOf(keyNode) ?? null) : null;
+        const keySpan = keyId !== null ? this.stores.selfSpan(keyId) : null;
+        if (keySpan !== null) {
+          this.intrinsics.push({
+            start: keySpan[0], end: keySpan[1], kind: 'event', name: event,
+            type: this.tsEventTypeText([event]) !== null ? `HTMLElementEventMap['${event}']` : null,
+            child: name,
+          });
+        }
+      }
       const evUsed = new Set();
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
@@ -10674,6 +10713,20 @@ class Emitter {
         // typing rides the casts below, host element included.
         const recv = this.tsElReceiver(el);
         const known = this.ts ? this.tsEventTypeText([eventName], recv.hostText) : null;
+        // The event WORD answers from the compiler's record (RULINGS.md,
+        // the event-word row): the key's face position is the listener
+        // call's string literal — no symbol for tsgo — so the handler
+        // signature the casts below enforce is served from here.
+        if (this.ts) {
+          const keyId = this.stores.idOf(key) ?? null;
+          const keySpan = keyId !== null ? this.stores.selfSpan(keyId) : null;
+          if (keySpan !== null) {
+            this.intrinsics.push({
+              start: keySpan[0], end: keySpan[1], kind: 'event', name: eventName,
+              type: known, tag: this.rstate?.tags?.get(el) ?? null, svg: this.rstate?.svgEls?.has(el) === true,
+            });
+          }
+        }
                 this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
           // The wrapper's own param is lowering plumbing — explicit
@@ -10732,6 +10785,14 @@ class Emitter {
       if (typeof key !== 'string') {
         throw this.positionedError(pair, 'emitter: computed attribute keys are not supported in render', objExpr);
       }
+      // The lexer records a hyphenated key (`aria-busy`, `data-kind`) as
+      // ONE string primitive whose STORED value keeps the quotes; the
+      // roads emit the bare spelling. Key claims below go through the
+      // stored spelling (emitKeyAs) — a claim on the bare spelling finds
+      // no recorded occurrence, the key owns no exact row, and its bytes
+      // fall to the pair's cover row, whose generated start is the
+      // road's machinery (`__effect`), not the key.
+      const storedKey = key;
       if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
 
       // Only the CHANNEL words the lowering still spends whole stay in
@@ -10885,7 +10946,7 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             this.b.emit(".toggleAttribute('");
-            this.emitPrimitive(key);
+            this.emitKeyAs(storedKey, key);
             this.b.emit("', !!");
             this.renderExpr(value);
             this.b.emit(');');
@@ -10899,7 +10960,7 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             this.b.emit(".setAttribute('");
-            this.emitPrimitive(key);
+            this.emitKeyAs(storedKey, key);
             this.b.emit("', '')");
           });
         }
@@ -10940,13 +11001,13 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             this.b.emit(".removeAttribute('");
-            this.emitPrimitive(key);
+            this.emitKeyAs(storedKey, key);
             this.b.emit("') : ");
             recv.open();
             this.b.emit(el);
             recv.close();
             this.b.emit(".setAttribute('");
-            this.emitPrimitive(key);
+            this.emitKeyAs(storedKey, key);
             this.b.emit("', __v); }");
           }, value);
         } else {
@@ -10961,7 +11022,7 @@ class Emitter {
             recv.close();
             this.b.emit(`.setAttribute('`);
             const keyStart = this.b.offset;
-            this.emitPrimitive(key);
+            this.emitKeyAs(storedKey, key);
             const keyEnd = this.b.offset;
             this.b.emit("', ");
             if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
@@ -10993,7 +11054,7 @@ class Emitter {
           this.b.emit(el);
           recv.close();
           this.b.emit(".setAttribute('");
-          this.emitPrimitive(key);
+          this.emitKeyAs(storedKey, key);
           this.b.emit("', __v); }");
         }, false);
       } else {
@@ -11004,7 +11065,7 @@ class Emitter {
           recv.close();
           this.b.emit(`.setAttribute('`);
           const keyStart = this.b.offset;
-          this.emitPrimitive(key);
+          this.emitKeyAs(storedKey, key);
           const keyEnd = this.b.offset;
           this.b.emit("', ");
           if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
@@ -12354,6 +12415,18 @@ class Emitter {
         // its signal's `.value` when the member is reactive — chains
         // read through the unwrap (`@user.name` → this.user.value.name).
         if (n[1] === 'this' && typeof n[2] === 'string' && this.memberIsReactive(n[2])) {
+          // The name's SOURCE span joins the value-first channel: the
+          // author wrote `@member` and the lowering appended `.value`,
+          // so a hover here answers the VALUE type — the same contract
+          // memberRead records for the bare spelling (RULINGS.md's
+          // member-read row).
+          if (this.ts) {
+            const id = this.stores.idOf(n) ?? null;
+            const row = id !== null ? this.stores.role(id, 'property') : null;
+            if (row && typeof row.sourceStart === 'number') {
+              this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
+            }
+          }
           this.b.emit('.value');
         }
       } else if (f.kind === 'index') {

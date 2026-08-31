@@ -544,12 +544,15 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(computed.contents.value).toContain('(property) Card.total: number');
       expect(computed.contents.value).not.toContain('__Card__computed');
       expect(computed.contents.value).not.toContain('read()');
-      // A member READ inside a render block is the CONSUMER position and
-      // keeps the container: `@title.value` is real there, and the
-      // declaration's vocabulary is not the reader's.
+      // A member READ inside a render block answers value-first like
+      // every other in-body read — the author wrote `@title` and the
+      // lowering appended `.value`, so the sigil spelling presents
+      // exactly as the bare spelling does. A consumer holding an
+      // INSTANCE (`inst.title.value`) still keeps the container: that
+      // position never rides the value-first channel.
       const renderRead = await hoverAt(client, 10, 9);
-      expect(renderRead.contents.value).toContain('value: string');
-      expect(renderRead.contents.value).toContain('read()');
+      expect(renderRead.contents.value).toContain('(property) Card.title: string');
+      expect(renderRead.contents.value).not.toContain('read()');
       // The accept member is the honest cross-component boundary: the
       // offered container's type is not knowable statically — any.
       const accepted = await hoverAt(client, 5, 10);

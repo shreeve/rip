@@ -11,7 +11,7 @@
 import path from 'node:path';
 import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
-  SUPPRESSED_TS_CODES, diagnosticTagsFor, prettifyRouteUnion,
+  SUPPRESSED_TS_CODES, diagnosticTagsFor, prettifyRouteUnion, scrubFaceArtifacts,
 } from './translate.js';
 import { alwaysReported, isSyntaxClass } from './scopes.js';
 import { declaredButUninstalled } from './mirror.js';
@@ -161,8 +161,11 @@ export function mapTsDiagnostic(good, d) {
   }
   // A route union in the message renders for READING: each dynamic
   // member re-labels as the parameterized display its route file
-  // spells. Display-only; spans and the checked union are untouched.
-  message = prettifyRouteUnion(message, good.routeEntries);
+  // spells. Display-only; spans and the checked union are untouched —
+  // and the face's own spellings (`__RipClassValue`, the receiver
+  // surfaces) read back in the author's vocabulary the same way
+  // hovers do (scrubFaceArtifacts).
+  message = scrubFaceArtifacts(prettifyRouteUnion(message, good.routeEntries));
   return {
     severity: d.severity ?? 1,
     code: d.code,

@@ -75,9 +75,9 @@
         "line": 13,
         "character": 9,
         "token": "class",
-        "expect": "(property) <span>.className: __RipClassValue[] | __RipClassValue",
+        "expect": "(property) <span>.className: ClassValue | ClassValue[]",
         "rule": "attr/prop name (intrinsic)",
-        "why": "served — the class key's exact row lands on the receiver surface's className property; the surface name reads back as the element (scrubFaceArtifacts); RULINGS: attr name on an intrinsic"
+        "why": "served — the class key's exact row lands on the receiver surface's className property; the surface name reads back as the element and the class alias as the clsx ecosystem's ClassValue (scrubFaceArtifacts); RULINGS: attr name on an intrinsic"
       },
       {
         "line": 19,
@@ -147,9 +147,9 @@
         "line": 50,
         "character": 14,
         "token": "click",
-        "expect": null,
+        "expect": "(event) @click: HTMLElementEventMap['click'] & { target: <button>; currentTarget: <button> }",
         "rule": "event word",
-        "why": "handler-signature target; interim silence, served — the cover-`this` leak closed"
+        "why": "the handler signature, served from the compiler's intrinsics record — the word's face position is the listener call's string literal, no symbol; RULINGS: event word"
       },
       {
         "line": 51,
@@ -195,17 +195,17 @@
         "line": 71,
         "character": 6,
         "token": "Field",
-        "expect": null,
+        "expect": "component Field extends input props: { label?: string value?: string error?: string }",
         "rule": "component name at a use site",
-        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
+        "why": "the component's signature, served — the use-site name's exact row reaches tsgo's construct signature and presentComponentSignatureHover re-dresses it: bind twins, children, and the extends passthrough out, container unions collapsed value-first"
       },
       {
         "line": 72,
         "character": 8,
         "token": "label",
-        "expect": "(property) label?: string | { value: string | undefined; read(): string | undefined; touch?(): void; } | undefined",
+        "expect": "(property) label?: string | undefined",
         "rule": "attr/prop name (component)",
-        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design, and an optional no-default prop's slot is the void slot, T | undefined inside"
+        "why": "the prop's type, served value-first (presentPropSlotHover): the bind-slot container arm collapses under the brand check; the trailing `undefined` stays — tsgo's optional-property convention, and the slot admits an explicit undefined"
       },
       {
         "line": 73,

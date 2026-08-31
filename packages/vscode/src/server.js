@@ -2477,6 +2477,16 @@ function requestContext(params) {
   return ctx;
 }
 
+// The identifier-shaped word around `at` in `text`, or '' when the
+// position sits on none (the hover machinery guard compares it to a
+// hover's declared name, so a non-word position must never equal one).
+function wordAtOffset(text, at) {
+  let s = at, e = at;
+  while (s > 0 && /[\w$]/.test(text[s - 1])) s--;
+  while (e < text.length && /[\w$]/.test(text[e])) e++;
+  return text.slice(s, e);
+}
+
 // A generated [start, end) range in `face` coordinates → a source
 // range in that face's text (last-good for open buffers, disk text for
 // mirrors), or null (synthetic/unmapped). The verbatim edit-span
@@ -2743,6 +2753,156 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   return { ...contents, value: reworded };
 }
 
+// A component-name hover arrives as the lowered construct signature —
+// `const Button: new (props?: { … }) => Button` — whose props block
+// speaks the lowering's vocabulary: every author prop unions its
+// reactive container, the two-way channel mints a `__bind_x__` twin
+// per prop, and the children slot rides along. The author's answer is
+// the component's SIGNATURE (RULINGS.md, the component-use row):
+// `component <Name>` with the props in value-first spelling. Every
+// structural expectation is verified before rewriting — a hover that
+// is not exactly the construct shape passes through untouched.
+function presentComponentSignatureHover(contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
+  if (!fence) return null;
+  // The rows are re-rendered from scratch, so tsgo's line breaks carry
+  // nothing — flatten once and parse the one-line shape.
+  const flat = fence[2].replace(/\s+/g, ' ').trim();
+  // An import-bound use hovers the same construct behind tsgo's alias
+  // dress — `(alias) const N: …` with a trailing `import N` line; a
+  // mutable module binding holding a component hovers `let`.
+  const head = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): new \(props\??: \{/.exec(flat);
+  if (!head) return null;
+  const name = head[1];
+  const balancedTo = (from, opener, closer) => {
+    let depth = 0;
+    for (let i = from; i < flat.length; i++) {
+      if (flat[i] === opener) depth++;
+      else if (flat[i] === closer && --depth === 0) return i;
+    }
+    return -1;
+  };
+  // A `{ … }` block's member rows, split at depth-0 semicolons, each
+  // in the author's spelling: bind twins and the minted children slot
+  // drop; an `extends <tag>` component's intrinsic passthrough (the
+  // per-attribute template rows and the `data-`/`aria-` index rows)
+  // collapses into the reported tag; and a container union collapses
+  // to its value type under the same brand check the reactive-cell
+  // presenter applies (both Ts equal). Any other union is the author's
+  // own type and stands.
+  const extendsTag = { tag: null };
+  const membersOf = (inner) => {
+    const rows = [];
+    let start = 0, depth = 0;
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '{') depth++;
+      else if (inner[i] === '}') depth--;
+      else if (inner[i] === ';' && depth === 0) { rows.push(inner.slice(start, i)); start = i + 1; }
+    }
+    if (inner.slice(start).trim() !== '') rows.push(inner.slice(start));
+    const out = [];
+    for (const raw of rows) {
+      const row = raw.trim();
+      if (row === '' || row === 'children?: any' || /^__bind_[\w$]+__\??:/.test(row)) continue;
+      const passthrough = /^(?:"[^"]*"|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\["([\w-]+)"\] extends Record</.exec(row);
+      if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
+      if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
+      const cell = / \| \{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(row);
+      const kept = cell && cell[1].trim() === cell[2].trim() ? row.slice(0, cell.index) : row;
+      // tsgo spells string literals double-quoted; the corpus spelling
+      // is single quotes, and the grammar colors the two forms apart.
+      // Only a literal with nothing to re-escape converts.
+      out.push(kept.replace(/"([^"'\\]*)"/g, "'$1'"));
+    }
+    return out;
+  };
+  // The base block holds every prop in optional spelling; each REQUIRED
+  // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
+  // group, whose author-named alternative supersedes the base row.
+  const open = head[0].length - 1;
+  const close = balancedTo(open, '{', '}');
+  if (close === -1) return null;
+  const props = membersOf(flat.slice(open + 1, close));
+  let at = close + 1;
+  while (flat.startsWith(' & (', at)) {
+    const groupEnd = balancedTo(at + 3, '(', ')');
+    if (groupEnd === -1) return null;
+    const group = flat.slice(at + 4, groupEnd).trim();
+    const alts = [];
+    let d = 0, s = 0;
+    for (let i = 0; i < group.length; i++) {
+      if (group[i] === '{') d++;
+      else if (group[i] === '}') d--;
+      else if (group[i] === '|' && d === 0) { alts.push(group.slice(s, i)); s = i + 1; }
+    }
+    alts.push(group.slice(s));
+    const named = alts
+      .map((a) => a.trim())
+      .filter((a) => a.startsWith('{') && a.endsWith('}'))
+      .flatMap((a) => membersOf(a.slice(1, -1)));
+    if (named.length !== 1) return null;
+    const propName = named[0].slice(0, named[0].indexOf(':')).replace(/\?$/, '');
+    const idx = props.findIndex((p) => p.slice(0, p.indexOf(':')).replace(/\?$/, '') === propName);
+    if (idx === -1) return null;
+    props[idx] = named[0];
+    at = groupEnd + 1;
+  }
+  const tail = flat.slice(at).trim();
+  if (tail !== `) => ${name}` && tail !== `) => ${name} import ${name}`) return null;
+  // The signature is rip vocabulary, so it renders in a `rip` fence —
+  // the extension's own grammar colors `component`/`extends` and the
+  // prop annotations the way the source does — and the rows carry no
+  // TS semicolons.
+  const headLine = extendsTag.tag === null ? `component ${name}` : `component ${name} extends ${extendsTag.tag}`;
+  const signature = props.length === 0
+    ? headLine
+    : `${headLine}\nprops: {\n${props.map((p) => `  ${p}`).join('\n')}\n}`;
+  return { ...contents, value: value.replace(fence[0], '```rip\n' + signature + fence[3]) };
+}
+
+// A component PROP KEY at a use site hovers the props surface's slot:
+// `(property) outline?: boolean | { value: …; read(): …; touch?(): void; }
+// | undefined` — the container arm is the bind-channel admission. The
+// author's answer is the prop's type (RULINGS.md, the prop-name row):
+// the cell arms collapse under the reactive-cell presenter's brand
+// check, and NOTHING else — the trailing `undefined` is tsgo's own
+// optional-property convention, kept so these keys hover like every
+// other optional property (and the slot truly admits an explicit
+// `undefined`). A `(property)` hover whose union carries no brand arm
+// passes through untouched.
+function presentPropSlotHover(contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
+  if (!fence) return null;
+  const flat = fence[2].replace(/\s+/g, ' ').trim();
+  const head = /^\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)(\??): (.+)$/.exec(flat);
+  if (!head) return null;
+  const [, name, opt, type] = head;
+  // Split the union's top-level arms.
+  const arms = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < type.length; i++) {
+    const ch = type[i];
+    if (ch === '{' || ch === '(' || ch === '[' || ch === '<') depth++;
+    else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) depth--;
+    else if (ch === '|' && depth === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') {
+      arms.push(type.slice(start, i - 1));
+      start = i + 2;
+    }
+  }
+  arms.push(type.slice(start));
+  const kept = arms.filter((arm) => {
+    const cell = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(arm.trim());
+    return !(cell && cell[1].trim() === cell[2].trim());
+  });
+  if (kept.length === arms.length || kept.length === 0) return null;
+  const reworded = `(property) ${name}${opt}: ${kept.map((a) => a.trim()).join(' | ')}`;
+  return { ...contents, value: value.replace(fence[0], `${fence[1]}${reworded}${fence[3]}`) };
+}
+
 async function enrichEvolvingAnyHover(ctx, hover) {
   const value = hover?.contents?.value;
   if (typeof value !== 'string' || !HOVER_EVOLVING_ANY.test(value)) return null;
@@ -2797,10 +2957,26 @@ connection.onHover(async (params) => {
   const intr = (ctx.good.intrinsics ?? []).find((r) => ctx.offset >= r.start && ctx.offset < r.end);
   if (intr) {
     const map = intr.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
-    const value = intr.kind === 'tag'
-      ? `\`\`\`typescript\n(element) ${intr.tag}: ${map}['${intr.tag}']\n\`\`\``
-      : `\`\`\`typescript\nref — writes ${map}['${intr.tag}'] into ${intr.name}\n\`\`\``;
-    return { contents: { kind: 'markdown', value } };
+    let body;
+    if (intr.kind === 'tag') {
+      body = `(element) ${intr.tag}: ${map}['${intr.tag}']`;
+    } else if (intr.kind === 'event') {
+      // The event word serves the handler's event type — the claim the
+      // lowering's casts enforce (RULINGS.md, the event-word row) — in
+      // the `(kind)` head form the other served rows use. Host
+      // elements read back in the `<tag>` shorthand; a component's
+      // root element is a runtime fact, so its known events carry no
+      // host claim, and a name outside the DOM vocabulary reads as the
+      // custom event it is. No prose in the fence: the grammar
+      // tokenizes the body as TypeScript, so an apostrophe would open
+      // a string scope.
+      body = intr.type === null
+        ? `(custom event) @${intr.name}: any`
+        : `(event) @${intr.name}: ${intr.type.replace(/(?:HTML|SVG)ElementTagNameMap\['([\w-]+)'\]/g, '<$1>')}`;
+    } else {
+      body = `ref — writes ${map}['${intr.tag}'] into ${intr.name}`;
+    }
+    return { contents: { kind: 'markdown', value: `\`\`\`typescript\n${body}\n\`\`\`` } };
   }
   // A position the lowering owns whole answers nothing. tsgo would
   // describe the minted symbol its own emission put there — truthfully,
@@ -2820,10 +2996,29 @@ connection.onHover(async (params) => {
   // `: any` requirement spares an author's own single-underscore
   // binding, whose hover carries a real type.
   if (typeof hover.contents?.value === 'string' && SCAFFOLD_HOVER.test(hover.contents.value)) return null;
+  // The same decline for the lowering's MINTED `__` names (`__effect`,
+  // `__clsx`, the generated interfaces): a cover-row landing can put a
+  // position on one of them, and tsgo then describes the helper. The
+  // author's own `__`-prefixed binding is spared by the source check —
+  // it spells the hover's declared name at the hovered position;
+  // machinery never does.
+  const minted = typeof hover.contents?.value === 'string'
+    ? /\b(?:let|const|var|function|class|interface|type) (__[A-Za-z$][\w$]*)/.exec(hover.contents.value) : null;
+  if (minted && wordAtOffset(ctx.good.source, ctx.offset) !== minted[1]) return null;
+  // The cover-`this` answer: a position with no landing of its own
+  // falls to a render cover whose generated start sits on the lowered
+  // receiver, and tsgo reports `this: this` over the whole construct.
+  // Machinery, not an answer (RULINGS.md names it among what the
+  // declines replaced) — unless the author is actually on a `this`.
+  if (typeof hover.contents?.value === 'string'
+      && /^```(?:typescript|ts)\n\s*this: this\s*\n?```/.test(hover.contents.value)
+      && wordAtOffset(ctx.good.source, ctx.offset) !== 'this') return null;
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
   contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
+  contents = presentComponentSignatureHover(contents) ?? contents;
+  contents = presentPropSlotHover(contents) ?? contents;
   // A route union in the hover renders for READING — the same
   // display-only re-labeling the diagnostics road applies.
   if (typeof contents?.value === 'string' && ctx.good.routeEntries?.length) {

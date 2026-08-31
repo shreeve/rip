@@ -145,6 +145,131 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       const param = await api.hover('app.rip', 9, 17);       // the `e` param
       expect(param?.contents?.value).toContain('InputEvent');
       expect(param?.contents?.value).toContain(`target: HTMLElementTagNameMap['input']`);
+
+      // The event WORD serves the handler signature from the compiler's
+      // record — the word's face position is a string literal.
+      const evWord = await api.hover('app.rip', 9, 10);      // inside `@input`
+      expect(evWord?.contents?.value).toContain(`(event) @input: HTMLElementEventMap['input'] & { target: <input>; currentTarget: <input> }`);
+    });
+  });
+
+  test('hover: a component name at a use site answers the component signature', async () => {
+    // The lowered construct signature (`new (props?: {…}) => Button`)
+    // re-dresses in the author's vocabulary: bind twins and the minted
+    // children slot out, container unions collapsed value-first, a
+    // required prop's intersection group folded back as a required
+    // row. Works identically for an import-bound name (tsgo's alias
+    // dress) and renders a props-less component as the bare head.
+    await inWorkspace({
+      'package.json': STRICT_PKG,
+      'button.rip': [
+        'export Button = component',
+        '  @label: string',
+        '  @kind?: number',
+        '  render',
+        '    button @label.value',
+        '',
+      ].join('\n'),
+    }, async (api) => {
+      const src = [
+        "import { Button } from './button.rip'", // 0
+        '',
+        'export Chip = component',               // 2
+        '  render',                              // 3
+        "    span 'hi'",                         // 4
+        '',
+        'export Panel = component',              // 6
+        '  render',                              // 7
+        '    div',                               // 8
+        "      Button label: 'Add'",             // 9
+        '      Chip',                            // 10
+        '',
+      ].join('\n');
+      await api.open('app.rip', src);
+      const use = await api.hover('app.rip', 9, 8);       // inside `Button`
+      expect(use?.contents?.value).toContain('```rip\ncomponent Button');
+      expect(use?.contents?.value).toContain('label: string');    // required stays required
+      expect(use?.contents?.value).toContain('kind?: number');
+      expect(use?.contents?.value).not.toContain('__bind_');
+      expect(use?.contents?.value).not.toContain('read()');
+      const bare = await api.hover('app.rip', 10, 8);     // inside `Chip`
+      expect(bare?.contents?.value).toContain('component Chip');
+      expect(bare?.contents?.value).not.toContain('props');
+      // The prop KEY hovers the prop's type value-first — the bind-slot
+      // container arm never reaches the author, and a REQUIRED prop
+      // carries no undefined arm to keep.
+      const propKey = await api.hover('app.rip', 9, 15);  // inside `label:`
+      expect(propKey?.contents?.value).toContain('(property) label: string');
+      expect(propKey?.contents?.value).not.toContain('read()');
+      expect(propKey?.contents?.value).not.toContain('undefined');
+
+      // A component's EVENT word answers against the child's root —
+      // a runtime fact, so the known map entry carries no host claim.
+      const withEvent = src.replace("      Chip", '      Chip @click: (-> 0)');
+      await api.change('app.rip', withEvent);
+      const childEvent = await api.hover('app.rip', 10, 13);  // inside `@click`
+      expect(childEvent?.contents?.value).toContain(`(event) @click: HTMLElementEventMap['click']`);
+      expect(childEvent?.contents?.value).not.toContain('target:');
+    });
+  });
+
+  test('hover: an `@member` read presents value-first — the container never leaks', async () => {
+    // The sigil read (`@tone`) takes the property-access lowering, not
+    // memberRead's bare-spelling path; both record the name's span into
+    // the value-first channel, so the hover answers the VALUE type at
+    // either spelling.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Tone = component extends span',  // 0
+        "  @tone?: 'a' | 'b' := 'a'",             // 1
+        '  render',                               // 2
+        '    span class: [@tone]',                // 3
+        "      'x'",                              // 4
+        '',
+      ].join('\n');
+      await api.open('tone.rip', src);
+      const read = await api.hover('tone.rip', 3, 20);   // inside `@tone`
+      expect(read?.contents?.value).toContain('tone: "a" | "b"');
+      expect(read?.contents?.value).not.toContain('read()');
+
+      // The head's grammar words decline — their bytes must never fall
+      // to the class expression's cover row (a hover there described,
+      // and highlighted, the whole lowered class). The extends TAG is
+      // a real element reference and serves the element row.
+      expect(await api.hover('tone.rip', 0, 17)).toBeNull();          // `component`
+      expect(await api.hover('tone.rip', 0, 26)).toBeNull();          // `extends`
+      const exTag = await api.hover('tone.rip', 0, 33);               // `span`
+      expect(exTag?.contents?.value).toContain(`(element) span: HTMLElementTagNameMap['span']`);
+
+      // A position with no landing of its own falls to a render cover
+      // sitting on the lowered receiver — the cover-`this` answer
+      // (`this: this`) declines rather than describing machinery.
+      expect(await api.hover('tone.rip', 2, 4)).toBeNull();           // the `render` word
+    });
+  });
+
+  test('hover: a hyphenated key declines on every road — never the effect machinery', async () => {
+    // A hyphenated key's stored primitive keeps the lexer's quotes, so
+    // its claim must go through the stored spelling; without the exact
+    // row the presence road's key bytes fall to the pair's cover row,
+    // whose generated start is the `__effect` helper — the machinery
+    // hover this pin holds out.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Chip = component',    // 0
+        '  busy := false',            // 1
+        '  render',                   // 2
+        '    button',                 // 3
+        '      aria-busy: @busy?!',   // 4 — the presence road
+        "      data-kind: 'primary'", // 5 — the template attr road
+        '',
+      ].join('\n');
+      await api.open('chip.rip', src);
+      expect(api.diagnostics('chip.rip').filter((d) => d.severity <= 2)).toEqual([]);
+      const presenceKey = await api.hover('chip.rip', 4, 9);   // inside `aria-busy`
+      expect(presenceKey).toBeNull();
+      const dataKey = await api.hover('chip.rip', 5, 9);       // inside `data-kind`
+      expect(dataKey).toBeNull();
     });
   });
 

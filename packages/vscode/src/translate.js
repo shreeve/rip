@@ -719,7 +719,13 @@ export function scrubFaceArtifacts(text) {
     // only — never applied to text that travels back into an edit.
     .replace(/\b__RipEl_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
     .replace(/\b__RipAttrVals_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
-    .replace(/\b__ripRefCell(?:Svg)?\b/g, 'ref');
+    .replace(/\b__ripRefCell(?:Svg)?\b/g, 'ref')
+    // The class-vocabulary alias is recursive (an array of itself), so
+    // it cannot expand away — it reads back under the clsx ecosystem's
+    // own name for the same union, in the declaration's own order
+    // (scalar first; tsgo's display normalization flips it).
+    .replace(/\b__RipClassValue\b/g, 'ClassValue')
+    .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]');
 }
 
 // Inserted-import text made idiomatic Rip: statement semicolons drop

@@ -869,7 +869,7 @@ const normHover = (h) => {
   if (!h) return null;
   const raw = typeof h.contents === 'string' ? h.contents
     : (h.contents?.value ?? (Array.isArray(h.contents) ? h.contents.map((c) => c.value ?? c).join('\n') : ''));
-  return raw.replace(/```typescript\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim() || null;
+  return raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim() || null;
 };
 // Top-level declarations: a name at column 0, optionally after a leading
 // export/def/class/interface/enum/type keyword. Heuristic, not a parser.
