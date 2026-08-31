@@ -1,5 +1,6 @@
 import { expect, Page } from '@playwright/test'
-import { UserPublic as User, ProductPublic as Product, OrderPublic as Order, OrderLine } from '../../api/models.rip'
+import { User, Product, Order } from '../../app/types.rip'
+import type { OrderLine } from '../../api/models.rip'
 import { execFileSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -38,6 +39,7 @@ export def createOrder(page: Page, ...items: OrderLine[]): Promise<Order>
 
 demoRoot = process.cwd()
 dbPath = join(demoRoot, 'api/cart.sqlite')
+ripBin = join(demoRoot, '../../../../bin/rip')
 
 export def reseed()
   db = DatabaseSync.new(dbPath)
@@ -46,7 +48,7 @@ export def reseed()
     db.exec('DELETE FROM users; DELETE FROM products; DELETE FROM orders')
   finally
     db.close()
-  execFileSync('rip', ['api/seed.rip'], { cwd: demoRoot })
+  execFileSync(ripBin, ['api/seed.rip'], { cwd: demoRoot })
 
 export def clearOrders()
   db = DatabaseSync.new(dbPath)
