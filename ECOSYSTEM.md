@@ -46,7 +46,7 @@ implementation and tests as authoritative and then correct the stale document.
 | [`rip/packages/app`](packages/app) | Browser application substrate: stash, data sources, routes, renderer, Workspace, feed, HMR |
 | [`rip/packages/db`](packages/db) | Raw SQL client, default connection, transaction runner, operational CLI, MCP server |
 | Rip `schema :model` runtime | Validation, typed model declarations, ORM, relations, hooks, DDL, and migration input; the schema CLI owns diff, history, and application |
-| [Janus](https://github.com/shreeve/janus) | Caddy module for dynamic app admission, files, proxying, Hub, cache, auth, and access observation |
+| [Janus](https://github.com/shreeve/janus) | Caddy module for dynamic app admission, files, proxying, Hub, auth, and access observation |
 | [DuckDB Harbor](https://github.com/shreeve/duckdb-harbor) | Standalone Rust database owner and HTTP/UDS server, one process per DuckDB file |
 | Pilot | Harbor protocol client and DuckDB-shell-class terminal UI; it does not link DuckDB |
 | MedLabs | A concrete multi-tenant application using the complete stack |
@@ -156,22 +156,21 @@ Janus is deliberately not a durable store or a process supervisor.
 
 ### Numbered capabilities
 
-Janus currently has ten numbered capability families:
+Janus currently has nine numbered capability families:
 
 1. `ping` — prove module load, TLS admission, and cascade behavior;
 2. `control` — expose the internal/local/public `/1.0` listeners;
-3. `cache` — short-lived anonymous GET micro-cache and request coalescing;
-4. `hub` — edge-terminated WebSocket rooms, fan-out, bridges, and control-plane
+3. `hub` — edge-terminated WebSocket rooms, fan-out, bridges, and control-plane
    publication;
-5. `mdns` — LAN discovery and the local status front door;
-6. `auth` — prefix gates and trusted `Remote-User` injection for apps without
+4. `mdns` — LAN discovery and the local status front door;
+5. `auth` — prefix gates and trusted `Remote-User` injection for apps without
    their own authentication wall;
-7. `files` — ordered registered roots, cache policy, precompressed sidecars,
+6. `files` — ordered registered roots, cache policy, precompressed sidecars,
    SPA shells, and directory-gated tenants;
-8. `sendfile` — transform an upstream `X-Sendfile` response into an edge-owned
+7. `sendfile` — transform an upstream `X-Sendfile` response into an edge-owned
    ranged and validated file transfer;
-9. `browse` — explicitly browsable roots, themes, and bounded renderers; and
-10. `access log` — durable Caddy-compatible JSON plus bounded per-app live NDJSON.
+8. `browse` — explicitly browsable roots, themes, and bounded renderers; and
+9. `access log` — durable Caddy-compatible JSON plus bounded per-app live NDJSON.
 
 The app registry, heartbeat reaping, TLS ask, request routing, and doorbell
 protocol are important supporting surfaces rather than extra numbered
@@ -183,14 +182,14 @@ For an admitted request, Janus performs edge concerns before selecting an API
 upstream: it always strips a client-supplied `Rip-Site`; when the auth wall is
 enabled it also strips client `Remote-User` and injects the authenticated
 identity. It then applies host policy, handles Hub upgrades and registered file
-roots, optionally uses the micro-cache, and finally proxies to a local worker
+roots, and finally proxies to a local worker
 socket. Unknown hosts are a `404`; a registered app with no published or
 currently healthy upstream is a retryable `503`.
 
 Workers may return marked busy or draining `503`s. Janus can choose another
 upstream only when replay is safe; it never guesses that a streamed request
 body can be sent twice. Least-connections selection, passive health
-suppression, and generation-fenced cache invalidation all live at this layer.
+suppression live at this layer.
 
 For multi-tenant Apps, Janus admits `{site}` only when the configured direct
 child directory exists. It injects the trusted selected site into the worker

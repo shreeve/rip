@@ -7,7 +7,7 @@ certifies:
 - registration, heartbeat survival, and upstream swap;
 - generated shell, bundle, App CSS, and weak ETag revalidation;
 - `X-Sendfile` transformation and range delivery;
-- cache-safe API replacement after an authored source edit;
+- API replacement after an authored source edit;
 - deregistration on clean shutdown.
 
 Run it with:

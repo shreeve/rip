@@ -21,13 +21,6 @@
 	janus {
 		control internal {$RIP_EDGE_CONTROL}
 		ping
-		cache {
-			ttl 1s
-			ttl_max 10s
-			max_body 256kb
-			max_bytes 64mb
-			max_app_share 50
-		}
 		hub {
 			mode bridge
 			origin same

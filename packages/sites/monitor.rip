@@ -10,7 +10,7 @@ NULLABLE_FIELDS =! Set.new ['tenant_site', 'status', 'mime_type', 'selected_upst
 RAW_FIELDS =! [
   'sequence', 'timestamp', 'request_id', 'app_id', 'app_name', 'tenant_site',
   'request_host', 'client_ip', 'method', 'path', 'status', 'duration_seconds',
-  'response_bytes', 'mime_type', 'response_class', 'cache_verdict',
+  'response_bytes', 'mime_type', 'response_class',
   'selected_upstream', 'retry_count', 'outcome', 'mark'
 ]
 PICTURE_FIELDS =! Set.new [...RAW_FIELDS, 'local_time', 'local_timezone', 'mime_abbrev']
@@ -410,7 +410,6 @@ export validateAccessEvent = (event) ->
   throw Error.new('access record path is malformed') unless validEscapedPath(event.path)
   throw Error.new('access record mime_type is malformed') if event.mime_type? and (not validHeaderValue(event.mime_type, false) or event.mime_type isnt trimHttpWhitespace(event.mime_type))
   throw Error.new('access record response_class is malformed') unless event.response_class in ['auth', 'browse_asset', 'browse_listing', 'browse_render', 'file', 'hub', 'janus', 'proxy', 'sendfile']
-  throw Error.new('access record cache_verdict is malformed') unless event.cache_verdict in ['off', 'bypass', 'miss', 'hit', 'coalesced']
   throw Error.new('access record selected_upstream is malformed') if event.selected_upstream? and not /^worker-[0-9a-f]{16}$/.test(event.selected_upstream)
   throw Error.new('access record outcome is malformed') unless event.outcome in ['upgraded', 'upstream_aborted', 'client_canceled', 'write_error', 'complete']
   throw Error.new('access record mark is malformed') if event.mark? and not validHeaderValue(event.mark, false)

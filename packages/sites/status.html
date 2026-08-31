@@ -63,7 +63,7 @@
   <div class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
     <!-- Stat cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
 
       <!-- Edge -->
       <div class="bg-white/70 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/20">
@@ -119,21 +119,6 @@
         </div>
       </div>
 
-      <!-- Cache -->
-      <div class="bg-white/70 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/20">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-gray-600">Cache</p>
-            <p class="text-2xl font-bold text-purple-600" x-text="cacheRate()">—</p>
-            <p class="text-xs text-gray-500 mt-1" x-text="cacheDetail()">no traffic yet</p>
-          </div>
-          <div class="p-3 bg-purple-100 rounded-full">
-            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-            </svg>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Apps -->
@@ -211,16 +196,7 @@
     </div>
 
     <!-- Janus row -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8" x-show="data.janus">
-      <div class="bg-white/70 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/20">
-        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Cache</h3>
-        <div class="grid grid-cols-4 gap-2 text-center">
-          <div><p class="text-xl font-bold text-gray-900" x-text="data.janus?.cache?.hits ?? 0"></p><p class="text-xs text-gray-500">hits</p></div>
-          <div><p class="text-xl font-bold text-gray-900" x-text="data.janus?.cache?.misses ?? 0"></p><p class="text-xs text-gray-500">misses</p></div>
-          <div><p class="text-xl font-bold text-gray-900" x-text="data.janus?.cache?.coalesced ?? 0"></p><p class="text-xs text-gray-500">coalesced</p></div>
-          <div><p class="text-xl font-bold text-gray-900" x-text="data.janus?.cache?.bypass ?? 0"></p><p class="text-xs text-gray-500">bypass</p></div>
-        </div>
-      </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8" x-show="data.janus">
       <div class="bg-white/70 backdrop-blur-sm rounded-xl shadow-lg p-6 border border-white/20">
         <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Hub</h3>
         <div class="grid grid-cols-2 gap-2 text-center">
@@ -321,20 +297,6 @@
             healthy: apps.reduce((n, a) => n + (a.workers?.healthy || 0), 0),
             total: apps.reduce((n, a) => n + (a.workers?.total || 0), 0),
           }
-        },
-
-        cacheRate() {
-          const c = this.data.janus?.cache
-          if (!c) return '—'
-          const lookups = (c.hits || 0) + (c.misses || 0)
-          if (!lookups) return '0%'
-          return Math.round(100 * (c.hits || 0) / lookups) + '%'
-        },
-
-        cacheDetail() {
-          const c = this.data.janus?.cache
-          if (!c) return 'not enabled'
-          return `${c.hits || 0} hits · ${c.misses || 0} misses`
         },
 
         heartbeat(j) {

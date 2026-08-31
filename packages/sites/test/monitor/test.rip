@@ -32,7 +32,6 @@ record = (changes = {}) ->
     response_bytes: '1536'
     mime_type: 'application/json; charset=utf-8'
     response_class: 'proxy'
-    cache_verdict: 'bypass'
     selected_upstream: 'worker-0123456789abcdef'
     retry_count: 0
     outcome: 'complete'
@@ -241,7 +240,6 @@ test! 'access validation enforces every protocol field bound', ->
     [{ mark: '' }, 'mark']
     [{ mark: '界'.repeat(86) }, 'mark']
     [{ response_class: 'worker' }, 'response_class']
-    [{ cache_verdict: 'warm' }, 'cache_verdict']
     [{ outcome: 'failed' }, 'outcome']
   ]
   for [change, field] in bad

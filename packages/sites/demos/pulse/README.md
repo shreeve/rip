@@ -59,8 +59,7 @@ rip sites run --name pulse
 The manager registers `pulse` with Janus, publishes the browser App,
 prepares the API artifact, and spawns workers on unix sockets. Caddy terminates TLS;
 Janus admits the host, routes it to the live worker sockets
-(least-conn with health), answers anonymous GETs from its micro-cache,
-and owns the Hub directly.
+(least-conn with health), and owns the Hub directly.
 
 ## Live publication
 

@@ -639,9 +639,7 @@ openapi title: 'Medlabs API', version: '1.0.0'
 
 ## Response Caching
 
-`@cache` emits standard response headers. Janus's micro-cache stores only
-explicitly cacheable responses; the same headers continue to govern browsers
-and downstream CDNs.
+`@cache` emits standard response headers for browsers and intermediary caches.
 
 ```coffee
 get '/live'   -> @cache off;       stats()
@@ -1534,7 +1532,7 @@ exact-width formatting. `{{` and `}}` emit literal braces.
 Raw event fields are `sequence`, `timestamp`, `request_id`, `app_id`,
 `app_name`, `tenant_site`, `request_host`, `client_ip`, `method`, `path`,
 `status`, `duration_seconds`, `response_bytes`, `mime_type`,
-`response_class`, `cache_verdict`, `selected_upstream`, `retry_count`,
+`response_class`, `selected_upstream`, `retry_count`,
 `outcome`, and `mark`. The renderer also provides `local_time`,
 `local_timezone`, and `mime_abbrev`. The first two are the event timestamp in
 the process local zone (`YYYY-MM-DD HH:mm:ss.SSS`) and its numeric

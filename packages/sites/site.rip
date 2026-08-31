@@ -300,8 +300,7 @@ CtxProto =
       return
     @_out?.get(name) ?? null
 
-  # Sugar over standard Cache-Control — the same header steers a micro-cache
-  # (Janus), a CDN, and the browser alike:
+  # Sugar over standard Cache-Control for browsers and intermediary caches:
   #   @cache 10 / '90' / '36m' / '2 hours' / '1 month'  — freshness in seconds
   #   @cache 0 / false / 'off' / 'no-store'             — never store
   #   @cache 'forever'                                  — a year, immutable

@@ -115,7 +115,7 @@ test! 'foreground manager registers one ready worker and deregisters before exit
               request_host: 'hello.test', client_ip: '127.0.0.1', method: 'GET',
               path: '/hello', status: 200, duration_seconds: 0.001,
               response_bytes: '19', mime_type: 'application/json',
-              response_class: 'proxy', cache_verdict: 'bypass',
+              response_class: 'proxy',
               selected_upstream: null, retry_count: 0, outcome: 'complete', mark: null
             }
         return Response.new body
