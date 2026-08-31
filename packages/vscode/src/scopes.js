@@ -568,11 +568,15 @@ export function importBindingsOf(stores, source) {
       out.push({ local: local || imported, imported, module });
     }
     // The default binding: the bare name between `import` and the first
-    // comma or `from`, with any braced list removed first. A type-only
-    // import's `type` keyword strips too — its binding IS a typed
-    // import — under the lexer's own lookahead rule, so the default
+    // comma or `from`. A type-only import's `type` keyword strips too —
+    // its binding IS a typed import — under the lexer's whole lookahead
+    // (`{`, `*`, or an identifier that is not `from`), and BEFORE the
+    // braced list comes off: once braced, `import type{ A }` reads
+    // `import type from …`, and a guard that only knows the identifier
+    // arm mints a phantom default binding named `type`. The default
     // binding NAMED `type` (`import type from 'mod'`) keeps its reading.
-    const head = text.replace(/\{[^}]*\}/, '').replace(/^import\s+(?:type\s+(?!from\b))?/, '');
+    const head = text.replace(/^import\s+type(?=\s*[{*]|\s+(?!from\b)[A-Za-z_$])/, 'import')
+      .replace(/\{[^}]*\}/, '').replace(/^import\s+/, '');
     const def = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,|from\b)/.exec(head);
     if (def) out.push({ local: def[1], imported: 'default', module });
   }
