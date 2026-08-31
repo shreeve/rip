@@ -906,8 +906,6 @@ duplicated descriptions should not be copied into new work:
   reconnect, not for every successor hash.
 - Current API replacement uses the doorbell/lazy-boot protocol. Descriptions
   that always boot a fresh pool before cutting the old one are outdated.
-- Janus has ten numbered capabilities. The phrase "nine capabilities" in its
-  `AGENTS.md` predates the access-log capability.
 - Pilot is deliberately TLS-free in current code. Harbor decision-record text
   suggesting that Pilot itself reaches HTTPS endpoints is stale.
 - The blanket `globalThis` ban in [`packages/AGENTS.md`](packages/AGENTS.md)
