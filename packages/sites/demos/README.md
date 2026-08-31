@@ -10,7 +10,7 @@ live in [`docs/SERVER.md`](../../../docs/SERVER.md) and
 | --- | --- | --- |
 | [`hello`](hello) | Workspace publication + watch policy | See Rip source `update`, CSS refresh, and asset invalidate without a product UI |
 | [`pulse`](pulse) | Live remount + Hub collaboration | Edit `app/mood.rip`, watch badges update; post in two windows |
-| [`cart`](cart) | Full App rails | Routes, stash/`source`, mutations, schema models, sessions — also `test:cart` |
+| [`cart`](cart) | Full App rails | Routes, stash/`source`, mutations, schema models |
 
 ```text
 hello  →  prove the feed

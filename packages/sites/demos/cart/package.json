@@ -3,6 +3,9 @@
   "rip": {
     "strict": true
   },
+  "scripts": {
+    "test": "playwright test"
+  },
   "devDependencies": {
     "@types/bun": "1.4.0"
   }

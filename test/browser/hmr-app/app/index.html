@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HMR fixture</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="app">
+      <div id="app-loader"></div>
+    </div>
+    <script type="module">
+      import { bootApp } from '/@rip/rip.min.js'
+      const debug = new URLSearchParams(location.search).has('debug')
+      bootApp({ url: '/bundle.json', debug, watch: true })
+    </script>
+  </body>
+</html>

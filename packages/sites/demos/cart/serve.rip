@@ -1,7 +1,3 @@
 export default
   name: 'cart'
   hosts: ['cart.via.rip', 'cart.local']
-  hub:
-    bridge: 'hub'
-  app:
-    root: 'app'

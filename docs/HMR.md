@@ -91,10 +91,9 @@ scans of generated JavaScript.
 
 ## Competitive bars (the constitution)
 
-Typing into a profile field is a **weak** pin. The decisive surface is
-Cart confirmation in
-`test/browser/tests/cart-apply.spec.mjs` (`bun run test:cart`
-from that package).
+Typing into a form field is a **weak** pin. The decisive surface is local
+action state held across a rebuild, certified in
+`test/browser/tests/live-hmr.spec.mjs` (`bun run test:live`).
 
 ### Gate A — local action-state (tie React / beat Vue)
 
@@ -392,10 +391,10 @@ a morph project, and not as churn for its own sake.
 |---|---|
 | Publication substrate (Layer A) | Contracted in WORKSPACE.md; Sites + browser-boot |
 | Signature classify + registry | Shipped |
-| Patch (view remount + effect/computed rebind) | Shipped; Cart Gate A green |
-| Migrate diagnostics + remount floor | Shipped; not the confirmation headline |
-| LKG overlay + in-place recovery | Shipped; Cart Gate B green |
-| Cart certification (`test:cart`) | **Done** — Gates A and B are the product bar |
+| Patch (view remount + effect/computed rebind) | Shipped; certified |
+| Migrate diagnostics + remount floor | Shipped; certified |
+| LKG overlay + in-place recovery | Shipped; certified |
+| Tier certification (`test:live`) | Every tier in this table, against `test/browser/hmr-app` |
 | Surgical DOM morph | **Out of scope** as a goal |
 | Seam compression | Optional later; see above — not blocking |
 

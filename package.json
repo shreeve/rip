@@ -20,7 +20,7 @@
     "test": "bun test --parallel --timeout 15000 test/rip.test.js test/lang test/mapping test/ui test/schema test/toolchain",
     "test:all": "bun scripts/test-all.mjs",
     "test:browser": "bun --cwd=test/browser run test:smoke",
-    "test:cart": "bun --cwd=test/browser run test:cart",
+    "test:live": "bun --cwd=test/browser run test:live",
     "test:rip": "bun test test/rip.test.js --timeout 15000",
     "test:spawn": "bun test --timeout 15000 test/spawn"
   },

@@ -1,0 +1,11 @@
+# Home — the tier target. `count` is the `:=` slot a patch must keep and a
+# migrate must carry; adding a second slot migrates, adding an `@prop`
+# remounts, and editing only the markup patches.
+export Home = component
+  counter ~= @app.data.counter
+  count := 0
+
+  render
+    h1#title 'home'
+    button#bump @click: (-> count += 1; counter.bump()), 'bump'
+    span#count "#{count}"

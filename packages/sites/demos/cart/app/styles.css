@@ -65,7 +65,6 @@ main.container {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  /* Nested @media syntax highlighting broken in VS Code: https://github.com/microsoft/vscode-css/issues/9 */
   @media (min-width: 768px) {
     grid-template-columns: repeat(3, 1fr);
   }

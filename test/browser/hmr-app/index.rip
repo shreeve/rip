@@ -1,0 +1,17 @@
+# HMR fixture — the app the refresh-tier gates run against.
+#
+# Owned by this suite, never a demo: every element carries an id the specs
+# address, and the component shapes exist so each tier in docs/HMR.md is
+# reachable by one deliberate edit. Classification is by signature
+# (src/runtime/components.js __hmrClassify): render-only edits patch,
+# a changed `:=` / `~=` name set migrates, a changed `@prop` set, gate
+# count, or `extends` tag remounts.
+import { get, start } from 'rip/sites'
+
+# One API route: Manager must register `/api` as proxy-first and the edge
+# must reach a worker through it. Nothing else in the tree covers that path.
+get '/api/ping' -> { ok: true, from: 'worker' }
+
+get '/styles.css' -> @send "#{import.meta.dir}/app/styles.css", 'text/css; charset=UTF-8'
+
+start()

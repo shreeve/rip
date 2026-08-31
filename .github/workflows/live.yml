@@ -1,14 +1,17 @@
-# Live Cart certification is explicit because it boots Rip Site, Manager,
-# workers, a Janus-shaped edge, and Chromium. Pull requests use the deterministic
+# Live certification is explicit because it boots Rip Site, Manager, workers,
+# a Janus-shaped edge, and Chromium. Pull requests use the deterministic
 # browser smoke matrix in test.yml; this workflow preserves the full-stack
 # contract without making that mutable process harness the edit loop.
-name: cart-certification
+#
+# The subject is test/browser/hmr-app, a fixture the suite owns: the HMR
+# refresh tiers and API proxying. No demo is a gate.
+name: live-certification
 
 on:
   workflow_dispatch:
 
 jobs:
-  cart:
+  live:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -26,5 +29,5 @@ jobs:
         working-directory: test/browser
         run: bunx playwright install --with-deps chromium
 
-      - name: Live Cart Server/Manager certification
-        run: bun run test:cart
+      - name: Live Site certification
+        run: bun run test:live
