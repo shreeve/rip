@@ -12,11 +12,13 @@ coverage to whatever state the demo happens to have.
 
 ## Shape
 
-Every element carries an `id`, so specs address anchors rather than prose.
+Every element carries an `id`, so specs address anchors rather than prose — and
+every `id` here is addressed by a spec. An anchor nothing reaches is dead weight,
+not coverage.
 
 | Path | Role |
 | --- | --- |
-| `index.rip` | API entry — `start()` and `/styles.css` |
+| `index.rip` | API entry — `start()`, and the `/api/ping` route that makes `/api` proxy-first |
 | `app/routes/_layout.rip` | The ancestor a route remount must keep; `#brand`, `#hits` |
 | `app/routes/index.rip` | Tier target: `count` (`:=`), `counter` (`~=`), `#bump`, `#count` |
 | `app/routes/form.rip` | `#field` — focus and caret restoration |

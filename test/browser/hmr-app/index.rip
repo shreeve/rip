@@ -12,6 +12,4 @@ import { get, start } from 'rip/sites'
 # must reach a worker through it. Nothing else in the tree covers that path.
 get '/api/ping' -> { ok: true, from: 'worker' }
 
-get '/styles.css' -> @send "#{import.meta.dir}/app/styles.css", 'text/css; charset=UTF-8'
-
 start()
