@@ -319,7 +319,6 @@ export const CONTRACT = [
     name: 'sweep.machinery', lane: 'sweep',
     property: 'no position in the sweep answers with the lowering\'s machinery, and no diagnostic message carries a face spelling',
     red: (s) => s.sw.machinery > 0,
-    redBecause: 'the sweep\'s first pass stands as filed work: a GENERIC component\'s use-site hover passes the signature presenter\'s head (`new <T>(props…`) and leaks the raw construct, and a schema behavior member\'s hover names its `__X__behavior` face object; both fixes are queued, and this reason leaves with them',
   },
   {
     name: 'token.delivery', lane: 'token',

@@ -2444,7 +2444,7 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
 
 // The request context for a feature call, or null when the position
 // does not survive translation.
-function requestContext(params) {
+function requestContext(params, { wordEndBias = false } = {}) {
   const state = states.get(params.textDocument.uri);
   const good = state?.lastGood;
   if (!good || !tsgo || !state.tsOpen) return null;
@@ -2455,7 +2455,18 @@ function requestContext(params) {
   const align = staleOffsetMap(currentText, good.source);
   const ctx = { state, good, document, currentText, curLineStarts, align };
   if (params.position) {
-    const curOffset = positionToOffset(curLineStarts, currentText.length, params.position);
+    let curOffset = positionToOffset(curLineStarts, currentText.length, params.position);
+    // HOVER ONLY: a cursor at a word's END boundary is on that word —
+    // VS Code's own word-under-cursor semantics — while every span
+    // channel here is end-EXCLUSIVE, so the boundary byte otherwise
+    // falls past the word's silence or serve and lands on whatever the
+    // cover holds (the sweep's boundary-cover class). Completion and
+    // the symbol surfaces keep exact cursor semantics.
+    if (wordEndBias && curOffset > 0
+        && /[\w$]/.test(currentText[curOffset - 1] ?? '')
+        && !/[\w$]/.test(currentText[curOffset] ?? '')) {
+      curOffset -= 1;
+    }
     const offset = align.toGood(curOffset);
     if (offset === null) return null;
     ctx.offset = offset;
@@ -2773,17 +2784,30 @@ function presentComponentSignatureHover(contents) {
   // An import-bound use hovers the same construct behind tsgo's alias
   // dress — `(alias) const N: …` with a trailing `import N` line; a
   // mutable module binding holding a component hovers `let`.
-  const head = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): new \(props\??: \{/.exec(flat);
-  if (!head) return null;
-  const name = head[1];
   const balancedTo = (from, opener, closer) => {
     let depth = 0;
     for (let i = from; i < flat.length; i++) {
       if (flat[i] === opener) depth++;
-      else if (flat[i] === closer && --depth === 0) return i;
+      else if (flat[i] === closer && flat[i - 1] !== '=' && --depth === 0) return i;
     }
     return -1;
   };
+  // A GENERIC component's use site carries the inferred instantiation
+  // — `new <"alpha">(props?: {…}) => Chip<"alpha">` — and the args
+  // ride into the served head: `component Chip<'alpha'>`.
+  const head = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): new /.exec(flat);
+  if (!head) return null;
+  const name = head[1];
+  let typeArgs = null;
+  let propsAt = head[0].length;
+  if (flat[propsAt] === '<') {
+    const argsEnd = balancedTo(propsAt, '<', '>');
+    if (argsEnd === -1) return null;
+    typeArgs = flat.slice(propsAt + 1, argsEnd);
+    propsAt = argsEnd + 1;
+  }
+  const propsHead = /^\(props\??: \{/.exec(flat.slice(propsAt));
+  if (!propsHead) return null;
   // A `{ … }` block's member rows, split at depth-0 semicolons, each
   // in the author's spelling: bind twins and the minted children slot
   // drop; an `extends <tag>` component's intrinsic passthrough (the
@@ -2809,8 +2833,25 @@ function presentComponentSignatureHover(contents) {
       const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
       if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
       if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
-      const cell = / \| \{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(row);
-      const kept = cell && cell[1].trim() === cell[2].trim() ? row.slice(0, cell.index) : row;
+      const colon = row.indexOf(': ');
+      let kept = row;
+      if (colon !== -1) {
+        const type = row.slice(colon + 2);
+        const arms = [];
+        let d = 0, a = 0;
+        for (let i = 0; i < type.length; i++) {
+          const ch = type[i];
+          if (ch === '{' || ch === '(' || ch === '[' || ch === '<') d++;
+          else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) d--;
+          else if (ch === '|' && d === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') { arms.push(type.slice(a, i - 1)); a = i + 2; }
+        }
+        arms.push(type.slice(a));
+        const keptArms = arms.filter((arm) => {
+          const cell = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(arm.trim());
+          return !(cell && cell[1].trim() === cell[2].trim());
+        });
+        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.map((x) => x.trim()).join(' | ');
+      }
       // tsgo spells string literals double-quoted; the corpus spelling
       // is single quotes, and the grammar colors the two forms apart.
       // Only a literal with nothing to re-escape converts.
@@ -2821,7 +2862,7 @@ function presentComponentSignatureHover(contents) {
   // The base block holds every prop in optional spelling; each REQUIRED
   // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
   // group, whose author-named alternative supersedes the base row.
-  const open = head[0].length - 1;
+  const open = propsAt + propsHead[0].length - 1;
   const close = balancedTo(open, '{', '}');
   if (close === -1) return null;
   const props = membersOf(flat.slice(open + 1, close));
@@ -2849,13 +2890,19 @@ function presentComponentSignatureHover(contents) {
     props[idx] = named[0];
     at = groupEnd + 1;
   }
+  // Under strict null posture an optional props param prints its own
+  // `| undefined` between the block and the paren.
+  if (flat.startsWith(' | undefined', at)) at += ' | undefined'.length;
   const tail = flat.slice(at).trim();
-  if (tail !== `) => ${name}` && tail !== `) => ${name} import ${name}`) return null;
+  const tailRe = new RegExp(`^\\) => ${name}(?:<.*>)?(?: import ${name})?$`);
+  if (!tailRe.test(tail)) return null;
   // The signature is rip vocabulary, so it renders in a `rip` fence —
   // the extension's own grammar colors `component`/`extends` and the
   // prop annotations the way the source does — and the rows carry no
   // TS semicolons.
-  const headLine = extendsTag.tag === null ? `component ${name}` : `component ${name} extends ${extendsTag.tag}`;
+  const requote = (t) => t.replace(/"([^"'\\]*)"/g, "'$1'");
+  const shownName = typeArgs === null ? name : `${name}<${requote(typeArgs)}>`;
+  const headLine = extendsTag.tag === null ? `component ${shownName}` : `component ${shownName} extends ${extendsTag.tag}`;
   const signature = props.length === 0
     ? headLine
     : `${headLine}\nprops: {\n${props.map((p) => `  ${p}`).join('\n')}\n}`;
@@ -2946,7 +2993,7 @@ connection.onHover(async (params) => {
   // re-aligned: change a binding's annotation and hover inside the debounce
   // and the old type is simply the wrong answer. So hover settles too.
   await settleDocument(params.textDocument.uri);
-  const ctx = requestContext(params);
+  const ctx = requestContext(params, { wordEndBias: true });
   if (!ctx || ctx.genPosition === null) return null;
   // Intrinsic-element positions the compiler recorded answer from the
   // record itself (RULINGS.md, the render rows) — checked BEFORE the
@@ -3002,8 +3049,11 @@ connection.onHover(async (params) => {
   // author's own `__`-prefixed binding is spared by the source check —
   // it spells the hover's declared name at the hovered position;
   // machinery never does.
+  // Judged on the SCRUBBED text: a `__` spelling the presentation
+  // layer translates (`__RipEl_span` → `<span>`) is presentable, not
+  // machinery — what gates is a minted name no translation covers.
   const minted = typeof hover.contents?.value === 'string'
-    ? /\b(?:let|const|var|function|class|interface|type) (__[A-Za-z$][\w$]*)/.exec(hover.contents.value) : null;
+    ? /(?:\b(?:let|const|var|function|class|interface|type) |\((?:property|parameter|method)\) )(__[A-Za-z$][\w$]*)/.exec(scrubFaceArtifacts(hover.contents.value)) : null;
   if (minted && wordAtOffset(ctx.good.source, ctx.offset) !== minted[1]) return null;
   // The cover-`this` answer: a position with no landing of its own
   // falls to a render cover whose generated start sits on the lowered

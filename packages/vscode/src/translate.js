@@ -725,6 +725,10 @@ export function scrubFaceArtifacts(text) {
     // own name for the same union, in the declaration's own order
     // (scalar first; tsgo's display normalization flips it).
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
+    // A schema's behavior object is the face's own home for the
+    // methods the author declared ON the schema — `__Cart__behavior`
+    // reads back as Cart, whose behavior it is.
+    .replace(/\b__([A-Za-z$][\w$]*)__behavior\b/g, '$1')
     .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]');
 }
 

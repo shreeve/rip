@@ -213,6 +213,38 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('hover: a generic use site carries its instantiation, and a word-end cursor hovers the word', async () => {
+    // The construct signature at a generic use prints the inferred
+    // instantiation (`new <"alpha">(props?: …) => Chip<"alpha">`) —
+    // the presenter carries it into the head and collapses cell arms
+    // WHEREVER they sit in a row's union. And a cursor at a word's END
+    // boundary hovers the word (VS Code's own semantics): the served
+    // spans are end-exclusive, so without the bias the boundary byte
+    // fell to whatever the cover held.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Chip<T extends string> = component',  // 0
+        '  @label?: T',                                // 1
+        '  render',                                    // 2
+        "    span 'chip'",                             // 3
+        '',
+        'export Panel = component',                    // 5
+        '  render',                                    // 6
+        '    div',                                     // 7
+        "      Chip label: 'alpha'",                   // 8
+        '',
+      ].join('\n');
+      await api.open('chip.rip', src);
+      const use = await api.hover('chip.rip', 8, 8);        // inside `Chip`
+      expect(use?.contents?.value).toContain(`component Chip<'alpha'>`);
+      expect(use?.contents?.value).toContain(`label?: 'alpha' | undefined`);
+      expect(use?.contents?.value).not.toContain('__bind_');
+      expect(use?.contents?.value).not.toContain('read()');
+      const boundary = await api.hover('chip.rip', 7, 7);   // END of `div`
+      expect(boundary?.contents?.value).toContain(`(element) div: HTMLElementTagNameMap['div']`);
+    });
+  });
+
   test('hover: a dual-namespace extends component collapses its quoted passthrough rows', async () => {
     // `a` lives in both tag namespaces, so its extends surface carries
     // the SVG presentation attributes — QUOTED hyphenated keys, spelled
