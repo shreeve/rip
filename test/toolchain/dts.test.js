@@ -494,7 +494,7 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any`); // per-tag, DOM-typed
     expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
     expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed
-    expect(d).toContain('[key: string]: any');   // rest admits any key
+    expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
   });
 
   test('a component with no annotations still declares — the props surface is structural (prop-name completions)', () => {

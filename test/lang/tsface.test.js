@@ -1349,7 +1349,11 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain(`id?: HTMLElementTagNameMap["section"] extends Record<'id', infer T> ? T : any`);
     expect(code).toContain(`class?: HTMLElementTagNameMap["section"] extends Record<'class', infer T> ? T : any`);
     expect(code).toContain(`tabIndex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? T : any`);
-    expect(code).toContain('[key: string]: any');
+    // Undeclared rest props ride the data-/aria- templates — no string
+    // catch-all, so a misspelled declared prop draws the
+    // excess-property did-you-mean instead of falling through.
+    expect(code).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');
+    expect(code).not.toContain('[key: string]: any');
   });
 
   test('render scaffold quiets TS-only: swap/reconcile state types any, handler calls cast', () => {

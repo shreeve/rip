@@ -24,9 +24,11 @@
 //     everything else is optional; `@x?: T` renders `x?: T | …`.
 //   - `extends <tag>`: the props surface gains the tag's attribute
 //     names (src/dom.js — spec-derived data, the #125 table)
-//     and a string index signature (undeclared props are REST props
-//     by the runtime-root design; excess-property checking stays ON
-//     for non-extends components — the #131 fix's editor twin).
+//     and the data-/aria- template index signatures (undeclared rest
+//     props ride the templates — a misspelled DECLARED prop draws the
+//     excess-property did-you-mean instead of falling through a
+//     catch-all; excess-property checking stays ON for non-extends
+//     components — the #131 fix's editor twin).
 //
 // Renderers produce SEGMENT lists ({ text } | { text, node, role })
 // so the face can mark each named piece under its recorded store row
@@ -692,7 +694,11 @@ export function propsTypeSegments(info) {
       segs.push({ text: `; ${keyText(attr)}?: ${t}` });
       if (prop !== attr && !used.has(prop)) segs.push({ text: `; ${prop}?: ${t}` });
     }
-    segs.push({ text: '; [key: string]: any' });
+    // Undeclared rest props ride the data-/aria- templates — the same
+    // admission the intrinsic surfaces make. A misspelled DECLARED
+    // prop must draw the excess-property did-you-mean instead of
+    // falling through a catch-all, so there is no string index here.
+    segs.push({ text: '; [key: `data-${string}`]: any; [key: `aria-${string}`]: any' });
   }
   segs.push({ text: ' }' });
   for (const m of props.filter(isRequiredProp)) {

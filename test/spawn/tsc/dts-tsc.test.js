@@ -450,17 +450,24 @@ describeTscExtended('component declarations: consumer programs check against the
     expect(ok.status).toBe(0);
   }, TSC_TIMEOUT);
 
-  test('an extends component accepts arbitrary rest keys in consumer programs', () => {
+  test('an extends component admits template rest keys and rejects arbitrary ones in consumer programs', () => {
     const dts = compile('export Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
-    const consumer = [
+    // Rest props ride the data-/aria- templates — no string catch-all,
+    // so a key outside the tag's vocabulary draws the excess-property
+    // did-you-mean instead of falling through (the same contract the
+    // face's props surface carries).
+    const clean = [
       "import { Btn } from './btn';",
-      "new Btn({ label: 'x', disabled: true, 'data-k': 1, anything: 2 }).mount('#a');",
+      "new Btn({ label: 'x', disabled: true, 'data-k': 1, 'aria-busy': true }).mount('#a');",
       'export {};',
       '',
     ].join('\n');
-    const { status, byFile } = tscBatch(TSC, { 'btn.d.ts': dts, 'consumer.ts': consumer });
-    expect(byFile.get('consumer.ts')).toEqual([]);
-    expect(status).toBe(0);
+    const ok = tscBatch(TSC, { 'btn.d.ts': dts, 'consumer.ts': clean });
+    expect(ok.byFile.get('consumer.ts')).toEqual([]);
+    expect(ok.status).toBe(0);
+    const excess = clean.replace("'aria-busy': true", 'anything: 2');
+    const bad = tscBatch(TSC, { 'btn.d.ts': dts, 'consumer.ts': excess });
+    expect(bad.byFile.get('consumer.ts').some((d) => /TS2(353|561)/.test(d))).toBe(true);
   }, TSC_TIMEOUT);
 });
 
