@@ -1,5 +1,5 @@
 import { expect, Page } from '@playwright/test'
-import type { UserPublic as User, ProductPublic as Product, OrderPublic as Order, OrderLine } from '../../api/models.rip'
+import { UserPublic as User, ProductPublic as Product, OrderPublic as Order, OrderLine } from '../../api/models.rip'
 import { execFileSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
@@ -22,28 +22,20 @@ export usd = (cents: number) ->
 export def fetchUser(page: Page): Promise<User>
   response = page.request.get!('/api/user')
   expect(response.ok(), 'the api should return the signed-in user').toBeTruthy()
-  user: User = response.json!
-  user
+  User.parse(response.json!)
 
 export def fetchProducts(page: Page): Promise<Product[]>
   response = page.request.get!('/api/products')
   expect(response.ok(), 'the api should list products').toBeTruthy()
-  products: Product[] = response.json!
+  products = Product.array.parse(response.json!)
   expect(products.length, 'the api should list more than one product').toBeGreaterThan(1)
   products
 
-# OrderPublic (aliased Order here) types createdAt as the server's Date; over the wire it is
-# a JSON string. No spec reads it — one that does must say so here.
 export def createOrder(page: Page, ...items: OrderLine[]): Promise<Order>
   response = page.request.post!('/api/orders', { data: { items } })
   expect(response.ok(), 'the api should accept the order').toBeTruthy()
-  order: Order = response.json!
-  order
+  Order.parse(response.json!)
 
-# Anchored on the working directory: the compiled copy of this file runs
-# from test/.build, where neither its own location nor Playwright's
-# config.rootDir names the demo — both the runner and a hand-run
-# `bunx playwright test` start from the demo root.
 demoRoot = process.cwd()
 dbPath = join(demoRoot, 'api/cart.sqlite')
 
