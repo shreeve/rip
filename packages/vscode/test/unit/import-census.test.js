@@ -1,15 +1,15 @@
-// The import census mirrors the lexer's type-only lookahead whole —
-// `type` strips when `{`, `*`, or an identifier that is not `from`
-// follows, and strips BEFORE the braced list comes off — so no spelling
-// mints a binding that does not exist, and the default binding NAMED
-// `type` keeps its reading.
+// The import census consumes the parser's own type-only decision — the
+// typeOnly role's recorded keyword span splices out of the head — so no
+// spelling mints a binding that does not exist, the default binding
+// NAMED `type` keeps its reading, and the identifier class matches the
+// lexer's, which binds beyond ASCII.
 import { describe, test, expect } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
 import { importBindingsOf } from '../../src/scopes.js';
 
 const bindingsOf = (source) => {
-  const result = compile(source, { path: '/b.rip', runtimeDelivery: 'none', typeStores: true });
-  return importBindingsOf(result.typeStores ?? result.stores, source);
+  const result = compile(source, { path: '/b.rip', runtimeDelivery: 'none' });
+  return importBindingsOf(result.stores, source);
 };
 
 describe('the census reads type-only import heads', () => {
@@ -32,5 +32,12 @@ describe('the census reads type-only import heads', () => {
 
   test('a type-only namespace head binds nothing here', () => {
     expect(bindingsOf("import type * as NS from './m.rip'\n")).toEqual([]);
+  });
+
+  test('a binding beyond ASCII is censused like any other', () => {
+    expect(bindingsOf("import type Éclair from './m.rip'\n"))
+      .toEqual([{ local: 'Éclair', imported: 'default', module: './m.rip' }]);
+    expect(bindingsOf("import Über from './m.rip'\n"))
+      .toEqual([{ local: 'Über', imported: 'default', module: './m.rip' }]);
   });
 });

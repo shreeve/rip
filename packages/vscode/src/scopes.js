@@ -551,9 +551,19 @@ function* importNodesOf(stores, source) {
   for (const node of stores.nodesByKind('import')) {
     const src = stores.role(node.nodeId, 'source');
     if (typeof src?.sourceStart !== 'number') continue;
+    // A type-only statement's `type` keyword splices out by the parser's
+    // own recorded span (the typeOnly role) — the census consumes the
+    // compiler's disambiguation instead of keeping a copy of the lexer's
+    // lookahead that could drift. The default binding NAMED `type`
+    // (`import type from 'mod'`) carries no role and keeps its reading.
+    let text = source.slice(node.sourceStart, node.sourceEnd);
+    const t = stores.role(node.nodeId, 'typeOnly');
+    if (typeof t?.sourceStart === 'number') {
+      text = text.slice(0, t.sourceStart - node.sourceStart) + text.slice(t.sourceEnd - node.sourceStart);
+    }
     yield {
       module: source.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''),
-      text: source.slice(node.sourceStart, node.sourceEnd),
+      text,
     };
   }
 }
@@ -564,20 +574,15 @@ export function importBindingsOf(stores, source) {
     const braced = /\{([^}]*)\}/.exec(text);
     for (const part of (braced?.[1] ?? '').split(',')) {
       const [imported, local] = part.trim().split(/\s+as\s+/).map((s) => s.trim());
-      if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(imported ?? '')) continue;
+      if (!/^[A-Za-z_$\x7f-\uffff][\w$\x7f-\uffff]*$/.test(imported ?? '')) continue;
       out.push({ local: local || imported, imported, module });
     }
     // The default binding: the bare name between `import` and the first
-    // comma or `from`. A type-only import's `type` keyword strips too —
-    // its binding IS a typed import — under the lexer's whole lookahead
-    // (`{`, `*`, or an identifier that is not `from`), and BEFORE the
-    // braced list comes off: once braced, `import type{ A }` reads
-    // `import type from …`, and a guard that only knows the identifier
-    // arm mints a phantom default binding named `type`. The default
-    // binding NAMED `type` (`import type from 'mod'`) keeps its reading.
-    const head = text.replace(/^import\s+type(?=\s*[{*]|\s+(?!from\b)[A-Za-z_$])/, 'import')
-      .replace(/\{[^}]*\}/, '').replace(/^import\s+/, '');
-    const def = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,|from\b)/.exec(head);
+    // comma or `from`, with any braced list removed first. The identifier
+    // class matches the lexer's IDENT_START/IDENT_PART — narrower here
+    // would drop a binding the compiler bound.
+    const head = text.replace(/\{[^}]*\}/, '').replace(/^import\s+/, '');
+    const def = /^([A-Za-z_$\x7f-\uffff][\w$\x7f-\uffff]*)\s*(?:,|from\b)/.exec(head);
     if (def) out.push({ local: def[1], imported: 'default', module });
   }
   return out;
