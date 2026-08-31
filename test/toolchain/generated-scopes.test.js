@@ -248,6 +248,7 @@ const LITERAL_CLASSIFICATION = [
   generated("`) => ${…}(() => `", 1, 'element listener arrow tail; handler control is validated before emission'),
   generated("`(this._refCleanups ??= []).push(() => ${…}(this.`", 1, 'emitter-owned ref cleanup; the ref NAME emits after it, through the primitive channel that gives the read its own source span'),
   excluded("`) as (e: ${…}) => unknown`", 1, 'TypeScript function type (the typed event-handler cast), erased from generated JavaScript'),
+  excluded("` as (e: ${…}) => unknown)`", 1, 'TypeScript function type (the typed bare-member handler cast), erased from generated JavaScript'),
   excluded("`${…} ${…}: function (this: ${…}) ${…}`", 1, 'the face behavior object re-states a computed body already emitted through computedBody, whose await/yield rejections govern both; a TypeScript-only region, erased from generated JavaScript'),
   excluded("' = __computed(() => this.'", 1, 'the render-gate face twin restates the read pure gate analysis already admitted (a literal @app.data path and a literal or params/query key — no control flow can appear); a TypeScript-only region, erased from generated JavaScript'),
   excluded("'\\ndeclare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };\\n'", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),

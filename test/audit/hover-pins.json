@@ -75,9 +75,9 @@
         "line": 13,
         "character": 9,
         "token": "class",
-        "expect": null,
+        "expect": "(property) <span>.className: __RipClassValue[] | __RipClassValue",
         "rule": "attr/prop name (intrinsic)",
-        "why": "the prop's type is the target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "why": "served — the class key's exact row lands on the receiver surface's className property; the surface name reads back as the element (scrubFaceArtifacts); RULINGS: attr name on an intrinsic"
       },
       {
         "line": 19,
@@ -123,25 +123,25 @@
         "line": 48,
         "character": 6,
         "token": "input",
-        "expect": null,
+        "expect": "(element) input: HTMLElementTagNameMap['input']",
         "rule": "element tag",
-        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
+        "why": "served from the compiler's intrinsics record — the tag word's face position is a string literal with no symbol; RULINGS: element tag"
       },
       {
         "line": 48,
         "character": 12,
         "token": "ref",
-        "expect": null,
+        "expect": "ref — writes HTMLElementTagNameMap['input'] into inputEl",
         "rule": "ref word",
-        "why": "typed-channel target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "why": "served from the compiler's intrinsics record — the channel word names the write it performs, the cell by the user's own binding; RULINGS: ref word"
       },
       {
         "line": 48,
         "character": 17,
         "token": "inputEl",
-        "expect": null,
+        "expect": "(property) Roster.inputEl: HTMLInputElement | null",
         "rule": "name after ref:",
-        "why": "target is the state binding's type; interim silence, served — the cover-`this` leak closed"
+        "why": "served — the cell bytes ride the __ripRefCell wrap and the name's span joins the value-first channel, so the binding answers its element type, never the container; RULINGS: the name after ref:"
       },
       {
         "line": 50,
@@ -155,9 +155,9 @@
         "line": 51,
         "character": 23,
         "token": "e",
-        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
+        "expect": "(parameter) e: PointerEvent & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button']; }",
         "rule": "value position (handler param)",
-        "why": "correct today — the principles' value-position answer, pinned as-is"
+        "why": "the value-position answer with the host-element claim — target/currentTarget name the listening element (RULINGS.md, the target re-ruling superseding any-by-design)"
       },
       {
         "line": 60,
@@ -187,9 +187,9 @@
         "line": 70,
         "character": 4,
         "token": "div",
-        "expect": null,
+        "expect": "(element) div: HTMLElementTagNameMap['div']",
         "rule": "element tag",
-        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
+        "why": "served from the compiler's intrinsics record; RULINGS: element tag"
       },
       {
         "line": 71,

@@ -712,7 +712,14 @@ export function isScaffoldingLabel(label) {
 export function scrubFaceArtifacts(text) {
   return text
     .replace(/([A-Za-z_$][\w$]*)!:/g, '$1:')
-    .replace(/\.rip\.ts(?=["'`])/g, '.rip');
+    .replace(/\.rip\.ts(?=["'`])/g, '.rip')
+    // The intrinsic-element surfaces (src/ts/dom-types.js): a receiver
+    // or attribute-values interface reads as the element it types, and
+    // the ref-cell admission helper reads as the channel word. Display
+    // only — never applied to text that travels back into an edit.
+    .replace(/\b__RipEl_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
+    .replace(/\b__RipAttrVals_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
+    .replace(/\b__ripRefCell(?:Svg)?\b/g, 'ref');
 }
 
 // Inserted-import text made idiomatic Rip: statement semicolons drop

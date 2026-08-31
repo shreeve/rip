@@ -66,6 +66,8 @@ const REGION_SHAPES = [
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
+  /^\) as \(e: .*\) => unknown$/su,                        // handler cast's TYPED close (the event's function type)
+  /^__ripRefCell(Svg)?\('[a-zA-Z][\w-]*',$/u,              // ref-wrap opener (the cell-admission call around the cell bytes)
   new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
   new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
@@ -172,19 +174,21 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     const faced = compile(src, routed({ runtimeDelivery: 'none', face: 'ts' }));
     // A wrapped intrinsic href closes WITHOUT the coercive `as any`
     // (the wrap already returns a string-literal type) and CASTS ITS
-    // RECEIVER — an any-receiver call suppresses the argument's
-    // string-literal completions in tsgo.
-    expect(faced.code).toContain(` as Element).setAttribute('href', __ripRoute("/cart"));`);          // intrinsic, plain
-    expect(faced.code).toContain(` as Element).setAttribute('href', __ripRoute(\`/orders/\${this.id.value}\`));`); // intrinsic, reactive template
+    // RECEIVER to the anchor's own surface — an any-receiver call
+    // suppresses the argument's string-literal completions in tsgo.
+    expect(faced.code).toContain(` as __RipEl_a).setAttribute('href', __ripRoute("/cart"));`);          // intrinsic, plain
+    expect(faced.code).toContain(` as __RipEl_a).setAttribute('href', __ripRoute(\`/orders/\${this.id.value}\`));`); // intrinsic, reactive template
     expect(faced.code).toContain('href: __ripRoute("/cart")');                        // component prop
-    expect(faced.code).toContain('"https://example.com" as any');                     // external passes bare
-    expect(faced.code).toContain("setAttribute('href', nav as any)");                 // dynamic passes bare
+    expect(faced.code).toContain(`setAttribute('href', "https://example.com")`);      // external passes bare — the surface's string road admits it
+    expect(faced.code).toContain("setAttribute('href', nav)");                        // dynamic passes bare through the typed surface
     expect(faced.code).toContain('href: nav');                                        // dynamic prop passes bare
     expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
     expect(faced.code).toContain(`type RoutePath = ${ROUTES};`);
-    // A non-anchor element's href is a plain attribute — never wrapped.
-    const divLine = faced.code.split('\n').find((l) => l.includes('_el5.setAttribute'));
-    expect(divLine).toContain('"/cart" as any');
+    // A non-anchor element's href is a plain attribute — never wrapped
+    // (its surface has no such key; the checker, not the wrap, owns
+    // that complaint).
+    const divLine = faced.code.split('\n').find((l) => l.includes('_el5 as __RipEl_div).setAttribute'));
+    expect(divLine).toContain(`setAttribute('href', "/cart")`);
     expect(divLine).not.toContain('__ripRoute');
   });
 
@@ -1137,7 +1141,7 @@ describe('TS directive comments', () => {
     // pinned here so the two inline forms hold the identity together.
     const dom = 'export C = component\n  render\n    div\n      span\n        # @ts-expect-error inline\n        title: 1\n';
     const domFaced = ts(dom);
-    expect(domFaced.code).toMatch(/\/\/ @ts-expect-error inline\n\s*this\._el\d+\.setAttribute\('title'/);
+    expect(domFaced.code).toMatch(/\/\/ @ts-expect-error inline\n\s*\(this\._el\d+ as __RipEl_span\)\.setAttribute\('title'/);
     expect(stripFace(domFaced.code, domFaced.tsRegions)).toBe(js(dom).code);
   });
 });
@@ -1369,7 +1373,10 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(faced.code).toContain('let currentBlock: any = null;');
     expect(faced.code).toContain('let showing: any = null;');
     expect(faced.code).toContain('const __s: any = { blocks: [], keys: [] };');
-    expect(faced.code).toContain('((this.onClick) as any)(e)');
+    // A bare member-name handler on a KNOWN event checks against the
+    // event's real function type, host element included — no longer a
+    // quieting `as any` (custom events keep that: no claim to check).
+    expect(faced.code).toContain(`((this.onClick) as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
     expect(faced.code).toContain('(this as any)._first = ');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });

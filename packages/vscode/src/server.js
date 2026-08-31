@@ -1852,6 +1852,10 @@ async function refresh(document) {
     // SOURCE spans the lowering owns whole — hover declines there rather
     // than describing the machinery the face put in their place.
     silent: noUserSymbolSpans(result),
+    // SOURCE spans of intrinsic-element positions served from the
+    // compiler's own record — the tag word and the `ref` channel word
+    // (RULINGS.md, the render rows; see the hover handler).
+    intrinsics: result.intrinsics ?? [],
     // SOURCE spans of component member declaration names — where a hover
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
@@ -2784,6 +2788,20 @@ connection.onHover(async (params) => {
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx || ctx.genPosition === null) return null;
+  // Intrinsic-element positions the compiler recorded answer from the
+  // record itself (RULINGS.md, the render rows) — checked BEFORE the
+  // silence decline, because the `ref` word is census-excluded yet
+  // ruled to answer. The tag word's face position is a string literal
+  // (no symbol — tsgo has nothing to say), so the served text is the
+  // native lib.dom spelling of what the lowering does there.
+  const intr = (ctx.good.intrinsics ?? []).find((r) => ctx.offset >= r.start && ctx.offset < r.end);
+  if (intr) {
+    const map = intr.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
+    const value = intr.kind === 'tag'
+      ? `\`\`\`typescript\n(element) ${intr.tag}: ${map}['${intr.tag}']\n\`\`\``
+      : `\`\`\`typescript\nref — writes ${map}['${intr.tag}'] into ${intr.name}\n\`\`\``;
+    return { contents: { kind: 'markdown', value } };
+  }
   // A position the lowering owns whole answers nothing. tsgo would
   // describe the minted symbol its own emission put there — truthfully,
   // and about something the user never wrote.
@@ -2810,6 +2828,11 @@ connection.onHover(async (params) => {
   // display-only re-labeling the diagnostics road applies.
   if (typeof contents?.value === 'string' && ctx.good.routeEntries?.length) {
     contents = { ...contents, value: prettifyRouteUnion(contents.value, ctx.good.routeEntries) };
+  }
+  // Face artifacts read back in the author's vocabulary — the
+  // intrinsic-surface names among them (display only).
+  if (typeof contents?.value === 'string') {
+    contents = { ...contents, value: scrubFaceArtifacts(contents.value) };
   }
 
   // The response range travels the reverse path: generated → last-good
@@ -3186,33 +3209,40 @@ async function dotProbeCompletion(params) {
   } catch { return null; }
   const at = result.code.indexOf(DOT_PROBE_MARK);
   if (at < 0) return null;
-  // OVERLAY, not a new document: the probe text rides the buffer's own
-  // face document (a project member by construction — a freshly minted
-  // probe file answers before tsgo has admitted it to the project, and
-  // an unadmitted file resolves no imports). The overlay swaps in, one
-  // completion asks against it, and the CURRENT last-good face swaps
-  // back in the finally — read at restore time, because a refresh can
-  // complete while the probe awaits tsgo. The version counter is the
-  // state's own so both roads stay monotonic. A buffer that has NEVER
-  // compiled has no face document yet: the probe face becomes its
-  // first (mirror written so the project holds a real file), stays
-  // open, and the next good compile didChanges over it.
+  const items = await overlayCompletionAsk(state, result.code, at);
+  return items.length ? { isIncomplete: false, items } : null;
+}
+
+// One completion ask against a PROBE face, returned as bare-label
+// items (scaffolding filtered). OVERLAY, not a new document: the probe
+// text rides the buffer's own face document (a project member by
+// construction — a freshly minted probe file answers before tsgo has
+// admitted it to the project, and an unadmitted file resolves no
+// imports). The overlay swaps in, one completion asks against it, and
+// the CURRENT last-good face swaps back in the finally — read at
+// restore time, because a refresh can complete while the probe awaits
+// tsgo. The version counter is the state's own so both roads stay
+// monotonic. A buffer that has NEVER compiled has no face document
+// yet: the probe face becomes its first (mirror written so the project
+// holds a real file), stays open, and the next good compile didChanges
+// over it.
+async function overlayCompletionAsk(state, code, at) {
   const coldOpen = !(state.tsOpen && state.lastGood);
   try {
     state.tsVersion += 1;
     if (!state.tsOpen) {
-      try { writeMirror(state.mirrorPath, result.code); } catch { return null; }
+      try { writeMirror(state.mirrorPath, code); } catch { return []; }
       state.tsOpen = true;
       tsgo.client.notify('textDocument/didOpen', {
-        textDocument: { uri: state.tsUri, languageId: 'typescript', version: state.tsVersion, text: result.code },
+        textDocument: { uri: state.tsUri, languageId: 'typescript', version: state.tsVersion, text: code },
       });
     } else {
       tsgo.client.notify('textDocument/didChange', {
         textDocument: { uri: state.tsUri, version: state.tsVersion },
-        contentChanges: [{ text: result.code }],
+        contentChanges: [{ text: code }],
       });
     }
-    const position = offsetToPosition(lineStartsOf(result.code), at);
+    const position = offsetToPosition(lineStartsOf(code), at);
     let res = await tsgoRequest('textDocument/completion', {
       textDocument: { uri: state.tsUri }, position,
     }, 'completion probe');
@@ -3239,7 +3269,7 @@ async function dotProbeCompletion(params) {
       }
       items.push(out);
     }
-    return items.length ? { isIncomplete: false, items } : null;
+    return items;
   } finally {
     // Restore the face CURRENT at this moment, never the pre-probe
     // snapshot: a debounced refresh may have completed while the probe
@@ -3259,6 +3289,55 @@ async function dotProbeCompletion(params) {
   }
 }
 
+// The pair-splice probe: an ATTRIBUTE-KEY ask the buffer cannot answer
+// through its own face — a bare prefix (`pla`) or an empty slot inside
+// an element body, positions whose real compile either fails or lands
+// the cursor on bytes that are not a key. The probe splices the ask
+// into a well-formed pair (`pla` → `<mark>: null`), compiles it
+// tolerant, and asks completions INSIDE the spliced key — where the
+// receiver surface's string-literal union answers with the tag's own
+// attribute vocabulary. Same overlay contract as the dot probe.
+async function pairSpliceProbe(params) {
+  const state = states.get(params.textDocument.uri);
+  const document = documents.get(params.textDocument.uri);
+  if (!state?.mirrorPath || !document || !tsgo || !compile) return null;
+  const text = document.getText();
+  const curLineStarts = lineStartsOf(text);
+  const cursor = positionToOffset(curLineStarts, text.length, params.position);
+  if (text.includes(DOT_PROBE_MARK)) return null;
+  // The ask must sit at the END of its word (attr words carry `-`).
+  if (cursor < text.length && /[\w$-]/.test(text[cursor])) return null;
+  let s = cursor;
+  while (s > 0 && /[\w$-]/.test(text[s - 1])) s--;
+  const prev = s > 0 ? text[s - 1] : '';
+  // Member (`.`), value (`:`), and event (`@`) asks are other roads.
+  if (prev === '.' || prev === ':' || prev === '@' || prev === '#') return null;
+  if (s === cursor) {
+    // An EMPTY-slot ask only on an otherwise-blank line tail — an
+    // empty prefix anywhere else is every other completion in the file.
+    const lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
+    if (text.slice(lineStart, cursor).trim() !== '') return null;
+  }
+  let result;
+  try {
+    const fsPath = fileURLToPath(document.uri);
+    const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
+    const routes = appRoutesFor(fsPath, workspaceRoot);
+    result = compile(text.slice(0, s) + DOT_PROBE_MARK + ': null' + text.slice(cursor), {
+      path: document.uri, runtimeDelivery: 'inline', face: 'ts', strict: state.strict, tolerant: true,
+      appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params,
+    });
+  } catch { return null; }
+  const at = result.code.indexOf(DOT_PROBE_MARK);
+  if (at < 0) return null;
+  // One byte INSIDE the mark: the key lands as a string literal on the
+  // attribute road, and a completion ask at the literal's first byte
+  // reads as outside the string (the identifier scope) — inside it,
+  // the constrained union answers.
+  const items = await overlayCompletionAsk(state, result.code, at + 1);
+  return items.length ? { isIncomplete: false, items } : null;
+}
+
 connection.onCompletion(async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
@@ -3266,9 +3345,9 @@ connection.onCompletion(async (params) => {
   // text of 100ms ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
-  if (!ctx) return dotProbeCompletion(params);
+  if (!ctx) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
   const genCursor = ctx.genSlot ?? ctx.genExact;
-  if (genCursor === null) return dotProbeCompletion(params);
+  if (genCursor === null) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
   // A member-dot ask must land in the face AS the same member-dot —
   // same typed prefix, right of a `.`. Two faces betray it: a STALE
   // face (the trailing dot failed to compile, and the fresh `.` sits
@@ -3290,6 +3369,22 @@ connection.onCompletion(async (params) => {
       const probed = await dotProbeCompletion(params);
       if (probed) return probed;
     }
+  } else {
+    // A bare-WORD ask whose bytes do not survive into the face at the
+    // mapped position is the pair-splice probe's case: a broken
+    // attribute line compiles stale, and the cursor lands on whatever
+    // the last good compile put there.
+    let ws = cursor;
+    while (ws > 0 && /[\w$-]/.test(ctx.currentText[ws - 1])) ws--;
+    if (ws < cursor) {
+      let fs = genCursor;
+      while (fs > 0 && /[\w$-]/.test(ctx.good.code[fs - 1])) fs--;
+      const faithful = ctx.good.code.slice(fs, genCursor) === ctx.currentText.slice(ws, cursor);
+      if (!faithful) {
+        const probed = await pairSpliceProbe(params);
+        if (probed) return probed;
+      }
+    }
   }
   const context = relayableCompletionContext(params.context);
   const result = await tsgoRequest('textDocument/completion', {
@@ -3297,7 +3392,7 @@ connection.onCompletion(async (params) => {
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
     ...(context ? { context } : {}),
   }, 'completion');
-  if (!result) return null;
+  if (!result) return pairSpliceProbe(params);
   const rawItems = Array.isArray(result) ? result : result.items ?? [];
   ctx.state.lastCompletion = rawItems;
   const items = [];
@@ -3307,6 +3402,12 @@ connection.onCompletion(async (params) => {
     if (item) items.push(item);
   }
   finishRouteStringItems(ctx, genCursor, items);
+  if (items.length === 0) {
+    // Nothing survived the face ask — an attribute-key position whose
+    // mapped bytes answer no completions falls to the probe.
+    const probed = await pairSpliceProbe(params);
+    if (probed) return probed;
+  }
   return { isIncomplete: Array.isArray(result) ? false : !!result.isIncomplete, items };
 });
 

@@ -4448,7 +4448,7 @@ describeExtended('rip check: typed routes over the real server', () => {
         '    a href: @nav, \'dynamic\'',
         '    a href: @data.href, \'string-typed-data\'',
         "    a href: ('/nowhere' as string), 'cast-hatch'",
-        "    div href: '/not-a-route'",
+        "    area href: '/not-a-route'",   // href on a non-anchor tag is never route-wrapped
         "    ButtonLink href: '/cart', 'component'",
         '    ButtonLink href: @nav, \'component-dynamic\'',
         "    PlainLink href: '/orders', 'own-prop'",
@@ -4683,6 +4683,120 @@ describeExtended('rip check: typed routes over the real server', () => {
       expect(diags.length).toBe(1);
       expect(diags[0].code).toBe(2345);
       expect(diags[0].line).toBe(6);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+});
+
+describeExtended('rip check: intrinsic-element typing over the real server', () => {
+  // The typed lowering (src/ts/dom-types.js + the receiver casts): the
+  // EXISTING lowering's own byte positions check natively, so every
+  // diagnostic here must anchor on the author's key/value/handler/cell
+  // bytes — never on scaffold. Detection is posture-independent (the
+  // gradual arm below); the strict arm carries the full matrix.
+  const comp = (lines) => ['export P = component', "  q := ''", '  render', '    div', ...lines.map((l) => `      ${l}`), ''].join('\n');
+  const diagsOf = (dir) => JSON.parse(check(dir, ['--json']).stdout).map((d) => [d.code, d.line, d.column]);
+
+  test('a misspelled attribute key draws TS2345 anchored on the key\'s own bytes, both postures', () => {
+    for (const strict of [true, false]) {
+      const dir = workspace({ 'app.rip': comp(["input placeholdr: 'x'"]) }, strict ? { strict: true } : null);
+      try {
+        expect(diagsOf(dir), `strict=${strict}`).toEqual([[2345, 5, 13]]);
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    }
+  }, 120_000);
+
+  test('the value policy: property road strict, attribute road widened by | string', () => {
+    const dir = workspace({
+      'app.rip': comp([
+        'input value: q',            // property road, string := string — clean
+        'img width: \'400\'',        // number property, widened — clean
+        'img alt: 42',               // string property — the number errors
+        'input maxlength: 5',        // both spellings legal, number | string
+        "input maxLength: '5'",
+        "label for: 'q'",            // the spec spelling is legal (v3 rejected it)
+        'div data-count: 5',         // templates admit serializable primitives
+        "div aria-labl: 'z'",        // template admission — any suffix is legal
+      ]),
+    }, { strict: true });
+    try {
+      expect(diagsOf(dir)).toEqual([[2345, 7, 16]]);   // img alt: 42 — the value bytes
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('class values ride the clsx contract: number rejects, boolean passes', () => {
+    const dir = workspace({
+      'app.rip': ['export P = component', '  lit := true', '  render', '    div',
+        '      span class: lit', '      p class: 42', ''].join('\n'),
+    }, { strict: true });
+    try {
+      const rows = diagsOf(dir);
+      expect(rows).toHaveLength(1);
+      expect(rows[0][0]).toBe(2322);
+      expect(rows[0][1]).toBe(6);                       // the `p class: 42` pair
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('event handlers: a mismatched named method draws the cast diagnostic; a custom event stays quiet', () => {
+    const dir = workspace({
+      'app.rip': ['export P = component', "  v := ''",
+        '  onKey = (e: KeyboardEvent) ->', '    v = e.key',
+        '  render', '    div',
+        "      button @click: @onKey, 'x'",             // KeyboardEvent into a click — errors
+        '      input @input: (e) -> v = e.target.value', // host-typed target — clean
+        '      div @fancy: (e) -> v = String(e.detail)', // custom event — no claim, no TS7006
+        ''].join('\n'),
+    }, { strict: true });
+    try {
+      const rows = diagsOf(dir);
+      expect(rows).toHaveLength(1);
+      expect(rows[0][0]).toBe(2352);
+      expect(rows[0][1]).toBe(7);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('refs: the blessed arms pass; a non-nullable or foreign-typed cell rejects on its own pair, static and dynamic', () => {
+    const clean = workspace({
+      'app.rip': ['export P = component', '  el := null', '  inp: HTMLInputElement | null := null', '  render',
+        '    div ref: el', '      input ref: inp', ''].join('\n'),
+    }, { strict: true });
+    try {
+      expect(diagsOf(clean)).toEqual([]);
+    } finally { fs.rmSync(clean, { recursive: true, force: true }); }
+    const bad = workspace({
+      'app.rip': ['export P = component', '  vis := true', '  divCell: HTMLDivElement | null := null', '  render',
+        '    div', '      if vis', '        input ref: divCell', ''].join('\n'),
+    }, { strict: true });
+    try {
+      const rows = diagsOf(bad);
+      expect(rows).toHaveLength(1);
+      expect(rows[0][0]).toBe(2345);
+      expect(rows[0][1]).toBe(7);                       // the dynamic ref's own line
+    } finally { fs.rmSync(bad, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('SVG: case-sensitive names with string | number values; the dual-namespace anchor takes the SVG surface', () => {
+    const dir = workspace({
+      'app.rip': ['export P = component', '  r := 4', '  render',
+        "    svg viewBox: '0 0 10 10'",
+        '      circle cx: 5, r: r',
+        "      circle viewbox: 'wrong-case'",
+        "      a href: '#in-svg'",
+        ''].join('\n'),
+    }, { strict: true });
+    try {
+      const rows = diagsOf(dir);
+      expect(rows).toHaveLength(1);
+      expect(rows[0][0]).toBe(2345);
+      expect(rows[0][1]).toBe(6);                       // the misspelled viewbox key
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('bare shorthand stays clean through the typed surface', () => {
+    const dir = workspace({
+      'app.rip': comp(['form noValidate', 'input required', 'button disabled', "  'go'"]),
+    }, { strict: true });
+    try {
+      expect(diagsOf(dir)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 });

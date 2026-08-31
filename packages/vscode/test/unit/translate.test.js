@@ -469,13 +469,22 @@ describe('spans with no user symbol (the hover declines)', () => {
 
     const renderAt = src.indexOf('  render');
     expect(silenced(at('ref:', renderAt))).toBe(true);            // the channel word
-    expect(silenced(at('inputEl', at('ref:', renderAt)))).toBe(true);   // the cell it names
     expect(silenced(at('value', renderAt))).toBe(true);           // the bind target
     expect(silenced(at('text', renderAt))).toBe(true);            // the name bound to it
 
-    // …and the census keeps the two reads it must still count.
+    // The cell a ref names is NOT silenced: the `__ripRefCell` wrap
+    // gives its bytes a real face position and the value-first channel
+    // serves the binding's own element type there (RULINGS.md, the
+    // ref-name row) — while the intrinsics record answers for the
+    // channel word itself.
+    const cellAt = at('inputEl', at('ref:', renderAt));
+    expect(silenced(cellAt)).toBe(false);
+    expect(r.memberDecls.some((m) => m.start === cellAt)).toBe(true);
+    expect(r.intrinsics.some((i) => i.kind === 'ref' && i.name === 'inputEl' && i.tag === 'input')).toBe(true);
+
+    // …and the census keeps the reads it must still count.
     const consumed = new Set(r.vocabulary.map((v) => v.start));
-    expect(consumed.has(at('inputEl', at('ref:', renderAt)))).toBe(false);
+    expect(consumed.has(cellAt)).toBe(false);
     expect(consumed.has(at('text', renderAt))).toBe(false);
     expect(consumed.has(at('ref:', renderAt))).toBe(true);        // the word itself IS consumed
   });

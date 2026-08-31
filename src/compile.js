@@ -303,6 +303,12 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // the pair's key, the anchor every other attribute reports on.
     // TS face only; empty otherwise.
     routeWraps: emitted.routeWraps,
+    // SOURCE spans of intrinsic-element positions the editor answers
+    // from the compiler's own record (RULINGS.md, the render rows): the
+    // element TAG word (its face position is a string literal — no
+    // symbol) and the `ref` channel word, each carrying the tag, its
+    // namespace, and for `ref` the cell's name. TS face only.
+    intrinsics: emitted.intrinsics ?? [],
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and

@@ -3,9 +3,9 @@
     {
       "line": 25,
       "character": 10,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+      "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — the __ripRefCell admission rejects the cell argument (TS2345, anchored through the pair's cover); rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 27,
@@ -42,16 +42,16 @@
     {
       "line": 47,
       "character": 12,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "a non-nullable cell receiving an element ref — the cell's own nullability is what rejects, and React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+      "why": "a non-nullable cell receiving an element ref — the __ripRefCell admission gates on `null extends V` (teardown writes null) and rejects the cell argument (TS2345); React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 48,
       "character": 14,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "a tag-typed cell on a foreign tag — the same rip-native ref surface as the row above, one tag apart; pinned per the components ruling (RULINGS.md)"
+      "why": "a tag-typed cell on a foreign tag — the same rip-native __ripRefCell admission as the row above, one tag apart (TS2345 on the cell argument); pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 49,
