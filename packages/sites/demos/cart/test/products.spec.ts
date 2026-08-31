@@ -8,8 +8,9 @@ test('lists every product with its image, name and price', async ({ page }) => {
   const products = await fetchProducts(page)
   await expect(page.locator(cards)).toHaveCount(products.length)
 
-  for (const product of products) {
-    const card = page.locator(cards).filter({ hasText: product.name })
+  for (const [index, product] of products.entries()) {
+    const card = page.locator(cards).nth(index)
+    await expect(card.locator('h5')).toHaveText(product.name)
     await expect(card.locator('.image')).toHaveText(product.image)
     await expect(card.locator('p')).toHaveText(usd(product.price))
   }

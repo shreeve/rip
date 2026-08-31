@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { fetchUser, nav } from './support/util'
+import { fetchUser, nav, reseed } from './support/util'
 
 const field = (page: Page, label: string) => page.getByLabel(label)
 const save = (page: Page) => page.getByRole('button', { name: 'Update Profile' })
@@ -33,7 +33,9 @@ test('a blank name is rejected, marked invalid, and nothing is saved', async ({ 
   await expect(field(page, 'Last name')).toHaveValue(user.lastName)
 })
 
-test('a saved change persists across a reload and renames the nav', async ({ page }) => {
+test('a saved change persists across a reload and renames the nav', async ({ page }, testInfo) => {
+  reseed(testInfo.config.rootDir)
+
   await page.goto('/profile')
   const user = await fetchUser(page)
   expect(user.firstName, 'the rename must actually change something').not.toBe('Ada')

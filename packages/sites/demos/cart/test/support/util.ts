@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 
@@ -51,7 +52,8 @@ export const menu = {
 
 export const cards = '#content article'
 
-export const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`
+export const usd = (cents: number) =>
+  Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
 
 export async function fetchUser(page: Page) {
   const response = await page.request.get('/api/user')
@@ -75,8 +77,21 @@ export async function createOrder(page: Page, ...items: OrderLine[]) {
   return order
 }
 
+const dbPath = (rootDir: string) => join(rootDir, 'api/cart.sqlite')
+
+export function reseed(rootDir: string) {
+  const db = new DatabaseSync(dbPath(rootDir))
+  try {
+    db.exec('PRAGMA busy_timeout = 5000')
+    db.exec('DELETE FROM users; DELETE FROM products; DELETE FROM orders')
+  } finally {
+    db.close()
+  }
+  execFileSync('rip', ['api/seed.rip'], { cwd: rootDir })
+}
+
 export function clearOrders(rootDir: string) {
-  const db = new DatabaseSync(join(rootDir, 'api/cart.sqlite'))
+  const db = new DatabaseSync(dbPath(rootDir))
   try {
     db.exec('PRAGMA busy_timeout = 5000')
     db.prepare('DELETE FROM orders').run()
