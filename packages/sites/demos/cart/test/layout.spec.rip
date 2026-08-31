@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test'
+import { cards, fetchUser, menu, nav } from './support/util.rip'
+
+test 'the chrome names the shop, the routes, and the signed-in user', ({ page }) ->
+  page.goto!('/')
+  user = fetchUser!(page)
+
+  expect(page.locator(nav.brand)).toHaveText!('Shop')
+  expect(page.locator(nav.products)).toHaveText!('Products')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+  expect(page.locator(nav.menu)).toHaveText!("#{user.firstName} #{user.lastName}")
+
+  page.locator(nav.menu).click!
+  expect(page.locator(menu.profile)).toBeVisible!
+  expect(page.locator(menu.orders)).toBeVisible!
+
+  page.locator(menu.profile).click!
+  expect(page.locator('h1')).toHaveText!('Profile')
+
+test 'every route renders inside the chrome and titles the document', ({ page }) ->
+  routes = [
+    ['/', 'Products - Rip']
+    ['/cart', 'Cart - Rip']
+    ['/profile', 'Profile - Rip']
+    ['/orders', 'Orders - Rip']
+    ['/nowhere', 'Not Found - Rip']
+    ['/a/b/c', 'Not Found - Rip']
+  ]
+
+  for [path, title] in routes
+    response = page.goto!(path)
+    expect(response?.status(), "#{path} should be served the shell, not the edge's 404").toBe(200)
+    expect(page).toHaveTitle!(title)
+    expect(page.locator(nav.brand)).toHaveText!('Shop')
+
+  expect(page.locator('#content')).toHaveText!('Page not found')
+
+test 'a failing gate shows the error, and it does not follow you', ({ page }) ->
+  page.goto!('/orders/999')
+  expect(page.locator('p.error')).toHaveText!("Couldn't load this page")
+  expect(page.locator('#content')).toBeEmpty!
+  expect(page.locator(nav.brand)).toHaveText!('Shop')
+
+  page.locator(nav.products).click!
+  expect(page.locator('p.error')).toHaveCount!(0)
+  expect(page.locator(cards)).not.toHaveCount!(0)
+
+test 'the cart survives navigation and is dropped by a reload', ({ page }) ->
+  page.goto!('/')
+  page.locator(cards).first().getByRole('button', { name: 'Add to Cart' }).click!
+  expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
+
+  page.locator(nav.cart).click!
+  expect(page.locator('h1')).toHaveText!('Cart')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
+
+  page.locator(nav.products).click!
+  expect(page.locator('h1')).toHaveText!('Products')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
+
+  page.reload!
+  expect(page.locator(nav.cart)).toHaveText!('Cart (0)')

@@ -4,7 +4,7 @@
     "strict": true
   },
   "scripts": {
-    "test": "playwright test"
+    "test": "bun test/run.mjs"
   },
   "devDependencies": {
     "@types/bun": "1.4.0"

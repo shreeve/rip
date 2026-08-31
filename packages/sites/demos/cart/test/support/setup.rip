@@ -1,0 +1,7 @@
+import { reseed } from './util.rip'
+
+def setup()
+  reseed()
+  return () -> reseed()
+
+export default setup

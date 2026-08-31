@@ -1,0 +1,76 @@
+import { expect, test, Page, Route } from '@playwright/test'
+import { fetchUser, nav, reseed } from './support/util.rip'
+
+field = (page: Page, label: string) -> page.getByLabel(label)
+save = (page: Page) -> page.getByRole('button', { name: 'Update Profile' })
+
+test 'shows the signed-in user, with the email read-only', ({ page }) ->
+  page.goto!('/profile')
+  user = fetchUser!(page)
+
+  expect(field(page, 'First name')).toHaveValue!(user.firstName)
+  expect(field(page, 'Last name')).toHaveValue!(user.lastName)
+  expect(field(page, 'Email')).toHaveValue!(user.email)
+  expect(field(page, 'Phone')).toHaveValue!(user.phone ?? '')
+  expect(field(page, 'Email')).not.toBeEditable!
+
+test 'a blank name is rejected, marked invalid, and nothing is saved', ({ page }) ->
+  page.goto!('/profile')
+  user = fetchUser!(page)
+
+  field(page, 'First name').fill!('')
+  field(page, 'Last name').fill!('')
+  save(page).click!
+
+  expect(page.locator('small')).toHaveText!(['Enter a first name', 'Enter a last name'])
+  expect(field(page, 'First name')).toHaveAttribute!('aria-invalid', 'true')
+  expect(field(page, 'Last name')).toHaveAttribute!('aria-invalid', 'true')
+  expect(page.locator('p.success')).toHaveCount!(0)
+
+  page.reload!
+  expect(field(page, 'First name')).toHaveValue!(user.firstName)
+  expect(field(page, 'Last name')).toHaveValue!(user.lastName)
+
+test 'a saved change persists across a reload and renames the nav', ({ page }) ->
+  reseed()
+
+  page.goto!('/profile')
+  user = fetchUser!(page)
+  expect(user.firstName, 'the rename must actually change something').not.toBe('Ada')
+
+  field(page, 'First name').fill!('Ada')
+  field(page, 'Phone').fill!('(555) 010-1234')
+  save(page).click!
+
+  expect(page.locator('p.success')).toHaveText!('Profile updated!')
+  expect(page.locator(nav.menu)).toHaveText!("Ada #{user.lastName}")
+
+  page.reload!
+  expect(field(page, 'First name')).toHaveValue!('Ada')
+  expect(field(page, 'Phone')).toHaveValue!('(555) 010-1234')
+  expect(page.locator(nav.menu)).toHaveText!("Ada #{user.lastName}")
+
+test 'a failed save shows a form error', ({ page }) ->
+  page.goto!('/profile')
+
+  failSave = (route: Route) ->
+    return route.continue() unless route.request().method() is 'PATCH'
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+
+  page.route!('**/api/user', failSave)
+
+  field(page, 'First name').fill!('Grace')
+  save(page).click!
+  expect(page.locator('p.error')).toHaveText!('Something went wrong')
+  expect(page.locator('p.success')).toHaveCount!(0)
+
+  page.unroute!('**/api/user')
+
+  dropSave = (route: Route) ->
+    return route.continue() unless route.request().method() is 'PATCH'
+    route.abort()
+
+  page.route!('**/api/user', dropSave)
+
+  save(page).click!
+  expect(page.locator('p.error')).toHaveText!('Network error')

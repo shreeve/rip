@@ -1,0 +1,106 @@
+import { expect, test, Page, Route } from '@playwright/test'
+import { cards, clearOrders, fetchProducts, nav, usd } from './support/util.rip'
+
+rows = (page: Page) -> page.locator('.cart-table tbody tr')
+line = (page: Page, index = 0) -> rows(page).nth(index)
+total = (page: Page) -> page.locator('.cart-table tfoot strong').last()
+
+quantity = (page: Page, index = 0) -> line(page, index).locator('.stepper input')
+minus = (page: Page, index = 0) -> line(page, index).locator('.stepper button').first()
+plus = (page: Page, index = 0) -> line(page, index).locator('.stepper button').last()
+
+subtotal = (page: Page, index = 0) -> line(page, index).locator('td').nth(3)
+
+def fillCart(page: Page, ...indexes: number[])
+  page.goto!('/')
+  for index in indexes
+    page.locator(cards).nth(index).getByRole('button', { name: 'Add to Cart' }).click!
+  page.locator(nav.cart).click!
+  expect(page.locator('h1')).toHaveText!('Cart')
+
+test 'a line carries the product, its price, quantity and subtotal', ({ page }) ->
+  fillCart!(page, 0)
+  [product] = fetchProducts!(page)
+
+  expect(rows(page)).toHaveCount!(1)
+  expect(line(page).locator('td.name')).toHaveText!("#{product.image} #{product.name}")
+  expect(line(page).locator('td').nth(1)).toHaveText!(usd(product.price))
+  expect(quantity(page)).toHaveValue!('1')
+  expect(subtotal(page)).toHaveText!(usd(product.price))
+  expect(total(page)).toHaveText!(usd(product.price))
+
+test 'the stepper raises and lowers the quantity, and drops the line at one', ({ page }) ->
+  fillCart!(page, 0)
+  [product] = fetchProducts!(page)
+
+  plus(page).click!
+  expect(quantity(page)).toHaveValue!('2')
+  expect(subtotal(page)).toHaveText!(usd(product.price * 2))
+  expect(total(page)).toHaveText!(usd(product.price * 2))
+  expect(page.locator(nav.cart)).toHaveText!('Cart (2)')
+
+  minus(page).click!
+  expect(quantity(page)).toHaveValue!('1')
+  expect(total(page)).toHaveText!(usd(product.price))
+
+  minus(page).click!
+  expect(page.locator('#content')).toContainText!('Your cart is empty.')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+  expect(page.getByRole('button', { name: 'Continue Shopping' })).toHaveAttribute!('href', '/')
+
+test 'a quantity below one is clamped', ({ page }) ->
+  fillCart!(page, 0)
+
+  for rejected in ['0', '', '-5']
+    quantity(page).fill!(rejected)
+    expect(quantity(page)).toHaveValue!('1')
+    expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
+
+  quantity(page).fill!('3')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (3)')
+
+test 'remove drops a single line, and clear empties the rest', ({ page }) ->
+  fillCart!(page, 0, 1, 2)
+  expect(rows(page)).toHaveCount!(3)
+
+  line(page).getByRole('button', { name: 'Remove' }).click!
+  expect(rows(page)).toHaveCount!(2)
+  expect(page.locator(nav.cart)).toHaveText!('Cart (2)')
+
+  page.getByRole('button', { name: 'Clear Cart' }).click!
+  expect(page.locator('#content')).toContainText!('Your cart is empty.')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+
+test 'placing an order confirms it, empties the cart, and lists it in the orders', ({ page }) ->
+  clearOrders()
+  fillCart!(page, 0)
+  [product] = fetchProducts!(page)
+  plus(page).click!
+
+  page.getByRole('button', { name: 'Place Order' }).click!
+  expect(page.locator('h1')).toHaveText!('Order Placed!')
+  expect(page.locator('#content')).toContainText!('Your order has been placed successfully.')
+  expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+  expect(page.getByRole('button', { name: 'Continue Shopping' })).toHaveAttribute!('href', '/')
+
+  page.getByRole('button', { name: 'View Orders' }).click!
+  expect(page.locator('h1')).toHaveText!('Orders')
+  expect(page.locator('#content tbody tr')).toHaveCount!(1)
+
+  order = page.locator('#content tbody tr').first().locator('td')
+  expect(order.nth(2)).toHaveText!('2')
+  expect(order.nth(3)).toHaveText!(usd(product.price * 2))
+
+test 'a rejected order shows the error and keeps the cart', ({ page }) ->
+  fillCart!(page, 0)
+
+  rejectOrder = (route: Route) ->
+    return route.continue() unless route.request().method() is 'POST'
+    route.fulfill({ status: 400, contentType: 'application/json', body: '{"errors":{"form":"Invalid order data"}}' })
+
+  page.route!('**/api/orders', rejectOrder)
+
+  page.getByRole('button', { name: 'Place Order' }).click!
+  expect(page.locator('p.error')).toHaveText!('Invalid order data')
+  expect(rows(page)).toHaveCount!(1)
+  expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
