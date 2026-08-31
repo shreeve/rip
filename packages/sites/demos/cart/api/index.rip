@@ -7,7 +7,15 @@ def errorResponse(errors: { form?: string, field?: Partial<Record<string, string
 
 currentUser = () -> User.find!(1)
 
+# FIXME: Janus micro-caches anonymous GETs whose responses carry no
+# Cache-Control, and a write does not invalidate the stored entry, so a read
+# issued within the window after a write answers from the stale copy. Every
+# endpoint below that reflects mutable state opts out until the edge
+# invalidates on writes. The product catalog is fixed after seeding and stays
+# cacheable.
+
 get '/api/user' ->
+  @cache off
   user = currentUser!
   if not user then return errorResponse({ form: 'No user found' }, 404)
   return UserPublic.parse(user)
@@ -34,11 +42,13 @@ patch '/api/user' ->
 get '/api/products' -> Product.all!.map((p) -> ProductPublic.parse(p))
 
 get '/api/orders' ->
+  @cache off
   user = currentUser!
   if not user then return []
   return user.orders!.reverse().map((o) -> OrderPublic.parse(o))
 
 get '/api/orders/:id' ->
+  @cache off
   id = read 'id', 'id'
 
   user = currentUser!
