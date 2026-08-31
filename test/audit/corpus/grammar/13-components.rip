@@ -152,6 +152,17 @@ Quiet = component
 Terse = component
   render null;
 
+# ── hyphenated attribute keys: the presence road and the data- template ──
+
+Held = component
+  busy := false
+
+  render
+    div
+      aria-busy: @busy?!
+      data-kind: 'row'
+      'held'
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held)
 console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))

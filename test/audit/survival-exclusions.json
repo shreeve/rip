@@ -100,7 +100,12 @@
     "140:8:circle": "lowered into a string — the face holds these bytes inside a literal",
     "140:15:cx": "lowered into a string — the face holds these bytes inside a literal",
     "140:25:cy": "lowered into a string — the face holds these bytes inside a literal",
-    "141:6:path": "lowered into a string — the face holds these bytes inside a literal"
+    "141:6:path": "lowered into a string — the face holds these bytes inside a literal",
+    "161:4:div": "lowered into a string — the face holds these bytes inside a literal",
+    "162:6:aria": "lowered into a string — the face holds these bytes inside a literal",
+    "162:11:busy": "lowered into a string — the face holds these bytes inside a literal",
+    "163:6:data": "lowered into a string — the face holds these bytes inside a literal",
+    "163:11:kind": "lowered into a string — the face holds these bytes inside a literal"
   },
   "14-schema.rip": {
     "8:2:street": "lowered into a string — the face holds these bytes inside a literal",

@@ -135,6 +135,15 @@ function Terse() {
   return null
 }
 
+// ── hyphenated attribute keys: the presence road and the data- template ──
+
+function Held() {
+  let busy = false
+  return (
+    <div aria-busy={busy ? true : undefined} data-kind='row'>held</div>
+  )
+}
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held)
 console.log('rip-native constructs:', true, true, true)

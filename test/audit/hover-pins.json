@@ -60,6 +60,10 @@
       {
         "name": "Terse",
         "expect": "let Terse: typeof Terse"
+      },
+      {
+        "name": "Held",
+        "expect": "let Held: typeof Held"
       }
     ],
     "positions": [

@@ -495,6 +495,23 @@ const AUDITS = [
     judge: 'the .rip SOURCE ITSELF — a binding\'s form fixes what its token must be, so no\n'
          + 'twin and no baseline are involved and the check cannot self-confirm',
   },
+  {
+    key: 'sweep', flag: '--sweep', name: 'Sweep Audit',
+    // Its own server, opened over the corpus — the audit's population,
+    // like every lane. Direct `bun test/audit/sweep.js` runs add the
+    // cart demo (or any file set) as DISCOVERY.
+    runs: 'drives its own editor server',
+    blurb: 'hover EVERY BYTE of the corpus and flag machinery-shaped answers',
+    judge: 'NEGATIVE invariants over the server\'s own answers — no twin, no pin, no\n'
+         + 'oracle: an answer may not name a minted `__` spelling, a scaffold local, or\n'
+         + 'the bare cover-`this`, and no diagnostic message may carry a face spelling\n'
+         + '(sweep.machinery gates the four together). The misdirection classes —\n'
+         + 'subject/keyword/comment covers, whole-construct ranges — print as gauges\n'
+         + 'and graduate the day the decline work drains them. Direct\n'
+         + '`bun test/audit/sweep.js <files>` runs the same engine over any file set —\n'
+         + 'the cart demo by default, the DISCOVERY side; a class it exposes earns a\n'
+         + 'corpus fixture, never a gate row',
+  },
 ];
 // DECLINED LANES — ruled against, recorded here because this registry is where
 // either would be built, and the reasoning must meet whoever re-proposes one.
@@ -509,17 +526,20 @@ const AUDITS = [
 // the day a symmetry defect appears that the mapping invariants cannot see.
 //
 // Content oracles (hover content at USE sites, completion, signature help,
-// twin-judged corpus-wide — the once-planned "M5"): not owed, not built, and
-// the dark area is real — the hover lane probes declarations only, and the
-// incomplete-expression work closed on per-buffer hand gates instead. Build it
-// when use-site answers start rotting, and carry the one constraint those
-// gates taught: a barriered request proves what a face CONTAINS and is blind
-// to whether the answer ARRIVES (test/toolchain/arrival.test.js holds the
-// counter-shape), so an oracle that settles before it asks inherits exactly
-// that blindness.
+// twin-judged corpus-wide — the once-planned "M5"): the NEGATIVE half of this
+// is built — the Sweep Audit above — because its build-when condition arrived:
+// use-site answers rotting (machinery hovers at positions no pin covers), a
+// class with live specimens. What remains declined is the twin-judged CONTENT
+// half: whether a use-site answer is RIGHT stays with the per-buffer hand
+// gates and the pinned rulings — the sweep asserts only that an answer is
+// never the lowering's own vocabulary. The constraint those gates taught
+// still binds both halves: a barriered request proves what a face CONTAINS
+// and is blind to whether the answer ARRIVES (test/toolchain/arrival.test.js
+// holds the counter-shape), so an oracle that settles before it asks inherits
+// exactly that blindness — the sweep asks the live server, per request.
 const FLAGS = [
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
-  ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, and every flagged mapping read'],
+  ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, every flagged mapping read, and the sweep\'s gauge rows'],
   ['--help', '-h', 'this message'],
 ];
 // Every accepted flag: the audits' own, plus the modifiers above (a row may
@@ -599,6 +619,7 @@ const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
 const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
+const RUN_SWEEP = ranAudit('sweep');
 const RUN_MAP = ranAudit('map');
 const RUN_GRAMMAR = ranAudit('grammar');
 const RUN_ERRORS = ranAudit('errors');
@@ -4661,6 +4682,93 @@ if (RUN_TOKENS) {
 
 await Promise.all(pool.map((s) => s.stop()));
 
+// ── THE SWEEP AUDIT ─ every word position, negative invariants only.
+// Its own engine and its own server (test/audit/sweep.js — `bun run
+// sweep` is the same engine standalone with the full row listing). The
+// GATED classes are the machinery-decline doctrine's hard violations
+// and print unconditionally, each row a doctrine break; the
+// misdirection classes are gauges until the decline work drains them.
+let sw = null;
+if (RUN_SWEEP) {
+  const { runSweep, corpusSets, GATED, kindOf, organize } = await import('./sweep.js');
+  // The CORPUS only — the audit's own population. The cart rides the
+  // discovery side (direct sweep.js runs), never this gate: a demo
+  // edit must not move the audit's exit code.
+  const sets = await runSweep(corpusSets());
+  auditBanner('SWEEP AUDIT', `machinery-shaped answers at ANY byte · ${sets.map((s) => `${s.name} ${s.files} files`).join(' · ')}`);
+  sw = { machinery: 0, probes: 0, answered: 0, gaugeRows: [], rows: [] };
+  for (const set of sets) {
+    sw.probes += set.probes;
+    sw.answered += set.answered;
+    for (const f of set.findings) {
+      if (GATED.has(kindOf(f))) { sw.machinery++; sw.rows.push(f); }
+      else sw.gaugeRows.push(f);
+    }
+  }
+  const base = (f) => f.slice(f.lastIndexOf('/') + 1);
+  const at = (f) => `${base(f.file)}:${f.line + 1}:${f.ch + 1}`;
+  // The summary table, in the lanes' shared shape: one right-aligned
+  // count column, gated classes first — each printed even at zero (a
+  // reassurance row, like the hover lane's `pins 0`) — then the gauges.
+  {
+    const srows = [];
+    const srow = (label, n, note, gated) => srows.push({ label, n, note, gated });
+    const counts = {};
+    for (const f of [...sw.rows, ...sw.gaugeRows]) counts[kindOf(f)] = (counts[kindOf(f)] ?? 0) + 1;
+    srow('minted', counts['minted'] ?? 0, 'answers naming a minted `__` spelling', true);
+    srow('scaffold', counts['scaffold'] ?? 0, 'answers naming a `_elN` render local', true);
+    srow('cover-this', counts['cover-this'] ?? 0, 'the bare `this: this` cover answer', true);
+    srow('diagnostics', counts['minted-in-diagnostic'] ?? 0, 'face spellings in published messages', true);
+    srows.push(null);
+    for (const g of organize(sw.gaugeRows)) srow(g.kind, g.count, g.note.split(';')[0], false);
+    out(`\n  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus, the position dimension closed; ${sw.answered} answer)`)}`);
+    const W = Math.max(...srows.filter(Boolean).map((s) => String(s.n).length));
+    for (const s of srows) {
+      if (!s) { console.log(''); continue; }
+      const color = s.n === 0 ? green : s.gated ? red : yellow;
+      out(`    ${pad(s.label, 14)} ${color(String(s.n).padStart(W))}   ${dim(s.note + (s.gated ? ' — gated: sweep.machinery' : ''))}`);
+    }
+  }
+  // The gate's own rows, each a doctrine break: fix, never excuse.
+  // The Gaps-row anatomy: bold name, dim position, dim source-line
+  // parenthetical; `leaks` names the minted spellings (the violation
+  // itself, scannable), `hover` gives the answer ONE ellipsized line —
+  // a direct sweep.js run carries it whole.
+  if (sw.rows.length) {
+    out(`\n    ${bold('Machinery-shaped answers')} ${dim('(each is a doctrine break — gated: sweep.machinery)')}`);
+    for (const f of sw.rows) {
+      out(`      ${red('✗')} ${bold(f.word)} ${dim(`@ ${at(f)}`)}${f.src ? `  ${dim(`(${f.src})`)}` : ''}`);
+      if (f.hits?.length) out(`        ${pad('leaks', 6)} ${red(f.hits.join(', '))}`);
+      const room = Math.max(24, TERM_W - 16);
+      out(`        ${dim(pad('hover', 6))} ${dim(f.text.length > room ? f.text.slice(0, room) + '…' : f.text)}`);
+    }
+  }
+  // The gauge subsections are the pre-PR worklist and print under -v,
+  // where every other lane's full listings live — the default view is
+  // a status, not a scroll. The chatty classes roll up per file+line:
+  // their unit of fixing is one rule, so the useful map is WHERE. The
+  // rest group positions under each distinct answer.
+  if (!VERBOSE && sw.gaugeRows.length) {
+    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — the pre-PR worklist; -v prints every one, per class`)}`);
+  }
+  for (const g of VERBOSE ? organize(sw.gaugeRows) : []) {
+    out(`\n    ${bold(g.kind)} ${dim(`(${g.count} — ${g.note})`)}`);
+    if (g.rollup) {
+      for (const e of g.rollup) {
+        for (const l of wrapText(`${bold(base(e.file))} ${dim(`${e.count} row${e.count === 1 ? '' : 's'} · lines ${e.lines.join(', ')}`)}`, TERM_W - 8, 2)) out(`      ${l}`);
+      }
+    } else {
+      for (const e of g.detail) {
+        const [first, ...more] = wrapText(e.text, TERM_W - 10, 0);
+        out(`      ${dim('•')} ${first}`);
+        for (const l of more) out(`        ${l}`);
+        for (const l of wrapText(e.positions.map((f) => `${at(f)} '${f.word}'`).join(' · '), TERM_W - 10, 0)) out(`          ${dim(l)}`);
+      }
+    }
+  }
+  console.log('');
+}
+
 // ── combined totals
 //
 // EVERY LINE NAMES ITS AUDIT. In a full run these totals lines print together at
@@ -4674,7 +4782,7 @@ await Promise.all(pool.map((s) => s.stop()));
 // text instead of butting straight into the number. A hand-picked 12 left it
 // one space, which reads as a run-on where every other lane has a clean
 // column. Adding a lane with a longer name widens the column by itself.
-const TOTAL_LABELS = ['Grammar', 'Mapping', 'Type', 'Diagnostics', 'Hover', 'Token'];
+const TOTAL_LABELS = ['Grammar', 'Mapping', 'Type', 'Diagnostics', 'Hover', 'Token', 'Sweep'];
 const TOTAL_W = Math.max(...TOTAL_LABELS.map((l) => l.length)) + 2;
 // Wrap on VISIBLE width (ANSI-stripped) at ` · ` segment boundaries: a totals
 // line longer than the terminal would otherwise hard-break mid-word at column
@@ -4856,6 +4964,11 @@ if (tk) {
       ? dim(' — server DELIVERY, not mapping: every read owns its own span (the census gates it), so what is dropped here is dropped on the way out')
       : dim(' — nothing dropped')));
 }
+if (sw) {
+  totalLine('Sweep', `${sw.answered} answers over ${sw.probes} positions: `
+    + (sw.machinery === 0 ? green('no machinery-shaped answer anywhere') : red(`${sw.machinery} machinery-shaped answer${sw.machinery === 1 ? '' : 's'}`))
+    + dim(' · misdirection classes stay gauges until the decline work drains them'));
+}
 
 // ── what this run did NOT cover. The default runs one of the audits, so say
 // so on the way out: an audit nobody knows about is an audit nobody runs. Reads
@@ -4891,7 +5004,7 @@ if (tk) {
   // detail-of-detail and left a gap under a section that has no middle tier.
   const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
   const { verdicts, failures, drift } = judge({
-    states: { gr, mp, el, gl, hp, tk, fails },
+    states: { gr, mp, el, gl, hp, tk, sw: sw ?? { machinery: 0 }, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
   // STRUCTURAL refusal, not a verdict: a predicate read a field no summary

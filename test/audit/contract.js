@@ -309,6 +309,19 @@ export const CONTRACT = [
     red: (s) => s.hp.ruledPopulation === 0,
   },
   {
+    // The machinery-decline doctrine, judged exhaustively: the sweep hovers
+    // EVERY word position (corpora and the cart demo) and these four classes
+    // are its hard violations — a minted `__` spelling, a scaffold local, the
+    // bare cover-`this`, or a face spelling in a diagnostic message. The
+    // sweep's misdirection classes (subject/keyword/comment covers, ranges)
+    // are gauges, not this invariant: they gate the day the decline work
+    // drains them, per the graduation rule at the top of this file.
+    name: 'sweep.machinery', lane: 'sweep',
+    property: 'no position in the sweep answers with the lowering\'s machinery, and no diagnostic message carries a face spelling',
+    red: (s) => s.sw.machinery > 0,
+    redBecause: 'the sweep\'s first pass stands as filed work: a GENERIC component\'s use-site hover passes the signature presenter\'s head (`new <T>(props…`) and leaks the raw construct, and a schema behavior member\'s hover names its `__X__behavior` face object; both fixes are queued, and this reason leaves with them',
+  },
+  {
     name: 'token.delivery', lane: 'token',
     property: 'the server delivers a semantic token for every probed declaration',
     red: (s) => s.tk.missing.length > 0,
