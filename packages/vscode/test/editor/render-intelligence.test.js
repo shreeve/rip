@@ -213,6 +213,32 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('hover: a dual-namespace extends component collapses its quoted passthrough rows', async () => {
+    // `a` lives in both tag namespaces, so its extends surface carries
+    // the SVG presentation attributes — QUOTED hyphenated keys, spelled
+    // single-quoted by the face and echoed that way by tsgo. They are
+    // passthrough like the bare rows and collapse into the head.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Pin = component extends a',  // 0
+        '  @label: string',                  // 1
+        '  render',                          // 2
+        '    a @label.value',                // 3
+        '',
+        'export Panel = component',          // 5
+        '  render',                          // 6
+        "    Pin label: 'x'",                // 7
+        '',
+      ].join('\n');
+      await api.open('pin.rip', src);
+      const use = await api.hover('pin.rip', 7, 5);   // inside `Pin`
+      expect(use?.contents?.value).toContain('component Pin extends a');
+      expect(use?.contents?.value).toContain('label: string');
+      expect(use?.contents?.value).not.toContain('stroke-width');
+      expect(use?.contents?.value).not.toContain('fill-opacity');
+    });
+  });
+
   test('hover: an `@member` read presents value-first — the container never leaks', async () => {
     // The sigil read (`@tone`) takes the property-access lowering, not
     // memberRead's bare-spelling path; both record the name's span into

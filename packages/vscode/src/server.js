@@ -2806,7 +2806,7 @@ function presentComponentSignatureHover(contents) {
     for (const raw of rows) {
       const row = raw.trim();
       if (row === '' || row === 'children?: any' || /^__bind_[\w$]+__\??:/.test(row)) continue;
-      const passthrough = /^(?:"[^"]*"|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\["([\w-]+)"\] extends Record</.exec(row);
+      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
       if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
       if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
       const cell = / \| \{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(row);
