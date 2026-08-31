@@ -4,7 +4,7 @@ import { fetchUser, nav, reseed } from './support/util.rip'
 field = (page: Page, label: string) -> page.getByLabel(label)
 save = (page: Page) -> page.getByRole('button', { name: 'Update Profile' })
 
-test 'shows the signed-in user, with the email read-only', ({ page }) ->
+test('shows the signed-in user, with the email read-only', ({ page }) ->
   page.goto!('/profile')
   user = fetchUser!(page)
 
@@ -13,8 +13,9 @@ test 'shows the signed-in user, with the email read-only', ({ page }) ->
   expect(field(page, 'Email')).toHaveValue!(user.email)
   expect(field(page, 'Phone')).toHaveValue!(user.phone ?? '')
   expect(field(page, 'Email')).not.toBeEditable!
+)
 
-test 'a blank name is rejected, marked invalid, and nothing is saved', ({ page }) ->
+test('a blank name is rejected, marked invalid, and nothing is saved', ({ page }) ->
   page.goto!('/profile')
   user = fetchUser!(page)
 
@@ -30,8 +31,9 @@ test 'a blank name is rejected, marked invalid, and nothing is saved', ({ page }
   page.reload!
   expect(field(page, 'First name')).toHaveValue!(user.firstName)
   expect(field(page, 'Last name')).toHaveValue!(user.lastName)
+)
 
-test 'a saved change persists across a reload and renames the nav', ({ page }) ->
+test('a saved change persists across a reload and renames the nav', ({ page }) ->
   reseed()
 
   page.goto!('/profile')
@@ -49,8 +51,9 @@ test 'a saved change persists across a reload and renames the nav', ({ page }) -
   expect(field(page, 'First name')).toHaveValue!('Ada')
   expect(field(page, 'Phone')).toHaveValue!('(555) 010-1234')
   expect(page.locator(nav.menu)).toHaveText!("Ada #{user.lastName}")
+)
 
-test 'a failed save shows a form error', ({ page }) ->
+test('a failed save shows a form error', ({ page }) ->
   page.goto!('/profile')
 
   failSave = (route: Route) ->
@@ -74,3 +77,4 @@ test 'a failed save shows a form error', ({ page }) ->
 
   save(page).click!
   expect(page.locator('p.error')).toHaveText!('Network error')
+)

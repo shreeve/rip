@@ -18,7 +18,7 @@ def fillCart(page: Page, ...indexes: number[])
   page.locator(nav.cart).click!
   expect(page.locator('h1')).toHaveText!('Cart')
 
-test 'a line carries the product, its price, quantity and subtotal', ({ page }) ->
+test('a line carries the product, its price, quantity and subtotal', ({ page }) ->
   fillCart!(page, 0)
   [product] = fetchProducts!(page)
 
@@ -28,8 +28,9 @@ test 'a line carries the product, its price, quantity and subtotal', ({ page }) 
   expect(quantity(page)).toHaveValue!('1')
   expect(subtotal(page)).toHaveText!(usd(product.price))
   expect(total(page)).toHaveText!(usd(product.price))
+)
 
-test 'the stepper raises and lowers the quantity, and drops the line at one', ({ page }) ->
+test('the stepper raises and lowers the quantity, and drops the line at one', ({ page }) ->
   fillCart!(page, 0)
   [product] = fetchProducts!(page)
 
@@ -47,8 +48,9 @@ test 'the stepper raises and lowers the quantity, and drops the line at one', ({
   expect(page.locator('#content')).toContainText!('Your cart is empty.')
   expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
   expect(page.getByRole('button', { name: 'Continue Shopping' })).toHaveAttribute!('href', '/')
+)
 
-test 'a quantity below one is clamped', ({ page }) ->
+test('a quantity below one is clamped', ({ page }) ->
   fillCart!(page, 0)
 
   for rejected in ['0', '', '-5']
@@ -58,8 +60,9 @@ test 'a quantity below one is clamped', ({ page }) ->
 
   quantity(page).fill!('3')
   expect(page.locator(nav.cart)).toHaveText!('Cart (3)')
+)
 
-test 'remove drops a single line, and clear empties the rest', ({ page }) ->
+test('remove drops a single line, and clear empties the rest', ({ page }) ->
   fillCart!(page, 0, 1, 2)
   expect(rows(page)).toHaveCount!(3)
 
@@ -70,8 +73,9 @@ test 'remove drops a single line, and clear empties the rest', ({ page }) ->
   page.getByRole('button', { name: 'Clear Cart' }).click!
   expect(page.locator('#content')).toContainText!('Your cart is empty.')
   expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+)
 
-test 'placing an order confirms it, empties the cart, and lists it in the orders', ({ page }) ->
+test('placing an order confirms it, empties the cart, and lists it in the orders', ({ page }) ->
   clearOrders()
   fillCart!(page, 0)
   [product] = fetchProducts!(page)
@@ -90,8 +94,9 @@ test 'placing an order confirms it, empties the cart, and lists it in the orders
   order = page.locator('#content tbody tr').first().locator('td')
   expect(order.nth(2)).toHaveText!('2')
   expect(order.nth(3)).toHaveText!(usd(product.price * 2))
+)
 
-test 'a rejected order shows the error and keeps the cart', ({ page }) ->
+test('a rejected order shows the error and keeps the cart', ({ page }) ->
   fillCart!(page, 0)
 
   rejectOrder = (route: Route) ->
@@ -104,3 +109,4 @@ test 'a rejected order shows the error and keeps the cart', ({ page }) ->
   expect(page.locator('p.error')).toHaveText!('Invalid order data')
   expect(rows(page)).toHaveCount!(1)
   expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
+)

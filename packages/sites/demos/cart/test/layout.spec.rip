@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { cards, fetchUser, menu, nav } from './support/util.rip'
 
-test 'the chrome names the shop, the routes, and the signed-in user', ({ page }) ->
+test('the chrome names the shop, the routes, and the signed-in user', ({ page }) ->
   page.goto!('/')
   user = fetchUser!(page)
 
@@ -16,8 +16,9 @@ test 'the chrome names the shop, the routes, and the signed-in user', ({ page })
 
   page.locator(menu.profile).click!
   expect(page.locator('h1')).toHaveText!('Profile')
+)
 
-test 'every route renders inside the chrome and titles the document', ({ page }) ->
+test('every route renders inside the chrome and titles the document', ({ page }) ->
   routes = [
     ['/', 'Products - Rip']
     ['/cart', 'Cart - Rip']
@@ -34,8 +35,9 @@ test 'every route renders inside the chrome and titles the document', ({ page })
     expect(page.locator(nav.brand)).toHaveText!('Shop')
 
   expect(page.locator('#content')).toHaveText!('Page not found')
+)
 
-test 'a failing gate shows the error, and it does not follow you', ({ page }) ->
+test('a failing gate shows the error, and it does not follow you', ({ page }) ->
   page.goto!('/orders/999')
   expect(page.locator('p.error')).toHaveText!("Couldn't load this page")
   expect(page.locator('#content')).toBeEmpty!
@@ -44,8 +46,9 @@ test 'a failing gate shows the error, and it does not follow you', ({ page }) ->
   page.locator(nav.products).click!
   expect(page.locator('p.error')).toHaveCount!(0)
   expect(page.locator(cards)).not.toHaveCount!(0)
+)
 
-test 'the cart survives navigation and is dropped by a reload', ({ page }) ->
+test('the cart survives navigation and is dropped by a reload', ({ page }) ->
   page.goto!('/')
   page.locator(cards).first().getByRole('button', { name: 'Add to Cart' }).click!
   expect(page.locator(nav.cart)).toHaveText!('Cart (1)')
@@ -60,3 +63,4 @@ test 'the cart survives navigation and is dropped by a reload', ({ page }) ->
 
   page.reload!
   expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+)

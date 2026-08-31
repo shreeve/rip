@@ -3,7 +3,7 @@ import { cards, fetchProducts, nav, usd } from './support/util.rip'
 
 names = (page: Page) -> page.locator("#{cards} h5")
 
-test 'lists every product with its image, name and price', ({ page }) ->
+test('lists every product with its image, name and price', ({ page }) ->
   page.goto!('/')
   products = fetchProducts!(page)
   expect(page.locator(cards)).toHaveCount!(products.length)
@@ -13,8 +13,9 @@ test 'lists every product with its image, name and price', ({ page }) ->
     expect(card.locator('h5')).toHaveText!(product.name)
     expect(card.locator('.image')).toHaveText!(product.image)
     expect(card.locator('p')).toHaveText!(usd(product.price))
+)
 
-test 'search filters the list, ignores case, and records the term in the url', ({ page }) ->
+test('search filters the list, ignores case, and records the term in the url', ({ page }) ->
   page.goto!('/')
   products = fetchProducts!(page)
   matching = products.filter((product) -> product.name.toLowerCase().includes('mug')).map((product) -> product.name)
@@ -26,8 +27,9 @@ test 'search filters the list, ignores case, and records the term in the url', (
 
   page.getByRole('searchbox').fill!('MUG')
   expect(names(page)).toHaveText!(matching)
+)
 
-test 'sorting orders by price both ways and records it in the url', ({ page }) ->
+test('sorting orders by price both ways and records it in the url', ({ page }) ->
   page.goto!('/')
   products = fetchProducts!(page)
   cheapestFirst = [...products].sort((a, b) -> a.price - b.price).map((product) -> product.name)
@@ -39,8 +41,9 @@ test 'sorting orders by price both ways and records it in the url', ({ page }) -
   page.getByRole('combobox').selectOption!('price-desc')
   expect(names(page)).toHaveText!([...cheapestFirst].reverse())
   expect(page).toHaveURL!(/[?&]sort=price-desc/)
+)
 
-test 'a deep link applies both filters on first render', ({ page }) ->
+test('a deep link applies both filters on first render', ({ page }) ->
   page.goto!('/?search=o&sort=price-desc')
   products = fetchProducts!(page)
   expected = products
@@ -52,8 +55,9 @@ test 'a deep link applies both filters on first render', ({ page }) ->
   expect(names(page)).toHaveText!(expected)
   expect(page.getByRole('searchbox')).toHaveValue!('o')
   expect(page.getByRole('combobox')).toHaveValue!('price-desc')
+)
 
-test 'a search matching nothing offers to clear the filters, and clearing empties the url', ({ page }) ->
+test('a search matching nothing offers to clear the filters, and clearing empties the url', ({ page }) ->
   page.goto!('/')
   products = fetchProducts!(page)
 
@@ -65,8 +69,9 @@ test 'a search matching nothing offers to clear the filters, and clearing emptie
   expect(page.locator(cards)).toHaveCount!(products.length)
   expect(page.getByRole('searchbox')).toHaveValue!('')
   expect(page).toHaveURL!(/\/$/)
+)
 
-test 'adding a product flips its button, and removing puts it back', ({ page }) ->
+test('adding a product flips its button, and removing puts it back', ({ page }) ->
   page.goto!('/')
   button = page.locator(cards).first().getByRole('button')
 
@@ -80,3 +85,4 @@ test 'adding a product flips its button, and removing puts it back', ({ page }) 
   button.click!
   expect(button).toHaveText!('Add to Cart')
   expect(page.locator(nav.cart)).toHaveText!('Cart (0)')
+)
