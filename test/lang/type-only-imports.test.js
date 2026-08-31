@@ -139,10 +139,9 @@ test('an `import type` clause erases the whole statement — the module never ru
 });
 
 test('a type-only import of a module with NO runtime face still loads', async () => {
-  // The motivating failure: a consumer (a test runner, a browser)
-  // parses whatever module the emission imports. A type-only import
-  // of a module that exists only as .rip source must leave the JS
-  // with nothing to resolve.
+  // A consumer (a test runner, a browser) parses whatever module the
+  // emission imports, so a type-only import of a module that exists
+  // only as .rip source must leave the JS with nothing to resolve.
   const { dir, url } = build({
     'use.rip': [
       "import type { Shape } from './missing.rip'",
@@ -172,10 +171,10 @@ test('every type-only clause form erases from the JS and rides the TS face', () 
     "import type * as NS from './ns.rip'",
     "import type {} from './empty.rip'",
     "import type { Shape, Form as F } from './lib.rip'",
-    // Every clause name USED in a type position: the per-name elision
-    // pass classifies them all, and the statement's own emission must
-    // not run that pass's separator bookkeeping (an all-classified
-    // clause once printed its names unseparated).
+    // Every clause name USED in a type position: a type-only
+    // statement's bindings stay out of the per-name elision set, so
+    // the shared clause path prints them plainly — an all-classified
+    // clause would print its names unseparated.
     'x: Shape = 1',
     'y: F = 2',
   ].join('\n') + '\n';

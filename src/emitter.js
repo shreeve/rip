@@ -2627,9 +2627,13 @@ class Emitter {
       if (!isNode(x)) return;
       // A module import's own specifiers are the declaration, not a use,
       // so they are recorded and not descended into. A DYNAMIC import is
-      // an ordinary expression and walks normally.
+      // an ordinary expression and walks normally. A TYPE-ONLY statement's
+      // bindings stay out entirely: the whole statement erases, so its
+      // names never need per-name elision — which is what lets its clause
+      // print through the shared arms with no separator bookkeeping.
       if (isModuleImportNode(this.stores, x)) {
-        bound.push(...Emitter.importedNames([x]));
+        const id = this.stores.idOf(x);
+        if (id === null || this.stores.role(id, 'typeOnly') === null) bound.push(...Emitter.importedNames([x]));
         return;
       }
       // The in-tree type text (see above): the target of a typed-var
@@ -4135,6 +4139,25 @@ class Emitter {
     });
   }
 
+  // The clause between `import` and its source — the spec arms every
+  // import emission shares. A type-only statement's clause prints the
+  // same bytes through it: its names never enter the elision set, so
+  // emitSpecifiers takes only its plain path.
+  emitImportClause(specs) {
+    specs.forEach((spec, i) => {
+      if (i > 0) this.b.emit(', ');
+      if (spec === '{}') this.b.emit('{}');
+      else if (typeof spec === 'string') this.b.emit(spec);
+      else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
+      else {
+        this.b.emit('{ ');
+        this.emitSpecifiers(spec);
+        this.b.emit(' }');
+      }
+    });
+    this.b.emit(' from ');
+  }
+
   // ["import", spec, source] | ["import", default, extra, source] —
   // ESM passthrough: `import { a, b as c } from 'src';`
   // (spaced braces, single-quoted source, a trailing newline that
@@ -4166,27 +4189,11 @@ class Emitter {
           this.b.emit('import ');
           this.mark(node, 'typeOnly', () => this.b.emit('type'));
           this.b.emit(' ');
-          specs.forEach((spec) => {
-            if (spec === '{}') this.b.emit('{}');
-            else if (typeof spec === 'string') this.b.emit(spec);
-            else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-            else {
-              // Every name emits plainly — never emitSpecifiers, whose
-              // per-name elision would run its separator bookkeeping
-              // here and print a clause of all-erased names unseparated.
-              this.b.emit('{ ');
-              spec.forEach((s, i) => {
-                if (i > 0) this.b.emit(', ');
-                if (isNode(s)) {
-                  this.emitPrimitive(s[0]);
-                  this.b.emit(' as ');
-                  this.emitPrimitive(s[1]);
-                } else this.emitPrimitive(s);
-              });
-              this.b.emit(' }');
-            }
-          });
-          this.b.emit(' from ');
+          // The shared clause arms serve here because collectTypeOnlyImports
+          // keeps a type-only statement's bindings out of the elision set —
+          // emitSpecifiers prints every name plainly, no separator
+          // bookkeeping fires.
+          this.emitImportClause(specs);
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
           this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
@@ -4214,23 +4221,9 @@ class Emitter {
         && (typeof spec === 'string' || spec[0] === '*'
           ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
           : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
-      const clause = () => {
-        specs.forEach((spec, i) => {
-          if (i > 0) this.b.emit(', ');
-          if (spec === '{}') this.b.emit('{}');
-          else if (typeof spec === 'string') this.b.emit(spec);
-          else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-          else {
-            this.b.emit('{ ');
-            this.emitSpecifiers(spec);
-            this.b.emit(' }');
-          }
-        });
-        this.b.emit(' from ');
-      };
       if (specs.length > 0) {
-        if (!allErased) clause();
-        else if (this.ts) this.b.tsOnly(clause);
+        if (!allErased) this.emitImportClause(specs);
+        else if (this.ts) this.b.tsOnly(() => this.emitImportClause(specs));
       }
       {
         const specStart = this.b.offset;
