@@ -36,6 +36,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor } from '../dom.js';
+import { CAMEL } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
@@ -679,16 +680,8 @@ export function propsTypeSegments(info) {
     // is boolean, not any — via an extends-Record guard so attributes
     // with no matching property fall back to any instead of erroring.
     // Attributes whose DOM property is camelCased get BOTH spellings
-    // (authors write maxLength; the spec list says maxlength).
-    const CAMEL = {
-      maxlength: 'maxLength', minlength: 'minLength', readonly: 'readOnly',
-      tabindex: 'tabIndex', colspan: 'colSpan', rowspan: 'rowSpan',
-      contenteditable: 'contentEditable', formaction: 'formAction',
-      formenctype: 'formEnctype', formmethod: 'formMethod',
-      formnovalidate: 'formNoValidate', formtarget: 'formTarget',
-      novalidate: 'noValidate', crossorigin: 'crossOrigin',
-      usemap: 'useMap', srclang: 'srcLang', autocomplete: 'autocomplete',
-    };
+    // (authors write maxLength; the spec list says maxlength) — the
+    // shared CAMEL bridge, the same one the intrinsic surfaces read.
     const tagMap = `HTMLElementTagNameMap[${JSON.stringify(info.extendsTag)}]`;
     const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
     const isHtmlTag = attributeNamesFor(info.extendsTag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(info.extendsTag);

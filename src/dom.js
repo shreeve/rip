@@ -91,17 +91,24 @@ export const BOOLEAN_ATTRS = new Set([
   'allowfullscreen', 'inert',
 ]);
 
-// The HTML GLOBAL attributes (the WHATWG "Global attributes" list).
-const GLOBAL_ATTRS = new Set([
+// The HTML GLOBAL attributes (the WHATWG "Global attributes" list,
+// plus WAI-ARIA's `role` — legal on every element in both namespaces,
+// exactly as `aria-*` is).
+// Exported for the generated type surfaces (src/ts/dom-types.js),
+// which must be built from these SAME tables — never a copy.
+export const GLOBAL_ATTRS = new Set([
   'accesskey', 'autocapitalize', 'autocorrect', 'autofocus', 'class',
   'contenteditable', 'dir', 'draggable', 'enterkeyhint', 'hidden', 'id',
   'inert', 'inputmode', 'is', 'itemid', 'itemprop', 'itemref', 'itemscope',
-  'itemtype', 'lang', 'nonce', 'popover', 'slot', 'spellcheck', 'style',
-  'tabindex', 'title', 'translate', 'writingsuggestions',
+  'itemtype', 'lang', 'nonce', 'popover', 'role', 'slot', 'spellcheck',
+  'style', 'tabindex', 'title', 'translate', 'writingsuggestions',
 ]);
 
 // Per-tag content attributes (the WHATWG HTML attributes index),
-// keyed by tag, values lowercase.
+// keyed by tag, values lowercase — plus the obsolete-but-rendered
+// TABLE presentation set (align/bgcolor/border/cellpadding/…): email
+// HTML requires those attributes, and lib.dom still carries their
+// DOM properties, so the typed surfaces can value them honestly.
 const PER_TAG_ATTRS = {
   __proto__: null,
   a: ['href', 'target', 'download', 'ping', 'rel', 'hreflang', 'type', 'referrerpolicy'],
@@ -142,11 +149,16 @@ const PER_TAG_ATTRS = {
   slot: ['name'],
   source: ['type', 'media', 'src', 'srcset', 'sizes', 'width', 'height'],
   style: ['media', 'blocking'],
-  td: ['colspan', 'rowspan', 'headers'],
+  table: ['align', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'width'],
+  tbody: ['align', 'valign'],
+  td: ['colspan', 'rowspan', 'headers', 'align', 'bgcolor', 'height', 'nowrap', 'valign', 'width'],
   template: ['shadowrootmode', 'shadowrootdelegatesfocus', 'shadowrootclonable', 'shadowrootserializable'],
+  tfoot: ['align', 'valign'],
   textarea: ['autocomplete', 'cols', 'dirname', 'disabled', 'form', 'maxlength', 'minlength', 'name', 'placeholder', 'readonly', 'required', 'rows', 'wrap'],
-  th: ['colspan', 'rowspan', 'headers', 'scope', 'abbr'],
+  th: ['colspan', 'rowspan', 'headers', 'scope', 'abbr', 'align', 'bgcolor', 'height', 'nowrap', 'valign', 'width'],
+  thead: ['align', 'valign'],
   time: ['datetime'],
+  tr: ['align', 'bgcolor', 'valign'],
   track: ['default', 'kind', 'label', 'src', 'srclang'],
   video: ['src', 'crossorigin', 'poster', 'preload', 'autoplay', 'playsinline', 'loop', 'muted', 'controls', 'width', 'height'],
 };
@@ -155,7 +167,7 @@ for (const tag in PER_TAG_ATTRS) PER_TAG_ATTRS[tag] = new Set(PER_TAG_ATTRS[tag]
 // SVG attributes (SVG 2 core + geometry + presentation + the common
 // gradient/filter/animation attributes). SVG attribute names are
 // case-SENSITIVE (viewBox, gradientUnits) — matched verbatim.
-const SVG_ATTRS = new Set([
+export const SVG_ATTRS = new Set([
   'id', 'class', 'style', 'lang', 'tabindex', 'href', 'pathLength',
   'crossorigin', 'transform', 'viewBox', 'preserveAspectRatio', 'xmlns',
   'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry',
