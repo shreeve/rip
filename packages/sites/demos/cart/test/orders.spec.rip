@@ -1,0 +1,53 @@
+import { expect, test, Page } from '@playwright/test'
+import { clearOrders, createOrder, fetchProducts, usd } from './support/util.rip'
+
+rows = (page: Page) -> page.locator('#content tbody tr')
+cell = (page: Page, row: number, column: number) -> rows(page).nth(row).locator('td').nth(column)
+
+test('no orders yet offers a way to the products', ({ page }) ->
+  clearOrders()
+
+  page.goto!('/orders')
+  expect(page.locator('h1')).toHaveText!('Orders')
+  expect(page.locator('#content')).toContainText!("You haven't placed any orders yet.")
+  expect(page.getByRole('button', { name: 'Browse Products' })).toHaveAttribute!('href', '/')
+)
+
+test('orders are listed newest first, with their item counts and totals', ({ page }) ->
+  clearOrders()
+  [first, second] = fetchProducts!(page)
+
+  older = createOrder!(page, { productId: first.id, quantity: 1 })
+  newer = createOrder!(page, { productId: first.id, quantity: 2 }, { productId: second.id, quantity: 3 })
+
+  page.goto!('/orders')
+  expect(rows(page)).toHaveCount!(2)
+
+  expect(cell(page, 0, 0)).toHaveText!("##{newer.id}")
+  expect(cell(page, 0, 2)).toHaveText!('5')
+  expect(cell(page, 0, 3)).toHaveText!(usd(newer.total))
+
+  expect(cell(page, 1, 0)).toHaveText!("##{older.id}")
+  expect(cell(page, 1, 2)).toHaveText!('1')
+  expect(cell(page, 1, 3)).toHaveText!(usd(older.total))
+)
+
+test('an order opens directly from its url, showing its lines, total and a way back', ({ page }) ->
+  clearOrders()
+  [product] = fetchProducts!(page)
+  order = createOrder!(page, { productId: product.id, quantity: 2 })
+
+  page.goto!("/orders/#{order.id}")
+  expect(page).toHaveTitle!("Order ##{order.id} - Rip")
+  expect(page.locator('h1')).toHaveText!("Order ##{order.id}")
+  expect(page.locator('#content')).toContainText!('Placed on')
+
+  expect(cell(page, 0, 0)).toHaveText!("#{product.image} #{product.name}")
+  expect(cell(page, 0, 1)).toHaveText!(usd(product.price))
+  expect(cell(page, 0, 2)).toHaveText!('2')
+  expect(cell(page, 0, 3)).toHaveText!(usd(product.price * 2))
+  expect(page.locator('#content tfoot strong').last()).toHaveText!(usd(order.total))
+
+  page.getByRole('button', { name: 'Back to Orders' }).click!
+  expect(page.locator('h1')).toHaveText!('Orders')
+)

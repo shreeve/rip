@@ -1,0 +1,59 @@
+import { expect, Page } from '@playwright/test'
+import { User, Product, Order } from '../../app/types.rip'
+import type { OrderLine } from '../../api/models.rip'
+import { execFileSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
+import { join } from 'node:path'
+
+export nav =
+  brand:    'nav strong'
+  products: 'nav a[href="/"]'
+  cart:     'nav a[href="/cart"]'
+  menu:     'nav summary'
+
+export menu =
+  profile: 'nav a[href="/profile"]'
+  orders:  'nav a[href="/orders"]'
+
+export cards = '#content article'
+
+export usd = (cents: number) ->
+  Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
+
+export def fetchUser(page: Page): Promise<User>
+  response = page.request.get!('/api/user')
+  expect(response.ok(), 'the api should return the signed-in user').toBeTruthy()
+  User.parse(response.json!)
+
+export def fetchProducts(page: Page): Promise<Product[]>
+  response = page.request.get!('/api/products')
+  expect(response.ok(), 'the api should list products').toBeTruthy()
+  products = Product.array.parse(response.json!)
+  expect(products.length, 'the api should list more than one product').toBeGreaterThan(1)
+  products
+
+export def createOrder(page: Page, ...items: OrderLine[]): Promise<Order>
+  response = page.request.post!('/api/orders', { data: { items } })
+  expect(response.ok(), 'the api should accept the order').toBeTruthy()
+  Order.parse(response.json!)
+
+demoRoot = process.cwd()
+dbPath = join(demoRoot, 'api/cart.sqlite')
+ripBin = join(demoRoot, '../../../../bin/rip')
+
+export def reseed()
+  db = DatabaseSync.new(dbPath)
+  try
+    db.exec('PRAGMA busy_timeout = 5000')
+    db.exec('DELETE FROM users; DELETE FROM products; DELETE FROM orders')
+  finally
+    db.close()
+  execFileSync(ripBin, ['api/seed.rip'], { cwd: demoRoot })
+
+export def clearOrders()
+  db = DatabaseSync.new(dbPath)
+  try
+    db.exec('PRAGMA busy_timeout = 5000')
+    db.prepare('DELETE FROM orders').run()
+  finally
+    db.close()

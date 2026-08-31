@@ -21,6 +21,19 @@ import paired, { describe } from './10-modules-lib.rip'
 describe()
 console.log('combined:', combo.theme, whole.host, paired.depth)
 
+# ── type-only heads: named, default, namespace, empty ──
+
+import type { Parcel } from './10-modules-lib.rip'
+import type themeShape from './10-modules-lib.rip'
+import type * as libShapes from './10-modules-lib.rip'
+import type { } from './10-modules-lib.rip'
+
+manifest: Parcel = { size: 7 }
+crate: typeof themeShape = { theme: 'dim', depth: 1 }
+cargo: libShapes.Parcel = { size: 2 }
+
+console.log('type-only:', manifest.size, crate.depth, cargo.size)
+
 # ── multiline specifier lists: the indented block, and the carried tail ──
 
 import {

@@ -2627,9 +2627,13 @@ class Emitter {
       if (!isNode(x)) return;
       // A module import's own specifiers are the declaration, not a use,
       // so they are recorded and not descended into. A DYNAMIC import is
-      // an ordinary expression and walks normally.
+      // an ordinary expression and walks normally. A TYPE-ONLY statement's
+      // bindings stay out entirely: the whole statement erases, so its
+      // names never need per-name elision — which is what lets its clause
+      // print through the shared arms with no separator bookkeeping.
       if (isModuleImportNode(this.stores, x)) {
-        bound.push(...Emitter.importedNames([x]));
+        const id = this.stores.idOf(x);
+        if (id === null || this.stores.role(id, 'typeOnly') === null) bound.push(...Emitter.importedNames([x]));
         return;
       }
       // The in-tree type text (see above): the target of a typed-var
@@ -4135,6 +4139,25 @@ class Emitter {
     });
   }
 
+  // The clause between `import` and its source — the spec arms every
+  // import emission shares. A type-only statement's clause prints the
+  // same bytes through it: its names never enter the elision set, so
+  // emitSpecifiers takes only its plain path.
+  emitImportClause(specs) {
+    specs.forEach((spec, i) => {
+      if (i > 0) this.b.emit(', ');
+      if (spec === '{}') this.b.emit('{}');
+      else if (typeof spec === 'string') this.b.emit(spec);
+      else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
+      else {
+        this.b.emit('{ ');
+        this.emitSpecifiers(spec);
+        this.b.emit(' }');
+      }
+    });
+    this.b.emit(' from ');
+  }
+
   // ["import", spec, source] | ["import", default, extra, source] —
   // ESM passthrough: `import { a, b as c } from 'src';`
   // (spaced braces, single-quoted source, a trailing newline that
@@ -4143,9 +4166,43 @@ class Emitter {
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
-    if (this.repl) return this.replImportStatement(node);
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
+    // A TYPE-ONLY import (`import type … from …`, the side-band
+    // typeOnly role): the author's declaration that the module carries
+    // no side effect they need, so the WHOLE statement erases from the
+    // JS — the one erasure a plain import can never earn (see the
+    // allErased comment below). The TS face keeps the statement as
+    // `import type …`, one region, so stripping it reproduces the JS
+    // byte for byte. The repl has no type face, so the statement
+    // erases there too — lowering it like a value import would await
+    // a module the author said not to run.
+    const nodeId = this.stores.idOf(node);
+    if (nodeId !== null && this.stores.role(nodeId, 'typeOnly') !== null) {
+      if (!this.ts) {
+        this.mark(node, '$self', () => {});
+        this.mark(node, 'source', () => {});
+        return;
+      }
+      this.b.tsOnly(() => {
+        this.mark(node, '$self', () => {
+          this.b.emit('import ');
+          this.mark(node, 'typeOnly', () => this.b.emit('type'));
+          this.b.emit(' ');
+          // The shared clause arms serve here because collectTypeOnlyImports
+          // keeps a type-only statement's bindings out of the elision set —
+          // emitSpecifiers prints every name plainly, no separator
+          // bookkeeping fires.
+          this.emitImportClause(specs);
+          const specStart = this.b.offset;
+          this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+        });
+        this.b.emit(';\n');
+      });
+      return;
+    }
+    if (this.repl) return this.replImportStatement(node);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
       // A SIDE-EFFECT import has no clause and gets none. Both forms once
@@ -4164,23 +4221,9 @@ class Emitter {
         && (typeof spec === 'string' || spec[0] === '*'
           ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
           : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
-      const clause = () => {
-        specs.forEach((spec, i) => {
-          if (i > 0) this.b.emit(', ');
-          if (spec === '{}') this.b.emit('{}');
-          else if (typeof spec === 'string') this.b.emit(spec);
-          else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-          else {
-            this.b.emit('{ ');
-            this.emitSpecifiers(spec);
-            this.b.emit(' }');
-          }
-        });
-        this.b.emit(' from ');
-      };
       if (specs.length > 0) {
-        if (!allErased) clause();
-        else if (this.ts) this.b.tsOnly(clause);
+        if (!allErased) this.emitImportClause(specs);
+        else if (this.ts) this.b.tsOnly(() => this.emitImportClause(specs));
       }
       {
         const specStart = this.b.offset;

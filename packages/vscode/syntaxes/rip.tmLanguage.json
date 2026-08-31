@@ -448,11 +448,12 @@
       ]
     },
     {
-      "comment": "Named imports: import { a, b as c } from 'path'",
-      "begin": "\\b(import)\\s*(\\{)",
+      "comment": "Named imports: import { a, b as c } from 'path', plain or type-only (`import type { … }`) — one rule, as TS's grammar folds `type` into its import rule, so the clause renders identically either way.",
+      "begin": "\\b(import)(?:\\s+(type))?\\s*(\\{)",
       "beginCaptures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "punctuation.definition.modules.begin.rip" }
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "punctuation.definition.modules.begin.rip" }
       },
       "end": "(\\})",
       "endCaptures": {
@@ -476,21 +477,23 @@
     },
     {
       "comment": "Namespace import: import * as name from 'path', and the default-plus-namespace spelling `import combo, * as whole from 'path'`. The leading binding is optional but must be matched when present — the `as` of an unmatched one is loose, and the cast rule downstream would read `as whole` as a cast and paint the namespace as a type.",
-      "match": "\\b(import)\\s+(?:([a-zA-Z_$]\\w*)\\s*,\\s*)?(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
+      "match": "\\b(import)\\s+(?:(type)\\s+)?(?:([a-zA-Z_$]\\w*)\\s*,\\s*)?(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
       "captures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "variable.other.readwrite.alias.rip" },
-        "3": { "name": "constant.language.import-export-all.rip" },
-        "4": { "name": "keyword.control.rip" },
-        "5": { "name": "variable.other.readwrite.alias.rip" }
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "variable.other.readwrite.alias.rip" },
+        "4": { "name": "constant.language.import-export-all.rip" },
+        "5": { "name": "keyword.control.rip" },
+        "6": { "name": "variable.other.readwrite.alias.rip" }
       }
     },
     {
-      "comment": "Default import: import name from 'path'",
-      "match": "\\b(import)\\s+([a-zA-Z_$]\\w*)(?=\\s+from\\b)",
+      "comment": "Default import: import name from 'path', plain or type-only. The (?!from) guard keeps `import type from 'path'` a default binding NAMED type — and keeps the whole match ahead of the type-declaration block rule, whose `type Name` begin would otherwise claim `type Parcel` in `import type Parcel from` and swallow lines to the next flush-left one.",
+      "match": "\\b(import)\\s+(?:(type)\\s+(?!from\\b))?([a-zA-Z_$]\\w*)(?=\\s+from\\b)",
       "captures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "variable.other.readwrite.alias.rip" }
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "variable.other.readwrite.alias.rip" }
       }
     },
 

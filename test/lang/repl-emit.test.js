@@ -120,6 +120,14 @@ describe('static imports lower to awaited dynamic imports through the minted res
     expect(r.code).toContain("const { default: d, a } = await import(__resolveImport('./m.js'));");
   });
 
+  test('a type-only import erases — nothing loads', () => {
+    // The repl has no type face, and lowering `import type` like a
+    // value import would await a module the author said not to run.
+    const r = repl('import type { A } from "./m.js"\nx = 1');
+    expect(r.code).not.toContain('import');
+    expect(r.code).toContain('x = 1');
+  });
+
   test('default + namespace bind through the namespace', () => {
     const r = repl('import d, * as ns from "./m.js"');
     expect(r.code).toContain("const ns = await import(__resolveImport('./m.js')), { default: d } = ns;");

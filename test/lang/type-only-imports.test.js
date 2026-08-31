@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { compile } from '../../src/compile.js';
+import { stripFace } from '../../src/emitter.js';
 
 // Compile each .rip to .js beside it and return the entry's URL.
 const build = (files, entry) => {
@@ -106,4 +107,84 @@ test("a module whose whole clause is types still RUNS the module it imported", a
     console.log = realLog;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ─── `import type` — the author-declared whole-statement erasure ─────
+//
+// Per-name elision above can never drop the STATEMENT: the emitter
+// cannot know the module carries no side effect the program needs.
+// `import type` is the author supplying that knowledge, so the JS
+// loses the statement whole — module load included.
+
+test('an `import type` clause erases the whole statement — the module never runs', async () => {
+  const { dir, url } = build({
+    'lib.rip': LIB,
+    'use.rip': [
+      "import type { Shape } from './lib.rip'",
+      'errors: Shape = {}',
+      'export seen = errors',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  const logged = [];
+  const realLog = console.log;
+  console.log = (...a) => logged.push(a.join(' '));
+  try {
+    const mod = await import(url);
+    expect(mod.seen).toEqual({});
+    expect(logged).not.toContain('lib ran');
+  } finally {
+    console.log = realLog;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a type-only import of a module with NO runtime face still loads', async () => {
+  // A consumer (a test runner, a browser) parses whatever module the
+  // emission imports, so a type-only import of a module that exists
+  // only as .rip source must leave the JS with nothing to resolve.
+  const { dir, url } = build({
+    'use.rip': [
+      "import type { Shape } from './missing.rip'",
+      'errors: Shape = {}',
+      'export seen = errors',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  try {
+    const mod = await import(url);
+    expect(mod.seen).toEqual({});
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the two plain readings of `type` keep their statements', () => {
+  // TypeScript's lookahead rule, applied at the lexer: `type` followed
+  // by `from` is a default binding named `type`; `type` inside braces
+  // is a named binding. Both are value imports and emit as written.
+  const one = compile("import type from 'mod'\nexport use = type\n", { runtimeDelivery: 'none' });
+  expect(one.code).toContain("import type from 'mod';");
+  const two = compile("import { type } from 'mod'\nexport use = type\n", { runtimeDelivery: 'none' });
+  expect(two.code).toContain("import { type } from 'mod';");
+});
+
+test('every type-only clause form erases from the JS and rides the TS face', () => {
+  const src = [
+    "import type Big from './big.rip'",
+    "import type * as NS from './ns.rip'",
+    "import type {} from './empty.rip'",
+    "import type { Shape, Form as F } from './lib.rip'",
+    // Every clause name USED in a type position: a type-only
+    // statement's bindings stay out of the per-name elision set, so
+    // the shared clause path prints them plainly — an all-classified
+    // clause would print its names unseparated.
+    'x: Shape = 1',
+    'y: F = 2',
+  ].join('\n') + '\n';
+  const js = compile(src, { runtimeDelivery: 'none' });
+  expect(js.code).toBe('let x = 1;\nlet y = 2;');
+  const ts = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+  expect(ts.code).toContain("import type Big from './big.rip';");
+  expect(ts.code).toContain("import type * as NS from './ns.rip';");
+  expect(ts.code).toContain("import type {} from './empty.rip';");
+  expect(ts.code).toContain("import type { Shape, Form as F } from './lib.rip';");
+  // The strip gate: deleting the TS-only regions reproduces the JS.
+  expect(stripFace(ts.code, ts.tsRegions)).toBe(js.code);
 });

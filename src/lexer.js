@@ -1413,6 +1413,26 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       } else if (word === 'export') {
         seenExport = true;
         push('EXPORT', word, start, pos);
+      } else if (word === 'type' && prev?.kind === 'IMPORT' && (() => {
+        // Contextual: `import type` opens a TYPE-ONLY import — the
+        // author's declaration that the module is needed for types
+        // alone, so the whole statement (side effects included) erases
+        // from the JS. TypeScript's lookahead rule disambiguates, and
+        // both plain readings must survive: `type` followed by `{`,
+        // `*`, or an identifier that is not `from` is the keyword;
+        // `import type from 'mod'` (a default binding named `type`)
+        // and `import { type } from 'mod'` (prev is `{`, not IMPORT)
+        // stay identifiers.
+        let at = pos;
+        while (text[at] === ' ' || text[at] === '\t') at++;
+        const next = text[at] ?? '';
+        if (next === '{' || next === '*') return true;
+        if (!IDENT_START.test(next)) return false;
+        let j = at + 1;
+        while (j < text.length && IDENT_PART.test(text[j])) j++;
+        return text.slice(at, j) !== 'from';
+      })()) {
+        push('IMPORT_TYPE', word, start, pos);
       } else if (word === 'as' && seenFor !== null) {
         // After FOR on the same logical line, `as` is the iterator-
         // protocol connector (`for x as iterable`); `as!` is its
@@ -1685,7 +1705,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (ch === '*' || ch === '/' || ch === '%') {
       // A namespace/re-export star in specifier position (`import * as
       // ns`, `import d, * as ns`, `export * from`).
-      if (ch === '*' && seenImport && (last()?.kind === 'IMPORT' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
+      if (ch === '*' && seenImport && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
       else if (ch === '*' && last()?.kind === 'EXPORT') push('EXPORT_ALL', ch, pos, pos + 1);
       else push('MATH', ch, pos, pos + 1);
       pos++;
