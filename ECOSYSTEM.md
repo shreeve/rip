@@ -754,8 +754,8 @@ owner:
 - Caddy terminates modern HTTP and TLS instead of application code rebuilding
   those facilities.
 - Janus serves static and authorized files without involving Bun workers,
-  terminates long-lived WebSockets at the stable edge, coalesces cache misses,
-  and routes over local sockets.
+  terminates long-lived WebSockets at the stable edge, and routes over local
+  sockets.
 - Manager compiles API source once into one artifact; workers import it rather
   than each running the compiler.
 - Workers remain small, isolated processes with explicit bounded concurrency.

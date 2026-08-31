@@ -1,7 +1,7 @@
 # Access monitor test
 
-Certifies the Janus v1.5 NDJSON envelope and access-event schema, exact framing,
-picture parsing, exhaustive Unicode display width, scaling, field bounds,
+Certifies the current Janus v1 NDJSON envelope and access-event schema, exact
+framing, picture parsing, exhaustive Unicode display width, scaling, field bounds,
 attacker-sized framing, generation cuts, reconnect ordering and jitter,
 bounded output backpressure, temporary listener cleanup, app-scoped
 subscriptions, and pretty/raw rendering.

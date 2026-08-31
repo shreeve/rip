@@ -261,7 +261,7 @@ test! 'access validation enforces every protocol field bound', ->
     retry_count: 4294967295
   })
 
-test! 'validated NDJSON accepts exactly the Janus v1.5 record shape', ->
+test! 'validated NDJSON accepts exactly the current Janus v1 record shape', ->
   value = validateAccessEvent record()
   eq value.sequence, '42'
   eq value.response_bytes, '1536'
