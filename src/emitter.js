@@ -4143,9 +4143,59 @@ class Emitter {
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
-    if (this.repl) return this.replImportStatement(node);
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
+    // A TYPE-ONLY import (`import type … from …`, the side-band
+    // typeOnly role): the author's declaration that the module carries
+    // no side effect they need, so the WHOLE statement erases from the
+    // JS — the one erasure a plain import can never earn (see the
+    // allErased comment below). The TS face keeps the statement as
+    // `import type …`, one region, so stripping it reproduces the JS
+    // byte for byte. The repl has no type face, so the statement
+    // erases there too — lowering it like a value import would await
+    // a module the author said not to run.
+    const nodeId = this.stores.idOf(node);
+    if (nodeId !== null && this.stores.role(nodeId, 'typeOnly') !== null) {
+      if (!this.ts) {
+        this.mark(node, '$self', () => {});
+        this.mark(node, 'source', () => {});
+        return;
+      }
+      this.b.tsOnly(() => {
+        this.mark(node, '$self', () => {
+          this.b.emit('import ');
+          this.mark(node, 'typeOnly', () => this.b.emit('type'));
+          this.b.emit(' ');
+          specs.forEach((spec) => {
+            if (spec === '{}') this.b.emit('{}');
+            else if (typeof spec === 'string') this.b.emit(spec);
+            else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
+            else {
+              // Every name emits plainly — never emitSpecifiers, whose
+              // per-name elision would run its separator bookkeeping
+              // here and print a clause of all-erased names unseparated.
+              this.b.emit('{ ');
+              spec.forEach((s, i) => {
+                if (i > 0) this.b.emit(', ');
+                if (isNode(s)) {
+                  this.emitPrimitive(s[0]);
+                  this.b.emit(' as ');
+                  this.emitPrimitive(s[1]);
+                } else this.emitPrimitive(s);
+              });
+              this.b.emit(' }');
+            }
+          });
+          this.b.emit(' from ');
+          const specStart = this.b.offset;
+          this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+        });
+        this.b.emit(';\n');
+      });
+      return;
+    }
+    if (this.repl) return this.replImportStatement(node);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
       // A SIDE-EFFECT import has no clause and gets none. Both forms once

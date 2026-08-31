@@ -92,6 +92,19 @@ grammar =
     o 'IMPORT { ImportSpecifierList OptComma } FROM String'                         , '["import", 3, 7]'      , 'import: _, spec, source'
     o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String'        , '["import", 2, 4, 6]'   , 'import: _, spec, extra, source'
     o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String', '["import", 2, 5, 9]'   , 'import: _, spec, extra, source'
+    # A TYPE-ONLY import (`import type … from …`): the keyword rides the
+    # side-band typeOnly role and the node keeps the plain import's
+    # shape, so everything that consumes an import statement consumes
+    # this one. The author is declaring the module carries no side
+    # effect they need — the statement erases from the JS whole, and
+    # the TS face keeps it as `import type …`. The combined
+    # default-plus-clause rows have no type-only mirror on purpose:
+    # TypeScript rejects `import type D, { A } from …` (TS1363), and a
+    # side-effect `import type 'mod'` names a contradiction.
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM String'              , '["import", 3, 5]'      , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM String'            , '["import", 3, 5]'      , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM String'                                 , '["import", "{}", 6]'   , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM String'    , '["import", 4, 8]'      , 'import: _, spec, source'
   ]
 
   ImportSpecifierList: [
@@ -1417,6 +1430,7 @@ operators = """
 displays =
   OPT_MARKER: '?'
   VOID_MARKER: '!'
+  IMPORT_TYPE: 'type'
 
 # ==============================================================================
 # Export

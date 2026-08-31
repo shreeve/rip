@@ -119,6 +119,51 @@
       ]
     },
 
+    {"comment": "=== TYPE-ONLY IMPORTS (import type …) — before TYPE DECLARATIONS, whose block rule would otherwise claim the `type Name` in `import type Name from`. The plain readings stay with the ordinary import rules: `import type from` fails the default form's binding lookahead here, and `import { type }` never has `type` between `import` and the brace. ==="},
+    {
+      "comment": "Named type-only import: import type { a, b as c } from 'path'",
+      "begin": "\\b(import)\\s+(type)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "punctuation.definition.modules.begin.rip" }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.modules.end.rip" }
+      },
+      "patterns": [
+        {
+          "match": "\\b(as)\\b",
+          "name": "keyword.control.rip"
+        },
+        {
+          "match": "\\b([a-zA-Z_$]\\w*)\\b",
+          "name": "variable.other.readwrite.alias.rip"
+        }
+      ]
+    },
+    {
+      "comment": "Namespace type-only import: import type * as name from 'path'",
+      "match": "\\b(import)\\s+(type)\\s+(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "constant.language.import-export-all.rip" },
+        "4": { "name": "keyword.control.rip" },
+        "5": { "name": "variable.other.readwrite.alias.rip" }
+      }
+    },
+    {
+      "comment": "Default type-only import: import type Name from 'path'. The binding-before-from lookahead is what keeps `import type from 'path'` (a default binding NAMED type) out of this rule — with no name between `type` and `from`, the match fails and the ordinary default-import rule takes the line.",
+      "match": "\\b(import)\\s+(type)\\s+([a-zA-Z_$]\\w*)(?=\\s+from\\b)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "variable.other.readwrite.alias.rip" }
+      }
+    },
+
     {"comment": "=== TYPE DECLARATIONS (type, enum, interface — before keywords to get name capture) ==="},
     {
       "begin": "\\b(type)\\s+([A-Z]\\w*)",

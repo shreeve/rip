@@ -58,7 +58,8 @@ Rip supports:
 - schema and model declarations;
 - typed component props, members, constructors, and declaration
   companions;
-- exported typed declarations.
+- exported typed declarations;
+- type-only imports (`import type { T } from './m.rip'`).
 
 Examples:
 
@@ -118,6 +119,8 @@ AST is added to syntax nodes.
 JS emission drops type text. Erased spans receive honest cover or
 zero-width mapping rows; the emitter never invents a generated
 location for bytes that do not exist.
+
+Imports erase at two depths. A binding used only in type positions elides from its clause automatically, but the statement survives — every binding erased leaves a bare `import 'mod'`, because the emitter cannot know the module carries no side effect the program needs. `import type … from …` is the author supplying that knowledge: the whole statement erases from the JS, module load included, and rides the TS face as written. The keyword is contextual under TypeScript's lookahead rule — `type` followed by `{`, `*`, or an identifier that is not `from` opens a type-only import, so `import type from 'mod'` (a default binding named `type`) and `import { type } from 'mod'` keep their plain readings. Only the statement form exists; an inline `import { type A, B }` is not recognized.
 
 ### Declarations
 
