@@ -20,6 +20,19 @@ import paired, { describe } from './10-modules-lib'
 describe()
 console.log('combined:', combo.theme, whole.host, paired.depth)
 
+// ── type-only heads: named, default, namespace, empty — the statement erases whole, module load included ──
+
+import type { Parcel } from './10-modules-lib'
+import type themeShape from './10-modules-lib'
+import type * as libShapes from './10-modules-lib'
+import type {} from './10-modules-lib'
+
+let manifest: Parcel = { size: 7 }
+let crate: typeof themeShape = { theme: 'dim', depth: 1 }
+let cargo: libShapes.Parcel = { size: 2 }
+
+console.log('type-only:', manifest.size, crate.depth, cargo.size)
+
 // ── multiline specifier lists: the indented block, and the carried tail ──
 
 import {

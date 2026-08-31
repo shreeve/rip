@@ -24,7 +24,9 @@
     "22:25:combo": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03",
     "22:38:whole": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03",
     "22:50:paired": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03",
-    "41:23:hubTheme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03"
+    "32:14:themeShape": "type-only default binding read through `typeof` — tsgo leaves it untokenized on equivalent hand-written TS (a default that exports a literal) — probe-verified 2026-08-31",
+    "33:7:libShapes": "type-only namespace head in a qualified type name — tsgo leaves it untokenized on equivalent hand-written TS — probe-verified 2026-08-31",
+    "54:23:hubTheme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03"
   },
   "11-types.rip": {
     "174:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
