@@ -502,22 +502,22 @@ describe('spans with no user symbol (the hover declines)', () => {
   });
 
   // A schema transform's `it` is the DSL's own word — the grammar fixes
-  // the parameter list, so there is nothing to rename or annotate. A
-  // record FIELD the author happens to name `it` is the opposite: an
-  // ordinary member with an answer of its own. Spelling cannot tell them
-  // apart; the token kind can, and this is the only fixture anywhere that
-  // spells both on one line.
-  test("a transform silences the `it` PARAMETER, not a field named `it`", () => {
+  // the parameter list, so there is nothing to rename or annotate — and
+  // it reaches the face as the minted parameter carrying the declared
+  // `any` boundary. That boundary IS its answer (`(parameter) it: any`,
+  // RULINGS.md), so nothing silences the word: neither the parameter, nor
+  // a record FIELD the author happens to name `it`, nor any other name in
+  // the body. This is the only fixture anywhere that spells both on one
+  // line.
+  test("a transform silences nothing — the `it` PARAMETER answers its boundary, and a field named `it` is a field", () => {
     const src = "S = schema\n  label! -> it.it\n  other! -> String(it.name)\n";
     const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
     const first = src.indexOf('it.it');
-    expect(inNoUserSymbolSpan(spans, first)).toBe(true);          // the parameter read
+    expect(inNoUserSymbolSpan(spans, first)).toBe(false);         // the parameter read
     expect(inNoUserSymbolSpan(spans, first + 3)).toBe(false);     // the field it reaches
-    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(true);
-    // …and an ordinary identifier in the same body is untouched: the
-    // predicate is the DSL's word AND the kind, not the kind alone.
+    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(false);
     expect(inNoUserSymbolSpan(spans, src.indexOf('String'))).toBe(false);
-    expect(spans.length).toBe(2);                                 // two parameters, nothing else
+    expect(spans.length).toBe(0);                                 // a transform body owns no span whole
   });
 
   test('a DECLARATION outside render keeps its answer', () => {

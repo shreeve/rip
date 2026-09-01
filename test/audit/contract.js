@@ -313,12 +313,32 @@ export const CONTRACT = [
     // EVERY word position (corpora and the cart demo) and these four classes
     // are its hard violations — a minted `__` spelling, a scaffold local, the
     // bare cover-`this`, or a face spelling in a diagnostic message. The
-    // sweep's misdirection classes (subject/keyword/comment covers, ranges)
-    // are gauges, not this invariant: they gate the day the decline work
-    // drains them, per the graduation rule at the top of this file.
+    // sweep's other two halves gate on their own rows below: the name
+    // census and the misdirection classes.
     name: 'sweep.machinery', lane: 'sweep',
     property: 'no position in the sweep answers with the lowering\'s machinery, and no diagnostic message carries a face spelling',
     red: (s) => s.sw.machinery > 0,
+  },
+  {
+    // The other half of the same walk. The machinery row judges what a
+    // position ANSWERS; this one judges that a name answers at all: every
+    // identifier the compiler's own lexer produces either hovers or is a
+    // ruled silence pinned null in hover-pins.json. The population is the
+    // lexer's, never the server's own hoverable set, so a word the server
+    // never knew about is exactly what turns this red.
+    name: 'sweep.census', lane: 'sweep',
+    property: 'every name the lexer produces either hovers or is a ruled silence',
+    red: (s) => s.sw.census > 0,
+  },
+  {
+    // Graduated when the last misdirection row drained. The sweep's cover
+    // classes — an answer about a different symbol than the word under the
+    // cursor, at the word, at its end boundary, or at a blank byte — were
+    // gauges while the decline work ran; from the day they hit zero a
+    // nonzero count is a regression, per the rule at the top of this file.
+    name: 'sweep.misdirection', lane: 'sweep',
+    property: 'every answering position answers about the word under the cursor',
+    red: (s) => s.sw.misdirection > 0,
   },
   {
     name: 'token.delivery', lane: 'token',

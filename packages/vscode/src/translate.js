@@ -725,6 +725,7 @@ export function scrubFaceArtifacts(text) {
     // own name for the same union, in the declaration's own order
     // (scalar first; tsgo's display normalization flips it).
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
+    .replace(/\b__RipChildren\b/g, 'Children')
     // A schema's behavior object is the face's own home for the
     // methods the author declared ON the schema — `__Cart__behavior`
     // reads back as Cart, whose behavior it is.
@@ -800,12 +801,33 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
 // bytes — declines, which is the platform's own convention (TS hovers
 // nothing at `if`, `42`, `'text'`, or whitespace) and what the render
 // rulings already pinned word by word. RULINGS.md, the hover model.
+// The token payloads a schema body captures instead of lowering inline:
+// a callable's parameters and body, a transform's body, a directive's
+// arguments. Their identifiers are the author's words as much as any
+// top-level token's — the lowering compiles them into the descriptor,
+// where the mapping already lands each on its typed face position — so
+// the hover model has to reach them, or the whole body declines.
+const SCHEMA_PAYLOADS = ['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens'];
+
 export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null) {
   const spans = [];
   const comments = trivia.filter((t) => t.kind === 'comment');
   let prevWord = null, prevPrev = null;
   for (const t of tokens) {
     if (typeof t.start !== 'number' || t.start === t.end) { continue; }
+    if (t.kind === 'SCHEMA_BODY') {
+      for (const e of t.value?.entries ?? []) {
+        for (const k of SCHEMA_PAYLOADS) {
+          for (const n of e[k] ?? []) {
+            if ((n.kind === 'IDENTIFIER' || n.kind === 'PROPERTY') && typeof n.start === 'number' && n.start !== n.end) {
+              spans.push([n.start, n.end]);
+            }
+          }
+        }
+      }
+      prevPrev = prevWord; prevWord = t.kind;
+      continue;
+    }
     if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY'
         || (t.kind === 'STRING' && (prevWord === 'FROM' || prevWord === 'IMPORT'))) {
       // `new.target`'s member is the meta-property's second half: the

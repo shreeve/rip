@@ -453,7 +453,9 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     // The sigil read (`@tone`) takes the property-access lowering, not
     // memberRead's bare-spelling path; both record the name's span into
     // the value-first channel, so the hover answers the VALUE type at
-    // either spelling.
+    // either spelling — under the minted kind, with the optional marker
+    // the author wrote (the face declares the member required, so the
+    // marker rides the kind record).
     await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
       const src = [
         'export Tone = component extends span',  // 0
@@ -465,7 +467,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       ].join('\n');
       await api.open('tone.rip', src);
       const read = await api.hover('tone.rip', 3, 20);   // inside `@tone`
-      expect(read?.contents?.value).toContain('tone: "a" | "b"');
+      expect(read?.contents?.value).toContain('(prop) tone?: "a" | "b"');
       expect(read?.contents?.value).not.toContain('read()');
 
       // The head's grammar words decline — their bytes must never fall

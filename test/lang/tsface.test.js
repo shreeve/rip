@@ -60,7 +60,7 @@ const REGION_SHAPES = [
   /^as\s+\S/u,                                            // the cast's `as T` spelling
   /^this: \S/u,                                           // schema callable `this` param 
   /^export \{\};$/u,                                      // module marker
-  new RegExp(String.raw`^declare (static |readonly )?${ID}: \S`, 'su'), // component member declare / static-mount narrowing / =! readonly 
+  new RegExp(String.raw`^declare (static |readonly )?${ID}\??: \S`, 'su'), // component member declare (optional for the projection channel) / static-mount narrowing / =! readonly 
   new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
@@ -71,6 +71,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
   new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
+  new RegExp(String.raw`^/\*\* [^\n]* \*/\ntype __Rip${ID}`, 'u'), // a minted alias carrying its doc — the sentence the editor shows on the name
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
   /^\/\/[ \t]*@ts-(expect-error|ignore|nocheck)(\s|$)/u,        // directive comment line
@@ -1261,7 +1262,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('declare readonly limit: number;'); // =! members declare readonly                   // readonly: the raw value
     expect(code).toContain('declare note: string;');                   // plain field: literal initializer infers 
     expect(code).toContain('declare theme: any;');                     // accept: the cross-component boundary is honest any
-    expect(code).toContain('declare children: any;');                  // the projection slot (slot reads this.children)
+    expect(code).toContain('declare children?: __RipChildren;');       // the projection slot (slot reads this.children), typed as what the runtime delivers
     expect(code).toContain('[key: `_${string}`]: any;');               // the minted/runtime slot namespace
   });
 
@@ -1279,7 +1280,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('max?: number | { value: number | undefined; read(): number | undefined; touch?(): void }');
     expect(code).toContain('__bind_max__?: { value: number | undefined; read(): number | undefined; touch?(): void }');
     expect(code).toContain('label?: any');
-    expect(code).toContain('children?: any');
+    expect(code).toContain('children?: __RipChildren');
     // @title: string (annotated, no marker, no default) is REQUIRED —
     // passable as the plain slot or the `<=>` container slot.
     expect(code).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
@@ -1315,7 +1316,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
-      'let Chip!: { new (props?: { label?: any; __bind_label__?: { value: any; read(): any; touch?(): void }; children?: any }): Chip; mount(target?: any): Chip; };',
+      'let Chip!: { new (props?: { label?: any; __bind_label__?: { value: any; read(): any; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
     );
     // Whole-line TS syntax: stripping restores the bare hoist.
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
@@ -1423,7 +1424,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     }
   });
 
-  test('a declared @children prop owns the key — no duplicate `children?: any` in any artifact (the GPT addendum, F1)', () => {
+  test('a declared @children prop owns the key — no duplicate `children?:` entry in any artifact (the GPT addendum, F1)', () => {
     const src = 'Child = component\n  @children: string\n  render\n    div "x"\nconsole.log Child\n';
     const faced = ts(src);
     const ctorLine = faced.code.split('\n').find((l) => l.includes('constructor('));
@@ -1431,7 +1432,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // carries the name; the projection-channel fallback suppresses —
     // a duplicate key is TS2300 on every artifact.
     expect(ctorLine).toContain('children?: string | { value: string; read(): string; touch?(): void }');
-    expect(ctorLine).not.toContain('children?: any');
+    expect(ctorLine).not.toContain('children?: __RipChildren');
     expect(faced.code.split('\n').filter((l) => l.includes('declare children')).length).toBe(1);
     expect(faced.code).toContain('declare children: { value: string; read(): string; touch?(): void };');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);

@@ -638,6 +638,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercerArray = false;
   let typeConsumed = false;
   let typeFirst = line[pos];
+  const typeAt = pos;
   const unionMemberAt = (p) => {
     if (line[p]?.kind === 'STRING' && line[p].value.startsWith('"')) {
       return { value: JSON.parse(line[p].value), bracketed: false, start: line[p].start, end: line[p].end, next: p + 1 };
@@ -734,11 +735,14 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   }
 
   // The type slot's own span, whatever spelling filled it — an
-  // identifier, a `~coercion`, a literal union, each with an optional
-  // `[]`. The editor answers a hover here from the companion member's
-  // annotation, so the span has to cover the whole slot the annotation
-  // stands for.
-  const typeSpan = typeConsumed ? [typeFirst.start, line[pos - 1].end] : null;
+  // identifier, a `~coercion`'s word, a literal union, each with an
+  // optional `[]`. The editor answers a hover here from the companion
+  // member's annotation, so the span covers the whole slot the annotation
+  // stands for — from the WORD, not the `~` ahead of it: the marker is
+  // punctuation, and unlike `!`/`?` it precedes its word, so no cursor
+  // bias makes it the word's own byte.
+  const typeWord = typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~' ? line[typeAt + 1] : typeFirst;
+  const typeSpan = typeConsumed ? [typeWord.start, line[pos - 1].end] : null;
 
   // Trailers: `,`-separated parts, each self-identifying by head shape.
   let rest = line.slice(pos);
@@ -1848,18 +1852,22 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
     else segs.push(s);
   };
   const emitTs = (s, span = null) => segs.push({ ts: s, span });
+  // Compiled BODY text — a callable's function, the adapter's expression
+  // — rides its own segment kind: it is the author's code, where a `word:`
+  // is an object key or a ternary arm, never the descriptor's vocabulary.
+  const emitBody = (s) => segs.push({ body: s });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName) emit(`, name: ${JSON.stringify(schemaName)}`);
   emit(`, entries: [`);
   descriptor.entries.forEach((e, i) => {
     if (i > 0) emit(', ');
     entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace, defaultTypes?.get(i) ?? null,
-      ensureTypes?.get(i) ?? null);
+      ensureTypes?.get(i) ?? null, emitBody);
   });
   emit(']');
   // `schema :model, on: <expr>` — evaluated at declaration time in
   // the user's scope.
-  if (adapterCode) emit(`, adapter: ${adapterCode}`);
+  if (adapterCode) { emit(', adapter: '); emitBody(adapterCode); }
   emit('}');
   return segs;
 }
@@ -1912,23 +1920,23 @@ function tsInserts(fnCode, thisType, annots = true) {
 // as ts segments. Only the FACE produces them: `tsOnly` records a region
 // for the strip gate but still emits, so a segment produced on the JS
 // road would ship — the gate is a check on the face, not a filter.
-function fnSegments(fnCode, thisType, emit, emitTs, tsFace = false) {
+function fnSegments(fnCode, thisType, emitBody, emitTs, tsFace = false) {
   const inserts = tsInserts(fnCode, thisType, tsFace);
   if (inserts.length === 0) {
-    emit(fnText(fnCode));
+    emitBody(fnText(fnCode));
     return;
   }
   const { code } = fnCode;
   let prev = 0;
   for (const [at, text] of inserts) {
-    emit(code.slice(prev, at));
+    emitBody(code.slice(prev, at));
     emitTs(text);
     prev = at;
   }
-  emit(code.slice(prev));
+  emitBody(code.slice(prev));
 }
 
-function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null, emitBody = emit) {
   switch (e.tag) {
     case 'computed':
     case 'method':
@@ -1937,7 +1945,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaul
     case 'scope':
     case 'defaultScope':
       emit(`{tag: ${JSON.stringify(e.tag)}, name: ${JSON.stringify(e.name)}, fn: `);
-      fnSegments(fnCode, thisType, emit, emitTs, tsFace);
+      fnSegments(fnCode, thisType, emitBody, emitTs, tsFace);
       emit('}');
       return;
     default:

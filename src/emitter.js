@@ -474,6 +474,7 @@ class Emitter {
     // ref wrap emitted. TS face only.
     this.domSurfaces = new Map();
     this._needsClassValue = false;
+    this._needsChildren = false;
     this._needsRefCellHelper = false;
     // SOURCE spans of intrinsic-element positions whose ruled hover the
     // editor SERVES from the compiler's own record rather than from a
@@ -1724,8 +1725,9 @@ class Emitter {
       // never a module binding that happens to share the name, and never a
       // guess when the frame does not carry the member.
       const cf = this.cframes[this.cframes.length - 1];
-      const kind = cf ? (cf.memberKinds?.get(value) ?? null) : this.kindOfName(value);
-      if (kind !== null) this.kinds.push({ start: span[0], end: span[1], label: kind, name: value });
+      const k = cf ? (cf.memberKinds?.get(value) ?? null) : this.kindOfName(value);
+      const kind = typeof k === 'string' ? { label: k, optional: false } : k;
+      if (kind !== null) this.kinds.push({ start: span[0], end: span[1], label: kind.label, name: value, optional: kind.optional });
     }
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? 'identifier' : 'literal';
@@ -1844,13 +1846,15 @@ class Emitter {
     const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
     const row = id !== null ? this.stores.role(id, m.nameRole) : null;
     if (!row || typeof row.sourceStart !== 'number') return;
-    // The member's minted kind, where the ruling names one. A `prop` and a
-    // `gate` are deliberately absent: RULINGS.md leaves both labels open, and
-    // a guessed word here would be the fabricated-entity the interim rule
-    // bans. A `plain` member is a plain property and mints nothing.
+    // The member's minted kind, where the ruling names one (memberLabel); a
+    // `plain` member is a plain property and mints nothing. An optional
+    // member carries its marker: the face declares the instance member
+    // required (its cell is always assigned), so the `?` the author wrote
+    // survives only here, and the head says `name?:` the way TypeScript's
+    // own does for an optional member.
     const label = Emitter.memberLabel(m);
     if (label !== null) {
-      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name });
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name, optional: m.optional === true });
     }
     if (!declaresContainer(m)) return;
     this.memberDecls.push({
@@ -1918,7 +1922,11 @@ class Emitter {
   // identifiers from those recorded occurrences. Object-literal keys are
   // generated descriptor vocabulary and stay unmarked. This consumes the text
   // before it reaches the builder; no generated output is searched afterward.
-  emitSchemaText(text) {
+  // `body` marks COMPILED body text (a callable's function, the adapter's
+  // expression): there a `word:` is the author's object key or a ternary
+  // arm and claims its source occurrence like any other word; only the
+  // descriptor's own text treats `word:` as generated vocabulary.
+  emitSchemaText(text, body = false) {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
@@ -1942,7 +1950,7 @@ class Emitter {
         // Descriptor object keys (`name:`, `typeName:`) are generated
         // vocabulary. Expression/member identifiers and shorthand values are
         // source-carried occurrences.
-        if (text[k] === ':') this.b.emit(word);
+        if (text[k] === ':' && !body) this.b.emit(word);
         else this.emitPrimitive(word);
         i = j;
         continue;
@@ -2301,7 +2309,11 @@ class Emitter {
       }
       line(() => this.emitSegments(memberDeclareSegments(m, info)));
     }
-    if (!hasChildren) line(() => this.b.emit('declare children: any;'));
+    // The projection channel, typed as what the runtime delivers — the
+    // `__RipChildren` alias (declared once per module, below the
+    // surfaces) that the editor shows as `Children`.
+    if (!hasChildren) line(() => this.b.emit('declare children?: __RipChildren;'));
+    this._needsChildren = true;
     // The ambience helper the `app` field infers through is declared
     // once at MODULE scope, from the emit() tail — keyed off the USE,
     // never off companion emission: expression-valued and function-
@@ -2613,7 +2625,7 @@ class Emitter {
     }
     this.b.tsOnly(() => {
       this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);
-      this.emitSegments(propsTypeSegments(info));
+      this.emitSegments(propsTypeSegments(info, { road: 'face' }));
       this.b.emit(') { super(props); }\n');
     });
   }
@@ -2643,7 +2655,7 @@ class Emitter {
         // of a member's type anchors at the member the author wrote
         // rather than across the whole component. Scaffolding segments
         // have no source span and stay under the cover.
-        for (const l of instanceTypeLines(info, `${name}${selfArgs}`)) {
+        for (const l of instanceTypeLines(info, `${name}${selfArgs}`, { road: 'face' })) {
           this.b.emit('\n' + pad + '  ');
           const segs = () => {
             for (const s of l.segs) {
@@ -3752,7 +3764,7 @@ class Emitter {
       info.appStashSpec = this.appStashSpec;
       info.routesUnion = this.routesUnion;
       info.routeParams = this.routeParams;
-      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name).join(' ')} }`);
+      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name, '', name, { road: 'face' }).join(' ')} }`);
     }
     kept.pinnable = new Map();
     for (const [name, , role] of kept) {
@@ -4800,25 +4812,11 @@ class Emitter {
       // Transforms see the whole raw input as the explicit `it`
       // parameter.
       const params = this.schemaBodyParams(e);
-      // `it` is the DSL's own word, not a name the author bound: the
-      // grammar fixes the parameter list, so there is nothing to
-      // annotate and nothing to rename. It reaches the face verbatim —
-      // so it stays in the mapping population — but what it reaches is
-      // the minted parameter carrying the declared `any` boundary.
-      // RULINGS.md rules the answer to the record under validation and
-      // pins silence until one is served. Read from the entry's own
-      // captured tokens, which carry each occurrence's span — and by
-      // token KIND, not by spelling: `it.it` reads the parameter and
-      // then a record FIELD the author named, which is an ordinary
-      // member with an answer of its own. The identifier is the DSL's
-      // word; the property is the user's.
-      if (this.ts && e.tag === 'field') {
-        for (const t of tokens) {
-          if (t.value === 'it' && t.kind === 'IDENTIFIER' && typeof t.start === 'number') {
-            this.silences.push([t.start, t.end]);
-          }
-        }
-      }
+      // `it` is the DSL's own word — the grammar fixes a transform's
+      // parameter list, so there is nothing to annotate — and it reaches
+      // the face as the minted parameter carrying the declared `any`
+      // boundary. That IS its answer: `(parameter) it: any`, the boundary
+      // stated at the word (RULINGS.md, Schema).
       fns.set(i, this.schemaFnCode(params, tokens));
     }
     // The schema type story (face only): callable bodies gain
@@ -4840,6 +4838,8 @@ class Emitter {
           story?.defaultTypes ?? null, story?.ensureTypes ?? null);
         for (const seg of segments) {
           if (typeof seg === 'string') this.emitSchemaText(seg);
+          // Compiled body text: the author's words, keys included.
+          else if (seg.body !== undefined) this.emitSchemaText(seg.body, true);
           // A face segment carrying a source span marks there — a
           // wrong-typed default's diagnostic anchors on the literal the
           // author wrote, not on the entry list that encloses it.
@@ -8624,7 +8624,7 @@ class Emitter {
     const memberKinds = new Map();
     for (const m of tsInfo?.members ?? []) {
       const label = Emitter.memberLabel(m);
-      if (label !== null) memberKinds.set(m.name, label);
+      if (label !== null) memberKinds.set(m.name, { label, optional: m.optional === true });
     }
     const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
@@ -8757,7 +8757,7 @@ class Emitter {
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
-      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit(`: ${propsTypeText(tsInfo)}`));
+      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit(`: ${propsTypeText(tsInfo, { road: 'face' })}`));
       this.b.emit(') {\n');
       this.scopes.push(initNames);
       this.rframes.push({ reactive: new Set(), bound: initNames });
@@ -10099,10 +10099,15 @@ class Emitter {
     R.slotSeen = true;
     this.noteVocabulary('render-channel', 'slot', markNode ?? this.rstate.node);
     const v = this.newRenderVar('slot');
+    const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
       const s = this.renderSelf ?? 'this';
       this.b.emit(v);
-      this.b.emit(` = ${s}.children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
+      this.b.emit(` = ${s}.`);
+      // The `slot` word answers the children it projects: the first
+      // `children` read here is the typed position (RULINGS.md, `slot`).
+      if (slotSpan !== null) this.intrinsics.push({ start: slotSpan[0], end: slotSpan[1], kind: 'slot', gen: this.b.offset });
+      this.b.emit(`children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
         `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
     });
     return v;
@@ -11729,6 +11734,7 @@ class Emitter {
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
     const keyExpr = this.extractLoopKey(body, node);
+    const keySpan = keyExpr !== null ? (this.rstate.keySpan ?? null) : null;
     if (keyExpr !== null) {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
@@ -11762,7 +11768,7 @@ class Emitter {
     sink.setups.push({
       kind: 'raw',
       node, // a directive above the render loop rides its setup line
-      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer),
+      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer, keySpan),
     });
     return anchorVar;
   }
@@ -11795,6 +11801,9 @@ class Emitter {
         const pair = obj[i];
         if (isNode(pair) && pair.length === 3 && pair[0] === ':' && pair[1] === 'key') {
           this.noteVocabulary('render-channel', 'key', pair);
+          // The word's own span, for the served record the loop setup
+          // writes once the keyFn has emitted (the key's type lives there).
+          this.rstate.keySpan = this.wordSpanIn('key', pair);
           this.rstate.suppressedPairs.add(pair);
           return pair[2];
         }
@@ -11895,7 +11904,7 @@ class Emitter {
   // The loop reconcile block. `__s` holds the row state __reconcile
   // threads across runs; teardown destroys the live blocks on scope
   // close.
-  emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer) {
+  emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer, keySpan = null) {
     const self = this.renderSelf ?? 'this';
     const outerExtra = outer.length > 0 ? `, ${outer.join(', ')}` : '';
     const p2 = pad + '  ';
@@ -11945,6 +11954,13 @@ class Emitter {
             const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
             if (wrap) this.b.emit('(');
             this.expr(keyExpr);
+            // The `key:` word answers the key's own type, read off the
+            // expression's last name — the same technique a bind uses:
+            // the typed position is the expression, and the word is the
+            // channel that spends it (RULINGS.md, `key:` in a render loop).
+            if (this.ts && keySpan !== null) {
+              this.intrinsics.push({ start: keySpan[0], end: keySpan[1], kind: 'key', gen: this.b.offset - 1 });
+            }
             if (wrap) this.b.emit(')');
           });
         } finally {
@@ -12687,11 +12703,11 @@ class Emitter {
             // ones.
             if (this.ts && n[1] === 'this' && typeof n[2] === 'string') {
               const cf = this.cframes[this.cframes.length - 1];
-              const label = cf?.memberKinds?.get(n[2]) ?? null;
+              const k = cf?.memberKinds?.get(n[2]) ?? null;
               const id = this.stores.idOf(n) ?? null;
               const prow = id !== null ? this.stores.role(id, 'property') : null;
-              if (label !== null && prow && typeof prow.sourceStart === 'number') {
-                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label, name: n[2] });
+              if (k !== null && prow && typeof prow.sourceStart === 'number') {
+                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label: k.label, name: n[2], optional: k.optional });
               }
             }
           });
@@ -16128,10 +16144,29 @@ function recordSchemaFields(emitter, builder, block, at) {
   const entries = block.story?.decl?.descriptor?.entries ?? null;
   if (entries === null) return;
   const text = builder.code.slice(at);
+  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // A schema NAMED in the body — a union's constituent, an `@mixin`
+  // target — reaches the alias as a type reference (`= A | B`, `& M`),
+  // so the word answers what any use of the companion type answers: the
+  // structural type, expanded. The reference is matched by the operator
+  // ahead of it, which keeps it apart from a same-named member.
+  for (const e of entries) {
+    const ref = e.tag === 'union-member' ? { name: e.name, start: e.start }
+      : e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER'
+        ? { name: e.argTokens[0].value, start: e.argTokens[0].start }
+        : null;
+    if (ref === null || typeof ref.start !== 'number') continue;
+    const m = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
+    if (m === null) continue;
+    emitter.intrinsics.push({
+      start: ref.start, end: ref.start + ref.name.length,
+      kind: 'schema', label: null, name: ref.name, gen: at + m.index + m[1].length,
+    });
+  }
   for (const e of entries) {
     const label = SCHEMA_BODY_KINDS[e.tag] ?? null;
     if (label === null || typeof e.start !== 'number') continue;
-    const name = e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const name = esc(e.name);
     // A member is `{ name: T` or `; name?: T`, with `readonly` ahead of
     // it on a computed one. Matching the opener keeps a field's own
     // member apart from a same-named one in a neighboring alias.
@@ -16558,10 +16593,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // declares when a ref wrap emitted. Declarations hoist, so the tail
   // placement governs every earlier cast. TS-only through the
   // recorded region.
-  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true)) {
+  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true)) {
     const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
       needsClassValue: emitter._needsClassValue === true,
       needsRefCell: emitter._needsRefCellHelper === true,
+      needsChildren: emitter._needsChildren === true,
     });
     if (surfaceText !== '') builder.tsOnly(() => builder.emit(surfaceText));
   }

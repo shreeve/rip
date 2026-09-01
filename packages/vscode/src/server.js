@@ -2859,7 +2859,10 @@ function presentComponentSignatureHover(contents) {
     const out = [];
     for (const raw of rows) {
       const row = raw.trim();
-      if (row === '' || row === 'children?: any' || /^__bind_[\w$]+__\??:/.test(row)) continue;
+      // The DEFAULT projection slot stays out of the signature — it is the
+      // channel every component has, not a prop this one declares — under
+      // either spelling of its minted type; a declared `@children: T` shows.
+      if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
       const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
       if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
       if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
@@ -3127,6 +3130,16 @@ connection.onHover(async (params) => {
         .map((arm) => /^\{ value: (.+?); read\(\)/.exec(arm.trim()))
         .find(Boolean);
       body = `(bind) ${intr.name}: ${scrubFaceArtifacts((cell ? cell[1] : head[1]).trim())}`;
+    } else if (intr.kind === 'key' || intr.kind === 'slot') {
+      // Two channel words whose typed position is what they spend: a
+      // loop's `key:` reads its expression's type off the expression's
+      // last name (the bind technique); `slot` reads the children it
+      // projects off the `children` member (RULINGS.md, render rows).
+      const head = /^\((?:parameter|property|method|accessor)\) (?:.*?\.)?[\w$]+(\??): ([^]+)$/.exec(scrubFaceArtifacts(await askAt(intr.gen)));
+      if (head === null) return null;
+      // An optional member keeps its marker beside its absence arm — the
+      // form every optional member answers in (`label?: string | undefined`).
+      body = intr.kind === 'key' ? `(key) key: ${head[2].trim()}` : `(slot) children${head[1]}: ${head[2].trim()}`;
     } else if (intr.kind === 'schema') {
       // A schema body's words are descriptor string literals in the face
       // and carry no symbol, so each answers from its own member in the
@@ -3221,7 +3234,10 @@ connection.onHover(async (params) => {
     // A module binding arrives as `const`/`let`.
     const esc = kind.name === null ? null : kind.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     contents = { ...contents, value: contents.value
-      .replace(esc === null ? /(?!)/ : new RegExp(`\\(property\\) [^\\n]*?\\b${esc}(?=\\??:)`), `(${kind.label}) ${kind.name}`)
+      // The marker is re-emitted from the record, never read off tsgo's text:
+      // the face declares an optional member required, so only the record
+      // knows the author wrote `?`.
+      .replace(esc === null ? /(?!)/ : new RegExp(`\\(property\\) [^\\n]*?\\b${esc}\\??(?=:)`), `(${kind.label}) ${kind.name}${kind.optional ? '?' : ''}`)
       .replace(/\b(?:const|let|var) (?=[A-Za-z_$])/, `(${kind.label}) `) };
   }
   // A route union in the hover renders for READING — the same

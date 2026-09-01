@@ -641,7 +641,15 @@ export const propsParamOptional = (info) => !publicProps(info).some(isRequiredPr
 // prop making it non-optional — passable as the plain slot or the
 // container slot (the base keeps both keys optional so _init's
 // `props.x` / `props.__bind_x__` reads type on every arm).
-export function propsTypeSegments(info) {
+// The projection channel's type. The union is the runtime's admission
+// and is what the .d.ts road spells inline (a declaration file owes its
+// reader a self-contained type); the FACE road names it through the
+// `__RipChildren` alias the editor scrubs to `Children` — a name at the
+// hover, the union one hop behind it.
+export const CHILDREN_UNION = 'Node | string | number | boolean | null';
+const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNION);
+
+export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);
   const segs = [{ text: '{ ' }];
   const used = new Set();
@@ -673,7 +681,7 @@ export function propsTypeSegments(info) {
   // same member-wide suppression instanceTypeLines carries).
   if (!info.members.some((m) => m.name === 'children')) {
     sep();
-    segs.push({ text: 'children?: any' });
+    segs.push({ text: `children?: ${childrenType(road)}` });
   }
   used.add('children');
   if (info.extendsTag !== null) {
@@ -713,7 +721,7 @@ export function propsTypeSegments(info) {
   return segs;
 }
 
-export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
+export const propsTypeText = (info, opts = {}) => segmentsText(propsTypeSegments(info, opts));
 
 // ── the constructor surface ──────────────────────────────────────────
 // The members of the type a component BINDING carries, each a complete
@@ -723,7 +731,7 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // module read the same component type. `self` is the instance type as
 // this surface must name it (a generic component's own parameters,
 // applied).
-export const componentCtorMembers = (info, name, typeParams = '', self = name) => {
+export const componentCtorMembers = (info, name, typeParams = '', self = name, opts = {}) => {
   // The GATED branch has no constructor to declare a parameter list on,
   // so the prototype cannot NAME one — `${name}<T>` would put an unbound
   // T inside a value's object type. It applies `any` per parameter: the
@@ -733,7 +741,7 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name) =
     return [`readonly prototype: ${name}${anyArgsOf(typeParams)};`];
   }
   const optional = propsParamOptional(info);
-  const members = [`new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info)}): ${self};`];
+  const members = [`new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info, opts)}): ${self};`];
   // The static mount mirror constructs with NO props (`new this()` in
   // the runtime), so a component with a REQUIRED prop must not offer it
   // — the call would be tsc-clean while the runtime yields a required
@@ -911,7 +919,7 @@ export const stashProjection = (m, info) =>
 export const COMPONENT_FAILURE_TYPE =
   '{ name: string; message: string; error: unknown; status?: number; path?: string; file?: string }';
 
-export function instanceTypeLines(info, selfType) {
+export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   const lines = [];
   let hasChildren = false;
   const memberNames = new Set();
@@ -1003,7 +1011,7 @@ export function instanceTypeLines(info, selfType) {
     }
     lines.push({ segs: [{ text: `${name}?: any;` }] });
   }
-  if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
+  if (!hasChildren) lines.push({ segs: [{ text: `children?: ${childrenType(road)};` }] });
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;

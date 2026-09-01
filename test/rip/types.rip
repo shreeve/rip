@@ -654,13 +654,13 @@ type 'void slot: optionality reaches inside the container only where absence can
     router?: any;
     params?: any;
     query?: any;
-    children?: any;
+    children?: Node | string | number | boolean | null;
     mount(target?: any): Panel;
     unmount(options?: { removeDOM?: boolean }): void;
     emit(name: string, detail?: any): void;
   }
   export declare let Panel: {
-    new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: any }): Panel;
+    new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: Node | string | number | boolean | null }): Panel;
     mount(target?: any): Panel;
   };
   '''

@@ -1,4 +1,13 @@
 {
+  "11-types.errors.rip": [
+    {
+      "line": 84,
+      "character": 11,
+      "code": 2307,
+      "token": ": import('./nowhere.rip').Parcel",
+      "why": "an import type naming a module nothing answers — the specifier lives inside opaque TYPE TEXT, which carries no per-token spans, so the diagnostic covers the annotation where TypeScript's own anchors on the string; the twin's line spells a RESOLVING import type instead, so it witnesses the construct while staying quiet rather than deriving a position rip cannot reach. A specifier that resolves for BOTH judges cannot exist in this lane (10-modules.errors.rip states why)"
+    }
+  ],
   "13-components.errors.rip": [
     {
       "line": 25,
@@ -73,15 +82,6 @@
       "code": 2322,
       "token": "entries",
       "why": "an array-typed reactive member whose initializer carries a wrong element — the mismatch rip publishes is between CELLS (the declared `{value: string[]}` against the inferred `{value: (string | number)[]}`), so it anchors on the member rather than on the element the twin flags; the twin's own array is correct and stays quiet"
-    }
-  ],
-  "11-types.errors.rip": [
-    {
-      "line": 84,
-      "character": 11,
-      "code": 2307,
-      "token": ": import('./nowhere.rip').Parcel",
-      "why": "an import type naming a module nothing answers — the specifier lives inside opaque TYPE TEXT, which carries no per-token spans, so the diagnostic covers the annotation where TypeScript's own anchors on the string; the twin's line spells a RESOLVING import type instead, so it witnesses the construct while staying quiet rather than deriving a position rip cannot reach. A specifier that resolves for BOTH judges cannot exist in this lane (10-modules.errors.rip states why)"
     }
   ]
 }

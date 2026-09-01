@@ -511,9 +511,10 @@ const AUDITS = [
     judge: 'NEGATIVE invariants over the server\'s own answers — no twin, no pin, no\n'
          + 'oracle: an answer may not name a minted `__` spelling, a scaffold local, or\n'
          + 'the bare cover-`this`, and no diagnostic message may carry a face spelling\n'
-         + '(sweep.machinery gates the four together). The misdirection classes —\n'
-         + 'subject/keyword/comment covers, whole-construct ranges — print as gauges\n'
-         + 'and graduate the day the decline work drains them. Direct\n'
+         + '(sweep.machinery gates the four together); the name census (a name the\n'
+         + 'lexer produces that declines) and the misdirection classes (subject,\n'
+         + 'boundary, blank, keyword and comment covers, whole-construct ranges)\n'
+         + 'each gate at zero, having drained (sweep.census, sweep.misdirection). Direct\n'
          + '`bun test/audit/sweep.js <files>` runs the same engine over any file set —\n'
          + 'the cart demo by default, the DISCOVERY side; a class it exposes earns a\n'
          + 'corpus fixture, never a gate row',
@@ -3817,7 +3818,12 @@ const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 // The pin file, loaded once for the probe pass, the coverage gate, and the
 // comparison alike (see HOVERS above for the shape and discipline).
 const hoverPins = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : {};
-const staleHoverPinKeys = Object.keys(hoverPins).filter((f) => !fixtures.includes(f));
+// A pin key names a fixture the hover lane probes — or one only the sweep's
+// census walks (corpus/gradual), whose ruled silences live in this same file
+// so the two instruments read one set of decisions. Anything else is stale.
+const { corpusSets: sweepCorpusSets } = await import('./sweep.js');
+const censusFixtures = new Set(sweepCorpusSets().flatMap((set) => set.files.map((f) => path.basename(f))));
+const staleHoverPinKeys = Object.keys(hoverPins).filter((f) => !fixtures.includes(f) && !censusFixtures.has(f));
 const declPinsOf = (f) => hoverPins[f]?.decls ?? [];
 const positionPinsOf = (f) => hoverPins[f]?.positions ?? [];
 let hskip = 0;
@@ -4736,23 +4742,24 @@ await Promise.all(pool.map((s) => s.stop()));
 // Its own engine and its own server (test/audit/sweep.js — `bun run
 // sweep` is the same engine standalone with the full row listing). The
 // GATED classes are the machinery-decline doctrine's hard violations
-// and print unconditionally, each row a doctrine break; the
-// misdirection classes are gauges until the decline work drains them.
+// and print unconditionally, each row a doctrine break; the name census
+// (sweep.census) and the misdirection classes (sweep.misdirection) gate
+// too, each having drained to zero — from that day a row is a regression.
 let sw = null;
 if (RUN_SWEEP) {
-  const { runSweep, corpusSets, GATED, kindOf, organize } = await import('./sweep.js');
+  const { runSweep, corpusSets, GATED, KIND_NOTES, kindOf, organize } = await import('./sweep.js');
   // The CORPUS only — the audit's own population. The cart rides the
   // discovery side (direct sweep.js runs), never this gate: a demo
   // edit must not move the audit's exit code.
   const sets = await runSweep(corpusSets());
   auditBanner('SWEEP AUDIT', `machinery-shaped answers at ANY byte · ${sets.map((s) => `${s.name} ${s.files} files`).join(' · ')}`);
-  sw = { machinery: 0, probes: 0, answered: 0, gaugeRows: [], rows: [] };
+  sw = { machinery: 0, census: 0, misdirection: 0, probes: 0, answered: 0, gaugeRows: [], rows: [] };
   for (const set of sets) {
     sw.probes += set.probes;
     sw.answered += set.answered;
     for (const f of set.findings) {
       if (GATED.has(kindOf(f))) { sw.machinery++; sw.rows.push(f); }
-      else sw.gaugeRows.push(f);
+      else { if (kindOf(f) === 'silent-name') sw.census++; else sw.misdirection++; sw.gaugeRows.push(f); }
     }
   }
   const base = (f) => f.slice(f.lastIndexOf('/') + 1);
@@ -4770,13 +4777,26 @@ if (RUN_SWEEP) {
     srow('cover-this', counts['cover-this'] ?? 0, 'the bare `this: this` cover answer', true);
     srow('diagnostics', counts['minted-in-diagnostic'] ?? 0, 'face spellings in published messages', true);
     srows.push(null);
-    for (const g of organize(sw.gaugeRows)) srow(g.kind, g.count, g.note.split(';')[0], false);
+    // Both halves of the walk are gated now, so like the four machinery
+    // rows each prints at zero — a reassurance row, not an absence. The
+    // misdirection classes share one invariant and one row when empty;
+    // any that fire print by class.
+    const gauges = organize(sw.gaugeRows);
+    if (!gauges.some((g) => g.kind === 'silent-name')) srow('silent-name', 0, KIND_NOTES['silent-name'].split(';')[0] + ' — gated: sweep.census', false);
+    if (!gauges.some((g) => g.kind !== 'silent-name')) srow('misdirection', 0, 'answers about a symbol other than the word under the cursor — at the word, its end boundary, or a blank byte — gated: sweep.misdirection', false);
+    for (const g of gauges) srow(g.kind, g.count, g.note.split(';')[0] + (g.kind === 'silent-name' ? ' — gated: sweep.census' : ' — gated: sweep.misdirection'), false);
     out(`\n  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus's valid programs, the position dimension closed; ${sw.answered} answer)`)}`);
     const W = Math.max(...srows.filter(Boolean).map((s) => String(s.n).length));
+    // A label column followed by prose: the note wraps at ITS OWN column,
+    // not two in from the label's (the `labeled` rule) — a hang under the
+    // label reads as a second row with a blank label.
+    const gutter = 4 + 14 + 1 + W + 3;
     for (const s of srows) {
       if (!s) { console.log(''); continue; }
-      const color = s.n === 0 ? green : s.gated ? red : yellow;
-      out(`    ${pad(s.label, 14)} ${color(String(s.n).padStart(W))}   ${dim(s.note + (s.gated ? ' — gated: sweep.machinery' : ''))}`);
+      const color = s.n === 0 ? green : red;
+      const lines = wrapText(s.note + (s.gated ? ' — gated: sweep.machinery' : ''), TERM_W - gutter, 0);
+      console.log(`    ${pad(s.label, 14)} ${color(String(s.n).padStart(W))}   ${dim(lines[0])}`);
+      for (const l of lines.slice(1)) console.log(' '.repeat(gutter) + dim(l));
     }
   }
   // The gate's own rows, each a doctrine break: fix, never excuse.
@@ -4793,20 +4813,37 @@ if (RUN_SWEEP) {
       out(`        ${dim(pad('hover', 6))} ${dim(f.text.length > room ? f.text.slice(0, room) + '…' : f.text)}`);
     }
   }
-  // The gauge subsections hold whatever misdirection rows exist —
-  // expected empty, since every known class declines by ruling — and
+  // The gauge subsections hold whatever gauge rows exist — misdirected
+  // answers, and names that decline — expected empty, since every known
+  // class is ruled one way or the other — and
   // print under -v, where every other lane's full listings live; the
   // default view is a status, not a scroll. The chatty classes roll up
   // per file+line: their unit of fixing is one rule, so the useful map
   // is WHERE. The rest group positions under each distinct answer.
   if (!VERBOSE && sw.gaugeRows.length) {
-    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — misdirected answers to rule or fix; -v prints every one, per class`)}`);
+    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — misdirected answers and silent names, to rule or fix; -v prints every one, per class`)}`);
   }
   for (const g of VERBOSE ? organize(sw.gaugeRows) : []) {
     out(`\n    ${bold(g.kind)} ${dim(`(${g.count} — ${g.note})`)}`);
     if (g.rollup) {
       for (const e of g.rollup) {
         for (const l of wrapText(`${bold(base(e.file))} ${dim(`${e.count} row${e.count === 1 ? '' : 's'} · lines ${e.lines.join(', ')}`)}`, TERM_W - 8, 2)) out(`      ${l}`);
+      }
+    } else if (g.byLine) {
+      // One row per POSITION, led by `file:line:col` — the shape a terminal
+      // links — then the word, then the source line on the first row of
+      // each line: the word in the context a reader needs to say whether
+      // silence there is right. Printed directly rather than through `out`:
+      // a row is one line by construction, the source ellipsized to the
+      // room its columns leave, and a paragraph wrap would fold that tail
+      // under the location.
+      const loc = (e, w) => `${base(e.file)}:${e.line + 1}:${w.ch + 1}`;
+      const locW = Math.max(...g.byLine.flatMap((e) => e.words.map((w) => loc(e, w).length)));
+      const wordW = Math.max(...g.byLine.flatMap((e) => e.words.map((w) => w.word.length)));
+      const room = Math.max(24, TERM_W - (6 + locW + 2 + wordW + 2 + 2));
+      for (const e of g.byLine) {
+        const src = e.src.length > room ? e.src.slice(0, room - 1) + '…' : e.src;
+        e.words.forEach((w, i) => console.log(`      ${pad(loc(e, w), locW)}  ${bold(pad(w.word, wordW))}  ${dim('│ ' + (i === 0 ? src : ''))}`));
       }
     } else {
       for (const e of g.detail) {
@@ -5019,8 +5056,8 @@ if (sw) {
   totalLine('Sweep', `${sw.answered} answers over ${sw.probes} positions: `
     + (sw.machinery === 0 ? green('no machinery-shaped answer anywhere') : red(`${sw.machinery} machinery-shaped answer${sw.machinery === 1 ? '' : 's'}`))
     + (sw.gaugeRows.length === 0
-      ? dim(' · no misdirected answer either — every position answers its own symbol or declines')
-      : dim(` · ${sw.gaugeRows.length} misdirection row${sw.gaugeRows.length === 1 ? '' : 's'} on the gauges`)));
+      ? dim(' · no gauge row either — every position answers its own symbol, or is a ruled silence')
+      : dim(` · ${sw.gaugeRows.length} gauge row${sw.gaugeRows.length === 1 ? '' : 's'} — misdirected answers and silent names`)));
 }
 
 // ── what this run did NOT cover. The default runs one of the audits, so say

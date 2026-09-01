@@ -60,6 +60,16 @@ export const CAMEL = {
 export const CLASS_VALUE_DECL =
   'type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];';
 
+// What a component projects through `slot`: the DOM the parent built for
+// it — an element, a fragment, a text node — or a value the runtime
+// renders as text. The union is the runtime's own admission (renderSlot:
+// a Node as-is, any other non-null value through String()); the name is
+// what the editor shows, scrubbed to `Children`, and its doc rides the
+// alias so a hover on the name explains it.
+export const CHILDREN_DECL =
+  '/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n' +
+  'type __RipChildren = Node | string | number | boolean | null;';
+
 // The `__clsx` signature for the runtime-destructure types assertion
 // (RUNTIME_TABLE `types`) — the one entry that types every merged
 // `class:` value in the face.
@@ -176,13 +186,14 @@ function elSurfaceDecl(tag, svg) {
 // `needsClassValue` forces the __RipClassValue alias even with no
 // surfaces (the __clsx types assertion references it wherever the
 // components runtime delivers inline).
-export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false } = {}) {
+export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false } = {}) {
   const surfaces = new Map();
   for (const { tag, svg } of used) {
     if (surfaceableTag(tag, svg)) surfaces.set(`${svg ? 'svg:' : ''}${tag}`, { tag, svg: Boolean(svg) });
   }
   const parts = [];
   if (surfaces.size > 0 || needsClassValue) parts.push(CLASS_VALUE_DECL);
+  if (needsChildren) parts.push(CHILDREN_DECL);
   if (surfaces.size > 0) {
     parts.push(HELPER_DECLS);
     const anyHtml = [...surfaces.values()].some((s) => !s.svg);
