@@ -118,6 +118,10 @@ Options:
                            parameters, returns, and instances of the
                            signatures they name. Inference counts,
                            so an unannotated export with a typed origin passes;
+                           an export clean only because ANOTHER export answers
+                           for a position is neither typed nor leaking — it
+                           names the row that has to change, and counts as
+                           typed nowhere;
                            members a package does not declare are its
                            dependencies' and are left alone. Exits 1 when any
                            export leaks, so it can gate
@@ -173,6 +177,45 @@ const invert = (s) => paint('7', s);    // the gutter "box"
 const sevPaint = (sev, s) => paint(sev === 1 ? '91' : '93', s); // error red / warning yellow
 const rel = (f) => path.relative(process.cwd(), f) || '.';
 
+// ── the deferred verdict ──
+// A walk stops where a position's type is another export of the same
+// package, handing that position to the sibling's own row: one edit is
+// named once, under the declaration that has to change. That is the right
+// home for the DEFECT and the wrong verdict for the row that stopped — a
+// consumer importing only that name still receives the `any`, and a green
+// row beside an advisory naming it reads as a tool error.
+//
+// So a row answers for what it reaches: clean itself, but reaching a
+// sibling that is not, it is `deferred` — carrying no position of its own,
+// counting as typed nowhere, and naming the row that has to change. To a
+// fixpoint, because a deferral chain is as long as the types are deep.
+//
+// Both walks arrive here. The package audit seeds every export as a stop,
+// so its chains are the long ones; a consumer walk seeds only what that
+// importer took, and reaches this with the few stops that survived.
+function markDeferred(entries) {
+  const rowsByName = new Map();
+  const nameById = new Map();
+  for (const { rows, exportIds } of entries) {
+    for (const r of rows) rowsByName.set(r.name, r);
+    for (const [name, id] of exportIds ?? []) nameById.set(id, name);
+  }
+  for (let moved = true; moved; ) {
+    moved = false;
+    for (const r of rowsByName.values()) {
+      if (r.kind !== 'typed') continue;
+      const via = (r.deferred ?? [])
+        .map((id) => nameById.get(id))
+        .filter((n) => n !== undefined && n !== r.name
+          && ['leak', 'deferred'].includes(rowsByName.get(n)?.kind));
+      if (via.length === 0) continue;
+      r.kind = 'deferred';
+      r.via = [...new Set(via)].sort();
+      moved = true;
+    }
+  }
+}
+
 // The `--public` report, v3's shape: every export listed with the type a
 // consumer resolves, the path to the first `any` on a leaking one, and a
 // percentage per package — a failures-only list cannot show a surface
@@ -185,9 +228,10 @@ function printPublicReport(report, unreadable = []) {
   }
   let anyBad = false, sawEntry = false, anyUnaudited = false;
   for (const [dir, entries] of byPkg) {
+    markDeferred(entries);
     let name = rel(dir);
     try { name = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? name; } catch { /* unnamed */ }
-    let total = 0, leaks = 0;
+    let total = 0, leaks = 0, deferrals = 0;
     // Distinct source positions across the whole package: one position
     // reached from two exports is still one edit, and the count that
     // matters to whoever has to make them is how many there are.
@@ -248,9 +292,16 @@ function printPublicReport(report, unreadable = []) {
         if (r.kind === 'unaudited') { unaudited.push({ entryFile, name: r.name, type: r.type, why: r.why }); continue; }
         total++;
         const [head, ...cont] = wrap(r.type ?? '?');
-        const mark = r.kind === 'leak' ? red('\u2717') : green('\u2713');
+        const mark = r.kind === 'leak' ? red('\u2717')
+          : r.kind === 'deferred' ? advise('\u21b7') : green('\u2713');
         lines.push(`    ${mark} ${r.name.padEnd(w)}  ${dim(head)}`);
         for (const line of cont) lines.push(`      ${' '.repeat(w)}  ${dim(line)}`);
+        if (r.kind === 'deferred') {
+          deferrals++;
+          // The row that has to change, never a position: this one has none
+          // of its own, and the edit is already listed under the name below.
+          lines.push(`      ${dim('\u2514\u2500')} reaches \`${r.via.join('`, `')}\``);
+        }
         if (r.kind === 'leak') {
           leaks++;
           // EVERY position this export leaves untyped, deduplicated by the
@@ -283,7 +334,7 @@ function printPublicReport(report, unreadable = []) {
       console.log(`  ${advise('?')} ${u.name}${dim(` — not audited: ${u.why ?? 'declared in another package'}`)}`);
     }
     if (unaudited.length) { anyUnaudited = true; console.log(''); }
-    const typed = total - leaks;
+    const typed = total - leaks - deferrals;
     const pct = total === 0 ? '0.0' : (100 * typed / total).toFixed(1);
     // Two gaps, and only one of them has a remedy: names an `export *`
     // forwards without naming, and positions the checker was asked about
@@ -302,8 +353,14 @@ function printPublicReport(report, unreadable = []) {
     else {
       anyBad = true;
       const n = positions.size;
+      // The deferred exports are named on their own rows; the count here
+      // says how much of the surface a reader would otherwise have read as
+      // finished, and it is not folded into the position count — no edit
+      // goes to any of them.
+      const reach = deferrals === 0 ? ''
+        : ` ${deferrals} more export${deferrals === 1 ? '' : 's'} reach${deferrals === 1 ? 'es' : ''} them.`;
       console.log(`${red('\u2717')} ${bold(name)}: ${typed}/${total} exports fully typed (${pct}%). `
-        + `${red(`${n} position${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} a type`)}.`);
+        + `${red(`${n} position${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} a type`)}.${reach}`);
     }
   }
   if (unreadable.length > 0) {
@@ -1105,7 +1162,7 @@ if (compiled.size > 0) {
                 // is. The mapped position is for display.
                 for (const d of row.defects ?? []) d.site = toSite(d.origin);
               }
-              report.push({ dir, entryFile, rows: walked.rows, lost: walked.lost, forwarded: walked.forwarded });
+              report.push({ dir, entryFile, rows: walked.rows, exportIds: walked.exportIds, lost: walked.lost, forwarded: walked.forwarded });
             }
           }
         } finally {
@@ -1205,7 +1262,13 @@ if (compiled.size > 0) {
                 claims: false,
               }).catch(() => null);
               if (walked === null || walked.unresolved !== null) continue;
-              const leaks = walked.rows.filter((r) => r.kind === 'leak').map((r) => r.name);
+              // A name this importer took can also be clean only because
+              // another name it took answers for it, and the `any` arrives
+              // through both. One entry, because `only` narrowed the stops
+              // to what this importer named.
+              markDeferred([walked]);
+              const leaks = walked.rows
+                .filter((r) => r.kind === 'leak' || r.kind === 'deferred').map((r) => r.name);
               if (leaks.length === 0) continue;
               let label = dir === null ? entryFile : path.relative(process.cwd(), dir);
               try { label = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name ?? label; } catch { /* unnamed */ }

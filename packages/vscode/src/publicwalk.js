@@ -134,11 +134,16 @@ async function widthCached(ck, type, owns, functionTypeId, caches) {
 // the POSITION. `type Empty = {}` states itself, so its own row is clean,
 // while an unannotated binding resolving to it is a defect that row will
 // never raise.
-async function namesSibling(ck, type, siblings, rootSymbol, owns, functionTypeId, caches) {
+// Answers WHICH sibling, not merely that there is one. A stop hands this
+// position's defects to that row, so the caller records the edge: a row
+// clean only because another row answers for it is clean only while that
+// row is, and the reader of a verdict is owed that difference.
+async function siblingStop(ck, type, siblings, rootSymbol, owns, functionTypeId, caches) {
   const named = [await type.getSymbol(), await type.getAliasSymbol()];
-  if (rootSymbol != null && named.some((sym) => sym != null && sym.id === rootSymbol.id)) return false;
-  if (!named.some((sym) => sym != null && siblings.has(sym.id))) return false;
-  return await widthCached(ck, type, owns, functionTypeId, caches) === null;
+  if (rootSymbol != null && named.some((sym) => sym != null && sym.id === rootSymbol.id)) return null;
+  const stop = named.find((sym) => sym != null && siblings.has(sym.id));
+  if (stop === undefined) return null;
+  return await widthCached(ck, type, owns, functionTypeId, caches) === null ? stop.id : null;
 }
 
 // A name that is only ever a type has no value to take the type OF, so its
@@ -460,6 +465,10 @@ async function returnIsStated(params, origin, synthesized) {
 async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, functionTypeId, caches, synthesized, claims) {
   const seen = new Set();
   const found = [];
+  // Siblings this walk handed a position to, so the caller can ask whether
+  // they answered. Symbol ids, which are stable across the entries of one
+  // session — the same property the cross-entry sibling stop already rests on.
+  const deferred = new Set();
   // Positions the CHECKER had no type for. The async API is allowed to
   // answer a symbol with undefined, and a thread lost there is unexamined
   // surface, not clean surface — it leaves as the walk's floor.
@@ -550,7 +559,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
             // TAKES, and a parameter whose defects belong to another row is
             // still a parameter a field was fed from.
             if (isCtor) ctorParams.push({ name: p.name, id: pType.id });
-            if (await namesSibling(ck, pType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
+            const pStop = await siblingStop(ck, pType, siblings, rootSymbol, owns, functionTypeId, caches);
+            if (pStop !== null) { deferred.add(pStop); continue; }
             next.push({
               type: pType,
               at: isCtor ? `${item.at}.new(${p.name})` : `${item.at}(${p.name})`,
@@ -562,7 +572,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
           }
           const returnType = await ck.getReturnTypeOfSignature(sig);
           if (returnType === undefined) { lost++; continue; }
-          if (await namesSibling(ck, returnType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
+          const rStop = await siblingStop(ck, returnType, siblings, rootSymbol, owns, functionTypeId, caches);
+          if (rStop !== null) { deferred.add(rStop); continue; }
           next.push({
             type: returnType,
             at: isCtor ? `${item.at}#` : `${item.at}()`,
@@ -590,7 +601,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         if (!declaredUnder(prop, owns)) continue;
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
-        if (await namesSibling(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches)) continue;
+        const propStop = await siblingStop(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches);
+        if (propStop !== null) { deferred.add(propStop); continue; }
         // A field that is the shadow of a constructor parameter is not its
         // own work: annotating the parameter answers both, and reporting it
         // twice overstates the edits. Decided on name AND type, never on
@@ -678,8 +690,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
   }
   const defects = [...bySite.values()];
   return defects.length === 0
-    ? { kind: 'typed', why: null, at: null, origin: null, defects: [], lost }
-    : { kind: 'leak', why: defects[0].why, at: defects[0].at, origin: defects[0].origin, defects, lost };
+    ? { kind: 'typed', why: null, at: null, origin: null, defects: [], deferred, lost }
+    : { kind: 'leak', why: defects[0].why, at: defects[0].at, origin: defects[0].origin, defects, deferred, lost };
 }
 
 // Every name one entry publishes, with the type a consumer resolves for it.
@@ -695,9 +707,9 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
 export async function walkPublicEntry(session, { mirrorFile, owns, only = null, siblingIds = null, synthesized = () => false, claims = true }) {
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
-    if (ck === null) return { rows: [], lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
+    if (ck === null) return { rows: [], exportIds: new Map(), lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
     const moduleSymbol = source === undefined ? undefined : await ck.getSymbolAtLocation(source);
-    if (!moduleSymbol) return { rows: [], lost: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
+    if (!moduleSymbol) return { rows: [], exportIds: new Map(), lost: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
 
     // The global `Function` type, resolved ONCE and held as an identity for
     // the width check: two files may each declare a `Function`, and only the
@@ -718,10 +730,14 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
     // the narrowing filters out below has no row, and seeding it here hands
     // its defects to a row that never prints.
     const siblings = siblingIds ?? new Set();
+    // Which NAME each stoppable id belongs to, so a caller holding rows can
+    // read a deferral edge back to the row that has to answer for it.
+    const exportIds = new Map();
     for (const [name, sym] of exported) {
       if (only !== null && !only.has(name)) continue;
       const s = await resolveAlias(ck, sym);
       siblings.add(s.id);
+      exportIds.set(name, s.id);
     }
     for (const [name, symbol] of exported) {
       if (only !== null && !only.has(name)) continue;
@@ -737,7 +753,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
       // No type is no verdict. "Found no defect" and "was never able to
       // look" are not the same answer, and only one of them is a clean bill.
       if (type === undefined) {
-        rows.push({ name, type: '?', kind: 'unaudited', defects: [], why: 'its type could not be resolved' });
+        rows.push({ name, type: '?', kind: 'unaudited', defects: [], deferred: [], why: 'its type could not be resolved' });
         continue;
       }
       // A type prints as it was WRITTEN, which is not always what it means: an
@@ -762,10 +778,10 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
       // "was never able to look" are not the same answer, and only one of them
       // is a clean bill.
       const kind = found.kind === 'typed' && !declaredUnder(rootSym, owns) ? 'unaudited' : found.kind;
-      rows.push({ name, type: printed, kind, defects: found.defects });
+      rows.push({ name, type: printed, kind, defects: found.defects, deferred: [...found.deferred] });
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
-    return { rows, lost, forwarded, unresolved: null };
+    return { rows, exportIds, lost, forwarded, unresolved: null };
   } finally {
     await snapshot.dispose?.();
   }

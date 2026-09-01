@@ -1288,12 +1288,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const a = check(typeOnly, ['--public']).stdout;
       expect(a).toMatch(/any at: Bag\.hole/);            // the row that owns the edit
       expect(a).not.toMatch(/at: Client#bag/);           // and only that row
-      expect(a).toContain('1/2 exports fully typed');
+      expect(a).toMatch(/\u21b7 Client/);                 // which is not a clean bill here
+      expect(a).toMatch(/reaches `Bag`/);
+      expect(a).toContain('0/2 exports fully typed');
 
       const b = check(twoEntry, ['--public']).stdout;
-      expect(b).toContain('1/2 exports fully typed');   // Session owns the work
+      expect(b).toContain('0/2 exports fully typed');   // Session owns the work
       expect(b).toMatch(/✗ Session/);
-      expect(b).toMatch(/✓ Client/);
+      expect(b).toMatch(/\u21b7 Client/);
+      expect(b).toMatch(/reaches `Session`/);           // read across the two entries
       expect(b).not.toMatch(/at: Client#session\.run/);
     } finally {
       for (const w of [typeOnly, twoEntry]) fs.rmSync(w, { recursive: true, force: true });
@@ -1338,17 +1341,17 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(a).toMatch(/any at: Thing#val/);            // the row that owns the edit
       expect(a).not.toMatch(/at: makeThing\(\)/);        // and only that row
       expect(a).not.toMatch(/at: useThing\(t\)/);
-      expect(a).toMatch(/\u2713 makeThing/);
-      expect(a).toMatch(/\u2713 useThing/);
-      expect(a).toMatch(/\u2713 holder/);                 // the property path, unchanged
-      expect(a).toContain('3/4 exports fully typed');
+      expect(a).toMatch(/\u21b7 makeThing/);
+      expect(a).toMatch(/\u21b7 useThing/);
+      expect(a).toMatch(/\u21b7 holder/);                 // the property path, unchanged
+      expect(a).toContain('0/4 exports fully typed');
       expect(printed(a)).toBe(counted(a));
 
       const b = check(aliased, ['--public']).stdout;
       expect(b).toMatch(/any at: Box\.val/);              // the alias's own row
       expect(b).not.toMatch(/at: both\./);                // neither member under `both`
-      expect(b).toMatch(/\u2713 both/);
-      expect(b).toContain('1/3 exports fully typed');
+      expect(b).toMatch(/\u21b7 both/);
+      expect(b).toContain('0/3 exports fully typed');
       expect(printed(b)).toBe(counted(b));
     } finally {
       for (const w of [returned, aliased]) fs.rmSync(w, { recursive: true, force: true });
@@ -1385,6 +1388,46 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // stated-ness of a position from the width of the type it names.
       expect(out.stdout).toMatch(/\u2713 holds/);
       expect(out.stdout).toContain('2/4 exports fully typed');
+      expect(out.status).toBe(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A stop moves the EDIT, never the verdict. The row it defers to is the
+  // one that has to change, and the row that stopped still hands a consumer
+  // whatever the sibling hands it — so it counts as typed nowhere, and says
+  // which row it is waiting on.
+  //
+  // Followed to a FIXPOINT: a deferral chain is as long as the types are
+  // deep, and a row two hops from the edit is no cleaner than one hop from
+  // it. The count stays a count of EDITS — a deferred row adds no position,
+  // because there is nothing to fix there.
+  test('--public counts a row deferring to a defective sibling as untyped, however deep', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ name: '@sib/chain', exports: { '.': './index.rip' } }),
+      'index.rip': ['export interface Bag', '  hole: any', '',
+        'export type Holder = { bag: Bag }', '',
+        'export def take(h: Holder): string', "  'x'", '',
+        'export def alone(n: number): string', "  'y'"].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir, ['--public']);
+      // One edit, named once, under the row that has to make it.
+      expect(out.stdout).toMatch(/any at: Bag\.hole/);
+      expect(out.stdout).toContain('1 position needs a type');
+      // One hop, and two: neither is a clean bill, and each names the row
+      // it is waiting on rather than the edit it does not own.
+      expect(out.stdout).toMatch(/\u21b7 Holder/);
+      expect(out.stdout).toMatch(/reaches `Bag`/);
+      expect(out.stdout).toMatch(/\u21b7 take/);
+      expect(out.stdout).toMatch(/reaches `Holder`/);
+      // A row that reaches none of it keeps its clean bill — the verdict
+      // travels along the deferral edges and nowhere else.
+      expect(out.stdout).toMatch(/\u2713 alone/);
+      expect(out.stdout).toContain('1/4 exports fully typed');
+      expect(out.stdout).toContain('2 more exports reach them');
+      // A deferred row carries no position, so the printed findings still
+      // number exactly what the summary counted.
+      expect((out.stdout.match(/ at: /g) ?? []).length).toBe(1);
       expect(out.status).toBe(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -2280,8 +2323,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // Reported once, under the export that owns it.
       expect(out.stdout).toContain('at: Boom.new(payload)');
       expect(out.stdout).not.toContain('at: api.Boom.new(payload)');
-      // `api` exposes it but is otherwise typed, so it is clean.
-      expect(out.stdout).toMatch(/✓ api/);
+      // `api` exposes it and carries no edit of its own, so the position
+      // is `Boom`'s to fix — and `api` is clean only while `Boom` is.
+      expect(out.stdout).toMatch(/\u21b7 api/);
+      expect(out.stdout).toMatch(/reaches `Boom`/);
       expect(out.stdout).toContain('1 position needs a type');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
