@@ -178,11 +178,11 @@
       "why": "reach by flow: the annotated type moves along assignment to the alias"
     },
     {
-      "line": 23,
-      "character": 16,
+      "line": 25,
+      "character": 28,
       "code": 2353,
-      "token": ":model",
-      "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared — anchored on the schema head"
+      "token": "active",
+      "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared — anchored on the key that names it, the body’s own word, which is a mapped position"
     },
     {
       "line": 32,
