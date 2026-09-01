@@ -70,6 +70,24 @@ var syncCounterFlag = () => {
   return counter.on;
 };
 
+// rip-ide-stub:types.js
+class TypeTextError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "TypeTextError";
+  }
+}
+var normalizeTypeText = (raw) => String(raw ?? "").trim();
+var tidyType = (t) => String(t ?? "");
+var renderTypeDecl = () => {
+  throw new Error("rip: type-text rendering is unavailable in the browser");
+};
+var renderParams = () => {
+  throw new Error("rip: type-text rendering is unavailable in the browser");
+};
+var optionalReader = () => () => false;
+var jsArityOptional = () => new Set;
+
 // src/runtime/vocab.js
 function snakeCase(name) {
   return String(name).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -1550,7 +1568,7 @@ function paramsRaw(paramTokens, what, fail, source) {
       fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
     }
     const last = typed ? [...part].filter(carries).pop() : null;
-    const type = typed && source !== null ? source.slice(toks[1].end, last.end).trim() : null;
+    const type = typed && source !== null ? normalizeTypeText(source.slice(toks[1].end, last.end)).trim() : null;
     return { name: toks[0].value, type, optional: false };
   });
 }
@@ -8428,24 +8446,6 @@ var buildSchemaTypeStory = () => {
 };
 var isModuleShaped = () => false;
 
-// rip-ide-stub:types.js
-class TypeTextError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "TypeTextError";
-  }
-}
-var normalizeTypeText = (raw) => String(raw ?? "").trim();
-var tidyType = (t) => String(t ?? "");
-var renderTypeDecl = () => {
-  throw new Error("rip: type-text rendering is unavailable in the browser");
-};
-var renderParams = () => {
-  throw new Error("rip: type-text rendering is unavailable in the browser");
-};
-var optionalReader = () => () => false;
-var jsArityOptional = () => new Set;
-
 // src/ts/dom-types.js
 var CAMEL = {
   __proto__: null,
@@ -9443,6 +9443,8 @@ class Emitter {
         return "effect";
       if (f.bound?.has(name))
         return null;
+      if (f.members !== undefined && f.members.has(name))
+        return f.memberKinds?.get(name) ?? null;
     }
     return null;
   }
@@ -9674,8 +9676,7 @@ class Emitter {
     const owner = this.b.currentMark;
     const span = this.ts && typeof value === "string" ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
     if (span !== null && isIdentifierName(value)) {
-      const cf = this.cframes[this.cframes.length - 1];
-      const k = cf ? cf.memberKinds?.get(value) ?? null : this.kindOfName(value);
+      const k = this.kindOfName(value);
       const kind = typeof k === "string" ? { label: k, optional: false } : k;
       if (kind !== null)
         this.kinds.push({ start: span[0], end: span[1], label: kind.label, name: value, optional: kind.optional });
@@ -10125,6 +10126,21 @@ class Emitter {
     if (this.ts)
       this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
+  tsServedValue(name, fn) {
+    if (!this.ts) {
+      fn();
+      return null;
+    }
+    let gen = null;
+    this.b.tsOnly(() => {
+      this.b.emit("({ ");
+      gen = this.b.offset;
+      this.b.emit(`${name}: `);
+    });
+    fn();
+    this.b.tsOnly(() => this.b.emit(` }).${name}`));
+    return gen;
+  }
   capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
     this.b = new CodeBuilder(this.stores, { source });
@@ -10190,12 +10206,12 @@ class Emitter {
     }
     return this.tsIterElementTypeText(entry.iter, unsafe, new Set([rec.self, ...rec.paramNames]));
   }
-  tsEventTypeText(events, hostText2 = null) {
+  tsEventTypeText(events, hostType = null) {
     const known = events.filter((e) => DOM_EVENTS.has(e));
     if (known.length === 0)
       return null;
     const map = known.map((e) => `HTMLElementEventMap['${e}']`).join(" | ");
-    const host = hostText2 ?? "any";
+    const host = hostType ?? "any";
     return `${known.length > 1 ? `(${map})` : map} & { target: ${host}; currentTarget: ${host} }`;
   }
   tsElReceiver(el) {
@@ -10207,23 +10223,28 @@ class Emitter {
         this.domSurfaces.set(name, { tag, svg });
         return {
           surfaced: true,
-          open: () => this.b.tsOnly(() => this.b.emit("(")),
-          close: () => this.b.tsOnly(() => this.b.emit(` as ${name})`)),
+          emit: () => {
+            this.b.tsOnly(() => this.b.emit("("));
+            this.b.emit(el);
+            this.b.tsOnly(() => this.b.emit(` as ${name})`));
+          },
           valsName: attrValsName(tag, svg),
-          hostText: `${svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap"}['${tag}']`,
-          tag,
-          svg
+          hostText: hostText(tag, svg)
         };
       }
     }
-    return { surfaced: false, open: () => {}, close: () => {}, valsName: null, hostText: null, tag: null, svg: false };
+    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
   }
   tsHandlerCast(fn, evTypeText = null) {
-    if (!this.ts)
-      return fn();
+    if (!this.ts) {
+      fn();
+      return null;
+    }
+    const start = this.b.offset;
     this.b.tsOnly(() => this.b.emit("("));
     fn();
     this.b.tsOnly(() => this.b.emit(evTypeText === null ? ") as any" : `) as (e: ${evTypeText}) => unknown`));
+    return evTypeText === null ? null : [start, this.b.offset];
   }
   tsComponentCtor(info, pad) {
     if (info.members.some((m) => m.kind === "gate")) {
@@ -14779,7 +14800,7 @@ ${pad ?? ""}`);
     const pad = "  ".repeat(ind + 1);
     const ipad = pad + "  ";
     this.cframes.push(frame);
-    this.rframes.push({ reactive: new Set, bound: new Set, members, memberReactive });
+    this.rframes.push({ reactive: new Set, bound: new Set, members, memberReactive, memberKinds });
     const prevMethod = this.methodName;
     this.methodName = null;
     const initValues = [
@@ -15101,16 +15122,13 @@ ${pad ?? ""}`);
           if (!isNode(x))
             return;
           let next = host;
-          if (typeof x[0] === "string" && x[0].length > 0) {
-            const base = x[0].split(/[#.]/)[0];
-            const tag = base === "" && /^[#.]/.test(x[0]) ? "div" : base;
-            if (tag === "object") {
-              next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ":") ? host : null;
-            } else if (TEMPLATE_TAGS.has(tag)) {
-              next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
-            } else if (/^[A-Z]/.test(x[0])) {
-              next = null;
-            }
+          const tag = x[0] === "switch" && x.length === 4 ? null : Emitter.templateHeadTag(x);
+          if (tag === "object") {
+            next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ":") ? host : null;
+          } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
+            next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
+          } else if (typeof x[0] === "string" && /^[A-Z]/.test(x[0])) {
+            next = null;
           }
           if (x[0] === ":" && x.length === 3 && isNode(x[1]) && x[1][0] === "." && x[1][1] === "this" && typeof x[1][2] === "string" && DOM_EVENTS.has(x[1][2])) {
             const v = x[2];
@@ -15121,7 +15139,7 @@ ${pad ?? ""}`);
               const rec = methodEventNames.get(m);
               rec.events.add(x[1][2]);
               if (host !== null && surfaceableTag(host.tag, host.svg)) {
-                rec.hosts.add(`${host.svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap"}['${host.tag}']`);
+                rec.hosts.add(hostText(host.tag, host.svg));
               } else {
                 rec.unknownHost = true;
               }
@@ -15417,14 +15435,18 @@ ${pad ?? ""}`);
     }
   }
   renderExpr(value) {
+    let span = null;
     this.withExpression(() => {
       const wrap = Emitter.needsGrouping(value, "operand");
       if (wrap)
         this.b.emit("(");
+      const start = this.b.offset;
       this.expr(value);
+      span = [start, this.b.offset];
       if (wrap)
         this.b.emit(")");
     });
+    return span;
   }
   renderVarKind(name, node) {
     const R = this.rstate;
@@ -15701,17 +15723,13 @@ ${pad ?? ""}`);
         this.renderEffect(node, () => {
           const clsx = this.runtimeName("__clsx");
           if (isSvg) {
-            mergeRecv.open();
-            this.b.emit(el);
-            mergeRecv.close();
+            mergeRecv.emit();
             const gen = this.b.offset + 1;
             this.b.emit(`.setAttribute('class', ${clsx}('${classes.join(" ")}', `);
             for (const k of mergedKeys)
               this.intrinsics.push({ start: k[0], end: k[1], kind: "attr", name: "class", gen });
           } else {
-            mergeRecv.open();
-            this.b.emit(el);
-            mergeRecv.close();
+            mergeRecv.emit();
             this.b.emit(".");
             const gen = this.b.offset;
             this.b.emit(`className = ${clsx}('${classes.join(" ")}', `);
@@ -15880,9 +15898,7 @@ ${pad ?? ""}`);
           }
           const recv = this.tsElReceiver(el);
           this.renderLine(null, () => {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit(".setAttribute(");
             this.emitQuotedPrimitive(arg);
             this.b.emit(", true");
@@ -15939,9 +15955,7 @@ ${pad ?? ""}`);
       return false;
     const recv = this.tsElReceiver(el);
     this.renderLine(null, () => {
-      recv.open();
-      this.b.emit(el);
-      recv.close();
+      recv.emit();
       this.b.emit(".setAttribute(");
       this.emitQuotedPrimitive(child);
       this.b.emit(", '')");
@@ -16259,15 +16273,24 @@ ${pad ?? ""}`);
           const emitPair = () => {
             const recordAttr = (fn) => {
               const start = this.b.offset;
-              fn();
+              const keySpan = fn();
               if (this.ts)
                 this.attrNames.push([start, this.b.offset]);
               if ("routeKey" in p)
                 p.routeKey = [start, this.b.offset];
+              if (this.ts && keySpan != null) {
+                const pid = p.pair !== null ? this.stores.idOf(p.pair) : null;
+                const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+                const key = [keySpan[0], keySpan[1]];
+                this.renderPairs.push({ key, pair: extent ?? key, sites: [[start, this.b.offset]] });
+              }
             };
             const mid = isNode(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
-              recordAttr(() => this.b.markSpan(mid, "shorthandProp", p.span[0], p.span[1], () => this.b.emit(p.key)));
+              recordAttr(() => {
+                this.b.markSpan(mid, "shorthandProp", p.span[0], p.span[1], () => this.b.emit(p.key));
+                return [p.span[0], p.span[1]];
+              });
               this.b.emit(": ");
               p.fn();
               return;
@@ -16281,6 +16304,7 @@ ${pad ?? ""}`);
                   this.intrinsics.push({ start: span[0], end: span[1], kind: "bind", name: p.key.slice(7, -2), gen });
                 }
                 this.b.emit("__");
+                return span;
               });
             } else {
               recordAttr(() => this.emitPrimitive(p.key));
@@ -16484,6 +16508,25 @@ ${this.replayPad}}` : " }");
         continue;
       let [, key, value] = pair;
       this.checkCrossScopeLocals(value, pair);
+      let rec = null;
+      if (this.ts) {
+        const pid = this.stores.idOf(pair);
+        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+        const src = this.b.source;
+        if (extent !== null && src !== null) {
+          let ke = extent[0];
+          while (ke < extent[1] && !/[\s:]/.test(src[ke]))
+            ke++;
+          if (ke > extent[0]) {
+            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+            this.renderPairs.push(rec);
+          }
+        }
+      }
+      const site = (span) => {
+        if (rec !== null && span !== null && span[1] > span[0])
+          rec.sites.push(span);
+      };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
         this.checkBareEventHandler(pair, value);
@@ -16515,9 +16558,7 @@ ${this.replayPad}}` : " }");
           if (!this.ts) {
             this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
           } else {
-            recv2.open();
-            this.b.emit(el);
-            recv2.close();
+            recv2.emit();
             this.b.emit(".addEventListener(");
             this.emitQuotedPrimitive(eventName);
             this.b.emit(`, (${ev}`);
@@ -16527,15 +16568,18 @@ ${this.replayPad}}` : " }");
           if (typeof value === "string" && this.renderVarKind(value) === null && this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
+            const castStart = this.b.offset;
             this.b.emit(`${self}.`);
             this.emitPrimitive(value);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(known !== null ? ` as (e: ${known}) => unknown)` : " as any)"));
+            if (this.ts && known !== null)
+              site([castStart, this.b.offset - 1]);
             this.b.emit(`(${ev})`);
           } else {
             const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known ?? "any" : isFunc(value) ? null : known;
             this.b.emit("(");
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
+            site(this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -16548,22 +16592,6 @@ ${this.replayPad}}` : " }");
       const storedKey = key;
       if (key.startsWith('"') && key.endsWith('"'))
         key = key.slice(1, -1);
-      if (this.ts) {
-        const pid = this.stores.idOf(pair);
-        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-        const src = this.b.source;
-        if (extent !== null && src !== null) {
-          let ke = extent[0];
-          while (ke < extent[1] && !/[\s:]/.test(src[ke]))
-            ke++;
-          let vs = ke;
-          while (vs < extent[1] && /[\s:<=>]/.test(src[vs]))
-            vs++;
-          if (ke > extent[0] && vs < extent[1]) {
-            this.renderPairs.push({ key: [extent[0], ke], value: [vs, extent[1]], pair: [extent[0], extent[1]] });
-          }
-        }
-      }
       if (key === "__transition__") {
         this.noteVocabulary("render-channel", key, pair);
         this.renderTransition(el, pair, value, objExpr);
@@ -16571,14 +16599,14 @@ ${this.replayPad}}` : " }");
       }
       if (key === "ref") {
         this.noteVocabulary("render-channel", key, pair);
-        this.renderRef(el, pair, value, objExpr);
+        this.renderRef(el, pair, value, objExpr, site);
         continue;
       }
       if (key.startsWith("__bind_") && key.endsWith("__")) {
         this.noteVocabulary("render-channel", key, pair);
         this.checkUserSpelledBind(pair);
         const prop = key.slice(7, -2);
-        this.renderBind(el, pair, prop, value, objExpr);
+        this.renderBind(el, pair, prop, value, objExpr, site);
         continue;
       }
       if (key === "key") {
@@ -16597,15 +16625,13 @@ ${this.replayPad}}` : " }");
           if (this.ts && extent !== null) {
             (R.pendingClassKeys ??= []).push([extent[0], extent[0] + key.length]);
           }
-          R.pendingClassArgs.push(() => this.renderExpr(value));
+          R.pendingClassArgs.push(() => site(this.renderExpr(value)));
         } else if (this.renderReactive(value)) {
           const isSvg = R.svgDepth > 0;
           const recv2 = this.tsElReceiver(el);
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName("__clsx");
-            recv2.open();
-            this.b.emit(el);
-            recv2.close();
+            recv2.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -16616,7 +16642,7 @@ ${this.replayPad}}` : " }");
               this.emitPropertyRoadKey(() => this.emitKeyAs(key, "className"));
               this.b.emit(` = ${clsx}(`);
             }
-            this.renderExpr(value);
+            site(this.renderExpr(value));
             this.b.emit(isSvg ? "));" : ");");
           }, value);
         } else {
@@ -16624,9 +16650,8 @@ ${this.replayPad}}` : " }");
           const compound = isNode(value);
           const recv2 = this.tsElReceiver(el);
           this.renderLine(pair, () => {
-            recv2.open();
-            this.b.emit(el);
-            recv2.close();
+            const lhsStart = this.b.offset;
+            recv2.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -16635,11 +16660,15 @@ ${this.replayPad}}` : " }");
             } else {
               this.b.emit(".");
               this.emitPropertyRoadKey(() => this.emitKeyAs(key, "className"));
+              if (!compound)
+                site([lhsStart, this.b.offset]);
               this.b.emit(" = ");
             }
             if (compound)
               this.b.emit(`${this.runtimeName("__clsx")}(`);
-            this.renderExpr(value);
+            const valueSpan = this.renderExpr(value);
+            if (isSvg || compound)
+              site(valueSpan);
             if (compound)
               this.b.emit(")");
             if (isSvg)
@@ -16651,11 +16680,11 @@ ${this.replayPad}}` : " }");
       if ((key === "value" || key === "checked") && this.renderReactive(value)) {
         const recv2 = this.tsElReceiver(el);
         this.renderEffect(pair, () => {
-          recv2.open();
-          this.b.emit(el);
-          recv2.close();
+          const lhsStart = this.b.offset;
+          recv2.emit();
           this.b.emit(".");
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
+          site([lhsStart, this.b.offset]);
           this.b.emit(" = ");
           this.renderExpr(value);
           this.b.emit(";");
@@ -16665,11 +16694,11 @@ ${this.replayPad}}` : " }");
       if (key === "innerHTML" || key === "textContent" || key === "innerText") {
         const recv2 = this.tsElReceiver(el);
         const emitAssign = () => {
-          recv2.open();
-          this.b.emit(el);
-          recv2.close();
+          const lhsStart = this.b.offset;
+          recv2.emit();
           this.b.emit(".");
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
+          site([lhsStart, this.b.offset]);
           this.b.emit(" = ");
           this.renderExpr(value);
         };
@@ -16693,29 +16722,31 @@ ${this.replayPad}}` : " }");
         };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            recv2.open();
-            this.b.emit(el);
-            recv2.close();
+            recv2.emit();
             this.b.emit(".toggleAttribute('");
             emitBooleanKey();
             this.b.emit("', !!");
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
             this.renderExpr(value);
+            const satStart = this.b.offset + 1;
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" satisfies boolean | undefined)"));
+            if (this.ts)
+              site([satStart, satStart + "satisfies".length]);
             this.b.emit(");");
           }, value);
         } else {
           this.renderLine(pair, () => {
             this.b.emit("if (");
             this.withExpression(() => this.expr(value));
+            const satStart = this.b.offset + 1;
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" satisfies boolean | undefined"));
+            if (this.ts)
+              site([satStart, satStart + "satisfies".length]);
             this.b.emit(") ");
-            recv2.open();
-            this.b.emit(el);
-            recv2.close();
+            recv2.emit();
             this.b.emit(".setAttribute('");
             emitBooleanKey();
             this.b.emit("', '')");
@@ -16756,28 +16787,23 @@ ${this.replayPad}}` : " }");
         if (isPresence || nullable) {
           this.renderEffect(pair, () => {
             this.b.emit("{ const __v");
+            site([this.b.offset - 3, this.b.offset]);
             nullableAnnotation();
             this.b.emit(" = ");
             this.renderExpr(value);
             this.b.emit("; __v == null ? ");
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit(".removeAttribute('");
             emitAttrKey();
             this.b.emit("') : ");
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             emitSetAttribute();
             emitAttrKey();
             this.b.emit("', __v); }");
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             emitSetAttribute();
             const keyStart = this.b.offset;
             emitAttrKey();
@@ -16786,7 +16812,7 @@ ${this.replayPad}}` : " }");
             if (routeWrap)
               this.b.tsOnly(() => this.b.emit("__ripRoute("));
             const valStart = this.b.offset;
-            this.renderExpr(value);
+            site(this.renderExpr(value));
             const valEnd = this.b.offset;
             if (this.ts) {
               if (routeWrap)
@@ -16802,22 +16828,19 @@ ${this.replayPad}}` : " }");
       } else if (isPresence || nullable) {
         this.renderLine(pair, () => {
           this.b.emit("{ const __v");
+          site([this.b.offset - 3, this.b.offset]);
           nullableAnnotation();
           this.b.emit(" = ");
           this.renderExpr(value);
           this.b.emit("; if (__v != null) ");
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          recv.emit();
           emitSetAttribute();
           emitAttrKey();
           this.b.emit("', __v); }");
         }, false);
       } else {
         this.renderLine(pair, () => {
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          recv.emit();
           emitSetAttribute();
           const keyStart = this.b.offset;
           emitAttrKey();
@@ -16826,7 +16849,7 @@ ${this.replayPad}}` : " }");
           if (routeWrap)
             this.b.tsOnly(() => this.b.emit("__ripRoute("));
           const valStart = this.b.offset;
-          this.renderExpr(value);
+          site(this.renderExpr(value));
           const valEnd = this.b.offset;
           if (this.ts) {
             if (routeWrap)
@@ -17327,14 +17350,16 @@ ${this.replayPad}}` : " }");
         try {
           this.withExpression(() => {
             const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
-            if (wrap)
-              this.b.emit("(");
-            this.expr(keyExpr);
-            if (this.ts && keySpan !== null) {
-              this.intrinsics.push({ start: keySpan[0], end: keySpan[1], kind: "key", gen: this.b.offset - 1 });
+            const gen = this.tsServedValue("__key", () => {
+              if (wrap)
+                this.b.emit("(");
+              this.expr(keyExpr);
+              if (wrap)
+                this.b.emit(")");
+            });
+            if (gen !== null && keySpan !== null) {
+              this.intrinsics.push({ start: keySpan[0], end: keySpan[1], kind: "key", gen });
             }
-            if (wrap)
-              this.b.emit(")");
           });
         } finally {
           this.rframes.pop();
@@ -17482,17 +17507,18 @@ ${this.replayPad}}` : " }");
             const typed = this.ts && typeof r.tag === "string";
             if (typed)
               this.b.tsOnly(() => this.b.emit(`${r.svg ? "__ripRefCellSvg" : "__ripRefCell"}('${r.tag}', `));
+            const cellStart = this.b.offset;
             this.b.emit(`${self}.`);
             const span = this.emitPrimitive(r.name);
             if (span !== null)
               this.memberDecls.push({ start: span[0], end: span[1] });
             if (typed)
+              r.site([cellStart, this.b.offset]);
+            if (typed)
               this.b.tsOnly(() => this.b.emit(")"));
             this.b.emit(`.value = ${r.elVar}`);
-            if (typed) {
-              const map = r.svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap";
-              this.b.tsOnly(() => this.b.emit(` as ${map}['${r.tag}'] | null`));
-            }
+            if (typed)
+              this.b.tsOnly(() => this.b.emit(` as ${hostText(r.tag, r.svg)} | null`));
             this.b.emit(";");
           });
           this.b.emit(`
@@ -17586,7 +17612,7 @@ ${this.replayPad}}` : " }");
       this.b.emit(`._t = "${name}"`);
     });
   }
-  renderRef(el, pair, value, objExpr) {
+  renderRef(el, pair, value, objExpr, site) {
     const refName = typeof value === "string" && RENDER_LOCAL_RE.test(value) ? value : null;
     if (refName === null) {
       throw this.positionedError(pair, "emitter: ref: expects a state cell — declare `el := null` then write `ref: el`", this.rstate.node);
@@ -17609,17 +17635,18 @@ ${this.replayPad}}` : " }");
       this.renderLine(pair, () => {
         if (refTyped)
           this.b.tsOnly(() => this.b.emit(`${refSvg ? "__ripRefCellSvg" : "__ripRefCell"}('${tag}', `));
+        const cellStart = this.b.offset;
         this.b.emit("this.");
         const span = this.emitPrimitive(refName);
         if (span !== null)
           this.memberDecls.push({ start: span[0], end: span[1] });
         if (refTyped)
+          site([cellStart, this.b.offset]);
+        if (refTyped)
           this.b.tsOnly(() => this.b.emit(")"));
         this.b.emit(`.value = ${el}`);
-        if (refTyped) {
-          const map = refSvg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap";
-          this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
-        }
+        if (refTyped)
+          this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
         this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName("__detachRef")}(this.`);
@@ -17632,11 +17659,12 @@ ${this.replayPad}}` : " }");
         elVar: el,
         node: pair,
         tag: refTyped ? tag : null,
-        svg: refSvg
+        svg: refSvg,
+        site
       });
     }
   }
-  renderBind(el, pair, prop, value, objExpr) {
+  renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
     if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
       this.rstate.sink.forceNonStatic = true;
@@ -17659,9 +17687,9 @@ ${this.replayPad}}` : " }");
       this.b.emit(`${el}.`);
       const span = this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
       this.b.emit(" = ");
-      this.withExpression(() => this.expr(value));
-      if (this.ts && span !== null) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: "bind", name: prop, gen: this.b.offset - 1 });
+      const gen = this.tsServedValue("__bind", () => this.withExpression(() => this.expr(value)));
+      if (gen !== null && span !== null) {
+        this.intrinsics.push({ start: span[0], end: span[1], kind: "bind", name: prop, gen });
       }
       this.b.emit(";");
     }, value);
@@ -17678,7 +17706,9 @@ ${this.replayPad}}` : " }");
       else
         this.tsScaffoldAny();
       this.b.emit(") => { ");
+      const targetStart = this.b.offset;
       this.withExpression(() => this.expr(value));
+      site([targetStart, this.b.offset]);
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
         this.b.emit(" ");
@@ -17817,6 +17847,25 @@ ${this.replayPad}}` : " }");
       }
     }
     return { tag: tag || "div", classes: classes.filter((c) => c !== ""), id };
+  }
+  static templateHeadTag(x) {
+    if (!isNode(x))
+      return null;
+    const head = x[0];
+    if (typeof head === "string") {
+      if (head === ".")
+        return Emitter.collectTemplateClasses(x).tag;
+      return head.length > 0 ? head.split("#")[0] || "div" : null;
+    }
+    if (!isNode(head))
+      return null;
+    if (isNode(head[0]) && head[0][0] === "." && head[0][2] === "__clsx") {
+      const tagExpr = head[0][1];
+      if (typeof tagExpr === "string")
+        return tagExpr.split("#")[0] || "div";
+      return Emitter.collectTemplateClasses(tagExpr).tag;
+    }
+    return Emitter.collectTemplateClasses(head).tag;
   }
   static returnGuard(x) {
     return isNode(x) && (x[0] === "||" || x[0] === "&&" || x[0] === "??") && x.length === 3 && isNode(x[2]) && x[2][0] === "return";
@@ -20470,11 +20519,10 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 var SCHEMA_BODY_KINDS = { field: "field", computed: "computed", derived: "derived", method: "method" };
-function recordSchemaFields(emitter, builder, block, at) {
+function recordSchemaFields(emitter, block, text, at) {
   const entries = block.story?.decl?.descriptor?.entries ?? null;
   if (entries === null)
     return;
-  const text = builder.code.slice(at);
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const e of entries) {
     const ref = e.tag === "union-member" ? { name: e.name, start: e.start } : e.tag === "directive" && e.name === "mixin" && e.argTokens?.[0]?.kind === "IDENTIFIER" ? { name: e.argTokens[0].value, start: e.argTokens[0].start } : null;
@@ -20748,9 +20796,10 @@ return { ${unit.names.join(", ")} };
         builder.tsOnly(() => {
           const lines = () => {
             const at = builder.offset;
-            builder.emit(b.lines.map((l) => `${exp}${l}`).join(`
-`));
-            recordSchemaFields(emitter, builder, b, at);
+            const text = b.lines.map((l) => `${exp}${l}`).join(`
+`);
+            builder.emit(text);
+            recordSchemaFields(emitter, b, text, at);
           };
           if (nodeId !== null)
             builder.mark(nodeId, "$self", lines);
