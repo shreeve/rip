@@ -9535,11 +9535,22 @@ class Emitter {
     }
     return null;
   }
+  checkBareRest(node, name) {
+    if (name !== "rest" || this.memberKindOf(name) !== "rest")
+      return;
+    const err = this.positionedError(node, "emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@app` and `@router`");
+    if (typeof err.start !== "number" && this.b.currentMark) {
+      err.start = this.b.currentMark.sourceStart;
+      err.end = this.b.currentMark.sourceEnd;
+    }
+    throw err;
+  }
   checkMemberWrite(node, target) {
     if (this.cframes.length === 0)
       return;
     let name = null, kind = null;
     if (typeof target === "string") {
+      this.checkBareRest(node, target);
       name = target;
       kind = this.memberKindOf(target);
     } else if (isNode(target) && target[0] === "." && target[1] === "this" && typeof target[2] === "string") {
@@ -13530,6 +13541,8 @@ ${pad ?? ""}`);
           return this.reactiveRead(node);
         if (rewrite === "member")
           this.notePlainRenderRead(node);
+        if (rewrite !== null)
+          this.checkBareRest(node, node);
         if (rewrite !== null)
           return this.memberRead(node, rewrite === "member-reactive");
         if (node === "this" && this.renderSelf !== null)
