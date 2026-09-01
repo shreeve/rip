@@ -73,6 +73,16 @@ export function mapTsDiagnostic(good, d) {
     const wrap = good.routeWraps.find((w) => s === w.value[0] && e === w.value[1]);
     if (wrap) span = generatedSpanToSource(good.mappings, wrap.key[0], wrap.key[1]) ?? span;
   }
+  // A render pair is markup, so its complaint anchors on the KEY — the
+  // name of the thing that is wrong, which is where a reader of JSX looks
+  // too. Only a span covering the whole VALUE or the whole PAIR moves; one
+  // interior to the value is about its own bytes and stays.
+  if (span && good.renderPairs?.length) {
+    const [a, b] = span;
+    const hit = good.renderPairs.find((p) =>
+      (a === p.value[0] && b === p.value[1]) || (a === p.pair[0] && b === p.pair[1]));
+    if (hit) span = [hit.key[0], hit.key[1]];
+  }
   // A generated span with no source mapping lives in a purely
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the

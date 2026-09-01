@@ -483,6 +483,9 @@ class Emitter {
     // row carries what the served answer is built from — the tag, its
     // namespace, and for `ref` the cell's name. TS face only.
     this.intrinsics = [];
+    // Per render pair: the key's span, the value's, and the pair's own —
+    // the diagnostics road's anchor table (SOURCE coordinates).
+    this.renderPairs = [];
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
     // production emission must stay byte-identical when hmr is false.
@@ -1806,6 +1809,7 @@ class Emitter {
     } else {
       this.b.emit(emittedValue);
     }
+    return span; // the claimed SOURCE span, for callers that record it
   }
 
   emitQuotedPrimitive(value, quote = "'") {
@@ -1822,9 +1826,12 @@ class Emitter {
   // `className`, `className:` landing on `'class'`) rides a
   // rewritten-primitive cover, so the source key owns the generated
   // position either way. JS mode emits the bytes plain — same output.
+  // Returns the SOURCE span the key claimed, for callers that record it:
+  // the claim is taken in source order from the occurrences the frame has
+  // not handed out, so a key whose spelling also appears in its own value
+  // (`disabled: @rest.disabled`) still lands on the key's own bytes.
   emitKeyAs(key, emitted) {
-    if (key === emitted) this.emitPrimitive(key);
-    else this.emitRewrittenPrimitive(key, emitted);
+    return key === emitted ? this.emitPrimitive(key) : this.emitRewrittenPrimitive(key, emitted);
   }
 
   // A PROPERTY-road key's generated span joins the attrNames drop
@@ -9685,9 +9692,29 @@ class Emitter {
           : `${el}.className = '${classes.join(' ')}'`));
       } else {
         const merged = R.pendingClassArgs.slice(1);
+        const mergedKeys = R.pendingClassKeys ?? [];
+        const mergeRecv = this.tsElReceiver(el);
         this.renderEffect(node, () => {
           const clsx = this.runtimeName('__clsx');
-          this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}('${classes.join(' ')}', ` : `${el}.className = ${clsx}('${classes.join(' ')}', `);
+          if (isSvg) {
+            mergeRecv.open();
+            this.b.emit(el);
+            mergeRecv.close();
+            const gen = this.b.offset + 1;
+            this.b.emit(`.setAttribute('class', ${clsx}('${classes.join(' ')}', `);
+            for (const k of mergedKeys) this.intrinsics.push({ start: k[0], end: k[1], kind: 'attr', name: 'class', gen });
+          } else {
+            // Through the tag's own receiver, so the merged write lands on a
+            // typed `className` — the position the key's ruled hover reads,
+            // and the same answer the unmerged spelling already gives.
+            mergeRecv.open();
+            this.b.emit(el);
+            mergeRecv.close();
+            this.b.emit('.');
+            const gen = this.b.offset;
+            this.b.emit(`className = ${clsx}('${classes.join(' ')}', `);
+            for (const k of mergedKeys) this.intrinsics.push({ start: k[0], end: k[1], kind: 'classkey', gen });
+          }
           merged.forEach((fn, i) => {
             if (i > 0) this.b.emit(', ');
             fn();
@@ -9695,6 +9722,7 @@ class Emitter {
           this.b.emit(isSvg ? '));' : ');');
         });
       }
+      R.pendingClassKeys = null;
       R.pendingClassArgs = prevArgs;
       R.pendingClassEl = prevEl;
     }
@@ -10137,7 +10165,6 @@ class Emitter {
         // bound to it, which the pair's cover describes as the minted
         // props slot rather than as itself.
         this.noteVocabulary('render-channel', cleanKey, pair);
-        if (typeof value === 'string') this.noteSilence(value, pair);
         const boundName = cleanKey.slice(7, -2);
         const container = this.childContainerRef(value);
         if (container !== null) {
@@ -10430,8 +10457,12 @@ class Emitter {
             }
             if (p.key.startsWith('__bind_') && p.key.endsWith('__')) {
               recordAttr(() => {
+                const gen = this.b.offset;
                 this.b.emit('__bind_');
-                this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+                const span = this.emitRewrittenPrimitive(p.key, p.key.slice(7, -2));
+                if (this.ts && span !== null) {
+                  this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: p.key.slice(7, -2), gen });
+                }
                 this.b.emit('__');
               });
             } else {
@@ -10620,7 +10651,12 @@ class Emitter {
       const r = this.resolveBareRead(value);
       if (r === 'member-reactive') return () => {
         this.b.emit(`${this.renderSelf ?? 'this'}.`);
-        this.emitPrimitive(value);
+        // The bind SHARES the container, so this position is the container's
+        // — but the author wrote their own binding here, not a consumer's
+        // read of an instance, so the name joins the value-first channel and
+        // answers the type they bound (RULINGS.md, the name in a bind).
+        const span = this.emitPrimitive(value);
+        if (this.ts && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
       };
       if (r === 'reactive') return () => this.emitPrimitive(value);
       return null;
@@ -10802,6 +10838,31 @@ class Emitter {
       const storedKey = key;
       if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
 
+      // WHERE A PAIR'S DIAGNOSTIC LANDS. A render pair is markup: the key
+      // names which thing is wrong, and that is where the reader looks —
+      // JSX anchors an attribute's own type error on the attribute name
+      // too. The roads below lower into different TypeScript shapes (a
+      // call takes its complaint on the argument, an object literal on
+      // the property), so without this the placement would move with the
+      // lowering, which the author cannot see. Recorded per pair in
+      // SOURCE coordinates; the diagnostics road re-anchors a complaint
+      // that covers the whole value, and leaves one INTERIOR to the value
+      // where it is (an interpolation's own defect is its own).
+      if (this.ts) {
+        const pid = this.stores.idOf(pair);
+        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+        const src = this.b.source;
+        if (extent !== null && src !== null) {
+          let ke = extent[0];
+          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
+          let vs = ke;
+          while (vs < extent[1] && /[\s:<=>]/.test(src[vs])) vs++;
+          if (ke > extent[0] && vs < extent[1]) {
+            this.renderPairs.push({ key: [extent[0], ke], value: [vs, extent[1]], pair: [extent[0], extent[1]] });
+          }
+        }
+      }
+
       // Only the CHANNEL words the lowering still spends whole stay in
       // the render-channel census (`__transition__`, the `ref` key
       // word, a bind's minted key, a loop's `key:`): nothing at those
@@ -10841,7 +10902,6 @@ class Emitter {
         // Looking for the source word instead finds the RHS when a bind
         // names the same word on both sides (`value <=> value`).
         const prop = key.slice(7, -2);
-        if (typeof value === 'string') this.noteSilence(value, pair);
         this.renderBind(el, pair, prop, value, objExpr);
         continue;
       }
@@ -10852,8 +10912,25 @@ class Emitter {
       }
 
       if (key === 'class' || key === 'className') {
+        // On SVG the class key rides setAttribute (className is not
+        // assignable there), so it answers from the record like any other
+        // attribute-road key. On HTML it is a real property access and the
+        // property road already answers.
+        const recordClassKey = (span, gen) => {
+          if (this.ts && span !== null) {
+            this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
+          }
+        };
         if (R.pendingClassArgs !== null && R.pendingClassEl === el) {
           this.checkSetupLocalRefs(value, pair);
+          // The merge dissolves this pair into one `__clsx` argument, so the
+          // key emits nothing of its own to claim a span from. The pair's
+          // extent starts at the key, which is the span the reader points at.
+          const pid = this.stores.idOf(pair);
+          const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+          if (this.ts && extent !== null) {
+            (R.pendingClassKeys ??= []).push([extent[0], extent[0] + key.length]);
+          }
           R.pendingClassArgs.push(() => this.renderExpr(value));
         } else if (this.renderReactive(value)) {
           const isSvg = R.svgDepth > 0;
@@ -10864,8 +10941,9 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             if (isSvg) {
+              const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
-              this.emitKeyAs(key, 'class');
+              recordClassKey(this.emitKeyAs(key, 'class'), gen);
               this.b.emit(`', ${clsx}(`);
             } else {
               this.b.emit('.');
@@ -10884,8 +10962,9 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             if (isSvg) {
+              const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
-              this.emitKeyAs(key, 'class');
+              recordClassKey(this.emitKeyAs(key, 'class'), gen);
               this.b.emit("', ");
             } else {
               this.b.emit('.');
@@ -10947,27 +11026,48 @@ class Emitter {
         // semantics (`!!expr` / `if (expr)`) — governed, never
         // constrained; the KEY answers through the receiver surface.
         const recv = this.tsElReceiver(el);
+        // The key's ruled hover carries its type outright: this road
+        // spells presence, and its two lowerings (a toggle under a
+        // reactive value, a guarded set under a static one) would
+        // otherwise describe one key two ways. The span is the key's own
+        // CLAIM, so a value repeating the key (`disabled: @rest.disabled`)
+        // still lands on the key.
+        const emitBooleanKey = () => {
+          const span = this.emitKeyAs(storedKey, key);
+          if (this.ts && recv.surfaced && span !== null) {
+            this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: key, type: 'boolean | undefined' });
+          }
+        };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
             recv.open();
             this.b.emit(el);
             recv.close();
             this.b.emit(".toggleAttribute('");
-            this.emitKeyAs(storedKey, key);
+            emitBooleanKey();
             this.b.emit("', !!");
+            // A boolean attribute admits a BOOLEAN, not any truthy value:
+            // `!!` would take anything, so the author's expression states
+            // its own type here. TS-only, and parenthesized because
+            // `satisfies` binds looser than `!!` — without the parens the
+            // negation's own result is what gets checked.
+            if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.renderExpr(value);
+            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined)'));
             this.b.emit(');');
           }, value);
         } else {
           this.renderLine(pair, () => {
             this.b.emit('if (');
+            // The guard's own parens already group the expression.
             this.withExpression(() => this.expr(value));
+            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined'));
             this.b.emit(') ');
             recv.open();
             this.b.emit(el);
             recv.close();
             this.b.emit(".setAttribute('");
-            this.emitKeyAs(storedKey, key);
+            emitBooleanKey();
             this.b.emit("', '')");
           });
         }
@@ -11009,9 +11109,41 @@ class Emitter {
       // narrowed `__v` then satisfies the setAttribute call by itself.
       // An unsurfaced receiver has no attribute type to check against and
       // keeps the quiet-TS-only doctrine's silence.
+      // The attribute KEY's ruled hover is served from this record. The
+      // key's own face position is a string literal — no symbol, nothing
+      // for tsgo to describe — but the call it names is generic over the
+      // key, so the INSTANTIATED method beside it spells the value type
+      // this attribute admits. The record carries where that method
+      // stands; the editor reads the type off it.
+      // The record's two halves arrive in either order and from either
+      // arm: the absence fork spells the key twice, and the FIRST spelling
+      // takes the source claim while only the setAttribute arm names a
+      // value type. So each half is captured where it happens and the row
+      // goes in once, when both are known.
+      let attrSpan = null, attrGen = null, attrRecorded = false;
+      const recordAttrKey = () => {
+        if (attrRecorded || !this.ts || !recv.surfaced || attrSpan === null || attrGen === null) return;
+        attrRecorded = true;
+        this.intrinsics.push({ start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, gen: attrGen });
+      };
+      // The method the record points at stands one byte past the dot the
+      // call opens with.
+      const emitSetAttribute = () => {
+        attrGen = this.b.offset + 1;
+        this.b.emit(".setAttribute('");
+        recordAttrKey();
+      };
+      // The key's own CLAIMED span — never a search for its spelling,
+      // which a value repeating the key (`disabled: @rest.disabled`)
+      // makes ambiguous.
+      const emitAttrKey = () => {
+        const span = this.emitKeyAs(storedKey, key);
+        if (attrSpan === null) attrSpan = span;
+        recordAttrKey();
+      };
       const nullableAnnotation = () => {
         if (!this.ts) return;
-        this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | null | undefined` : ': any'));
+        this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | undefined` : ': any'));
       };
       if (this.renderReactive(value)) {
         if (isPresence || nullable) {
@@ -11025,13 +11157,13 @@ class Emitter {
             this.b.emit(el);
             recv.close();
             this.b.emit(".removeAttribute('");
-            this.emitKeyAs(storedKey, key);
+            emitAttrKey();
             this.b.emit("') : ");
             recv.open();
             this.b.emit(el);
             recv.close();
-            this.b.emit(".setAttribute('");
-            this.emitKeyAs(storedKey, key);
+            emitSetAttribute();
+            emitAttrKey();
             this.b.emit("', __v); }");
           }, value);
         } else {
@@ -11044,9 +11176,9 @@ class Emitter {
             recv.open();
             this.b.emit(el);
             recv.close();
-            this.b.emit(`.setAttribute('`);
+            emitSetAttribute();
             const keyStart = this.b.offset;
-            this.emitKeyAs(storedKey, key);
+            emitAttrKey();
             const keyEnd = this.b.offset;
             this.b.emit("', ");
             if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
@@ -11079,8 +11211,8 @@ class Emitter {
           recv.open();
           this.b.emit(el);
           recv.close();
-          this.b.emit(".setAttribute('");
-          this.emitKeyAs(storedKey, key);
+          emitSetAttribute();
+          emitAttrKey();
           this.b.emit("', __v); }");
         }, false);
       } else {
@@ -11089,9 +11221,9 @@ class Emitter {
           recv.open();
           this.b.emit(el);
           recv.close();
-          this.b.emit(`.setAttribute('`);
+          emitSetAttribute();
           const keyStart = this.b.offset;
-          this.emitKeyAs(storedKey, key);
+          emitAttrKey();
           const keyEnd = this.b.offset;
           this.b.emit("', ");
           if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
@@ -12084,9 +12216,19 @@ class Emitter {
     }
     this.renderEffect(pair, () => {
       this.b.emit(`${el}.`);
-      this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
+      // The `<=>` target's ruled hover is served from this record: the word
+      // is a channel word the census declines, and the record names where
+      // its type stands — here the element property the bind writes.
+      const span = this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
       this.b.emit(' = ');
       this.withExpression(() => this.expr(value));
+      // The channel's type is the CELL's, not the element's (docs/TYPES.md:
+      // a `<=>` write is typed at the cell), and the element receiver here is
+      // a scaffold local with no type to read. So the record points INTO the
+      // bound expression's last name, whose type is what flows both ways.
+      if (this.ts && span !== null) {
+        this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: prop, gen: this.b.offset - 1 });
+      }
       this.b.emit(';');
     }, value);
     const touch = this.bindRootTouch(value);
@@ -12098,7 +12240,15 @@ class Emitter {
       // The bind's write-back listener is lowering-internal, correct
       // by construction — its param stays explicit `any`.
       this.b.emit(`${el}.addEventListener('${event}', (${ev}`);
-      this.tsScaffoldAny();
+      // The write-back READS the element and assigns into the cell, so its
+      // param carries the event's real type with the host claim — that is
+      // what makes `cell.value = e.target.value` check against the cell.
+      // Without it the param is `any` and the channel is unchecked in both
+      // directions, which lets a number cell take a string on first input.
+      const bindRecv = this.tsElReceiver(el);
+      const evText = this.ts ? this.tsEventTypeText([event], bindRecv.hostText) : null;
+      if (evText !== null) this.b.tsOnly(() => this.b.emit(`: ${evText}`));
+      else this.tsScaffoldAny();
       this.b.emit(') => { ');
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
@@ -16355,7 +16505,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

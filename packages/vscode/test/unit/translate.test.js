@@ -459,7 +459,7 @@ describe('spans with no user symbol (the hover declines)', () => {
   // right-hand name are real reads that reach a face entity — they must
   // stay counted there while still being silent HERE, which is why the
   // compiler reports them on a second channel.
-  test('the render channel silences its own words and the names they bind', () => {
+  test('the render channel silences its own words; the names they bind answer', () => {
     const src = [
       'Panel = component',
       "  text := 'x'",
@@ -477,8 +477,12 @@ describe('spans with no user symbol (the hover declines)', () => {
 
     const renderAt = src.indexOf('  render');
     expect(silenced(at('ref:', renderAt))).toBe(true);            // the channel word
-    expect(silenced(at('value', renderAt))).toBe(true);           // the bind target
-    expect(silenced(at('text', renderAt))).toBe(true);            // the name bound to it
+    // The bind TARGET is a channel word the census spends — silenced here,
+    // and answered from the compiler's record instead (RULINGS.md).
+    expect(silenced(at('value', renderAt))).toBe(true);
+    // The name BOUND to it is the author's own binding, so it answers
+    // value-first through its own position — never silenced.
+    expect(silenced(at('text', renderAt))).toBe(false);
 
     // The cell a ref names is NOT silenced: the `__ripRefCell` wrap
     // gives its bytes a real face position and the value-first channel

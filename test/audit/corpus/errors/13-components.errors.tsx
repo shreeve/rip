@@ -60,3 +60,10 @@ function Heads() {
     {
     missingExpr}
   </div> }
+
+function Truthy({ label }: { label: string }) {
+  return (
+    <button
+      disabled={!!label} />
+  )
+}

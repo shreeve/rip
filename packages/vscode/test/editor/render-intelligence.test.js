@@ -116,7 +116,7 @@ const APP = [
 const labelsOf = (completion) => (completion?.items ?? completion ?? []).map((i) => i.label);
 
 describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
-  test('hover: tag word, ref word, ref name, and a property-road key answer; an attribute-road key declines', async () => {
+  test('hover: tag word, ref word, ref name, and both key roads answer', async () => {
     await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
       await api.open('app.rip', APP);
       expect(api.diagnostics('app.rip').filter((d) => d.severity <= 2)).toEqual([]);
@@ -135,10 +135,10 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       expect(valueKey?.contents?.value).toContain('<input>.value: string');
 
       // An attribute-road key's face position is a string literal — no
-      // symbol, so hover declines (RULINGS.md: the served half is the
-      // property roads; completions and diagnostics answer here).
+      // symbol — so it answers from the compiler's intrinsics record,
+      // naming the value type its road admits (RULINGS.md).
       const attrKey = await api.hover('app.rip', 7, 12);     // inside `placeholder`
-      expect(attrKey).toBeNull();
+      expect(attrKey?.contents?.value).toContain('(attribute) placeholder:');
 
       // The handler param carries the host-element claim (the target
       // re-ruling): e.target reads as the input.
@@ -290,6 +290,107 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('hover: an attribute key answers the value type its road admits', async () => {
+    // The key's own face position is a string literal, so the answer
+    // comes from the compiler's intrinsics record: it points at the
+    // INSTANTIATED setAttribute beside the key, which is generic over
+    // the key and so spells the one value type this attribute takes.
+    // The presence road spells its type outright, because its reactive
+    // and static lowerings would otherwise describe one key two ways.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'B = component',              // 0
+        '  @busy?: boolean',          // 1
+        '  render',                   // 2
+        '    button',                 // 3
+        '      aria-busy: @busy',     // 4
+        "      role: 'button'",       // 5
+        '      disabled: @busy',      // 6
+        "      class: 'btn'",         // 7
+        '',
+      ].join('\n');
+      await api.open('attrs.rip', src);
+      // A data-/aria- suffix rides the surface's template row.
+      expect((await api.hover('attrs.rip', 4, 6))?.contents?.value)
+        .toContain('(attribute) aria-busy: string | number | boolean | undefined');
+      // A named attribute answers its own road's admission.
+      expect((await api.hover('attrs.rip', 5, 6))?.contents?.value).toContain('(attribute) role:');
+      // The presence road spells presence.
+      expect((await api.hover('attrs.rip', 6, 6))?.contents?.value)
+        .toContain('(attribute) disabled: boolean | undefined');
+      // A PROPERTY-road key keeps answering through its real property
+      // access — it never needed the record.
+      expect((await api.hover('attrs.rip', 7, 6))?.contents?.value)
+        .toContain('.className');
+    });
+  });
+
+  test('hover: a `<=>` target answers the channel, on both receivers', async () => {
+    // The target word is a channel word the census spends, so it answers from
+    // the compiler's record. One form for both receivers: an intrinsic bind
+    // reads the CELL side (the element receiver is an untyped scaffold local,
+    // and a `<=>` write is typed at the cell), a component bind reads the
+    // minted props key's container — which arrives as a union when the prop
+    // is optional, so the cell has to be found among the arms.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Field = component',        // 0
+        '  @label?: string',        // 1
+        '  render',                 // 2
+        '    span label',           // 3
+        '',
+        'T = component',            // 5
+        "  q := ''",                // 6
+        "  n := ''",                // 7
+        '  render',                 // 8
+        '    input',                // 9
+        '      value <=> q',        // 10
+        '    Field',                // 11
+        '      label <=> n',        // 12
+        '',
+      ].join('\n');
+      await api.open('bind.rip', src);
+      expect((await api.hover('bind.rip', 10, 6))?.contents?.value)
+        .toContain('(bind) value: string');
+      const component = (await api.hover('bind.rip', 12, 6))?.contents?.value;
+      expect(component).toContain('(bind) label: string');
+      // never the container, and never the minted key
+      expect(component).not.toContain('read()');
+      expect(component).not.toContain('__bind_');
+      // The bound NAME answers value-first on both receivers — the author's
+      // own vocabulary, never the container the channel shares.
+      const intrinsicName = (await api.hover('bind.rip', 10, 16))?.contents?.value;
+      expect(intrinsicName).toContain(': string');
+      expect(intrinsicName).not.toContain('read()');
+      const componentName = (await api.hover('bind.rip', 12, 16))?.contents?.value;
+      expect(componentName).toContain(': string');
+      expect(componentName).not.toContain('read()');
+    });
+  });
+
+  test('hover: a key whose VALUE repeats it still answers about the key', async () => {
+    // The record carries the key's own CLAIMED span. Searching for the
+    // spelling instead finds two occurrences on these rows and can name
+    // neither, so the key would fall silent exactly where a passthrough
+    // component spells its own prop — the commonest shape there is.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'L = component extends button',            // 0
+        '  @busy?: boolean',                       // 1
+        '  render',                                // 2
+        '    button',                              // 3
+        '      disabled: @busy or @rest.disabled', // 4
+        "      aria-label: @rest['aria-label']",   // 5
+        '',
+      ].join('\n');
+      await api.open('pass.rip', src);
+      expect((await api.hover('pass.rip', 4, 6))?.contents?.value)
+        .toContain('(attribute) disabled: boolean | undefined');
+      expect((await api.hover('pass.rip', 5, 6))?.contents?.value)
+        .toContain('(attribute) aria-label:');
+    });
+  });
+
   test('hover: a generic use site carries its instantiation, and a word-end cursor hovers the word', async () => {
     // The construct signature at a generic use prints the inferred
     // instantiation (`new <"alpha">(props?: …) => Chip<"alpha">`) —
@@ -383,7 +484,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
-  test('hover: a hyphenated key declines on every road — never the effect machinery', async () => {
+  test('hover: a hyphenated key answers on every road — never the effect machinery', async () => {
     // A hyphenated key's stored primitive keeps the lexer's quotes, so
     // its claim must go through the stored spelling; without the exact
     // row the presence road's key bytes fall to the pair's cover row,
@@ -402,9 +503,13 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       await api.open('chip.rip', src);
       expect(api.diagnostics('chip.rip').filter((d) => d.severity <= 2)).toEqual([]);
       const presenceKey = await api.hover('chip.rip', 4, 9);   // inside `aria-busy`
-      expect(presenceKey).toBeNull();
+      // A presence VALUE does not move the key's road: aria-busy is not
+      // a boolean attribute, so its type is still the template row's.
+      expect(presenceKey?.contents?.value).toContain('(attribute) aria-busy: string | number | boolean | undefined');
+      expect(presenceKey?.contents?.value).not.toContain('__effect');
       const dataKey = await api.hover('chip.rip', 5, 9);       // inside `data-kind`
-      expect(dataKey).toBeNull();
+      expect(dataKey?.contents?.value).toContain('(attribute) data-kind: string | number | boolean | undefined');
+      expect(dataKey?.contents?.value).not.toContain('__effect');
     });
   });
 

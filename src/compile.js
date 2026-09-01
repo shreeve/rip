@@ -303,6 +303,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // the pair's key, the anchor every other attribute reports on.
     // TS face only; empty otherwise.
     routeWraps: emitted.routeWraps,
+    renderPairs: emitted.renderPairs,
     // SOURCE spans of intrinsic-element positions the editor answers
     // from the compiler's own record (RULINGS.md, the render rows): the
     // element TAG word (its face position is a string literal — no

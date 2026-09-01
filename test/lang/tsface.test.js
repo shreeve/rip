@@ -182,8 +182,10 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     expect(faced.code).toContain(`setAttribute('href', "https://example.com")`);      // external passes bare — the surface's string road admits it
     // A dynamic value takes the road's absence fork, so it checks at the
     // scratch const — against the attribute's own type, widened by the
-    // arm that removes — and reaches setAttribute already narrowed.
-    expect(faced.code).toContain(`const __v: __RipAttrVals_a['href'] | null | undefined = nav; if (__v != null)`);
+    // `undefined` that means absent — and reaches setAttribute already
+    // narrowed. The runtime still removes on `null`; the type does not
+    // invite it.
+    expect(faced.code).toContain(`const __v: __RipAttrVals_a['href'] | undefined = nav; if (__v != null)`);
     expect(faced.code).toContain(`.setAttribute('href', __v); }`);
     expect(faced.code).toContain('href: nav');                                        // dynamic prop passes bare
     expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);

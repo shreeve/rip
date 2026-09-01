@@ -1839,6 +1839,8 @@ async function refresh(document) {
     // Generated key/value spans of the `__ripRoute` attribute wraps —
     // the diagnostics road re-anchors a whole-value mismatch on the key.
     routeWraps: result.routeWraps ?? [],
+    // Where a render pair's diagnostic anchors — the key (RULINGS.md).
+    renderPairs: result.renderPairs ?? [],
     // Parse/lex rejections the tolerant compile carried through —
     // published beside the mapped TS diagnostics, so an incomplete
     // buffer still says it is incomplete.
@@ -3012,6 +3014,27 @@ async function enrichEvolvingAnyHover(ctx, hover) {
   return result;
 }
 
+// Add the absence arms to a union without repeating a member it already has.
+// The split is depth-aware: a `|` inside a generic argument list, a call
+// signature, or an object type belongs to that nested type, not to this union.
+function unionArms(type) {
+  const arms = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < type.length; i++) {
+    const c = type[i];
+    if (c === '<' || c === '(' || c === '[' || c === '{') depth++;
+    else if (c === '>' || c === ')' || c === ']' || c === '}') depth--;
+    else if (c === '|' && depth === 0) { arms.push(type.slice(start, i).trim()); start = i + 1; }
+  }
+  arms.push(type.slice(start).trim());
+  return arms.filter(Boolean);
+}
+function withAbsenceArms(type) {
+  const arms = unionArms(type);
+  if (!arms.includes('undefined')) arms.push('undefined');
+  return arms.join(' | ');
+}
+
 connection.onHover(async (params) => {
   await tsgoReady;
   // Position-identifying surfaces (definition, references) survive a stale
@@ -3028,6 +3051,15 @@ connection.onHover(async (params) => {
   // (no symbol — tsgo has nothing to say), so the served text is the
   // native lib.dom spelling of what the lowering does there.
   const intr = (ctx.good.intrinsics ?? []).find((r) => ctx.offset >= r.start && ctx.offset < r.end);
+  // What tsgo says at a chosen face offset, flattened. The served records
+  // below point at the position that NAMES a type the author's word cannot.
+  const askAt = async (offset) => {
+    const probe = await tsgoRequest('textDocument/hover', {
+      textDocument: { uri: ctx.state.tsUri },
+      position: offsetToPosition(ctx.good.genLineStarts, offset),
+    }, 'served-record quickinfo');
+    return typeof probe?.contents?.value === 'string' ? probe.contents.value.replace(/```\w*\n?/g, '').replace(/\s+/g, ' ').trim() : '';
+  };
   if (intr) {
     const map = intr.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
     let body;
@@ -3046,6 +3078,53 @@ connection.onHover(async (params) => {
       body = intr.type === null
         ? `(custom event) @${intr.name}: any`
         : `(event) @${intr.name}: ${intr.type.replace(/(?:HTML|SVG)ElementTagNameMap\['([\w-]+)'\]/g, '<$1>')}`;
+    } else if (intr.kind === 'attr') {
+      // The attribute KEY answers the value type its road admits
+      // (RULINGS.md, the attr-name row). A road that spells presence
+      // carries the type outright; every other key reads it off the
+      // INSTANTIATED method the record points at — the call is generic
+      // over the key, so tsgo prints the one value type this attribute
+      // takes. No shape to read means no honest type to name, and the
+      // ruled interim is silence.
+      let type = intr.type ?? null;
+      if (type === null && typeof intr.gen === 'number') {
+        const flat = await askAt(intr.gen);
+        const m = /\(name: "[^"]*", (?:value|force\??): (.+?)\): void/.exec(flat);
+        // The call takes the value ALREADY NARROWED past the absence fork,
+        // so its parameter names what lands on the element. The road admits
+        // the two absence spellings on top, and the answer says so — unless
+        // the value type already carries one (a DOM property spelled
+        // `string | null`), which must not be said twice.
+        // Through the same scrub every served answer takes: a surface
+        // name reads back as what the author wrote, never its face spelling.
+        if (m) type = withAbsenceArms(scrubFaceArtifacts(m[1]));
+      }
+      if (type === null) return null;
+      body = `(attribute) ${intr.name}: ${type}`;
+    } else if (intr.kind === 'classkey') {
+      // A `class:` merged with a selector class emits no key of its own — the
+      // pair dissolves into one `__clsx` argument — so it answers from the
+      // typed `className` the merge writes, which is the SAME answer the
+      // unmerged spelling gives. The key does not change meaning because a
+      // selector appeared on the tag.
+      const head = /^\(property\) (.+)$/.exec(await askAt(intr.gen));
+      if (head === null) return null;
+      body = `(property) ${scrubFaceArtifacts(head[1])}`;
+    } else if (intr.kind === 'bind') {
+      // The `<=>` target names a channel, not a symbol: the census spends the
+      // word, so the answer comes from the record. Both receivers land on a
+      // typed face position — an element property for an intrinsic bind, the
+      // minted props key for a component one — and the component's key holds
+      // the CONTAINER, whose value type is what the author bound.
+      const head = /^\(property\) (?:.+\.)?[\w$]+\??: (.+)$/.exec(await askAt(intr.gen));
+      if (head === null) return null;
+      // A bindable prop's slot is the CONTAINER, and an optional one arrives
+      // as a union with its absence arm — so the arms are split and the cell
+      // among them gives up the value type the author bound.
+      const cell = unionArms(head[1].trim())
+        .map((arm) => /^\{ value: (.+?); read\(\)/.exec(arm.trim()))
+        .find(Boolean);
+      body = `(bind) ${intr.name}: ${scrubFaceArtifacts((cell ? cell[1] : head[1]).trim())}`;
     } else {
       body = `ref — writes ${map}['${intr.tag}'] into ${intr.name}`;
     }

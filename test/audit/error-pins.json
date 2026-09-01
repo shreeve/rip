@@ -20,6 +20,13 @@
       "code": 2322,
       "token": "@wrongPlain",
       "why": "a wrong-typed member write in the `@` spelling — the diagnostic anchors on the sigil (the lowering's `this` maps back through the member's own cover), and no TSX line spells `@`, so the twin cannot transfer the position; the bare spelling one line above is the derived pair"
+    },
+    {
+      "line": 67,
+      "character": 6,
+      "code": 1360,
+      "token": "disabled",
+      "why": "a boolean attribute admits `boolean | null | undefined`, not any truthy value — the road states that type on the author's OWN expression, so an uncoerced string rejects where `!!` would have taken it; rip-native: a JSX attribute is an assignment (TS2322) and cannot spell a type stated on the expression, so the twin coerces (`!!label`) and stays quiet; pinned per the components ruling (RULINGS.md)"
     }
   ],
   "14-schema.errors.rip": [

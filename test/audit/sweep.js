@@ -56,6 +56,7 @@ function subjectOf(flat) {
   if ((m = /^\((?:property|method)\) \(Anonymous class\)\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\(property\) <[\w-]+>\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\((?:custom )?event\) @([\w-]+):/.exec(flat))) return m[1]
+  if ((m = /^\(attribute\) ([\w-]+):/.exec(flat))) return m[1]
   if ((m = /^component ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if (/^ref — /.test(flat)) return 'ref'
   if (/^(?:\(alias\) )?module "/.test(flat)) return '(module)'
@@ -193,6 +194,10 @@ async function sweep(wsRoot, files) {
         // A module answer is only reachable from a specifier's own
         // bytes or a namespace-import name — right wherever it lands.
         || b === '(bare-type)' || b === '(module)'
+        // A hyphenated name is ONE author word that the probe's word
+        // boundaries cut into segments; each segment asks about the
+        // whole, so the answer that spells it is right at every one.
+        || (b.includes('-') && b.split('-').includes(a))
         // `import.meta`'s member answers the lib's own ImportMeta,
         // and `.new` answers the constructor it invokes — both the
         // platform's own conventions. The constructor arrives in three

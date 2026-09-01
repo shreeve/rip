@@ -115,9 +115,9 @@
         "line": 28,
         "character": 8,
         "token": "value",
-        "expect": null,
-        "rule": "bind target (intrinsic)",
-        "why": "interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "expect": "(bind) value: string",
+        "rule": "bind target",
+        "why": "the `<=>` target is a channel word the census spends, so the answer comes from the compiler's record — an intrinsic bind reads the cell side, a component bind the minted props key's container, in one form for both; RULINGS: bind target"
       },
       {
         "line": 36,
@@ -235,17 +235,17 @@
         "line": 73,
         "character": 8,
         "token": "value",
-        "expect": null,
-        "rule": "bind target (component)",
-        "why": "interim silence, served — the minted `__bind_value__` slot no longer leaks"
+        "expect": "(bind) value: string",
+        "rule": "bind target",
+        "why": "the `<=>` target is a channel word the census spends, so the answer comes from the compiler's record — an intrinsic bind reads the cell side, a component bind the minted props key's container, in one form for both; RULINGS: bind target"
       },
       {
         "line": 73,
         "character": 18,
         "token": "text",
-        "expect": null,
-        "rule": "name in a bind",
-        "why": "VALUE-type target; interim silence, served — the bind cover's `__bind_value__` no longer leaks"
+        "expect": "(property) Panel.text: string",
+        "rule": "the name in a bind",
+        "why": "the author's own binding, value-first — the bind SHARES the container, but this position is the author's vocabulary and not a consumer's read of an instance; RULINGS: the name in a bind"
       },
       {
         "line": 78,
@@ -334,6 +334,22 @@
         "expect": "(property) Routed.user: { name: string; }",
         "rule": "gate target name",
         "why": "value-first, the annotated spelling — the author's own type, so the answer is the annotation back"
+      },
+      {
+        "line": 162,
+        "character": 6,
+        "token": "aria-busy",
+        "expect": "(attribute) aria-busy: string | number | boolean | undefined",
+        "rule": "attr name on an intrinsic (attribute road)",
+        "why": "the key’s face position is a string literal, so the answer comes from the compiler’s intrinsics record — the value type the instantiated setAttribute beside it admits; RULINGS: attr name on an intrinsic"
+      },
+      {
+        "line": 163,
+        "character": 6,
+        "token": "data-kind",
+        "expect": "(attribute) data-kind: string | number | boolean | undefined",
+        "rule": "attr name on an intrinsic (template key)",
+        "why": "a data-/aria- suffix rides the surface’s template row, and the served type is that row’s own; RULINGS: attr name on an intrinsic"
       },
       {
         "line": 182,
