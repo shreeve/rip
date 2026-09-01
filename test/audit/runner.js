@@ -4726,7 +4726,7 @@ if (RUN_SWEEP) {
     srow('diagnostics', counts['minted-in-diagnostic'] ?? 0, 'face spellings in published messages', true);
     srows.push(null);
     for (const g of organize(sw.gaugeRows)) srow(g.kind, g.count, g.note.split(';')[0], false);
-    out(`\n  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus, the position dimension closed; ${sw.answered} answer)`)}`);
+    out(`\n  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus's valid programs, the position dimension closed; ${sw.answered} answer)`)}`);
     const W = Math.max(...srows.filter(Boolean).map((s) => String(s.n).length));
     for (const s of srows) {
       if (!s) { console.log(''); continue; }

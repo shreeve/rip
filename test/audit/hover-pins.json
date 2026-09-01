@@ -608,5 +608,25 @@
         "why": "the lowering rewrites the meta-property away, so no face symbol stands at the word — the only available answer was the enclosing declaration through its cover, a wrong subject; RULINGS: the hover model"
       }
     ]
+  },
+  "06-loops.rip": {
+    "positions": [
+      {
+        "line": 85,
+        "character": 4,
+        "token": "mark",
+        "expect": "let mark: number",
+        "rule": "loop value binding",
+        "why": "the value name answers its own binding, the plain-answer rule for a loop variable"
+      },
+      {
+        "line": 85,
+        "character": 10,
+        "token": "k",
+        "expect": "let k: number",
+        "rule": "loop index binding",
+        "why": "the index name's declaring occurrence is a source variable and owns its own row in every for…in form, stepped or bare — so the word answers its own binding and never the loop's value variable"
+      }
+    ]
   }
 }

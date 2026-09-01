@@ -194,10 +194,14 @@ async function sweep(wsRoot, files) {
         // bytes or a namespace-import name — right wherever it lands.
         || b === '(bare-type)' || b === '(module)'
         // `import.meta`'s member answers the lib's own ImportMeta,
-        // and `new` answers the constructor it invokes — both the
-        // platform's own conventions.
+        // and `.new` answers the constructor it invokes — both the
+        // platform's own conventions. The constructor arrives in three
+        // spellings and all three are the same right answer: a bare
+        // construct signature, a GENERIC one carrying its type-parameter
+        // list between the keyword and the parameters, and tsgo's
+        // `constructor X(): X` head for a class.
         || (a === 'meta' && b === 'ImportMeta')
-        || (a === 'new' && flat.includes(': new ('))
+        || (a === 'new' && (/: new\s*[<(]/.test(flat) || flat.startsWith('constructor ')))
         // `::` lexes as the `prototype` property it means, and hover
         // there answering `.prototype` is the spelling's own truth.
         || (b === 'prototype' && text.slice(Math.max(0, p.off - 2), p.off + 2).includes('::'))
@@ -264,10 +268,17 @@ async function sweep(wsRoot, files) {
 // a direct `bun test/audit/sweep.js` run, where a class the corpus lacks shows up
 // first — and then earns a corpus fixture, which is where permanence
 // lives.
+// The population is every VALID corpus program — no working fixture sits
+// outside the net, so the position dimension's denominator is closed over
+// the programs the editor is meant to serve. The errors bucket stays out
+// on subject grounds, not on cost: those fixtures describe programs that
+// do not type, so an answer there is degraded by the program's own
+// unresolved symbols and a misdirection row would be evidence about the
+// error state rather than about the lowering.
 export const corpusSets = () => [
   {
     name: 'corpus', root: path.join(repoRoot, 'test/audit'),
-    files: fs.globSync('corpus/{grammar,claims}/*.rip', { cwd: path.join(repoRoot, 'test/audit') }).sort(),
+    files: fs.globSync('corpus/{grammar,claims,gradual}/*.rip', { cwd: path.join(repoRoot, 'test/audit') }).sort(),
   },
 ]
 export const defaultSets = () => [

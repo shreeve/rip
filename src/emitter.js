@@ -5596,7 +5596,11 @@ class Emitter {
           this.expr(iter);
           this.b.emit(', ');
         }
-        this.b.emit(`${vars[1]} = 0; ${vars[1]} < `);
+        // The index name's DECLARING occurrence is the source variable; every
+        // later `${vars[1]}` in the header is emitter arithmetic on that
+        // binding, not another read of the source.
+        markVar(vars[1]);
+        this.b.emit(` = 0; ${vars[1]} < `);
         if (it) this.b.emit(it); else this.expr(iter);
         this.b.emit(`.length; ${vars[1]}++) {\n`);
         this.b.emit('  '.repeat(ind + 1) + 'let ');
@@ -5929,7 +5933,10 @@ class Emitter {
         this.expr(iter);
         this.b.emit(', ');
       }
-      this.b.emit(`${vars[1]} = 0; ${vars[1]} < `);
+      // The index name's DECLARING occurrence is the source variable; every
+      // later `${vars[1]}` in the header is emitter arithmetic on that binding.
+      markVar(vars[1]);
+      this.b.emit(` = 0; ${vars[1]} < `);
       if (it) this.b.emit(it); else this.expr(iter);
       this.b.emit(`.length; ${vars[1]}++)`);
       setups.push(() => {

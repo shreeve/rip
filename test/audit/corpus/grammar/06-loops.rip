@@ -73,7 +73,7 @@ waves = loop 3
 
 console.log('loop:', spins, waves)
 
-# ── for…in over arrays: plain, guard, step, and the two guard/step orders ──
+# ── for…in over arrays: plain, guard, step, the bare index, and the two guard/step orders ──
 
 scores = [3, 8, 5, 9]
 for score in scores
@@ -82,6 +82,8 @@ for score in scores when score > 4
   console.log('high:', score)
 for even in scores by 2
   console.log('stepped:', even)
+for mark, k in scores
+  console.log('index:', mark, k)
 for late, i in scores when i > 1 by 2
   console.log('late:', late, i)
 for peak, j in scores by 2 when peak > 4
