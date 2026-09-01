@@ -803,24 +803,40 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
 export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null) {
   const spans = [];
   const comments = trivia.filter((t) => t.kind === 'comment');
-  let prevWord = null;
+  let prevWord = null, prevPrev = null;
   for (const t of tokens) {
     if (typeof t.start !== 'number' || t.start === t.end) { continue; }
     if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY'
         || (t.kind === 'STRING' && (prevWord === 'FROM' || prevWord === 'IMPORT'))) {
-      spans.push([t.start, t.end]);
+      // `new.target`'s member is the meta-property's second half: the
+      // lowering rewrites the construct away, so no face symbol stands
+      // at the word — a hover could only answer through the enclosing
+      // declaration's cover, about something the word never named. It
+      // declines instead.
+      if (!(t.kind === 'PROPERTY' && prevWord === '.' && prevPrev === 'NEW_TARGET')) {
+        spans.push([t.start, t.end]);
+      }
     } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL') && source !== null) {
       // An annotation or a type/interface DECLARATION is one opaque
       // token; its WORDS answer (tsgo resolves the names) while its
       // punctuation, spaces, and quote bytes decline like everyone
       // else's. The words come off the SOURCE slice — the token's
       // value normalizes spelling and may not cover the span — and a
-      // word inside a comment the body carries stays declined.
-      for (const m of source.slice(t.start, t.end).matchAll(/[A-Za-z_$][\w$]*/g)) {
-        const a = t.start + m.index, b = t.start + m.index + m[0].length;
-        if (!comments.some((c) => a < c.end && b > c.start)) spans.push([a, b]);
+      // word inside a comment the body carries stays declined. So does
+      // a word inside a quoted literal ('primary' in a union): a
+      // literal is a value, not a symbol, and its only answer would be
+      // an echo of the bytes under the cursor.
+      const slice = source.slice(t.start, t.end);
+      const veiled = [...comments.map((c) => [c.start - t.start, c.end - t.start])];
+      for (const q of slice.matchAll(/'[^'\n]*'|"[^"\n]*"/g)) {
+        veiled.push([q.index, q.index + q[0].length]);
+      }
+      for (const m of slice.matchAll(/[A-Za-z_$][\w$]*/g)) {
+        const a = m.index, b = m.index + m[0].length;
+        if (!veiled.some(([s, e]) => a < e && b > s)) spans.push([t.start + a, t.start + b]);
       }
     }
+    prevPrev = prevWord;
     prevWord = t.kind;
   }
   return spans.sort((a, b) => a[0] - b[0]);

@@ -64,9 +64,29 @@
       {
         "name": "Held",
         "expect": "let Held: typeof Held"
+      },
+      {
+        "name": "Teaser",
+        "expect": "let Teaser: typeof Teaser"
+      },
+      {
+        "name": "Anchor",
+        "expect": "component Anchor extends a props: { label: string }"
+      },
+      {
+        "name": "Gauge",
+        "expect": "let Gauge: typeof Gauge"
       }
     ],
     "positions": [
+      {
+        "line": 8,
+        "character": 11,
+        "token": "info",
+        "expect": null,
+        "rule": "annotation literal",
+        "why": "a quoted literal inside a type annotation declines with the other string interiors — a literal is a value, not a symbol, and the only answer would echo the bytes under the cursor; RULINGS: the hover model"
+      },
       {
         "line": 10,
         "character": 2,
@@ -314,6 +334,14 @@
         "expect": "(property) Routed.user: { name: string; }",
         "rule": "gate target name",
         "why": "value-first, the annotated spelling — the author's own type, so the answer is the annotation back"
+      },
+      {
+        "line": 182,
+        "character": 13,
+        "token": "number",
+        "expect": null,
+        "rule": "aligned annotation type word",
+        "why": "the padded word maps through the builder's layout-twin segments to the face's own `number` keyword, which has no symbol to describe — so it declines; before the segments it fell to the member cover and answered the container's value slot"
       }
     ]
   },
@@ -566,6 +594,18 @@
       {
         "name": "parcel",
         "expect": "let parcel: Parcel"
+      }
+    ]
+  },
+  "04-assignments.rip": {
+    "positions": [
+      {
+        "line": 163,
+        "character": 19,
+        "token": "target",
+        "expect": null,
+        "rule": "new.target member",
+        "why": "the lowering rewrites the meta-property away, so no face symbol stands at the word — the only available answer was the enclosing declaration through its cover, a wrong subject; RULINGS: the hover model"
       }
     ]
   }

@@ -229,24 +229,64 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
         "      p 'hello world'",                  // 6
         '      Button label: 42',                 // 7 (the 42 draws its own diagnostic; positions still answer)
         '',
+        "make = -> new.target?.name ?? 'plain'",  // 9
+        '',
       ].join('\n');
       const btn = [
         'export Button = component',
         '  @label: string',
+        "  @size?: 'big' | 'small' := 'big'",
+        '  chosenEl:   HTMLElement | null := null',
         '  render',
         '    button @label.value',
         '',
       ].join('\n');
       await api.open('button.rip', btn);
       await api.open('panel.rip', src);
+      expect(await api.hover('button.rip', 2, 12)).toBeNull();        // annotation literal `big` — a value, not a symbol
+      // An ALIGNED annotation (padding after the colon) answers the
+      // type itself — the builder's layout-twin segments keep the word
+      // exact-mapped, never falling to the member container's slot.
+      const aligned = await api.hover('button.rip', 3, 16);           // `HTMLElement` behind the padding
+      expect(aligned?.contents?.value).toContain('interface HTMLElement');
+      expect(aligned?.contents?.value).not.toContain('(property) value');
       expect(await api.hover('panel.rip', 1, 6)).toBeNull();          // comment word `note`
       expect(await api.hover('panel.rip', 5, 4)).toBeNull();          // the `if` keyword
       expect(await api.hover('panel.rip', 6, 10)).toBeNull();         // string interior `hello`
       expect(await api.hover('panel.rip', 7, 20)).toBeNull();         // the number 42
+      expect(await api.hover('panel.rip', 9, 16)).toBeNull();         // `target` in new.target — the meta-property declines
       const typeWord = await api.hover('panel.rip', 3, 8);            // `HTMLInputElement` in the annotation
       expect(typeWord?.contents?.value).toContain('HTMLInputElement');
       const spec = await api.hover('panel.rip', 0, 28);               // inside the specifier
       expect(spec?.contents?.value).toContain('button.rip');
+    });
+  });
+
+  test('hover: a forward-used extends component presents at its own declaration', async () => {
+    // A use ABOVE the declaration makes tsgo print the RESOLVED
+    // construct at the decl site instead of `typeof Name` — every
+    // intrinsic passthrough row of the extends tag, far past tsgo's
+    // default hover cap. The broker floors `maximumHoverLength` so the
+    // whole construct arrives and the signature presenter fires; a
+    // truncated construct would pass its raw machinery to the user.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Teaser = component',           // 0
+        '  render',                     // 1
+        "    Anchor label: 'ahead'",    // 2
+        '',
+        'Anchor = component extends a', // 4
+        '  @label: string',             // 5
+        '  render',                     // 6
+        '    a label',                  // 7
+        '',
+      ].join('\n');
+      await api.open('nav.rip', src);
+      const decl = await api.hover('nav.rip', 4, 0);
+      expect(decl?.contents?.value).toContain('```rip\ncomponent Anchor extends a');
+      expect(decl?.contents?.value).toContain('label: string');
+      expect(decl?.contents?.value).not.toContain('__bind_');
+      expect(decl?.contents?.value).not.toContain('HTMLElementTagNameMap["a"] extends');
     });
   });
 

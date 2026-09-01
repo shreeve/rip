@@ -589,9 +589,30 @@ function tsgoDiagnosticRefreshRequest() {
 // parity — VS Code ships the typescript.* contributions regardless of
 // our extension); a client without configuration support answers null
 // per item, which leaves tsgo's own defaults in charge.
+// tsgo truncates quickinfo at `js/ts.hover.maximumLength` (default
+// 5000), and a component's lowered construct type — every intrinsic
+// passthrough row of an `extends <tag>` — can exceed that. A truncated
+// construct loses the tail the signature presenter keys on, so the raw
+// machinery would pass through to the user. The broker floors the
+// preference high enough that whole constructs always arrive; the
+// presenter collapses them to a few lines, and a user's LARGER setting
+// still wins.
+const HOVER_LENGTH_FLOOR = 262144;
+function floorHoverLength(items, answers) {
+  return answers.map((answer, i) => {
+    // The preference has no VS Code config path — tsgo reads it from a
+    // section's `unstable` blob (raw-name lookup), and `js/ts` is the
+    // last section in its precedence order.
+    if (items[i]?.section !== 'js/ts') return answer;
+    const given = answer?.unstable?.maximumHoverLength;
+    if (typeof given === 'number' && given >= HOVER_LENGTH_FLOOR) return answer;
+    return { ...(answer ?? {}), unstable: { ...(answer?.unstable ?? {}), maximumHoverLength: HOVER_LENGTH_FLOOR } };
+  });
+}
+
 async function tsgoConfigurationRequest(params) {
   const items = params?.items ?? [];
-  if (!clientSupportsConfiguration) return items.map(() => null);
+  if (!clientSupportsConfiguration) return floorHoverLength(items, items.map(() => null));
   // The handshake window: tsgo boots INSIDE this server's own
   // initialize handler and asks for configuration immediately, but the
   // editor's languageclient installs its workspace/configuration
@@ -600,17 +621,18 @@ async function tsgoConfigurationRequest(params) {
   // nulls directly (its own defaults, the same answer the bounce
   // produced), and save the forward — and the failure log — for
   // requests the editor can actually serve.
-  if (!clientInitialized) return items.map(() => null);
+  if (!clientInitialized) return floorHoverLength(items, items.map(() => null));
   try {
-    return await connection.workspace.getConfiguration(
+    const answers = await connection.workspace.getConfiguration(
       items.map((item) => ({
         ...(item.section !== undefined ? { section: item.section } : {}),
         ...(item.scopeUri !== undefined ? { scopeUri: item.scopeUri } : {}),
       })),
     );
+    return floorHoverLength(items, answers);
   } catch (err) {
     connection.console.log(`[rip] configuration forward failed: ${err.message}`);
-    return items.map(() => null);
+    return floorHoverLength(items, items.map(() => null));
   }
 }
 

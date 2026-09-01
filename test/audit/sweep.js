@@ -61,7 +61,8 @@ function subjectOf(flat) {
   if (/^(?:\(alias\) )?module "/.test(flat)) return '(module)'
   if ((m = /^(?:\(alias\) )*(?:export )?(?:type|interface|class|enum|namespace) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if (/^(?:any|unknown|never|string|number|boolean|null|undefined|void)\b/.test(flat) && !flat.includes(':')) return '(bare-type)'
-  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|local class|local function)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
+  if (flat === 'this') return 'this'
+  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
   if (head !== null) {
     // Walk a dotted name whose segments may carry generic argument
     // lists: `Array<Pick<…>>.slice` names `slice`.
@@ -313,7 +314,7 @@ export const KIND_NOTES = {
   'cover-this': 'the bare `this: this` cover answer — same doctrine, receiver shape',
   'minted-in-diagnostic': 'a face spelling in a published diagnostic message',
   'range': 'the hover\'s own range spans 3+ lines — the whole-construct highlight; drains when the range clamps to the word',
-  'subject': 'the answer is about a DIFFERENT symbol than the word under the cursor — mostly literal interiors; drains with the decline-inside-literals rule (annotation literals may earn a served answer instead — a ruling)',
+  'subject': 'the answer is about a DIFFERENT symbol than the word under the cursor — a cover landing; literal interiors and new.target decline by ruling, so any row here is new',
   'keyword-cover': 'a rip structure word answering about a neighbor; drains with the keyword-decline rule (`def` answering its own declaration may be kept deliberately)',
   'comment-cover': 'a word inside a `#` comment answering a neighboring symbol; one comment-decline rule drains the whole class',
   'unparsed-head': 'the classifier could not name the answer\'s subject — a triage bucket; most rows resolve by teaching the classifier the head form, not by fixing the editor',

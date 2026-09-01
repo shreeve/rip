@@ -265,6 +265,12 @@ const CLM = path.join(CORPUS, 'claims');
 // nothing in errors/ can join another audit's denominator, and
 // tsconfig.json excludes it from the twin type-check.
 const ERRD = path.join(CORPUS, 'errors');
+// Fixture listings must reject non-files: opening a fixture in the
+// editor drops the live server's face mirror — a DIRECTORY named
+// `.rip` — into the bucket, and a bare endsWith('.rip') would read it.
+const ripFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.rip'))
+  .map((e) => e.name);
 // The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
 // re-pin exists; the run prints paste-ready rows for divergences and
 // unpinned symbols). Two sections per fixture, one discipline — reviewed
@@ -800,7 +806,7 @@ function dimTwin(twinBase, byFile) {
 const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
-  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(dir, f));
   const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
   tscfg.include = ['.'];   // the fixtures are flat here, not under corpus/
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
@@ -1083,7 +1089,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
+    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
     // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -1942,8 +1948,8 @@ function mappingScan(src, code, mappings, vocabulary = []) {
 // identically (the buckets differ only in which instrument justifies a
 // fixture's existence — judged in the grammar audit). Basenames must be
 // unique across buckets: twins, pins, and CLAIMS carriers all key on them.
-const grammarFixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
-const claimsFixtures = fs.existsSync(CLM) ? fs.readdirSync(CLM).filter((f) => f.endsWith('.rip')).sort() : [];
+const grammarFixtures = ripFilesIn(FIX).sort();
+const claimsFixtures = fs.existsSync(CLM) ? ripFilesIn(CLM).sort() : [];
 {
   const dup = grammarFixtures.filter((f) => claimsFixtures.includes(f));
   if (dup.length) {
@@ -1972,7 +1978,7 @@ const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
 }
 // The Diagnostics Audit's fixtures, listed here beside the flat walk so the
 // pool below can size itself to the lane's workload.
-const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
+const errorFixtures = fs.existsSync(ERRD) ? ripFilesIn(ERRD).sort() : [];
 // ── shared presentation helpers
 const useColor = Bun.enableANSIColors;
 const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -2764,11 +2770,10 @@ if (RUN_GRAMMAR) {
     // exactly the workaround notes a reader cannot reconstruct from the code.
     // Reported every run, because a header reaching eighteen lines unnoticed
     // is what this measures.
-    const commentFiles = [
-      ...fs.readdirSync(FIX).map((f) => [FIX, f]),
-      ...fs.readdirSync(CLM).map((f) => [CLM, f]),
-      ...fs.readdirSync(ERRD).map((f) => [ERRD, f]),
-    ].filter(([, f]) => /\.(rip|ts|tsx)$/.test(f));
+    const commentFiles = [FIX, CLM, ERRD]
+      .flatMap((d) => fs.readdirSync(d, { withFileTypes: true })
+        .filter((e) => e.isFile() && /\.(rip|ts|tsx)$/.test(e.name))
+        .map((e) => [d, e.name]));
     const splitDividers = [];
     // A rip line opening `#` is not necessarily a comment: `#{…}` is string
     // interpolation, and inside a heredoc or heregex a `#` line is content
@@ -4743,13 +4748,14 @@ if (RUN_SWEEP) {
       out(`        ${dim(pad('hover', 6))} ${dim(f.text.length > room ? f.text.slice(0, room) + '…' : f.text)}`);
     }
   }
-  // The gauge subsections are the pre-PR worklist and print under -v,
-  // where every other lane's full listings live — the default view is
-  // a status, not a scroll. The chatty classes roll up per file+line:
-  // their unit of fixing is one rule, so the useful map is WHERE. The
-  // rest group positions under each distinct answer.
+  // The gauge subsections hold whatever misdirection rows exist —
+  // expected empty, since every known class declines by ruling — and
+  // print under -v, where every other lane's full listings live; the
+  // default view is a status, not a scroll. The chatty classes roll up
+  // per file+line: their unit of fixing is one rule, so the useful map
+  // is WHERE. The rest group positions under each distinct answer.
   if (!VERBOSE && sw.gaugeRows.length) {
-    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — the pre-PR worklist; -v prints every one, per class`)}`);
+    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — misdirected answers to rule or fix; -v prints every one, per class`)}`);
   }
   for (const g of VERBOSE ? organize(sw.gaugeRows) : []) {
     out(`\n    ${bold(g.kind)} ${dim(`(${g.count} — ${g.note})`)}`);
@@ -4967,7 +4973,9 @@ if (tk) {
 if (sw) {
   totalLine('Sweep', `${sw.answered} answers over ${sw.probes} positions: `
     + (sw.machinery === 0 ? green('no machinery-shaped answer anywhere') : red(`${sw.machinery} machinery-shaped answer${sw.machinery === 1 ? '' : 's'}`))
-    + dim(' · misdirection classes stay gauges until the decline work drains them'));
+    + (sw.gaugeRows.length === 0
+      ? dim(' · no misdirected answer either — every position answers its own symbol or declines')
+      : dim(` · ${sw.gaugeRows.length} misdirection row${sw.gaugeRows.length === 1 ? '' : 's'} on the gauges`)));
 }
 
 // ── what this run did NOT cover. The default runs one of the audits, so say

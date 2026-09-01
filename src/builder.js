@@ -160,6 +160,9 @@ export class CodeBuilder {
     let { mappingKind } = f;
     if (mappingKind === null) {
       mappingKind = this.matchesSource(f) ? 'exact' : 'cover';
+      if (mappingKind === 'cover' && CodeBuilder.NORMALIZED_ROLES.has(f.role)) {
+        this.layoutTwinSegments(f);
+      }
     }
     this.rows.push({
       nodeId: f.nodeId, role: f.role, mappingKind,
@@ -169,6 +172,53 @@ export class CodeBuilder {
     });
     if (this.trackPrimitives && mappingKind === 'exact') {
       this.exactSourceSpans.add(`${f.sourceStart}:${f.sourceEnd}`);
+    }
+  }
+
+  // The roles whose emission NORMALIZES whitespace by design (the face
+  // renders annotation text through normalizeTypeText), so an author's
+  // aligned spelling demotes the frame to a cover on whitespace alone.
+  // Only these frames attempt layout-twin segmentation: a JS-face
+  // multiline cover is also a whitespace twin of its emission, but
+  // segmenting it would ripple into every sourcemap for no reader gain.
+  static NORMALIZED_ROLES = new Set(['annotation', 'returnType']);
+
+  // A LAYOUT TWIN: the face renders annotation text with normalized
+  // spacing, so an author's ALIGNED annotation (`menuRef:    HTMLElement`)
+  // demotes its role frame to a cover on whitespace alone — and every
+  // identifier read inside it would lose its exact row, resolving only
+  // while a downstream tolerance holds. When such a frame's source and
+  // emission differ ONLY in whitespace-run lengths, each non-space
+  // segment is verbatim by construction and earns its own exact row,
+  // so reads inside the frame stay census-clean. The size gate keeps
+  // the join off big covers, which are never layout twins.
+  layoutTwinSegments(f) {
+    if (this.source === null) return;
+    const srcLen = f.sourceEnd - f.sourceStart;
+    const genLen = this.length - f.generatedStart;
+    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256) return;
+    const src = this.source.slice(f.sourceStart, f.sourceEnd);
+    const gen = this.chunks.slice(f.chunkStart).join('');
+    if (src.replace(/\s+/g, ' ') !== gen.replace(/\s+/g, ' ')) return;
+    let si = 0, gi = 0;
+    while (si < src.length && gi < gen.length) {
+      if (/\s/.test(src[si])) {
+        while (si < src.length && /\s/.test(src[si])) si++;
+        while (gi < gen.length && /\s/.test(gen[gi])) gi++;
+        continue;
+      }
+      let len = 0;
+      while (si + len < src.length && !/\s/.test(src[si + len])) len++;
+      this.rows.push({
+        nodeId: f.nodeId, role: f.role, mappingKind: 'exact',
+        sourceStart: f.sourceStart + si, sourceEnd: f.sourceStart + si + len,
+        generatedStart: f.generatedStart + gi, generatedEnd: f.generatedStart + gi + len,
+        fileId: 0,
+      });
+      if (this.trackPrimitives) {
+        this.exactSourceSpans.add(`${f.sourceStart + si}:${f.sourceStart + si + len}`);
+      }
+      si += len; gi += len;
     }
   }
 

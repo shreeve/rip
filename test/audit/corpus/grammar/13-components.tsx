@@ -144,6 +144,34 @@ function Held() {
   )
 }
 
+// ── forward use: a component referenced above its own declaration ──
+
+function Teaser() {
+  return (
+    <Anchor label='ahead' />
+  )
+}
+
+type AnchorProps = ComponentProps<'a'> & {
+  label: string
+}
+
+function Anchor({ label, ...props }: AnchorProps) {
+  return (
+    <a {...props}>{label}</a>
+  )
+}
+
+// ── aligned annotations: padding between the colon and the type ──
+
+function Gauge() {
+  const needleRef = useRef<HTMLDivElement | null>(null)
+  let scale = 10
+  return (
+    <div ref={needleRef}>gauge {scale}</div>
+  )
+}
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
 console.log('rip-native constructs:', true, true, true)

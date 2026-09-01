@@ -163,6 +163,29 @@ Held = component
       data-kind: 'row'
       'held'
 
+# ── forward use: a component referenced above its own declaration ──
+
+Teaser = component
+  render
+    Anchor label: 'ahead'
+
+Anchor = component extends a
+  @label: string
+
+  render
+    a label
+
+# ── aligned annotations: padding between the colon and the type ──
+
+Gauge = component
+  needleRef: HTMLDivElement | null := null
+  scale:     number := 10
+
+  render
+    div
+      ref: needleRef
+      "gauge #{scale}"
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
 console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))
