@@ -38,6 +38,33 @@ export const fileDB = (path) => {
         save(state)
         throw new Error('FAIL_NOW tripped')
       }
+      // The lease lock: acquire answers with a row when taken and zero
+      // rows when a live lease holds it — never a constraint error.
+      if (sql.startsWith('INSERT INTO schema (version, name, applied_at)')) {
+        if (state.lock) {
+          save(state)
+          return { columns: [{ name: 'version' }], data: [], rowCount: 0 }
+        }
+        state.lock = { owner: params[1], at: Date.now() }
+        save(state)
+        return { columns: [{ name: 'version' }], data: [['@lock']], rowCount: 1 }
+      }
+      if (sql.startsWith('UPDATE schema SET applied_at = now()')) {
+        const renewed = state.lock && state.lock.owner === params[1]
+        if (renewed) state.lock.at = Date.now()
+        save(state)
+        return { columns: [{ name: 'version' }], data: renewed ? [['@lock']] : [], rowCount: renewed ? 1 : 0 }
+      }
+      if (sql.startsWith('SELECT name AS owner')) {
+        const rows = state.lock ? [[state.lock.owner, null, (Date.now() - state.lock.at) / 1000]] : []
+        save(state)
+        return { columns: ['owner', 'applied_at', 'age_seconds'].map((name) => ({ name })), data: rows, rowCount: rows.length }
+      }
+      if (sql.startsWith('DELETE FROM schema') && params[0] === '@lock') {
+        delete state.lock
+        save(state)
+        return { columns: [], data: [], rowCount: 0 }
+      }
       if (sql.startsWith('INSERT INTO schema (version, name, checksum)')) {
         state.history.push({ version: params[0], name: params[1], checksum: params[2] })
       }

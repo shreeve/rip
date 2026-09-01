@@ -2115,7 +2115,10 @@ p "\nMigrate — harbor double and runner"
 
 harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } = {}) ->
   history = []
-  lock = { held: lockHeld }
+  # A pre-held lock is a LIVE lease from some other runner: lease-tagged
+  # owner, renewed seconds ago, so migrate must refuse rather than take
+  # over.
+  lock = { held: lockHeld, owner: 'rip2 host=elsewhere pid=4242 run=cafebabe', ageSeconds: 5 }
   res = (names, rows) -> { ok: true, columns: names.map((name) -> { name, duckdbType: 'VARCHAR' }), data: rows, rowCount: rows.length }
   ack = { ok: true, columns: [], data: [], rowCount: 0 }
 
@@ -2151,11 +2154,21 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
     if sql.startsWith('DELETE FROM schema') and params?[0] is '@lock'
       lock.held = false
       return ack
-    if sql.startsWith('INSERT INTO schema (version, name) VALUES') and params?[0] is '@lock'
+    # The lease acquire is ONE statement whose row count settles all
+    # three cases: acquired (row back), taken over (row back), or a live
+    # lease elsewhere (zero rows) — never a constraint error.
+    if sql.startsWith('INSERT INTO schema (version, name, applied_at)') and params?[0] is '@lock'
       if lock.held
-        return { ok: false, error: 'Duplicate key "version: @lock" violates primary key constraint', errorCode: 'CONSTRAINT' }
+        return res ['version'], []
       lock.held = true
-      return ack
+      lock.owner = params[1]
+      return res ['version'], [['@lock']]
+    if sql.startsWith('UPDATE schema SET applied_at = now()') and params?[0] is '@lock'
+      renewed = lock.held and lock.owner is params[1]
+      return res ['version'], (if renewed then [['@lock']] else [])
+    if sql.startsWith('SELECT name AS owner') and params?[0] is '@lock'
+      rows = if lock.held then [[lock.owner, null, lock.ageSeconds]] else []
+      return res ['owner', 'applied_at', 'age_seconds'], rows
     if sql.startsWith 'SELECT version'
       return res ['version', 'name', 'checksum', 'applied_at'], history.map (h) -> [h.version, h.name, h.checksum, null]
     if sql.startsWith 'INSERT INTO schema (version, name, checksum)'
@@ -2244,7 +2257,7 @@ test! "a pending file is applied in one session with history row, then lock rele
   ok fetch.calls.some (c) -> c.sql is 'COMMIT' and c.sessionId is 'sess-1'
   ok fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith '/sql/sessions/sess-1'
   eq fetch.history.map((h) -> h.version), ['0001']
-  ok fetch.calls.some (c) -> c.sql?.startsWith('INSERT INTO schema (version, name) VALUES') and c.params?[0] is '@lock'
+  ok fetch.calls.some (c) -> c.sql?.startsWith('INSERT INTO schema (version, name, applied_at)') and c.params?[0] is '@lock'
   eq fetch.lock.held, false
 
 test! "a failing statement rolls back, drops session, records no history", ->

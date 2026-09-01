@@ -99,6 +99,24 @@ export function fileDB(path) {
           throw new Error('Duplicate key "version: ' + params[0] + '" violates primary key constraint');
         }
         s.history.push({ version: params[0], name: params[1], checksum: params[2] });
+      } else if (sql.startsWith('INSERT INTO schema (version, name, applied_at)')) {
+        // The lease acquire: a row back means acquired, zero rows means
+        // a live lease elsewhere — never a constraint error.
+        if (s.lock) {
+          out = { columns: [{ name: 'version' }], data: [], rowCount: 0 };
+        } else {
+          s.lock = { owner: params[1], at: Date.now() };
+          out = { columns: [{ name: 'version' }], data: [['@lock']], rowCount: 1 };
+        }
+      } else if (sql.startsWith('UPDATE schema SET applied_at = now()')) {
+        const renewed = s.lock && s.lock.owner === params[1];
+        if (renewed) s.lock.at = Date.now();
+        out = { columns: [{ name: 'version' }], data: renewed ? [['@lock']] : [], rowCount: renewed ? 1 : 0 };
+      } else if (sql.startsWith('SELECT name AS owner')) {
+        const rows = s.lock ? [[s.lock.owner, null, (Date.now() - s.lock.at) / 1000]] : [];
+        out = { columns: ['owner', 'applied_at', 'age_seconds'].map((name) => ({ name })), data: rows, rowCount: rows.length };
+      } else if (sql.startsWith('DELETE FROM schema') && params[0] === '@lock') {
+        delete s.lock;
       } else if (sql.startsWith('UPDATE schema')) {
         const h = s.history.find((x) => x.version === params[1]);
         if (h) h.checksum = params[0];
@@ -125,7 +143,7 @@ export Order = schema :model
 const dbState = () => JSON.parse(readFileSync(join(dir, 'db.json'), 'utf8'));
 
 describe('rip schema: usage surface', () => {
-  test('help exits 0; unknown verb, unknown flag, missing make name, and misplaced flags exit 2', () => {
+  test('help exits 0; unknown verb, unknown flag, and misplaced flags exit 2', () => {
     const help = rip(['schema', '--help']);
     expect(help.status).toBe(0);
     expect(help.stdout).toContain('rip schema status');
@@ -139,17 +157,20 @@ describe('rip schema: usage surface', () => {
     expect(flag.status).toBe(2);
     expect(flag.stderr).toContain('unknown flag: --definitely-bogus');
 
-    const noName = rip(['schema', 'make']);
-    expect(noName.status).toBe(2);
-    expect(noName.stderr).toContain('a migration name is required');
-
     const misplaced = rip(['schema', 'plan', '--repair']);
     expect(misplaced.status).toBe(2);
     expect(misplaced.stderr).toContain('--repair only applies to migrate');
 
+    // migrate lost --force to the lease: the refusal explains that a
+    // crashed run's lock expires on its own, and points at unlock.
+    const forceMigrate = rip(['schema', 'migrate', '--force']);
+    expect(forceMigrate.status).toBe(2);
+    expect(forceMigrate.stderr).toContain('migrate no longer takes --force');
+    expect(forceMigrate.stderr).toContain('rip schema unlock --force');
+
     const forceMisplaced = rip(['schema', 'status', '--force']);
     expect(forceMisplaced.status).toBe(2);
-    expect(forceMisplaced.stderr).toContain('--force only applies to migrate');
+    expect(forceMisplaced.stderr).toContain('--force only applies to unlock');
     expect(help.stdout).toContain('--force'); // documented in the usage
   });
 
@@ -214,7 +235,11 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(r.stdout).toContain('2 safe');
   });
 
-  test('make writes the numbered file; migrate applies it with the non-transactional posture warning; a second migrate is idempotent; status reports', () => {
+  // The made file is named by the UTC clock, so later tests in this
+  // sequence learn its version from make's own output.
+  let initVersion;
+
+  test('make writes the timestamped file; migrate applies it with the non-transactional posture warning; a second migrate is idempotent; status reports', () => {
     write('filedb.js', FILEDB);
     write('models.rip', MODELS);
     rmSync(join(dir, 'db.json'), { force: true });
@@ -222,17 +247,19 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
 
     const make = rip(['schema', 'make', 'init', 'models.rip']);
     expect(make.status).toBe(0);
-    expect(make.stdout).toContain('wrote ' + join('migrations', '0001_init.sql'));
-    const body = readFileSync(join(dir, 'migrations/0001_init.sql'), 'utf8');
+    const wrote = make.stdout.match(/wrote migrations[\/\\](\d{14})_init\.sql/);
+    expect(wrote).not.toBeNull();
+    initVersion = wrote[1];
+    const body = readFileSync(join(dir, 'migrations', initVersion + '_init.sql'), 'utf8');
     expect(body).toContain('-- [safe] create-table users');
     expect(body).toContain('CREATE TABLE "users"');
 
     const migrate = rip(['schema', 'migrate', 'models.rip']);
     expect(migrate.status).toBe(0);
-    expect(migrate.stdout).toContain('applied 0001_init');
+    expect(migrate.stdout).toContain('applied ' + initVersion + '_init');
     expect(migrate.stderr).toContain('WITHOUT transactions'); // the loud posture (no begin())
     const state = dbState();
-    expect(state.history.map((h) => h.version)).toEqual(['0001']);
+    expect(state.history.map((h) => h.version)).toEqual([initVersion]);
     expect(state.log.some((s) => s.includes('CREATE TABLE "users"'))).toBe(true);
     expect(state.log.some((s) => s.includes('CREATE TABLE "orders"'))).toBe(true);
 
@@ -242,7 +269,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
 
     const status = rip(['schema', 'status', 'models.rip']);
     expect(status.status).toBe(0);
-    expect(status.stdout).toContain('applied:  0001_init');
+    expect(status.stdout).toContain('applied:  ' + initVersion + '_init');
     expect(status.stdout).toContain('pending:  (none)');
     // The fake DB never really creates tables, so the models still
     // diff against an empty deployed schema — the drift line proves
@@ -251,14 +278,14 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
   });
 
   test('checksum mismatch: status reports it, migrate refuses it, --repair re-records', () => {
-    // Continues from the applied 0001_init above.
-    appendFileSync(join(dir, 'migrations/0001_init.sql'), '\n-- edited after apply\n');
+    // Continues from the applied init above.
+    appendFileSync(join(dir, 'migrations', initVersion + '_init.sql'), '\n-- edited after apply\n');
     const status = rip(['schema', 'status', 'models.rip']);
-    expect(status.stdout).toContain('edited after apply: 0001_init');
+    expect(status.stdout).toContain('edited after apply: ' + initVersion + '_init');
 
     const refuse = rip(['schema', 'migrate', 'models.rip']);
     expect(refuse.status).toBe(1);
-    expect(refuse.stderr).toContain('checksum mismatch on applied migration 0001_init');
+    expect(refuse.stderr).toContain('checksum mismatch on applied migration ' + initVersion + '_init');
     expect(refuse.stderr).toContain('--repair');
 
     const repair = rip(['schema', 'migrate', '--repair', 'models.rip']);
@@ -269,23 +296,24 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
   });
 
   test('an interrupted run: the failure names the file, the statement, and the partial state; conflicting versions refuse upfront', () => {
-    // Continues from the repaired state above.
-    write('migrations/0002_bad.sql', 'CREATE TABLE extras (x INTEGER);\nSELECT FAIL_NOW;\nCREATE TABLE more (x INTEGER);\n');
+    // Continues from the repaired state above. A hand-written version
+    // stamped after the applied one, so it is plainly pending.
+    write('migrations/30000101000000_bad.sql', 'CREATE TABLE extras (x INTEGER);\nSELECT FAIL_NOW;\nCREATE TABLE more (x INTEGER);\n');
     const r = rip(['schema', 'migrate', 'models.rip']);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('0002_bad failed at statement 2 of 3');
+    expect(r.stderr).toContain('30000101000000_bad failed at statement 2 of 3');
     expect(r.stderr).toContain('Parser Error: FAIL_NOW tripped');
-    expect(r.stderr).toContain('statements 1-1 of 0002_bad ARE applied');
-    expect(dbState().history.map((h) => h.version)).toEqual(['0001']); // no row for the failed file
+    expect(r.stderr).toContain('statements 1-1 of 30000101000000_bad ARE applied');
+    expect(dbState().history.map((h) => h.version)).toEqual([initVersion]); // no row for the failed file
 
-    write('migrations/0002_other.sql', 'SELECT 1;\n');
+    write('migrations/30000101000000_other.sql', 'SELECT 1;\n');
     const dup = rip(['schema', 'migrate', 'models.rip']);
     expect(dup.status).toBe(1);
     expect(dup.stderr).toContain('conflicting migration files share a version number');
-    expect(dup.stderr).toContain('0002_bad');
-    expect(dup.stderr).toContain('0002_other');
-    rmSync(join(dir, 'migrations/0002_bad.sql'));
-    rmSync(join(dir, 'migrations/0002_other.sql'));
+    expect(dup.stderr).toContain('30000101000000_bad');
+    expect(dup.stderr).toContain('30000101000000_other');
+    rmSync(join(dir, 'migrations/30000101000000_bad.sql'));
+    rmSync(join(dir, 'migrations/30000101000000_other.sql'));
   });
 
   test('make gates: a destructive plan refuses without the flag and writes with it', () => {
@@ -330,8 +358,9 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
 
     const allow = rip(['schema', 'make', 'cleanup', 'gated.rip', '--dir', 'gated-migrations', '--allow-destructive']);
     expect(allow.status).toBe(0);
-    expect(allow.stdout).toContain('wrote ' + join('gated-migrations', '0001_cleanup.sql'));
-    const body = readFileSync(join(dir, 'gated-migrations/0001_cleanup.sql'), 'utf8');
+    const wrote = allow.stdout.match(/wrote gated-migrations[\/\\](\d{14}_cleanup\.sql)/);
+    expect(wrote).not.toBeNull();
+    const body = readFileSync(join(dir, 'gated-migrations', wrote[1]), 'utf8');
     expect(body).toContain('DROP TABLE "staging";');
   });
 
