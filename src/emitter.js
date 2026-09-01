@@ -1569,6 +1569,23 @@ class Emitter {
     return null;
   }
 
+  // Under `extends`, `rest` is provided, never declared: nothing above
+  // a read says the name exists, and only the member rewrite makes a
+  // bare `rest` reach the synthesized view. The sigil is its one
+  // spelling — `@rest` names what the runtime supplies, as `@app` and
+  // `@router` do. A local the author binds as `rest` is their own name
+  // and shadows the view (memberKindOf answers null there).
+  checkBareRest(node, name) {
+    if (name !== 'rest' || this.memberKindOf(name) !== 'rest') return;
+    const err = this.positionedError(node,
+      'emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@app` and `@router`');
+    if (typeof err.start !== 'number' && this.b.currentMark) {
+      err.start = this.b.currentMark.sourceStart;
+      err.end = this.b.currentMark.sourceEnd;
+    }
+    throw err;
+  }
+
   // Component-member write guards — called with an assignment/update
   // TARGET before emission. A readonly ('=!') member has no legal
   // write anywhere after _init, so the write rejects at the site; a
@@ -1578,6 +1595,7 @@ class Emitter {
     if (this.cframes.length === 0) return;
     let name = null, kind = null;
     if (typeof target === 'string') {
+      this.checkBareRest(node, target);
       name = target;
       kind = this.memberKindOf(target);
     } else if (isNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
@@ -7033,6 +7051,7 @@ class Emitter {
         const rewrite = this.bareRewrite(node);
         if (rewrite === 'reactive') return this.reactiveRead(node);
         if (rewrite === 'member') this.notePlainRenderRead(node);
+        if (rewrite !== null) this.checkBareRest(node, node);
         if (rewrite !== null) return this.memberRead(node, rewrite === 'member-reactive');
         // Inside a render factory, `this` (spelled bare or through
         // `@member` chains) is the ctx parameter — the factory methods

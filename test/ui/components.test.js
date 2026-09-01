@@ -623,6 +623,22 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component extends button\n  rest := 1\n  render\n    button "x"', /cannot declare a member named 'rest'/);
   });
 
+  test('an extends component reaches the rest view only as `@rest` — bare `rest` is provided, not declared', () => {
+    // A read in render, a read in a method, and a write: every bare
+    // spelling rejects, positioned, and names the sigil form.
+    emitFails('C = component extends button\n  render\n    button title: rest.class', /spell it `@rest`/);
+    emitFails('C = component extends button\n  go: -> p rest.class\n  render\n    button "x"', /spell it `@rest`/);
+    emitFails('C = component extends button\n  go: -> rest = 1\n  render\n    button "x"', /spell it `@rest`/);
+    // A local the author binds as `rest` is their own name: it shadows
+    // the view and stays bare.
+    const { code } = compile('C = component extends button\n  go: (rest) -> p rest\n  render\n    button "x"\n');
+    expect(code).toContain('p(rest)');
+    // Outside `extends` there is no view to reach: bare `rest` is an
+    // ordinary free name, untouched.
+    const plain = compile('C = component\n  go: -> p rest\n  render\n    div "x"\n');
+    expect(plain.code).toContain('p(rest)');
+  });
+
   test('render/offer/accept outside a component body reject with \'s rule', () => {
     emitFails('render\n  div.card\n    "x"', /render blocks can only be used inside a component/);
     emitFails('x = render div "hi"', /render blocks can only be used inside a component/);
