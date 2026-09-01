@@ -45,10 +45,10 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('declare const S: Schema<S, S>;');
   });
 
-  test(':shape with behavior — Data split; computed readonly, methods honest fallbacks', () => {
+  test(':shape with behavior — Data split; computed readonly, a method states its declared parameters', () => {
     const d = dts('A = schema :shape\n  street! string\n  full: ~> @street\n  label: (p) -> p\n  size: !> @street.length');
     expect(d).toContain('type AData = { street: string };');
-    expect(d).toContain('type A = AData & { size: unknown; readonly full: unknown; label: (...args: any[]) => unknown };');
+    expect(d).toContain('type A = AData & { size: unknown; readonly full: unknown; label: (p?: any) => unknown };');
     expect(d).toContain('declare const A: Schema<A, AData>;');
   });
 
@@ -251,7 +251,7 @@ describe('schema type story on the TS face', () => {
     expect(f.code).toContain('{tag: "hook", name: "beforeSave", fn: (function(this: M) {');
     expect(f.code).toContain('{tag: "computed", name: "slug", fn: (function(this: M) {');
     expect(f.code).toContain('{tag: "derived", name: "tag", fn: (function(this: M) {');
-    expect(f.code).toContain('{tag: "method", name: "greet", fn: (function(this: M, p) {');
+    expect(f.code).toContain('{tag: "method", name: "greet", fn: (function(this: M, p?) {');
     // query `this` for scope/defaultScope (the alias exists — a named scope does)
     expect(f.code).toContain('{tag: "scope", name: "live", fn: (function(this: MQuery) {');
     expect(f.code).toContain('{tag: "defaultScope", name: "defaultScope", fn: (function(this: MQuery) {');
@@ -282,7 +282,7 @@ describe('schema type story on the TS face', () => {
 
   test('a :shape callable gets the instance this too', () => {
     const f = face('A = schema :shape\n  street! string\n  label: (p) -> p + @street');
-    expect(f.code).toContain('fn: (function(this: A, p) {');
+    expect(f.code).toContain('fn: (function(this: A, p?) {');
   });
 
   test(':mixin bindings cast like every other kind — to what a mixin actually serves', () => {

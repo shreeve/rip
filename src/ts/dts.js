@@ -78,7 +78,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // names reject here; JS output never carries them.
   let schemaStory = null;
   try {
-    schemaStory = buildSchemaTypeStory(sexpr);
+    schemaStory = buildSchemaTypeStory(sexpr, source);
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;

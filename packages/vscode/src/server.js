@@ -3127,6 +3127,27 @@ connection.onHover(async (params) => {
         .map((arm) => /^\{ value: (.+?); read\(\)/.exec(arm.trim()))
         .find(Boolean);
       body = `(bind) ${intr.name}: ${scrubFaceArtifacts((cell ? cell[1] : head[1]).trim())}`;
+    } else if (intr.kind === 'schema') {
+      // A schema body's words are descriptor string literals in the face
+      // and carry no symbol, so each answers from its own member in the
+      // companion alias (RULINGS.md, Schema). A name row keeps tsgo's
+      // type and takes rip's word for the head — the body declared a
+      // field or a callable, never the `property` the alias spells. A
+      // type-slot row lands on an annotation already, so it passes
+      // through whatever that position answers.
+      const flat = scrubFaceArtifacts(await askAt(intr.gen));
+      if (flat === '') return null;
+      if (intr.label === null) { body = flat; }
+      else {
+        const esc = intr.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const head = new RegExp(`^\\(property\\) (?:.*?\\.)?${esc}\\??: ([^]+)$`).exec(flat);
+        if (head === null) return null;
+        // The `this` parameter is the lowering's own calling convention,
+        // not a parameter the author declared — it is spent making the
+        // body's `@name` reads resolve, so it never reaches the answer.
+        const type = head[1].trim().replace(/^\(this: [^,)]+(?:, )?/, '(');
+        body = `(${intr.label}) ${intr.name}${intr.optional ? '?' : ''}: ${type}`;
+      }
     } else {
       body = `ref — writes ${map}['${intr.tag}'] into ${intr.name}`;
     }

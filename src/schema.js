@@ -733,6 +733,13 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     fail(`array-of-literal-union is not supported — use 'string[]' for an array of strings`, typeFirst.start);
   }
 
+  // The type slot's own span, whatever spelling filled it — an
+  // identifier, a `~coercion`, a literal union, each with an optional
+  // `[]`. The editor answers a hover here from the companion member's
+  // annotation, so the span has to cover the whole slot the annotation
+  // stands for.
+  const typeSpan = typeConsumed ? [typeFirst.start, line[pos - 1].end] : null;
+
   // Trailers: `,`-separated parts, each self-identifying by head shape.
   let rest = line.slice(pos);
   if (typeConsumed && rest[0]?.kind === '->') {
@@ -885,7 +892,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     tag: 'field', name, modifiers, typeName, array,
     literals, coerce, coercer, constraints, transformTokens,
     unique: uniqueAttr, primary: primaryAttr, attrs,
-    start: first.start,
+    start: first.start, typeSpan,
     defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end],
   });
 }
@@ -1599,21 +1606,42 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   return { message, field, paramTokens, bodyTokens };
 }
 
-// Parameter names from a captured `(a, b)` slice. Each parameter is a
-// plain identifier, optionally typed (`other: Money`) — the annotation
-// is type-surface only and never reaches the emitted JS, exactly like
-// annotations everywhere else in the language.
-export function paramNamesOf(paramTokens, what, fail) {
+// Each parameter of a captured `(a, b)` slice: a plain identifier,
+// optionally typed (`other: Money`). The name is what the runtime
+// spelling emits; the annotation is type-surface only and never reaches
+// the emitted JS, exactly like annotations everywhere else in the
+// language, so it reaches the face as a spliced segment instead. Its
+// text is sliced from SOURCE rather than rebuilt from tokens, so
+// whatever shape the author spelled survives verbatim.
+export function paramsOf(paramTokens, what, fail, source = null) {
   if (!paramTokens.length) return [];
+  const params = paramsRaw(paramTokens, what, fail, source);
+  // JS ARITY, the same rule an ordinary function's parameters follow
+  // (emitParams): a TRAILING run of parameters the author never
+  // annotated is optional, because calling with fewer arguments is
+  // legal in rip as in JavaScript. A run stops at the first annotated
+  // parameter — TypeScript admits no required parameter after an
+  // optional one.
+  for (let i = params.length - 1; i >= 0 && params[i].type === null; i--) params[i].optional = true;
+  return params;
+}
+
+function paramsRaw(paramTokens, what, fail, source) {
+  const carries = (t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT';
   return splitTopLevelByComma(paramTokens).map((part) => {
-    const toks = part.filter((t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT' && t.kind !== 'TYPE');
+    const toks = part.filter((t) => carries(t) && t.kind !== 'TYPE');
     // A typed parameter's name arrives as PROPERTY (the lexer's
     // `word:` tagging) with the raw ':' following it.
     const typed = toks.length >= 3 && (toks[0].kind === 'IDENTIFIER' || toks[0].kind === 'PROPERTY') && toks[1].kind === ':';
     if (!typed && (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER')) {
       fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
     }
-    return toks[0].value;
+    // The span runs to the last token the PART carries, not the last
+    // the filter kept — a TYPE token inside the annotation is dropped
+    // from the scan but still occupies source.
+    const last = typed ? [...part].filter(carries).pop() : null;
+    const type = typed && source !== null ? source.slice(toks[1].end, last.end).trim() : null;
+    return { name: toks[0].value, type, optional: false };
   });
 }
 
@@ -1853,27 +1881,51 @@ export function behaviorObjectText(descriptor, name, fns, thisTypes) {
     if (fnCode === undefined) return;
     const thisType = thisTypes?.get(i) ?? null;
     let code = fnText(fnCode);
-    if (thisType !== null && typeof fnCode !== 'string') {
-      const { thisAt } = fnCode;
-      code = code.slice(0, thisAt) + `this: ${thisType}${code[thisAt] === ')' ? '' : ', '}` + code.slice(thisAt);
+    // The behavior object is a TS-only line whole, so the face-only
+    // annotations go in as plain text — spliced from the back so each
+    // recorded offset still addresses the code it was measured against.
+    for (const [at, text] of tsInserts(fnCode, thisType).reverse()) {
+      code = code.slice(0, at) + text + code.slice(at);
     }
     props.push(`${e.name}: ${code}`);
   });
   return props.length ? `const ${behaviorName(name)} = {${props.join(', ')}};` : null;
 }
 
-// A compiled callable's code, with the face-only `this: T` parameter
-// inserted at the recorded parameter-list offset when the entry
-// carries a `this` type.
-function fnSegments(fnCode, thisType, emit, emitTs) {
-  if (thisType === null || typeof fnCode === 'string') {
+// Every face-only annotation a compiled callable carries, as
+// [offset, text] into its own code, ascending: the `this` parameter its
+// calling convention gives it, and each parameter type the author
+// declared. Both are TypeScript the runtime spelling must not contain,
+// so they are recorded rather than emitted, and spliced by whichever
+// road can carry them.
+function tsInserts(fnCode, thisType, annots = true) {
+  if (typeof fnCode === 'string') return [];
+  const inserts = annots ? (fnCode.annots ?? []).map(([at, text]) => [at, text]) : [];
+  if (thisType !== null) {
+    const { code, thisAt } = fnCode;
+    inserts.push([thisAt, `this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`]);
+  }
+  return inserts.sort((a, b) => a[0] - b[0]);
+}
+
+// A compiled callable's code with its face-only annotations spliced in
+// as ts segments. Only the FACE produces them: `tsOnly` records a region
+// for the strip gate but still emits, so a segment produced on the JS
+// road would ship — the gate is a check on the face, not a filter.
+function fnSegments(fnCode, thisType, emit, emitTs, tsFace = false) {
+  const inserts = tsInserts(fnCode, thisType, tsFace);
+  if (inserts.length === 0) {
     emit(fnText(fnCode));
     return;
   }
-  const { code, thisAt } = fnCode;
-  emit(code.slice(0, thisAt));
-  emitTs(`this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`);
-  emit(code.slice(thisAt));
+  const { code } = fnCode;
+  let prev = 0;
+  for (const [at, text] of inserts) {
+    emit(code.slice(prev, at));
+    emitTs(text);
+    prev = at;
+  }
+  emit(code.slice(prev));
 }
 
 function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null) {
@@ -1885,7 +1937,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaul
     case 'scope':
     case 'defaultScope':
       emit(`{tag: ${JSON.stringify(e.tag)}, name: ${JSON.stringify(e.name)}, fn: `);
-      fnSegments(fnCode, thisType, emit, emitTs);
+      fnSegments(fnCode, thisType, emit, emitTs, tsFace);
       emit('}');
       return;
     default:

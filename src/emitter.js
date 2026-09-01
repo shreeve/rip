@@ -21,7 +21,7 @@
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
-import { descriptorSegments, behaviorObjectText, paramNamesOf, splitTopLevelByComma } from './schema.js';
+import { descriptorSegments, behaviorObjectText, paramsOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
@@ -4799,7 +4799,7 @@ class Emitter {
       }
       // Transforms see the whole raw input as the explicit `it`
       // parameter.
-      const params = Emitter.schemaBodyParams(e);
+      const params = this.schemaBodyParams(e);
       // `it` is the DSL's own word, not a name the author bound: the
       // grammar fixes the parameter list, so there is nothing to
       // annotate and nothing to rename. It reaches the face verbatim —
@@ -4884,25 +4884,30 @@ class Emitter {
     return out;
   }
 
-  static schemaBodyParams(entry) {
+  schemaBodyParams(entry) {
     if (entry.tag === 'adapter') return [];
-    if (entry.tag === 'field') return ['it'];
-    return paramNamesOf(
+    if (entry.tag === 'field') return [{ name: 'it', type: null }];
+    return paramsOf(
       entry.paramTokens ?? [],
       entry.tag === 'ensure' ? '@ensure' : `'${entry.name}'`,
       Emitter.schemaFail,
+      this.b.source,
     );
   }
 
   // Compile a captured schema-body token slice to a parenthesized
   // function expression. Single-statement bodies compact to one line
   // (`(function() { return X; })`); multi-statement bodies
-  // take the ordinary block form at indent 0. Returns {code, thisAt}:
-  // thisAt is the offset right after the parameter list opens — where
-  // the TS face inserts a `this` parameter (descriptorSegments).
+  // take the ordinary block form at indent 0. Returns {code, thisAt,
+  // annots}, where the two offsets are the face's own splice points into
+  // `code`: thisAt sits right after the parameter list opens, where the
+  // calling convention's `this` parameter goes, and annots carries each
+  // declared parameter's type (or the JS-arity `?`) at the offset it
+  // follows. The code itself is the runtime spelling and holds neither.
   schemaFnCode(params, bodyTokens) {
+    const names = params.map((p) => p.name);
     const { stmts, stores } = this.subParse(bodyTokens);
-    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length };
+    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [] };
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = Emitter.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -4914,9 +4919,9 @@ class Emitter {
       // single statement can still assign (`(y = 5) and y`, a match
       // write's `_`), and the emitted function is a real (strict
       // module) scope where an undeclared write throws.
-      const { entries, names } = sub.scopedHoist([stmt], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
-      sub.scopes.push(names);
+      const { entries, names: scoped } = sub.scopedHoist([stmt], names);
+      for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
+      sub.scopes.push(scoped);
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
@@ -4925,9 +4930,9 @@ class Emitter {
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
-      const { entries, names } = sub.scopedHoist([bodyNode], params.map(String));
-      for (const n of sub.pushReactiveFrame(stmts, names, params.map(String))) names.add(n);
-      sub.scopes.push(names);
+      const { entries, names: scoped } = sub.scopedHoist([bodyNode], names);
+      for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
+      sub.scopes.push(scoped);
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
@@ -4944,7 +4949,18 @@ class Emitter {
       bodyText = sub.b.code;
     }
     const head = `(${isAsync ? 'async ' : ''}function${isGen ? '*' : ''}(`;
-    return { code: `${head}${params.join(', ')}) ${bodyText})`, thisAt: head.length };
+    // A declared parameter type is TypeScript, so the emitted list holds
+    // NAMES and each annotation is recorded at the offset it belongs
+    // after — the same channel the `this` parameter rides.
+    const annots = [];
+    let at = head.length;
+    params.forEach((p, i) => {
+      at += p.name.length;
+      if (p.type !== null) annots.push([at, `: ${p.type}`]);
+      else if (p.optional) annots.push([at, '?']);
+      if (i < params.length - 1) at += ', '.length;
+    });
+    return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots };
   }
 
   // Compile a captured VALUE-expression slice (the `on:` adapter) —
@@ -15899,7 +15915,7 @@ const deliveryTrees = (emitter, sexpr) => {
             visit(
               ['program', ...sub.stmts],
               sub.stores,
-              value ? [] : Emitter.schemaBodyParams(entry),
+              value ? [] : emitter.schemaBodyParams(entry).map((p) => p.name),
             );
           }
         }
@@ -16098,6 +16114,44 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   }
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
+
+// A schema body reaches the face only as descriptor string literals,
+// which carry no symbol — so nothing in it is a typed position of its
+// own. Its types do live in the companion alias this block emits, so
+// each entry pairs its SOURCE span with the generated offset of its own
+// member there, and the editor answers from that (RULINGS.md, Schema).
+// The label is the entry's own tag, naming the construct the body
+// declared rather than the `property` the alias spells it as.
+const SCHEMA_BODY_KINDS = { field: 'field', computed: 'computed', derived: 'derived', method: 'method' };
+
+function recordSchemaFields(emitter, builder, block, at) {
+  const entries = block.story?.decl?.descriptor?.entries ?? null;
+  if (entries === null) return;
+  const text = builder.code.slice(at);
+  for (const e of entries) {
+    const label = SCHEMA_BODY_KINDS[e.tag] ?? null;
+    if (label === null || typeof e.start !== 'number') continue;
+    const name = e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // A member is `{ name: T` or `; name?: T`, with `readonly` ahead of
+    // it on a computed one. Matching the opener keeps a field's own
+    // member apart from a same-named one in a neighboring alias.
+    const m = new RegExp(`([{;] )((?:readonly )?)(${name})(\\??: )`).exec(text);
+    if (m === null) continue;
+    const nameGen = at + m.index + m[1].length + m[2].length;
+    emitter.intrinsics.push({
+      start: e.start, end: e.start + e.name.length,
+      kind: 'schema', label, name: e.name, gen: nameGen,
+      optional: m[4].startsWith('?'),
+    });
+    if (e.tag === 'field' && e.typeSpan !== null && e.typeSpan !== undefined) {
+      emitter.intrinsics.push({
+        start: e.typeSpan[0], end: e.typeSpan[1],
+        kind: 'schema', label: null, name: e.name,
+        gen: nameGen + m[3].length + m[4].length,
+      });
+    }
+  }
+}
 
 export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
@@ -16335,7 +16389,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (face === 'ts') {
     let story = null;
     try {
-      story = buildSchemaTypeStory(parseResult.sexpr);
+      story = buildSchemaTypeStory(parseResult.sexpr, builder.source);
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -16384,7 +16438,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         const nodeId = stores.idOf(b.node);
         const tail = i === blocks.length - 1 ? '\n\n' : '\n';
         builder.tsOnly(() => {
-          const lines = () => builder.emit(b.lines.map((l) => `${exp}${l}`).join('\n'));
+          const lines = () => {
+            const at = builder.offset;
+            builder.emit(b.lines.map((l) => `${exp}${l}`).join('\n'));
+            recordSchemaFields(emitter, builder, b, at);
+          };
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
           else lines();
           builder.emit(tail);

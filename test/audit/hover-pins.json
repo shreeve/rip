@@ -451,31 +451,31 @@
         "token": "string",
         "expect": null,
         "rule": "field type word",
-        "why": "the type is the target; the body serves silence, the ruled interim — measured 2026-08-24"
+        "why": "a primitive keyword has no symbol — the same decline a plain `x: string` annotation gives"
       },
       {
         "line": 13,
         "character": 2,
         "token": "name",
-        "expect": null,
+        "expect": "(field) name: string",
         "rule": "field name",
-        "why": "ruled (field) name: string; the body serves silence, the ruled interim — green, measured 2026-07-23"
+        "why": "the body answers from its own member in the companion alias"
       },
       {
         "line": 13,
         "character": 6,
         "token": "!",
-        "expect": null,
+        "expect": "(field) name: string",
         "rule": "! marker",
-        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+        "why": "a marker abuts its name, and the byte after a word belongs to that word"
       },
       {
         "line": 14,
         "character": 5,
         "token": "?",
-        "expect": null,
+        "expect": "(field) age?: number | undefined",
         "rule": "? marker",
-        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+        "why": "the same, on an optional field — tsgo prints an optional property's type with its absence arm under strict"
       },
       {
         "line": 15,
@@ -484,6 +484,14 @@
         "expect": null,
         "rule": "default-value expression",
         "why": "ruled normal expression hovers; today the bracket serves silence — the pin moves when expression hovers reach it"
+      },
+      {
+        "line": 18,
+        "character": 11,
+        "token": "Address",
+        "expect": "type Address = { street: string; city: string; zip?: string; }",
+        "rule": "field type word",
+        "why": "a named type expands, exactly as it does in a plain annotation"
       },
       {
         "line": 20,
@@ -505,17 +513,25 @@
         "line": 53,
         "character": 2,
         "token": "subtotal",
-        "expect": null,
-        "rule": "computed field name",
-        "why": "the !> spelling of the computed row; ruled (computed), interim silence — green, measured 2026-07-23"
+        "expect": "(derived) subtotal: number",
+        "rule": "eager derived field name",
+        "why": "`!>` declares an eager derived field, and the label names that construct"
       },
       {
         "line": 54,
         "character": 2,
         "token": "total",
-        "expect": null,
+        "expect": "(computed) total: number",
         "rule": "computed field name",
-        "why": "ruled (computed) total: number, interim silence — green, measured 2026-07-23"
+        "why": "`~>` declares a computed getter, and the label names that construct"
+      },
+      {
+        "line": 55,
+        "character": 2,
+        "token": "describe",
+        "expect": "(method) describe: () => string",
+        "rule": "method name",
+        "why": "the declared signature; the `this` parameter is the lowering's calling convention, never the author's"
       },
       {
         "line": 124,
