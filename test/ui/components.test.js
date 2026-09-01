@@ -639,6 +639,24 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     expect(plain.code).toContain('p(rest)');
   });
 
+  test('the rest view is never assigned — every write shape through `@rest` rejects, positioned', () => {
+    const H = 'C = component extends button\n  go: -> ';
+    const T = '\n  render\n    button "x"';
+    // The member itself, chains rooted at it (dot, index, optional),
+    // compound and update forms, and a destructuring pattern that
+    // reaches it: one rule, one message.
+    for (const w of ['@rest = {}', "@rest.title = 't'", '@rest.a.b = 1', "@rest['title'] = 1", "@rest?.title = 't'",
+      "@rest.title += 't'", '@rest.count++', "@rest.title ?= 't'", '[@rest.title] = [1]']) {
+      emitFails(H + w + T, /never assigned/);
+    }
+    // Reads stay open, and a NON-extends component's own `rest` member
+    // is an ordinary member: the rule keys on the synthesized view.
+    const { code } = compile('C = component extends button\n  render\n    button title: @rest.title\n');
+    expect(code).toContain('this.rest.value.title');
+    const own = compile('C = component\n  rest := {}\n  go: -> @rest.x = 1\n  render\n    div "x"\n');
+    expect(own.code).toContain('this.rest.value.x = 1');
+  });
+
   test('render/offer/accept outside a component body reject with \'s rule', () => {
     emitFails('render\n  div.card\n    "x"', /render blocks can only be used inside a component/);
     emitFails('x = render div "hi"', /render blocks can only be used inside a component/);

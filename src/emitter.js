@@ -1569,6 +1569,26 @@ class Emitter {
     return null;
   }
 
+  // Does a write TARGET land on `this.rest` or inside it? The view is
+  // one object held by two hands — the cell the render reads and the
+  // `_rest` map the runtime forwards from — so replacing the cell's
+  // value parts the hands for the instance's life, and mutating through
+  // it notifies neither. Every spelling that reaches the view is a
+  // write to it: the member itself, any chain rooted there, and the
+  // same shapes inside a destructuring pattern.
+  static targetsRestView(t) {
+    if (!isNode(t)) return false;
+    if (t[0] === 'array') return t.slice(1).some((e) => Emitter.targetsRestView(e));
+    if (t[0] === 'object') return t.slice(1).some((e) => isNode(e) && Emitter.targetsRestView(e[2] ?? e[1]));
+    if (t[0] === 'default' || t[0] === 'rest') return Emitter.targetsRestView(t[1]);
+    let n = t;
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 3) {
+      if (n[0] === '.' && n[1] === 'this' && n[2] === 'rest') return true;
+      n = n[1];
+    }
+    return false;
+  }
+
   // Under `extends`, `rest` is provided, never declared: nothing above
   // a read says the name exists, and only the member rewrite makes a
   // bare `rest` reach the synthesized view. The sigil is its one
@@ -1593,6 +1613,11 @@ class Emitter {
   // component close (render reads of a plain member never re-run).
   checkMemberWrite(node, target) {
     if (this.cframes.length === 0) return;
+    if (this.thisMemberKindOf('rest') === 'rest' && Emitter.targetsRestView(target)) {
+      throw this.positionedError(node,
+        'emitter: `@rest` is the runtime-owned view of the caller\'s undeclared props and is never assigned — ' +
+        'set the attribute on the element in render, or declare the name as a prop the caller supplies');
+    }
     let name = null, kind = null;
     if (typeof target === 'string') {
       this.checkBareRest(node, target);
@@ -7490,6 +7515,10 @@ class Emitter {
   // Hoisted temps (never an IIFE parameter) keep `yield`, `await`,
   // and every control transfer in the source function's own context.
   optionalAssign(node, optLink, context) {
+    // The member write guards run here too: an optional target never
+    // reaches the plain assignment path, and the rest-view rule keys
+    // on the chain's ROOT, which the optional link does not change.
+    this.checkMemberWrite(node, node[1]);
     const op = node[0];
     const synth = op === '//=' || op === '%%=';
     const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
