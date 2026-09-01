@@ -93,7 +93,7 @@ const keyText = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`)
 // (a, script, style, title) carry distinct surfaces per namespace.
 export const attrValsName = (tag, svg) => `__RipAttrVals_${svg ? 'svg_' : ''}${tag}`;
 export const elSurfaceName = (tag, svg) => `__RipEl_${svg ? 'svg_' : ''}${tag}`;
-const hostText = (tag, svg) =>
+export const hostText = (tag, svg) =>
   `${svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap'}['${tag}']`;
 
 // A tag is emittable when the cast text would be legal TS and the tag

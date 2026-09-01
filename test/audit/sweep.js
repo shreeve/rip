@@ -53,6 +53,9 @@ const { compile } = await import(path.join(repoRoot, 'src/compile.js'))
 // declares, never a spelling the sweep guesses.
 const { INTRINSIC_FIELD_TYPES } = await import(path.join(repoRoot, 'src/ts/schema.js'))
 const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
+// The editor's own position table, hover flattener, and schema-payload
+// key list: the sweep judges the server with the server's arithmetic.
+const { lineStartsOf, offsetToPosition, flattenHover, SCHEMA_PAYLOADS } = await import(path.join(repoRoot, 'packages/vscode/src/translate.js'))
 
 const MINTED = /\b(__[A-Za-z$][\w$]*)/g
 const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+)\b/g
@@ -87,7 +90,9 @@ const CELL = /\| \{ value: [^}]*; read\(\)|\{ value: [^}]*; read\(\)[^}]*\} \|/
 // its own token payload — a schema body's callables, its transforms —
 // keeps those tokens off the top-level stream, so a walk that does not
 // descend sees a body as one opaque token and reports nothing about it.
-const NESTED_TOKENS = ['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens']
+// The payload keys are the editor's own SCHEMA_PAYLOADS, so the census
+// descends exactly where the hover model does: the two cannot disagree
+// about which bodies exist, only about whether a name in one answers.
 
 // The entry tags whose `start` is the entry's own NAME. The rest record
 // the sigil the name follows (`:open`, `@mixin`, `@scope :active`), so a
@@ -114,7 +119,7 @@ function nameSpans(text) {
           if (NAMED_ENTRY_TAGS.has(e.tag) && typeof e.start === 'number' && typeof e.name === 'string') {
             out.push([e.start, e.start + e.name.length])
           }
-          for (const k of NESTED_TOKENS) take(e[k])
+          for (const k of SCHEMA_PAYLOADS) take(e[k])
         }
       }
     }
@@ -242,13 +247,8 @@ async function sweep(wsRoot, files) {
       }
       MINTED.lastIndex = 0
     }
-    const lineStarts = [0]
-    for (let i = 0; i < text.length; i++) if (text[i] === '\n') lineStarts.push(i + 1)
-    const posOf = (off) => {
-      let lo = 0, hi = lineStarts.length - 1
-      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= off) lo = mid; else hi = mid - 1 }
-      return { line: lo, character: off - lineStarts[lo] }
-    }
+    const lineStarts = lineStartsOf(text)
+    const posOf = (off) => offsetToPosition(lineStarts, off)
     // EVERY byte offset — the position dimension CLOSED, not sampled:
     // no judgment decides which positions are interesting, so “are
     // there more position rows?” is settled by construction. Each
@@ -289,9 +289,7 @@ async function sweep(wsRoot, files) {
       probes++
       const hover = hovers[ci]
       const value = hover?.contents?.value
-      const flat = typeof value === 'string'
-        ? value.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim()
-        : ''
+      const flat = typeof value === 'string' ? flattenHover(value) : ''
       const word = p.word
       const srcLine = text.slice(lineStarts[line], (lineStarts[line + 1] ?? text.length + 1) - 1).trim()
       const row = (kind, hits) => findings.push({ file: rel, line, ch: character, word, kind, text: flat.slice(0, 400), src: srcLine.slice(0, 90), ...(hits ? { hits } : {}) })

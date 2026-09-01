@@ -608,3 +608,31 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
     });
   });
 });
+
+// ── 5. method parameter annotations ──────────────────────────────────
+// A schema method's parameter annotation is type text like any other
+// annotation: it lowers through normalizeTypeText on its way to BOTH
+// the face (the behavior object's spliced segment) and the `.d.ts` (the
+// member's respelled signature), so the rip spellings a type position
+// admits never reach tsgo verbatim.
+
+describe('schema method parameter annotations normalize on both roads', () => {
+  const src = (ann) => `Flag = schema :shape\n  n! number\n  set: (v: ${ann}) -> v\n`;
+  const faceLine = (ann) => face(src(ann)).code.split('\n').find((l) => l.startsWith('const __Flag__behavior'));
+  const dtsLine = (ann) => dts(src(ann)).split('\n').find((l) => l.startsWith('type Flag ='));
+
+  test('the boolean spellings lower to TS', () => {
+    expect(faceLine('on | off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('on | off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
+  });
+
+  test('a single-quoted literal union displays double-quoted', () => {
+    expect(faceLine("'a' | 'b'")).toBe('const __Flag__behavior = {set: (function(this: Flag, v: "a" | "b") { return v; })};');
+    expect(dtsLine("'a' | 'b'")).toBe('type Flag = FlagData & { set: (v: "a" | "b") => unknown };');
+  });
+
+  test('a comment inside a wrapped annotation drops with its layout', () => {
+    expect(faceLine('on | # which\n    off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('on | # which\n    off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
+  });
+});

@@ -646,6 +646,7 @@ type 'void slot: optionality reaches inside the container only where absence can
     @title?: string
     render null
   ''', '''
+  /// <reference lib="dom" />
   export interface Panel {
     label: { value: string | undefined; read(): string | undefined; touch(): void };
     variant: { value: string; read(): string; touch(): void };

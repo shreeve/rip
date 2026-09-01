@@ -119,6 +119,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { counter } from './counter.js';
+import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
 // runtimes that also need them (src/runtime/schema.js validates
 // declared names, src/runtime/orm.js validates hand-built descriptors).
@@ -1615,8 +1616,10 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
 // spelling emits; the annotation is type-surface only and never reaches
 // the emitted JS, exactly like annotations everywhere else in the
 // language, so it reaches the face as a spliced segment instead. Its
-// text is sliced from SOURCE rather than rebuilt from tokens, so
-// whatever shape the author spelled survives verbatim.
+// text is sliced from SOURCE rather than rebuilt from tokens, and
+// lowers through normalizeTypeText like every other annotation — the
+// rip boolean spellings, single-quoted literals, and a comment inside
+// a wrapped annotation all read as TS on both roads.
 export function paramsOf(paramTokens, what, fail, source = null) {
   if (!paramTokens.length) return [];
   const params = paramsRaw(paramTokens, what, fail, source);
@@ -1644,7 +1647,7 @@ function paramsRaw(paramTokens, what, fail, source) {
     // the filter kept — a TYPE token inside the annotation is dropped
     // from the scan but still occupies source.
     const last = typed ? [...part].filter(carries).pop() : null;
-    const type = typed && source !== null ? source.slice(toks[1].end, last.end).trim() : null;
+    const type = typed && source !== null ? normalizeTypeText(source.slice(toks[1].end, last.end)).trim() : null;
     return { name: toks[0].value, type, optional: false };
   });
 }

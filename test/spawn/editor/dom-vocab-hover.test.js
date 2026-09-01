@@ -28,6 +28,7 @@ import path from 'node:path';
 import { describeExtended } from '../../support/extended.js';
 import { LspClient } from '../../../packages/vscode/src/tsgo.js';
 import { HTML_TAGS, SVG_TAGS, attributeNamesFor } from '../../../src/dom.js';
+import { flattenHover } from '../../../packages/vscode/src/translate.js';
 
 const SERVER = path.resolve(import.meta.dir, '..', '..', '..', 'packages', 'vscode', 'src', 'server.js');
 
@@ -75,8 +76,7 @@ function judge(attr, flat) {
   return null;
 }
 
-const flatten = (h) => (h === null ? null
-  : String(h.contents?.value ?? '').replace(/```\w*\n?/g, '').replace(/\s+/g, ' ').trim());
+const flatten = (h) => (h === null ? null : flattenHover(String(h.contents?.value ?? '')));
 
 describeExtended('dom vocabulary ↔ editor answers', () => {
   test('every attribute key answers at its own word, in every spelling', async () => {
@@ -110,14 +110,22 @@ describeExtended('dom vocabulary ↔ editor answers', () => {
         const uri = 'file://' + path.join(dir, `${job.svg ? 'svg-' : ''}${job.tag}-${id}.rip`);
         const { text, positions } = fixtureFor(job.tag, job.svg, job.attrs);
         client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text } });
-        await new Promise((r) => setTimeout(r, 350));
-        for (const p of positions) {
-          probed++;
-          const flat = flatten(await client.request('textDocument/hover', {
+        // No wait after didOpen: the server's hover handler settles the
+        // document before answering, so the first probe is served from
+        // the opened text. A WINDOW of probes in flight, not one: the wire
+        // round-trip is the cost, and the answers are position-independent,
+        // so latency must not stack once per key.
+        const WINDOW = 32;
+        for (let w = 0; w < positions.length; w += WINDOW) {
+          const chunk = positions.slice(w, w + WINDOW);
+          const flats = await Promise.all(chunk.map((p) => client.request('textDocument/hover', {
             textDocument: { uri }, position: { line: p.line, character: p.character },
-          }).catch(() => null));
-          const why = judge(p.attr, flat);
-          if (why !== null) findings.push(`${job.svg ? 'svg:' : ''}${job.tag} ${p.attr} (${p.spelling}) — ${why}`);
+          }).then(flatten, () => null)));
+          chunk.forEach((p, i) => {
+            probed++;
+            const why = judge(p.attr, flats[i]);
+            if (why !== null) findings.push(`${job.svg ? 'svg:' : ''}${job.tag} ${p.attr} (${p.spelling}) — ${why}`);
+          });
         }
         client.notify('textDocument/didClose', { textDocument: { uri } });
       }

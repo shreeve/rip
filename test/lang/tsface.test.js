@@ -75,6 +75,8 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
   /^\/\/[ \t]*@ts-(expect-error|ignore|nocheck)(\s|$)/u,        // directive comment line
+  /^\(\{ __(key|bind):$/u,                                 // served-value wrap opener (a `key:` / `<=>` record's typed position)
+  /^\}\)\.__(key|bind)$/u,                                 // served-value wrap closer
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
   /^declare function __ripRoute<const T extends \(.*\)>\(s: T\): T;$/su, // the route helper declare, union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
@@ -1394,6 +1396,117 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // quieting `as any` (custom events keep that: no claim to check).
     expect(faced.code).toContain(`((this.onClick) as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
     expect(faced.code).toContain('(this as any)._first = ');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
+  test('a named handler under a render `switch` keeps the enclosing HTML host', () => {
+    // The statement node shares its head word with the SVG `switch` tag;
+    // the scan tells the shapes apart, so the arm's element types against
+    // the HTML map — the map the element is created from. The tag spelling
+    // itself never reaches the scan: inside render the parser reads the
+    // word as the statement.
+    const src = [
+      'C = component',
+      "  status := 'open'",
+      '  hit = (e) -> 1',
+      '  render',
+      '    div',
+      '      switch status',
+      "        when 'open'",
+      "          a href: '/x', @click: @hit",
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    expect(faced.code).toContain(`hit(e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['a']; currentTarget: HTMLElementTagNameMap['a'] })`);
+    expect(faced.code).not.toContain('SVGElementTagNameMap');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
+  test("a named handler's host resolves through every element-head spelling", () => {
+    // The scan reads the head the way the render walk does: a bare
+    // string (`input#one`), a dot chain (`input.field`, `.cls`), a call
+    // whose head is a chain, and the dynamic-class call — so the method's
+    // param claims the element the handler is on, never the enclosing one.
+    const cases = [
+      ['input.field @input: @handle', 'input'],
+      ['input.field', 'input', '  @input: @handle'],
+      ["input.field 'txt', @input: @handle", 'input'],
+      ['input#one @input: @handle', 'input'],
+      ["input.('x') @input: @handle", 'input'],
+      ["input.field.(active and 'x') @input: @handle", 'input'],
+      ['.cls @click: @handle', 'div'],
+      [".(active and 'x') @click: @handle", 'div'],
+      ['div.a#x.b @click: @handle', 'div'],
+    ];
+    for (const [line, tag, ...rest] of cases) {
+      const src = [
+        'C = component',
+        '  active := true',
+        '  handle = (e) -> 1',
+        '  render',
+        '    form',
+        `      ${line}`,
+        ...rest.map((l) => `      ${l}`),
+        '',
+      ].join('\n');
+      const faced = ts(src);
+      const host = `HTMLElementTagNameMap['${tag}']`;
+      const event = src.includes('@input') ? 'input' : 'click';
+      expect(faced.code, line).toContain(`handle(e: HTMLElementEventMap['${event}'] & { target: ${host}; currentTarget: ${host} })`);
+      expect(faced.code, line).not.toContain("HTMLElementTagNameMap['form']; currentTarget");
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+    }
+  });
+
+  test('kinds inside a component resolve by scope: locals and params shadow members, module cells keep their kind', () => {
+    // One binding answers one way (RULINGS.md): a `for` variable or a
+    // parameter that spells a member's name is a local, so it carries no
+    // member kind; a module-scope cell read from inside a component is
+    // still that cell, so it carries the module's kind.
+    const rows = (src) => ts(src).kinds.map((k) => `${k.start}:${src.slice(k.start, k.end)}:${k.label}`);
+    const loop = 'C = component\n  count := 0\n  xs := [1]\n  bump = ->\n    for count in xs\n      count + 1\n';
+    expect(rows(loop)).toEqual(['16:count:state', '29:xs:state', '68:xs:state']);
+    const param = 'C = component\n  count := 0\n  bump = (count) -> count + 1\n';
+    expect(rows(param)).toEqual(['16:count:state', '37:count:state']);
+    const moduleCell = 'count := 0\nC = component\n  bump = -> count + 1\n';
+    expect(rows(moduleCell)).toEqual(['0:count:state', '37:count:state']);
+    // A member read keeps its member kind; a member's name shadows a
+    // module binding of the same spelling.
+    const member = 'count := 0\nC = component\n  count = 1\n  bump = -> count + 1\n';
+    expect(rows(member)).toEqual(['0:count:state']);
+  });
+
+  test('a served `key:` / `<=>` record points at a wrap member typed as the whole expression', () => {
+    // A call- or index-ended expression ends on `)`/`]`, and the name
+    // before it types a part; the record points at the TS-only wrap's
+    // member, whose type is the expression's. JS bytes unchanged.
+    const src = [
+      'C = component',
+      "  items: { id: number, ids: string[] }[] := [{ id: 1, ids: ['a'] }]",
+      "  nums: string[] := ['1']",
+      '  render',
+      '    ul',
+      '      for item in items',
+      '        li key: String(item.id)',
+      '          = item.id',
+      '      for it in items',
+      '        li key: it.ids[0]',
+      '          = it.id',
+      '    input',
+      '      value <=> nums[0]',
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    const served = faced.intrinsics.filter((r) => r.kind === 'key' || r.kind === 'bind');
+    expect(served.map((r) => `${r.kind}:${src.slice(r.start, r.end)}`)).toEqual(['key:key', 'key:key', 'bind:value']);
+    for (const r of served) {
+      const name = r.kind === 'key' ? '__key' : '__bind';
+      expect(faced.code.slice(r.gen, r.gen + name.length)).toBe(name);
+      expect(faced.code[r.gen - 1]).toBe(' ');
+    }
+    expect(faced.code).toContain('({ __key: String(item.id) }).__key');
+    expect(faced.code).toContain('({ __key: it.ids[0] }).__key');
+    expect(faced.code).toContain('({ __bind: this.nums.value[0] }).__bind;');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 

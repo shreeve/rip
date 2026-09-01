@@ -70,6 +70,7 @@ import {
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
+  splitTypeAt, balancedTo, unionArms, cellShape,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
@@ -1839,7 +1840,9 @@ async function refresh(document) {
     // Generated key/value spans of the `__ripRoute` attribute wraps —
     // the diagnostics road re-anchors a whole-value mismatch on the key.
     routeWraps: result.routeWraps ?? [],
-    // Where a render pair's diagnostic anchors — the key (RULINGS.md).
+    // Per render pair, the key's source span and the road's generated
+    // relation sites — a diagnostic standing on a site re-anchors on the
+    // key (diagnostics.js, recordedAnchor; RULINGS.md).
     renderPairs: result.renderPairs ?? [],
     // Minted kind labels by declaration span (RULINGS.md, the kind rows).
     kinds: result.kinds ?? [],
@@ -2702,6 +2705,10 @@ const HOVER_EVOLVING_ANY = /^```typescript\r?\n(?:let|var) [A-Za-z_$][\w$]*: any
 const HOVER_LET_DECL = /^```typescript\r?\n(?:let|var) /;
 const REF_PROBE_LIMIT = 16;
 
+// A regex source for a name tsgo printed — every metacharacter an
+// identifier can carry (`$`) reads literally.
+const reSource = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Alias-union hover ordering (the old runtime/TS6 display parity): TS7 renders
 // literal unions in checker-internal order (effectively sorted), but
 // authors read their unions in DECLARATION order ('pending' before
@@ -2715,26 +2722,11 @@ function reorderUnionHover(ctx, contents) {
   const fence = /(```(?:typescript|ts)\n)(\s*(?:export )?type ([A-Za-z_$][\w$]*)\s*=\s*)([^\n]+?);?\n(```)/.exec(value);
   if (!fence) return null;
   const [, open, head, name, rhs, close] = fence;
-  const splitUnion = (t) => {
-    const parts = [];
-    let depth = 0, cur = '', inStr = null;
-    for (let i = 0; i < t.length; i++) {
-      const c = t[i];
-      if (inStr) { if (c === '\\') { cur += c + (t[i + 1] ?? ''); i++; continue; } if (c === inStr) inStr = null; cur += c; continue; }
-      if (c === '"' || c === "'") { inStr = c; cur += c; continue; }
-      if ('<([{'.includes(c)) depth++;
-      else if ('>)]}'.includes(c)) depth--;
-      if (c === '|' && depth === 0) { parts.push(cur.trim()); cur = ''; }
-      else cur += c;
-    }
-    parts.push(cur.trim());
-    return parts.filter((p) => p !== '');
-  };
-  const hoverMembers = splitUnion(rhs);
+  const hoverMembers = unionArms(rhs);
   if (hoverMembers.length < 2) return null;
-  const decl = new RegExp(`^(?:export )?type ${name}\\s*=\\s*(.+?);?$`, 'm').exec(ctx.good.code);
+  const decl = new RegExp(`^(?:export )?type ${reSource(name)}\\s*=\\s*(.+?);?$`, 'm').exec(ctx.good.code);
   if (!decl) return null;
-  const declMembers = splitUnion(decl[1]);
+  const declMembers = unionArms(decl[1]);
   if (declMembers.length !== hoverMembers.length) return null;
   const set = new Set(hoverMembers);
   if (!declMembers.every((mem) => set.has(mem))) return null;
@@ -2779,18 +2771,16 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   // arrives with its parameter list (`Palette<TShade extends string>`),
   // and anything narrower silently leaves the container standing on every
   // generic component. The greedy run cannot swallow the type, which is
-  // anchored behind `: { … value: `.
-  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(flat);
+  // anchored behind `: {` and judged whole by the cell-shape check.
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): (\{ .+ \})$/.exec(flat);
   if (!m) return null;
-  const [, , plain, qualified, ro, t, readT] = m;
+  const [, , plain, qualified, type] = m;
   const member = qualified !== undefined;
   if (member && !atMemberDecl) return null;
-  // depth guard: the `;` split above is greedy on `t` — verify T and
-  // read()'s return agree after the same normalization (the brand
-  // shape), else pass through.
-  if (t.trim() !== readT.trim()) return null;
-  const head = member ? `(property) ${qualified}` : `${ro ? 'const' : 'let'} ${plain}`;
-  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${t.trim()}${fence[3]}`);
+  const cell = cellShape(type);
+  if (cell === null) return null;
+  const head = member ? `(property) ${qualified}` : `${cell.readonly ? 'const' : 'let'} ${plain}`;
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${cell.value}${fence[3]}`);
   return { ...contents, value: reworded };
 }
 
@@ -2813,25 +2803,25 @@ function presentComponentSignatureHover(contents) {
   const flat = fence[2].replace(/\s+/g, ' ').trim();
   // An import-bound use hovers the same construct behind tsgo's alias
   // dress — `(alias) const N: …` with a trailing `import N` line; a
-  // mutable module binding holding a component hovers `let`.
-  const balancedTo = (from, opener, closer) => {
-    let depth = 0;
-    for (let i = from; i < flat.length; i++) {
-      if (flat[i] === opener) depth++;
-      else if (flat[i] === closer && flat[i - 1] !== '=' && --depth === 0) return i;
-    }
-    return -1;
-  };
+  // mutable module binding holding a component hovers `let`. The
+  // binding's name says nothing about the construct: another binding
+  // can hold a component (`Local = Button`), so the served name is the
+  // one the tail constructs.
+  // Two printings of the one construct: a lone construct signature
+  // prints in arrow form (`new (props: …) => Name`), and the hoisted
+  // binding's published type with its static `mount` beside it prints
+  // as the object it is (`{ new (props?: …): Name; mount(target?: any):
+  // Name; }`) — a forward-used declaration answers that form.
   // A GENERIC component's use site carries the inferred instantiation
   // — `new <"alpha">(props?: {…}) => Chip<"alpha">` — and the args
   // ride into the served head: `component Chip<'alpha'>`.
-  const head = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): new /.exec(flat);
+  const head = /^(?:\(alias\) )?(?:const|let|var) [A-Za-z_$][\w$]*: (\{ )?new /.exec(flat);
   if (!head) return null;
-  const name = head[1];
+  const objectForm = head[1] !== undefined;
   let typeArgs = null;
   let propsAt = head[0].length;
   if (flat[propsAt] === '<') {
-    const argsEnd = balancedTo(propsAt, '<', '>');
+    const argsEnd = balancedTo(flat, propsAt);
     if (argsEnd === -1) return null;
     typeArgs = flat.slice(propsAt + 1, argsEnd);
     propsAt = argsEnd + 1;
@@ -2848,16 +2838,8 @@ function presentComponentSignatureHover(contents) {
   // own type and stands.
   const extendsTag = { tag: null };
   const membersOf = (inner) => {
-    const rows = [];
-    let start = 0, depth = 0;
-    for (let i = 0; i < inner.length; i++) {
-      if (inner[i] === '{') depth++;
-      else if (inner[i] === '}') depth--;
-      else if (inner[i] === ';' && depth === 0) { rows.push(inner.slice(start, i)); start = i + 1; }
-    }
-    if (inner.slice(start).trim() !== '') rows.push(inner.slice(start));
     const out = [];
-    for (const raw of rows) {
+    for (const raw of splitTypeAt(inner, ';')) {
       const row = raw.trim();
       // The DEFAULT projection slot stays out of the signature — it is the
       // channel every component has, not a prop this one declares — under
@@ -2874,21 +2856,9 @@ function presentComponentSignatureHover(contents) {
       const colon = row.indexOf(': ');
       let kept = row;
       if (colon !== -1) {
-        const type = row.slice(colon + 2);
-        const arms = [];
-        let d = 0, a = 0;
-        for (let i = 0; i < type.length; i++) {
-          const ch = type[i];
-          if (ch === '{' || ch === '(' || ch === '[' || ch === '<') d++;
-          else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) d--;
-          else if (ch === '|' && d === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') { arms.push(type.slice(a, i - 1)); a = i + 2; }
-        }
-        arms.push(type.slice(a));
-        const keptArms = arms.filter((arm) => {
-          const cell = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(arm.trim());
-          return !(cell && cell[1].trim() === cell[2].trim());
-        });
-        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.map((x) => x.trim()).join(' | ');
+        const arms = unionArms(row.slice(colon + 2));
+        const keptArms = arms.filter((arm) => cellShape(arm) === null);
+        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.join(' | ');
       }
       // tsgo spells string literals double-quoted; the corpus spelling
       // is single quotes, and the grammar colors the two forms apart.
@@ -2901,24 +2871,14 @@ function presentComponentSignatureHover(contents) {
   // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
   // group, whose author-named alternative supersedes the base row.
   const open = propsAt + propsHead[0].length - 1;
-  const close = balancedTo(open, '{', '}');
+  const close = balancedTo(flat, open);
   if (close === -1) return null;
   const props = membersOf(flat.slice(open + 1, close));
   let at = close + 1;
   while (flat.startsWith(' & (', at)) {
-    const groupEnd = balancedTo(at + 3, '(', ')');
+    const groupEnd = balancedTo(flat, at + 3);
     if (groupEnd === -1) return null;
-    const group = flat.slice(at + 4, groupEnd).trim();
-    const alts = [];
-    let d = 0, s = 0;
-    for (let i = 0; i < group.length; i++) {
-      if (group[i] === '{') d++;
-      else if (group[i] === '}') d--;
-      else if (group[i] === '|' && d === 0) { alts.push(group.slice(s, i)); s = i + 1; }
-    }
-    alts.push(group.slice(s));
-    const named = alts
-      .map((a) => a.trim())
+    const named = unionArms(flat.slice(at + 4, groupEnd))
       .filter((a) => a.startsWith('{') && a.endsWith('}'))
       .flatMap((a) => membersOf(a.slice(1, -1)));
     if (named.length !== 1) return null;
@@ -2931,9 +2891,12 @@ function presentComponentSignatureHover(contents) {
   // Under strict null posture an optional props param prints its own
   // `| undefined` between the block and the paren.
   if (flat.startsWith(' | undefined', at)) at += ' | undefined'.length;
-  const tail = flat.slice(at).trim();
-  const tailRe = new RegExp(`^\\) => ${name}(?:<.*>)?(?: import ${name})?$`);
-  if (!tailRe.test(tail)) return null;
+  const tail = (objectForm
+    ? /^\): ([A-Za-z_$][\w$]*)(?:<.*>)?(?:; mount\(target\?: any\): \1(?:<.*>)?)?;? \}$/
+    : /^\) => ([A-Za-z_$][\w$]*)(?:<.*>)?(?: import [A-Za-z_$][\w$]*)?$/
+  ).exec(flat.slice(at).trim());
+  if (!tail) return null;
+  const name = tail[1];
   // The signature is rip vocabulary, so it renders in a `rip` fence —
   // the extension's own grammar colors `component`/`extends` and the
   // prop annotations the way the source does — and the rows carry no
@@ -3011,20 +2974,6 @@ async function enrichEvolvingAnyHover(ctx, hover) {
 }
 
 // Add the absence arms to a union without repeating a member it already has.
-// The split is depth-aware: a `|` inside a generic argument list, a call
-// signature, or an object type belongs to that nested type, not to this union.
-function unionArms(type) {
-  const arms = [];
-  let depth = 0, start = 0;
-  for (let i = 0; i < type.length; i++) {
-    const c = type[i];
-    if (c === '<' || c === '(' || c === '[' || c === '{') depth++;
-    else if (c === '>' || c === ')' || c === ']' || c === '}') depth--;
-    else if (c === '|' && depth === 0) { arms.push(type.slice(start, i).trim()); start = i + 1; }
-  }
-  arms.push(type.slice(start).trim());
-  return arms.filter(Boolean);
-}
 function withAbsenceArms(type) {
   const arms = unionArms(type);
   if (!arms.includes('undefined')) arms.push('undefined');
@@ -3121,10 +3070,8 @@ connection.onHover(async (params) => {
       // A bindable prop's slot is the CONTAINER, and an optional one arrives
       // as a union with its absence arm — so the arms are split and the cell
       // among them gives up the value type the author bound.
-      const cell = unionArms(head[1].trim())
-        .map((arm) => /^\{ value: (.+?); read\(\)/.exec(arm.trim()))
-        .find(Boolean);
-      body = `(bind) ${intr.name}: ${scrubFaceArtifacts((cell ? cell[1] : head[1]).trim())}`;
+      const cell = unionArms(head[1]).map(cellShape).find((c) => c !== null);
+      body = `(bind) ${intr.name}: ${scrubFaceArtifacts(cell ? cell.value : head[1].trim())}`;
     } else if (intr.kind === 'key' || intr.kind === 'slot') {
       // Two channel words whose typed position is what they spend: a
       // loop's `key:` reads its expression's type off the expression's
@@ -3147,8 +3094,7 @@ connection.onHover(async (params) => {
       if (flat === '') return null;
       if (intr.label === null) { body = flat; }
       else {
-        const esc = intr.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const head = new RegExp(`^\\(property\\) (?:.*?\\.)?${esc}\\??: ([^]+)$`).exec(flat);
+        const head = new RegExp(`^\\(property\\) (?:.*?\\.)?${reSource(intr.name)}\\??: ([^]+)$`).exec(flat);
         if (head === null) return null;
         // The `this` parameter is the lowering's own calling convention,
         // not a parameter the author declared — it is spent making the
@@ -3227,7 +3173,7 @@ connection.onHover(async (params) => {
     // — and the owner can carry type parameters, so the replacement is
     // anchored on the member's OWN name rather than on a shape for the owner.
     // A module binding arrives as `const`/`let`.
-    const esc = kind.name === null ? null : kind.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const esc = kind.name === null ? null : reSource(kind.name);
     contents = { ...contents, value: contents.value
       // The marker is re-emitted from the record, never read off tsgo's text:
       // the face declares an optional member required, so only the record
@@ -3716,6 +3662,27 @@ async function overlayCompletionAsk(state, code, at) {
   }
 }
 
+// Whether a cursor sits in RENDER content, judged on the last good
+// compile's own record: the cursor's line, or the line above it, holds
+// a render pair or an intrinsic position. The cursor reaches the good
+// source through the stale alignment — its line start stands in when
+// the cursor's own bytes are the edit. A buffer without a good compile,
+// or a cursor the alignment cannot place, is not judged.
+function inRenderContent(state, text, cursor) {
+  const good = state.lastGood;
+  if (!good) return true;
+  const align = staleOffsetMap(text, good.source);
+  const at = align.toGood(cursor) ?? align.toGood(text.lastIndexOf('\n', cursor - 1) + 1);
+  if (at === null) return true;
+  const lineOf = (offset) => offsetToPosition(good.srcLineStarts, offset).line;
+  const line = lineOf(at);
+  const spans = [
+    ...(good.renderPairs ?? []).map((p) => p.pair),
+    ...(good.intrinsics ?? []).map((r) => [r.start, r.end]),
+  ];
+  return spans.some(([s, e]) => lineOf(s) <= line && lineOf(Math.max(s, e - 1)) >= line - 1);
+}
+
 // The pair-splice probe: an ATTRIBUTE-KEY ask the buffer cannot answer
 // through its own face — a bare prefix (`pla`) or an empty slot inside
 // an element body, positions whose real compile either fails or lands
@@ -3723,7 +3690,9 @@ async function overlayCompletionAsk(state, code, at) {
 // into a well-formed pair (`pla` → `<mark>: null`), compiles it
 // tolerant, and asks completions INSIDE the spliced key — where the
 // receiver surface's string-literal union answers with the tag's own
-// attribute vocabulary. Same overlay contract as the dot probe.
+// attribute vocabulary. Same overlay contract as the dot probe. The
+// probe costs a compile and two face swaps, so it runs only where a
+// key can be asked for: inside render content.
 async function pairSpliceProbe(params) {
   const state = states.get(params.textDocument.uri);
   const document = documents.get(params.textDocument.uri);
@@ -3745,6 +3714,7 @@ async function pairSpliceProbe(params) {
     const lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
     if (text.slice(lineStart, cursor).trim() !== '') return null;
   }
+  if (!inRenderContent(state, text, cursor)) return null;
   let result;
   try {
     const fsPath = fileURLToPath(document.uri);

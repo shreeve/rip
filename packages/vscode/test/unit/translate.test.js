@@ -12,7 +12,7 @@ import { collapseCellArms,
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SCAFFOLD_FAMILIES, prettifyRouteUnion,
+  SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover,
 } from '../../src/translate.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -704,5 +704,38 @@ describe('collapseCellArms: a cell reads as its value type', () => {
   });
   test('a type with no cell is untouched', () => {
     expect(collapseCellArms('"/" | "/cart" | `/orders/${string}`')).toBe('"/" | "/cart" | `/orders/${string}`');
+  });
+  test('a ` | ` inside a literal arm belongs to that literal, never to the union', () => {
+    expect(collapseCellArms('"a | b" | { value: "a | b"; read(): "a | b"; touch?(): void; } | undefined'))
+      .toBe('"a | b" | undefined');
+    expect(collapseCellArms('"{" | { value: "{"; read(): "{"; touch?(): void; } | undefined'))
+      .toBe('"{" | undefined');
+  });
+  test('a quoted operator is not a union: the message text around it survives', () => {
+    expect(collapseCellArms('|')).toBe('|');
+    expect(collapseCellArms('||')).toBe('||');
+  });
+});
+
+describe('flattenHover', () => {
+  test('strips the fences and collapses whitespace to the bare type text', () => {
+    expect(flattenHover('```typescript\n(property) a: {\n  b: string\n}\n```')).toBe('(property) a: { b: string }');
+    expect(flattenHover('  const x: number  ')).toBe('const x: number');
+  });
+
+  test('an empty or fence-only body flattens to the empty string, not null', () => {
+    expect(flattenHover('')).toBe('');
+    expect(flattenHover('```ts\n```')).toBe('');
+  });
+});
+
+describe('SCHEMA_PAYLOADS', () => {
+  test('names every token payload a schema entry captures, and hoverableSpans descends each one', () => {
+    expect(SCHEMA_PAYLOADS).toEqual(['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens']);
+    for (const k of SCHEMA_PAYLOADS) {
+      const entry = { [k]: [{ kind: 'IDENTIFIER', start: 5, end: 8 }] };
+      const spans = hoverableSpans({ tokens: [{ kind: 'SCHEMA_BODY', start: 0, end: 20, value: { entries: [entry] } }] });
+      expect(spans).toContainEqual([5, 8]);
+    }
   });
 });

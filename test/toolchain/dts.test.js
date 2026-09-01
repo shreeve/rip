@@ -526,6 +526,20 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain("'stroke-width'?: any");
   });
 
+  test('a declaration file that names a DOM global opens with the dom lib reference; one that names none has no directive', () => {
+    const card = compile('export Card = component\n  @title := "x"\n  render\n    div\n      = @title\n').declarations;
+    expect(card.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    expect(card).toContain('children?: Node | string | number | boolean | null;');
+    const push = compile('export Push = component extends button\n  @label := "x"\n  render\n    button\n      = @label\n').declarations;
+    expect(push.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    // A component that owns `children` and extends nothing spells no
+    // DOM global — the reference follows the names the file uses, so
+    // a schema-only or function-only module stays directive-free too.
+    expect(compile('export Own = component\n  @children: string\n').declarations).not.toContain('<reference');
+    expect(compile('export S = schema :input\n  email! email\n').declarations).not.toContain('<reference');
+    expect(compile('export def f(a: number): string\n  String(a)\n').declarations).not.toContain('<reference');
+  });
+
   test('non-binding components declare nothing (a d.ts is a module boundary)', () => {
     expect(compile('f = ->\n  C = component\n    n := 1\n  C\n').declarations).toBe('');
   });

@@ -8,7 +8,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import {
-  CAMEL, domSurfaceDecls, attrValsName, elSurfaceName, surfaceableTag,
+  CAMEL, domSurfaceDecls, attrValsName, elSurfaceName, hostText, surfaceableTag,
   CLASS_VALUE_DECL, CLSX_TYPE,
 } from '../../src/ts/dom-types.js';
 import { attributeNamesFor, knownBareAttribute, HTML_TAGS, SVG_TAGS, SVG_ONLY_TAGS } from '../../src/dom.js';
@@ -122,6 +122,17 @@ describe('dom-types ↔ dom.js lockstep', () => {
     const text = domSurfaceDecls([], { needsClassValue: true });
     expect(text).toContain(CLASS_VALUE_DECL);
     expect(text).not.toContain('interface');
+  });
+
+  test('hostText is the one spelling of an element type — the surfaces and the emitter share it', () => {
+    // The receiver cast, the handler-param host claim, and the ref-cell
+    // cast all spell the element's lib.dom type through this function, so
+    // the generated block and the face never drift on it.
+    expect(hostText('input', false)).toBe("HTMLElementTagNameMap['input']");
+    expect(hostText('a', true)).toBe("SVGElementTagNameMap['a']");
+    const text = domSurfaceDecls([{ tag: 'input', svg: false }, { tag: 'a', svg: true }]);
+    expect(text).toContain(`value: __RipProp<${hostText('input', false)}, 'value'>`);
+    expect(text).toContain(hostText('a', true));
   });
 
   test('the ref-cell declares ride only when asked, and carry both namespace roads', () => {

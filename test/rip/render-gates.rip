@@ -140,6 +140,7 @@ type 'gate: annotated value is a non-null readonly computed container', '''
     user: { name: string } <~ @app.data.user
     render null
 ''', '''
+  /// <reference lib="dom" />
   export interface UserCard {
     user: { readonly value: { name: string }; read(): { name: string } };
     app?: any;

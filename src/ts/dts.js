@@ -46,7 +46,7 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
 import {
-  componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED,
+  componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
   selfArgsOf,
 } from './components.js';
@@ -611,5 +611,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
   if (lines.length > 0 && !lines.some((l) => /^(export|import)\s/.test(l))) {
     lines.push('export {};');
   }
+  // A DOM global the declarations name (the minted component surfaces —
+  // DOM_LIB_GLOBALS) resolves only against the `dom` lib, so the file
+  // declares that dependency itself: a consumer compiled with the
+  // language lib alone still resolves every name the file uses. A
+  // module naming none stays directive-free. The directive is a
+  // file-head pragma, so it goes before the retained imports.
+  if (DOM_LIB_GLOBALS.some(referenced)) lines.unshift('/// <reference lib="dom" />');
   return lines.length > 0 ? lines.join('\n') + '\n' : '';
 }

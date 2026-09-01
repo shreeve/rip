@@ -30,7 +30,7 @@ import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
-import { attrValsName, elSurfaceName, surfaceableTag, domSurfaceDecls, CLSX_TYPE } from './ts/dom-types.js';
+import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
@@ -485,8 +485,9 @@ class Emitter {
     // row carries what the served answer is built from — the tag, its
     // namespace, and for `ref` the cell's name. TS face only.
     this.intrinsics = [];
-    // Per render pair: the key's span, the value's, and the pair's own —
-    // the diagnostics road's anchor table (SOURCE coordinates).
+    // Per render pair: the key's and the pair's SOURCE spans, and the
+    // road's relation sites in GENERATED coordinates — the diagnostics
+    // road's anchor table (WHERE A PAIR'S DIAGNOSTIC LANDS, below).
     this.renderPairs = [];
     this.browserModule = browserModule;
     // HMR metadata on module-scope named components. Off by default —
@@ -1440,7 +1441,10 @@ class Emitter {
   // The kind a name's own DECLARATION minted, asked at any occurrence — so a
   // read answers the way its declaration does. `let count` at a read is the
   // same leak as at the declaration: the binding is a const cell, and the
-  // author declared a state.
+  // author declared a state. The walk is resolveBareRead's: a local or
+  // param shadows a member, and a component's own members are the
+  // authority for their names — a member with no kind of its own
+  // answers null, never a module binding that shares the spelling.
   kindOfName(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -1448,6 +1452,7 @@ class Emitter {
       if (f.readonly?.has(name)) return 'readonly';
       if (f.handles?.has(name)) return 'effect';
       if (f.bound?.has(name)) return null;   // shadowed by a plain binding
+      if (f.members !== undefined && f.members.has(name)) return f.memberKinds?.get(name) ?? null;
     }
     return null;
   }
@@ -1765,11 +1770,7 @@ class Emitter {
     // mapping ROW needs, not what naming the construct needs, and a read
     // emitted outside one answers about the same declaration.
     if (span !== null && isIdentifierName(value)) {
-      // Inside a component the component's OWN members are the authority —
-      // never a module binding that happens to share the name, and never a
-      // guess when the frame does not carry the member.
-      const cf = this.cframes[this.cframes.length - 1];
-      const k = cf ? (cf.memberKinds?.get(value) ?? null) : this.kindOfName(value);
+      const k = this.kindOfName(value);
       const kind = typeof k === 'string' ? { label: k, optional: false } : k;
       if (kind !== null) this.kinds.push({ start: span[0], end: span[1], label: kind.label, name: value, optional: kind.optional });
     }
@@ -2447,6 +2448,31 @@ class Emitter {
     if (this.ts) this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
 
+  // The face position a served record points at must answer with the
+  // value's WHOLE type. The value's own last byte cannot promise that:
+  // a call or an index ends in `)`/`]`, which names nothing, and the
+  // name before it types a part (`String(item.id)` ends on `id`, a
+  // number, when the key is a string). So the value emits as the one
+  // member of a TS-only object literal, `({ __name: value }).__name`,
+  // and the record points at the member — a `(property)` head carrying
+  // exactly the value's type. JS bytes unchanged; the returned offset
+  // is the member's first byte, or null when the face records nothing.
+  tsServedValue(name, fn) {
+    if (!this.ts) {
+      fn();
+      return null;
+    }
+    let gen = null;
+    this.b.tsOnly(() => {
+      this.b.emit('({ ');
+      gen = this.b.offset;
+      this.b.emit(`${name}: `);
+    });
+    fn();
+    this.b.tsOnly(() => this.b.emit(` }).${name}`));
+    return gen;
+  }
+
   // Capture an emission's text without touching the real output. The
   // builder swaps for a scratch CodeBuilder over the same stores, so
   // marks, mapping rows and TS-only regions recorded during the capture
@@ -2574,22 +2600,22 @@ class Emitter {
   // several elements reports each; none reports nothing) the slots
   // stay `any` — zero noise on legal reads while the event's own
   // surface (key, clientX, preventDefault) checks for real.
-  tsEventTypeText(events, hostText = null) {
+  tsEventTypeText(events, hostType = null) {
     const known = events.filter((e) => DOM_EVENTS.has(e));
     if (known.length === 0) return null;
     const map = known.map((e) => `HTMLElementEventMap['${e}']`).join(' | ');
-    const host = hostText ?? 'any';
+    const host = hostType ?? 'any';
     return `${known.length > 1 ? `(${map})` : map} & { target: ${host}; currentTarget: ${host} }`;
   }
 
   // The receiver-surface cast for one render element (TS face only):
   // registers the (tag, namespace) surface — the emit() tail declares
-  // exactly the registered set — and hands back the two splices the
-  // branch wraps around the receiver bytes, plus the names the
-  // branch's annotations spell. Everything is a no-op passthrough
-  // when the tag has no surface (an unrecorded var, a tag outside the
-  // vocabulary): the receiver stays the scaffold's `any` and the
-  // caller keeps its own quieting cast.
+  // exactly the registered set — and hands back `emit()`, which writes
+  // the receiver bytes wrapped in the cast, plus the names the
+  // branch's annotations spell. Everything is a passthrough when the
+  // tag has no surface (an unrecorded var, a tag outside the
+  // vocabulary): emit() writes the bare receiver, which stays the
+  // scaffold's `any`, and the caller keeps its own quieting cast.
   tsElReceiver(el) {
     if (this.ts) {
       const tag = this.rstate?.tags?.get(el);
@@ -2599,15 +2625,17 @@ class Emitter {
         this.domSurfaces.set(name, { tag, svg });
         return {
           surfaced: true,
-          open: () => this.b.tsOnly(() => this.b.emit('(')),
-          close: () => this.b.tsOnly(() => this.b.emit(` as ${name})`)),
+          emit: () => {
+            this.b.tsOnly(() => this.b.emit('('));
+            this.b.emit(el);
+            this.b.tsOnly(() => this.b.emit(` as ${name})`));
+          },
           valsName: attrValsName(tag, svg),
-          hostText: `${svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap'}['${tag}']`,
-          tag, svg,
+          hostText: hostText(tag, svg),
         };
       }
     }
-    return { surfaced: false, open: () => {}, close: () => {}, valsName: null, hostText: null, tag: null, svg: false };
+    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
   }
 
   // An event listener's handler CALL casts in the face (TS-only): the
@@ -2632,11 +2660,16 @@ class Emitter {
   // draw TS2352 on legal rip), an author-annotated param already
   // governs its own body, and a non-literal handler types at its own
   // declaration — all keep `as any`.
+  // Returns the generated span of the `as` expression — where a handler
+  // that cannot take the event draws TS2352 — or null where the cast
+  // is `as any` (no claim, no relation).
   tsHandlerCast(fn, evTypeText = null) {
-    if (!this.ts) return fn();
+    if (!this.ts) { fn(); return null; }
+    const start = this.b.offset;
     this.b.tsOnly(() => this.b.emit('('));
     fn();
     this.b.tsOnly(() => this.b.emit(evTypeText === null ? ') as any' : `) as (e: ${evTypeText}) => unknown`));
+    return evTypeText === null ? null : [start, this.b.offset];
   }
 
   // The TS-only constructor: the props SURFACE —
@@ -8689,7 +8722,7 @@ class Emitter {
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
     this.cframes.push(frame);
-    this.rframes.push({ reactive: new Set(), bound: new Set(), members, memberReactive });
+    this.rframes.push({ reactive: new Set(), bound: new Set(), members, memberReactive, memberKinds });
     const prevMethod = this.methodName;
     this.methodName = null;
 
@@ -9104,24 +9137,25 @@ class Emitter {
         const scanHandlers = (x, host) => {
           if (!isNode(x)) return;
           let next = host;
-          if (typeof x[0] === 'string' && x[0].length > 0) {
-            const base = x[0].split(/[#.]/)[0];
-            const tag = base === '' && /^[#.]/.test(x[0]) ? 'div' : base;
-            // `object` is BOTH the object-literal node head and an HTML
-            // tag. Direct `:` pairs mark the LITERAL (an element's
-            // pairs arrive wrapped in their own object child), and a
-            // literal is transparent — its element's context flows
-            // through to the handlers it carries. Anything else spelled
-            // `object` is ambiguous and clears the context: a real
-            // `<object>`'s handlers must not inherit the outer tag, and
-            // no wrong claim beats either right one.
-            if (tag === 'object') {
-              next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ':') ? host : null;
-            } else if (TEMPLATE_TAGS.has(tag)) {
-              next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
-            } else if (/^[A-Z]/.test(x[0])) {
-              next = null;
-            }
+          // A render `switch` STATEMENT carries the host through to its
+          // arms; its node shape is told apart before the tag test
+          // because `switch` is also an SVG tag (the render walk's own
+          // dispatch order).
+          const tag = x[0] === 'switch' && x.length === 4 ? null : Emitter.templateHeadTag(x);
+          // `object` is BOTH the object-literal node head and an HTML
+          // tag. Direct `:` pairs mark the LITERAL (an element's
+          // pairs arrive wrapped in their own object child), and a
+          // literal is transparent — its element's context flows
+          // through to the handlers it carries. Anything else spelled
+          // `object` is ambiguous and clears the context: a real
+          // `<object>`'s handlers must not inherit the outer tag, and
+          // no wrong claim beats either right one.
+          if (tag === 'object') {
+            next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ':') ? host : null;
+          } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
+            next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
+          } else if (typeof x[0] === 'string' && /^[A-Z]/.test(x[0])) {
+            next = null;
           }
           if (x[0] === ':' && x.length === 3 && isNode(x[1]) && x[1][0] === '.' &&
               x[1][1] === 'this' && typeof x[1][2] === 'string' && DOM_EVENTS.has(x[1][2])) {
@@ -9134,7 +9168,7 @@ class Emitter {
               const rec = methodEventNames.get(m);
               rec.events.add(x[1][2]);
               if (host !== null && surfaceableTag(host.tag, host.svg)) {
-                rec.hosts.add(`${host.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap'}['${host.tag}']`);
+                rec.hosts.add(hostText(host.tag, host.svg));
               } else {
                 rec.unknownHost = true;
               }
@@ -9479,14 +9513,21 @@ class Emitter {
   }
 
   // A value expression inside a render line — operand grouping, the
-  // component member rewrites live on the normal expr path.
+  // component member rewrites live on the normal expr path. Returns
+  // the generated span of the expression INSIDE any grouping parens:
+  // TypeScript reports an argument's mismatch on the bare expression,
+  // parens skipped, so that is the span a relation site records.
   renderExpr(value) {
+    let span = null;
     this.withExpression(() => {
       const wrap = Emitter.needsGrouping(value, 'operand');
       if (wrap) this.b.emit('(');
+      const start = this.b.offset;
       this.expr(value);
+      span = [start, this.b.offset];
       if (wrap) this.b.emit(')');
     });
+    return span;
   }
 
   // How does a bare name read inside the CURRENT render scope —
@@ -9849,9 +9890,7 @@ class Emitter {
         this.renderEffect(node, () => {
           const clsx = this.runtimeName('__clsx');
           if (isSvg) {
-            mergeRecv.open();
-            this.b.emit(el);
-            mergeRecv.close();
+            mergeRecv.emit();
             const gen = this.b.offset + 1;
             this.b.emit(`.setAttribute('class', ${clsx}('${classes.join(' ')}', `);
             for (const k of mergedKeys) this.intrinsics.push({ start: k[0], end: k[1], kind: 'attr', name: 'class', gen });
@@ -9859,9 +9898,7 @@ class Emitter {
             // Through the tag's own receiver, so the merged write lands on a
             // typed `className` — the position the key's ruled hover reads,
             // and the same answer the unmerged spelling already gives.
-            mergeRecv.open();
-            this.b.emit(el);
-            mergeRecv.close();
+            mergeRecv.emit();
             this.b.emit('.');
             const gen = this.b.offset;
             this.b.emit(`className = ${clsx}('${classes.join(' ')}', `);
@@ -10049,9 +10086,7 @@ class Emitter {
           // its quieting cast stays.
           const recv = this.tsElReceiver(el);
           this.renderLine(null, () => {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit('.setAttribute(');
             this.emitQuotedPrimitive(arg);
             this.b.emit(', true');
@@ -10117,9 +10152,7 @@ class Emitter {
     if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
     const recv = this.tsElReceiver(el);
     this.renderLine(null, () => {
-      recv.open();
-      this.b.emit(el);
-      recv.close();
+      recv.emit();
       this.b.emit('.setAttribute(');
       this.emitQuotedPrimitive(child);
       this.b.emit(", '')");
@@ -10593,11 +10626,21 @@ class Emitter {
             // (emitted by p.fn below) keeps every one of its own.
             const recordAttr = (fn) => {
               const start = this.b.offset;
-              fn();
+              const keySpan = fn();
               if (this.ts) this.attrNames.push([start, this.b.offset]);
               // A route-wrapped href prop pairs its key span with the
               // value span its fn records (see addChildProp).
               if ('routeKey' in p) p.routeKey = [start, this.b.offset];
+              // The property NAME is the props-object road's relation
+              // site — TS2322 and TS2353 both stand on it (WHERE A PAIR'S
+              // DIAGNOSTIC LANDS, in the intrinsic pair loop); `fn`
+              // returns the key's source span, the anchor.
+              if (this.ts && keySpan != null) {
+                const pid = p.pair !== null ? this.stores.idOf(p.pair) : null;
+                const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+                const key = [keySpan[0], keySpan[1]];
+                this.renderPairs.push({ key, pair: extent ?? key, sites: [[start, this.b.offset]] });
+              }
             };
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
@@ -10607,7 +10650,10 @@ class Emitter {
             // an editor-consumer concern.
             const mid = isNode(markNode) ? this.stores.idOf(markNode) : null;
             if (this.ts && p.span != null && mid !== null) {
-              recordAttr(() => this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key)));
+              recordAttr(() => {
+                this.b.markSpan(mid, 'shorthandProp', p.span[0], p.span[1], () => this.b.emit(p.key));
+                return [p.span[0], p.span[1]];
+              });
               this.b.emit(': ');
               p.fn();
               return;
@@ -10621,6 +10667,7 @@ class Emitter {
                   this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: p.key.slice(7, -2), gen });
                 }
                 this.b.emit('__');
+                return span;
               });
             } else {
               recordAttr(() => this.emitPrimitive(p.key));
@@ -10887,6 +10934,38 @@ class Emitter {
       // text/condition sites (F2).
       this.checkCrossScopeLocals(value, pair);
 
+      // WHERE A PAIR'S DIAGNOSTIC LANDS. A complaint that exists only
+      // because of the pair — the value against the key's admitted type —
+      // lands on the KEY, where JSX puts an attribute's type error and
+      // where a reader of markup looks; a complaint the value would draw
+      // in any position (name resolution, member access, its own syntax
+      // or type errors) is about the value and keeps its bytes. The roads
+      // below lower into different TypeScript shapes, and each spells the
+      // relation at a different generated position — the scratch const's
+      // `__v` name, a property write's left-hand side, the `satisfies`
+      // keyword, a call's argument, a props-object key, the handler
+      // cast — so each road records its RELATION SITE(S) here, in
+      // GENERATED coordinates, beside the key's source span; the
+      // diagnostics road re-anchors exactly a diagnostic standing on a
+      // recorded site (packages/vscode/src/diagnostics.js). A site is
+      // recorded at the moment its bytes emit — the roads run inside
+      // deferred closures, and the offset is only known then.
+      let rec = null;
+      if (this.ts) {
+        const pid = this.stores.idOf(pair);
+        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+        const src = this.b.source;
+        if (extent !== null && src !== null) {
+          let ke = extent[0];
+          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
+          if (ke > extent[0]) {
+            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+            this.renderPairs.push(rec);
+          }
+        }
+      }
+      const site = (span) => { if (rec !== null && span !== null && span[1] > span[0]) rec.sites.push(span); };
+
       // Event binding: `@name: handler`. A dispatch through a bare
       // member name calls the method on the instance (`ctx` inside
       // factories — the factory methods run unbound). The event param
@@ -10935,9 +11014,7 @@ class Emitter {
           if (!this.ts) {
             this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
           } else {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit('.addEventListener(');
             this.emitQuotedPrimitive(eventName);
             this.b.emit(`, (${ev}`);
@@ -10953,9 +11030,13 @@ class Emitter {
             // handler's own bytes (a custom event keeps `any`: no
             // claim to check against).
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
+            const castStart = this.b.offset;
             this.b.emit(`${self}.`);
             this.emitPrimitive(value);
             if (this.ts) this.b.tsOnly(() => this.b.emit(known !== null ? ` as (e: ${known}) => unknown)` : ' as any)'));
+            // The `as` expression (its closing paren excluded) is the
+            // pair's relation site — TS2352 stands on it.
+            if (this.ts && known !== null) site([castStart, this.b.offset - 1]);
             this.b.emit(`(${ev})`);
           } else {
             // A literal handler with no params (the implicit-`it` rule
@@ -10974,7 +11055,7 @@ class Emitter {
                 ? (known ?? 'any')
                 : isFunc(value) ? null : known;
             this.b.emit('(');
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
+            site(this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit('))');
@@ -10994,31 +11075,6 @@ class Emitter {
       // road's machinery (`__effect`), not the key.
       const storedKey = key;
       if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
-
-      // WHERE A PAIR'S DIAGNOSTIC LANDS. A render pair is markup: the key
-      // names which thing is wrong, and that is where the reader looks —
-      // JSX anchors an attribute's own type error on the attribute name
-      // too. The roads below lower into different TypeScript shapes (a
-      // call takes its complaint on the argument, an object literal on
-      // the property), so without this the placement would move with the
-      // lowering, which the author cannot see. Recorded per pair in
-      // SOURCE coordinates; the diagnostics road re-anchors a complaint
-      // that covers the whole value, and leaves one INTERIOR to the value
-      // where it is (an interpolation's own defect is its own).
-      if (this.ts) {
-        const pid = this.stores.idOf(pair);
-        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-        const src = this.b.source;
-        if (extent !== null && src !== null) {
-          let ke = extent[0];
-          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
-          let vs = ke;
-          while (vs < extent[1] && /[\s:<=>]/.test(src[vs])) vs++;
-          if (ke > extent[0] && vs < extent[1]) {
-            this.renderPairs.push({ key: [extent[0], ke], value: [vs, extent[1]], pair: [extent[0], extent[1]] });
-          }
-        }
-      }
 
       // Only the CHANNEL words the lowering still spends whole stay in
       // the render-channel census (`__transition__`, the `ref` key
@@ -11042,7 +11098,7 @@ class Emitter {
         // face position, and the value-first channel serves the
         // binding's own type there (RULINGS.md, the ref rows).
         this.noteVocabulary('render-channel', key, pair);
-        this.renderRef(el, pair, value, objExpr);
+        this.renderRef(el, pair, value, objExpr, site);
         continue;
       }
       if (key.startsWith('__bind_') && key.endsWith('__')) {
@@ -11059,7 +11115,7 @@ class Emitter {
         // Looking for the source word instead finds the RHS when a bind
         // names the same word on both sides (`value <=> value`).
         const prop = key.slice(7, -2);
-        this.renderBind(el, pair, prop, value, objExpr);
+        this.renderBind(el, pair, prop, value, objExpr, site);
         continue;
       }
       if (key === 'key') {
@@ -11088,15 +11144,17 @@ class Emitter {
           if (this.ts && extent !== null) {
             (R.pendingClassKeys ??= []).push([extent[0], extent[0] + key.length]);
           }
-          R.pendingClassArgs.push(() => this.renderExpr(value));
+          // A `__clsx` argument is the pair's relation site — and the
+          // value's own expression, so a whole-span complaint of the
+          // value's own stands there too; the diagnostics road tells
+          // them apart by the complaint's family.
+          R.pendingClassArgs.push(() => site(this.renderExpr(value)));
         } else if (this.renderReactive(value)) {
           const isSvg = R.svgDepth > 0;
           const recv = this.tsElReceiver(el);
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName('__clsx');
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -11107,7 +11165,8 @@ class Emitter {
               this.emitPropertyRoadKey(() => this.emitKeyAs(key, 'className'));
               this.b.emit(` = ${clsx}(`);
             }
-            this.renderExpr(value);
+            // The `__clsx` argument (see the merge road above).
+            site(this.renderExpr(value));
             this.b.emit(isSvg ? '));' : ');');
           }, value);
         } else {
@@ -11115,9 +11174,12 @@ class Emitter {
           const compound = isNode(value);
           const recv = this.tsElReceiver(el);
           this.renderLine(pair, () => {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            // The relation site by shape: an HTML write of a plain value
+            // is a property assignment (TS2322 on its left-hand side);
+            // the SVG call and the `__clsx` wrap take the value as an
+            // argument (see the merge road above).
+            const lhsStart = this.b.offset;
+            recv.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -11126,10 +11188,12 @@ class Emitter {
             } else {
               this.b.emit('.');
               this.emitPropertyRoadKey(() => this.emitKeyAs(key, 'className'));
+              if (!compound) site([lhsStart, this.b.offset]);
               this.b.emit(' = ');
             }
             if (compound) this.b.emit(`${this.runtimeName('__clsx')}(`);
-            this.renderExpr(value);
+            const valueSpan = this.renderExpr(value);
+            if (isSvg || compound) site(valueSpan);
             if (compound) this.b.emit(')');
             // The open is branched, so the close is too: SVG opened a CALL, HTML an assignment.
             if (isSvg) this.b.emit(')');
@@ -11144,11 +11208,13 @@ class Emitter {
         // is a number into a string property).
         const recv = this.tsElReceiver(el);
         this.renderEffect(pair, () => {
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          // A property write's left-hand side is the pair's relation
+          // site — TS2322 stands on the whole receiver-and-property.
+          const lhsStart = this.b.offset;
+          recv.emit();
           this.b.emit('.');
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
+          site([lhsStart, this.b.offset]);
           this.b.emit(' = ');
           this.renderExpr(value);
           this.b.emit(';');
@@ -11159,11 +11225,12 @@ class Emitter {
       if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
         const recv = this.tsElReceiver(el);
         const emitAssign = () => {
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          // The left-hand side is the relation site (the property road).
+          const lhsStart = this.b.offset;
+          recv.emit();
           this.b.emit('.');
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
+          site([lhsStart, this.b.offset]);
           this.b.emit(' = ');
           this.renderExpr(value);
         };
@@ -11197,9 +11264,7 @@ class Emitter {
         };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit(".toggleAttribute('");
             emitBooleanKey();
             this.b.emit("', !!");
@@ -11210,7 +11275,11 @@ class Emitter {
             // negation's own result is what gets checked.
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.renderExpr(value);
+            // The `satisfies` keyword is the pair's relation site —
+            // TS1360 stands on the keyword, never on the expression.
+            const satStart = this.b.offset + 1;
             if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined)'));
+            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
             this.b.emit(');');
           }, value);
         } else {
@@ -11218,11 +11287,12 @@ class Emitter {
             this.b.emit('if (');
             // The guard's own parens already group the expression.
             this.withExpression(() => this.expr(value));
+            // The `satisfies` keyword is the relation site (the toggle arm above).
+            const satStart = this.b.offset + 1;
             if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined'));
+            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
             this.b.emit(') ');
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit(".setAttribute('");
             emitBooleanKey();
             this.b.emit("', '')");
@@ -11312,19 +11382,20 @@ class Emitter {
         if (isPresence || nullable) {
           this.renderEffect(pair, () => {
             this.b.emit('{ const __v');
+            // The scratch const's NAME is the pair's relation site: the
+            // value initializes it against the admitted type, and TS2322
+            // stands on the declaration name while the initializer's own
+            // complaints stay on the author's bytes.
+            site([this.b.offset - 3, this.b.offset]);
             nullableAnnotation();
             this.b.emit(' = ');
             this.renderExpr(value);
             this.b.emit('; __v == null ? ');
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             this.b.emit(".removeAttribute('");
             emitAttrKey();
             this.b.emit("') : ");
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             emitSetAttribute();
             emitAttrKey();
             this.b.emit("', __v); }");
@@ -11336,9 +11407,7 @@ class Emitter {
             // doctrine), and inside an any-receiver call tsgo stops
             // computing the argument's contextual string-literal
             // completions.
-            recv.open();
-            this.b.emit(el);
-            recv.close();
+            recv.emit();
             emitSetAttribute();
             const keyStart = this.b.offset;
             emitAttrKey();
@@ -11346,7 +11415,9 @@ class Emitter {
             this.b.emit("', ");
             if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
             const valStart = this.b.offset;
-            this.renderExpr(value);
+            // The call's argument is the pair's relation site (TS2345);
+            // a literal or a template draws nothing of its own there.
+            site(this.renderExpr(value));
             const valEnd = this.b.offset;
             // The wrap CLOSES WITHOUT a cast: __ripRoute returns a
             // string-literal type setAttribute already accepts, and an
@@ -11367,13 +11438,13 @@ class Emitter {
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
           this.b.emit('{ const __v');
+          // The scratch const's name is the relation site (the effect arm above).
+          site([this.b.offset - 3, this.b.offset]);
           nullableAnnotation();
           this.b.emit(' = ');
           this.renderExpr(value);
           this.b.emit('; if (__v != null) ');
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          recv.emit();
           emitSetAttribute();
           emitAttrKey();
           this.b.emit("', __v); }");
@@ -11381,9 +11452,7 @@ class Emitter {
       } else {
         this.renderLine(pair, () => {
           // Same receiver cast as the reactive branch above.
-          recv.open();
-          this.b.emit(el);
-          recv.close();
+          recv.emit();
           emitSetAttribute();
           const keyStart = this.b.offset;
           emitAttrKey();
@@ -11391,7 +11460,8 @@ class Emitter {
           this.b.emit("', ");
           if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
           const valStart = this.b.offset;
-          this.renderExpr(value);
+          // The call's argument is the relation site (the effect arm above).
+          site(this.renderExpr(value));
           const valEnd = this.b.offset;
           // The value checks against the surface's widened
           // `propertyType | string` road (Rip DOM attributes are
@@ -12016,16 +12086,19 @@ class Emitter {
         try {
           this.withExpression(() => {
             const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
-            if (wrap) this.b.emit('(');
-            this.expr(keyExpr);
             // The `key:` word answers the key's own type, read off the
-            // expression's last name — the same technique a bind uses:
-            // the typed position is the expression, and the word is the
-            // channel that spends it (RULINGS.md, `key:` in a render loop).
-            if (this.ts && keySpan !== null) {
-              this.intrinsics.push({ start: keySpan[0], end: keySpan[1], kind: 'key', gen: this.b.offset - 1 });
+            // served position around the expression — the same technique
+            // a bind uses: the typed position is the expression, and the
+            // word is the channel that spends it (RULINGS.md, `key:` in a
+            // render loop).
+            const gen = this.tsServedValue('__key', () => {
+              if (wrap) this.b.emit('(');
+              this.expr(keyExpr);
+              if (wrap) this.b.emit(')');
+            });
+            if (gen !== null && keySpan !== null) {
+              this.intrinsics.push({ start: keySpan[0], end: keySpan[1], kind: 'key', gen });
             }
-            if (wrap) this.b.emit(')');
           });
         } finally {
           this.rframes.pop();
@@ -12182,17 +12255,17 @@ class Emitter {
           this.mark(r.node, '$self', () => {
             const typed = this.ts && typeof r.tag === 'string';
             if (typed) this.b.tsOnly(() => this.b.emit(`${r.svg ? '__ripRefCellSvg' : '__ripRefCell'}('${r.tag}', `));
+            const cellStart = this.b.offset;
             this.b.emit(`${self}.`);
             // The NAME claims its exact row and joins the value-first
             // channel — a dynamic ref answers like a static one.
             const span = this.emitPrimitive(r.name);
             if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
+            // The cell argument is the pair's relation site (renderRef).
+            if (typed) r.site([cellStart, this.b.offset]);
             if (typed) this.b.tsOnly(() => this.b.emit(')'));
             this.b.emit(`.value = ${r.elVar}`);
-            if (typed) {
-              const map = r.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
-              this.b.tsOnly(() => this.b.emit(` as ${map}['${r.tag}'] | null`));
-            }
+            if (typed) this.b.tsOnly(() => this.b.emit(` as ${hostText(r.tag, r.svg)} | null`));
             this.b.emit(';');
           });
           this.b.emit('\n');
@@ -12293,7 +12366,7 @@ class Emitter {
   // messages. Static refs write in _create (the subtree is connected
   // before any effect first runs — glitch-free) and clear through
   // _refCleanups on unmount; dynamic refs ride the factory's m()/d().
-  renderRef(el, pair, value, objExpr) {
+  renderRef(el, pair, value, objExpr, site) {
     const refName = typeof value === 'string' && RENDER_LOCAL_RE.test(value) ? value : null;
     if (refName === null) {
       throw this.positionedError(pair,
@@ -12332,18 +12405,21 @@ class Emitter {
     if (this.rstate.sink.kind === 'class') {
       this.renderLine(pair, () => {
         if (refTyped) this.b.tsOnly(() => this.b.emit(`${refSvg ? '__ripRefCellSvg' : '__ripRefCell'}('${tag}', `));
+        // The wrap's cell argument is the pair's relation site: a cell
+        // that cannot hold this tag's element draws TS2345 there. The
+        // name is a verified state member, so nothing the value draws
+        // on its own can stand on the same span.
+        const cellStart = this.b.offset;
         this.b.emit('this.');
         // The NAME's exact row joins the value-first channel: hover at
         // `ref: inputEl` answers the binding's own element type, never
         // the container wrapper (RULINGS.md, the ref-name row).
         const span = this.emitPrimitive(refName);
         if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
+        if (refTyped) site([cellStart, this.b.offset]);
         if (refTyped) this.b.tsOnly(() => this.b.emit(')'));
         this.b.emit(`.value = ${el}`);
-        if (refTyped) {
-          const map = refSvg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
-          this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
-        }
+        if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
         // The ref NAME emits through the primitive channel so the TS face
@@ -12356,7 +12432,7 @@ class Emitter {
     } else {
       this.rstate.sink.refs.push({
         name: refName, elVar: el, node: pair,
-        tag: refTyped ? tag : null, svg: refSvg,
+        tag: refTyped ? tag : null, svg: refSvg, site,
       });
     }
   }
@@ -12369,7 +12445,7 @@ class Emitter {
   // input via e.target.value. Chain targets notify their root
   // container with `.touch?.()` (a nested write changes no container
   // identity).
-  renderBind(el, pair, prop, value, objExpr) {
+  renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
     if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
       this.rstate.sink.forceNonStatic = true;
@@ -12395,13 +12471,14 @@ class Emitter {
       // its type stands — here the element property the bind writes.
       const span = this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
       this.b.emit(' = ');
-      this.withExpression(() => this.expr(value));
       // The channel's type is the CELL's, not the element's (docs/TYPES.md:
       // a `<=>` write is typed at the cell), and the element receiver here is
-      // a scaffold local with no type to read. So the record points INTO the
-      // bound expression's last name, whose type is what flows both ways.
-      if (this.ts && span !== null) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: prop, gen: this.b.offset - 1 });
+      // a scaffold local with no type to read. So the record points at the
+      // served position around the bound expression, whose type is what
+      // flows both ways.
+      const gen = this.tsServedValue('__bind', () => this.withExpression(() => this.expr(value)));
+      if (gen !== null && span !== null) {
+        this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: prop, gen });
       }
       this.b.emit(';');
     }, value);
@@ -12424,7 +12501,14 @@ class Emitter {
       if (evText !== null) this.b.tsOnly(() => this.b.emit(`: ${evText}`));
       else this.tsScaffoldAny();
       this.b.emit(') => { ');
+      // The write-back's left-hand side is the pair's relation site: a
+      // cell that cannot hold what the element returns draws TS2322
+      // there. The target is a verified writable member (checkBindTarget),
+      // so no complaint of its own covers the whole span — a chain's
+      // missing member reports on that member alone.
+      const targetStart = this.b.offset;
       this.withExpression(() => this.expr(value));
+      site([targetStart, this.b.offset]);
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
         this.b.emit(' ');
@@ -12587,6 +12671,29 @@ class Emitter {
       }
     }
     return { tag: tag || 'div', classes: classes.filter((c) => c !== ''), id };
+  }
+
+  // The tag a render node's HEAD names, or null — every head spelling
+  // the render walk dispatches on, resolved through collectTemplateClasses
+  // so the two never disagree: a bare string (`input`, `input#one`), a
+  // dot chain (`input.field`, `.cls`), a call whose head is either, and
+  // the dynamic-class call (`tag.(…)` — `__clsx` as the chain's last
+  // member, or a `__clsx`-headed call standing as the head). The tag is
+  // the spelling's, unchecked against the vocabulary.
+  static templateHeadTag(x) {
+    if (!isNode(x)) return null;
+    const head = x[0];
+    if (typeof head === 'string') {
+      if (head === '.') return Emitter.collectTemplateClasses(x).tag;
+      return head.length > 0 ? head.split('#')[0] || 'div' : null;
+    }
+    if (!isNode(head)) return null;
+    if (isNode(head[0]) && head[0][0] === '.' && head[0][2] === '__clsx') {
+      const tagExpr = head[0][1];
+      if (typeof tagExpr === 'string') return tagExpr.split('#')[0] || 'div';
+      return Emitter.collectTemplateClasses(tagExpr).tag;
+    }
+    return Emitter.collectTemplateClasses(head).tag;
   }
 
   // ── Accessor/call chains — iterative spine emission ────────────────
@@ -16204,10 +16311,13 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
 // declared rather than the `property` the alias spells it as.
 const SCHEMA_BODY_KINDS = { field: 'field', computed: 'computed', derived: 'derived', method: 'method' };
 
-function recordSchemaFields(emitter, builder, block, at) {
+// `text` is the block's alias text as emitted, starting at generated
+// offset `at` — the caller hands over the string it just built rather
+// than the face re-joining its chunks (a mark is open here, so the
+// builder's `code` getter joins the whole output on every read).
+function recordSchemaFields(emitter, block, text, at) {
   const entries = block.story?.decl?.descriptor?.entries ?? null;
   if (entries === null) return;
-  const text = builder.code.slice(at);
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // A schema NAMED in the body — a union's constituent, an `@mixin`
   // target — reaches the alias as a type reference (`= A | B`, `& M`),
@@ -16539,8 +16649,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         builder.tsOnly(() => {
           const lines = () => {
             const at = builder.offset;
-            builder.emit(b.lines.map((l) => `${exp}${l}`).join('\n'));
-            recordSchemaFields(emitter, builder, b, at);
+            const text = b.lines.map((l) => `${exp}${l}`).join('\n');
+            builder.emit(text);
+            recordSchemaFields(emitter, b, text, at);
           };
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
           else lines();

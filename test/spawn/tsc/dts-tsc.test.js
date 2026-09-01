@@ -70,6 +70,10 @@ const HAND_ROWS = [
   // container's `.value` slot (state mutable, computed readonly) —
   // exported and module-internal
   'export count: number := 0\nexport total: number ~= count * 2\nlabel: string := "tag"',
+  // a schema method's parameter annotation lowers like every other
+  // annotation: the rip boolean spellings and a single-quoted literal
+  // reach the member's respelled signature as TS
+  "Flag = schema :shape\n  n! number\n  set: (v: on | off) -> v\n  pick: (k: 'a' | 'b') -> k",
 ];
 
 // The whole gate's rows — corpus declarations and hand rows — as one
@@ -162,6 +166,61 @@ describeTscExtended('tsc validates the hand rows the corpus does not carry', () 
     const { status, byFile } = tscBatch(TSC, { 'bad.d.ts': 'declare function f(a);\nexport {};\n' });
     expect(status).not.toBe(0);
     expect(byFile.get('bad.d.ts')).not.toEqual([]);
+  }, TSC_TIMEOUT);
+});
+
+describeTscExtended('a declaration file names its own lib dependency', () => {
+  // The component surfaces spell DOM globals (`Node` in the children
+  // union, `HTMLElementTagNameMap` under extends), so the .d.ts carries
+  // the `dom` lib reference itself: a consumer compiled with the
+  // language lib alone still resolves every name the file uses. The
+  // batch's default lib includes the DOM, which is exactly why this
+  // row narrows it — under the default, a missing reference is invisible.
+  const LANG_ONLY = { lib: 'es2022' };
+
+  test('a component module checks with the language lib alone', () => {
+    const card = compile([
+      'export Card = component',
+      "  @title := 'x'",
+      '  render',
+      '    div',
+      '      = @title',
+      '',
+    ].join('\n')).declarations;
+    const button = compile([
+      'export Push = component extends button',
+      "  @label := 'x'",
+      '  render',
+      '    button',
+      '      = @label',
+      '',
+    ].join('\n')).declarations;
+    expect(card.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    expect(button.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    const { status, byFile, unattributed } = tscBatch(TSC, { 'card.d.ts': card, 'push.d.ts': button }, [], LANG_ONLY);
+    expect(byFile.get('card.d.ts')).toEqual([]);
+    expect(byFile.get('push.d.ts')).toEqual([]);
+    expect(unattributed).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('a module naming no DOM global carries no reference, and checks the same way', () => {
+    const fn = compile('export def f(a: number): string\n  String(a)\n').declarations;
+    const schema = compile('export S = schema :input\n  email! email\n  age? ~integer\n').declarations;
+    // A component that owns `children` and extends nothing spells no
+    // DOM global either — the reference follows the NAMES, not the kind.
+    const owned = compile('export Own = component\n  @children: string\n').declarations;
+    for (const d of [fn, schema, owned]) expect(d).not.toContain('<reference');
+    const { status, byFile, unattributed } = tscBatch(TSC, { 'fn.d.ts': fn, 'schema.d.ts': schema, 'own.d.ts': owned }, [], LANG_ONLY);
+    for (const [name, diags] of byFile) expect({ name, diags }).toEqual({ name, diags: [] });
+    expect(unattributed).toEqual([]);
+    expect(status).toBe(0);
+  }, TSC_TIMEOUT);
+
+  test('the narrowed lib has teeth: a DOM name with no reference is TS2304', () => {
+    const { status, byFile } = tscBatch(TSC, { 'bare.d.ts': 'export declare let n: Node;\n' }, [], LANG_ONLY);
+    expect(status).not.toBe(0);
+    expect(byFile.get('bare.d.ts').join('\n')).toContain('TS2304');
   }, TSC_TIMEOUT);
 });
 

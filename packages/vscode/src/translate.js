@@ -136,6 +136,85 @@ export function diagnosticTagsFor(code) {
   return [];
 }
 
+// The one walk over a printed type: every character outside a string
+// literal (escapes honored) visits with its bracket depth, a `>`
+// closing an arrow (`=>`) counting as none. Stops where `visit`
+// answers false and returns that index; -1 when the walk runs out.
+export function walkType(text, from, visit) {
+  let depth = 0, quote = null;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (quote !== null) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+    if ('<([{'.includes(c)) depth++;
+    else if (')]}'.includes(c) || (c === '>' && text[i - 1] !== '=')) depth--;
+    if (visit(i, c, depth) === false) return i;
+  }
+  return -1;
+}
+// The pieces of a printed type around its depth-0 `sep`s: a separator
+// inside a literal, a bracket pair, or a function type's own arms
+// belongs to that nested type, never to this list. Pieces come back
+// untrimmed and possibly empty.
+export function splitTypeAt(text, sep) {
+  const parts = [];
+  let start = 0;
+  walkType(text, 0, (i, c, depth) => {
+    if (c === sep && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  });
+  parts.push(text.slice(start));
+  return parts;
+}
+// The index of the bracket closing the one at `from`, or -1.
+export const balancedTo = (text, from) => walkType(text, from, (i, c, depth) => !(i > from && depth === 0));
+// A printed union's own arms, trimmed — the depth-0 split.
+export function unionArms(type) {
+  return splitTypeAt(type, '|').map((arm) => arm.trim()).filter(Boolean);
+}
+// The reactive-cell shape `{ value: T; read(): T }` — both Ts equal, the
+// brand doctrine keeping user literals out of it — with the marker
+// rows a component's bind slot adds. Answers the value type T (and
+// whether the cell is readonly), or null for any other type.
+export function cellShape(text) {
+  const m = /^\{ (readonly )?value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(text.trim());
+  if (!m || m[2].trim() !== m[3].trim()) return null;
+  return { value: m[2].trim(), readonly: m[1] !== undefined };
+}
+
+// A reactive CELL, `{ value: T; read(): T; touch?(): void }`, plays two
+// parts, and only one of them is the lowering's. BESIDE its own value type
+// in a union — `T | { value: T; … } | undefined`, a shared prop slot's
+// admission, a `<=>` channel's — the cell arm is the plumbing that lets a
+// container ride the same slot as a value, and it reads as T (the brand
+// check — value and read() agreeing — keeps a user literal of that shape
+// out). STANDALONE, a cell is a thing the author holds or passed: a
+// reactive import IS the cell the importer receives, and a `:=` cell handed
+// where a value belongs is exactly that. Those stay named as cells, because
+// collapsing one would make `n: number = count` complain that number is
+// not assignable to number. A text with no cell arm comes back untouched:
+// the diagnostic path hands this every quoted span of a message, and a
+// quoted operator (`'|'`) is not a union to normalize.
+export function collapseCellArms(type) {
+  if (typeof type !== 'string') return type;
+  const top = unionArms(type);
+  if (top.length < 2) return type;
+  let collapsed = false;
+  const arms = top.map((arm) => {
+    const cell = cellShape(arm);
+    if (cell === null) return arm;
+    collapsed = true;
+    return cell.value;
+  });
+  if (!collapsed) return type;
+  // A collapsed cell's value type may itself be a union, so the arms
+  // flatten once more and an arm already present folds into it.
+  return [...new Set(arms.flatMap(unionArms))].join(' | ');
+}
+
 // Route-union display prettifying, two passes over the same member
 // list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
 // reads as the parameterized display the route file spells
@@ -149,48 +228,6 @@ export function diagnosticTagsFor(code) {
 // face text, the union the checker saw, and every span are untouched.
 // Entries come from the route walker (mirror.js appRoutesFor), already
 // in walker order.
-// The top-level arms of a union type text, split outside every bracket.
-export function unionArmsOf(type) {
-  const arms = [];
-  let depth = 0, start = 0;
-  for (let i = 0; i < type.length; i++) {
-    const ch = type[i];
-    if (ch === '{' || ch === '(' || ch === '[' || ch === '<') depth++;
-    else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) depth--;
-    else if (ch === '|' && depth === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') {
-      arms.push(type.slice(start, i - 1));
-      start = i + 2;
-    }
-  }
-  arms.push(type.slice(start));
-  return arms.map((a) => a.trim());
-}
-
-// A reactive CELL, `{ value: T; read(): T; touch?(): void }`, plays two
-// parts, and only one of them is the lowering's. BESIDE its own value type
-// in a union — `T | { value: T; … } | undefined`, a shared prop slot's
-// admission, a `<=>` channel's — the cell arm is the plumbing that lets a
-// container ride the same slot as a value, and it reads as T (the brand
-// check — value and read() agreeing — keeps a user literal of that shape
-// out). STANDALONE, a cell is a thing the author holds or passed: a
-// reactive import IS the cell the importer receives, and a `:=` cell handed
-// where a value belongs is exactly that. Those stay named as cells, because
-// collapsing one would make `n: number = count` complain that number is
-// not assignable to number.
-const CELL = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/;
-export function collapseCellArms(type) {
-  if (typeof type !== 'string') return type;
-  const top = unionArmsOf(type);
-  if (top.length < 2) return type;
-  const arms = top.map((arm) => {
-    const cell = CELL.exec(arm);
-    return cell && cell[1].trim() === cell[2].trim() ? cell[1].trim() : arm;
-  });
-  // A collapsed cell's value type may itself be a union, so the arms
-  // flatten once more and an arm already present folds into it.
-  return [...new Set(arms.flatMap((a) => unionArmsOf(a)))].join(' | ');
-}
-
 export function prettifyRouteUnion(text, entries) {
   if (typeof text !== 'string' || !entries?.length) return text;
   let out = text;
@@ -777,6 +814,15 @@ export function scrubFaceArtifacts(text) {
     .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]');
 }
 
+// A hover's markdown body reduced to its bare type text, for pinning
+// and comparison: the code fences go, and every run of whitespace
+// (the multi-line display of an object type included) becomes one
+// space. Empty in, empty out — the caller decides what an empty
+// answer means.
+export function flattenHover(markdown) {
+  return markdown.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim();
+}
+
 // Inserted-import text made idiomatic Rip: statement semicolons drop
 // (Rip parses them, but no Rip author writes them), mirror-path
 // specifiers lose their face extension, and the specifier is
@@ -851,7 +897,7 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
 // top-level token's — the lowering compiles them into the descriptor,
 // where the mapping already lands each on its typed face position — so
 // the hover model has to reach them, or the whole body declines.
-const SCHEMA_PAYLOADS = ['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens'];
+export const SCHEMA_PAYLOADS = ['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens'];
 
 export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null) {
   const spans = [];

@@ -29,8 +29,13 @@ try {
 } catch { /* dependencies not installed */ }
 
 const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
+const TSGO_TRACE_TAP = path.resolve(import.meta.dir, 'support', 'tsgo-trace.mjs');
 
-async function inWorkspace(files, fn) {
+// `traceTsgo` preloads the test-only tap (support/tsgo-trace.mjs) into
+// the server, and `api.tsgoNotifications()` reads back every
+// tsgo-bound notification method it has sent — the face swaps a probe
+// costs are otherwise invisible from this side of the stdio.
+async function inWorkspace(files, fn, { traceTsgo = false } = {}) {
   const { LspClient } = await import('../../src/tsgo.js');
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-render-intel-'));
   for (const [rel, content] of Object.entries(files)) {
@@ -39,9 +44,12 @@ async function inWorkspace(files, fn) {
     fs.writeFileSync(p, content);
   }
   const published = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
+  const trace = traceTsgo ? path.join(os.tmpdir(), path.basename(ws) + '.tsgo-trace') : null;
+  if (trace) { fs.writeFileSync(trace, ''); process.env.RIP_TSGO_TRACE = trace; }
+  const client = new LspClient('bun', [...(trace ? ['--preload', TSGO_TRACE_TAP] : []), SERVER, '--stdio'], {
     onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') published.push(p); },
   });
+  if (trace) delete process.env.RIP_TSGO_TRACE;
   client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
   const uriOf = (rel) => 'file://' + path.join(ws, rel);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,6 +88,7 @@ async function inWorkspace(files, fn) {
     hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
     completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
     semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
+    tsgoNotifications: () => (trace ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean) : []),
   };
   try {
     const init = await client.request('initialize', {
@@ -93,6 +102,7 @@ async function inWorkspace(files, fn) {
   } finally {
     await client.stop();
     fs.rmSync(ws, { recursive: true, force: true });
+    if (trace) fs.rmSync(trace, { force: true });
   }
 }
 
@@ -588,6 +598,46 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('where a pair\'s complaint lands: the value\'s own complaint keeps its bytes, the pair\'s relation lands on the key', async () => {
+    // The editor half of the CLI row of the same name (RULINGS.md, the
+    // render-pair section): one road per line, LSP positions.
+    const source = [
+      'Btn = component',               // 0
+      '  @label: string',              // 1
+      '  render',                      // 2
+      "    button 'b'",                // 3
+      '',                              // 4
+      'export P = component',          // 5
+      '  n := 0',                      // 6
+      '  cell: HTMLInputElement | null := null', // 7
+      '  render',                      // 8
+      '    div',                       // 9
+      '      input value: nope',       // 10: TS2304 on `nope`
+      '      img alt: 42',             // 11: TS2345 on `alt`
+      '      Btn anything: 2',         // 12: TS2353 on `anything`
+      '      Btn label: nope',         // 13: TS2304 on `nope`
+      '      input value <=> n',       // 14: TS2322 on `value`
+      '      div innerHTML: n',        // 15: TS2322 on `innerHTML`
+      '      div textContent: nope',   // 16: TS2304 on `nope`
+      '      Btn label <=> n',         // 17: TS2322 on `label`
+      '      button disabled: nope',   // 18: TS2304 on `nope`
+      '      div ref: cell',           // 19: TS2345 on `ref`
+      '      p class: n',              // 20: TS2345 on `class`
+      '      div.card class: nope',    // 21: TS2304 on `nope`
+      '',
+    ].join('\n');
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      await api.open('app.rip', source);
+      const rows = api.diagnostics('app.rip')
+        .map((d) => [d.code, d.range.start.line, d.range.start.character])
+        .sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+      expect(rows).toEqual([
+        [2304, 10, 19], [2345, 11, 10], [2353, 12, 10], [2304, 13, 17], [2322, 14, 12], [2322, 15, 10],
+        [2304, 16, 23], [2322, 17, 10], [2304, 18, 23], [2345, 19, 10], [2345, 20, 8], [2304, 21, 22],
+      ]);
+    });
+  });
+
   test('a property-road key keeps the TextMate attribute color — no `property` semantic token lands on it', async () => {
     await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
       await api.open('app.rip', APP);
@@ -597,6 +647,175 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // line 8 `        value: q` — the key spans characters 8-13.
       const onKey = rows.filter((t) => t.line === 8 && t.character < 13 && t.character + t.length > 8);
       expect(onKey).toEqual([]);
+    });
+  });
+  test('completions: the pair-splice probe fires only inside render content', async () => {
+    // The probe is an attribute-key ask: it costs a tolerant compile and
+    // two face swaps against tsgo (the probe face in, the last-good face
+    // back). A completion outside render content — a string literal in
+    // ordinary code — pays none of that, while an ask inside an element
+    // body still pays for its answer.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      await api.open('app.rip', APP + "s = 'hello wor'\n");   // line 12
+      const swaps = () => api.tsgoNotifications().filter((m) => m === 'textDocument/didChange').length;
+      const before = swaps();
+      await api.completion('app.rip', 12, 14);             // after `wor`, inside the literal
+      expect(swaps() - before).toBe(0);
+      const broken = APP.replace('      input ref: el', '      input pla');
+      await api.change('app.rip', broken, { waitPublish: false });
+      const settled = swaps();
+      const labels = labelsOf(await api.completion('app.rip', 10, 15));   // after `pla`
+      expect(labels).toContain('placeholder');
+      expect(swaps() - settled).toBeGreaterThanOrEqual(2);  // the probe face and its restore
+    }, { traceTsgo: true });
+  });
+
+  test('hover: a component held by another binding presents the construct it holds', async () => {
+    // A module binding assigned a component hovers the same construct
+    // under the binding's own name — `const Local: new (…) => Button` —
+    // so the constructed name is read off the tail, and the served
+    // signature names the construct (the thing Local IS), never the
+    // raw machinery.
+    await inWorkspace({
+      'package.json': STRICT_PKG,
+      'button.rip': [
+        'export Button = component',
+        '  @label: string',
+        '  render',
+        '    button @label.value',
+        '',
+      ].join('\n'),
+    }, async (api) => {
+      const src = [
+        "import { Button } from './button.rip'",  // 0
+        'Local = Button',                         // 1
+        'export Panel = component',               // 2
+        '  render',                               // 3
+        "    Local label: 'b'",                   // 4
+        '',
+      ].join('\n');
+      await api.open('app.rip', src);
+      const use = await api.hover('app.rip', 4, 6);        // inside `Local`
+      expect(use?.contents?.value).toContain('```rip\ncomponent Button');
+      expect(use?.contents?.value).toContain('label: string');
+      expect(use?.contents?.value).not.toContain('__bind_');
+      expect(use?.contents?.value).not.toContain('new (');
+    });
+  });
+
+  test('hover: a component whose name carries `$` presents wherever its construct prints', async () => {
+    // `$` is legal in a component name and a regex anchor — the tail
+    // check reads the constructed name rather than interpolating it.
+    // A reference above the declaration makes tsgo print the resolved
+    // construct at both sites, and the holder presents the construct
+    // it holds.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Local = Menu$',          // 0
+        '',
+        'Menu$ = component',      // 2
+        '  @label: string',       // 3
+        '  render',               // 4
+        '    span label',         // 5
+        '',
+      ].join('\n');
+      await api.open('menu.rip', src);
+      for (const [line, character] of [[0, 9], [2, 2]]) {     // inside `Menu$`
+        const hover = (await api.hover('menu.rip', line, character))?.contents?.value;
+        expect(hover).toContain('```rip\ncomponent Menu$\nprops: {\n  label: string\n}');
+        expect(hover).not.toContain('new (');
+      }
+    });
+  });
+
+  test('hover: a forward-used component with only optional props presents at its declaration', async () => {
+    // With every prop optional the hoisted binding's published type
+    // carries the static `mount` beside the construct signature, and
+    // tsgo prints the object form — `{ new (props?: …): Name;
+    // mount(target?: any): Name; }` — where a lone signature prints
+    // as an arrow. Both forms are the one construct.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Teaser = component',     // 0
+        '  render',               // 1
+        "    Menu label: 'm'",    // 2
+        '',
+        'Menu = component',       // 4
+        '  @label?: string',      // 5
+        '  render',               // 6
+        '    span label',         // 7
+        '',
+      ].join('\n');
+      await api.open('menu.rip', src);
+      const decl = (await api.hover('menu.rip', 4, 2))?.contents?.value;
+      expect(decl).toContain('```rip\ncomponent Menu\nprops: {\n  label?: string\n}');
+      expect(decl).not.toContain('mount(');
+      expect(decl).not.toContain('__bind_');
+    });
+  });
+
+  test('hover: a `<=>` target whose cell holds a function answers the value type', async () => {
+    // The container's own rows hold `=>` and nested braces; the arm
+    // split honors both, so the cell among the arms gives up its value
+    // type rather than the whole container.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Field = component',                    // 0
+        '  @label?: string',                    // 1
+        '  @pick?: ((x: number) => any)',       // 2
+        '  render',                             // 3
+        '    span label',                       // 4
+        '',
+        'T = component',                        // 6
+        "  n := ''",                            // 7
+        '  f := (x: number) -> x',              // 8
+        '  render',                             // 9
+        '    Field',                            // 10
+        '      label <=> n',                    // 11
+        '      pick <=> f',                     // 12
+        '',
+      ].join('\n');
+      await api.open('bind.rip', src);
+      const control = (await api.hover('bind.rip', 11, 6))?.contents?.value;
+      expect(control).toContain('(bind) label: string');
+      expect(control).not.toContain('read()');
+      const fn = (await api.hover('bind.rip', 12, 6))?.contents?.value;
+      expect(fn).toContain('(bind) pick: ((x: number) => any) | undefined');
+      expect(fn).not.toContain('read()');
+      expect(fn).not.toContain('touch');
+    });
+  });
+
+  test('hover: a component signature whose literals spell separators and brackets presents whole', async () => {
+    // The construct's rows are split at depth-0 separators; a literal
+    // holding `;`, `|`, `{`, or `[` belongs to its string and never
+    // moves a split. Required and optional spellings both present.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'Sep = component',              // 0
+        "  @sep?: ';' | ','",           // 1
+        "  @open?: '{' | '['",          // 2
+        '  render',                     // 3
+        "    span 'x'",                 // 4
+        '',
+        'Panel = component',            // 6
+        '  render',                     // 7
+        "    Sep sep: ','",             // 8
+        '',
+      ].join('\n');
+      await api.open('sep.rip', src);
+      const optional = (await api.hover('sep.rip', 8, 5))?.contents?.value;   // inside `Sep`
+      expect(optional).toContain('```rip\ncomponent Sep');
+      expect(optional).toMatch(/^  sep\?: ';' \| ','(?: \| undefined)?$/m);
+      expect(optional).toMatch(/^  open\?: '\{' \| '\['(?: \| undefined)?$/m);
+      expect(optional).not.toContain('read()');
+      expect(optional).not.toContain('new (');
+      await api.change('sep.rip', src.replace("@sep?: ';' | ','", "@sep: ';' | ','"));
+      const required = (await api.hover('sep.rip', 8, 5))?.contents?.value;
+      expect(required).toContain('```rip\ncomponent Sep');
+      expect(required).toMatch(/^  sep: ';' \| ','$/m);
+      expect(required).not.toContain('read()');
+      expect(required).not.toContain('new (');
     });
   });
 });

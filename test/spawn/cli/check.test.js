@@ -4719,7 +4719,48 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
       ]),
     }, { strict: true });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 7, 16]]);   // img alt: 42 — the value bytes
+      expect(diagsOf(dir)).toEqual([[2345, 7, 11]]);   // img alt: 42 — anchored on the key, as in the editor
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('where a pair\'s complaint lands: the value\'s own complaint keeps its bytes, the pair\'s relation lands on the key', () => {
+    // RULINGS.md, the render-pair section — every road, one file: the
+    // scratch-const, direct, property, boolean, and clsx roads of an
+    // intrinsic, the props-object road of a component use, a bind on
+    // each, and the ref channel.
+    const dir = workspace({
+      'app.rip': [
+        'Btn = component',
+        '  @label: string',
+        '  render',
+        "    button 'b'",
+        '',
+        'export P = component',
+        '  n := 0',
+        '  cell: HTMLInputElement | null := null',
+        '  render',
+        '    div',
+        '      input value: nope',        // 11: TS2304 on `nope` — the value's own
+        '      img alt: 42',              // 12: TS2345 on `alt` — the relation
+        '      Btn anything: 2',          // 13: TS2353 on `anything`
+        '      Btn label: nope',          // 14: TS2304 on `nope`
+        '      input value <=> n',        // 15: TS2322 on `value` — the bind's relation
+        '      div innerHTML: n',         // 16: TS2322 on `innerHTML` — the property road
+        '      div textContent: nope',    // 17: TS2304 on `nope`
+        '      Btn label <=> n',          // 18: TS2322 on `label` — the props-object bind
+        '      button disabled: nope',    // 19: TS2304 on `nope`
+        '      div ref: cell',            // 20: TS2345 on `ref`
+        '      p class: n',               // 21: TS2345 on `class` — the clsx argument
+        '      div.card class: nope',     // 22: TS2304 on `nope` — the merge road's own name
+        '',
+      ].join('\n'),
+    }, { strict: true });
+    try {
+      const rows = diagsOf(dir).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+      expect(rows).toEqual([
+        [2304, 11, 20], [2345, 12, 11], [2353, 13, 11], [2304, 14, 18], [2322, 15, 13], [2322, 16, 11],
+        [2304, 17, 24], [2322, 18, 11], [2304, 19, 24], [2345, 20, 11], [2345, 21, 9], [2304, 22, 23],
+      ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

@@ -696,6 +696,13 @@ export function restPassthroughEntries(tag, road = 'dts') {
 export const restPassthroughText = (tag, road = 'dts') =>
   `{ ${restPassthroughEntries(tag, road).map(([k, t]) => `${keyText(k)}?: ${t}`).join('; ')}; ${REST_TEMPLATES} }`;
 export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g, '_')}`;
+// Every DOM-lib global the minted declaration text can spell: `Node`
+// in the children union, the tag map under `extends`. A declaration
+// file naming one carries its own `dom` lib reference (src/ts/dts.js),
+// so a consumer compiled with the language lib alone still resolves
+// every name the file uses; a new DOM global in the minted text joins
+// this list or the consumer's TS2304 is the only gate that sees it.
+export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap'];
 
 export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);

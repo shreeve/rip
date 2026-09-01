@@ -67,3 +67,12 @@ function Truthy({ label }: { label: string }) {
       disabled={!!label} />
   )
 }
+
+function Names() {
+  return (
+    <div>
+      <input value={wrongValue} />
+      <img alt={`${wrongInterp}`} />
+    </div>
+  )
+}

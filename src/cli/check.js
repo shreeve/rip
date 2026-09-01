@@ -809,6 +809,10 @@ while (queue.length) {
       echoSpans: result.echoSpans ?? [],
       pinSpans: result.pinSpans ?? [],
       routeWraps: result.routeWraps ?? [],
+      // The render-pair re-anchor (mapTsDiagnostic): a complaint standing
+      // on a pair's recorded relation site lands on the KEY here exactly
+      // as it does in the editor.
+      renderPairs: result.renderPairs ?? [],
       // Display-side route-union prettifying (mapTsDiagnostic): the CLI
       // reads the same words the editor does.
       routeEntries: appRoutesFor(fsPath, workspaceRoot, routesMemo).entries,
@@ -1009,6 +1013,7 @@ if (compiled.size > 0) {
         entry.good.echoSpans = r.echoSpans ?? [];
         entry.good.pinSpans = r.pinSpans ?? [];
         entry.good.routeWraps = r.routeWraps ?? [];
+        entry.good.renderPairs = r.renderPairs ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });

@@ -253,7 +253,7 @@ import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
 import { renderTypeDecl } from '../../src/ts/types.js';
 import { judge } from './contract.js';
-import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition, flattenHover } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -898,7 +898,7 @@ const normHover = (h) => {
   if (!h) return null;
   const raw = typeof h.contents === 'string' ? h.contents
     : (h.contents?.value ?? (Array.isArray(h.contents) ? h.contents.map((c) => c.value ?? c).join('\n') : ''));
-  return raw.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim() || null;
+  return flattenHover(raw) || null;
 };
 // Top-level declarations: a name at column 0, optionally after a leading
 // export/def/class/interface/enum/type keyword. Heuristic, not a parser.
@@ -4281,7 +4281,7 @@ if (RUN_HOVER) {
   };
   // The kind belongs to the NAME, not to the line the probe sits on: a write
   // (`pulse = 3`) is the same binding as its declaration and answers the same
-  // way, which is the token audit's rule for the colour as well. So the
+  // way, which is the token audit's rule for the color as well. So the
   // declaration is found once per file and every occurrence reads from it.
   const declaredKinds = new Map();
   for (const r of allRows) {

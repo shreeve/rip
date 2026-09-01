@@ -33,6 +33,43 @@ export function compileErrorInfo(err, textLength) {
   return { reason, start, end: Math.min(end, textLength) };
 }
 
+// WHERE A RENDER PAIR'S COMPLAINT LANDS. A complaint that exists only
+// because of the pair — the value against the key's admitted type —
+// lands on the KEY, where JSX puts an attribute's type error and where
+// a reader of markup looks; a complaint the value would draw in any
+// position (name resolution, member access, its own syntax or type
+// errors) is about the value and keeps its bytes. The emitter records,
+// per render pair, the generated RELATION SITES its road spells — the
+// scratch const's `__v` name, a property write's left-hand side, the
+// `satisfies` keyword, a call's argument, a props-object key, the
+// handler cast — and only a diagnostic whose generated span IS such a
+// site re-anchors. The `__clsx` roads spell no site of their own: the
+// argument there is the value's own expression, so a whole-span
+// complaint of the value's own (an unresolved bare name) stands on the
+// same bytes as the relation — the family tells them apart, and the
+// re-anchor asks for a code the relation draws: an assignment (2322),
+// an argument (2345), an excess property (2353), a `satisfies` (1360),
+// a cast that cannot convert (2352).
+//
+// The same lookup serves the route surfaces (routeWraps): the emitter
+// records a key/value generated-span pair per checked surface — the
+// pair's KEY for the attribute wraps, the METHOD NAME for a
+// `push`/`replace` argument — and a diagnostic covering EXACTLY the
+// recorded value re-anchors on the key; a wrapped value is a `/`-leading
+// literal, which draws nothing of its own. An error interior to any
+// recorded span (an interpolated expression's own defect) keeps its
+// exact position, and an unrecorded call — an array's `.push`,
+// route-membered element type or not — can never match. Returns the
+// SOURCE span to re-anchor on, or null.
+const RELATION_CODES = new Set([2322, 2345, 2353, 1360, 2352]);
+function recordedAnchor(good, s, e, code) {
+  const wrap = good.routeWraps?.find((w) => s === w.value[0] && e === w.value[1]);
+  if (wrap) return generatedSpanToSource(good.mappings, wrap.key[0], wrap.key[1]);
+  if (!RELATION_CODES.has(code)) return null;
+  const pair = good.renderPairs?.find((p) => p.sites.some(([a, b]) => a === s && b === e));
+  return pair ? [pair.key[0], pair.key[1]] : null;
+}
+
 // A tsgo diagnostic mapped onto .rip source, or null when it is a
 // suppressed implicit-any code or its generated span has no honest
 // source mapping (synthetic/injected regions). Under rip.strict the
@@ -59,30 +96,10 @@ export function mapTsDiagnostic(good, d) {
   const s = positionToOffset(good.genLineStarts, good.code.length, d.range.start);
   const e = positionToOffset(good.genLineStarts, good.code.length, d.range.end);
   let span = generatedSpanToSource(good.mappings, s, e);
-  // A route mismatch re-anchors on its surface's MEANINGFUL TOKEN,
-  // through the one recorded-span mechanism: the emitter's routeWraps
-  // carry a key/value span pair per checked surface — the pair's KEY
-  // for the attribute wraps (every other mistyped attribute reports on
-  // its name — the props-object road, TS's own property convention),
-  // the METHOD NAME for `push`/`replace` arguments. Only a diagnostic
-  // covering EXACTLY the recorded value re-anchors; an error interior
-  // to the value (an interpolated expression's own defect) keeps its
-  // exact position, and an unrecorded call — an array's `.push`,
-  // route-membered element type or not — can never match.
-  if (span && good.routeWraps?.length) {
-    const wrap = good.routeWraps.find((w) => s === w.value[0] && e === w.value[1]);
-    if (wrap) span = generatedSpanToSource(good.mappings, wrap.key[0], wrap.key[1]) ?? span;
-  }
-  // A render pair is markup, so its complaint anchors on the KEY — the
-  // name of the thing that is wrong, which is where a reader of JSX looks
-  // too. Only a span covering the whole VALUE or the whole PAIR moves; one
-  // interior to the value is about its own bytes and stays.
-  if (span && good.renderPairs?.length) {
-    const [a, b] = span;
-    const hit = good.renderPairs.find((p) =>
-      (a === p.value[0] && b === p.value[1]) || (a === p.pair[0] && b === p.pair[1]));
-    if (hit) span = [hit.key[0], hit.key[1]];
-  }
+  // A diagnostic standing on a RECORDED SITE re-anchors on that site's
+  // key — the one re-anchor path, over the two records the emitter keeps
+  // (recordedAnchor). Judged on the GENERATED span, exactly.
+  if (span) span = recordedAnchor(good, s, e, d.code) ?? span;
   // A generated span with no source mapping lives in a purely
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the
