@@ -1544,6 +1544,18 @@ class SchemaDef {
       return merged;
     });
   }
+
+  toJSONSchema() {
+    const ctx = { defs: new Map(), expanding: new Set() };
+    const root = jSONSchemaBody(this, ctx);
+    root.$schema = 'https://json-schema.org/draft/2020-12/schema';
+    if (this.name) root.title = this.name;
+    if (ctx.defs.size) {
+      root.$defs = {};
+      for (const [k, v] of ctx.defs) root.$defs[k] = v;
+    }
+    return root;
+  }
 }
 
 // ── JSON Schema export (draft 2020-12) ───────────────────────────────
@@ -1658,18 +1670,6 @@ function jSONSchemaBody(def, ctx) {
   }
   return out;
 }
-
-SchemaDef.prototype.toJSONSchema = function () {
-  const ctx = { defs: new Map(), expanding: new Set() };
-  const root = jSONSchemaBody(this, ctx);
-  root.$schema = 'https://json-schema.org/draft/2020-12/schema';
-  if (this.name) root.title = this.name;
-  if (ctx.defs.size) {
-    root.$defs = {};
-    for (const [k, v] of ctx.defs) root.$defs[k] = v;
-  }
-  return root;
-};
 
 function flatten(keys) {
   const out = [];

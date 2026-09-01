@@ -28,6 +28,17 @@ import { registerCoercer } from '../../src/runtime/schema.js'
 
 type Validator = (value: unknown) => unknown
 
+export type Validated =
+  id: number, int: number, whole: number, float: number
+  money: number, money_even: number, cents: number
+  bool: boolean, truthy: boolean, falsy: boolean
+  string: string, text: string, name: string, address: string
+  decimal: string, date: string, time: string, time12: string, datetime: string
+  email: string, state: string, zip: string, zipplus4: string, ssn: string
+  sex: string, phone: string, username: string, ip: string, mac: string
+  url: string, color: string, uuid: string, semver: string, slug: string
+  array: unknown[], ids: number[], hash: Record<string, unknown>, json: unknown
+
 fail = (message) -> throw Error.new "Rip Validate: #{message}"
 
 # ==============================================================================
@@ -319,7 +330,11 @@ export def validatorNames(): string[]
 
 # Apply a validator to a value in hand. Raw validators receive the value
 # untouched; every other validator receives its string form.
-export def check(value: unknown, type: string | symbol): unknown
+type CheckFn =
+  <K extends keyof Validated>(value: unknown, type: K): Validated[K] | null
+  (value: unknown, type: string | symbol): unknown
+
+export check: CheckFn = (value: unknown, type: string | symbol) ->
   type = nameOf type
   entry = registry.get type
   fail "unknown validator '#{type}'" unless entry

@@ -7,7 +7,9 @@ import {
   start, read, error, notice, bail, hub,
   ctx, session, env, subrequest, mark, errorEnvelope, openapi,
 } from 'rip/sites'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 
 request = (method, path, opts = {}) ->
   Request.new "http://framework.test#{path}", { method, ...opts }
@@ -28,15 +30,63 @@ captureWarnings = (fn) ->
     console.warn = prior
 
 test 'public package surface exposes the documented framework', ->
+  # Nothing from rip/validate is here. That package is imported for the
+  # coercer registration its module body performs, and `read` dispatches
+  # through its `getValidator` — neither of which is a reason to republish
+  # a name whose registry is a singleton either way.
   expected = [
-    'App', 'after', 'all', 'bail', 'before', 'check', 'ctx', 'del', 'env',
-    'error', 'errorEnvelope', 'fetch', 'formatMoney', 'get', 'getValidator',
-    'hub', 'isBlank', 'isRawType', 'mark', 'notFound', 'notice', 'onError',
-    'openapi', 'patch', 'post', 'prefix', 'put', 'raw', 'read',
-    'registerValidator', 'requestContext', 'resetGlobals', 'session', 'start',
-    'subrequest', 'toName', 'toPhone', 'use', 'validatorNames',
+    'App', 'after', 'all', 'bail', 'before', 'ctx', 'del', 'env', 'error',
+    'errorEnvelope', 'fetch', 'get', 'hub', 'mark', 'notFound', 'notice',
+    'onError', 'openapi', 'patch', 'post', 'prefix', 'put', 'raw', 'read',
+    'requestContext', 'resetGlobals', 'session', 'start', 'subrequest',
+    'use',
   ]
   eq Object.keys(server).sort(), expected
+
+test "read's signature answers from the validator name it is given", ->
+  dir = join(import.meta.dir, '.read-types')
+  rmSync dir, { recursive: true, force: true }   # a run killed before its finally
+  mkdirSync dir, { recursive: true }
+  try
+    writeFileSync join(dir, 'package.json'), JSON.stringify({ name: 'read-types', rip: { strict: true } })
+    writeFileSync join(dir, 'index.rip'), [
+      "import { read } from 'rip/sites'"
+      ''
+      "bang: number = read 'a', 'id!'"                  # `!` throws on absence
+      "bare: number | null = read 'a', 'id'"            # bare admits null
+      "loud: string | null = read 'a', 'email?'"        # so does a loud optional
+      "enumd: string | null = read 'a', ['x', 'y']"     # an enumeration matches a string
+      "ranged: number | null = read 'a', [1, 9]"        # a range matches a number
+      "pattern: string | null = read 'a', /^x$/"
+      # Each of the three lands on the signature that promises nothing, and
+      # `unknown` would accept whatever it returned — so the claim is that a
+      # NARROW annotation is refused, which stops holding the moment one of
+      # them starts answering from the map.
+      "# @ts-expect-error a symbol carries no literal a type can read"
+      "sym: string = read 'a', :email!"
+      "# @ts-expect-error a name registered at runtime is in no map"
+      "custom: string = read 'a', 'registeredAtRuntime'"
+      "# @ts-expect-error a read naming no type promises nothing"
+      "bareName: string = read 'a'"
+      # A shape the signatures can read is answered precisely; one they
+      # cannot is still ACCEPTED and answered `unknown`. These two assert
+      # acceptance, which a missing overload fails whatever the annotation.
+      "bounded: string | number | null = read 'a', { min: 3 }"
+      "loose: Record<string, number> = { min: 3 }"
+      "dynamic: unknown = read 'a', loose"
+      "mixed: unknown = read 'a', ['a', 1]"
+      # `miss` cannot quietly widen what the signature promised: a fallback
+      # of the read's own type keeps the claim, and any other lands on the
+      # signature that claims nothing.
+      "fallback: number = read 'a', 'int!', 1"
+      "thunk: number = read 'a', 'int!', -> 1"
+      "# @ts-expect-error a fallback of another type is not the read's own"
+      "mismatched: number = read 'a', 'int!', -> null"
+    ].join('\n') + '\n'
+    r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', '..', '..', 'bin', 'rip'), 'check', dir], { encoding: 'utf8' }
+    eq r.status, 0, r.stdout + r.stderr
+  finally
+    rmSync dir, { recursive: true, force: true }
 
 test! 'routes, parameters, prefixes, and smart responses compose', ->
   resetGlobals()
@@ -176,7 +226,7 @@ test! 'after filters run on thrown errors and never mask them', ->
   # when requests fail is worse than none at all.
   resetGlobals()
   seen = []
-  after -> seen.push (if @error? then "error:#{@error.status}" else 'clean')
+  after -> seen.push (if @error? then "error:#{(@error as { status: number }).status}" else 'clean')
   get '/boom' -> throw Object.assign(Error.new('nope'), { status: 422 })
   get '/calm' -> 'ok'
   response = handle! request('GET', '/boom')
@@ -555,6 +605,7 @@ test 'start performs only the artifact-worker handoff', ->
     handler = start()
     ok handler is handle
     ok globalThis.__ripHandler is handler
+    # @ts-expect-error start() hands back the fetch handler itself, never a promise
     ok typeof handler.then isnt 'function'
   finally
     if priorArtifact? then process.env.APP_ARTIFACT = priorArtifact else delete process.env.APP_ARTIFACT

@@ -194,20 +194,22 @@ const rel = (f) => path.relative(process.cwd(), f) || '.';
 // so its chains are the long ones; a consumer walk seeds only what that
 // importer took, and reaches this with the few stops that survived.
 function markDeferred(entries) {
-  const rowsByName = new Map();
-  const nameById = new Map();
-  for (const { rows, exportIds } of entries) {
-    for (const r of rows) rowsByName.set(r.name, r);
-    for (const [name, id] of exportIds ?? []) nameById.set(id, name);
+  // Keyed by SYMBOL, never by name: a package publishes from every entry
+  // its manifest names, and two of them may publish one name for two
+  // different declarations. Resolving an edge through the name picks
+  // whichever row was seen last, which is a verdict about the wrong
+  // declaration in either direction.
+  const rowById = new Map();
+  for (const { rows } of entries) {
+    for (const r of rows) if (r.id !== undefined) rowById.set(r.id, r);
   }
   for (let moved = true; moved; ) {
     moved = false;
-    for (const r of rowsByName.values()) {
+    for (const r of rowById.values()) {
       if (r.kind !== 'typed') continue;
       const via = (r.deferred ?? [])
-        .map((id) => nameById.get(id))
-        .filter((n) => n !== undefined && n !== r.name
-          && ['leak', 'deferred'].includes(rowsByName.get(n)?.kind));
+        .filter((id) => id !== r.id && ['leak', 'deferred'].includes(rowById.get(id)?.kind))
+        .map((id) => rowById.get(id).name);
       if (via.length === 0) continue;
       r.kind = 'deferred';
       r.via = [...new Set(via)].sort();
@@ -1162,7 +1164,7 @@ if (compiled.size > 0) {
                 // is. The mapped position is for display.
                 for (const d of row.defects ?? []) d.site = toSite(d.origin);
               }
-              report.push({ dir, entryFile, rows: walked.rows, exportIds: walked.exportIds, lost: walked.lost, forwarded: walked.forwarded });
+              report.push({ dir, entryFile, rows: walked.rows, lost: walked.lost, forwarded: walked.forwarded });
             }
           }
         } finally {

@@ -13,11 +13,9 @@
 #   Filters:    raw, before, after
 #   Handlers:   onError, notFound
 #   Errors:     error!, notice!, bail!
-#   Validation: read, registerValidator, getValidator, isRawType,
-#               validatorNames, check
+#   Validation: read
 #   Context:    ctx, session, env, subrequest, mark
 #   Hub:        hub
-#   Utilities:  isBlank, toName, toPhone, formatMoney
 #   OpenAPI:    openapi, errorEnvelope
 #   Dev:        resetGlobals, requestContext
 # ==============================================================================
@@ -192,17 +190,17 @@ export type CtxReq =
   url: string
   path: string
   site: string | null
-  param: (key?: string) => any
-  query: (key?: string) => any
-  header: (key?: string) => any
-  json: () => Promise<any>
+  param: { (key: string): string | undefined, (): Record<string, string> }
+  query: { (key: string): string | null, (): Record<string, string> }
+  header: { (key: string): string | null, (): Record<string, string> }
+  json: () => Promise<unknown>
   text: () => Promise<string>
   formData: () => Promise<FormData>
-  parseBody: (opts?: Record<string, unknown>) => Promise<any>
+  parseBody: (opts?: Record<string, unknown>) => Promise<unknown>
 
 export type Ctx =
-  input: any
-  json: (data: any, status?: number, headers?: Record<string, string>) => Response
+  input: unknown
+  json: (data: unknown, status?: number, headers?: Record<string, string>) => Response
   text: (str: string, status?: number, headers?: Record<string, string>) => Response
   html: (str: string, status?: number, headers?: Record<string, string>) => Response
   body: (data: BodyInit | null, status?: number, headers?: Record<string, string>) => Response
@@ -210,16 +208,19 @@ export type Ctx =
   send: (path: string, type?: string) => Response
   header: (name: string, value?: string, opts?: { append?: boolean }) => string | null | undefined
   cache: (duration: number | string | false) => void
-  session: Record<string, any>
-  error: any
+  session: Record<string, unknown>
+  error: unknown
   req: CtxReq
   mark?: string                  # the request's correlation id, set by the handler
 
-export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => any
+export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => unknown
 
 # The leading options slot a verb accepts before its handlers: `input:` wires
 # schema validation and the OpenAPI contract.
-export type RouteOptions = { input?: Record<string, any> }
+export type RouteOptions =
+  input?:
+    safeAsync: (data: unknown) => Promise<{ ok: boolean, value: unknown, errors: unknown }>
+    toJSONSchema: () => Record<string, unknown>
 
 # The custom error handler: the thrown value, then the request context.
 export type ErrorHandler = (this: Ctx, error: any, c: Ctx) => any
@@ -563,7 +564,7 @@ buildOpenAPI = ->
         required: true
         content:
           'application/json':
-            schema: r.inputSchema.toJSONSchema()
+            schema: r.inputSchema.toJSONSchema?() ?? {}
     if r.keys?.length
       op.parameters = r.keys.map (k) -> { name: k, in: 'path', required: true, schema: { type: 'string' } }
     entry[r.method.toLowerCase()] = op
@@ -699,7 +700,7 @@ invokeMiddleware = (request) ->
     dispatchRequest! currentRequest
   invoke! 0, request
 
-export fetch = (request) ->
+export fetch = (request: Request): Promise<Response> ->
   try
     response = invokeMiddleware! request
     throw TypeError.new('middleware chain returned no Response') unless response instanceof Response
@@ -755,7 +756,7 @@ runHandler = (c, route) ->
 # Server Startup
 # ==============================================================================
 
-export start = ->
+export start = (): ((request: Request) => Promise<Response>) ->
   unless process.env.APP_ARTIFACT? and process.env.SOCKET_PATH?
     throw Error.new 'start() requires the Rip worker runtime — run the application with `rip site`'
   globalThis.__ripHandler = fetch
@@ -764,7 +765,13 @@ export start = ->
 # Bam Hub bridge — Janus POSTs open|text|close here; return directive
 # frames (or null for 204). `bridge: 'hub'` matches serve.rip and becomes
 # POST /hub. auth: true (default) requires session.authenticated.
-export hub = (opts = {}) ->
+export hub = (opts: {
+  bridge?: string
+  auth?: boolean | ((this: Ctx) => unknown)
+  open?: (this: Ctx) => unknown
+  text?: (this: Ctx) => unknown
+  close?: (this: Ctx) => unknown
+} = {}): void ->
   throw TypeError.new('hub options must be an object') unless opts? and typeof opts is 'object' and not Array.isArray(opts)
   name = opts.bridge ?? 'hub'
   throw TypeError.new('hub.bridge must be a nonempty string') unless typeof name is 'string' and name.length > 0
@@ -941,18 +948,28 @@ export { error, notice, bail }
 # The validation/normalization vocabulary lives in rip/validate — a
 # zero-dependency, browser-safe (`rip.browser: true`) package, so the same
 # validators that power `read()` here also power `~:name` schema coercers
-# in client-side `.parse()` calls. Importing it registers every validator
-# as a named schema coercer. Re-exported here: these are part of
-# rip/sites's public surface.
+# in client-side `.parse()` calls. The import is what registers every
+# validator as a named schema coercer, so it runs for that effect as much
+# as for the binding it names. Nothing from it is re-exported: the
+# registry is a module singleton, so a caller wanting `getValidator` or
+# `check` reaches the very one `read` dispatches through by importing
+# rip/validate itself.
 
-import { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check } from 'rip/validate'
-export { isBlank, toName, toPhone, formatMoney, registerValidator, getValidator, isRawType, validatorNames, check }
+import { getValidator, Validated } from 'rip/validate'
 
 # ==============================================================================
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
-export read = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?) ->
+type ReadFn =
+  <K extends keyof Validated>(name: string, type: `${K}!`, miss?: Validated[K] | (() => Validated[K])): Validated[K]
+  <K extends keyof Validated>(name: string, type: K | `${K}?`, miss?: Validated[K] | (() => Validated[K])): Validated[K] | null
+  (name: string, type: RegExp | readonly string[], miss?: string | (() => string)): string | null
+  (name: string, type: readonly number[], miss?: number | (() => number)): number | null
+  (name: string, type: { start: number, end?: number } | { end: number, start?: number } | { min: number, max?: number } | { max: number, min?: number }, miss?: string | number | (() => string | number)): string | number | null
+  (name?: string, type?: string | symbol | RegExp | readonly unknown[] | Record<string, unknown>, miss?: unknown): unknown
+
+export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: unknown) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
 
   # missing value helper

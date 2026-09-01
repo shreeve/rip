@@ -1432,6 +1432,29 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // A deferral edge names a SYMBOL. A package publishes from every entry its
+  // manifest names, so one name can stand for two declarations, and reading
+  // the edge back through the name answers for whichever row was seen last.
+  test('--public resolves a deferral to the declaration it stopped at, not the name', () => {
+    const dir = workspace({
+      'package.json': JSON.stringify({ name: '@sib/dup', exports: { '.': './index.rip', './other': './other.rip' } }),
+      // `Bag` here leaks, and `Client` stops at THIS one.
+      'index.rip': ['export interface Bag', '  hole: any', '',
+        'export class Client', '  bag: Bag = ({} as Bag)'].join('\n') + '\n',
+      // A second, unrelated `Bag` that is perfectly clean.
+      'other.rip': ['export type Bag = { ok: string }', '',
+        'export def fine(b: Bag): string', '  b.ok'].join('\n') + '\n',
+    });
+    try {
+      const out = check(dir, ['--public']).stdout;
+      expect(out).toMatch(/any at: Bag\.hole/);        // the edit, named once
+      expect(out).toMatch(/\u21b7 Client/);             // and the row that waits on it
+      expect(out).toMatch(/reaches `Bag`/);
+      expect(out).toMatch(/\u2713 fine/);               // the clean Bag's reader is untouched
+      expect(out).toContain('2/4 exports fully typed');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Q2a — what a package publishes is its MANIFEST's answer, and the mirror
   // already computes that answer to decide which faces to build. A second
   // reader is a second answer, and where they disagree `--public` audits

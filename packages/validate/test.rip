@@ -14,7 +14,7 @@ import {
 } from 'rip/validate'
 import * as mod from 'rip/validate'
 import { registerCoercer, SchemaError } from '../../src/runtime/schema.js'
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { spawnSync } from 'child_process'
@@ -84,6 +84,32 @@ test "a fresh process holds exactly the 38 built-ins, all bridged", ->
   }
   eq r.status, 0
   eq r.stdout, '38\n2024-02-29\n'
+
+test "the Validated map names every registered validator, and only those", ->
+  # The map is a hand-written mirror of a runtime registry, so the live
+  # registry is what it answers to: a name added to one and not the other
+  # fails here, naming the name. Checked as TYPES — `Exclude` against
+  # `never` is the only reader that can see a type map at all — from a
+  # directory inside the package, which is what resolves the entry.
+  dir = join(import.meta.dir, '.validated-gate')
+  rmSync dir, { recursive: true, force: true }   # a run killed before its finally
+  mkdirSync dir, { recursive: true }
+  try
+    names = validatorNames().map((n) -> "'#{n}'").join(' | ')
+    writeFileSync join(dir, 'index.rip'), [
+      "import type { Validated } from '../validate.rip'"
+      "type Expected = #{names}"
+      'missing: never = null as unknown as Exclude<Expected, keyof Validated>'
+      'extra: never = null as unknown as Exclude<keyof Validated, Expected>'
+    ].join('\n') + '\n'
+    r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), 'check', dir], {
+      encoding: 'utf8'
+      env: plainEnv()
+    }
+    eq r.status, 0, r.stdout + r.stderr
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 
 # ==[ The vocabulary, row by row ]==
 

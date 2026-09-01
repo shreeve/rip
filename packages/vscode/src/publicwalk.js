@@ -707,9 +707,9 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
 export async function walkPublicEntry(session, { mirrorFile, owns, only = null, siblingIds = null, synthesized = () => false, claims = true }) {
   const { snapshot, ck, source } = await moduleAt(session, mirrorFile);
   try {
-    if (ck === null) return { rows: [], exportIds: new Map(), lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
+    if (ck === null) return { rows: [], lost: 0, forwarded: 0, unresolved: 'no project covers the mirrored entry' };
     const moduleSymbol = source === undefined ? undefined : await ck.getSymbolAtLocation(source);
-    if (!moduleSymbol) return { rows: [], exportIds: new Map(), lost: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
+    if (!moduleSymbol) return { rows: [], lost: 0, forwarded: 0, unresolved: 'the mirrored entry resolves to no module' };
 
     // The global `Function` type, resolved ONCE and held as an identity for
     // the width check: two files may each declare a `Function`, and only the
@@ -730,14 +730,10 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
     // the narrowing filters out below has no row, and seeding it here hands
     // its defects to a row that never prints.
     const siblings = siblingIds ?? new Set();
-    // Which NAME each stoppable id belongs to, so a caller holding rows can
-    // read a deferral edge back to the row that has to answer for it.
-    const exportIds = new Map();
     for (const [name, sym] of exported) {
       if (only !== null && !only.has(name)) continue;
       const s = await resolveAlias(ck, sym);
       siblings.add(s.id);
-      exportIds.set(name, s.id);
     }
     for (const [name, symbol] of exported) {
       if (only !== null && !only.has(name)) continue;
@@ -753,7 +749,7 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
       // No type is no verdict. "Found no defect" and "was never able to
       // look" are not the same answer, and only one of them is a clean bill.
       if (type === undefined) {
-        rows.push({ name, type: '?', kind: 'unaudited', defects: [], deferred: [], why: 'its type could not be resolved' });
+        rows.push({ name, id: rootSym.id, type: '?', kind: 'unaudited', defects: [], deferred: [], why: 'its type could not be resolved' });
         continue;
       }
       // A type prints as it was WRITTEN, which is not always what it means: an
@@ -778,10 +774,10 @@ export async function walkPublicEntry(session, { mirrorFile, owns, only = null, 
       // "was never able to look" are not the same answer, and only one of them
       // is a clean bill.
       const kind = found.kind === 'typed' && !declaredUnder(rootSym, owns) ? 'unaudited' : found.kind;
-      rows.push({ name, type: printed, kind, defects: found.defects, deferred: [...found.deferred] });
+      rows.push({ name, id: rootSym.id, type: printed, kind, defects: found.defects, deferred: [...found.deferred] });
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
-    return { rows, exportIds, lost, forwarded, unresolved: null };
+    return { rows, lost, forwarded, unresolved: null };
   } finally {
     await snapshot.dispose?.();
   }
