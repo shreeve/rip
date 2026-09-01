@@ -790,6 +790,42 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
   return spans.sort((a, b) => a[0] - b[0]);
 }
 
+// The POSITIVE hover model, read off the lexer's own tokens: hover
+// answers only where the author wrote a symbol. IDENTIFIER and
+// PROPERTY tokens are the author's names; a TYPE token is an opaque
+// annotation whose words tsgo resolves (the type name answers, and
+// the mapping decides); an import specifier's STRING serves the
+// module hover v3 served. Everything else — structure keywords,
+// string and regex literals, numbers, operators, comments, blank
+// bytes — declines, which is the platform's own convention (TS hovers
+// nothing at `if`, `42`, `'text'`, or whitespace) and what the render
+// rulings already pinned word by word. RULINGS.md, the hover model.
+export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null) {
+  const spans = [];
+  const comments = trivia.filter((t) => t.kind === 'comment');
+  let prevWord = null;
+  for (const t of tokens) {
+    if (typeof t.start !== 'number' || t.start === t.end) { continue; }
+    if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY'
+        || (t.kind === 'STRING' && (prevWord === 'FROM' || prevWord === 'IMPORT'))) {
+      spans.push([t.start, t.end]);
+    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL') && source !== null) {
+      // An annotation or a type/interface DECLARATION is one opaque
+      // token; its WORDS answer (tsgo resolves the names) while its
+      // punctuation, spaces, and quote bytes decline like everyone
+      // else's. The words come off the SOURCE slice — the token's
+      // value normalizes spelling and may not cover the span — and a
+      // word inside a comment the body carries stays declined.
+      for (const m of source.slice(t.start, t.end).matchAll(/[A-Za-z_$][\w$]*/g)) {
+        const a = t.start + m.index, b = t.start + m.index + m[0].length;
+        if (!comments.some((c) => a < c.end && b > c.start)) spans.push([a, b]);
+      }
+    }
+    prevWord = t.kind;
+  }
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
 // Does `offset` fall inside a span the lowering owns whole? The end is
 // EXCLUSIVE, so a request one past the operator (the next construct's
 // first byte) is not silenced.

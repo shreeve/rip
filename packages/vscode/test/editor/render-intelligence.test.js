@@ -213,6 +213,43 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('hover: the positive model — symbols answer, everything else declines', async () => {
+    // Hover answers only where the author wrote a symbol (RULINGS.md,
+    // the hover model): keywords, string and comment interiors, and
+    // numbers decline like the platform's own convention; a TYPE
+    // annotation's words and an import specifier keep answering.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        "import { Button } from './button.rip'",  // 0
+        '# a note about the panel',               // 1
+        'export Panel = component',               // 2
+        '  el: HTMLInputElement | null := null',  // 3
+        '  render',                               // 4
+        '    if true',                            // 5
+        "      p 'hello world'",                  // 6
+        '      Button label: 42',                 // 7 (the 42 draws its own diagnostic; positions still answer)
+        '',
+      ].join('\n');
+      const btn = [
+        'export Button = component',
+        '  @label: string',
+        '  render',
+        '    button @label.value',
+        '',
+      ].join('\n');
+      await api.open('button.rip', btn);
+      await api.open('panel.rip', src);
+      expect(await api.hover('panel.rip', 1, 6)).toBeNull();          // comment word `note`
+      expect(await api.hover('panel.rip', 5, 4)).toBeNull();          // the `if` keyword
+      expect(await api.hover('panel.rip', 6, 10)).toBeNull();         // string interior `hello`
+      expect(await api.hover('panel.rip', 7, 20)).toBeNull();         // the number 42
+      const typeWord = await api.hover('panel.rip', 3, 8);            // `HTMLInputElement` in the annotation
+      expect(typeWord?.contents?.value).toContain('HTMLInputElement');
+      const spec = await api.hover('panel.rip', 0, 28);               // inside the specifier
+      expect(spec?.contents?.value).toContain('button.rip');
+    });
+  });
+
   test('hover: a generic use site carries its instantiation, and a word-end cursor hovers the word', async () => {
     // The construct signature at a generic use prints the inferred
     // instantiation (`new <"alpha">(props?: …) => Chip<"alpha">`) —

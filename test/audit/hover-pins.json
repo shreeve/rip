@@ -228,6 +228,30 @@
         "why": "VALUE-type target; interim silence, served — the bind cover's `__bind_value__` no longer leaks"
       },
       {
+        "line": 78,
+        "character": 5,
+        "token": "Generic",
+        "expect": null,
+        "rule": "comment interior",
+        "why": "the positive hover model: a comment byte is outside every author-symbol token, so hover declines — a cover otherwise answered about a neighboring symbol; RULINGS: the hover model"
+      },
+      {
+        "line": 84,
+        "character": 10,
+        "token": "chip",
+        "expect": null,
+        "rule": "string interior",
+        "why": "the positive hover model: a string literal's interior declines — the platform's own convention; RULINGS: the hover model"
+      },
+      {
+        "line": 91,
+        "character": 6,
+        "token": "for",
+        "expect": null,
+        "rule": "structure keyword",
+        "why": "the positive hover model: a structure word declines rather than answering about a neighbor; RULINGS: the hover model"
+      },
+      {
         "line": 105,
         "character": 2,
         "token": "stats",

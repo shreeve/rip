@@ -50,11 +50,15 @@ const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+)\b/g
 function subjectOf(flat) {
   let m
   if ((m = /^\(element\) ([\w-]+):/.exec(flat))) return m[1]
+  if ((m = /^constructor ([A-Za-z_$][\w$]*)\(/.exec(flat))) return m[1]
+  if ((m = /^\(type parameter\) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
+  if ((m = /^\(local (?:class|function)\) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
+  if ((m = /^\((?:property|method)\) \(Anonymous class\)\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\(property\) <[\w-]+>\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\((?:custom )?event\) @([\w-]+):/.exec(flat))) return m[1]
   if ((m = /^component ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if (/^ref — /.test(flat)) return 'ref'
-  if (/^module "/.test(flat)) return '(module)'
+  if (/^(?:\(alias\) )?module "/.test(flat)) return '(module)'
   if ((m = /^(?:\(alias\) )*(?:export )?(?:type|interface|class|enum|namespace) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if (/^(?:any|unknown|never|string|number|boolean|null|undefined|void)\b/.test(flat) && !flat.includes(':')) return '(bare-type)'
   const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|local class|local function)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
@@ -183,22 +187,48 @@ async function sweep(wsRoot, files) {
         if (d !== 0) row('truncated')
       }
       if (flat === '') { row('empty'); continue }
-      // A non-word position has no symbol to ask about, and a word's
-      // END boundary asks about a word the answer never names — ANY
-      // answer at either is a cover landing.
-      if (word === '') { row('blank-cover'); continue }
-      if (p.boundary) {
-        const named = new RegExp(`(^|[^\\w$])${word.replace(/\$/g, '\\$&')}([^\\w$]|$)`).test(flat)
-        if (!named) { row('boundary-cover'); continue }
-        continue
-      }
       const subj = subjectOf(flat)
       const okPair = (a, b) => a === b || (a === 'class' && b === 'className') || (a === 'for' && b === 'htmlFor')
-        || b === '(bare-type)' || (b === '(module)' && flat.includes(a))
+        // A module answer is only reachable from a specifier's own
+        // bytes or a namespace-import name — right wherever it lands.
+        || b === '(bare-type)' || b === '(module)'
+        // `import.meta`'s member answers the lib's own ImportMeta,
+        // and `new` answers the constructor it invokes — both the
+        // platform's own conventions.
+        || (a === 'meta' && b === 'ImportMeta')
+        || (a === 'new' && flat.includes(': new ('))
+        // `::` lexes as the `prototype` property it means, and hover
+        // there answering `.prototype` is the spelling's own truth.
+        || (b === 'prototype' && text.slice(Math.max(0, p.off - 2), p.off + 2).includes('::'))
         // An alias hover names the ORIGIN declaration — tsgo's own
         // convention for renamed imports, informative by design.
         || flat.startsWith('(alias)')
-      const inComment = text.slice(lineStarts[line], p.off).includes('#')
+        // The `constructor` word answers its own signature, and a
+        // SERVED head is only reachable through its own span (`@` of
+        // `@click` serves the event row; a specifier's quote bytes
+        // serve the module) — right answers wherever they land.
+        || (a === 'constructor' && flat.startsWith('constructor '))
+        || /^\((?:custom )?event\) |^\(element\) |^ref — |^component /.test(flat)
+      // A non-word position has no symbol to ask about, and a word's
+      // END boundary asks about a word the answer never names — ANY
+      // answer at either is a cover landing.
+      if (word === '') {
+        // The bias adopts a byte after a word into that word, and the
+        // pair rules judge exactly as they would there.
+        const adopted = p.off > 0 ? (inWord[p.off - 1] ?? atEnd[p.off - 1] ?? '') : ''
+        if (subj !== null && okPair(adopted, subj)) continue
+        row('blank-cover'); continue
+      }
+      // A boundary probe judges by the SAME pair rules: the bias makes
+      // the position the word's own, so a boundary answer is wrong
+      // exactly when the word's answer would be.
+      if (p.boundary) {
+        const named = new RegExp(`(^|[^\\w$])${word.replace(/\$/g, '\\$&')}([^\\w$]|$)`).test(flat)
+        if (!named && subj !== null && !okPair(word, subj)) { row('boundary-cover'); continue }
+        if (!named && subj === null) { row('boundary-cover'); continue }
+        continue
+      }
+      const inComment = text.slice(lineStarts[line], p.off).replace(/#\{/g, '').includes('#')
       if (subj !== null && !okPair(word, subj)) row(inComment ? 'comment-cover' : KEYWORDS.has(word) ? 'keyword-cover' : 'subject:' + subj)
       else if (subj === null && flat !== 'this: this') row(inComment ? 'comment-cover' : KEYWORDS.has(word) ? 'keyword-cover' : 'unparsed-head')
       if (hover.range && hover.range.end.line - hover.range.start.line >= 2) {

@@ -69,7 +69,7 @@ import {
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
@@ -1856,6 +1856,10 @@ async function refresh(document) {
     // compiler's own record — the tag word and the `ref` channel word
     // (RULINGS.md, the render rows; see the hover handler).
     intrinsics: result.intrinsics ?? [],
+    // SOURCE spans where hover may answer at all — the positive model
+    // (hoverableSpans, translate.js): the author's own symbol tokens,
+    // annotations, and import specifiers; every other byte declines.
+    hoverable: hoverableSpans(result, text),
     // SOURCE spans of component member declaration names — where a hover
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
@@ -3025,6 +3029,12 @@ connection.onHover(async (params) => {
     }
     return { contents: { kind: 'markdown', value: `\`\`\`typescript\n${body}\n\`\`\`` } };
   }
+  // The POSITIVE hover model: outside the author's own symbol tokens
+  // (and the served records above, which answered already) there is
+  // nothing to ask about — a keyword, a literal's interior, a comment,
+  // or a blank byte otherwise falls to a cover row and answers about
+  // a NEIGHBOR. Declining here is the platform's own convention.
+  if (!inNoUserSymbolSpan(ctx.good.hoverable ?? [], ctx.offset)) return null;
   // A position the lowering owns whole answers nothing. tsgo would
   // describe the minted symbol its own emission put there — truthfully,
   // and about something the user never wrote.
