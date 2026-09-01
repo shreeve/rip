@@ -8554,7 +8554,7 @@ ${rows.join(`
 `)}
 }`;
 }
-function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false } = {}) {
+function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
   const surfaces = new Map;
   for (const { tag, svg } of used) {
     if (surfaceableTag(tag, svg))
@@ -8565,6 +8565,8 @@ function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, 
     parts.push(CLASS_VALUE_DECL);
   if (needsChildren)
     parts.push(CHILDREN_DECL);
+  for (const line of extra)
+    parts.push(line);
   if (surfaces.size > 0) {
     parts.push(HELPER_DECLS);
     const anyHtml = [...surfaces.values()].some((s) => !s.svg);
@@ -8627,6 +8629,12 @@ var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
 var componentCtorMembers = () => [];
 var runtimeApiDeclares = () => [];
+var restAliasName = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
+var restPassthroughText = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
 
 // src/emitter.js
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
@@ -8895,6 +8903,7 @@ class Emitter {
     this.domSurfaces = new Map;
     this._needsClassValue = false;
     this._needsChildren = false;
+    this._restTags = new Set;
     this._needsRefCellHelper = false;
     this.intrinsics = [];
     this.renderPairs = [];
@@ -10068,8 +10077,11 @@ class Emitter {
       this._needsAmbienceHelper = true;
     for (const text of ambientLines)
       line(() => this.b.emit(text));
-    if (info.extendsTag !== null)
-      line(() => this.b.emit(`declare rest: ${containerType("Record<string, any>", "", MINTED)};`));
+    if (info.extendsTag !== null) {
+      this._restTags.add(info.extendsTag);
+      this._needsClassValue = true;
+      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), "", MINTED)};`));
+    }
     for (const text of runtimeApiDeclares("this"))
       line(() => this.b.emit(text));
     line(() => this.b.emit("[key: `_${string}`]: any;"));
@@ -14760,6 +14772,8 @@ ${pad ?? ""}`);
       if (label !== null)
         memberKinds.set(m.name, { label, optional: m.optional === true });
     }
+    if (extendsTag !== null)
+      memberKinds.set("rest", { label: "rest", optional: false });
     const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map, renderPlainReads: new Set };
     const ind = this.ind;
     const pad = "  ".repeat(ind + 1);
@@ -16720,7 +16734,7 @@ ${this.replayPad}}` : " }");
         if (attrRecorded || !this.ts || !recv.surfaced || attrSpan === null || attrGen === null)
           return;
         attrRecorded = true;
-        this.intrinsics.push({ start: attrSpan[0], end: attrSpan[1], kind: "attr", name: key, gen: attrGen });
+        this.intrinsics.push(routeWrap ? { start: attrSpan[0], end: attrSpan[1], kind: "attr", name: key, type: this.routesUnion, route: true } : { start: attrSpan[0], end: attrSpan[1], kind: "attr", name: key, gen: attrGen });
       };
       const emitSetAttribute = () => {
         attrGen = this.b.offset + 1;
@@ -20818,11 +20832,12 @@ declare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };
 declare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;
 `));
   }
-  if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true)) {
+  if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
     const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
       needsClassValue: emitter._needsClassValue === true,
       needsRefCell: emitter._needsRefCellHelper === true,
-      needsChildren: emitter._needsChildren === true
+      needsChildren: emitter._needsChildren === true,
+      extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, "face")};`)
     });
     if (surfaceText !== "")
       builder.tsOnly(() => builder.emit(surfaceText));
