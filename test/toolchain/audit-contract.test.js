@@ -27,7 +27,7 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // shape the predicates touch. Built fresh per test: a shared object mutated by
 // one case would leak into the next.
 const cleanStates = () => ({
-  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, famZero: 0, darkSpellings: 0, kindQueued: 0, kindHeld: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
+  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, famZero: 0, darkSpellings: 0, kindQueued: 0, kindHeld: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0, memberReadDrift: 0, memberReadStale: 0, bareProvided: 0 } },
   mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
@@ -136,6 +136,8 @@ describe('the audit contract judges in both directions', () => {
       'claims.parks': (s) => { s.gr.negatives.claimsBadParks = 1; },
       'claims.carriage': (s) => { s.gr.negatives.claimsAbsent = 1; },
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
+      'corpus.memberReads': (s) => { s.gr.negatives.memberReadDrift = 1; },
+      'corpus.providedNames': (s) => { s.gr.negatives.bareProvided = 1; },
       'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
       'mapping.census': (s) => { s.mp.census = 1; },

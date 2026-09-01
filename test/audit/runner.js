@@ -238,6 +238,7 @@
 // Lane, so the verdict dimension means zero diagnostics absolutely.
 
 import fs from 'node:fs';
+import { Stores } from '../../src/stores.js';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2220,6 +2221,77 @@ if (RUN_GRAMMAR) {
   // that parsed. For the same reason the first NON-EMPTY line is taken — an
   // error whose text opens with a newline still names itself.
   const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) ?? 'no message';
+  // ── Member-read spelling: the house rule, judged both ways ──
+  // A component reads what it DECLARES bare — state, computed, readonly,
+  // methods, gates, and props at their reads — and spells what it is
+  // PROVIDED with the sigil: `@app`, `@router`, `@params`, `@query`, and
+  // `@rest` under `extends`. The `@name` read of a declared member is still a
+  // path the mapping must carry (ThisProperty maps the member through a
+  // span-less `this`), so this table lists the reads that keep it exercised,
+  // by fixture and member. Like the spelling exclusions, both directions are
+  // judged: a sigil read of a declared member no row lists is drift, and a
+  // listed read the fixture no longer writes is a row that measures nothing.
+  const SIGIL_READ_COVERAGE = new Map([
+    ['13-components.rip', new Map([
+      ['bump', 'the `@name` read path — one token keeps the ThisProperty mapping exercised while every other member read in the corpus is bare'],
+    ])],
+  ]);
+  const PROVIDED_NAMES = new Set(['app', 'router', 'params', 'query', 'rest']);
+  const MEMBER_DECL_HEADS = new Set(['typed-var', 'state', 'readonly', 'computed', '=', 'gate']);
+  const isThisProp = (x) => Array.isArray(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && typeof x[2] === 'string';
+  const isWriteHead = (h) => typeof h === 'string' && (h === '++' || h === '--'
+    || (h.endsWith('=') && !['==', '!=', '<=', '>=', '===', '!=='].includes(h)));
+  const bindNames = (ps, out) => {
+    if (!Array.isArray(ps)) { if (typeof ps === 'string') out.add(ps); return; }
+    for (const q of ps) {
+      if (typeof q === 'string') out.add(q);
+      else if (Array.isArray(q)) {
+        if (q[0] === 'default' || q[0] === 'rest') bindNames([q[1]], out);
+        else if (q[0] === 'object' || q[0] === 'array') for (const e of q.slice(1)) bindNames([e], out);
+        else bindNames(q, out);
+      }
+    }
+  };
+  // Every `@name` read of a declared member, and every bare read of a provided
+  // name, inside each component of one tree. Declaration targets, write
+  // targets, object and attribute keys, and gate lines (an erased address and
+  // an erased key) are names, never reads; a local bound as a provided name
+  // is the author's own.
+  const memberReadCensus = (sexpr) => {
+    const sigil = [], bare = [];
+    const blockOf = (n) => { for (let i = 1; i < n.length; i++) if (Array.isArray(n[i]) && n[i][0] === 'block') return n[i]; return null; };
+    const walk = (n) => {
+      if (!Array.isArray(n)) return;
+      if (n[0] !== 'component') { for (const c of n) walk(c); return; }
+      const b = blockOf(n);
+      const members = new Set();
+      if (b) for (const st of b.slice(1)) {
+        if (!Array.isArray(st)) continue;
+        if (st[0] === 'gate' && typeof st[1] === 'string') members.add(st[1]);
+        else if (st[0] === 'object') { for (const q of st.slice(1)) if (Array.isArray(q) && q[0] === ':') { const nm = isThisProp(q[1]) ? q[1][2] : q[1]; if (typeof nm === 'string') members.add(nm); } }
+        else if (MEMBER_DECL_HEADS.has(st[0])) { if (isThisProp(st[1])) members.add(st[1][2]); else if (typeof st[1] === 'string') members.add(st[1]); }
+      }
+      const body = (x, bound) => {
+        if (!Array.isArray(x)) {
+          if (typeof x === 'string' && PROVIDED_NAMES.has(x) && !members.has(x) && !bound.has(x)) bare.push({ name: x });
+          return;
+        }
+        if (x[0] === 'gate') return;
+        if (isThisProp(x)) { if (members.has(x[2])) sigil.push({ name: x[2], node: x }); return; }
+        let nb = bound;
+        if ((x[0] === '->' || x[0] === '=>' || x[0] === 'for-in' || x[0] === 'for-of') && Array.isArray(x[1])) { nb = new Set(bound); bindNames(x[1], nb); }
+        for (let i = 0; i < x.length; i++) {
+          if (i === 1 && (MEMBER_DECL_HEADS.has(x[0]) || isWriteHead(x[0]) || x[0] === ':')) continue;
+          body(x[i], nb);
+        }
+      };
+      if (b) body(b, new Set());
+    };
+    walk(sexpr);
+    return { sigil, bare };
+  };
+  const sigilReadDrift = [], bareProvided = [];
+  const coverageSeen = new Set();   // `${fixture} ${member}` listed reads the corpus still writes
   const fixtureRows = [];
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
@@ -2246,6 +2318,23 @@ if (RUN_GRAMMAR) {
         continue;
       }
       walkPairs(tree.sexpr, []);
+      {
+        const { sigil, bare } = memberReadCensus(tree.sexpr);
+        const listed = SIGIL_READ_COVERAGE.get(f);
+        // The line is decoration on the finding, read through the parse
+        // tree's own stores; a lookup that fails names the read without it.
+        let lineOf = () => null;
+        try {
+          const st = new Stores(tree.stores);
+          lineOf = (node) => { const id = st.idOf(node); const span = id === null ? null : st.selfSpan(id); return span ? offsetToPosition(lineStartsOf(text), span[0]).line + 1 : null; };
+        } catch { /* decoration only */ }
+        for (const { name, node } of sigil) {
+          if (listed?.has(name)) { coverageSeen.add(`${f} ${name}`); continue; }
+          const line = lineOf(node);
+          sigilReadDrift.push(`${f}${line === null ? '' : `:${line}`} @${name}`);
+        }
+        for (const { name } of bare) bareProvided.push(`${f} ${name}`);
+      }
       // Coverage folds in only once the parse SUCCEEDS. Reductions performed on
       // the way to a rejected token are not evidence that the corpus exercises
       // a production — a file the compiler refuses cannot be the reason a rule
@@ -2831,6 +2920,15 @@ if (RUN_GRAMMAR) {
     out(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
     if (unfalsified.length) wrapList(unfalsified, red);
     if (VERBOSE) for (const [c, n] of claimed) console.log(`      ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
+    const sigilReadStale = [];
+    for (const [file, rows] of SIGIL_READ_COVERAGE) for (const name of rows.keys()) if (!coverageSeen.has(`${file} ${name}`)) sigilReadStale.push(`${file} @${name}`);
+    const readsBad = sigilReadDrift.length + sigilReadStale.length + bareProvided.length;
+    out(`    ${dim('member reads:')} ${readsBad === 0
+      ? green('every declared member reads bare, every listed @ read stands, every provided name takes the sigil')
+      : red(`${sigilReadDrift.length} sigil read${sigilReadDrift.length === 1 ? '' : 's'} of a declared member unlisted · ${sigilReadStale.length} listed read${sigilReadStale.length === 1 ? '' : 's'} no longer written · ${bareProvided.length} provided name${bareProvided.length === 1 ? '' : 's'} read bare`)}`);
+    if (sigilReadDrift.length) wrapList(sigilReadDrift.map((x) => `${x} — spell it bare, or list it in SIGIL_READ_COVERAGE`), red);
+    if (sigilReadStale.length) wrapList(sigilReadStale.map((x) => `${x} — the row measures nothing; remove it or restore the read`), red);
+    if (bareProvided.length) wrapList(bareProvided.map((x) => `${x} — a bare provided name is a free variable; spell it with the sigil`), red);
     ng = {
       darkSpellings: darkSpellings.length, spellings: spellings.length, staleMints: staleMints.length,
       badSpellingExclusions: falseSpellingExclusions.length + staleSpellingExclusions.length,
@@ -2840,6 +2938,7 @@ if (RUN_GRAMMAR) {
         + heldButClaimed.length + staleHeldKinds.length,
       headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
       splitDividers: splitDividers.length, splitDividerRows: splitDividers, dividerFiles: commentFiles.length,
+      memberReadDrift: sigilReadDrift.length, memberReadStale: sigilReadStale.length, bareProvided: bareProvided.length,
     };
     // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
     // no syntactic denominator: checker behaviors (carrier presence-checked
@@ -4939,6 +5038,8 @@ if (gr) {
   if (gr.uncovered) broken.push(`${s(gr.uncovered, 'production')} uncovered — write the fixture, or rule an exclusion`);
   if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));
   if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
+  if (n.memberReadDrift || n.memberReadStale) broken.push(`${s((n.memberReadDrift ?? 0) + (n.memberReadStale ?? 0), 'member-read spelling violation')} — bare for declared members, the listed @ reads kept`);
+  if (n.bareProvided) broken.push(`${s(n.bareProvided, 'provided name')} read bare — spell it with the sigil`);
   if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
   if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment construct')} no fixture spells`);
   // The contract judged this all along, but Totals never did — so a wrapped

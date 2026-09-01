@@ -159,7 +159,7 @@ Held = component
 
   render
     div
-      aria-busy: @busy?!
+      aria-busy: busy?!
       data-kind: 'row'
       'held'
 

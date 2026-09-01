@@ -141,6 +141,23 @@ export const CONTRACT = [
     red: (s) => (s.gr.negatives.kindQueued - s.gr.negatives.kindHeld) > 0,
   },
   {
+    // The house rule for member reads, judged both ways like the spelling
+    // exclusions: a sigil read of a declared member that no coverage row
+    // lists is drift, and a listed read the corpus no longer writes is a
+    // row that measures nothing.
+    name: 'corpus.memberReads', lane: 'grammar',
+    property: 'every read of a declared member in a positive fixture is bare, save the reads the gate lists as the `@name` path\'s coverage — and every listed read is still written',
+    red: (s) => s.gr.negatives.memberReadDrift + s.gr.negatives.memberReadStale > 0,
+  },
+  {
+    // A provided name spelled bare is not a member read at all — it is a
+    // free variable the emitter passes through — so the rule is the read
+    // reaching the instance, not a spelling preference.
+    name: 'corpus.providedNames', lane: 'grammar',
+    property: 'every provided name a positive fixture reads — app, router, params, query, rest — takes the sigil, so the read reaches the instance',
+    red: (s) => s.gr.negatives.bareProvided > 0,
+  },
+  {
     name: 'negatives.falsifiability', lane: 'grammar',
     property: 'every type-vocabulary class the positives claim carries at least one error-lane instance',
     red: (s) => s.gr.negatives.vocabUnfalsified > 0,
