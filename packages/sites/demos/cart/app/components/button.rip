@@ -6,7 +6,7 @@ export Button = component extends button
 
   render
     button
-      aria-busy: @loading?!
+      aria-busy: @loading
       disabled: @loading or @rest.disabled
       class: [
         @variant

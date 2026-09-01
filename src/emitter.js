@@ -10988,19 +10988,36 @@ class Emitter {
       // VALUE — the widened `propertyType | string` road. Only where
       // no surface exists does the old value-quieting `as any` remain.
       const recv = this.tsElReceiver(el);
-      // Presence value checking anchors on the author's bytes through
-      // the scratch const's tsOnly annotation: the value expression
-      // initializes `__v` against the attribute's type (nullable — the
-      // remove arm is the road's own semantics), and the narrowed
-      // `__v` then satisfies the setAttribute call by itself.
-      const presenceAnnotation = () => {
-        if (recv.surfaced) this.b.tsOnly(() => this.b.emit(`: ${recv.valsName}['${key}'] | null | undefined`));
+      // NULLISH IS ABSENCE on the attribute road: a value that reaches
+      // `null`/`undefined` removes the attribute instead of stringifying
+      // into it, so `aria-busy: @loading` on an absent optional prop
+      // writes no attribute rather than the four letters `null`. The
+      // author states the value; the road states what an absent one
+      // means. A value whose SPELLING cannot reach either — a quoted
+      // string, a number, a boolean literal, or an interpolation, which
+      // always yields a string — keeps the direct call. The test reads
+      // the value alone and never the face's own wraps: the JS emission
+      // and its TS face must fork identically, or stripping the face
+      // leaves two shapes that cannot reconcile.
+      const nullable = !(
+        (typeof value === 'string' && (!isIdentifierName(value) || value === 'true' || value === 'false')) ||
+        (isNode(value) && value[0] === 'str')
+      );
+      // Value checking anchors on the author's bytes through the scratch
+      // const's tsOnly annotation: the value expression initializes `__v`
+      // against the attribute's type widened by the absence arm, and the
+      // narrowed `__v` then satisfies the setAttribute call by itself.
+      // An unsurfaced receiver has no attribute type to check against and
+      // keeps the quiet-TS-only doctrine's silence.
+      const nullableAnnotation = () => {
+        if (!this.ts) return;
+        this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | null | undefined` : ': any'));
       };
       if (this.renderReactive(value)) {
-        if (isPresence) {
+        if (isPresence || nullable) {
           this.renderEffect(pair, () => {
             this.b.emit('{ const __v');
-            presenceAnnotation();
+            nullableAnnotation();
             this.b.emit(' = ');
             this.renderExpr(value);
             this.b.emit('; __v == null ? ');
@@ -11050,10 +11067,12 @@ class Emitter {
             if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
           }, value);
         }
-      } else if (isPresence) {
+      } else if (isPresence || nullable) {
+        // A fresh element holds no attribute yet, so absence needs no
+        // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
           this.b.emit('{ const __v');
-          presenceAnnotation();
+          nullableAnnotation();
           this.b.emit(' = ');
           this.renderExpr(value);
           this.b.emit('; if (__v != null) ');

@@ -921,7 +921,7 @@ code 'reactive attribute', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.setAttribute('href', this.href.value); });
+      __effect(() => { { const __v = this.href.value; __v == null ? this._el0.removeAttribute('href') : this._el0.setAttribute('href', __v); } });
     }
   };
   '''
@@ -1144,7 +1144,7 @@ code 'value: @event is a member read, not an event binding', '''
     _create() {
       this._el0 = document.createElement('input');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.setAttribute('value', this.click);
+      { const __v = this.click; if (__v != null) this._el0.setAttribute('value', __v); }
       return this._el0;
     }
   };
@@ -2167,7 +2167,7 @@ code 'render: property access attr value with children', '''
     _create() {
       this._el0 = document.createElement('button');
       this._el0.setAttribute('data-part', 'Test');
-      this._el0.setAttribute('data-trigger', navItem.dataset.trigger);
+      { const __v = navItem.dataset.trigger; if (__v != null) this._el0.setAttribute('data-trigger', __v); }
       this._el1 = document.createElement('span');
       this._t0 = document.createTextNode("child");
       this._el1.appendChild(this._t0);
@@ -2189,7 +2189,7 @@ code 'render: deep property chain attr value with children', '''
     _create() {
       this._el0 = document.createElement('button');
       this._el0.setAttribute('data-part', 'Test');
-      this._el0.setAttribute('data-x', a.b.c.d);
+      { const __v = a.b.c.d; if (__v != null) this._el0.setAttribute('data-x', __v); }
       this._el1 = document.createElement('span');
       this._t0 = document.createTextNode("child");
       this._el1.appendChild(this._t0);
@@ -2233,7 +2233,7 @@ code 'render: CSS class + property access attr coexist', '''
     _create() {
       this._el0 = document.createElement('button');
       this._el0.setAttribute('data-part', 'Test');
-      this._el0.setAttribute('data-trigger', obj.prop);
+      { const __v = obj.prop; if (__v != null) this._el0.setAttribute('data-trigger', __v); }
       this._el1 = document.createElement('span');
       this._t0 = document.createTextNode("child");
       this._el1.appendChild(this._t0);

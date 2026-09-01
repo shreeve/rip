@@ -180,7 +180,11 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     expect(faced.code).toContain(` as __RipEl_a).setAttribute('href', __ripRoute(\`/orders/\${this.id.value}\`));`); // intrinsic, reactive template
     expect(faced.code).toContain('href: __ripRoute("/cart")');                        // component prop
     expect(faced.code).toContain(`setAttribute('href', "https://example.com")`);      // external passes bare — the surface's string road admits it
-    expect(faced.code).toContain("setAttribute('href', nav)");                        // dynamic passes bare through the typed surface
+    // A dynamic value takes the road's absence fork, so it checks at the
+    // scratch const — against the attribute's own type, widened by the
+    // arm that removes — and reaches setAttribute already narrowed.
+    expect(faced.code).toContain(`const __v: __RipAttrVals_a['href'] | null | undefined = nav; if (__v != null)`);
+    expect(faced.code).toContain(`.setAttribute('href', __v); }`);
     expect(faced.code).toContain('href: nav');                                        // dynamic prop passes bare
     expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
     expect(faced.code).toContain(`type RoutePath = ${ROUTES};`);

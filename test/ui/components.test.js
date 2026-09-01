@@ -826,7 +826,7 @@ describe('the static render DSL: emission pins', () => {
 
   test('a member chain in an attribute value keeps the subtraction reading — never a rewritten property name', () => {
     const { code } = compile('T = component\n  box := { w: 10 }\n  render\n    div width: @box.w-pad\n');
-    expect(code).toContain("setAttribute('width', (this.box.value.w - pad))");
+    expect(code).toContain("const __v = (this.box.value.w - pad);");
     // Class-SELECTOR chains keep the hyphen consumption: tag-rooted
     // and bare line-start dots.
     const cls = compile('T = component\n  render\n    .counter-display "a"\n    span.badge.big-x "c"\n').code;
@@ -834,7 +834,7 @@ describe('the static render DSL: emission pins', () => {
     expect(cls).toContain("className = 'badge big-x'");
     // Capitalized roots are value chains too: `Math.max-1` subtracts.
     expect(compile('T = component\n  render\n    div width: Math.max-1\n').code)
-      .toContain("setAttribute('width', (Math.max - 1))");
+      .toContain("const __v = (Math.max - 1);");
   });
 
   test('a parameterized chain continuation under an element rejects — never minted nonsense DOM', () => {
