@@ -490,7 +490,7 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(r.length).toBe(0);
   });
 
-  test('FK additions on existing tables are notes; new required column with FK carries the note', async () => {
+  test('a new required FK column is an ordinary add-column: @belongsTo is unenforced by design', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       K4.__schema(model('User', field('name')));
@@ -502,15 +502,15 @@ describe('migrate: the differ — step kinds and classes', () => {
     });
     const add = r.find((s) => s.kind === 'add-column');
     expect(add.table).toBe('orders');
-    // A required FK column with no default carries BOTH notes: the
-    // withheld SET NOT NULL (lossy) and the unenforceable constraint.
+    // A required FK column with no default carries only the withheld
+    // SET NOT NULL (lossy). No constraint note: the renderer never
+    // emits REFERENCES, so there is nothing unenforceable to flag.
     expect(add.class).toBe('lossy');
     expect(add.notes.some((n) => n.includes('the SET NOT NULL is withheld'))).toBe(true);
-    expect(add.notes.some((n) => n.includes('DuckDB cannot add FOREIGN KEY constraints'))).toBe(true);
-    expect(r.some((s) => s.kind === 'note-fk')).toBe(false); // the add-column carries it; note-fk is for existing columns
+    expect(add.notes.some((n) => n.includes('FOREIGN KEY'))).toBe(false);
   });
 
-  test('note-fk fires for an EXISTING column that should gain a reference', async () => {
+  test('an existing FK column with no deployed constraint is the steady state, not drift', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('Order', field('total', 'integer'), dir('belongsTo', { target: 'User', optional: false })));
       K4.__schema(model('User', field('name')));
@@ -520,8 +520,7 @@ describe('migrate: the differ — step kinds and classes', () => {
       ] };
       return mig.plan();
     });
-    expect(r.map((s) => s.kind)).toEqual(['note-fk']);
-    expect(r[0].sql[0]).toContain('orders.user_id should reference users(id)');
+    expect(r.length).toBe(0);
   });
 
   test('sequence drift is a NOTE step, never silence: start mismatch and missing sequence', async () => {

@@ -459,7 +459,7 @@ function validateSchemaIdentifiers(schema, side) {
 const UNBLOCKED_KINDS = new Set([
   'create-table', 'create-sequence', 'add-column', 'create-index', 'drop-index',
   'alter-default',
-  'note-fk', 'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case', 'note-unique',
+  'note-sequence', 'note-adapter', 'note-primary-key', 'note-column-case', 'note-unique',
 ]);
 
 // Steps on a renamed table carry the NEW name; deployed evidence is
@@ -983,11 +983,6 @@ function diffTable(d, p, steps, deps) {
       notes.push('the UNIQUE is withheld — ADD COLUMN cannot carry a constraint, and adding one to a ' +
         'live table means rebuilding it; the next plan emits add-unique as its own step');
     }
-    const fk = d.foreignKeys.find((f) => f.column === name);
-    if (fk) {
-      notes.push('DuckDB cannot add FOREIGN KEY constraints to an existing table; ' +
-        name + ' -> ' + fk.refTable + '(' + fk.refColumn + ') is unenforced until the table is recreated');
-    }
     steps.push({ table: t, kind: 'add-column', class: cls, sql, notes });
   }
 
@@ -1175,18 +1170,12 @@ function diffTable(d, p, steps, deps) {
     steps.push({ table: t, kind: 'note-unique', class: 'safe', sql: [text], notes: [] });
   }
 
-  // FK diffs are notes only — DuckDB has no ALTER TABLE ADD/DROP
-  // CONSTRAINT.
-  const pFks = new Set(p.foreignKeys.map((f) => f.column));
-  for (const fk of d.foreignKeys) {
-    if (pFks.has(fk.column) || !pCols.has(fk.column)) continue;
-    steps.push({
-      table: t, kind: 'note-fk', class: 'safe',
-      sql: ['-- NOTE: ' + t + '.' + fk.column + ' should reference ' + fk.refTable + '(' + fk.refColumn + ') ' +
-           'but DuckDB cannot add FK constraints to an existing table'],
-      notes: [],
-    });
-  }
+  // Declared-vs-deployed FK differences are NOT diffed. @belongsTo is
+  // unenforced by design — the renderer deliberately emits no
+  // REFERENCES clause (see the note in orm.js's column renderer), so a
+  // deployed table lacking the constraint is the intended steady state,
+  // not drift worth a step. Deployed FKs still matter as evidence: they
+  // block DDL (applyFkBlocks) and order drops.
 
   // Sequence-start drift: DuckDB has no ALTER SEQUENCE RESTART, so
   // the drift is a NOTE step — a fact the plan states out loud, never
