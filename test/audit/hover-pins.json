@@ -143,9 +143,9 @@
         "line": 13,
         "character": 9,
         "token": "class",
-        "expect": "(property) <span>.className: ClassValue | ClassValue[]",
+        "expect": "(attribute) class: ClassValue | ClassValue[]",
         "rule": "attr/prop name (intrinsic)",
-        "why": "served — the class key's exact row lands on the receiver surface's className property; the surface name reads back as the element and the class alias as the clsx ecosystem's ClassValue (scrubFaceArtifacts); RULINGS: attr name on an intrinsic"
+        "why": "served — the class key answers as the attribute the author wrote, with the type its road admits; the road (the surface's className property) is never in the head; RULINGS: attr name on an intrinsic"
       },
       {
         "line": 19,

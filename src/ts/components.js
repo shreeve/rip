@@ -38,7 +38,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor } from '../dom.js';
-import { CAMEL } from './dom-types.js';
+import { CAMEL, CLASS_TYPE } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
@@ -649,6 +649,54 @@ export const propsParamOptional = (info) => !publicProps(info).some(isRequiredPr
 export const CHILDREN_UNION = 'Node | string | number | boolean | null';
 const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNION);
 
+// The passthrough object an `extends` component admits beyond what it
+// declares — the same object on two surfaces: the props ctor spells it
+// inline (less the keys declared props own), and the `rest` view holds
+// it. Intrinsic attr typing: each attribute types through the tag's DOM
+// interface — `disabled?:` on a button is boolean, not any — via an
+// extends-Record guard so attributes with no matching property fall back
+// to any instead of erroring. Attributes whose DOM property is camelCased
+// get BOTH spellings (authors write maxLength; the spec list says
+// maxlength) — the shared CAMEL bridge, the same one the intrinsic
+// surfaces read. Undeclared rest props ride the data-/aria- templates —
+// the same admission the intrinsic surfaces make. A misspelled DECLARED
+// prop must draw the excess-property did-you-mean instead of falling
+// through a catch-all, so there is no string index.
+export const REST_TEMPLATES = '[key: `data-${string}`]: any; [key: `aria-${string}`]: any';
+export function restPassthroughEntries(tag, road = 'dts') {
+  const tagMap = `HTMLElementTagNameMap[${JSON.stringify(tag)}]`;
+  const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
+  const isHtmlTag = attributeNamesFor(tag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(tag);
+  const out = [];
+  const seen = new Set();
+  const put = (key, t) => { if (!seen.has(key)) { seen.add(key); out.push([key, t]); } };
+  for (const attr of attributeNamesFor(tag)) {
+    // Two keys take the element roads' own types rather than the DOM guard.
+    // `class` has no property of its name (the property is `className`, no
+    // camel-casing of it) and the runtime applies it through __clsx, so both
+    // spellings admit the clsx vocabulary — on the face; the clsx alias is
+    // recursive and the declaration road ships no minted names, so a .d.ts
+    // keeps `any` there. `style` is a string or an object at runtime, the
+    // attribute road's admission: the DOM property widened by `| string`.
+    if (attr === 'class') {
+      const t = road === 'face' ? CLASS_TYPE : 'any';
+      put('class', t); put('className', t);
+      continue;
+    }
+    const prop = CAMEL[attr] ?? attr;
+    const t = !isHtmlTag ? 'any' : attr === 'style' ? `(${guarded('style')}) | string` : guarded(prop);
+    put(attr, t);
+    if (prop !== attr) put(prop, t);
+  }
+  return out;
+}
+// The `rest` view's value type, spelled whole: what the face names through
+// the per-tag `__RipRest_<tag>` alias (the editor shows it as `Rest<tag>`),
+// and what the shipped declarations spell inline.
+export const restPassthroughText = (tag, road = 'dts') =>
+  `{ ${restPassthroughEntries(tag, road).map(([k, t]) => `${keyText(k)}?: ${t}`).join('; ')}; ${REST_TEMPLATES} }`;
+export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g, '_')}`;
+
 export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);
   const segs = [{ text: '{ ' }];
@@ -685,28 +733,13 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
   }
   used.add('children');
   if (info.extendsTag !== null) {
-    // Intrinsic attr typing: passthrough attributes
-    // type through the tag's DOM interface — `disabled?:` on a button
-    // is boolean, not any — via an extends-Record guard so attributes
-    // with no matching property fall back to any instead of erroring.
-    // Attributes whose DOM property is camelCased get BOTH spellings
-    // (authors write maxLength; the spec list says maxlength) — the
-    // shared CAMEL bridge, the same one the intrinsic surfaces read.
-    const tagMap = `HTMLElementTagNameMap[${JSON.stringify(info.extendsTag)}]`;
-    const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
-    const isHtmlTag = attributeNamesFor(info.extendsTag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(info.extendsTag);
-    for (const attr of attributeNamesFor(info.extendsTag)) {
-      if (used.has(attr)) continue;
-      const prop = CAMEL[attr] ?? attr;
-      const t = isHtmlTag ? guarded(prop) : 'any';
-      segs.push({ text: `; ${keyText(attr)}?: ${t}` });
-      if (prop !== attr && !used.has(prop)) segs.push({ text: `; ${prop}?: ${t}` });
+    // The passthrough object (restPassthroughEntries), less any key a
+    // declared prop already owns.
+    for (const [key, t] of restPassthroughEntries(info.extendsTag, road)) {
+      if (used.has(key)) continue;
+      segs.push({ text: `; ${keyText(key)}?: ${t}` });
     }
-    // Undeclared rest props ride the data-/aria- templates — the same
-    // admission the intrinsic surfaces make. A misspelled DECLARED
-    // prop must draw the excess-property did-you-mean instead of
-    // falling through a catch-all, so there is no string index here.
-    segs.push({ text: '; [key: `data-${string}`]: any; [key: `aria-${string}`]: any' });
+    segs.push({ text: `; ${REST_TEMPLATES}` });
   }
   segs.push({ text: ' }' });
   for (const m of props.filter(isRequiredProp)) {
@@ -1012,7 +1045,9 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
     lines.push({ segs: [{ text: `${name}?: any;` }] });
   }
   if (!hasChildren) lines.push({ segs: [{ text: `children?: ${childrenType(road)};` }] });
-  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
+  // The rest view: the passthrough object, named on the face and inline
+  // in the declarations (a .d.ts owes its reader a self-contained type).
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag), '', MINTED)};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }

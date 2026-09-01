@@ -149,6 +149,48 @@ export function diagnosticTagsFor(code) {
 // face text, the union the checker saw, and every span are untouched.
 // Entries come from the route walker (mirror.js appRoutesFor), already
 // in walker order.
+// The top-level arms of a union type text, split outside every bracket.
+export function unionArmsOf(type) {
+  const arms = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < type.length; i++) {
+    const ch = type[i];
+    if (ch === '{' || ch === '(' || ch === '[' || ch === '<') depth++;
+    else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) depth--;
+    else if (ch === '|' && depth === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') {
+      arms.push(type.slice(start, i - 1));
+      start = i + 2;
+    }
+  }
+  arms.push(type.slice(start));
+  return arms.map((a) => a.trim());
+}
+
+// A reactive CELL, `{ value: T; read(): T; touch?(): void }`, plays two
+// parts, and only one of them is the lowering's. BESIDE its own value type
+// in a union — `T | { value: T; … } | undefined`, a shared prop slot's
+// admission, a `<=>` channel's — the cell arm is the plumbing that lets a
+// container ride the same slot as a value, and it reads as T (the brand
+// check — value and read() agreeing — keeps a user literal of that shape
+// out). STANDALONE, a cell is a thing the author holds or passed: a
+// reactive import IS the cell the importer receives, and a `:=` cell handed
+// where a value belongs is exactly that. Those stay named as cells, because
+// collapsing one would make `n: number = count` complain that number is
+// not assignable to number.
+const CELL = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/;
+export function collapseCellArms(type) {
+  if (typeof type !== 'string') return type;
+  const top = unionArmsOf(type);
+  if (top.length < 2) return type;
+  const arms = top.map((arm) => {
+    const cell = CELL.exec(arm);
+    return cell && cell[1].trim() === cell[2].trim() ? cell[1].trim() : arm;
+  });
+  // A collapsed cell's value type may itself be a union, so the arms
+  // flatten once more and an arm already present folds into it.
+  return [...new Set(arms.flatMap((a) => unionArmsOf(a)))].join(' | ');
+}
+
 export function prettifyRouteUnion(text, entries) {
   if (typeof text !== 'string' || !entries?.length) return text;
   let out = text;
@@ -726,6 +768,8 @@ export function scrubFaceArtifacts(text) {
     // (scalar first; tsgo's display normalization flips it).
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
+    // The per-tag rest alias reads as `Rest<tag>` — the tag shorthand's own idiom.
+    .replace(/\b__RipRest_([A-Za-z][\w]*)\b/g, 'Rest<$1>')
     // A schema's behavior object is the face's own home for the
     // methods the author declared ON the schema — `__Cart__behavior`
     // reads back as Cart, whose behavior it is.

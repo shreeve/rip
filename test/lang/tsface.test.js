@@ -1349,12 +1349,17 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('extends: the tag attribute surface + string index in the props type, the rest declare', () => {
     const code = ts('Deck = component extends section\n  name := "n"\n  render\n    section.deck\n      = name\n').code;
-    expect(code).toContain('declare rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
+    // The rest view names the per-tag passthrough alias the module declares once.
+    expect(code).toContain('declare rest: { value: __RipRest_section; read(): __RipRest_section; touch(): void };');
+    expect(code).toContain('type __RipRest_section = { ');
     // Intrinsic attrs type through the tag's DOM interface with an
     // extends-Record guard; camelCased DOM twins get
     // their own entries (tabindex/tabIndex).
     expect(code).toContain(`id?: HTMLElementTagNameMap["section"] extends Record<'id', infer T> ? T : any`);
-    expect(code).toContain(`class?: HTMLElementTagNameMap["section"] extends Record<'class', infer T> ? T : any`);
+    // `class` takes the element road's own admission, both spellings — no DOM
+    // property is named `class`, and the runtime applies it through __clsx.
+    expect(code).toContain('class?: __RipClassValue | __RipClassValue[]');
+    expect(code).toContain('className?: __RipClassValue | __RipClassValue[]');
     expect(code).toContain(`tabIndex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? T : any`);
     // Undeclared rest props ride the data-/aria- templates — no string
     // catch-all, so a misspelled declared prop draws the

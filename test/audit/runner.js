@@ -3726,6 +3726,19 @@ if (RUN_ERRORS) {
     // fixtures are visible to no other audit, so a narrower filter here would
     // make warnings on them invisible everywhere.
     const ds = (await dsP).filter((d) => (d.severity ?? 1) <= 2);
+    // What a complaint SAYS is judged too: a published message may carry no
+    // face artifact — neither a minted `__` spelling nor a reactive cell ARM
+    // (`T | { value: T; read(): T; … }`, the slot admission the lowering
+    // spells for a shared prop or a `<=>` channel). The editor collapses that
+    // arm onto its value type and scrubs minted names before publishing; a
+    // message that still shows either is the face leaking into the author's
+    // view. A STANDALONE cell is not an artifact: a reactive import is the
+    // cell the importer holds, and a message naming it is the truth.
+    for (const d of ds) {
+      if (/__[A-Za-z]|\| \{ value: [^}]*; read\(\)|\{ value: [^}]*; read\(\)[^}]*\} \|/.test(d.message)) {
+        problems.push({ kind: 'message', note: `TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character + 1} publishes a face shape — ${d.message.replace(/\s+/g, ' ').slice(0, 140)}` });
+      }
+    }
     const unmatched = [...ds];
     for (const e of expected) {
       // Exact column first, so two same-code diagnostics on one line each
@@ -4874,6 +4887,7 @@ if (RUN_SWEEP) {
     srow('minted', counts['minted'] ?? 0, 'answers naming a minted `__` spelling', true);
     srow('scaffold', counts['scaffold'] ?? 0, 'answers naming a `_elN` render local', true);
     srow('cover-this', counts['cover-this'] ?? 0, 'the bare `this: this` cover answer', true);
+    srow('cell', counts['cell'] ?? 0, 'answers showing a reactive cell ARM beside its value type — the slot admission', true);
     srow('diagnostics', counts['minted-in-diagnostic'] ?? 0, 'face spellings in published messages', true);
     srows.push(null);
     // Both halves of the walk are gated now, so like the four machinery

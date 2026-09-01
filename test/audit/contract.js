@@ -238,7 +238,16 @@ export const CONTRACT = [
   {
     name: 'diagnostics.codes', lane: 'errors',
     property: 'every diagnostic the twin publishes is published by the fixture, and none besides',
-    red: (s) => s.el.problems.some((p) => p.kind !== 'position'),
+    red: (s) => s.el.problems.some((p) => p.kind !== 'position' && p.kind !== 'message'),
+  },
+  {
+    // The message is the author's view of a complaint, and it is judged in
+    // its own right: no minted `__` spelling and no reactive cell in it. The
+    // hover and the diagnostic answer about the same slot; they must name
+    // the same type.
+    name: 'diagnostics.messages', lane: 'errors',
+    property: 'no published message carries a face shape — a minted spelling or a reactive cell',
+    red: (s) => s.el.problems.some((p) => p.kind === 'message'),
   },
   // Position holds as THREE invariants, one general and two named by fixture.
   // A single row joined by `AND` can only recover as a whole, so while either

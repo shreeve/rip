@@ -21,7 +21,7 @@
       "character": 8,
       "code": 2322,
       "token": "label",
-      "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
+      "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel, so the twin cannot derive it; the message names the value types on both sides (`number` into `string | undefined`), the channel's cell collapsed like every other; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 47,

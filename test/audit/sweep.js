@@ -56,6 +56,15 @@ const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
 
 const MINTED = /\b(__[A-Za-z$][\w$]*)/g
 const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+)\b/g
+// The reactive cell ARM — `T | { value: T; read(): T; … }`, the slot
+// admission the lowering spells for a shared prop or a `<=>` channel. An
+// answer showing one names the face's plumbing, not the author's type; the
+// presenters collapse it onto its value type, and a position they do not
+// reach is exactly what this catches. A STANDALONE cell is not this: a
+// reactive import or a `:=` member IS a cell, and an answer naming it is the
+// truth (the reactive-cell presenter chooses the value-first spelling at a
+// declaration by its own ruling).
+const CELL = /\| \{ value: [^}]*; read\(\)|\{ value: [^}]*; read\(\)[^}]*\} \|/
 
 // ── the NAME census: the other half of the position dimension ────────
 //
@@ -174,7 +183,7 @@ function subjectOf(flat) {
   // The parenthesized heads: TypeScript's own, and the kinds rip mints in
   // their place — a `(state)`, `(prop)`, `(field)` … head is followed by
   // the same `name:` shape, so the one walk below names its subject.
-  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
+  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot|rest)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
   if (head !== null) {
     // Walk a dotted name whose segments may carry generic argument
     // lists: `Array<Pick<…>>.slice` names `slice`.
@@ -302,6 +311,7 @@ async function sweep(wsRoot, files) {
       const scaffold = [...new Set([...flat.matchAll(SCAFFOLD)].map((mm) => mm[1]).filter((n) => n !== word))]
       if (scaffold.length) row('scaffold', scaffold)
       if (flat === 'this: this' && word !== 'this') row('cover-this')
+      if (CELL.test(flat)) row('cell')
       // Structural truncation: tsgo cuts very long display types mid-
       // token, and a cut answer is never a right answer. Unbalanced
       // nesting is the cut's fingerprint (rest `...` is balanced).
@@ -452,7 +462,7 @@ export async function runSweep(sets = defaultSets()) {
   return out
 }
 
-export const ORDER = ['minted', 'scaffold', 'cover-this', 'minted-in-diagnostic', 'truncated', 'empty', 'range', 'subject', 'silent-name', 'boundary-cover', 'blank-cover', 'keyword-cover', 'comment-cover', 'unparsed-head']
+export const ORDER = ['minted', 'scaffold', 'cover-this', 'cell', 'minted-in-diagnostic', 'truncated', 'empty', 'range', 'subject', 'silent-name', 'boundary-cover', 'blank-cover', 'keyword-cover', 'comment-cover', 'unparsed-head']
 // One line per class: what a row MEANS and what drains the class —
 // printed under each section header so the report reads without the
 // file comment in hand.
@@ -467,6 +477,7 @@ export const KIND_NOTES = {
   'comment-cover': 'a word inside a `#` comment answering a neighboring symbol; one comment-decline rule drains the whole class',
   'unparsed-head': 'the classifier could not name the answer\'s subject — a triage bucket; most rows resolve by teaching the classifier the head form, not by fixing the editor',
   'truncated': "the answer's nesting does not balance — tsgo cut a very long display type mid-token; a cut answer is never a right answer",
+  'cell': 'an answer showing a reactive cell ARM beside its value type (`T | { value: T; read(): T; … }`) — the slot admission every presenter collapses onto T; a position none of them reaches. A standalone cell is a thing the author holds and is not this',
   'empty': 'an answer whose fence is blank',
   'silent-name': 'a name the lexer produces that the editor declines at; the census half of the position dimension — every other class judges an answer, so over-declining is invisible to them; drains through a ruling and its pin, like every other class',
   'boundary-cover': "a cursor at a word's END boundary answers about something the word never named — the served spans are end-exclusive",
@@ -523,7 +534,7 @@ export function organize(findings) {
 // The classes the audit contract GATES (sweep.machinery): the
 // machinery-decline doctrine's hard violations. The rest are gauges
 // until the decline work drains them.
-export const GATED = new Set(['minted', 'scaffold', 'cover-this', 'minted-in-diagnostic'])
+export const GATED = new Set(['minted', 'scaffold', 'cover-this', 'cell', 'minted-in-diagnostic'])
 export const kindOf = (f) => f.kind.split(':')[0]
 
 if (import.meta.main) {

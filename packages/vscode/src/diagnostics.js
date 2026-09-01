@@ -11,7 +11,7 @@
 import path from 'node:path';
 import {
   offsetToPosition, positionToOffset, generatedSpanToSource,
-  SUPPRESSED_TS_CODES, diagnosticTagsFor, prettifyRouteUnion, scrubFaceArtifacts,
+  SUPPRESSED_TS_CODES, collapseCellArms, diagnosticTagsFor, prettifyRouteUnion, scrubFaceArtifacts,
 } from './translate.js';
 import { alwaysReported, isSyntaxClass } from './scopes.js';
 import { declaredButUninstalled } from './mirror.js';
@@ -176,6 +176,10 @@ export function mapTsDiagnostic(good, d) {
   // surfaces) read back in the author's vocabulary the same way
   // hovers do (scrubFaceArtifacts).
   message = scrubFaceArtifacts(prettifyRouteUnion(message, good.routeEntries));
+  // A cell — the lowering's container for a shared prop slot or a `<=>`
+  // channel — reads as its value type on both sides of a complaint, the
+  // same collapse the prop-slot hover makes (collapseCellArms).
+  message = message.replace(/'([^'\n]*)'/g, (m, t) => `'${collapseCellArms(t)}'`);
   return {
     severity: d.severity ?? 1,
     code: d.code,

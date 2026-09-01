@@ -31,7 +31,7 @@ import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, surfaceableTag, domSurfaceDecls, CLSX_TYPE } from './ts/dom-types.js';
-import { COMPONENT_FAILURE_TYPE,
+import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
@@ -475,6 +475,7 @@ class Emitter {
     this.domSurfaces = new Map();
     this._needsClassValue = false;
     this._needsChildren = false;
+    this._restTags = new Set();
     this._needsRefCellHelper = false;
     // SOURCE spans of intrinsic-element positions whose ruled hover the
     // editor SERVES from the compiler's own record rather than from a
@@ -2367,7 +2368,13 @@ class Emitter {
     const ambientLines = ambientClassDeclares(info);
     if (ambientLines.some((t) => t.includes('__ripAmbientApp('))) this._needsAmbienceHelper = true;
     for (const text of ambientLines) line(() => this.b.emit(text));
-    if (info.extendsTag !== null) line(() => this.b.emit(`declare rest: ${containerType('Record<string, any>', '', MINTED)};`));
+    if (info.extendsTag !== null) {
+      // The rest view holds the passthrough object, named through the
+      // per-tag alias the module declares once (restAliasName).
+      this._restTags.add(info.extendsTag);
+      this._needsClassValue = true; // the alias types the view's `class`
+      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), '', MINTED)};`));
+    }
     // The runtime base's API, declared because the inlined base types as
     // `any` and carries nothing into the class. `this` rather than the
     // component's name: an expression-valued component has no companion
@@ -8674,6 +8681,9 @@ class Emitter {
       const label = Emitter.memberLabel(m);
       if (label !== null) memberKinds.set(m.name, { label, optional: m.optional === true });
     }
+    // The provided `rest` view is no declared member, but its reads mint a
+    // kind of their own: `(rest)`, the view of the undeclared caller props.
+    if (extendsTag !== null) memberKinds.set('rest', { label: 'rest', optional: false });
     const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
     const pad = '  '.repeat(ind + 1);
@@ -11271,7 +11281,13 @@ class Emitter {
       const recordAttrKey = () => {
         if (attrRecorded || !this.ts || !recv.surfaced || attrSpan === null || attrGen === null) return;
         attrRecorded = true;
-        this.intrinsics.push({ start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, gen: attrGen });
+        // A route-checked href answers the type this position actually
+        // admits — the project's route union the wrap checks against —
+        // rather than the road's generic string. No absence arm: the
+        // value is a leading-`/` literal by construction, never nullish.
+        this.intrinsics.push(routeWrap
+          ? { start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, type: this.routesUnion, route: true }
+          : { start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, gen: attrGen });
       };
       // The method the record points at stands one byte past the dot the
       // call opens with.
@@ -16641,11 +16657,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // declares when a ref wrap emitted. Declarations hoist, so the tail
   // placement governs every earlier cast. TS-only through the
   // recorded region.
-  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true)) {
+  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
     const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
       needsClassValue: emitter._needsClassValue === true,
       needsRefCell: emitter._needsRefCellHelper === true,
       needsChildren: emitter._needsChildren === true,
+      // One `__RipRest_<tag>` alias per extends tag the module uses.
+      extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, 'face')};`),
     });
     if (surfaceText !== '') builder.tsOnly(() => builder.emit(surfaceText));
   }

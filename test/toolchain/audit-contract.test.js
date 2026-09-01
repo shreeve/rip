@@ -145,6 +145,7 @@ describe('the audit contract judges in both directions', () => {
       'mapping.exclusions': (s) => { s.mp.badExclusions = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
+      'diagnostics.messages': (s) => { s.el.problems.push({ kind: 'message', note: 'x' }); },
       'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position', file: '09-classes.errors.rip' }]; },
       'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
       'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },

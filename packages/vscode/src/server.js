@@ -69,7 +69,7 @@ import {
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
@@ -2863,8 +2863,13 @@ function presentComponentSignatureHover(contents) {
       // channel every component has, not a prop this one declares — under
       // either spelling of its minted type; a declared `@children: T` shows.
       if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
-      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: (?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
+      // A passthrough row types through the tag's DOM interface — bare, or
+      // parenthesized where the attribute road widened it (`style`) — and
+      // the two class spellings take the clsx admission; all of them are
+      // the extends surface's, never props this component declares.
+      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: \(?(?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
       if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
+      if (/^(?:class|className)\??: (?:__RipClassValue \| __RipClassValue\[\]|ClassValue \| ClassValue\[\])$/.test(row)) continue;
       if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
       const colon = row.indexOf(': ');
       let kept = row;
@@ -2961,25 +2966,11 @@ function presentPropSlotHover(contents) {
   const head = /^\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)(\??): (.+)$/.exec(flat);
   if (!head) return null;
   const [, name, opt, type] = head;
-  // Split the union's top-level arms.
-  const arms = [];
-  let depth = 0, start = 0;
-  for (let i = 0; i < type.length; i++) {
-    const ch = type[i];
-    if (ch === '{' || ch === '(' || ch === '[' || ch === '<') depth++;
-    else if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && type[i - 1] !== '=')) depth--;
-    else if (ch === '|' && depth === 0 && type[i - 1] === ' ' && type[i + 1] === ' ') {
-      arms.push(type.slice(start, i - 1));
-      start = i + 2;
-    }
-  }
-  arms.push(type.slice(start));
-  const kept = arms.filter((arm) => {
-    const cell = /^\{ value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(arm.trim());
-    return !(cell && cell[1].trim() === cell[2].trim());
-  });
-  if (kept.length === arms.length || kept.length === 0) return null;
-  const reworded = `(property) ${name}${opt}: ${kept.map((a) => a.trim()).join(' | ')}`;
+  // The cell arms collapse onto their value type (collapseCellArms — the
+  // same collapse a diagnostic's quoted types take).
+  const collapsed = collapseCellArms(type);
+  if (collapsed === type) return null;
+  const reworded = `(property) ${name}${opt}: ${collapsed}`;
   return { ...contents, value: value.replace(fence[0], `${fence[1]}${reworded}${fence[3]}`) };
 }
 
@@ -3091,7 +3082,9 @@ connection.onHover(async (params) => {
       // over the key, so tsgo prints the one value type this attribute
       // takes. No shape to read means no honest type to name, and the
       // ruled interim is silence.
-      let type = intr.type ?? null;
+      // A route-checked href carries the route union; it reads in the same
+      // display form the diagnostics use (`/orders/:id`, never `${string}`).
+      let type = intr.type === undefined ? null : (intr.route ? prettifyRouteUnion(intr.type, ctx.good.routeEntries) : intr.type);
       if (type === null && typeof intr.gen === 'number') {
         const flat = await askAt(intr.gen);
         const m = /\(name: "[^"]*", (?:value|force\??): (.+?)\): void/.exec(flat);
@@ -3112,9 +3105,11 @@ connection.onHover(async (params) => {
       // typed `className` the merge writes, which is the SAME answer the
       // unmerged spelling gives. The key does not change meaning because a
       // selector appeared on the tag.
-      const head = /^\(property\) (.+)$/.exec(await askAt(intr.gen));
+      const head = /^\(property\) (?:.+\.)?[\w$]+\??: (.+)$/.exec(await askAt(intr.gen));
       if (head === null) return null;
-      body = `(property) ${scrubFaceArtifacts(head[1])}`;
+      // The merged key answers as the attribute the author wrote, like every
+      // other element key — never as the surface's `className` property.
+      body = `(attribute) ${intr.name}: ${scrubFaceArtifacts(head[1])}`;
     } else if (intr.kind === 'bind') {
       // The `<=>` target names a channel, not a symbol: the census spends the
       // word, so the answer comes from the record. Both receivers land on a
@@ -3249,6 +3244,22 @@ connection.onHover(async (params) => {
   // intrinsic-surface names among them (display only).
   if (typeof contents?.value === 'string') {
     contents = { ...contents, value: scrubFaceArtifacts(contents.value) };
+  }
+  // An element KEY answers as the attribute the author wrote, whichever
+  // road the lowering took it down. A property-road key (`class:`,
+  // `value:`, `innerHTML:`) lands on the surface's real property, so tsgo
+  // heads it `(property) <tag>.className` — the road and the DOM's own
+  // name for it, neither of which the author spelled. The attribute and
+  // boolean roads already answer `(attribute) key: T`; this makes the
+  // three one form: the word under the cursor, and the type the road
+  // admits (RULINGS.md, attr name on an intrinsic).
+  if (typeof contents?.value === 'string' && typeof ctx.genExact === 'number'
+      && (ctx.good.attrNames ?? []).some(([s, e]) => ctx.genExact >= s && ctx.genExact < e)) {
+    const span = (ctx.good.hoverable ?? []).find(([a, b]) => ctx.offset >= a && ctx.offset < b);
+    const word = span ? ctx.good.source.slice(span[0], span[1]) : null;
+    if (word !== null) {
+      contents = { ...contents, value: contents.value.replace(/\(property\) <[\w-]+>\.[\w$]+\??: /, `(attribute) ${word}: `) };
+    }
   }
 
   // The response range travels the reverse path: generated → last-good

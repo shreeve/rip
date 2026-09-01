@@ -490,7 +490,10 @@ describe('component declarations: the class shape, the props surface, the extend
 
   test('extends: the attribute surface for the extended tag, the index signature, the rest view', () => {
     const d = compile('Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
-    expect(d).toContain('rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
+    // The rest view holds the passthrough object itself, spelled inline in a
+    // declaration file — DOM-typed per attribute, never a catch-all.
+    expect(d).toContain(`rest: { value: { accesskey?: HTMLElementTagNameMap["button"] extends Record<'accesskey', infer T> ? T : any;`);
+    expect(d).not.toContain('Record<string, any>');
     expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any`); // per-tag, DOM-typed
     expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
     expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed

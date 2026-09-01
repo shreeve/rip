@@ -4,7 +4,7 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
-import {
+import { collapseCellArms,
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
@@ -683,5 +683,26 @@ describe('prettifyRouteUnion', () => {
     expect(prettifyRouteUnion('text', [])).toBe('text');
     expect(prettifyRouteUnion('text', undefined)).toBe('text');
     expect(prettifyRouteUnion(null, entries)).toBe(null);
+  });
+});
+
+// A reactive cell is the lowering's container, never the author's type, so
+// wherever a type text shows one it reads as its value type — the same
+// collapse the prop-slot hover and a diagnostic's quoted types share.
+describe('collapseCellArms: a cell reads as its value type', () => {
+  test('a cell arm beside its value type folds into it, absence arm kept', () => {
+    expect(collapseCellArms('boolean | { value: boolean | undefined; read(): boolean | undefined; touch?(): void; } | undefined'))
+      .toBe('boolean | undefined');
+  });
+  test('a STANDALONE cell stays a cell — a reactive import is the cell the importer holds', () => {
+    const cell = '{ value: number; read(): number; touch(): void; }';
+    expect(collapseCellArms(cell)).toBe(cell);
+  });
+  test('the brand check: a literal whose value and read() disagree is left alone', () => {
+    const literal = '{ value: string; read(): number; }';
+    expect(collapseCellArms(literal)).toBe(literal);
+  });
+  test('a type with no cell is untouched', () => {
+    expect(collapseCellArms('"/" | "/cart" | `/orders/${string}`')).toBe('"/" | "/cart" | `/orders/${string}`');
   });
 });

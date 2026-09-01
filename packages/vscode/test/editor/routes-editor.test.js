@@ -213,6 +213,13 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         if (typeof value === 'string') expect(value).not.toMatch(LEAK);
       }
 
+      // The href KEY answers what this position admits — the route union
+      // in its display form — not the attribute road's generic string.
+      const key = (await api.hover('app/routes/index.rip', 4, 6))?.contents?.value ?? '';
+      expect(key).toContain('(attribute) href: "/cart" | "/orders" | `/orders/:id`');
+      expect(key).not.toContain('${string}');
+      // An external URL is unchecked by construction, so its key keeps the road's string.
+
       // Inside the "/" literal (line 4, after the slash): the union's
       // members arrive as string-literal completions — tsgo's statics
       // plus our own item for each DYNAMIC member, labeled by display

@@ -82,7 +82,7 @@ const HELPER_DECLS =
   "type __RipAV<E, P extends PropertyKey, F = string> = E extends Record<P, infer V> ? V | string : F;\n" +
   'type __RipProp<E, P extends PropertyKey> = E extends Record<P, infer V> ? V : any;';
 
-const CLASS_TYPE = '__RipClassValue | __RipClassValue[]';
+export const CLASS_TYPE = '__RipClassValue | __RipClassValue[]';
 const TEMPLATE_ROWS =
   '  [k: `data-${string}`]: string | number | boolean;\n' +
   '  [k: `aria-${string}`]: string | number | boolean;';
@@ -186,7 +186,7 @@ function elSurfaceDecl(tag, svg) {
 // `needsClassValue` forces the __RipClassValue alias even with no
 // surfaces (the __clsx types assertion references it wherever the
 // components runtime delivers inline).
-export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false } = {}) {
+export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
   const surfaces = new Map();
   for (const { tag, svg } of used) {
     if (surfaceableTag(tag, svg)) surfaces.set(`${svg ? 'svg:' : ''}${tag}`, { tag, svg: Boolean(svg) });
@@ -194,6 +194,7 @@ export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = 
   const parts = [];
   if (surfaces.size > 0 || needsClassValue) parts.push(CLASS_VALUE_DECL);
   if (needsChildren) parts.push(CHILDREN_DECL);
+  for (const line of extra) parts.push(line);
   if (surfaces.size > 0) {
     parts.push(HELPER_DECLS);
     const anyHtml = [...surfaces.values()].some((s) => !s.svg);

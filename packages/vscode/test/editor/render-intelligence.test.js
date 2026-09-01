@@ -132,7 +132,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       expect(refName?.contents?.value).not.toContain('read()');   // value-first, never the container
 
       const valueKey = await api.hover('app.rip', 8, 10);    // inside `value`
-      expect(valueKey?.contents?.value).toContain('<input>.value: string');
+      expect(valueKey?.contents?.value).toContain('(attribute) value: string');   // the attribute the author wrote, never the road's property
 
       // An attribute-road key's face position is a string literal — no
       // symbol — so it answers from the compiler's intrinsics record,
@@ -321,7 +321,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // A PROPERTY-road key keeps answering through its real property
       // access — it never needed the record.
       expect((await api.hover('attrs.rip', 7, 6))?.contents?.value)
-        .toContain('.className');
+        .toContain('(attribute) class: ClassValue | ClassValue[]');   // the property road, re-headed as the key the author wrote
     });
   });
 
@@ -446,6 +446,27 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       expect(use?.contents?.value).toContain('label: string');
       expect(use?.contents?.value).not.toContain('stroke-width');
       expect(use?.contents?.value).not.toContain('fill-opacity');
+    });
+  });
+
+  test('hover: `@rest` names the provided view, typed as the tag\'s passthrough', async () => {
+    // Under `extends`, `rest` is provided, not declared: its read mints
+    // `(rest)`, and its type is the per-tag passthrough object the editor
+    // shows as `Rest<tag>` — so a member read through it types by the tag.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Btn = component extends button',   // 0
+        '  render',                                // 1
+        '    button disabled: @rest.disabled',     // 2
+        "      'x'",                               // 3
+        '',
+      ].join('\n');
+      await api.open('btn.rip', src);
+      const rest = (await api.hover('btn.rip', 2, 24))?.contents?.value ?? '';     // inside `rest`
+      expect(rest).toContain('(rest) rest: Rest<button>');
+      expect(rest).not.toContain('__Rip');
+      const member = (await api.hover('btn.rip', 2, 30))?.contents?.value ?? '';   // inside `disabled`
+      expect(member).toContain('disabled?: boolean | undefined');
     });
   });
 
