@@ -9535,6 +9535,23 @@ class Emitter {
     }
     return null;
   }
+  static targetsRestView(t) {
+    if (!isNode(t))
+      return false;
+    if (t[0] === "array")
+      return t.slice(1).some((e) => Emitter.targetsRestView(e));
+    if (t[0] === "object")
+      return t.slice(1).some((e) => isNode(e) && Emitter.targetsRestView(e[2] ?? e[1]));
+    if (t[0] === "default" || t[0] === "rest")
+      return Emitter.targetsRestView(t[1]);
+    let n = t;
+    while (isNode(n) && (n[0] === "." || n[0] === "[]" || n[0] === "?." || n[0] === "optindex") && n.length === 3) {
+      if (n[0] === "." && n[1] === "this" && n[2] === "rest")
+        return true;
+      n = n[1];
+    }
+    return false;
+  }
   checkBareRest(node, name) {
     if (name !== "rest" || this.memberKindOf(name) !== "rest")
       return;
@@ -9548,6 +9565,9 @@ class Emitter {
   checkMemberWrite(node, target) {
     if (this.cframes.length === 0)
       return;
+    if (this.thisMemberKindOf("rest") === "rest" && Emitter.targetsRestView(target)) {
+      throw this.positionedError(node, "emitter: `@rest` is the runtime-owned view of the caller's undeclared props and is never assigned — " + "set the attribute on the element in render, or declare the name as a prop the caller supplies");
+    }
     let name = null, kind = null;
     if (typeof target === "string") {
       this.checkBareRest(node, target);
@@ -13934,6 +13954,7 @@ ${pad ?? ""}`);
     return entries;
   }
   optionalAssign(node, optLink, context) {
+    this.checkMemberWrite(node, node[1]);
     const op = node[0];
     const synth = op === "//=" || op === "%%=";
     const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
