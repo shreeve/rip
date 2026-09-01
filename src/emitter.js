@@ -653,6 +653,11 @@ class Emitter {
     // editor needs the distinction and cannot derive it: both positions
     // resolve to the same face symbol.
     this.memberDecls = [];
+    // Minted KIND labels: a declaration's own name span and the word rip
+    // spells that construct with. The lowering's `const`/`let` describes the
+    // cell it binds, never the construct the author declared — the same leak
+    // the token audit refuses in the COLOR, refused here in the words.
+    this.kinds = [];
     // Component type stories (TS face only): component node →
     // the walked member/props info. Populated by componentExpr (the
     // one place the member model is authoritative), consumed by the
@@ -1388,6 +1393,11 @@ class Emitter {
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
+      // Kept as their own sets, not only folded into `bound`: a read of one
+      // answers with the kind its declaration minted, so the scope has to be
+      // able to say which spelling declared the name.
+      readonly,
+      handles,
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
       enums: Emitter.declaredEnumNames(stmts),
       classes: Emitter.declaredClassNames(stmts),
@@ -1425,6 +1435,21 @@ class Emitter {
   }
 
   // Does `name` read (or write) as a reactive container here?
+  // The kind a name's own DECLARATION minted, asked at any occurrence — so a
+  // read answers the way its declaration does. `let count` at a read is the
+  // same leak as at the declaration: the binding is a const cell, and the
+  // author declared a state.
+  kindOfName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive?.has(name)) return f.computed?.has(name) ? 'computed' : 'state';
+      if (f.readonly?.has(name)) return 'readonly';
+      if (f.handles?.has(name)) return 'effect';
+      if (f.bound?.has(name)) return null;   // shadowed by a plain binding
+    }
+    return null;
+  }
+
   isReactiveName(name) {
     return this.resolveBareRead(name) === 'reactive';
   }
@@ -1691,6 +1716,17 @@ class Emitter {
     const owner = this.b.currentMark;
     const span = this.ts && typeof value === 'string'
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
+    // The KIND rides the claimed span alone — an open mark is what a
+    // mapping ROW needs, not what naming the construct needs, and a read
+    // emitted outside one answers about the same declaration.
+    if (span !== null && isIdentifierName(value)) {
+      // Inside a component the component's OWN members are the authority —
+      // never a module binding that happens to share the name, and never a
+      // guess when the frame does not carry the member.
+      const cf = this.cframes[this.cframes.length - 1];
+      const kind = cf ? (cf.memberKinds?.get(value) ?? null) : this.kindOfName(value);
+      if (kind !== null) this.kinds.push({ start: span[0], end: span[1], label: kind, name: value });
+    }
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? 'identifier' : 'literal';
       this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.noteNameSpan(value));
@@ -1766,6 +1802,17 @@ class Emitter {
 
   // A read the editor stays silent about without claiming the compiler
   // consumed it — see `silences` above for why the two differ.
+  // A declaration's minted kind, at the SOURCE span of the role that names
+  // it — the coordinates a hover arrives in.
+  noteKind(node, role, label) {
+    const id = this.stores.idOf(node);
+    const row = id !== null ? this.stores.role(id, role) : null;
+    if (row?.sourceStart != null && row.sourceEnd > row.sourceStart) {
+      const name = this.b.source?.slice(row.sourceStart, row.sourceEnd) ?? null;
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name });
+    }
+  }
+
   noteSilence(word, container) {
     const hit = this.wordSpanIn(word, container);
     if (hit !== null) this.silences.push([hit[0], hit[1]]);
@@ -1781,11 +1828,31 @@ class Emitter {
   // appended `.value` to a bare name), so the channel's meaning is "a
   // position that answers VALUE-FIRST"; a consumer holding an instance
   // is in neither set and keeps the container. Spans and nothing else.
+  static MEMBER_KINDS = { state: 'state', computed: 'computed', readonly: 'readonly', gate: 'gate' };
+
+  // A member's minted word. The PROP test is the `@` sigil, not the operator:
+  // `@shades?: T := []` is a prop carrying a default, and reading its `:=`
+  // would call it a state. Only the two kinds a parent can supply answer
+  // `prop` — a public computed is still derived, so it stays a computed.
+  static memberLabel(m) {
+    if (m.isPublic && (m.kind === 'prop' || m.kind === 'state')) return 'prop';
+    return Emitter.MEMBER_KINDS[m.kind] ?? null;
+  }
+
   noteMemberDecl(m) {
-    if (!this.ts || !declaresContainer(m)) return;
+    if (!this.ts) return;
     const id = isNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
     const row = id !== null ? this.stores.role(id, m.nameRole) : null;
     if (!row || typeof row.sourceStart !== 'number') return;
+    // The member's minted kind, where the ruling names one. A `prop` and a
+    // `gate` are deliberately absent: RULINGS.md leaves both labels open, and
+    // a guessed word here would be the fabricated-entity the interim rule
+    // bans. A `plain` member is a plain property and mints nothing.
+    const label = Emitter.memberLabel(m);
+    if (label !== null) {
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name });
+    }
+    if (!declaresContainer(m)) return;
     this.memberDecls.push({
       start: row.sourceStart, end: row.sourceEnd,
     });
@@ -7687,6 +7754,7 @@ class Emitter {
       const nameStart = this.b.offset;
       this.mark(node, 'target', () => this.b.emit(target));
       if (head === 'state' && this.ts) this.mutables.push([nameStart, this.b.offset]);
+      if (this.ts) this.noteKind(node, 'target', head === 'state' ? 'state' : 'computed');
       // TS face: a typed reactive declaration types its CONTAINER —
       // the annotation names the `.value` slot (the dts convention;
       // a computed's container is read-only from the outside), and
@@ -7832,6 +7900,7 @@ class Emitter {
     this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
       this.mark(node, 'target', () => this.b.emit(target));
+      if (this.ts) this.noteKind(node, 'target', 'readonly');
       if (this.ts && this.annotationText(node) !== null) {
         this.tsAnnotate(node, 'annotation', this.annotationText(node));
       }
@@ -7883,6 +7952,7 @@ class Emitter {
       if (target !== null) {
         this.b.emit('const ');
         this.mark(node, 'target', () => this.b.emit(target));
+        if (this.ts) this.noteKind(node, 'target', 'effect');
         if (this.ts && this.annotationText(node) !== null) {
           this.tsAnnotate(node, 'annotation', this.annotationText(node));
         }
@@ -8532,7 +8602,15 @@ class Emitter {
       tsInfo.routeParams = this.routeParams;
     }
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
-    const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
+    // The member KINDS this component declares, so a read inside its body
+    // answers the way the declaration does — scoped to the innermost
+    // component, so a consumer holding an instance is never touched.
+    const memberKinds = new Map();
+    for (const m of tsInfo?.members ?? []) {
+      const label = Emitter.memberLabel(m);
+      if (label !== null) memberKinds.set(m.name, label);
+    }
+    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
@@ -12585,6 +12663,21 @@ class Emitter {
             // real member already owns an exact row from its own frame.
             if (this.stores.idOf(n) === null) this.emitPrimitive(n[2]);
             else this.b.emit(n[2]);
+            // A `@member` read carries the kind its declaration minted. The
+            // name is emitted raw here (a real member already owns an exact
+            // row), so it claims no primitive and the kinds channel would
+            // never otherwise see it — and this site covers every member
+            // kind, where the `.value` branch below sees only the reactive
+            // ones.
+            if (this.ts && n[1] === 'this' && typeof n[2] === 'string') {
+              const cf = this.cframes[this.cframes.length - 1];
+              const label = cf?.memberKinds?.get(n[2]) ?? null;
+              const id = this.stores.idOf(n) ?? null;
+              const prow = id !== null ? this.stores.role(id, 'property') : null;
+              if (label !== null && prow && typeof prow.sourceStart === 'number') {
+                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label, name: n[2] });
+              }
+            }
           });
         }
         // Component scope: `@member` (this.member) reads and writes
@@ -16505,7 +16598,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

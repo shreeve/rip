@@ -91,7 +91,7 @@
         "line": 10,
         "character": 2,
         "token": "shade",
-        "expect": "(property) Badge.shade: \"#06f\" | \"#a60\"",
+        "expect": "(computed) shade: \"#06f\" | \"#a60\"",
         "rule": "member declaration (computed)",
         "why": "the value-first answer every other member kind serves — the face now types an unannotated computed from an INFERRED position (a declaration with no type node, which TypeScript prints resolved) rather than through the lowering behavior object, so no machinery name can be spelled here; the cell wrapper strips as it does for every member declaration. The minted kind label `(computed)` stays the open half, exactly as for the other kinds"
       },
@@ -107,7 +107,7 @@
         "line": 19,
         "character": 3,
         "token": "label",
-        "expect": "(property) Field.label: string | undefined",
+        "expect": "(prop) label: string | undefined",
         "rule": "member declaration (prop)",
         "why": "value-first; the optional marker widens the value, which is the prop's own type"
       },
@@ -123,7 +123,7 @@
         "line": 36,
         "character": 2,
         "token": "people",
-        "expect": "(property) Roster.people: string[]",
+        "expect": "(state) people: string[]",
         "rule": "member declaration (state)",
         "why": "value-first, the ruled interim served; the minted `(state)` kind is the open half"
       },
@@ -131,7 +131,7 @@
         "line": 39,
         "character": 2,
         "token": "inputEl",
-        "expect": "(property) Roster.inputEl: HTMLInputElement | null",
+        "expect": "(state) inputEl: HTMLInputElement | null",
         "rule": "member declaration (ref cell)",
         "why": "value-first; the annotation is the author's own"
       },
@@ -139,7 +139,7 @@
         "line": 40,
         "character": 2,
         "token": "cap",
-        "expect": "(property) Roster.cap: number",
+        "expect": "(readonly) cap: number",
         "rule": "member declaration (readonly)",
         "why": "value-first — a `=!` member annotates its value type directly, so no container ever stood here"
       },
@@ -163,7 +163,7 @@
         "line": 48,
         "character": 17,
         "token": "inputEl",
-        "expect": "(property) Roster.inputEl: HTMLInputElement | null",
+        "expect": "(state) inputEl: HTMLInputElement | null",
         "rule": "name after ref:",
         "why": "served — the cell bytes ride the __ripRefCell wrap and the name's span joins the value-first channel, so the binding answers its element type, never the container; RULINGS: the name after ref:"
       },
@@ -243,7 +243,7 @@
         "line": 73,
         "character": 18,
         "token": "text",
-        "expect": "(property) Panel.text: string",
+        "expect": "(state) text: string",
         "rule": "the name in a bind",
         "why": "the author's own binding, value-first — the bind SHARES the container, but this position is the author's vocabulary and not a consumer's read of an instance; RULINGS: the name in a bind"
       },
@@ -275,7 +275,7 @@
         "line": 105,
         "character": 2,
         "token": "stats",
-        "expect": "(property) Routed.stats: any",
+        "expect": "(gate) stats: any",
         "rule": "gate target name",
         "why": "value-first; an unannotated gate target's value IS any — truthful, and the kind label stays undecided"
       },
@@ -331,7 +331,7 @@
         "line": 108,
         "character": 2,
         "token": "user",
-        "expect": "(property) Routed.user: { name: string; }",
+        "expect": "(gate) user: { name: string; }",
         "rule": "gate target name",
         "why": "value-first, the annotated spelling — the author's own type, so the answer is the annotation back"
       },
@@ -575,7 +575,7 @@
         "line": 42,
         "character": 3,
         "token": "shades",
-        "expect": "(property) Palette<TShade extends string>.shades: TShade[]",
+        "expect": "(prop) shades: TShade[]",
         "rule": "member declaration (prop)",
         "why": "value-first on a GENERIC component — the containing type carries its parameter list into the answer, the one spelling 13-components cannot show"
       }

@@ -304,6 +304,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // TS face only; empty otherwise.
     routeWraps: emitted.routeWraps,
     renderPairs: emitted.renderPairs,
+    kinds: emitted.kinds,
     // SOURCE spans of intrinsic-element positions the editor answers
     // from the compiler's own record (RULINGS.md, the render rows): the
     // element TAG word (its face position is a string literal — no

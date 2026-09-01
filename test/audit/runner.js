@@ -4140,6 +4140,42 @@ if (RUN_HOVER) {
     return parts.length > 1 ? [...parts].map((x) => x.trim()).sort().join(' | ') : null;
   };
   const eq = (a, b) => canon(a) === canon(b);
+  // A MINTED KIND is not a divergence to reconcile — it is derived from the
+  // declaration's own spelling, exactly as the Token Audit derives a token
+  // type. So the twin stays the oracle for the TYPE, and the kind is checked
+  // against the syntax: the answer must be the twin's with `const`/`let`
+  // replaced by the label the operator mints, and nothing else moved. A
+  // wrong kind fails here as loudly as a wrong type.
+  const MINTED_KIND = /^\((state|computed|readonly|effect|field)\) /;
+  // The kind a declaration's OWN SPELLING mints, read off the code line the
+  // row already carries. This is the whole point of deriving rather than
+  // pinning: a label that does not match the operator fails here.
+  const spelledKind = (row) => {
+    const code = row?.code ?? '';
+    const at = code.indexOf(row?.name ?? '\u0000');
+    if (at < 0) return null;
+    const rest = code.slice(at + row.name.length);
+    if (/(?:^|\s):=/.test(rest)) return 'state';
+    if (/(?:^|\s)~=/.test(rest)) return 'computed';
+    if (/(?:^|\s)=!/.test(rest)) return 'readonly';
+    if (/(?:^|\s)~>/.test(rest)) return 'effect';
+    return null;
+  };
+  // The kind belongs to the NAME, not to the line the probe sits on: a write
+  // (`pulse = 3`) is the same binding as its declaration and answers the same
+  // way, which is the token audit's rule for the colour as well. So the
+  // declaration is found once per file and every occurrence reads from it.
+  const declaredKinds = new Map();
+  for (const r of allRows) {
+    const k = spelledKind(r);
+    if (k !== null) declaredKinds.set(`${r.file}\u0000${r.name}`, k);
+  }
+  const kindFromSpelling = (row) => declaredKinds.get(`${row?.file}\u0000${row?.name}`) ?? null;
+  const eqKinded = (row) => {
+    const m = MINTED_KIND.exec((row.hover ?? '').trim());
+    if (m === null || m[1] !== kindFromSpelling(row)) return false;
+    return eq(row.hover.trim().replace(MINTED_KIND, ''), (row.ts ?? '').trim().replace(/^(?:const|let|var) /, ''));
+  };
   const eqType = (a, b) => { if (eq(a, b)) return true; const ka = unionSet(a); return ka != null && ka === unionSet(b); };
 
   // A rip-NATIVE construct — component / schema / reactive — has no
@@ -4173,13 +4209,19 @@ if (RUN_HOVER) {
   //   gap          hover ≠ tsgo twin on a COMPARABLE type — the actionable bucket
   //   rip-native   component / schema / reactive — the twin is not an oracle there
   //   pinned-only  no twin symbol — hover-pins alone covers it
-  const tally = { agree: 0, gap: 0, native: 0, pinnedOnly: 0, order: 0 };
+  const tally = { agree: 0, gap: 0, native: 0, pinnedOnly: 0, order: 0, kinded: 0 };
   const gaps = [], natives = [], pinnedOnly = [];
   for (const r of allRows) {
     if (r.ts != null) {
-      if (eqType(r.hover, r.ts)) {
+      // A spelling that mints a kind REQUIRES it: matching the twin exactly
+      // is the failure here, not the pass — it means the label went missing
+      // and the lowering's own word came back.
+      if (kindFromSpelling(r) !== null) {
+        if (eqKinded(r)) { tally.agree++; tally.kinded++; }
+        else { tally.gap++; gaps.push(r); }
+      } else if (eqType(r.hover, r.ts)) {
         tally.agree++;
-        if (!eq(r.hover, r.ts)) tally.order++; // agreed modulo union order
+        if (!eq(r.hover, r.ts)) tally.order++;              // agreed modulo union order
       } else if (ripNative(r)) { tally.native++; natives.push(r); }
       else { tally.gap++; gaps.push(r); }
     } else if (ripNative(r)) { tally.native++; natives.push(r); }
@@ -4236,7 +4278,10 @@ if (RUN_HOVER) {
   const prow = (label, n, color, note) => prows.push({ label, text: String(n), color, note });
   const pgap = () => prows.push(null);
   const pfrac = (label, ok, of, note) => prows.push({ label, text: `${ok} / ${of}`, color: ok === of ? green : red, note });
-  prow('agree', tally.agree, green, tally.order ? `${tally.order} of them after normalizing union-member order` : 'every twin-checked hover matches TypeScript');
+  prow('agree', tally.agree, green, [
+    tally.order ? `${tally.order} after normalizing union-member order` : null,
+    tally.kinded ? `${tally.kinded} carrying the minted kind their spelling derives` : null,
+  ].filter(Boolean).join(' · ') || 'every twin-checked hover matches TypeScript');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : 'no hover disagrees with the tsgo twin on a comparable type');
   prow('rip-native', tally.native, dim, 'component / schema / reactive — the twin uses React/zod, so it has no answer to compare');
   prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');

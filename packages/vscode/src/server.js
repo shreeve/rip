@@ -1841,6 +1841,8 @@ async function refresh(document) {
     routeWraps: result.routeWraps ?? [],
     // Where a render pair's diagnostic anchors — the key (RULINGS.md).
     renderPairs: result.renderPairs ?? [],
+    // Minted kind labels by declaration span (RULINGS.md, the kind rows).
+    kinds: result.kinds ?? [],
     // Parse/lex rejections the tolerant compile carried through —
     // published beside the mapped TS diagnostics, so an incomplete
     // buffer still says it is incomplete.
@@ -3180,6 +3182,27 @@ connection.onHover(async (params) => {
   contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
   contents = presentComponentSignatureHover(contents) ?? contents;
   contents = presentPropSlotHover(contents) ?? contents;
+  // The declaration's own kind. tsgo names the CELL the lowering binds
+  // (`const count: number`), which describes the emission and not the
+  // construct the author declared — the same leak the token audit refuses
+  // in the color. Rip mints its own labels, mirroring TypeScript's
+  // (RULINGS.md, Principles), so the head is replaced and the type it
+  // resolved stands untouched.
+  const kind = (ctx.good.kinds ?? []).find((k) => ctx.offset >= k.start && ctx.offset < k.end);
+  if (kind && typeof contents?.value === 'string') {
+    // Two heads to displace: the `const`/`let` tsgo gives a module binding,
+    // and the `(property) Owner.` it gives a class member. The owner is
+    // dropped with it — at a member's own declaration the class is the line
+    // above, and the ruled form names the member alone.
+    // Two heads to displace. A class member arrives as `(property) Owner.name`
+    // — and the owner can carry type parameters, so the replacement is
+    // anchored on the member's OWN name rather than on a shape for the owner.
+    // A module binding arrives as `const`/`let`.
+    const esc = kind.name === null ? null : kind.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    contents = { ...contents, value: contents.value
+      .replace(esc === null ? /(?!)/ : new RegExp(`\\(property\\) [^\\n]*?\\b${esc}(?=\\??:)`), `(${kind.label}) ${kind.name}`)
+      .replace(/\b(?:const|let|var) (?=[A-Za-z_$])/, `(${kind.label}) `) };
+  }
   // A route union in the hover renders for READING — the same
   // display-only re-labeling the diagnostics road applies.
   if (typeof contents?.value === 'string' && ctx.good.routeEntries?.length) {
