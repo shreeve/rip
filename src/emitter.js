@@ -10774,19 +10774,27 @@ class Emitter {
       this.addChildProp(props, updaters, pair, key, cleanKey, value);
     };
 
-    // A bare TEMPLATE-TAG word (or `slot`) in a child-argument
-    // position is ambiguous whatever it resolves to — element intent,
-    // prop intent, and value intent collide — and rejects naming
-    // the TWO silent readings: resolving to nothing, the boolean-prop
-    // reading renders no element; resolving to a module value, the
-    // VALUE renders as text.
+    // A bare TEMPLATE-TAG word (or `slot`) under a child component that
+    // ALSO names a module value: the element reading and the value
+    // reading collide, and the value wins SILENTLY — `Card div` beside
+    // `div = "TEXT"` renders the string, no element, no error. Nothing
+    // downstream can see it: a value passed as children is well-typed.
+    //
+    // The word that resolves to NOTHING is not refused here. It becomes
+    // boolean-prop shorthand, and if the component declares no such prop
+    // the type layer says so exactly — TS2353, naming the prop and the
+    // props type, at the word itself, across files as well as within
+    // one. That is the same fact this refusal would report, from the
+    // instrument that can also tell a DECLARED prop from an undeclared
+    // one; refusing ahead of it costs every legitimate `Button link`
+    // whose component declares `link`.
     // Render locals and loop variables keep the established
     // shadow-to-text rule; members keep their text reading.
     const rejectTagWord = (owner, word) => {
       throw this.positionedError(owner,
-        `emitter: bare '${word}' under a child component is ambiguous — it reads as an HTML element, as ` +
-        'boolean-prop shorthand, and as a value; spell the prop ' +
-        `\`${word}: true\`, render the value with \`= ${word}\`, or give the element content or attributes`,
+        `emitter: bare '${word}' under a child component is ambiguous — it names an HTML element AND a ` +
+        `value in scope, and the value would win silently; render the value with \`= ${word}\`, ` +
+        'or give the element content or attributes',
         this.rstate.node);
     };
     const addBareWord = (owner, word) => {
@@ -10888,7 +10896,8 @@ class Emitter {
       if (arg == null) return;
       const isBareWord = typeof arg === 'string' && RENDER_LOCAL_RE.test(arg) &&
         this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
-      if (isBareWord && (isHtmlTag(arg) || arg === 'slot')) {
+      if (isBareWord && (isHtmlTag(arg) || arg === 'slot')
+          && (this.inScope(arg) || this.moduleBound.has(arg))) {
         rejectTagWord(markNode ?? this.rstate.node, arg);
       }
       if (isBareWord && !this.inScope(arg) && !this.moduleBound.has(arg)) {

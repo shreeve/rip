@@ -3725,16 +3725,20 @@ fail 'ref to a plain (=) member is rejected', '''
 # ==============================================================================
 # A child component must be a module binding, an import, or a component
 # member; the rows define their children in-file. Bare words in a child's
-# arg list are boolean-prop shorthand — except a word that is ALSO an
-# HTML tag name, which is ambiguous and rejects (spell it `name: true`).
+# arg list are boolean-prop shorthand — an HTML tag name included: the
+# props type judges whether the component takes it, and names it in the
+# error when it does not. The one rejection left is a tag word that ALSO
+# names a module value, where the value wins silently and no type sees it.
 
-fail 'bare-word prop that is also an HTML tag name is ambiguous', '''
+fail 'a bare tag word that also names a module value is ambiguous', '''
+  link = "TEXT"
   Btn = component
     render
       button
   export A = component
     render
-      Btn outline, link, "Save"
+      Btn
+        link
   ''', "ambiguous"
 
 code 'child component with static props', '''

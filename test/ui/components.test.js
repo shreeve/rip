@@ -1866,8 +1866,23 @@ App = component
     expect(code.match(/children:/g)).toHaveLength(1);
   });
 
-  test('a bare TEMPLATE-TAG word under a child component rejects as ambiguous ', () => {
-    emitFails('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card\n      div\n',
+  test('a bare TEMPLATE-TAG word under a child component is a PROP, and the props type judges it', () => {
+    // Resolving to nothing, it is boolean-prop shorthand like any other
+    // bare word. The reading is not silent: an undeclared prop is TS2353
+    // against the component's own props type, at the word, which names
+    // the prop and the type the emitter could only call ambiguous — and
+    // does so for an IMPORTED component too, where the emitter can see
+    // no props at all. The refusal is kept for the one reading the type
+    // layer cannot see (below).
+    const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card\n      div\n');
+    expect(code).toContain('div: true');
+  });
+
+  test('a bare TEMPLATE-TAG word that ALSO names a module value rejects — the value would win silently', () => {
+    // The reading the props type cannot judge: a value passed as children
+    // is well-typed, so `Card div` beside `div = "TEXT"` renders the
+    // string with no element and no error anywhere.
+    emitFails('div = "TEXT"\nCard = component\n  render\n    section\n      slot\nApp = component\n  render\n    Card\n      div\n',
       /bare 'div' under a child component is ambiguous/s);
   });
 
