@@ -9731,6 +9731,10 @@ class Emitter {
     if (hit !== null)
       this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
+  noteShorthandClasses(classes, node) {
+    for (const cls of classes)
+      this.noteVocabulary("render-channel", cls, node);
+  }
   noteHeadKeyword(kind, word, node) {
     if (!this.ts)
       return;
@@ -15676,6 +15680,7 @@ ${pad ?? ""}`);
     this.renderLine(node, () => this.b.emit("this._applyRestToInheritedEl()"));
   }
   renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -15751,6 +15756,7 @@ ${pad ?? ""}`);
     return el;
   }
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
+    this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
