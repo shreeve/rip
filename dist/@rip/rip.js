@@ -10121,37 +10121,72 @@ class Emitter {
       if (s.node !== undefined)
         this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
       else
-        this.b.emit(s.text);
+        this.emitDeclaredTypeCopies(s.text);
     }
   }
-  emitNamedCopies(text, name, id, span) {
-    if (id === null || span === null || !this.ts) {
+  emitDeclaredTypeCopies(text, id = null) {
+    const owner = id ?? this.b.currentMark?.nodeId ?? null;
+    if (owner === null || !this.ts) {
       this.b.emit(text);
       return;
     }
-    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+    this.emitNamedCopies(text, null, owner, null);
+  }
+  emitNamedCopies(text, name, id, span) {
+    if (id === null || !this.ts) {
+      this.b.emit(text);
+      return;
+    }
+    const declared = this.moduleTypeDeclarationSpans();
+    if (name !== null && span !== null)
+      declared.set(name, span);
+    if (declared.size === 0) {
+      this.b.emit(text);
+      return;
+    }
     let cursor = 0;
-    for (const m of text.matchAll(re)) {
+    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      const at = declared.get(m[0]);
+      if (at === undefined || m.index < cursor)
+        continue;
       this.b.emit(text.slice(cursor, m.index));
-      this.b.markSpan(id, "identifier", span[0], span[1], () => this.b.emit(name));
-      cursor = m.index + name.length;
+      this.b.markSpan(id, "identifier", at[0], at[1], () => this.b.emit(m[0]));
+      cursor = m.index + m[0].length;
     }
     this.b.emit(text.slice(cursor));
   }
   moduleTypeDeclarationSpans() {
-    if (this._typeDeclSpans !== undefined)
-      return this._typeDeclSpans;
-    const spans = new Map;
-    if (this.b.source !== null) {
-      for (const m of this.b.source.matchAll(/^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b)/gm)) {
-        const name = m[1] ?? m[2];
-        if (spans.has(name))
-          continue;
-        spans.set(name, [m.index + m[0].lastIndexOf(name), m.index + m[0].lastIndexOf(name) + name.length]);
+    if (this._typeDeclSpans === undefined) {
+      const spans = new Map;
+      if (this.b.source !== null) {
+        const DECL = /^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b|([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$]*\s*\.\s*(?:pick|omit|partial|required|extend)\b)/gmd;
+        for (const m of this.b.source.matchAll(DECL)) {
+          const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
+          const name = this.b.source.slice(at[0], at[1]);
+          if (spans.has(name))
+            continue;
+          spans.set(name, [at[0], at[1]]);
+        }
+        const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
+        for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
+          const [from] = clause.indices[1];
+          const after = clause.index + clause[0].length;
+          for (const sp of clause[1].matchAll(SPEC)) {
+            const [start, end] = sp.indices[1];
+            const name = clause[1].slice(start, end);
+            if (spans.has(name))
+              continue;
+            const use = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`, "g");
+            use.lastIndex = after;
+            const hit = use.exec(this.b.source);
+            if (hit !== null)
+              spans.set(name, [hit.index, hit.index + name.length]);
+          }
+        }
       }
+      this._typeDeclSpans = spans;
     }
-    this._typeDeclSpans = spans;
-    return spans;
+    return new Map(this._typeDeclSpans);
   }
   bindingNameSpan(node, role, name) {
     const id = isNode(node) ? this.stores.idOf(node) : null;
@@ -10163,7 +10198,7 @@ class Emitter {
     const self = this.stores.selfSpan(id);
     if (self === null)
       return null;
-    let from = self[0];
+    let from = self[0] + 1;
     while (from > 0) {
       const i = this.b.source.lastIndexOf(name, from - 1);
       if (i < 0)
@@ -11318,18 +11353,7 @@ class Emitter {
                     this.mark(seg.node, seg.role, () => this.b.emit(seg.text));
                     continue;
                   }
-                  if (bindSpan === null) {
-                    this.b.emit(seg.text);
-                    continue;
-                  }
-                  const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
-                  let cursor = 0;
-                  for (const m of seg.text.matchAll(re)) {
-                    this.b.emit(seg.text.slice(cursor, m.index));
-                    this.b.markSpan(bindId, "identifier", bindSpan[0], bindSpan[1], () => this.b.emit(name));
-                    cursor = m.index + name.length;
-                  }
-                  this.b.emit(seg.text.slice(cursor));
+                  this.emitNamedCopies(seg.text, name, bindId, bindSpan);
                 }
               } else
                 this.b.emit(ctorType);
@@ -11340,7 +11364,8 @@ class Emitter {
             if (pinType !== undefined)
               this.b.tsOnly(() => {
                 const at = this.b.offset;
-                this.b.emit(`${this.strict ? "" : "!"}: ${pinType}`);
+                this.b.emit(`${this.strict ? "" : "!"}: `);
+                this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
                 this.pinSpans.push([at, this.b.offset]);
               });
           }
@@ -11999,14 +12024,22 @@ class Emitter {
       this.schemaFns.set(node, fns);
     this.schemaPins = this.ts ? new Map : null;
     this.schemaPinNode = nodeId;
+    const pinSpan = (key, span, name) => {
+      if (span === null || span === undefined)
+        return;
+      const k = `${key}:${name}`;
+      if (!this.schemaPins.has(k))
+        this.schemaPins.set(k, []);
+      this.schemaPins.get(k).push([span[0], span[1]]);
+    };
+    if (this.ts && schemaName !== null) {
+      pinSpan("name", this.moduleTypeDeclarationSpans().get(schemaName) ?? null, schemaName);
+    }
     for (const e of this.ts ? descriptor.entries : []) {
       const pin = (key, name, start) => {
         if (typeof start !== "number" || typeof name !== "string")
           return;
-        const k = `${key}:${name}`;
-        if (!this.schemaPins.has(k))
-          this.schemaPins.set(k, []);
-        this.schemaPins.get(k).push([start, start + name.length]);
+        pinSpan(key, [start, start + name.length], name);
       };
       if (e.tag === "union-member")
         pin("name", e.name, e.start);
@@ -15223,7 +15256,10 @@ ${pad ?? ""}`);
         this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
       if (tsInfo !== null)
-        this.b.tsOnly(() => this.b.emit(`: ${propsTypeText(tsInfo, { road: "face" })}`));
+        this.b.tsOnly(() => {
+          this.b.emit(": ");
+          this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: "face" }));
+        });
       this.b.emit(`) {
 `);
       this.scopes.push(initNames);
@@ -20938,29 +20974,6 @@ var SCHEMA_BODY_KINDS = { field: "field", computed: "computed", derived: "derive
 function emitSchemaTextMarked(emitter, block, text, nodeId) {
   const marks = [];
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
-  if (selfSpan !== null && emitter.b.source !== null) {
-    const src = emitter.b.source;
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
-    for (const headName of heads) {
-      let from = selfSpan[0], nameAt = -1;
-      while (from > 0) {
-        const i = src.lastIndexOf(headName, from - 1);
-        if (i < 0)
-          break;
-        if (!/[\w$]/.test(src[i - 1] ?? " ") && !/[\w$]/.test(src[i + headName.length] ?? " ")) {
-          nameAt = i;
-          break;
-        }
-        from = i;
-      }
-      if (nameAt < 0)
-        continue;
-      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(headName)}(?![\\w$])`, "g"))) {
-        marks.push({ at: m.index, len: headName.length, start: nameAt, end: nameAt + headName.length });
-      }
-    }
-  }
   for (const e of block.story?.decl?.descriptor?.entries ?? []) {
     const ref = e.tag === "union-member" ? { name: e.name, start: e.start } : e.tag === "directive" && e.name === "mixin" && e.argTokens?.[0]?.kind === "IDENTIFIER" ? { name: e.argTokens[0].value, start: e.argTokens[0].start } : null;
     if (ref !== null && typeof ref.start === "number") {
@@ -20983,6 +20996,37 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
         const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
         if (tm !== null)
           marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
+      }
+    }
+  }
+  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
+  if (selfSpan !== null && emitter.b.source !== null) {
+    const src = emitter.b.source;
+    const named = emitter.moduleTypeDeclarationSpans();
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    for (const headName of heads) {
+      if (named.has(headName))
+        continue;
+      let from = selfSpan[0] + 1, nameAt = -1;
+      while (from > 0) {
+        const i = src.lastIndexOf(headName, from - 1);
+        if (i < 0)
+          break;
+        if (!/[\w$]/.test(src[i - 1] ?? " ") && !/[\w$]/.test(src[i + headName.length] ?? " ")) {
+          nameAt = i;
+          break;
+        }
+        from = i;
+      }
+      if (nameAt >= 0)
+        named.set(headName, [nameAt, nameAt + headName.length]);
+    }
+    const claimed = (at, len) => marks.some((mk) => at < mk.at + mk.len && mk.at < at + len);
+    for (const [name, span] of named) {
+      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`, "g"))) {
+        if (claimed(m.index, name.length))
+          continue;
+        marks.push({ at: m.index, len: name.length, start: span[0], end: span[1] });
       }
     }
   }
