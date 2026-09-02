@@ -15301,7 +15301,11 @@ ${pad ?? ""}`);
             const tm = tsInfo?.members.find((x) => x.node === m.node && x.kind === "readonly");
             this.b.tsOnly(() => this.b.emit("("));
             this.b.emit("this");
-            this.b.tsOnly(() => this.b.emit(` as ${tm ? readonlyCastType(tm) : "any"})`));
+            this.b.tsOnly(() => {
+              this.b.emit(" as ");
+              this.emitDeclaredTypeCopies(tm ? readonlyCastType(tm) : "any");
+              this.b.emit(")");
+            });
             this.b.emit(".");
             this.mark(m.node, "target", () => this.b.emit(m.name));
           } else {
