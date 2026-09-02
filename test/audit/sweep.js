@@ -71,6 +71,18 @@ const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
 const { lineStartsOf, offsetToPosition, flattenHover, SCHEMA_PAYLOADS } = await import(path.join(repoRoot, 'packages/vscode/src/translate.js'))
 
 const MINTED = /\b(__[A-Za-z$][\w$]*)/g
+// `__`-prefixed roots a DEPENDENCY owns, not the lowering. The doctrine
+// is about rip's own minted vocabulary reaching a user-visible answer;
+// a library that names its internals the same way is outside it, and the
+// engine runs against real apps whose dependencies do exactly that.
+//
+// REVIEWED MEMBERSHIP, like the token audit's survival exclusions: a
+// predicate over the spelling would excuse rip's own names the day one
+// looked foreign, so each entry is named and its owner stated. A rip
+// minted name can never hide here — it would have to be added by hand.
+const FOREIGN_MINTED = new Map([
+  ['__internal', 'Bun\'s own ambient namespace (bun-types)'],
+])
 const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+|_factory[A-Za-z]*|create_block_\d+|_(?:init|teardown|mountSetup|mountCreate|beginMount|failMount|hmrRerender|setRestProp|updateProp|applyInheritedProp|applyPlainInheritedProp|applyRestToInheritedEl))\b/g
 // The reactive cell ARM — `T | { value: T; read(): T; … }`, the slot
 // admission the lowering spells for a shared prop or a `<=>` channel. An
@@ -247,7 +259,7 @@ const KEYWORDS = new Set(('if unless else then switch when for while until in of
 // prose — a documentation string — is not judged for structure.
 function judgeText(flat, word, source, { structure = true } = {}) {
   const out = []
-  const minted = [...new Set([...flat.matchAll(MINTED)].map((m) => m[1]).filter((n) => n !== word && !source.includes(n)))]
+  const minted = [...new Set([...flat.matchAll(MINTED)].map((m) => m[1]).filter((n) => n !== word && !source.includes(n) && !FOREIGN_MINTED.has(n)))]
   if (minted.length) out.push({ kind: 'minted', hits: minted })
   const scaffold = [...new Set([...flat.matchAll(SCAFFOLD)].map((m) => m[1]).filter((n) => n !== word && !source.includes(n)))]
   if (scaffold.length) out.push({ kind: 'scaffold', hits: scaffold })

@@ -155,10 +155,28 @@ export async function landing(wsRoot, files) {
   client.notify('initialized', {})
   const findings = []
   const texts = new Map()
+  // local name → the name it aliases, taken from every import/export
+  // CLAUSE in the set. One map per run: a re-export chain is a property
+  // of the module graph, not of the file being asked.
+  const aliasOrigins = new Map()
+  // …and the same edges the other way: one symbol answers under every
+  // spelling the graph gives it, so references asked at the ORIGIN list
+  // locations under each alias.
+  const aliasedAs = new Map()
+  const clauseAliases = (src) => {
+    for (const clause of src.matchAll(/\b(?:import|export)\s*(?:type\s+)?\{([^}]*)\}/g)) {
+      for (const pair of clause[1].matchAll(/([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)/g)) {
+        if (!aliasOrigins.has(pair[2])) aliasOrigins.set(pair[2], pair[1])
+        if (!aliasedAs.has(pair[1])) aliasedAs.set(pair[1], new Set())
+        aliasedAs.get(pair[1]).add(pair[2])
+      }
+    }
+  }
   // Per FILE: a name is owed a landing where its author declared it (an
   // import binding declares in the importing file), not wherever another
   // fixture happens to spell the same word.
   const authoredIn = new Map(files.map((rel) => [rel, declaredNames([fs.readFileSync(path.resolve(wsRoot, rel), 'utf8')])]))
+  for (const rel of files) clauseAliases(fs.readFileSync(path.resolve(wsRoot, rel), 'utf8'))
   let asked = 0, served = 0
   const WINDOW = 32
   for (const rel of files) {
@@ -240,7 +258,15 @@ export async function landing(wsRoot, files) {
         // names the `default` keyword of its export — both are the right
         // landing under another spelling.
         const esc = n.word.replace(/\$/g, '\\$&')
-        const origin = new RegExp(`\\b([A-Za-z_$][\\w$]*) as ${esc}\\b`).exec(text)?.[1] ?? null
+        // The alias's ORIGIN, wherever the module graph spells it. A
+        // re-export renames on the way through (`export { UserPublic as
+        // User } from './models.rip'`), so the file that ASKS may name
+        // neither end: `import { User }` here, `UserPublic` at the
+        // landing, and the alias in a third file entirely. Only
+        // import/export CLAUSES are read, so a rename pair inside
+        // ordinary code can never excuse a wrong landing.
+        const origin = aliasOrigins.get(n.word)
+          ?? new RegExp(`\\b([A-Za-z_$][\\w$]*) as ${esc}\\b`).exec(text)?.[1] ?? null
         const isDefault = new RegExp(`^import ${esc}\\b|^import type ${esc}\\b|\\bdefault as ${esc}\\b`, 'm').test(text)
         // The other spellings of one symbol across the corpus: an alias
         // bound from the asked name (`host as hubHost`), a default export's
@@ -251,6 +277,7 @@ export async function landing(wsRoot, files) {
         const classes = [...text.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
         const okText = (t, landingUri) => {
           if (t === n.word || (origin !== null && t === origin)) return true
+          if (aliasedAs.get(n.word)?.has(t)) return true
           // TypeScript's own landings: a read satisfied by an INDEX
           // SIGNATURE navigates to the signature; a class's references
           // include its `this`; a constructor's include the class name

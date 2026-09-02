@@ -1189,6 +1189,30 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
     });
   }, 30000);
 
+  test('a path with uri-reserved characters keeps its own answers: a route group and a dynamic route', async () => {
+    // tsgo percent-encodes what a uri reserves, so a result in
+    // `(app)/page.rip` returns as `%28app%29`. Attribution compares
+    // PATHS, not uri strings — a string comparison misses exactly the
+    // shapes a rip app routes with, and the buffer loses every answer
+    // about itself: its own references vanish from its own list.
+    await inWorkspace({
+      'lib.rip': 'export shared = 1\n',
+    }, async (api) => {
+      await api.open('lib.rip', 'export shared = 1\n');
+      await api.open('app/routes/(app)/page.rip', 'import { shared } from "../../../lib.rip"\ng = shared + 1\nh = shared + 2\n');
+      await api.open('app/routes/[id].rip', 'import { shared } from "../../lib.rip"\nk = shared + 3\n');
+
+      for (const rel of ['app/routes/(app)/page.rip', 'app/routes/[id].rip']) {
+        const refs = await api.references(rel, 0, 9); // the import specifier
+        const own = (refs ?? []).filter((l) => decodeURIComponent(l.uri).endsWith(rel));
+        expect(own.length).toBeGreaterThan(0);
+      }
+      // The plain path is the control — it never depended on the fix.
+      const plain = await api.references('lib.rip', 0, 7);
+      expect((plain ?? []).length).toBeGreaterThan(0);
+    });
+  }, 30000);
+
   test('a rename in a broken buffer refuses whole with a clear message (fail-safe)', async () => {
     await inWorkspace({}, async (api) => {
       const GOOD = 'total = 41\nnext = total + 1\n';

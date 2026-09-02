@@ -2569,11 +2569,30 @@ function goodRangeToCurrent(ctx, range) {
 }
 
 // tsUri → the open buffer's state, for result attribution.
+//
+// Compared as PATHS, never as uri strings. tsgo percent-encodes the
+// characters a uri reserves — `[`, `]`, `(`, `)`, a space — so a result
+// in `app/routes/(app)/page.rip` comes back as `%28app%29`, while the
+// state's own tsUri was built by concatenation and spells the bytes.
+// A string comparison misses exactly the paths a rip app is most likely
+// to have (a dynamic route's `[id]`, a route group's `(app)`), and the
+// open buffer then loses every answer about itself: its references
+// vanish from its own list, and a definition falls back to a mirror
+// whose face need not match the buffer.
 function stateByTsUri(tsUri) {
+  const wanted = fsPathOfUri(tsUri);
+  if (wanted === null) return null;
   for (const [uri, state] of states) {
-    if (state.tsUri === tsUri && state.lastGood) return { uri, state };
+    if (state.lastGood && fsPathOfUri(state.tsUri) === wanted) return { uri, state };
   }
   return null;
+}
+
+// A `file:` uri's path, decoded, or null when it names no file. Both
+// spellings of one path answer alike, which is the whole point.
+function fsPathOfUri(uri) {
+  if (typeof uri !== 'string' || !uri.startsWith('file://')) return null;
+  try { return fileURLToPath(uri); } catch { return null; }
 }
 
 // One tsgo result uri, classified. This is the SHARED policy — which
@@ -2992,8 +3011,12 @@ async function enrichEvolvingAnyHover(ctx, hover) {
     context: { includeDeclaration: false },
   }, 'hover-enrichment references');
   if (Array.isArray(refs) && refs.length) {
+    // Same-file references first — by PATH, since tsgo percent-encodes a
+    // uri's reserved characters and the state's own tsUri spells them.
+    const here = fsPathOfUri(state.tsUri);
+    const isHere = (u) => (here !== null && fsPathOfUri(u) === here ? 0 : 1);
     const ordered = [...refs].sort((a, b) =>
-      (a.uri === state.tsUri ? 0 : 1) - (b.uri === state.tsUri ? 0 : 1)
+      isHere(a.uri) - isHere(b.uri)
       || (a.uri < b.uri ? -1 : a.uri > b.uri ? 1 : 0)
       || a.range.start.line - b.range.start.line
       || a.range.start.character - b.range.start.character);

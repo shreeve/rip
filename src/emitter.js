@@ -9279,7 +9279,14 @@ class Emitter {
             const tm = tsInfo?.members.find((x) => x.node === m.node && x.kind === 'readonly');
             this.b.tsOnly(() => this.b.emit('('));
             this.b.emit('this');
-            this.b.tsOnly(() => this.b.emit(` as ${tm ? readonlyCastType(tm) : 'any'})`));
+            // The readonly member's cast names its own TYPE (`this as {
+            // menuItems: AvatarMenuItem[] }`), so the declared types it
+            // spells are copies like every other generated one.
+            this.b.tsOnly(() => {
+              this.b.emit(' as ');
+              this.emitDeclaredTypeCopies(tm ? readonlyCastType(tm) : 'any');
+              this.b.emit(')');
+            });
             this.b.emit('.');
             this.mark(m.node, 'target', () => this.b.emit(m.name));
           } else {

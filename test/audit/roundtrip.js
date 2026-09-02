@@ -164,10 +164,17 @@ export async function roundtrip(wsRoot, files) {
         const ls = lineStartsOf(original)
         for (const e of edits) {
           const replaced = original.slice(ls[e.range.start.line] + e.range.start.character, ls[e.range.end.line] + e.range.end.character)
-          // TypeScript keeps a re-exported name's PUBLIC spelling: renaming
-          // the local behind `export { name }` writes `newName as name`.
-          const keepsExport = e.newText === `${newName} as ${d.name}`
-          if (replaced !== d.name || (e.newText !== newName && !keepsExport)) row(target, e.range.start.line, e.range.start.character, d.name, 'rename-bytes', `${JSON.stringify(replaced)} → ${JSON.stringify(e.newText)}`)
+          // Three places where a rename must write MORE than the new name,
+          // because one spelling there serves two roles and only the local
+          // one is being renamed. TypeScript expands the shorthand and
+          // keeps the other role's spelling; the result means exactly what
+          // it did before, so it is a correct rename, not a wrong edit.
+          //   `export { name }`  → `newName as name`   (the public name)
+          //   `import { name }`  → `name as newName`   (the origin's name)
+          //   `{ name }`         → `name: newName`     (the property key)
+          const expansions = [`${newName} as ${d.name}`, `${d.name} as ${newName}`, `${d.name}: ${newName}`]
+          const keepsRole = expansions.includes(e.newText)
+          if (replaced !== d.name || (e.newText !== newName && !keepsRole)) row(target, e.range.start.line, e.range.start.character, d.name, 'rename-bytes', `${JSON.stringify(replaced)} → ${JSON.stringify(e.newText)}`)
         }
         const after = applyEdits(original, edits)
         if (!compiles(after, path.resolve(wsRoot, target))) row(target, d.line, d.character, d.name, 'rename-breaks', `after renaming ${d.name} → ${newName}`)
