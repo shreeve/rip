@@ -16464,7 +16464,7 @@ ${pad ?? ""}`);
       this.addChildProp(props, updaters, pair, key, cleanKey, value);
     };
     const rejectTagWord = (owner, word) => {
-      throw this.positionedError(owner, `emitter: bare '${word}' under a child component is ambiguous — it reads as an HTML element, as ` + "boolean-prop shorthand, and as a value; spell the prop " + `\`${word}: true\`, render the value with \`= ${word}\`, or give the element content or attributes`, this.rstate.node);
+      throw this.positionedError(owner, `emitter: bare '${word}' under a child component is ambiguous — it names an HTML element AND a ` + `value in scope, and the value would win silently; render the value with \`= ${word}\`, ` + "or give the element content or attributes", this.rstate.node);
     };
     const addBareWord = (owner, word) => {
       declareKey(word, null);
@@ -16527,7 +16527,7 @@ ${pad ?? ""}`);
       if (arg == null)
         return;
       const isBareWord = typeof arg === "string" && RENDER_LOCAL_RE.test(arg) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
-      if (isBareWord && (isHtmlTag2(arg) || arg === "slot")) {
+      if (isBareWord && (isHtmlTag2(arg) || arg === "slot") && (this.inScope(arg) || this.moduleBound.has(arg))) {
         rejectTagWord(markNode ?? this.rstate.node, arg);
       }
       if (isBareWord && !this.inScope(arg) && !this.moduleBound.has(arg)) {
