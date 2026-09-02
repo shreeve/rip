@@ -280,6 +280,14 @@ async function sweep(wsRoot, files) {
   client.notify('initialized', {})
   const findings = []
   let probes = 0, answered = 0, asks = 0, items = 0, signatures = 0
+  const spent = { hover: 0, signature: 0, completion: 0, resolve: 0 }
+  // Distinct items resolve ONCE per run: a lib global's presentation does
+  // not change between files, and the corpus offers the same thousand in
+  // every one. Keyed by label, kind, and description; judged against the
+  // file that first offered it.
+  const seenItems = new Set()
+  let t0 = performance.now()
+  const lap = (k) => { const now = performance.now(); spent[k] += now - t0; t0 = now }
   for (const rel of files) {
     const fp = path.resolve(wsRoot, rel)
     const text = fs.readFileSync(fp, 'utf8')
@@ -311,6 +319,7 @@ async function sweep(wsRoot, files) {
       for (let i = m.index; i < m.index + m[0].length; i++) inWord[i] = m[0]
       atEnd[m.index + m[0].length] = m[0]
     }
+    t0 = performance.now()
     // One census per file, taken before the walk: the set of offsets a
     // NAME starts at, which is the population the decline check judges,
     // less the positions a ruling has already settled as silent.
@@ -415,6 +424,7 @@ async function sweep(wsRoot, files) {
       }
       }
     }
+    lap('hover')
     const srcLineOf = (line) => text.slice(lineStarts[line], (lineStarts[line + 1] ?? text.length + 1) - 1).trim().slice(0, 90)
     // ── SIGNATURE HELP at every position: the text judge, plus the
     // answer's SUBJECT. Its callee must be a name the source spells by
@@ -448,25 +458,60 @@ async function sweep(wsRoot, files) {
         if (/^[A-Za-z_$][\w$]*(?:<[^(]*>)?\(props\??: \{/.test(flat)) row('signature-component')
       }
     }
-    // ── COMPLETION at every word end and after every member or sigil
-    // ask — the two ask shapes the surface has. Asked serially, since a
-    // resolve reads the document's NEWEST list; each distinct item
-    // (label, kind, description) resolves once per file, and its whole
-    // presentation — label, description, detail, documentation — takes
-    // the text judge.
-    const seenItems = new Set()
+    lap('signature')
+    // ── COMPLETION. The unit here is the ITEM, not the byte: an item's
+    // text is the same wherever a list offers it, and each distinct item
+    // (label, kind, description) is judged once per file. What decides
+    // which items a bare ask can offer is SCOPE, and rip's scope changes
+    // by line — blocks are indentation — with one exception, an inline
+    // arrow's parameter list, whose only extra items are the author's own
+    // parameters and can never be machinery. So a bare ask lands once per
+    // line, at its last word end, and reaches the file's whole item set;
+    // a member or sigil ask (`.`, `@`) is receiver-specific and lands at
+    // every one. Lists are asked in parallel (an ask mutates nothing but
+    // the document's "newest list"); only the positions that first
+    // surface an item need a resolve, and a resolve reads the newest
+    // list, so those few are re-asked serially, each followed by its
+    // resolves.
+    const askAt = []
+    const lastEndOnLine = new Map()
     for (let off = 0; off <= text.length; off++) {
-      if (atEnd[off] === null && text[off - 1] !== '.' && text[off - 1] !== '@') continue
+      if (text[off - 1] === '.' || text[off - 1] === '@') { askAt.push(off); continue }
+      if (atEnd[off] !== null) lastEndOnLine.set(posOf(off).line, off)
+    }
+    askAt.push(...lastEndOnLine.values())
+    askAt.sort((a, b) => a - b)
+    // A completion list runs to a thousand items, so the window for THIS
+    // surface is small — tsgo serializes its answers, and a wide window
+    // only queues them until the last one times out. An ask that fails
+    // under load is asked once more on its own before it counts.
+    const ASK_WINDOW = 4
+    const listAt = async (off, retry = true) => {
       const { line, character } = posOf(off)
-      const comp = await client.request('textDocument/completion', { textDocument: { uri }, position: { line, character } })
-      asks++
-      const list = Array.isArray(comp) ? comp : comp?.items ?? []
-      const fresh = list.filter((it) => {
-        const k = [it.label, it.kind, it.labelDetails?.description ?? ''].join('\0')
-        if (seenItems.has(k)) return false
-        seenItems.add(k)
-        return true
-      })
+      try {
+        const comp = await client.request('textDocument/completion', { textDocument: { uri }, position: { line, character } })
+        return Array.isArray(comp) ? comp : comp?.items ?? []
+      } catch (e) {
+        if (!retry) throw e
+        return listAt(off, false)
+      }
+    }
+    const keyOf = (it) => [it.label, it.kind, it.labelDetails?.description ?? ''].join('\0')
+    const toResolve = []
+    for (let w = 0; w < askAt.length; w += ASK_WINDOW) {
+      const chunk = askAt.slice(w, w + ASK_WINDOW)
+      const lists = await Promise.all(chunk.map((off) => listAt(off)))
+      for (let ci = 0; ci < chunk.length; ci++) {
+        asks++
+        const fresh = lists[ci].filter((it) => { const k = keyOf(it); if (seenItems.has(k)) return false; seenItems.add(k); return true })
+        if (fresh.length) toResolve.push({ off: chunk[ci], keys: new Set(fresh.map(keyOf)) })
+      }
+    }
+    lap('completion')
+    for (const { off, keys } of toResolve) {
+      const { line, character } = posOf(off)
+      const list = await listAt(off)
+      const fresh = list.filter((it) => keys.has(keyOf(it)))
       for (let i = 0; i < fresh.length; i += WINDOW) {
         const chunk = fresh.slice(i, i + WINDOW)
         const resolved = await Promise.all(chunk.map((it) => client.request('completionItem/resolve', it).catch(() => it)))
@@ -484,6 +529,7 @@ async function sweep(wsRoot, files) {
         }
       }
     }
+    lap('resolve')
     // The boundary pass's RESCUES over this file: each names a display
     // field a presenter upstream left for the net — a finding, since the
     // net is the instrument that says the presenters are whole.
@@ -509,7 +555,7 @@ async function sweep(wsRoot, files) {
     seenRow.set(k, true)
     deduped.push(f)
   }
-  return { probes, answered, asks, items, signatures, findings: deduped }
+  return { probes, answered, asks, items, signatures, spent, findings: deduped }
 }
 
 // The corpus set is the AUDIT's population — the closed, curated
@@ -657,8 +703,9 @@ if (import.meta.main) {
   const explicit = process.argv.slice(2)
   const sets = explicit.length > 0 ? [{ name: 'files', root: repoRoot, files: explicit }] : defaultSets()
   for (const set of sets) {
-    const { probes, answered, asks, items, signatures, findings } = await sweep(set.root, set.files)
-    console.log(`\n══ ${set.name} ─ ${set.files.length} files · ${probes} probes · ${answered} answered · ${signatures} signatures · ${asks} completion asks · ${items} items · ${findings.length} findings`)
+    const { probes, answered, asks, items, signatures, spent, findings } = await sweep(set.root, set.files)
+    const secs = (ms) => `${(ms / 1000).toFixed(1)}s`
+    console.log(`\n══ ${set.name} ─ ${set.files.length} files · ${probes} probes · ${answered} answered · ${signatures} signatures · ${asks} completion asks · ${items} items · ${findings.length} findings · hover ${secs(spent.hover)} · signature ${secs(spent.signature)} · completion asks ${secs(spent.completion)} · resolves ${secs(spent.resolve)}`)
     for (const g of organize(findings)) {
       console.log(`\n  ${g.kind} (${g.count})`)
       console.log(`    ${g.note}`)

@@ -3956,10 +3956,17 @@ connection.onCompletionResolve(presented('completionItem/resolve', async (item) 
   // The positional leak (see onCompletion): a detail whose type is the
   // cursor symbol's own, on an item that is not that symbol, is not the
   // item's type and does not show.
-  // The item that IS the cursor symbol carries its own type by right.
+  // The item that IS the cursor symbol carries its own type by right. Every
+  // other item's detail is the leak when it carries the cursor type — whole,
+  // as a variable's type, or as the PARAMETER LIST a function head wears
+  // (`function scroll(props?: { … }): Tag` for a construct `new (props?: {
+  // … }) => Tag`), which is the same body under another head.
   const leaked = state.lastCompletionCursorType;
   const own = item.label.replace(/\?$/, '') === state.lastCompletionCursorWord;
-  if (resolved.detail && !(leaked && !own && typeTextOf(resolved.detail.replace(/\s+/g, ' ').trim()) === leaked)) {
+  const leakedBody = leaked === null ? null : /\((?:.|\n)*\)(?= =>|:)/.exec(leaked)?.[0] ?? null;
+  const flatDetail = resolved.detail ? resolved.detail.replace(/\s+/g, ' ').trim() : '';
+  const carriesLeak = leaked !== null && !own && (typeTextOf(flatDetail) === leaked || (leakedBody !== null && leakedBody.length > 8 && flatDetail.includes(leakedBody)));
+  if (resolved.detail && !carriesLeak) {
     item.detail = state.lastGood ? presentCompletionDetail(state.lastGood, resolved.detail) : presentType(resolved.detail);
   }
   if (resolved.documentation) item.documentation = scrubDocumentation(resolved.documentation);

@@ -4957,7 +4957,7 @@ if (RUN_SWEEP) {
     out(`  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus's valid programs, the position dimension closed)`)}`);
     out(`    ${dim(pad('hover', 14))} ${dim(`${sw.answered} answers`)}`);
     out(`    ${dim(pad('signature help', 14))} ${dim(`${sw.signatures} answers`)}`);
-    out(`    ${dim(pad('completion', 14))} ${dim(`${sw.asks} asks at every word end and sigil · ${sw.items} items resolved`)}`);
+    out(`    ${dim(pad('completion', 14))} ${dim(`${sw.asks} asks — every member and sigil ask, and one bare ask per line · ${sw.items} distinct items judged`)}`);
     console.log('');
     const W = Math.max(...srows.filter(Boolean).map((s) => String(s.n).length));
     // A label column followed by prose: the note wraps at ITS OWN column,

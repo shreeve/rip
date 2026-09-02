@@ -626,6 +626,11 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       const resolvedOther = await api.resolve(other);
       expect(resolvedOther.detail ?? '').not.toContain('=> Button');
       expect(resolvedOther.detail ?? '').not.toContain('read()');
+      // A FUNCTION item wears the leak as its parameter list —
+      // `function structuredClone(props?: { variant?: … }): Button`.
+      const fn = (atUse?.items ?? []).find((i) => i.label === 'structuredClone');
+      expect(fn).toBeDefined();
+      expect((await api.resolve(fn)).detail ?? '').not.toContain('props?: {');
 
       const inBody = await api.completion('button.rip', 6, 9);          // inside the `count` read
       const countItem = (inBody?.items ?? []).find((i) => i.label === 'count');
