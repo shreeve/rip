@@ -41,6 +41,19 @@
 //   unparsed-head the classifier could not name a subject; a bucket for
 //                 reading, not a verdict
 // plus minted-in-diagnostic for face spellings in published messages.
+//
+// Two more surfaces ride the same walk with the same text judge, since
+// what an answer's text may never carry does not depend on who printed
+// it. SIGNATURE HELP is asked at every position; its label takes the
+// judge (`signature-minted` / `-scaffold` / `-cell`), its callee must
+// be a name the source spells by the cursor's line (`signature-subject`
+// — a call the lowering wrote describing itself), and a component
+// construction must decline (`signature-component`). COMPLETION is
+// asked at every word end and after every `.`/`@` — the surface's two
+// ask shapes — serially, since a resolve reads the newest list; each
+// distinct item resolves once per file and its label, description,
+// detail, and documentation take the judge (`completion-minted` /
+// `-scaffold` / `-cell`).
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -58,7 +71,7 @@ const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
 const { lineStartsOf, offsetToPosition, flattenHover, SCHEMA_PAYLOADS } = await import(path.join(repoRoot, 'packages/vscode/src/translate.js'))
 
 const MINTED = /\b(__[A-Za-z$][\w$]*)/g
-const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+)\b/g
+const SCAFFOLD = /\b(_(?:el|t|inst|frag|anchor|empty|slot)\d+|_factory[A-Za-z]*|create_block_\d+|_(?:init|teardown|mountSetup|mountCreate|beginMount|failMount|hmrRerender|setRestProp|updateProp|applyInheritedProp|applyPlainInheritedProp|applyRestToInheritedEl))\b/g
 // The reactive cell ARM — `T | { value: T; read(): T; … }`, the slot
 // admission the lowering spells for a shared prop or a `<=>` channel. An
 // answer showing one names the face's plumbing, not the author's type; the
@@ -108,6 +121,13 @@ function nameSpans(text) {
     for (const t of toks ?? []) {
       if (typeof t.start !== 'number' || t.start === t.end) continue
       if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY') out.push([t.start, t.end])
+      // A type-parameter list's names — one lexer token, several symbols.
+      if (t.kind === 'TYPE_PARAMS' && typeof t.value === 'string') {
+        for (const m of t.value.matchAll(/(?:^<|,)\s*([A-Za-z_$][\w$]*)/g)) {
+          const at = t.start + m.index + m[0].length - m[1].length
+          out.push([at, at + m[1].length])
+        }
+      }
       if (t.kind === 'SCHEMA_BODY') {
         for (const e of t.value?.entries ?? []) {
           // A descriptor entry's own declared NAME is a span it carries
@@ -138,7 +158,7 @@ const HOVER_PINS = (() => {
   } catch { return {} }
 })()
 
-function ruledSilent(rel) {
+export function ruledSilent(rel) {
   const base = path.basename(rel)
   const out = new Set()
   for (const p of HOVER_PINS[base]?.positions ?? []) {
@@ -153,7 +173,7 @@ function ruledSilent(rel) {
 // `silences` are the spans a construct owns whole. A file the compiler
 // rejects has no census: the editor cannot type it either, so every
 // name in it declines, and rows there would say nothing about hover.
-function censusStarts(text, fp) {
+export function censusStarts(text, fp) {
   const spans = nameSpans(text)
   if (spans.length === 0) return new Set()
   let spent, silences
@@ -218,10 +238,39 @@ function subjectOf(flat) {
 const KEYWORDS = new Set(('if unless else then switch when for while until in of and or not is isnt new return def render '
   + 'component extends class enum type import export from try catch finally throw do break continue slot').split(' '))
 
+// The text judge every surface shares: what an answer's TEXT may never
+// carry, whoever printed it — a hover fence, a completion item's detail,
+// a signature label. A `__` name the FILE's own source spells is the
+// author's, not the lowering's (`__`-prefixed user members are legal rip).
+// Structural truncation: tsgo cuts a very long display type mid-token,
+// and unbalanced nesting is the cut's fingerprint (rest `...` balances);
+// prose — a documentation string — is not judged for structure.
+function judgeText(flat, word, source, { structure = true } = {}) {
+  const out = []
+  const minted = [...new Set([...flat.matchAll(MINTED)].map((m) => m[1]).filter((n) => n !== word && !source.includes(n)))]
+  if (minted.length) out.push({ kind: 'minted', hits: minted })
+  const scaffold = [...new Set([...flat.matchAll(SCAFFOLD)].map((m) => m[1]).filter((n) => n !== word && !source.includes(n)))]
+  if (scaffold.length) out.push({ kind: 'scaffold', hits: scaffold })
+  if (CELL.test(flat)) out.push({ kind: 'cell' })
+  if (structure && flat !== '') {
+    let d = 0
+    for (const ch of flat) {
+      if (ch === '{' || ch === '(' || ch === '[') d++
+      else if (ch === '}' || ch === ')' || ch === ']') d--
+    }
+    if (d !== 0) out.push({ kind: 'truncated' })
+  }
+  return out
+}
+
 async function sweep(wsRoot, files) {
   const published = []
+  const rescues = []
   const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') published.push(p) },
+    onNotification: (m, p) => {
+      if (m === 'textDocument/publishDiagnostics') published.push(p)
+      if (m === 'window/logMessage' && /^\[rip\] presentation rescue: /.test(p?.message ?? '')) rescues.push(p.message.slice('[rip] presentation rescue: '.length))
+    },
   })
   client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})))
   await client.request('initialize', {
@@ -230,7 +279,7 @@ async function sweep(wsRoot, files) {
   })
   client.notify('initialized', {})
   const findings = []
-  let probes = 0, answered = 0
+  let probes = 0, answered = 0, asks = 0, items = 0, signatures = 0
   for (const rel of files) {
     const fp = path.resolve(wsRoot, rel)
     const text = fs.readFileSync(fp, 'utf8')
@@ -302,25 +351,8 @@ async function sweep(wsRoot, files) {
         continue
       }
       answered++
-      // A `__` name the FILE's own source spells is the author's, not
-      // the lowering's — `__`-prefixed user members are legal rip.
-      const minted = [...new Set([...flat.matchAll(MINTED)].map((mm) => mm[1]).filter((n) => n !== word && !text.includes(n)))]
-      if (minted.length) row('minted', minted)
-      const scaffold = [...new Set([...flat.matchAll(SCAFFOLD)].map((mm) => mm[1]).filter((n) => n !== word))]
-      if (scaffold.length) row('scaffold', scaffold)
+      for (const j of judgeText(flat, word, text)) row(j.kind, j.hits)
       if (flat === 'this: this' && word !== 'this') row('cover-this')
-      if (CELL.test(flat)) row('cell')
-      // Structural truncation: tsgo cuts very long display types mid-
-      // token, and a cut answer is never a right answer. Unbalanced
-      // nesting is the cut's fingerprint (rest `...` is balanced).
-      if (flat !== '') {
-        let d = 0
-        for (const ch of flat) {
-          if (ch === '{' || ch === '(' || ch === '[') d++
-          else if (ch === '}' || ch === ')' || ch === ']') d--
-        }
-        if (d !== 0) row('truncated')
-      }
       if (flat === '') { row('empty'); continue }
       const subj = subjectOf(flat)
       const okPair = (a, b) => a === b || (a === 'class' && b === 'className') || (a === 'for' && b === 'htmlFor')
@@ -383,6 +415,79 @@ async function sweep(wsRoot, files) {
       }
       }
     }
+    const srcLineOf = (line) => text.slice(lineStarts[line], (lineStarts[line + 1] ?? text.length + 1) - 1).trim().slice(0, 90)
+    // ── SIGNATURE HELP at every position: the text judge, plus the
+    // answer's SUBJECT. Its callee must be a name the source spells by
+    // the end of the cursor's line — the calls the lowering wrote
+    // (createTextNode, the `String` wrap, the `__batch` wrapper) are
+    // not — and a component construction must decline (RULINGS.md,
+    // the component-name row).
+    for (let w = 0; w < positions.length; w += WINDOW) {
+      const chunk = positions.slice(w, w + WINDOW)
+      const helps = await Promise.all(chunk.map((p) => {
+        const { line, character } = posOf(p.off)
+        return client.request('textDocument/signatureHelp', { textDocument: { uri }, position: { line, character } })
+      }))
+      for (let ci = 0; ci < chunk.length; ci++) {
+        const p = chunk[ci], help = helps[ci]
+        if (!help?.signatures?.length) continue
+        signatures++
+        const { line, character } = posOf(p.off)
+        const active = help.signatures[help.activeSignature ?? 0] ?? help.signatures[0]
+        const flat = String(active.label ?? '').replace(/\s+/g, ' ').trim()
+        const row = (kind, hits) => findings.push({ file: rel, line, ch: character, word: p.word, kind, text: flat.slice(0, 400), src: srcLineOf(line), ...(hits ? { hits } : {}) })
+        for (const j of judgeText(flat, p.word, text, { structure: false })) row('signature-' + j.kind, j.hits)
+        const callee = /^(?:new )?(?:[\w$]+\.)*([A-Za-z_$][\w$]*)\(/.exec(flat)
+        const lineEnd = (lineStarts[line + 1] ?? text.length + 1) - 1
+        // Inside a function literal tsgo describes the CONTEXTUAL signature
+        // the callee expects, under the parameter's own name (`callbackfn`,
+        // `predicate`) — TypeScript's convention, and no word of the
+        // source; an arrow on the cursor's line marks that position.
+        const inLiteral = /->|=>/.test(text.slice(lineStarts[line], lineEnd))
+        if (callee !== null && !inLiteral && !new RegExp(`(^|[^\\w$])${callee[1].replace(/\$/g, '\\$&')}([^\\w$]|$)`).test(text.slice(0, lineEnd))) row('signature-subject:' + callee[1])
+        if (/^[A-Za-z_$][\w$]*(?:<[^(]*>)?\(props\??: \{/.test(flat)) row('signature-component')
+      }
+    }
+    // ── COMPLETION at every word end and after every member or sigil
+    // ask — the two ask shapes the surface has. Asked serially, since a
+    // resolve reads the document's NEWEST list; each distinct item
+    // (label, kind, description) resolves once per file, and its whole
+    // presentation — label, description, detail, documentation — takes
+    // the text judge.
+    const seenItems = new Set()
+    for (let off = 0; off <= text.length; off++) {
+      if (atEnd[off] === null && text[off - 1] !== '.' && text[off - 1] !== '@') continue
+      const { line, character } = posOf(off)
+      const comp = await client.request('textDocument/completion', { textDocument: { uri }, position: { line, character } })
+      asks++
+      const list = Array.isArray(comp) ? comp : comp?.items ?? []
+      const fresh = list.filter((it) => {
+        const k = [it.label, it.kind, it.labelDetails?.description ?? ''].join('\0')
+        if (seenItems.has(k)) return false
+        seenItems.add(k)
+        return true
+      })
+      for (let i = 0; i < fresh.length; i += WINDOW) {
+        const chunk = fresh.slice(i, i + WINDOW)
+        const resolved = await Promise.all(chunk.map((it) => client.request('completionItem/resolve', it).catch(() => it)))
+        for (const it of resolved) {
+          items++
+          const doc = typeof it?.documentation === 'string' ? it.documentation : it?.documentation?.value ?? ''
+          const fields = [['label', it?.label, ''], ['description', it?.labelDetails?.description, it?.label], ['detail', it?.detail, it?.label], ['documentation', doc, it?.label]]
+          for (const [field, value, own] of fields) {
+            if (typeof value !== 'string' || value === '') continue
+            const flat = value.replace(/\s+/g, ' ').trim()
+            for (const j of judgeText(flat, own, text, { structure: false })) {
+              findings.push({ file: rel, line, ch: character, word: it.label, kind: 'completion-' + j.kind, text: `${field}: ${flat.slice(0, 380)}`, src: srcLineOf(line), ...(j.hits ? { hits: j.hits } : {}) })
+            }
+          }
+        }
+      }
+    }
+    // The boundary pass's RESCUES over this file: each names a display
+    // field a presenter upstream left for the net — a finding, since the
+    // net is the instrument that says the presenters are whole.
+    for (const r of rescues.splice(0)) findings.push({ file: rel, line: 0, ch: 0, word: '(boundary)', kind: 'rescued', text: r, src: '' })
     client.notify('textDocument/didClose', { textDocument: { uri } })
   }
   await client.stop()
@@ -404,7 +509,7 @@ async function sweep(wsRoot, files) {
     seenRow.set(k, true)
     deduped.push(f)
   }
-  return { probes, answered, findings: deduped }
+  return { probes, answered, asks, items, signatures, findings: deduped }
 }
 
 // The corpus set is the AUDIT's population — the closed, curated
@@ -452,15 +557,19 @@ export async function runSweep(sets = defaultSets()) {
       lightest.weight += size
     }
     const results = await Promise.all(shards.filter((sh) => sh.files.length).map((sh) => sweep(set.root, sh.files)))
-    const merged = { probes: 0, answered: 0, findings: [] }
-    for (const r of results) { merged.probes += r.probes; merged.answered += r.answered; merged.findings.push(...r.findings) }
+    const merged = { probes: 0, answered: 0, asks: 0, items: 0, signatures: 0, findings: [] }
+    for (const r of results) {
+      merged.probes += r.probes; merged.answered += r.answered
+      merged.asks += r.asks; merged.items += r.items; merged.signatures += r.signatures
+      merged.findings.push(...r.findings)
+    }
     merged.findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.ch - b.ch)
     out.push({ name: set.name, files: set.files.length, ...merged })
   }
   return out
 }
 
-export const ORDER = ['minted', 'scaffold', 'cover-this', 'cell', 'minted-in-diagnostic', 'truncated', 'empty', 'range', 'subject', 'silent-name', 'boundary-cover', 'blank-cover', 'keyword-cover', 'comment-cover', 'unparsed-head']
+export const ORDER = ['minted', 'scaffold', 'cover-this', 'cell', 'rescued', 'completion-minted', 'completion-scaffold', 'completion-cell', 'signature-minted', 'signature-scaffold', 'signature-cell', 'minted-in-diagnostic', 'truncated', 'signature-subject', 'signature-component', 'empty', 'range', 'subject', 'silent-name', 'boundary-cover', 'blank-cover', 'keyword-cover', 'comment-cover', 'unparsed-head']
 // One line per class: what a row MEANS and what drains the class —
 // printed under each section header so the report reads without the
 // file comment in hand.
@@ -469,6 +578,15 @@ export const KIND_NOTES = {
   'scaffold': 'the answer names a `_elN`-family render local — same doctrine, scaffold shape',
   'cover-this': 'the bare `this: this` cover answer — same doctrine, receiver shape',
   'minted-in-diagnostic': 'a face spelling in a published diagnostic message',
+  'rescued': 'a display field the boundary pass had to present on the way out — a presenter upstream was forgotten; the response reached the editor clean, and the presenter is the fix',
+  'completion-minted': 'a completion item whose label, description, detail, or documentation names a minted `__` spelling — the same doctrine on the completion surface',
+  'completion-scaffold': 'a completion item naming a `_elN`-family render local',
+  'completion-cell': 'a completion item showing a reactive cell ARM beside its value type — the slot admission the presenters collapse; a detail column none of them reached',
+  'signature-minted': 'a signature label naming a minted `__` spelling',
+  'signature-scaffold': 'a signature label naming a `_elN`-family render local',
+  'signature-cell': 'a signature label showing a reactive cell ARM beside its value type',
+  'signature-subject': 'a signature whose callee the source never spells by the cursor\'s line — a call the LOWERING wrote (createTextNode, the String wrap, a runtime helper) describing itself; drains when the server declines inside every lowered call',
+  'signature-component': 'a signature describing a component construction (`Name(props?: { … }): Name`) — a use has no positional parameter to track and declines by ruling (RULINGS.md, the component-name row)',
   'range': 'the hover\'s own range spans 3+ lines — the whole-construct highlight; drains when the range clamps to the word',
   'subject': 'the answer is about a DIFFERENT symbol than the word under the cursor — a cover landing; literal interiors and new.target decline by ruling, so any row here is new',
   'keyword-cover': 'a rip structure word answering about a neighbor; drains with the keyword-decline rule (`def` answering its own declaration may be kept deliberately)',
@@ -532,15 +650,15 @@ export function organize(findings) {
 // The classes the audit contract GATES (sweep.machinery): the
 // machinery-decline doctrine's hard violations. The rest are gauges
 // until the decline work drains them.
-export const GATED = new Set(['minted', 'scaffold', 'cover-this', 'cell', 'minted-in-diagnostic'])
+export const GATED = new Set(['minted', 'scaffold', 'cover-this', 'cell', 'rescued', 'minted-in-diagnostic', 'completion-minted', 'completion-scaffold', 'completion-cell', 'signature-minted', 'signature-scaffold', 'signature-cell'])
 export const kindOf = (f) => f.kind.split(':')[0]
 
 if (import.meta.main) {
   const explicit = process.argv.slice(2)
   const sets = explicit.length > 0 ? [{ name: 'files', root: repoRoot, files: explicit }] : defaultSets()
   for (const set of sets) {
-    const { probes, answered, findings } = await sweep(set.root, set.files)
-    console.log(`\n══ ${set.name} ─ ${set.files.length} files · ${probes} probes · ${answered} answered · ${findings.length} findings`)
+    const { probes, answered, asks, items, signatures, findings } = await sweep(set.root, set.files)
+    console.log(`\n══ ${set.name} ─ ${set.files.length} files · ${probes} probes · ${answered} answered · ${signatures} signatures · ${asks} completion asks · ${items} items · ${findings.length} findings`)
     for (const g of organize(findings)) {
       console.log(`\n  ${g.kind} (${g.count})`)
       console.log(`    ${g.note}`)

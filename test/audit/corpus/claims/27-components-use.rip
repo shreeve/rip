@@ -1,0 +1,14 @@
+# 27-components-use.rip — a component imported from another module: the use, the prop key, and the child cross the module boundary.
+
+import { Tag } from './27-components-lib.rip'
+
+Board = component
+  clicks := 3
+
+  render
+    section
+      Tag label: "#{clicks} clicks", tone: 'warn'
+      Tag
+        'plain'
+
+console.log('use:', typeof Board, typeof Tag)

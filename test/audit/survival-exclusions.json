@@ -201,5 +201,12 @@
     "36:2:price": "lowered into a string — the face holds these bytes inside a literal",
     "38:2:weight": "lowered into a string — the face holds these bytes inside a literal",
     "39:2:slip": "lowered into a string — the face holds these bytes inside a literal"
+  },
+  "27-components-lib.rip": {
+    "8:4:span": "lowered into a string — the face holds these bytes inside a literal",
+    "10:6:slot": "render DSL word — lowers into a string"
+  },
+  "27-components-use.rip": {
+    "9:4:section": "lowered into a string — the face holds these bytes inside a literal"
   }
 }

@@ -342,7 +342,7 @@ export const CONTRACT = [
     // sweep's other two halves gate on their own rows below: the name
     // census and the misdirection classes.
     name: 'sweep.machinery', lane: 'sweep',
-    property: 'no position in the sweep answers with the lowering\'s machinery, and no diagnostic message carries a face spelling',
+    property: 'no position in the sweep answers with the lowering\'s machinery — in a hover, a completion item\'s presentation, or a signature label — and no diagnostic message carries a face spelling',
     red: (s) => s.sw.machinery > 0,
   },
   {
@@ -363,8 +363,49 @@ export const CONTRACT = [
     // gauges while the decline work ran; from the day they hit zero a
     // nonzero count is a regression, per the rule at the top of this file.
     name: 'sweep.misdirection', lane: 'sweep',
-    property: 'every answering position answers about the word under the cursor',
+    property: 'every answering position answers about the word under the cursor, and a signature help answer describes a call the author wrote',
     red: (s) => s.sw.misdirection > 0,
+  },
+  {
+    // A navigation answer IDENTIFIES a symbol, so it lands on a name, and
+    // the name it lands on is the one that was asked — a definition, type
+    // definition, or reference on other bytes is a wrong symbol however
+    // plausible; an outline entry that is not its own name, or is the
+    // lowering's, is not the author's outline; a link whose target is
+    // missing is not a link. Judged over every name the author declared,
+    // at every occurrence (landing.js).
+    name: 'landing.answers', lane: 'landing',
+    property: 'every navigation answer — definition, type definition, references, outline, workspace symbol, document link — lands on the name that was asked',
+    red: (s) => s.ld.answers > 0,
+  },
+  {
+    // The census half: a name the author declared that navigates NOWHERE
+    // — no definition, or no references from a position that defines in
+    // rip. Every other class judges an answer, so over-declining is
+    // invisible to them.
+    name: 'landing.census', lane: 'landing',
+    property: 'every name the author declared has a definition, and references that include the asked position',
+    red: (s) => s.ld.silent > 0,
+    redBecause: 'declaration names the face spells without a verbatim twin, so a strict landing has nowhere to go — FINDINGS.md #20: destructuring-pattern bindings, the render loop\'s factory parameter, a constructor\'s promoted `@param`, a schema companion\'s instance members, a prototype augmentation\'s member, and a prop key at a use site (the hoist line\'s constructor type); each drains with the exact mark at its emission site',
+  },
+  {
+    // An edit surface changes exactly what it names and leaves a program:
+    // a rename replaces the name's own bytes with the new name and the
+    // file compiles (so the reverse rename is byte-identical); organize
+    // imports touches import lines alone, compiles, and leaves the
+    // diagnostics less the unused imports it removed; the import quick fix
+    // restores a dropped specifier so the name resolves and the import set
+    // is the original's (roundtrip.js).
+    name: 'roundtrip.edits', lane: 'roundtrip',
+    property: 'every rename, organize-imports, and import quick fix over the corpus changes only what it names and leaves a compiling file',
+    red: (s) => s.rt.edits > 0,
+  },
+  {
+    // The census half: a top-level declaration rename refuses at.
+    name: 'roundtrip.census', lane: 'roundtrip',
+    property: 'every top-level declaration can be renamed',
+    red: (s) => s.rt.refused > 0,
+    redBecause: 'a component or type name has generated-only copies (the class expression\'s name, the hoist line\'s constructor type, a TS-only declare) with no source twin, and the fail-safe refuses the whole rename rather than apply a partial one — FINDINGS.md #21; drains as each copy maps to the declaration\'s own span',
   },
   {
     name: 'token.delivery', lane: 'token',

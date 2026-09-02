@@ -67,7 +67,7 @@ import {
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
-  staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, presentType, isImportFixTitle, ripImportText,
+  staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, presentType, presentOutgoing, isImportFixTitle, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
   splitTypeAt, balancedTo, unionArms, cellShape,
@@ -2535,8 +2535,20 @@ function wordAtOffset(text, at) {
 function faceRangeToSourceRange(face, range, { strict = false } = {}) {
   const s = positionToOffset(face.genLineStarts, face.code.length, range.start);
   const e = positionToOffset(face.genLineStarts, face.code.length, range.end);
-  const span = generatedEditSpanToSource(face.mappings, s, e, face.source, face.code)
+  let span = generatedEditSpanToSource(face.mappings, s, e, face.source, face.code)
     ?? (strict ? null : generatedSpanToSource(face.mappings, s, e));
+  // An anonymous default export has no NAME for a strict landing: tsgo
+  // targets the whole `export default …` statement, whose body is the
+  // lowering's spelling. The statement's head is verbatim on both sides,
+  // and the `default` keyword is the landing TypeScript itself uses for
+  // it — so a strict miss whose face and source both open on
+  // `export default ` lands there.
+  if (!span && strict) {
+    const cover = generatedSpanToSource(face.mappings, s, e);
+    if (cover && /^export default\b/.test(face.code.slice(s, s + 15)) && /^export default\b/.test(face.source.slice(cover[0], cover[0] + 15))) {
+      span = [cover[0] + 'export '.length, cover[0] + 'export default'.length];
+    }
+  }
   if (!span) return null;
   return {
     start: offsetToPosition(face.srcLineStarts, span[0]),
@@ -2631,9 +2643,32 @@ function ripLocation(uri, range, { strict = false } = {}) {
   return srcRange ? { uri: 'file://' + sourcePath, range: srcRange } : null;
 }
 
-// Location | Location[] | LocationLink[] → Rip locations (flat).
+// The rip text a mapped location covers, and the line it starts on —
+// from the open buffer when there is one, else the disk file. Null when
+// neither can be read.
+function ripSourceText(uri) {
+  const document = documents.get(uri);
+  if (document) return document.getText();
+  try { return fs.readFileSync(fileURLToPath(uri), 'utf8'); } catch { return null; }
+}
+function ripTextAt(uri, range) {
+  const text = ripSourceText(uri);
+  if (text === null) return null;
+  const ls = lineStartsOf(text);
+  return text.slice(ls[range.start.line] + range.start.character, ls[range.end.line] + range.end.character);
+}
+function ripLineAt(uri, line) {
+  const text = ripSourceText(uri);
+  return text === null ? null : (text.split('\n')[line] ?? null);
+}
+
+// Location | Location[] | LocationLink[] → Rip locations (flat). STRICT:
+// a definition, type definition, or reference IDENTIFIES a symbol, so
+// each range maps verbatim or drops — a cover landing would present a
+// construct's whole span as the name (translate.js states the rule for
+// the request direction; this is the answer direction).
 function ripLocations(result) {
-  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range)).filter(Boolean);
+  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range, { strict: true })).filter(Boolean);
 }
 
 // A definition answer FOR A MODULE SPECIFIER names a file, not a symbol:
@@ -2985,7 +3020,16 @@ function withAbsenceArms(type) {
   return arms.join(' | ');
 }
 
-connection.onHover(async (params) => {
+// Every display response leaves through the boundary pass
+// (translate.js presentOutgoing). A field it has to change names a
+// presenter that was forgotten upstream, and is logged as a RESCUE — the
+// sweep counts those lines as findings, so the net stays an instrument
+// and never becomes the only presenter.
+const presented = (method, handler) => async (...args) => presentOutgoing(method, await handler(...args), (m, field) => {
+  connection.console.log(`[rip] presentation rescue: ${m} ${field}`);
+});
+
+connection.onHover(presented('textDocument/hover', async (params) => {
   await tsgoReady;
   // Position-identifying surfaces (definition, references) survive a stale
   // face because staleOffsetMap re-aligns coordinates. A TYPE cannot be
@@ -3222,7 +3266,7 @@ connection.onHover(async (params) => {
     if (srcRange) range = goodRangeToCurrent(ctx, srcRange) ?? undefined;
   }
   return { contents, ...(range ? { range } : {}) };
-});
+}));
 
 // The import/export specifier STRING span the last-good offset sits in
 // (stores coordinates, quotes included), or null. Membership is the
@@ -3276,7 +3320,17 @@ connection.onDefinition(async (params) => {
   }, 'definition');
   // A position inside a specifier asked about the MODULE, and the answer
   // is read as one (ripModuleLocations).
-  const locations = span ? ripModuleLocations(result) : ripLocations(result);
+  // A NAMESPACE or DEFAULT import's definition is the module — tsgo
+  // targets the whole file, or the `export default` statement whose
+  // body is the lowering's spelling. Neither has a name to land on
+  // verbatim: the whole-file target answers the module (its start,
+  // like a specifier's), and the default statement lands on its
+  // `default` keyword (faceRangeToSourceRange). Every other target is a
+  // symbol and maps strictly.
+  const locations = span ? ripModuleLocations(result) : flattenLocations(result).map(({ uri, range }) => {
+    const wholeFile = range.start.line === 0 && range.start.character === 0 && (range.end.line > 0 || range.end.character > 0);
+    return wholeFile && classifyTsUri(uri)?.kind !== 'real' ? ripModuleLocation(uri, range) : ripLocation(uri, range, { strict: true });
+  }).filter(Boolean);
   const origin = span && locations.length ? specifierOriginOf(ctx, span) : null;
   if (clientDefinitionLinks && origin) {
     return locations.map((loc) => ({
@@ -3306,7 +3360,20 @@ connection.onTypeDefinition(async (params) => {
     textDocument: { uri: ctx.state.tsUri },
     position,
   }, 'type definition');
-  return span ? ripModuleLocations(result) : ripLocations(result);
+  if (span) return ripModuleLocations(result);
+  // tsgo answers a TYPE ALIAS with its body as the selection (`{ name:
+  // string; … }`), not its name. A landing that is not an identifier,
+  // on a line declaring a type or interface, re-lands on the declared
+  // name — the symbol the command names.
+  return ripLocations(result).map((loc) => {
+    const text = ripTextAt(loc.uri, loc.range);
+    if (text === null || /^[A-Za-z_$][\w$]*$/.test(text)) return loc;
+    const line = ripLineAt(loc.uri, loc.range.start.line);
+    const decl = line === null ? null : /^\s*(?:export\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/.exec(line);
+    if (!decl) return loc;
+    const character = line.indexOf(decl[1], decl[0].length - decl[1].length);
+    return { uri: loc.uri, range: { start: { line: loc.range.start.line, character }, end: { line: loc.range.start.line, character: character + decl[1].length } } };
+  });
 });
 
 // References take NO module treatment: at a specifier, tsgo answers
@@ -3428,6 +3495,52 @@ function relayableCompletionContext(context) {
   return completionTriggerCharacters.includes(context.triggerCharacter) ? context : null;
 }
 
+// The TYPE half of a one-line declaration head: what follows the first
+// `: ` after the head's name (`let text: string` → `string`, `(property)
+// P.count: number` → `number`); a construct or call head (`constructor
+// Field(props): Field`) is its own type. Null where no head is found.
+function typeTextOf(flat) {
+  if (typeof flat !== 'string' || flat === '') return null;
+  if (/^(?:constructor |\(method\) |function )/.test(flat)) return flat;
+  const m = /^(?:\(alias\) )*(?:\([a-z ]+\) )?(?:readonly )?(?:const |let |var )?[\w$.]+(?:<[^>]*>)?\??: ([^]*)$/.exec(flat);
+  return m ? m[1] : null;
+}
+
+// A completion item's detail column is a typed line, the same thing a
+// hover's fenced block is, and it takes the hover's own presenters
+// before the type presenter: a component's construct signature reads as
+// its rip signature on one line (`component Button extends button props:
+// { … }`), and a reactive member of a component THIS file declares reads
+// value-first, the in-body answer (RULINGS.md, the member rows) — a
+// consumer's instance member, declared elsewhere, keeps its container.
+// Everything else is presentType's.
+function presentCompletionDetail(good, detail) {
+  const fence = { kind: 'markdown', value: '```typescript\n' + detail + '\n```' };
+  const asComponent = presentComponentSignatureHover(fence);
+  if (asComponent) {
+    const body = /```rip\n([^]*?)\n```/.exec(asComponent.value);
+    if (body) {
+      const lines = body[1].split('\n');
+      return lines.length > 1 ? `${lines[0]} props: { ${lines.slice(2, -1).map((l) => l.trim()).join('; ')} }` : lines[0];
+    }
+  }
+  const flat = detail.replace(/\s+/g, ' ').trim();
+  // tsgo cuts a long resolved detail short (`…Record<'accesskey', ...`),
+  // and a cut construct signature parses as nothing: the props block is
+  // open-ended. The construct's own head still says what it is, and a
+  // component whose rows cannot be read presents as the component alone
+  // — never as the lowering's cut text.
+  const construct = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): (?:\{ )?new (?:<[^(]*>)?\(props\??: \{/.exec(flat);
+  if (construct) return `component ${construct[1]}`;
+  const member = /^\(property\) (?:[\w$]+\.)*([A-Za-z_$][\w$]*)\.[A-Za-z_$][\w$]*: \{/.exec(flat);
+  if (member && new RegExp(`(?:^|\\n)(?:export )?${member[1]}(?:<[^>\\n]*>)?\\s*=\\s*component\\b`).test(good.source)) {
+    const asMember = presentReactiveCellHover({ ...fence, value: '```typescript\n' + flat + '\n```' }, true);
+    const body = asMember ? /```typescript\n([^]*?)\n```/.exec(asMember.value) : null;
+    if (body) return presentType(body[1]);
+  }
+  return presentType(detail);
+}
+
 // A completion's documentation, either LSP spelling, face names scrubbed.
 function scrubDocumentation(doc) {
   return typeof doc === 'string' ? scrubFaceArtifacts(doc) : { ...doc, value: scrubFaceArtifacts(doc.value ?? '') };
@@ -3451,7 +3564,7 @@ function ripCompletionItem(ctx, raw, index) {
   // The detail column is a printed type and the documentation is prose:
   // the type presents (presentType — scrubbed, a cell arm collapsed), the
   // prose only scrubs.
-  if (raw.detail) item.detail = presentType(raw.detail);
+  if (raw.detail) item.detail = presentCompletionDetail(ctx.good, raw.detail);
   if (raw.documentation) item.documentation = scrubDocumentation(raw.documentation);
   if (raw.textEdit?.range) {
     const mapped = faceEditsToCurrent(ctx, [raw.textEdit]);
@@ -3740,7 +3853,7 @@ async function pairSpliceProbe(params) {
   return items.length ? { isIncomplete: false, items } : null;
 }
 
-connection.onCompletion(async (params) => {
+connection.onCompletion(presented('textDocument/completion', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
@@ -3797,9 +3910,29 @@ connection.onCompletion(async (params) => {
   if (!result) return pairSpliceProbe(params);
   const rawItems = Array.isArray(result) ? result : result.items ?? [];
   ctx.state.lastCompletion = rawItems;
+  // tsgo's resolve, asked with the cursor inside a CALLABLE symbol's own
+  // name (a class in `new Field(`, a function in `go()`), prints every
+  // item's detail with that symbol's type after the item's own head —
+  // `let text: new (props?) => Field`. The cursor symbol's type is read
+  // once here, and a resolved detail that merely repeats it is dropped
+  // (onCompletionResolve) rather than shown wrong. At a fresh prefix,
+  // a blank, or a plain variable the details are tsgo's own and pass.
+  ctx.state.lastCompletionCursorType = null;
+  ctx.state.lastCompletionCursorWord = null;
+  if (/[\w$]/.test(ctx.currentText[cursor - 1] ?? '') || /[\w$]/.test(ctx.currentText[cursor] ?? '')) {
+    let ws = cursor, we = cursor;
+    while (ws > 0 && /[\w$]/.test(ctx.currentText[ws - 1])) ws--;
+    while (we < ctx.currentText.length && /[\w$]/.test(ctx.currentText[we])) we++;
+    ctx.state.lastCompletionCursorWord = ctx.currentText.slice(ws, we);
+    const probe = await tsgoRequest('textDocument/hover', {
+      textDocument: { uri: ctx.state.tsUri }, position: offsetToPosition(ctx.good.genLineStarts, genCursor),
+    }, 'completion cursor type');
+    const flat = typeof probe?.contents?.value === 'string' ? probe.contents.value.replace(/```\w*\n?/g, '').replace(/\s+/g, ' ').trim() : '';
+    ctx.state.lastCompletionCursorType = typeTextOf(flat);
+  }
   const items = [];
   for (let i = 0; i < rawItems.length; i++) {
-    if (isScaffoldingLabel(rawItems[i].label)) continue;
+    if (isScaffoldingLabel(rawItems[i].label, ctx.good.source)) continue;
     const item = ripCompletionItem(ctx, rawItems[i], i);
     if (item) items.push(item);
   }
@@ -3811,16 +3944,24 @@ connection.onCompletion(async (params) => {
     if (probed) return probed;
   }
   return { isIncomplete: Array.isArray(result) ? false : !!result.isIncomplete, items };
-});
+}));
 
-connection.onCompletionResolve(async (item) => {
+connection.onCompletionResolve(presented('completionItem/resolve', async (item) => {
   const { uri, index } = item.data ?? {};
   const state = uri === undefined ? null : states.get(uri);
   const raw = state?.lastCompletion?.[index];
   if (!raw || !tsgo) return item;
   const resolved = await tsgoRequest('completionItem/resolve', raw, 'completion resolve');
   if (!resolved) return item;
-  if (resolved.detail) item.detail = presentType(resolved.detail);
+  // The positional leak (see onCompletion): a detail whose type is the
+  // cursor symbol's own, on an item that is not that symbol, is not the
+  // item's type and does not show.
+  // The item that IS the cursor symbol carries its own type by right.
+  const leaked = state.lastCompletionCursorType;
+  const own = item.label.replace(/\?$/, '') === state.lastCompletionCursorWord;
+  if (resolved.detail && !(leaked && !own && typeTextOf(resolved.detail.replace(/\s+/g, ' ').trim()) === leaked)) {
+    item.detail = state.lastGood ? presentCompletionDetail(state.lastGood, resolved.detail) : presentType(resolved.detail);
+  }
   if (resolved.documentation) item.documentation = scrubDocumentation(resolved.documentation);
   if (resolved.additionalTextEdits?.length) {
     const ctx = requestContext({ textDocument: { uri } });
@@ -3829,7 +3970,7 @@ connection.onCompletionResolve(async (item) => {
     else connection.console.log(`[rip] auto-import edit for '${item.label}' did not map — inserted without the import`);
   }
   return item;
-});
+}));
 
 // ---- signature help: the position maps with cursor semantics (the
 // active position sits between a call's argument tokens); the response
@@ -3838,7 +3979,7 @@ connection.onCompletionResolve(async (item) => {
 // keeps the indices correct across bodiless overload rows (the face
 // prints them adjacent to their implementation, and tsgo numbers the
 // overload list itself).
-connection.onSignatureHelp(async (params) => {
+connection.onSignatureHelp(presented('textDocument/signatureHelp', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
@@ -3863,6 +4004,14 @@ connection.onSignatureHelp(async (params) => {
   // says so — a signature whose callee is a minted `__` name the source
   // never spells.
   if (insideLoweredCall(ctx.good.code, genCursor)) return null;
+  // The general form of the same rule: the call's CALLEE must be a word
+  // the author wrote. The lowering inserts calls whose callee is a lib
+  // name — `__out.push(` for a comprehension, `Object.assign(` for a
+  // spread, `Array.isArray(`/`.includes(` for `in`, `new RegExp(` for a
+  // heregex, `toMatchable(` for `=~` — and a signature there describes
+  // the lowering. A callee whose face bytes map back to source
+  // verbatim is the author's; one with no such twin is not.
+  if (!authoredCallee(ctx, genCursor)) return null;
   const active = result.signatures[result.activeSignature ?? 0];
   const mintedCallee = /^(__[A-Za-z$][\w$]*)\(/.exec(active?.label ?? '');
   if (mintedCallee && !ctx.good.source.includes(mintedCallee[1])) return null;
@@ -3879,22 +4028,34 @@ connection.onSignatureHelp(async (params) => {
     ...result,
     signatures: result.signatures.map((sig) => ({ ...sig, label: presentType(sig.label) })),
   };
-});
+}));
 
 // Whether the face position `gen` sits inside the argument list of a call
 // the LOWERING minted on that line — the text-node call a render child
 // becomes. Walks back over the line's balanced parens to each enclosing
 // open paren and reads its callee.
-const LOWERED_CALLEES = /(?:^|[^\w$.])(?:document\.create(?:TextNode|Element|ElementNS|Comment)|__[A-Za-z$][\w$]*)$/;
+// The calls the lowering writes around an author's bytes: the DOM
+// constructors, the `String` wrap a text read takes, the runtime's `__`
+// helpers, and any method called on a render local (`this._el3.
+// setAttribute(`, `_el0.addEventListener(`) — the attribute, event, and
+// presence roads. Judged at the INNERMOST call: the call nearest the
+// cursor is the one a signature would describe, and a call the author
+// wrote inside a handler (`console.log(1)` under the `__batch` wrapper)
+// answers as itself.
+const LOWERED_CALLEES = /(?:^|[^\w$.])(?:document\.create(?:TextNode|Element|ElementNS|Comment)|String|__[A-Za-z$][\w$]*|\(?(?:this\.)?_(?:el|t|inst|frag|anchor|empty|slot)\d+(?: as [\w$<>]+)?\)?\.[A-Za-z]+)$/;
 function insideLoweredCall(code, gen) {
   const call = enclosingCall(code, gen);
   return call !== null && LOWERED_CALLEES.test(call.before);
 }
 
-// The innermost call whose argument list holds the face position `gen`,
+// The innermost CALL whose argument list holds the face position `gen`,
 // on gen's own face line: the text before its open paren (the callee
-// sits at its end) and the paren's offset. Null when no paren on the
-// line opens around the position.
+// sits at its end) and the paren's offset. A paren that opens no call —
+// a grouping `(`, an arrow's parameter list, a keyword's `if (` — is
+// passed over for the next one out: a cursor inside the ternary the
+// loop lowering pushes is inside `push(`, whatever parens the ternary
+// wears. Null when no call on the line opens around the position.
+const NOT_A_CALLEE = /\b(?:if|while|for|switch|catch|return|typeof|await|yield|else|in|of|void|delete|instanceof)$/;
 function enclosingCall(code, gen) {
   const lineStart = code.lastIndexOf('\n', gen - 1) + 1;
   let depth = 0;
@@ -3903,13 +4064,29 @@ function enclosingCall(code, gen) {
     if (c === ')') depth++;
     else if (c === '(') {
       if (depth > 0) { depth--; continue; }
-      return { before: code.slice(lineStart, i), open: i };
+      const before = code.slice(lineStart, i);
+      if (/[\w$)\]]\s*$/.test(before) && !NOT_A_CALLEE.test(before.trimEnd())) return { before, open: i };
     }
   }
   return null;
 }
 
 
+
+// Whether the innermost call around the face position `gen` has a
+// callee the author wrote: its identifier bytes in the face map back
+// to source verbatim (the precise map, the same one an edit needs). A
+// position inside no call answers true — there is nothing to judge, and
+// tsgo decides.
+function authoredCallee(ctx, gen) {
+  const call = enclosingCall(ctx.good.code, gen);
+  if (call === null) return true;
+  const callee = /([A-Za-z_$][\w$]*)\s*$/.exec(call.before);
+  if (callee === null) return true;
+  const end = call.open - (call.before.length - callee.index - callee[0].length) - (callee[0].length - callee[1].length);
+  const start = end - callee[1].length;
+  return generatedEditSpanToSource(ctx.good.mappings, start, end, ctx.good.source, ctx.good.code) !== null;
+}
 
 // Whether a signature row is a component's construction — `Name(props?:
 // { … }): Name`, one parameter whose block reads as a props block
@@ -4194,6 +4371,13 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
     if (!selSrc) continue;
     const selection = goodRangeToCurrent(ctx, selSrc);
     if (!selection) continue;
+    // A selection that maps to NOTHING (an anonymous callback's arrow, a
+    // name the face spells where the source spells none) is no entry:
+    // an outline row must be its own name. Its children still list.
+    if (selection.start.line === selection.end.line && selection.start.character === selection.end.character) {
+      if (sym.children?.length) out.push(...ripDocumentSymbols(ctx, sym.children, seen));
+      continue;
+    }
     const key = `${sym.name}@${selection.start.line}:${selection.start.character}:${selection.end.line}:${selection.end.character}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -4220,7 +4404,7 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
   return out;
 }
 
-connection.onDocumentSymbol(async (params) => {
+connection.onDocumentSymbol(presented('textDocument/documentSymbol', async (params) => {
   await tsgoReady;
   // Cached by the editor exactly like semantic tokens, and asked once when
   // the editor opens — before the first compile that is a null, and the
@@ -4244,7 +4428,7 @@ connection.onDocumentSymbol(async (params) => {
     return out;
   }
   return ripDocumentSymbols(ctx, result);
-});
+}));
 
 // Workspace symbols search the ACTIVE PROGRAM (the open
 // buffers' closure; out-of-program files are honestly out of scope).
@@ -4253,7 +4437,7 @@ connection.onDocumentSymbol(async (params) => {
 // recompile-for-mappings, real
 // TypeScript files pass through; synthetic landings drop. The same
 // one-symbol-per-declaration dedup as the outline.
-connection.onWorkspaceSymbol(async (params) => {
+connection.onWorkspaceSymbol(presented('workspace/symbol', async (params) => {
   await tsgoReady;
   if (!tsgo) return null;
   const result = await tsgoRequest('workspace/symbol', { query: params.query ?? '' }, 'workspace symbols');
@@ -4277,7 +4461,7 @@ connection.onWorkspaceSymbol(async (params) => {
     });
   }
   return out;
-});
+}));
 
 // ---- WorkspaceEdit mapping (rename, code actions): every edit in
 // every touched file must land on Rip source — all-or-nothing. Edits
@@ -4378,7 +4562,11 @@ function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
     for (const e of edits) {
       const srcEdit = faceEditToSourceEdit(face, e);
       if (!srcEdit) {
-        return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source` };
+        // The refusal names the generated bytes it could not place, so the
+        // reader sees WHICH copy of the name the lowering spelled on its own.
+        const at = positionToOffset(face.genLineStarts, face.code.length, e.range.start);
+        const around = face.code.slice(Math.max(0, face.code.lastIndexOf('\n', at - 1) + 1), Math.min(face.code.length, at + 60)).replace(/\s+/g, ' ').trim().slice(0, 90);
+        return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source (${JSON.stringify(around)})` };
       }
       if (incompleteFrom !== null && !beforePosition(srcEdit.range.end, incompleteFrom)) {
         return { failure: `an edit in ${ripUri.split('/').pop()} lands on an incomplete expression — finish it and retry` };
@@ -4466,7 +4654,7 @@ connection.onRenameRequest(async (params) => {
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose
 // edit cannot land on Rip source is dropped, never shown broken.
-connection.onCodeAction(async (params) => {
+connection.onCodeAction(presented('textDocument/codeAction', async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx) return null;
@@ -4549,7 +4737,7 @@ connection.onCodeAction(async (params) => {
     });
   }
   return actions;
-});
+}));
 
 documents.listen(connection);
 connection.listen();

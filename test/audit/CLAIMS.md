@@ -83,6 +83,8 @@ What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across e
 | a wrong-typed write to component state inside a method rejects, while the legal write types | 25-components.rip:Ledger | 25-components.errors.rip:Books |
 | array-typed reactive state keeps its ELEMENT type through the cell — `string[] := [...]` rejects a number element and types a read | 25-components.rip:ledgerHead | 25-components.errors.rip:Books |
 | a forwarded element ref — a child `ref:` into a `<=>` bound parent cell — checks end to end | 25-components.rip:Cuff | 25-components.errors.rip:Liner |
+| an exported component — a prop with a default and a child slot — is a module's export another module's use site consumes | 27-components-lib.rip:Tag | — |
+| a component imported from another module: its use, its prop key, and its child type-check and navigate across the module boundary | 27-components-use.rip:Board | — |
 
 ### Schema
 

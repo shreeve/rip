@@ -35,6 +35,8 @@ const cleanStates = () => ({
   hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1, untyped: 0 },
   tk: { missing: [], badType: [], badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
   sw: { machinery: 0, census: 0, misdirection: 0 },
+  ld: { answers: 0, silent: 0 },
+  rt: { edits: 0, refused: 0 },
 });
 const allRan = () => true;
 
@@ -168,6 +170,10 @@ describe('the audit contract judges in both directions', () => {
       'sweep.machinery': (s) => { s.sw.machinery = 1; },
       'sweep.census': (s) => { s.sw.census = 1; },
       'sweep.misdirection': (s) => { s.sw.misdirection = 1; },
+      'landing.answers': (s) => { s.ld.answers = 1; },
+      'landing.census': (s) => { s.ld.silent = 1; },
+      'roundtrip.edits': (s) => { s.rt.edits = 1; },
+      'roundtrip.census': (s) => { s.rt.refused = 1; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
     for (const [name, seed] of Object.entries(fire)) {

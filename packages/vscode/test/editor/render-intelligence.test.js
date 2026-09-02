@@ -571,6 +571,72 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('completion detail: a component reads as its signature, a member value-first, and a positional leak is dropped', async () => {
+    // The detail column is a typed line and takes the hover's presenters:
+    // a component item's construct signature reads as the rip signature
+    // on one line, and a reactive member of the file's own component
+    // reads value-first. tsgo's resolve, asked with the cursor inside a
+    // callable symbol's own name, prints every item's detail with THAT
+    // symbol's type; a detail that merely repeats it is dropped.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const button = [
+        'export Button = component extends button',           // 0
+        "  @variant?: 'primary' | 'secondary' := 'primary'",  // 1
+        '  count := 0',                                       // 2
+        '  render',                                           // 3
+        "    button class: [@variant], @click: (-> count += 1)", // 4
+        "      'x'",                                          // 5
+        '      count',                                        // 6
+        'export Tag = component',                             // 7
+        '  @label?: string',                                  // 8
+        '  render',                                           // 9
+        '    span label',                                     // 10
+        '',
+      ].join('\n');
+      const form = [
+        "import { Button, Tag } from './button.rip'",  // 0
+        'export Form = component',                     // 1
+        '  render',                                    // 2
+        '    div',                                     // 3
+        "      Button variant: 'primary'",             // 4
+        "      Tag label: 'x'",                        // 5
+        '',
+      ].join('\n');
+      await api.open('button.rip', button);
+      await api.open('form.rip', form);
+      const atUse = await api.completion('form.rip', 4, 10);            // inside `Button`, a construct's callee
+      const buttonItem = (atUse?.items ?? []).find((i) => i.label === 'Button');
+      expect(buttonItem).toBeDefined();
+      // An `extends` component's construct detail carries every passthrough
+      // row, and tsgo may cut a resolved detail that long — whole, it
+      // reads as the full signature; cut, the head still says what it
+      // is and the item reads as the component alone. Never the rows.
+      const resolvedButton = await api.resolve(buttonItem);
+      expect(resolvedButton.detail).toMatch(/^component Button( extends button props: \{ variant\?: 'primary' \| 'secondary' \})?$/);
+      // A construct detail tsgo delivers whole reads as the full signature
+      // — asked at the item's own use, where its detail is its own.
+      const atTag = await api.completion('form.rip', 5, 8);              // inside `Tag`
+      const tagItem = (atTag?.items ?? []).find((i) => i.label === 'Tag');
+      expect(tagItem).toBeDefined();
+      expect((await api.resolve(tagItem)).detail).toBe('component Tag props: { label?: string }');
+      // Any other item at this position carried Button's construct type
+      // in its detail; it never shows.
+      const other = (atUse?.items ?? []).find((i) => i.label === 'console');
+      expect(other).toBeDefined();
+      const resolvedOther = await api.resolve(other);
+      expect(resolvedOther.detail ?? '').not.toContain('=> Button');
+      expect(resolvedOther.detail ?? '').not.toContain('read()');
+
+      const inBody = await api.completion('button.rip', 6, 9);          // inside the `count` read
+      const countItem = (inBody?.items ?? []).find((i) => i.label === 'count');
+      expect(countItem).toBeDefined();
+      const resolvedCount = await api.resolve(countItem);
+      expect(resolvedCount.detail).toBe('(property) Button.count: number');
+      // The lowering's own names are never offered.
+      expect((inBody?.items ?? []).some((i) => /^_(?:el|t|inst)\d+$|^_init$|^create_block_/.test(i.label))).toBe(false);
+    });
+  });
+
   test('hover: a hyphenated key answers on every road — never the effect machinery', async () => {
     // A hyphenated key's stored primitive keeps the lexer's quotes, so
     // its claim must go through the stored spelling; without the exact

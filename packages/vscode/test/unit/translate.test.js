@@ -4,7 +4,7 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
-import { collapseCellArms, collapseTypedHead, presentType, isImportFixTitle,
+import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isImportFixTitle,
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
@@ -711,6 +711,13 @@ describe('collapseCellArms: a cell reads as its value type', () => {
     expect(collapseCellArms('"{" | { value: "{"; read(): "{"; touch?(): void; } | undefined'))
       .toBe('"{" | undefined');
   });
+  test('a cell arm inside a parenthesized group collapses within its parens — a required prop\'s slot', () => {
+    // The group's own parens go once nothing in it needs them: `&` binds
+    // tighter than `|`, so `A | (B | C) & D` reads as TypeScript prints it.
+    expect(collapseCellArms('string | ((string | { value: string; read(): string; touch?(): void; } | undefined) & { x: 1 })'))
+      .toBe('string | (string | undefined) & { x: 1 }');
+    expect(collapseCellArms('((number | { value: number; read(): number; touch?(): void; }))')).toBe('number');
+  });
   test('a quoted operator is not a union: the message text around it survives', () => {
     expect(collapseCellArms('|')).toBe('|');
     expect(collapseCellArms('||')).toBe('||');
@@ -751,6 +758,35 @@ describe('isImportFixTitle: the quick fixes the editor offers', () => {
       "Change spelling to 'size'", "Remove unused declaration for: 'k'", "Prefix 'k' with an underscore",
       'Infer parameter types from usage', "Add 'await'", "Declare property 'sizee'", 'Add all missing imports to file',
     ]) expect([title, isImportFixTitle(title)]).toEqual([title, false]);
+  });
+});
+
+// The boundary pass: display fields present once more on the way out,
+// edit fields never, and a changed field is reported as a rescue.
+describe('presentOutgoing: the boundary pass', () => {
+  const cell = 'boolean | { value: boolean; read(): boolean; touch?(): void; } | undefined';
+  test('a clean response passes through and reports nothing', () => {
+    const calls = [];
+    const res = { items: [{ label: 'x', detail: '(property) x: boolean | undefined', textEdit: { newText: '__RipChildren' } }] };
+    expect(presentOutgoing('textDocument/completion', res, (m, f) => calls.push(f))).toEqual(res);
+    expect(calls).toEqual([]);
+  });
+  test('a forgotten presenter is rescued and named — the edit payload beside it is untouched', () => {
+    const calls = [];
+    const out = presentOutgoing('textDocument/completion', { items: [{ label: 'x', detail: `(property) x: ${cell}`, insertText: '__RipRest_button', textEdit: { newText: '__RipChildren' } }] }, (m, f) => calls.push(`${m} ${f}`));
+    expect(out.items[0].detail).toBe('(property) x: boolean | undefined');
+    expect(out.items[0].insertText).toBe('__RipRest_button');
+    expect(out.items[0].textEdit.newText).toBe('__RipChildren');
+    expect(calls).toEqual(['textDocument/completion detail']);
+  });
+  test('hover contents, signature labels, symbol names, and action titles are display fields', () => {
+    const calls = [];
+    const on = (m, f) => calls.push(f);
+    expect(presentOutgoing('textDocument/hover', { contents: { kind: 'markdown', value: 'x: __RipChildren' } }, on).contents.value).toBe('x: Children');
+    expect(presentOutgoing('textDocument/signatureHelp', { signatures: [{ label: `f(a: ${cell}): void`, parameters: [{ label: 'a' }] }] }, on).signatures[0].label).toBe(`f(a: ${cell}): void`);
+    expect(presentOutgoing('textDocument/documentSymbol', [{ name: '__RipEl_div', detail: 'x', children: [] }], on)[0].name).toBe('<div>');
+    expect(presentOutgoing('textDocument/codeAction', [{ title: "Add import from './a.rip.ts'" }], on)[0].title).toBe("Add import from './a.rip'");
+    expect(calls).toEqual(['contents', 'name', 'title']);
   });
 });
 

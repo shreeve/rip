@@ -777,6 +777,24 @@
       }
     ]
   },
+  "27-components-lib.rip": {
+    "decls": [
+      {
+        "name": "Tag",
+        "expect": "const Tag: typeof Tag"
+      }
+    ],
+    "positions": []
+  },
+  "27-components-use.rip": {
+    "decls": [
+      {
+        "name": "Board",
+        "expect": "let Board: typeof Board"
+      }
+    ],
+    "positions": []
+  },
   "held.rip": {
     "positions": [
       {

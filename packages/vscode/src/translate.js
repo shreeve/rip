@@ -201,13 +201,35 @@ export function cellShape(text) {
 export function collapseCellArms(type) {
   if (typeof type !== 'string') return type;
   const top = unionArms(type);
-  if (top.length < 2) return type;
+  // A PARENTHESIZED union is a union too — a required prop's slot prints
+  // `string | ((string | { value: … } | undefined) & …)` — so a `(…)` arm
+  // collapses inside its parens, and drops them when one arm remains.
+  const inner = (arm) => {
+    // An INTERSECTION's pieces each collapse on their own.
+    const pieces = splitTypeAt(arm, '&');
+    if (pieces.length > 1) {
+      const done = pieces.map((p) => { const t = p.trim(); const c = inner(t); return c === t ? p : p.replace(t, c); });
+      return done.every((p, i) => p === pieces[i]) ? arm : done.join('&');
+    }
+    if (!(arm.startsWith('(') && balancedTo(arm, 0) === arm.length - 1)) return arm;
+    const within = collapseCellArms(arm.slice(1, -1));
+    if (within === arm.slice(1, -1)) return arm;
+    return unionArms(within).length === 1 ? within : `(${within})`;
+  };
+  if (top.length < 2) {
+    if (top.length === 1) {
+      const one = inner(top[0]);
+      if (one !== top[0]) return type.replace(top[0], one);
+    }
+    return type;
+  }
   let collapsed = false;
   const arms = top.map((arm) => {
     const cell = cellShape(arm);
-    if (cell === null) return arm;
-    collapsed = true;
-    return cell.value;
+    if (cell !== null) { collapsed = true; return cell.value; }
+    const grouped = inner(arm);
+    if (grouped !== arm) collapsed = true;
+    return grouped;
   });
   if (!collapsed) return type;
   // A collapsed cell's value type may itself be a union, so the arms
@@ -256,6 +278,81 @@ export function presentType(text) {
 // syntax, which has no place landing inside rip source.
 export const isImportFixTitle = (title) => typeof title === 'string'
   && /^(?:Add import from |Update import from |Add all missing imports$)/.test(title);
+
+// The BOUNDARY pass: every response leaves the server through it, and
+// every DISPLAY field — text a person reads — is presented once more
+// (scrubbed; a type field collapsed) on the way out. The presenters
+// upstream are the real fix, and a well-behaved response passes through
+// unchanged; a field the pass has to change is a presenter that was
+// forgotten, and `onRescue(method, field)` reports it so a suite or a
+// lane can fail on it rather than let the net become the only
+// presenter. Fields that travel back INTO the buffer — `newText`,
+// `insertText`, `filterText`, `sortText`, every edit — are never
+// touched: the scrub is display-only by design, and rewriting an edit
+// would corrupt the file it lands in.
+const TYPE_FIELDS = new Set(['detail', 'description', 'label']);
+export function presentOutgoing(method, result, onRescue = () => {}) {
+  if (result === null || result === undefined) return result;
+  const rescue = (field) => onRescue(method, field);
+  const text = (value, field, type = false) => {
+    if (typeof value !== 'string') return value;
+    const out = type ? presentType(value) : scrubFaceArtifacts(value);
+    if (out !== value) rescue(field);
+    return out;
+  };
+  const markup = (doc, field) => {
+    if (typeof doc === 'string') return text(doc, field);
+    if (doc && typeof doc.value === 'string') { const v = text(doc.value, field); return v === doc.value ? doc : { ...doc, value: v }; }
+    return doc;
+  };
+  const item = (it) => {
+    if (!it || typeof it !== 'object') return it;
+    const out = { ...it };
+    if (out.detail !== undefined) out.detail = text(out.detail, 'detail', true);
+    if (out.labelDetails?.description !== undefined) {
+      const d = text(out.labelDetails.description, 'labelDetails.description', true);
+      if (d !== out.labelDetails.description) out.labelDetails = { ...out.labelDetails, description: d };
+    }
+    if (out.documentation !== undefined) out.documentation = markup(out.documentation, 'documentation');
+    return out;
+  };
+  const symbol = (sym) => {
+    if (!sym || typeof sym !== 'object') return sym;
+    const out = { ...sym };
+    if (out.name !== undefined) out.name = text(out.name, 'name');
+    if (out.detail !== undefined) out.detail = text(out.detail, 'detail', true);
+    if (out.containerName !== undefined) out.containerName = text(out.containerName, 'containerName');
+    if (Array.isArray(out.children)) out.children = out.children.map(symbol);
+    return out;
+  };
+  switch (method) {
+    case 'textDocument/hover': {
+      const c = result.contents;
+      if (c && typeof c.value === 'string') { const v = text(c.value, 'contents'); return v === c.value ? result : { ...result, contents: { ...c, value: v } }; }
+      return result;
+    }
+    case 'textDocument/completion': {
+      if (Array.isArray(result)) return result.map(item);
+      return Array.isArray(result.items) ? { ...result, items: result.items.map(item) } : result;
+    }
+    case 'completionItem/resolve': return item(result);
+    case 'textDocument/signatureHelp': {
+      if (!Array.isArray(result.signatures)) return result;
+      return { ...result, signatures: result.signatures.map((sig) => ({
+        ...sig,
+        label: text(sig.label, 'label', true),
+        ...(sig.documentation !== undefined ? { documentation: markup(sig.documentation, 'documentation') } : {}),
+        ...(Array.isArray(sig.parameters) ? { parameters: sig.parameters.map((p) => ({ ...p, ...(typeof p.label === 'string' ? { label: text(p.label, 'parameters.label', true) } : {}), ...(p.documentation !== undefined ? { documentation: markup(p.documentation, 'parameters.documentation') } : {}) })) } : {}),
+      })) };
+    }
+    case 'textDocument/documentSymbol':
+    case 'workspace/symbol':
+      return Array.isArray(result) ? result.map(symbol) : result;
+    case 'textDocument/codeAction':
+      return Array.isArray(result) ? result.map((a) => (a && typeof a.title === 'string' ? { ...a, title: text(a.title, 'title') } : a)) : result;
+    default: return result;
+  }
+}
 
 // Route-union display prettifying, two passes over the same member
 // list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
@@ -820,8 +917,20 @@ export function exactSpanMapper(mappings) {
 // their internals) and the `_ref` temp family (hoisted chain-comparison
 // caches). Both namespaces are the compiler's by construction — temps
 // dodge every user identifier, and the runtime ships under `__`.
-export function isScaffoldingLabel(label) {
-  return /^__/.test(label) || /^_ref\d*$/.test(label);
+// The lowering's own names never surface as completion items: the `__`
+// runtime helpers, the `_ref` temps, the render locals (`_el3`, `_t1`,
+// `_inst9`, `_factoryChildren`), the block factories (`create_block_5`),
+// and the component runtime's private surface (`_init`, `_teardown`,
+// `_mountSetup`, …). A `_`-prefixed name the SOURCE spells is the
+// author's own and stays offered.
+const RUNTIME_PRIVATE = new Set([
+  '_init', '_teardown', '_mountSetup', '_mountCreate', '_beginMount', '_failMount', '_hmrRerender',
+  '_setRestProp', '_updateProp', '_applyInheritedProp', '_applyPlainInheritedProp', '_applyRestToInheritedEl',
+]);
+export function isScaffoldingLabel(label, source = '') {
+  if (/^__/.test(label) || /^_ref\d*$/.test(label)) return true;
+  if (!/^_(?:el|t|inst|frag|anchor|empty|slot)\d+$|^_factory[A-Za-z]*$|^create_block_\d+$/.test(label) && !RUNTIME_PRIVATE.has(label)) return false;
+  return !source.includes(label);
 }
 
 // TS-face spellings scrubbed from user-visible STRINGS (labels,
@@ -958,6 +1067,18 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
         }
       }
       prevPrev = prevWord; prevWord = t.kind;
+      continue;
+    }
+    // A type-parameter list is ONE lexer token (`<T, U extends Base>`);
+    // each name inside it is a symbol the author wrote, and hovers.
+    // Only the parameter NAMES — the word after `<` or a `,` — are its
+    // declarations; a constraint's words (`extends string`) are types,
+    // and stay out the way an annotation's do.
+    if (t.kind === 'TYPE_PARAMS' && typeof t.value === 'string' && typeof t.start === 'number') {
+      for (const m of t.value.matchAll(/(?:^<|,)\s*([A-Za-z_$][\w$]*)/g)) {
+        const at = t.start + m.index + m[0].length - m[1].length;
+        spans.push([at, at + m[1].length]);
+      }
       continue;
     }
     if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY'

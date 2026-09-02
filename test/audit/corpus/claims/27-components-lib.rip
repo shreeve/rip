@@ -1,0 +1,12 @@
+# 27-components-lib.rip — the module 27-components-use imports from: one exported component with a prop and a child slot.
+
+export Tag = component
+  @label?: string := ''
+  @tone?: 'info' | 'warn' := 'info'
+
+  render
+    span class: tone
+      label
+      slot
+
+console.log('lib:', typeof Tag)

@@ -117,3 +117,4 @@ console.log('dynamic:', lazyHost, bangPort)
 # ── import.meta: the module knows its own address ──
 
 console.log('meta:', import.meta.url.includes('10-modules'))
+# The lib this file imports from is ./10-modules-lib.rip; the hub beside it is ./10-modules-hub.rip.
