@@ -537,7 +537,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       for (const p of pairs) {
         entries.push({
           tag: 'ensure', name: 'ensure',
-          message: p.message, field: p.field, async: isAsync,
+          message: p.message, field: p.field, fieldStart: p.fieldStart, async: isAsync,
           paramTokens: p.paramTokens, bodyTokens: p.bodyTokens,
           start: first.start,
         });
@@ -1580,7 +1580,9 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   }
   const msgTok = messagePart[0];
   const message = JSON.parse(msgTok.value);
-  const field = fieldPart ? symWordAt(fieldPart, 0).value : null;
+  const fieldTok = fieldPart ? symWordAt(fieldPart, 0) : null;
+  const field = fieldPart ? fieldTok.value : null;
+  const fieldStart = fieldTok?.start ?? null;
   if (!fnPart?.length) {
     fail(`@ensure: missing function after message`, msgTok.start);
   }
@@ -1608,7 +1610,7 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   }
   const bodyTokens = fnPart.slice(pos + 1);
   if (!bodyTokens.length) fail(`@ensure: predicate function body is empty`, arrowTok.start);
-  return { message, field, paramTokens, bodyTokens };
+  return { message, field, fieldStart, paramTokens, bodyTokens };
 }
 
 // Each parameter of a captured `(a, b)` slice: a plain identifier,

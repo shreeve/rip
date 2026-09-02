@@ -346,6 +346,30 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
     });
   }, 30000);
 
+  test('auto-import never names a module under the mirror\'s __external__ tree: the app runtime\'s internals stay unoffered, its entry stays offered', async () => {
+    // A route's gate pulls the app runtime into the program; tsgo then
+    // offers every exported type it can reach as an auto-import, the
+    // runtime's internal files included — under the mirror's own path.
+    await inWorkspace({
+      'index.rip': "console.log 'serve'\n",
+      'package.json': '{}',
+      'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n",
+    }, async (api) => {
+      await api.open('app/routes/page.rip', "export Page = component\n  todos <~ @app.data.todos\n  q ~= @router.query.q ?? ''\n  shout ~= q.toUpperCase()\n  n = Number.parseInt('4')\n  render null\n");
+      await api.open('app/stash.rip', "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n");
+      let items = [];
+      for (let i = 0; i < 20; i++) {
+        const c = await api.completion('app/stash.rip', 1, 13); // id: number‸
+        items = Array.isArray(c) ? c : c?.items ?? [];
+        if (items.some((it) => it.labelDetails?.description === 'rip/app')) break;
+        await api.sleep(200);
+      }
+      expect(items.some((it) => it.labelDetails?.description === 'rip/app')).toBe(true);
+      const leaked = items.filter((it) => /__external__/.test(`${it.labelDetails?.description ?? ''} ${it.detail ?? ''}`));
+      expect(leaked.map((it) => it.label)).toEqual([]);
+    });
+  }, 30000);
+
   test('the plain-comment control: a first-line ordinary comment does not hoist the insertion anchor', async () => {
     await inWorkspace({
       'util.rip': UTIL,

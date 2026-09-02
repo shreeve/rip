@@ -933,6 +933,15 @@ export function isScaffoldingLabel(label, source = '') {
   return !source.includes(label);
 }
 
+// An auto-import item whose module is a file under the mirror's
+// `__external__` tree — a source outside the workspace, mirrored under a
+// path only this server spells. The specifier it would insert is one no
+// author can write, and the item's description and detail print the
+// mirror's own layout. Never offered: what the same program reaches by a
+// real specifier (`rip/app`) is offered under that name instead.
+export const isMirrorImportItem = (item) =>
+  [item?.labelDetails?.description, item?.detail].some((s) => typeof s === 'string' && /(?:^|[\\/])__external__(?:[\\/]|$)/.test(s));
+
 // TS-face spellings scrubbed from user-visible STRINGS (labels,
 // details, documentation — never positions): the definite-assignment
 // `!` the face puts on bare typed forwards (`let y!: number` is a face

@@ -1476,6 +1476,17 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(rows(member)).toEqual(['0:count:state']);
   });
 
+  test('a provided name notes its kind at the chain root from every body position, a call\'s callee included', () => {
+    // `@app` / `@router` are read like members but declared by the runtime
+    // (RULINGS.md, Components): the read's own bytes carry the provision's
+    // label wherever the chain sits — a computed, a method body, and the
+    // callee of a call, which the chain driver enters as a call node.
+    // Source order: the emitter notes a method body's read after the members'.
+    const rows = (src) => ts(src).kinds.filter((k) => k.label === 'app' || k.label === 'router').sort((a, b) => a.start - b.start).map((k) => `${k.start}:${src.slice(k.start, k.end)}:${k.label}`);
+    const src = 'C = component\n  a ~= @router.query.q\n  mounted: -> @router.onNavigate(-> 1)\n  b: -> @app.data.x?.y()\n';
+    expect(rows(src)).toEqual(['22:router:router', '52:router:router', '85:app:app']);
+  });
+
   test('a served `key:` / `<=>` record points at a wrap member typed as the whole expression', () => {
     // A call- or index-ended expression ends on `)`/`]`, and the name
     // before it types a part; the record points at the TS-only wrap's

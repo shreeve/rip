@@ -1,0 +1,18 @@
+# page.rip — a route component over the stash: every gate form with a discovered stash, the `@app` and `@router` reads, and the typed router ambience.
+
+export Page = component
+  todos <~ @app.data.todos
+  title: string <~ @app.data.title
+  q ~= @router.query.q ?? ''
+  shout ~= q.toUpperCase()
+  remaining ~= todos.filter((t) -> not t.done).length
+
+  render
+    section
+      h1 title
+      p "#{remaining} left · #{shout}"
+      ul
+        for todo in todos
+          li key: todo.id, todo.label
+
+console.log('page:', typeof Page)

@@ -41,9 +41,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
-| [19](#19-completion-resolve-prints-the-cursor-symbols-type-on-every-item) | Completion resolve prints the cursor symbol's type on every item | `editor` | `sweep.machinery` — the completion classes over every word end |
-| [20](#20-declaration-names-the-face-spells-without-a-verbatim-twin) | Declaration names the face spells without a verbatim twin | `compiler`, `editor` | `landing.census` — red by agreement until each mark lands |
-| [21](#21-a-generated-copy-of-a-declared-name-refuses-its-rename) | A generated copy of a declared name refuses its rename | `compiler`, `editor` | `roundtrip.census` — red by agreement until each copy maps |
+| [68](#68-completion-resolve-prints-the-cursor-symbols-type-on-every-item) | Completion resolve prints the cursor symbol's type on every item | `editor` | `sweep.js` — the completion classes, gated by sweep.machinery |
 
 **The ordering principles.** Audience first; within a band, *silently wrong* outranks *visibly missing*: a wrong answer stated without hedging misleads, where a loud failure merely interrupts — so the loud rows (build breaks, parse errors) sink below the silent ones however broken their output is. One row remains — #16, held by an upstream release rather than a missing fix; its own body argues its place.
 
@@ -76,11 +74,11 @@ Also driven straight against the tsgo binary, bypassing rip: **not a single toke
 
 **Status.** ⬜ **Open** (2026-07-14) — **fixed upstream, waiting on a stable release.** [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635) closed 2026-07-21 (PR #4654, `declSourceFile.Path()`), and the modifier is present when the same probe runs against a build carrying it. But no stable release has it: npm `latest` is 7.0.2, published before the merge, and the only builds with the fix are `7.1.0-dev.*` under `next`. This repo pins 7.0.2, and that pin also feeds every tsc-backed gate ([tsc.js](../support/tsc.js) `resolveTsc`), so adopting it early means putting the gates on a daily build. The row's exit is a stable 7.1 reaching the pin. It still sits last because nothing here moves it — but the reason is now a release cadence, not an unfixed upstream bug.
 
-### 19. Completion resolve prints the cursor symbol's type on every item
+### 68. Completion resolve prints the cursor symbol's type on every item
 
 With the completion cursor inside a CALLABLE symbol's own name — a class in `new Field(`, a function in `go()` — tsgo's `completionItem/resolve` answers every item's detail as the item's own head followed by that symbol's type: `let text: new (props?: { label?: string; }) => Field`, `var SVGTransform: new (props?: …) => Field`. Inside a plain variable, at a fresh prefix, or on a blank the details are the items' own. A rip component use lowers its tag word to exactly such a callee, so a completion asked inside a component's name at a use site carried the construct signature — bind twins, cell arms, passthrough rows — on every item in the list.
 
-**Why (code)** — tsgo's resolve, not the broker: driven against the tsgo binary alone on a plain `.ts` file, same answers. The server forwards tsgo's own item to resolve and presents what comes back.
+**Why (code)** — tsgo's resolve, not the broker and not TypeScript: driven against the tsgo binary alone on a plain `.ts` file, same answers; TypeScript's own LanguageService (6.0.3, `getCompletionEntryDetails`) on the same file at the same cursor answers each entry's own type — `let text: string` where tsgo prints the constructor. The server forwards tsgo's own item to resolve and presents what comes back.
 
 **The fix — the server drops what it can prove wrong.** At completion time the cursor symbol's type is read once (one hover at the face position); at resolve a detail whose type text equals it, on an item that is not that symbol, is not the item's type and is not shown (`onCompletionResolve`). A correct detail at every other position passes untouched. No local change can recover the item's real type without a second ask per item, which resolve's own contract exists to avoid.
 
@@ -88,41 +86,9 @@ With the completion cursor inside a CALLABLE symbol's own name — a class in `n
 
 **Driven** — the broker on `13-components.rip` (every item at the `Field` and `Step` tag words carried the construct type) and the tsgo binary alone on a five-line `.ts` file (the table above the fix, in the drive).
 
-**vs v3** — not comparable: v3 resolved through the in-process JS LanguageService, whose `getCompletionEntryDetails` takes the entry name and answers that entry.
+**vs v3** — v3 did not have it: it resolved through the in-process JS LanguageService, whose `getCompletionEntryDetails` answers the named entry's own type at this position (the control above).
 
 **Status.** ⬜ **Open** (2026-09-02) — upstream in tsgo, not yet filed; the guard holds the editor honest meanwhile, and the sweep's completion classes gate the symptom.
-
-### 20. Declaration names the face spells without a verbatim twin
-
-A navigation answer maps back to rip STRICTLY — verbatim or not at all — so a declaration whose face spelling carries no exact row cannot be landed on, and every definition, reference, and outline entry that targets it drops. Six declaration sites emit their name without a mark: a destructuring pattern's bindings (`{ host, port: portNumber } = config`, `[first, ...rest] = xs`), the render loop's factory parameter (`for person in people` inside `render`, lowered to `create_block_N(ctx, person, …)`), a constructor's promoted `@param`, a schema companion's instance members (`parcel.weight`, `cart.total`), a prototype augmentation's member (`String::titleCase`, inside the `declare global` text), and a prop key at a use site (`Anchor label:`), whose declaration tsgo finds in the hoist line's constructor type — text emitted whole. A read of any of these names hovers and types correctly; only the landing is missing.
-
-**Why (code)** — each site emits its name through a plain `emit` or a text blob (`emitTypeText`, `componentTypes`, the schema story's member text) rather than through a mark on the declaring node, so the builder records no exact row for the bytes. The Mapping Audit's census does not see them because it counts identifier READS; declarations are the other half.
-
-**The fix** — the exact mark at each emission site: `mark(node, role)` around the name for patterns, the factory parameter (`markVar`'s role), and the promoted parameter; segment emission for the hoist line's constructor type (`propsTypeSegments` already carries the member nodes) and for the schema companion's members (`recordSchemaFields` already knows each member's span and offset); a split around the member name inside the augmentation text. Each is a compiler change with a mapping test, and the landing lane turns green family by family.
-
-**Why the suite missed it.** No instrument asked where a navigation answer LANDS. The hand tests asked definition at a handful of positions whose declarations are marked; the lenient cover fallback then landed the rest on the whole construct, which read as an answer. The landing lane asks at every occurrence of every declared name and maps strictly.
-
-**Driven** — `bun run audit --landing`, the `definition-silent` rows, each with its hover head beside it; the strict map and the raw tsgo target compared per family.
-
-**vs v3** — not comparable in mechanism; v3 navigated through the in-process LanguageService on its own emitted text and had no map-back to make.
-
-**Status.** ⬜ **Open** (2026-09-02) — `landing.census` is red by agreement naming these families; it turns green as the marks land.
-
-### 21. A generated copy of a declared name refuses its rename
-
-Renaming a component, a schema, an enum-style constant, or a prototype augmentation's member refuses whole: "an edit lands on generated-only bytes with no Rip source". The lowering spells the author's name again in declarations it mints — a component's instance `interface Badge { … }`, a schema's companion `type Person = { … }`, the `type Status = (typeof Status)[keyof typeof Status]` beside an enum-style object, the `declare global { interface String { titleCase … } }` of an augmentation — and tsgo's rename reaches every copy. None of the copies maps back verbatim, and the fail-safe (a rename applies whole or not at all) refuses rather than leave the copies behind. A plain `def`, class, or binding renames cleanly.
-
-**Why (code)** — the type stories emit their declarations as text (`src/ts/components.js`, `src/ts/schema.js`, the enum and augmentation emitters), so the builder records no row for the name inside them. The refusal message quotes the generated bytes, which names the copy.
-
-**The fix** — each copy marks the DECLARATION's own source span (`mark(node, 'target', …)` around the name inside the minted declaration): the edits then land on one source span and the coincident-span dedup already collapses them into one edit. A compiler change per emitter, each with a rename round-trip in the lane.
-
-**Why the suite missed it.** The rename tests renamed bindings and imports; no test renamed a component or a schema, and the refusal reads as the fail-safe doing its job.
-
-**Driven** — `bun run audit --roundtrip`, the `rename-refused` rows, each quoting its generated copy.
-
-**vs v3** — v3 renamed through the in-process LanguageService on its own emitted text; the copies were its own to rename.
-
-**Status.** ⬜ **Open** (2026-09-02) — `roundtrip.census` is red by agreement naming these families; it turns green as the copies map.
 
 ## Closed
 
@@ -197,3 +163,5 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 65 | A render loop's binding classified `parameter` — the lowering made it one | `semantic-tokens` |
 | 66 | Adjacent component attributes read in two colors — suppressed, not synthesized | `semantic-tokens` |
 | 67 | A materialized mirror was never forwarded to tsgo, so a pruned module's importers kept the stub's any — masked by FSEvents on macOS, wedged on linux | the audit CI job on ubuntu (hover parity + token delivery over the corpus); the compile path forwards its touched list |
+| 69 | Declaration names the face spells without a verbatim twin | `landing.js` — landing.census, every declared name navigates |
+| 70 | A generated copy of a declared name refuses its rename | `roundtrip.js` — roundtrip.census, every declaration renames |

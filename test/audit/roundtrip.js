@@ -248,6 +248,14 @@ export const corpusSets = () => [
     name: 'corpus', root: path.join(repoRoot, 'test/audit'),
     files: fs.globSync('corpus/{grammar,claims,gradual}/*.rip', { cwd: path.join(repoRoot, 'test/audit') }).sort(),
   },
+  // The stash-bearing bucket: an app-shaped tree (index.rip, package.json,
+  // app/stash.rip) the editor anchors a stash to, so the gate rows' typed
+  // arm has a corpus specimen. Its own root, since discovery walks up
+  // from the file to the workspace root.
+  {
+    name: 'app', root: path.join(repoRoot, 'test/audit/corpus/app'),
+    files: fs.globSync('app/**/*.rip', { cwd: path.join(repoRoot, 'test/audit/corpus/app') }).sort(),
+  },
 ]
 export async function runRoundtrip(sets = corpusSets()) {
   const out = []

@@ -386,7 +386,6 @@ export const CONTRACT = [
     name: 'landing.census', lane: 'landing',
     property: 'every name the author declared has a definition, and references that include the asked position',
     red: (s) => s.ld.silent > 0,
-    redBecause: 'declaration names the face spells without a verbatim twin, so a strict landing has nowhere to go — FINDINGS.md #20: destructuring-pattern bindings, the render loop\'s factory parameter, a constructor\'s promoted `@param`, a schema companion\'s instance members, a prototype augmentation\'s member, and a prop key at a use site (the hoist line\'s constructor type); each drains with the exact mark at its emission site',
   },
   {
     // An edit surface changes exactly what it names and leaves a program:
@@ -405,7 +404,6 @@ export const CONTRACT = [
     name: 'roundtrip.census', lane: 'roundtrip',
     property: 'every top-level declaration can be renamed',
     red: (s) => s.rt.refused > 0,
-    redBecause: 'a component or type name has generated-only copies (the class expression\'s name, the hoist line\'s constructor type, a TS-only declare) with no source twin, and the fail-safe refuses the whole rename rather than apply a partial one — FINDINGS.md #21; drains as each copy maps to the declaration\'s own span',
   },
   {
     name: 'token.delivery', lane: 'token',

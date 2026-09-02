@@ -1,0 +1,3 @@
+# index.rip — the app root the editor anchors a stash to: a directory holding this file and a package.json.
+
+console.log('serve')

@@ -35,7 +35,7 @@ import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
-  componentCtorMembers, runtimeApiDeclares,
+  componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
 } from './ts/components.js';
@@ -624,6 +624,7 @@ class Emitter {
     // which has no role of its own and would otherwise claim out of the body.
     // Null everywhere else; set tightly around one emission and always restored.
     this.primitiveAvoid = null;
+    this.primitiveReuse = null;
     // Inside an emission that WRITES A NAME BEING DECLARED (a parameter,
     // a class member). The token-correction channels record references,
     // and a declaration of the same spelling is not one — see
@@ -1764,8 +1765,15 @@ class Emitter {
   // verbatim call, never declared here.
   emitPrimitive(value) {
     const owner = this.b.currentMark;
-    const span = this.ts && typeof value === 'string'
+    let span = this.ts && typeof value === 'string'
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
+    // A lowering that re-reads a name it has no occurrence for (`x .= f()`
+    // reads `x` where the author wrote it once, as the target) names the
+    // occurrence it repeats ahead of the emission: the copy maps there.
+    if (span === null && this.primitiveReuse !== null && this.primitiveReuse.name === value) {
+      span = this.primitiveReuse.span;
+      this.primitiveReuse = null;
+    }
     // The KIND rides the claimed span alone — an open mark is what a
     // mapping ROW needs, not what naming the construct needs, and a read
     // emitted outside one answers about the same declaration.
@@ -1982,15 +1990,51 @@ class Emitter {
   // descriptor's own text treats `word:` as generated vocabulary.
   emitSchemaText(text, body = false) {
     let i = 0;
+    let lastKey = null;
     while (i < text.length) {
       const ch = text[i];
+      // A template literal's raw text is string content, not words the
+      // author read: it emits verbatim, and only its `${…}` holes carry
+      // source occurrences (`"#{@items.length} items"` reads `items`
+      // once, in the hole).
+      if (ch === '`') {
+        let j = i + 1;
+        this.b.emit('`');
+        while (j < text.length && text[j] !== '`') {
+          if (text[j] === '\\') { this.b.emit(text.slice(j, j + 2)); j += 2; continue; }
+          if (text[j] === '$' && text[j + 1] === '{') {
+            let depth = 1, k = j + 2, quote = null;
+            while (k < text.length && depth > 0) {
+              const c = text[k];
+              if (quote !== null) { if (c === '\\') k++; else if (c === quote) quote = null; }
+              else if (c === '"' || c === "'" || c === '`') quote = c;
+              else if (c === '{') depth++;
+              else if (c === '}') depth--;
+              k++;
+            }
+            this.b.emit('${');
+            this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
+            if (depth === 0) this.b.emit('}');
+            j = k;
+            continue;
+          }
+          this.b.emit(text[j]);
+          j++;
+        }
+        if (j < text.length) this.b.emit('`');
+        i = j + 1;
+        continue;
+      }
       if (ch === '"' || ch === "'") {
         let j = i + 1;
         while (j < text.length && text[j] !== ch) j += text[j] === '\\' ? 2 : 1;
-        const body = text.slice(i + 1, j);
+        const str = text.slice(i + 1, j);
         this.b.emit(ch);
-        if (isIdentifierName(body)) this.emitPrimitive(body);
-        else this.b.emit(body);
+        const pin = body ? undefined : this.schemaPins?.get(`${lastKey}:${str}`)?.shift();
+        lastKey = null;
+        if (pin !== undefined && this.schemaPinNode !== null) this.b.markSpan(this.schemaPinNode, 'literal', pin[0], pin[1], () => this.b.emit(str));
+        else if (isIdentifierName(str)) this.emitPrimitive(str);
+        else this.b.emit(str);
         if (j < text.length) this.b.emit(ch);
         i = Math.min(j + 1, text.length);
         continue;
@@ -2004,7 +2048,7 @@ class Emitter {
         // Descriptor object keys (`name:`, `typeName:`) are generated
         // vocabulary. Expression/member identifiers and shorthand values are
         // source-carried occurrences.
-        if (text[k] === ':' && !body) this.b.emit(word);
+        if (text[k] === ':' && !body) { this.b.emit(word); lastKey = word; }
         else this.emitPrimitive(word);
         i = j;
         continue;
@@ -2332,9 +2376,91 @@ class Emitter {
   // span-less optional glyphs), plain pieces emit bare.
   emitSegments(segs) {
     for (const s of segs) {
-      if (s.node !== undefined) this.mark(s.node, s.role, () => this.b.emit(s.text));
+      if (s.node !== undefined) this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
       else this.b.emit(s.text);
     }
+  }
+
+  // A generated text that repeats a declared NAME (`Schema<Hop, Hop>`
+  // beside `Hop = schema`, `mount(): Badge` in a component's surface)
+  // emits in slices, every whole-word copy marking the declaration's own
+  // span — so a rename reaching the copy lands where the declaration is,
+  // and the coincident-span dedup folds the edits into one. A minted
+  // `__Name__behavior` is one word to the underscore and is not a copy.
+  emitNamedCopies(text, name, id, span) {
+    if (id === null || span === null || !this.ts) { this.b.emit(text); return; }
+    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+    let cursor = 0;
+    for (const m of text.matchAll(re)) {
+      this.b.emit(text.slice(cursor, m.index));
+      this.b.markSpan(id, 'identifier', span[0], span[1], () => this.b.emit(name));
+      cursor = m.index + name.length;
+    }
+    this.b.emit(text.slice(cursor));
+  }
+
+  // The module's own TYPE declarations — `type X`, `interface X`, `enum X`,
+  // `X = schema` — each at its name's declaration span, scanned once per
+  // module: a generated text that repeats one of these names marks it.
+  moduleTypeDeclarationSpans() {
+    if (this._typeDeclSpans !== undefined) return this._typeDeclSpans;
+    const spans = new Map();
+    if (this.b.source !== null) {
+      for (const m of this.b.source.matchAll(/^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b)/gm)) {
+        const name = m[1] ?? m[2];
+        if (spans.has(name)) continue;
+        spans.set(name, [m.index + m[0].lastIndexOf(name), m.index + m[0].lastIndexOf(name) + name.length]);
+      }
+    }
+    this._typeDeclSpans = spans;
+    return spans;
+  }
+
+  // The span a binding's own name occupies in the source, from the node
+  // and role that declare it — null when the role covers more than the
+  // name (a pattern) or the node has no row.
+  bindingNameSpan(node, role, name) {
+    const id = isNode(node) ? this.stores.idOf(node) : null;
+    if (id === null || this.b.source === null) return null;
+    const r = this.stores.role(id, role);
+    if (r?.sourceStart != null && this.b.source.slice(r.sourceStart, r.sourceEnd) === name) return { id, span: [r.sourceStart, r.sourceEnd] };
+    // No role spells the bare name: the declaration is the nearest
+    // whole-word occurrence ahead of the node's own span (`Hop = schema`).
+    const self = this.stores.selfSpan(id);
+    if (self === null) return null;
+    let from = self[0];
+    while (from > 0) {
+      const i = this.b.source.lastIndexOf(name, from - 1);
+      if (i < 0) break;
+      if (!/[\w$]/.test(this.b.source[i - 1] ?? ' ') && !/[\w$]/.test(this.b.source[i + name.length] ?? ' ')) return { id, span: [i, i + name.length] };
+      from = i;
+    }
+    return null;
+  }
+
+  // An annotation segment the face re-renders around the author's type
+  // (`: { value: Item[]; read(): Item[]; … }` for the author's `Item[]`)
+  // is a cover of the annotation, so the type words inside it — copies
+  // of words the author wrote — map to their own occurrences in the
+  // annotation's source, and a rename of `Item` reaches every copy. A
+  // segment that repeats the source verbatim maps as one row already.
+  emitAnnotationWords(s) {
+    if (s.role !== 'annotation' || !this.ts) { this.b.emit(s.text); return; }
+    const id = this.stores.idOf(s.node);
+    const r = id !== null ? this.stores.role(id, 'annotation') : null;
+    const src = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
+    if (src === null || s.text.includes(src)) { this.b.emit(s.text); return; }
+    const words = new Map();
+    for (const m of src.matchAll(/[A-Za-z_$][\w$]*/g)) if (!words.has(m[0])) words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
+    let cursor = 0;
+    for (const m of s.text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      const at = words.get(m[0]);
+      if (!at) continue;
+      this.b.emit(s.text.slice(cursor, m.index));
+      this.b.markSpan(id, 'identifier', at[0], at[1], () => this.b.emit(m[0]));
+      cursor = m.index + m[0].length;
+    }
+    this.b.emit(s.text.slice(cursor));
   }
 
   // TS-only member declares at the class top: one `declare name: T;`
@@ -2357,11 +2483,16 @@ class Emitter {
       if (m.name === 'children') hasChildren = true;
       if (!isDeclarableMember(m)) continue;
       this.noteMemberDecl(m);
-      if (this.gateTwinSource(m, info) !== null) {
-        line(() => this.emitGateTwin(m, this.gateTwinSource(m, info)));
+      const twin = this.gateTwinSource(m, info);
+      if (twin !== null && m.annotation == null) {
+        line(() => this.emitGateTwin(m, twin));
         continue;
       }
       line(() => this.emitSegments(memberDeclareSegments(m, info)));
+      // An ANNOTATED gate keeps its declare line (the annotation is the
+      // member's type) and gains the twin under a minted name, so its path
+      // segments still claim their spans and answer at each depth.
+      if (twin !== null) line(() => this.emitGateTwin(m, twin, `__${m.name}__gate`));
     }
     // The projection channel, typed as what the runtime delivers — the
     // `__RipChildren` alias (declared once per module, below the
@@ -2401,7 +2532,7 @@ class Emitter {
   // undeclared on the class, so a twin would publish an error on every
   // gate.
   gateTwinSource(m, info) {
-    if (m.kind !== 'gate' || m.annotation != null || !info.appStashSpec) return null;
+    if (m.kind !== 'gate' || !info.appStashSpec) return null;
     const src = Emitter.gateSource(m.node);
     return src.error ? null : src;
   }
@@ -2418,8 +2549,9 @@ class Emitter {
   // remains the only assignment the shipped JS carries. A keyed gate's
   // key is a literal (verbatim) or a `params`/`query` chain, re-rooted
   // on `this` — the class ambience declares both records.
-  emitGateTwin(m, src) {
-    this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
+  emitGateTwin(m, src, as = null) {
+    if (as === null) this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
+    else this.b.emit(as);
     this.b.emit(' = __computed(() => this.');
     this.mark(src.pathNode, '$self', () => {
       const segs = Emitter.gateChain(src.pathNode).slice(1);
@@ -2427,6 +2559,16 @@ class Emitter {
         if (i > 0) this.b.emit('.');
         this.emitPrimitive(seg);
       });
+      // The path's root is a PROVIDED name (`@app`, `@router`): its bytes
+      // take the provision's head, as a plain read's do (noteProvidedRead).
+      if (this.ts && (segs[0] === 'app' || segs[0] === 'router')) {
+        const id = this.stores.idOf(src.pathNode);
+        const span = id !== null ? this.stores.selfSpan(id) : null;
+        const hit = span !== null ? this.stores.primitiveSpans(segs[0], span[0], span[1])[0] ?? null : null;
+        if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === segs[0])) {
+          this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: segs[0], name: segs[0], optional: false });
+        }
+      }
     });
     if (src.key !== null) {
       this.b.emit('(');
@@ -2741,7 +2883,46 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
-        this.b.emit(`${exported ? 'export ' : ''}interface ${name}${typeParams ?? ''} {`);
+        // The interface repeats the component's NAME; it marks the
+        // binding's own declaration bytes — the nearest whole-word
+        // occurrence ahead of the component expression — so a rename
+        // reaching this copy lands on the one span every copy shares.
+        const compId = this.stores.idOf(compNode);
+        const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
+        let nameAt = -1;
+        if (compSpan !== null && this.b.source !== null) {
+          let from = compSpan[0];
+          while (from > 0) {
+            const i = this.b.source.lastIndexOf(name, from - 1);
+            if (i < 0) break;
+            const before = this.b.source[i - 1] ?? ' ', after = this.b.source[i + name.length] ?? ' ';
+            if (!/[\w$]/.test(before) && !/[\w$]/.test(after)) { nameAt = i; break }
+            from = i;
+          }
+        }
+        // A text segment that repeats the name (`mount(): Name`) emits in
+        // slices, each copy marked the same way.
+        // A text segment repeats the component's name (`mount(): Name`) and
+        // the module's own declared type names (`remove(item: Item)`): every
+        // copy marks the declaration it copies, so a rename of either lands
+        // where the declaration is.
+        const declared = this.moduleTypeDeclarationSpans();
+        if (nameAt >= 0) declared.set(name, [nameAt, nameAt + name.length]);
+        const emitNamed = (text) => {
+          if (declared.size === 0) { this.b.emit(text); return; }
+          let cursor = 0;
+          for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+            const span = declared.get(m[0]);
+            if (!span) continue;
+            this.b.emit(text.slice(cursor, m.index));
+            this.b.markSpan(compId, 'identifier', span[0], span[1], () => this.b.emit(m[0]));
+            cursor = m.index + m[0].length;
+          }
+          this.b.emit(text.slice(cursor));
+        };
+        this.b.emit(`${exported ? 'export ' : ''}interface `);
+        emitNamed(name);
+        this.b.emit(`${typeParams ?? ''} {`);
         // Every segment carrying a node marks its own row nested inside
         // the $self cover, so a diagnostic born in this second rendering
         // of a member's type anchors at the member the author wrote
@@ -2751,8 +2932,8 @@ class Emitter {
           this.b.emit('\n' + pad + '  ');
           const segs = () => {
             for (const s of l.segs) {
-              if (s.node !== undefined) this.mark(s.node, s.role, () => this.b.emit(s.text));
-              else this.b.emit(s.text);
+              if (s.node !== undefined) this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
+              else emitNamed(s.text);
             }
           };
           if (l.node !== undefined) this.mark(l.node, l.role, segs);
@@ -2789,8 +2970,24 @@ class Emitter {
         // directly; wrapping it in `return …` would emit
         // `return { let x = …; }`, which does not parse. A
         // single-expression body is a value and needs the return.
+        // `this: Name` repeats the component's name: each copy marks the
+        // binding's own declaration span, like the instance surface's.
+        const compId = this.stores.idOf(compNode);
+        const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
+        let bindAt = -1;
+        if (compSpan !== null && this.b.source !== null) {
+          let from = compSpan[0];
+          while (from > 0) {
+            const i = this.b.source.lastIndexOf(name, from - 1);
+            if (i < 0) break;
+            if (!/[\w$]/.test(this.b.source[i - 1] ?? ' ') && !/[\w$]/.test(this.b.source[i + name.length] ?? ' ')) { bindAt = i; break }
+            from = i;
+          }
+        }
         bodies.forEach(({ name: n, code, block }, i) => {
-          this.b.emit(`${i > 0 ? ',' : ''} ${n}: function (this: ${selfType}) ${block ? code : `{ return ${code}; }`}`);
+          this.b.emit(`${i > 0 ? ',' : ''} ${n}: function (this: `);
+          this.emitNamedCopies(selfType, name, bindAt >= 0 ? compId : null, bindAt >= 0 ? [bindAt, bindAt + name.length] : null);
+          this.b.emit(`) ${block ? code : `{ return ${code}; }`}`);
         });
         this.b.emit(' };');
       });
@@ -3857,6 +4054,7 @@ class Emitter {
       info.routesUnion = this.routesUnion;
       info.routeParams = this.routeParams;
       kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name, '', name, { road: 'face' }).join(' ')} }`);
+      (kept.componentInfos ??= new Map()).set(name, info);
     }
     kept.pinnable = new Map();
     for (const [name, , role] of kept) {
@@ -4002,7 +4200,19 @@ class Emitter {
         && this.stores.role(ownerId, 'target') !== null;
       const nameStart = this.b.offset;
       if (declaration) this.mark(owner, 'target', () => this.b.emit(name));
-      else this.mark(node, role, () => this.b.emit(name));
+      else {
+        // A name bound by a PATTERN (`{ host, port: portNumber } = …`) or
+        // beside another (`for x, i in …`) has a role that covers more
+        // than its own bytes; the hoist marks the name's own occurrence
+        // inside that role, so the declaration TypeScript lands on maps
+        // to the name and not to the whole pattern.
+        const id = this.stores.idOf(node);
+        const r = id !== null ? this.stores.role(id, role) : null;
+        const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
+        const own = roleText !== null && roleText !== name ? this.stores.primitiveSpans(name, r.sourceStart, r.sourceEnd)[0] ?? null : null;
+        if (own) this.b.markSpan(id, 'identifier', own.sourceStart, own.sourceEnd, () => this.b.emit(name));
+        else this.mark(node, role, () => this.b.emit(name));
+      }
       if (this.ts && role === 'target' && entries.classBindings?.has(name)) {
         this.classDecls.push([nameStart, this.b.offset]);
       }
@@ -4030,9 +4240,35 @@ class Emitter {
           // probed from a first write — a pin would answer the same
           // question worse, and only after a round trip.
           const ctorType = entries.componentTypes?.get(name) ?? null;
-          if (constType !== null) this.b.tsOnly(() => this.b.emit(`: ${constType}`));
-          else if (ctorType !== null) {
-            this.b.tsOnly(() => this.b.emit(`${this.strict ? '' : '!'}: ${ctorType}`));
+          if (constType !== null) {
+            const bind = this.bindingNameSpan(node, role, name);
+            this.b.tsOnly(() => { this.b.emit(': '); this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null); });
+          } else if (ctorType !== null) {
+            // Emitted as SEGMENTS, so the props block's member names map to
+            // their declarations — a prop key at a use site lands here.
+            const info = entries.componentInfos?.get(name) ?? null;
+            const bindId = this.stores.idOf(node);
+            const bind = bindId !== null ? this.stores.role(bindId, role) : null;
+            const bindSpan = bind?.sourceStart != null && this.b.source?.slice(bind.sourceStart, bind.sourceEnd) === name ? [bind.sourceStart, bind.sourceEnd] : null;
+            this.b.tsOnly(() => {
+              this.b.emit(`${this.strict ? '' : '!'}: `);
+              if (info !== null) {
+                // Text segments repeating the name (`): Name;`) mark the
+                // binding's own span, copy by copy.
+                for (const seg of componentCtorSegments(info, name, '', name, { road: 'face' })) {
+                  if (seg.node !== undefined) { this.mark(seg.node, seg.role, () => this.b.emit(seg.text)); continue; }
+                  if (bindSpan === null) { this.b.emit(seg.text); continue; }
+                  const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+                  let cursor = 0;
+                  for (const m of seg.text.matchAll(re)) {
+                    this.b.emit(seg.text.slice(cursor, m.index));
+                    this.b.markSpan(bindId, 'identifier', bindSpan[0], bindSpan[1], () => this.b.emit(name));
+                    cursor = m.index + name.length;
+                  }
+                  this.b.emit(seg.text.slice(cursor));
+                }
+              } else this.b.emit(ctorType);
+            });
           } else {
             // Pin (evolving-let Tier 3): a caller-supplied inferred
             // type for a still-hoisted nested-referenced name, keyed
@@ -4718,7 +4954,14 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit('\n');
       this.mark(node, '$self', () => {
-        this.b.emit(`${exported ? 'export ' : ''}type ${name} = (typeof ${name})[keyof typeof ${name}];`);
+        // Every copy of the name in the companion marks the enum's own
+        // declaration bytes, so a rename reaching the companion lands on
+        // the span the declaration and the companion share.
+        const id = this.stores.idOf(node);
+        const span = id !== null ? this.stores.selfSpan(id) : null;
+        const decl = span !== null ? this.stores.primitiveSpans(name, span[0], span[1])[0] ?? null : null;
+        const nm = () => (decl ? this.b.markSpan(id, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(name)) : this.b.emit(name));
+        this.b.emit(`${exported ? 'export ' : ''}type `); nm(); this.b.emit(' = (typeof '); nm(); this.b.emit(')[keyof typeof '); nm(); this.b.emit('];');
       });
     });
   }
@@ -4922,6 +5165,45 @@ class Emitter {
     // statement emits after this expression (same bodies, one place
     // they are compiled).
     if (this.ts && story !== null) this.schemaFns.set(node, fns);
+    // The descriptor's word-valued strings that repeat a DECLARED name —
+    // a field's `name:`, an ensure's `field:`, a `typeName:` naming
+    // another schema, a union's constituent, a mixin target — are copies
+    // of the author's declaration bytes and pin there. Claimed instead,
+    // they would take the declaration's occurrence only while nothing
+    // else owned it; once the companion alias places the declaration, a
+    // claim slides to the next occurrence of the name, which is a body
+    // read (`@items` in a callable), and every later read shifts by one.
+    // Pins are keyed by the descriptor key the string sits under and
+    // queued in entry order — the order the literal serializes — so two
+    // copies of one name pin apart: the field's `name:` to its
+    // declaration, the ensure's `field:` to the symbol.
+    // Pins are TS-face rows (a caller-spanned `literal` row, like every
+    // markSpan row); the runtime face keeps the claim, where nothing
+    // else owns the declaration.
+    this.schemaPins = this.ts ? new Map() : null;
+    this.schemaPinNode = nodeId;
+    for (const e of this.ts ? descriptor.entries : []) {
+      const pin = (key, name, start) => {
+        if (typeof start !== 'number' || typeof name !== 'string') return;
+        const k = `${key}:${name}`;
+        if (!this.schemaPins.has(k)) this.schemaPins.set(k, []);
+        this.schemaPins.get(k).push([start, start + name.length]);
+      };
+      if (e.tag === 'union-member') pin('name', e.name, e.start);
+      else if (e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER') pin('target', e.argTokens[0].value, e.argTokens[0].start);
+      else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
+      else if ((SCHEMA_BODY_KINDS[e.tag] ?? null) !== null) {
+        pin('name', e.name, e.start);
+        if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
+          const typeWord = /[A-Za-z_$][\w$]*/.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+          if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
+        }
+      }
+    }
+    // A pinned occurrence is spoken for before the literal emits: a
+    // compiled body ahead of the pin in the literal (an ensure's
+    // predicate precedes its `field:`) must not claim it for a read.
+    for (const spans of this.schemaPins?.values() ?? []) for (const [a, z] of spans) this.b.exactSourceSpans.add(`${a}:${z}`);
     this.mark(node, '$self', () => {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
@@ -4937,14 +5219,22 @@ class Emitter {
           // author wrote, not on the entry list that encloses it.
           else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
             this.b.tsOnly(() => this.b.markSpan(nodeId, 'literal', seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
+          } else if (story !== null) {
+            // A TS-only insert repeating the schema's NAME (`this: Parcel`
+            // on a callable) marks the declaration, like every other copy.
+            const bind = this.bindingNameSpan(story.decl.node, 'target', story.decl.name);
+            this.b.tsOnly(() => this.emitNamedCopies(seg.ts, story.decl.name, bind?.id ?? null, bind?.span ?? null));
           } else this.b.tsOnly(() => this.b.emit(seg.ts));
         }
       });
       this.b.emit(')');
       if (story !== null && story.constType !== null) {
-        this.b.tsOnly(() => this.b.emit(` as unknown as ${story.constType}`));
+        const bind = this.bindingNameSpan(story.decl.node, 'target', story.decl.name);
+        this.b.tsOnly(() => { this.b.emit(' as unknown as '); this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null); });
       }
     });
+    this.schemaPins = null;
+    this.schemaPinNode = null;
   }
 
   static schemaFail(message, at) {
@@ -5310,7 +5600,7 @@ class Emitter {
     const id = this.stores.idOf(schemaNode);
     this.b.tsOnly(() => this.b.echo(() => {
       this.b.emit('\n' + '  '.repeat(this.ind));
-      if (id !== null) this.b.mark(id, '$self', () => this.b.emit(text));
+      if (id !== null) this.b.mark(id, '$self', () => { const bind = this.bindingNameSpan(story.decl.node, 'target', story.decl.name); this.emitNamedCopies(text, story.decl.name, bind?.id ?? null, bind?.span ?? null); });
       else this.b.emit(text);
     }));
   }
@@ -7741,13 +8031,28 @@ class Emitter {
             'the annotation manifests as an interface augmentation, which TypeScript admits ' +
             'only at a module\'s top level; move the write there or drop the annotation');
         }
+        // The member name inside the augmentation marks the `::`
+        // declaration's own bytes, so a definition from a use lands on
+        // `String::titleCase` rather than dropping.
+        const memberDecl = (() => {
+          const id = this.stores.idOf(node);
+          const span = id !== null ? this.stores.selfSpan(id) : null;
+          const hit = span !== null ? this.stores.primitiveSpans(proto.member, span[0], span[1])[0] ?? null : null;
+          return hit === null ? null : { id, start: hit.sourceStart, end: hit.sourceEnd };
+        })();
+        const augment = (head, tail) => {
+          this.b.emit(head);
+          if (memberDecl !== null) this.b.markSpan(memberDecl.id, 'identifier', memberDecl.start, memberDecl.end, () => this.b.emit(proto.member));
+          else this.b.emit(proto.member);
+          this.emitTypeText(node, 'annotation', tail);
+        };
         if (this.moduleClassNames?.has(proto.head)) {
           if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.emitTypeText(node, 'annotation', `interface ${proto.head} { ${proto.member}: ${text} }\n`)));
+            augment(`interface ${proto.head} { `, `: ${text} }\n`)));
         } else if (!this.scopes[0].has(proto.head)) {
           const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
           if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.emitTypeText(node, 'annotation', `declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }\n`)));
+            augment(`declare global { interface ${proto.head}${params} { `, `: ${text} } }\n`)));
         } else {
           throw protoError(
             `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
@@ -7785,7 +8090,8 @@ class Emitter {
         } else {
           const story = this.schemaStories?.get(node);
           if (story && !story.decl.exported && story.constType !== null) {
-            this.b.tsOnly(() => this.b.emit(`: ${story.constType}`));
+            const bind = this.bindingNameSpan(node, 'target', story.decl.name);
+            this.b.tsOnly(() => { this.b.emit(': '); this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null); });
           }
         }
       }
@@ -11884,7 +12190,19 @@ class Emitter {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    const rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
+    // The loop head's own occurrence of each variable is its DECLARATION,
+    // and the factory parameter marks it (emitTypedParams); the body's
+    // reads claim their own occurrences, never the head's.
+    const headId = this.stores.idOf(node);
+    const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
+    const prevAvoid = this.primitiveAvoid;
+    if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
+    let rec;
+    try {
+      rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
+    } finally {
+      this.primitiveAvoid = prevAvoid;
+    }
     if (keyExpr !== null) {
       // The keyFn emits in the ENCLOSING setup scope with (item, i)
       // params — a render local declared inside the loop BODY does
@@ -12083,7 +12401,17 @@ class Emitter {
         // parent's. The index is the reconciler's counter.
         const keyItemType = this.tsIterElementTypeText(iter,
           new Set([itemVar, indexVar, ...rec.renameHazardNames]), new Set([self, ...outer]));
-        this.b.emit(`(${itemVar}`);
+        {
+          // The key function's parameter is the loop variable: it marks the
+          // head's declaration of it, so a definition from the key's read
+          // lands on `for person in people`.
+          const headId = this.stores.idOf(node);
+          const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
+          const decl = headVars?.sourceStart != null ? this.stores.primitiveSpans(itemVar, headVars.sourceStart, headVars.sourceEnd)[0] ?? null : null;
+          this.b.emit('(');
+          if (decl) this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
+          else this.b.emit(itemVar);
+        }
         if (keyItemType !== null) this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
         this.b.emit(`, ${indexVar}`);
         if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
@@ -12104,7 +12432,15 @@ class Emitter {
             // render loop).
             const gen = this.tsServedValue('__key', () => {
               if (wrap) this.b.emit('(');
-              this.expr(keyExpr);
+              {
+                // The head's own occurrences of the loop variables are
+                // their declarations; the key's reads claim their own.
+                const headId = this.stores.idOf(node);
+                const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
+                const prevAvoid = this.primitiveAvoid;
+                if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
+                try { this.expr(keyExpr); } finally { this.primitiveAvoid = prevAvoid; }
+              }
               if (wrap) this.b.emit(')');
             });
             if (gen !== null && keySpan !== null) {
@@ -12186,11 +12522,27 @@ class Emitter {
         });
       });
     }
+    // A loop variable's DECLARATION is the `for` head's own occurrence of
+    // it; the factory parameter that carries it marks that span, so a
+    // definition from a body read lands on `for person in people`.
+    const declSpans = new Map();
+    for (const entry of rec.loopStack) {
+      const id = entry.node ? this.stores.idOf(entry.node) : null;
+      const r = id !== null ? this.stores.role(id, 'vars') : null;
+      if (r?.sourceStart == null) continue;
+      for (const v of [entry.itemVar, entry.indexVar]) {
+        if (typeof v !== 'string' || declSpans.has(v)) continue;
+        const hit = this.stores.primitiveSpans(v, r.sourceStart, r.sourceEnd)[0] ?? null;
+        if (hit) declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd });
+      }
+    }
     const emitTypedParams = (names, selfType, typeOf) => {
       names.forEach((n, i) => {
         if (i > 0) this.b.emit(', ');
         const emitOne = () => {
-          this.emitPrimitive(n);
+          const decl = declSpans.get(n);
+          if (decl) this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
+          else this.emitPrimitive(n);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null) this.b.tsOnly(() => this.b.emit(`: ${t}`));
@@ -12791,6 +13143,7 @@ class Emitter {
   }
 
   chain(node) {
+    this.noteProvidedRead(node);
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
@@ -12960,6 +13313,32 @@ class Emitter {
     this.chain(node);
   }
 
+  // The names the runtime PROVIDES to a component — `@app`, `@router` —
+  // are read like members but declared by no one in the file; the read's
+  // own bytes take a head naming the provision (RULINGS.md, Components),
+  // the way `(prop)` and `(rest)` name theirs. A provided name is always
+  // the root of a chain (`@app.data.cart`, `@router.onNavigate(fn)`), so
+  // the chain that reads it notes the kind once, at the name's own span.
+  // The descent follows the chain driver's head slots, so a call whose
+  // callee reads the name reaches the root the way the driver does.
+  noteProvidedRead(node) {
+    if (!this.ts || !(this.cframes?.length > 0)) return;
+    let root = node;
+    while (isNode(root)) {
+      const slot = this.chainHeadSlotOf(root);
+      if (slot === null || !isNode(root[slot])) break;
+      root = root[slot];
+    }
+    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'app' && root[2] !== 'router')) return;
+    if (this.cframes[this.cframes.length - 1].members?.has(root[2])) return;
+    const id = this.stores.idOf(root);
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    const hit = span !== null ? this.stores.primitiveSpans(root[2], span[0], span[1])[0] ?? null : null;
+    if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === root[2])) {
+      this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: root[2], name: root[2], optional: false });
+    }
+  }
+
   // ['.{}'|'?.{}', source, ...items] — the pick operator:
   // `o.{a, b: c, d = e}` lowers to an always-parenthesized object
   // literal reading the source per key —
@@ -13025,7 +13404,10 @@ class Emitter {
         if (!bare) this.b.emit('(');
         this.mark(node, 'source', () => this.expr(source));
         this.b.emit(' == null ? undefined : {');
-        body(() => this.expr(source));
+        // Each per-key re-read of the source emits under the SOURCE role,
+        // like the guard's read: the copies then map to the one occurrence
+        // the author wrote, and a rename of it reaches every copy.
+        body(() => this.mark(node, 'source', () => this.expr(source)));
         this.b.emit(bare ? '}' : '})');
       } else {
         // The IIFE argument is an operand position: compound sources
@@ -13864,7 +14246,18 @@ class Emitter {
         declared.add(field.name);
         const text = field.typed === null ? null
           : this.annotationText(field.typed) ?? (field.typed[2] === '' ? null : tidyType(field.typed[2]));
-        this.b.tsOnly(() => this.b.emit(`${pad}${field.name}${text ? `: ${text}` : ''};\n`));
+        // The field's name marks the promoted parameter's own bytes (its
+        // first occurrence in the class body is the `@name` parameter), so
+        // a definition from a read lands on the constructor's parameter.
+        const bodyId = this.stores.idOf(body);
+        const bodySpan = bodyId !== null ? this.stores.selfSpan(bodyId) : null;
+        const at = bodySpan !== null ? this.stores.primitiveSpans(field.name, bodySpan[0], bodySpan[1])[0] ?? null : null;
+        this.b.tsOnly(() => {
+          this.b.emit(pad);
+          if (at) this.b.markSpan(bodyId, 'identifier', at.sourceStart, at.sourceEnd, () => this.b.emit(field.name));
+          else this.b.emit(field.name);
+          this.b.emit(`${text ? `: ${text}` : ''};\n`);
+        });
       }
     }
 
@@ -15297,7 +15690,12 @@ class Emitter {
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
+      // The read of the target inside the value is the author's one
+      // occurrence of it, re-read: it maps to the target's own span.
+      const tspan = typeof read === 'string' ? this.bindingNameSpan(node, 'target', read) : null;
+      if (tspan !== null) this.primitiveReuse = { name: read, span: tspan.span };
       this.mark(node, 'value', () => this.expr(substHead(rhs)));
+      this.primitiveReuse = null;
     });
   }
 
@@ -16326,6 +16724,85 @@ const SCHEMA_BODY_KINDS = { field: 'field', computed: 'computed', derived: 'deri
 // offset `at` — the caller hands over the string it just built rather
 // than the face re-joining its chunks (a mark is open here, so the
 // builder's `code` getter joins the whole output on every read).
+// The alias text, emitted in slices so the names it declares MAP: the
+// alias head (`type Person =`) marks the schema's own declaration name,
+// and each member (`{ name: T`, `; name?: T`) marks its entry's span —
+// so a definition or a rename from a use lands on the schema body rather
+// than dropping on generated-only bytes. The slice positions are the
+// ones recordSchemaFields reads for the hover records, computed the same
+// way, so the two never disagree about where a name sits.
+function emitSchemaTextMarked(emitter, block, text, nodeId) {
+  const marks = [];
+  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The alias head names the schema's binding: its declaration bytes are
+  // the nearest whole-word occurrence of the name ahead of the schema
+  // expression (`Hop = schema …`).
+  // A story may declare several aliases (`type ParcelData = …; type
+  // Parcel = ParcelData & …`): each head whose name the source declares
+  // marks every whole-word copy of it — the head, a `Promise<Name>`
+  // return, a self-reference — to the one declaration span; a minted
+  // head (`ParcelData`) has no source occurrence and marks nothing, and
+  // a minted `__Name__behavior` is one word to the underscore, not a copy.
+  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
+  if (selfSpan !== null && emitter.b.source !== null) {
+    const src = emitter.b.source;
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    for (const headName of heads) {
+      let from = selfSpan[0], nameAt = -1;
+      while (from > 0) {
+        const i = src.lastIndexOf(headName, from - 1);
+        if (i < 0) break;
+        if (!/[\w$]/.test(src[i - 1] ?? ' ') && !/[\w$]/.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
+        from = i;
+      }
+      if (nameAt < 0) continue;
+      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(headName)}(?![\\w$])`, 'g'))) {
+        marks.push({ at: m.index, len: headName.length, start: nameAt, end: nameAt + headName.length });
+      }
+    }
+  }
+  for (const e of block.story?.decl?.descriptor?.entries ?? []) {
+    // A schema NAMED in the body — a union's constituent, an `@mixin`
+    // target — is a copy of that schema's name, and marks the word the
+    // author wrote for it.
+    const ref = e.tag === 'union-member' ? { name: e.name, start: e.start }
+      : e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER'
+        ? { name: e.argTokens[0].value, start: e.argTokens[0].start }
+        : null;
+    if (ref !== null && typeof ref.start === 'number') {
+      const rm = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
+      if (rm !== null) marks.push({ at: rm.index + rm[1].length, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
+      continue;
+    }
+    if ((SCHEMA_BODY_KINDS[e.tag] ?? null) === null || typeof e.start !== 'number') continue;
+    const m = new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`).exec(text);
+    if (m === null) continue;
+    marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
+    // A field whose type names another schema (`hops: [Hop]`) repeats
+    // that name in the member's type; the copy marks the author's type
+    // word.
+    if (e.tag === 'field' && Array.isArray(e.typeSpan) && emitter.b.source !== null) {
+      const typeWord = /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+      if (typeWord !== null) {
+        const after = m.index + m[0].length;
+        const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
+        const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
+        if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
+      }
+    }
+  }
+  marks.sort((a, b) => a.at - b.at);
+  let cursor = 0;
+  for (const mk of marks) {
+    if (mk.at < cursor) continue;
+    emitter.b.emit(text.slice(cursor, mk.at));
+    if (nodeId !== null) emitter.b.markSpan(nodeId, 'identifier', mk.start, mk.end, () => emitter.b.emit(text.slice(mk.at, mk.at + mk.len)));
+    else emitter.b.emit(text.slice(mk.at, mk.at + mk.len));
+    cursor = mk.at + mk.len;
+  }
+  emitter.b.emit(text.slice(cursor));
+}
+
 function recordSchemaFields(emitter, block, text, at) {
   const entries = block.story?.decl?.descriptor?.entries ?? null;
   if (entries === null) return;
@@ -16661,7 +17138,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
           const lines = () => {
             const at = builder.offset;
             const text = b.lines.map((l) => `${exp}${l}`).join('\n');
-            builder.emit(text);
+            emitSchemaTextMarked(emitter, b, text, nodeId);
             recordSchemaFields(emitter, b, text, at);
           };
           if (nodeId !== null) builder.mark(nodeId, '$self', lines);
@@ -16732,7 +17209,16 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       return null;
     })();
     if (stashLocal !== null) {
-      builder.tsOnly(() => builder.emit(`\nexport type __RipStash = typeof ${stashLocal};\n`));
+      builder.tsOnly(() => {
+        // `typeof stash` repeats the stash binding's name; the copy marks
+        // the binding's own declaration bytes, so a rename reaches it.
+        const decl = /^(?:export\s+)?(stash)\s*=/m.exec(builder.source ?? '');
+        const rootId = decl !== null ? stores.idOf(parseResult.sexpr) : null;
+        builder.emit('\nexport type __RipStash = typeof ');
+        if (rootId !== null) builder.markSpan(rootId, 'identifier', decl.index + decl[0].indexOf('stash'), decl.index + decl[0].indexOf('stash') + 5, () => builder.emit(stashLocal));
+        else builder.emit(stashLocal);
+        builder.emit(';\n');
+      });
     }
   }
   // Ambient `RoutePath` — the route union under a clean public name, so

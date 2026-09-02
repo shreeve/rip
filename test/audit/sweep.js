@@ -208,7 +208,7 @@ function subjectOf(flat) {
   // The parenthesized heads: TypeScript's own, and the kinds rip mints in
   // their place — a `(state)`, `(prop)`, `(field)` … head is followed by
   // the same `name:` shape, so the one walk below names its subject.
-  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot|rest)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
+  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot|rest|app|router)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
   if (head !== null) {
     // Walk a dotted name whose segments may carry generic argument
     // lists: `Array<Pick<…>>.slice` names `slice`.
@@ -575,6 +575,14 @@ export const corpusSets = () => [
   {
     name: 'corpus', root: path.join(repoRoot, 'test/audit'),
     files: fs.globSync('corpus/{grammar,claims,gradual}/*.rip', { cwd: path.join(repoRoot, 'test/audit') }).sort(),
+  },
+  // The stash-bearing bucket: an app-shaped tree (index.rip, package.json,
+  // app/stash.rip) the editor anchors a stash to, so the gate rows' typed
+  // arm has a corpus specimen. Its own root, since discovery walks up
+  // from the file to the workspace root.
+  {
+    name: 'app', root: path.join(repoRoot, 'test/audit/corpus/app'),
+    files: fs.globSync('app/**/*.rip', { cwd: path.join(repoRoot, 'test/audit/corpus/app') }).sort(),
   },
 ]
 export const defaultSets = () => [

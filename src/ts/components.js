@@ -771,6 +771,20 @@ export const propsTypeText = (info, opts = {}) => segmentsText(propsTypeSegments
 // module read the same component type. `self` is the instance type as
 // this surface must name it (a generic component's own parameters,
 // applied).
+// The same constructor type as SEGMENTS — the props block carrying each
+// member's node — for the hoist line, where the face declares a
+// forward-used component's binding: a prop key at a use site navigates
+// to its declaration through this text, so the names in it map.
+export const componentCtorSegments = (info, name, typeParams = '', self = name, opts = {}) => {
+  if (info.members.some((m) => m.kind === 'gate')) return [{ text: `{ readonly prototype: ${name}${anyArgsOf(typeParams)}; }` }];
+  const optional = propsParamOptional(info);
+  return [
+    { text: `{ new ${typeParams}(props${optional ? '?' : ''}: ` },
+    ...propsTypeSegments(info, opts),
+    { text: `): ${self};${optional ? ` mount${typeParams}(target?: any): ${self};` : ''} }` },
+  ];
+};
+
 export const componentCtorMembers = (info, name, typeParams = '', self = name, opts = {}) => {
   // The GATED branch has no constructor to declare a parameter list on,
   // so the prototype cannot NAME one — `${name}<T>` would put an unbound

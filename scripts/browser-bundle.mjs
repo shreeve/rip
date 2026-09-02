@@ -98,6 +98,7 @@ const IDE_STUBS = new Map([
     `export const runtimeApiDeclares = () => [];`,
     `export const restAliasName = ${unavailable('component type story')};`,
     `export const restPassthroughText = ${unavailable('component type story')};`,
+    `export const componentCtorSegments = () => [];`,
   ].join('\n')],
 ]);
 

@@ -25,6 +25,7 @@
 // flatten of the whole growing buffer.
 
 import { counter } from './counter.js';
+import { CALLER_SPAN_ROLES } from './stores.js';
 
 export class CodeBuilder {
   constructor(stores, { source = null, primitives = false } = {}) {
@@ -238,7 +239,7 @@ export class CodeBuilder {
   // splits by what the claimed value SPELLS — a literal's row is cover
   // where an identifier's is exact, so a name that told neither apart
   // would make the mapping audit's role breakdown unreadable.
-  static SPAN_ROLES = new Set(['tsDirective', 'shorthandProp', 'identifier', 'literal']);
+  static SPAN_ROLES = CALLER_SPAN_ROLES;
 
   // A mark whose source span is supplied by the CALLER — the channel
   // for trivia-sourced emission (TS directive comments), whose spans
@@ -318,10 +319,27 @@ export class CodeBuilder {
     // name, so every byte check downstream agrees with it.
     const pool = unplaced.length > 0 ? unplaced : free;
     const owned = pool.filter((c) => c.nodeId === f.nodeId);
-    const p = (owned.length > 0 ? owned : pool)[0];
-    // Every occurrence in this frame is spoken for — decline, rather than hand
-    // a second generated position a row on a source read that already has one.
-    if (p === undefined) return null;
+    let p = (owned.length > 0 ? owned : pool)[0];
+    // Every occurrence in this frame is spoken for. A further emission of the
+    // same name from this frame is a lowering re-reading the bytes it already
+    // placed — the `in` operator evaluating its operand three ways, a soak's
+    // second read of its receiver, a loop's iterable read inside the body —
+    // and it maps to the occurrence most recently placed: both generated
+    // positions then hold one source read, which is what a rename of that
+    // read must reach. A frame that placed nothing declines.
+    if (p === undefined) {
+      const last = [...taken].pop();
+      p = last === undefined ? undefined : candidates.find((c) => c.sourceStart === last);
+      // A frame that placed nothing itself re-reads what an enclosing or
+      // earlier frame placed — a soak's second read of its receiver, emitted
+      // under the soak's own mark: the most recent placed occurrence in
+      // this frame's span is the read it repeats.
+      if (p === undefined) {
+        const placed = candidates.filter((c) => this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`));
+        p = placed[placed.length - 1];
+      }
+      if (p === undefined) return null;
+    }
     taken.add(p.sourceStart);
     // A SIGIL-carrying token records the sigil inside its span — the symbol
     // `alpha` is lexed as `:alpha` — so the recorded span is wider than the

@@ -1,0 +1,13 @@
+# stash.rip — the app's data stash: what `@app.data` carries into every route.
+
+export type Todo =
+  id: number
+  label: string
+  done: boolean
+
+todos: Todo[] = [{ id: 1, label: 'write the fixture', done: false }]
+title = 'Todos'
+
+export stash =
+  todos: todos
+  title: title

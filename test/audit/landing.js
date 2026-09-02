@@ -194,6 +194,9 @@ export async function landing(wsRoot, files) {
         if (!/^[A-Za-z_$][\w$]*$/.test(word) || !authoredIn.get(rel).has(word)) continue
         if (KEYWORD_MEMBERS.has(word) || RUNTIME_MEMBERS.has(word)) continue
         if (ruled.has(`${line}:${character}`) || runtime.has(word)) continue
+        // A key of the router's query or params (`@router.query.q`) is a
+        // string-map lookup: TypeScript owns no declaration for it.
+        if (/@router\.(?:query|params)\.$/.test(text.slice(Math.max(0, t.start - 20), t.start))) continue
         names.push({ off: t.start, word })
       }
     } catch { names = [] }
@@ -334,6 +337,14 @@ export const corpusSets = () => [
   {
     name: 'corpus', root: path.join(repoRoot, 'test/audit'),
     files: fs.globSync('corpus/{grammar,claims,gradual}/*.rip', { cwd: path.join(repoRoot, 'test/audit') }).sort(),
+  },
+  // The stash-bearing bucket: an app-shaped tree (index.rip, package.json,
+  // app/stash.rip) the editor anchors a stash to, so the gate rows' typed
+  // arm has a corpus specimen. Its own root, since discovery walks up
+  // from the file to the workspace root.
+  {
+    name: 'app', root: path.join(repoRoot, 'test/audit/corpus/app'),
+    files: fs.globSync('app/**/*.rip', { cwd: path.join(repoRoot, 'test/audit/corpus/app') }).sort(),
   },
 ]
 export async function runLanding(sets = corpusSets()) {
