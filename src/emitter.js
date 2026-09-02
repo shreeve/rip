@@ -12481,8 +12481,15 @@ class Emitter {
           const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
           const decl = headVars?.sourceStart != null ? this.stores.primitiveSpans(itemVar, headVars.sourceStart, headVars.sourceEnd)[0] ?? null : null;
           this.b.emit('(');
-          if (decl) this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
-          else this.b.emit(itemVar);
+          if (decl) {
+            // Marked, and RECORDED: this parameter is the loop binding's
+            // declaration, so the editor's correction must reach it. The
+            // marked path bypasses emitPrimitive, which is where the
+            // record is otherwise made.
+            const at = this.b.offset;
+            this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
+            this.loopVars.push([at, this.b.offset]);
+          } else this.b.emit(itemVar);
         }
         if (keyItemType !== null) this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
         this.b.emit(`, ${indexVar}`);
@@ -12613,8 +12620,17 @@ class Emitter {
         if (i > 0) this.b.emit(', ');
         const emitOne = () => {
           const decl = declSpans.get(n);
-          if (decl) this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
-          else this.emitPrimitive(n);
+          if (decl) {
+            // The span still joins `loopVars`, which the editor reads to
+            // retype this occurrence: the factory parameter IS the loop
+            // variable's declaration, and the author declared a loop
+            // variable, not a parameter. Taking the marked path instead
+            // of emitPrimitive must not cost the classification the
+            // primitive path recorded.
+            const at = this.b.offset;
+            this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
+            if (this.isRenderLoopName(n)) this.loopVars.push([at, this.b.offset]);
+          } else this.emitPrimitive(n);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null) this.b.tsOnly(() => this.b.emit(`: ${t}`));

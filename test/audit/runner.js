@@ -1772,6 +1772,48 @@ function expectedTokenType(d, form) {
   if (form === 'plain' && IS_ARROW.test(val)) return 'function';
   return 'variable';
 }
+// A LOOP HEAD declares its bindings, and the audit reads that from the
+// SOURCE. `for item in items` binds `item`; `for k, v of pairs` binds
+// both. Whatever the construct lowers to — a render loop becomes a block
+// factory, so the binding genuinely IS a parameter in the face — the
+// author declared a loop variable, and that is the token the editor owes.
+//
+// SOURCE, deliberately, and not the compiler's own `loopVars` channel.
+// That channel is what the editor READS to correct tsgo, so an expectation
+// taken from it says only "positions the compiler called loop variables
+// are colored as loop variables" — trivially true on the day the compiler
+// stops calling one, which is the regression this exists to catch. The
+// grammar is the independent authority: a `for` head binds its names
+// whether or not anything downstream remembered.
+//
+// This is the half `declsOf` cannot reach at all. That population is a
+// name at column 0 with its form read off the line, so a binding nested
+// inside a construct — a render loop's item, several indents into a
+// component — has no wanted type anywhere.
+// EVERY loop head rip spells, or the invariant under-covers in silence:
+// `in` and `of` over a collection, `as` over a generator, each with its
+// optional `await` and the dammit form (`as!`), and `own` on a key loop.
+// A form left out is not a smaller gate — it is a form nothing checks.
+const LOOP_HEAD = /^\s*for\s+(?:await\s+)?(?:own\s+)?([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*))?\s+(?:in|of|as!?)\s/;
+function loopBindings(src) {
+  const out = [];
+  src.split('\n').forEach((raw, line) => {
+    // Strings blanked and a trailing comment cut, offsets preserved: a
+    // loop head is source, never text that merely reads like one.
+    const text = codeOf(raw);
+    const m = LOOP_HEAD.exec(text);
+    if (!m) return;
+    for (const name of [m[1], m[2]]) {
+      if (!name) continue;
+      // The name's own column, found after the head it follows, so a
+      // binding spelled like a word in that head cannot mis-place.
+      const from = text.indexOf(name, text.indexOf('for') + 3);
+      if (from >= 0) out.push({ name, line, character: from, type: 'variable' });
+    }
+  });
+  return out;
+}
+
 function expectedToken(d) {
   const raw = d.keyword ?? bindingForm(d.code);
   const type = expectedTokenType(d, raw);
@@ -4576,6 +4618,9 @@ if (RUN_TOKENS) {
   }
   {
     const missing = [], badType = [], badReadonly = [], unasserted = [];
+    // The compiler-stated half: nested positions the line-shape population
+    // cannot enumerate. Same comparison, a different source of `want`.
+    const badKind = []; let kindAsserted = 0;
     // Face-survival accumulators: survivors, the dropped
     // classified names ({name, count} per fixture), and `unclassified` — server
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
@@ -4652,6 +4697,14 @@ if (RUN_TOKENS) {
         survProbed.add(f);
         for (const u of survival.unexplained) survUnexplained.push({ ...u, file: f });
         for (const key of survival.exclusionDrift) survExcuseDrift.push({ file: f, key, reason: SURVIVAL_EXCUSED?.[f]?.[key] });
+      }
+      for (const e of loopBindings(fs.readFileSync(fixPath(f), 'utf8'))) {
+        const got = at.get(`${e.line}:${e.character}`);
+        // Only a DELIVERED token is judged here: whether one is owed at all
+        // is `token.delivery.use-site`'s question, over its own population.
+        if (!got) continue;
+        kindAsserted++;
+        if (got.type !== e.type) badKind.push({ ...e, file: f, want: { type: e.type }, got, text: e.name });
       }
       for (const d of decls) {
         // `String::titleCase = …` extends an EXISTING prototype: the
@@ -4746,6 +4799,7 @@ if (RUN_TOKENS) {
     };
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
+    irow('type · nested', badKind.length, kindAsserted, 'a loop head\'s binding carries the loop variable\'s type');
     irow('readonly', badReadonly.length, roAsserted + stateUses, `readonly IFF the binding is immutable in rip, at declarations AND at every use${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
     // Face-survival — USE-SITE delivery, the direction the source-enumerated
     // invariants above cannot see: they enumerate declarations, and this is the
@@ -4804,6 +4858,7 @@ if (RUN_TOKENS) {
     }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
+    show(badKind, 'Wrong token type at a nested binding', (r) => `${r.name} @ ${r.file}:${r.line + 1}:${r.character + 1}  ${r.got.type} — the loop head declares a ${r.want.type}`);
     show(badType, 'Wrong token type', (r) => {
       console.log(`        ${dim('expected')} ${green(r.want.type)}`);
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
@@ -4892,7 +4947,7 @@ if (RUN_TOKENS) {
       for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, unexplained: survUnexplained, exclusionDrift: survExcuseDrift, facesAvailable };
+    tk = { probed, missing, badType, badKind, kindAsserted, badReadonly, survSurvived, survDrops, survUnclassified, unexplained: survUnexplained, exclusionDrift: survExcuseDrift, facesAvailable };
   }
 }
 

@@ -419,6 +419,26 @@ export const CONTRACT = [
     red: (s) => s.tk.badType.some((r) => r.want?.type !== 'enum'),
   },
   {
+    // The half `token.type` cannot reach. Its population is a line-shape
+    // heuristic over column 0, so a binding nested inside a construct — a
+    // render loop's item, several indents into a component — has no wanted
+    // type there at all.
+    //
+    // The expectation comes from the GRAMMAR, read off the source: a `for`
+    // head binds its names, and the author declared a loop variable however
+    // the construct lowers (a render loop becomes a block factory, which
+    // makes the binding a parameter in the face). It must NOT come from the
+    // compiler's `loopVars` channel, which is what the editor reads to
+    // correct tsgo: an expectation drawn from there asserts only that
+    // positions the compiler called loop variables are colored as loop
+    // variables, and goes quiet on the day the compiler stops calling one —
+    // which is the regression this exists to catch. The first version of
+    // this row did exactly that and stayed green against a live defect.
+    name: 'token.type.nested', lane: 'token',
+    property: "a name a construct's own syntax binds carries that type wherever it appears, not only where it starts a line",
+    red: (s) => s.tk.badKind.length > 0,
+  },
+  {
     name: 'token.type.enum', lane: 'token',
     property: 'an enum name is classified by its own declaring form',
     red: (s) => s.tk.badType.some((r) => r.want?.type === 'enum'),

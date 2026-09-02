@@ -949,14 +949,23 @@ export function isScaffoldingLabel(label, source = '') {
   return !source.includes(label);
 }
 
-// An auto-import item whose module is a file under the mirror's
-// `__external__` tree — a source outside the workspace, mirrored under a
-// path only this server spells. The specifier it would insert is one no
-// author can write, and the item's description and detail print the
-// mirror's own layout. Never offered: what the same program reaches by a
-// real specifier (`rip/app`) is offered under that name instead.
+// An auto-import item whose module is one only THIS SERVER spells, so
+// the specifier it would insert is one no author can write and its
+// description prints the mirror's own layout. Two such modules exist:
+//
+//   `__external__/…`  a source outside the workspace, mirrored under a
+//                     path of the server's own making — what the same
+//                     program reaches by a real specifier (`rip/app`)
+//                     is offered under that name instead;
+//   `….__rip_probe__` the pin probe's sibling file, which is open in
+//                     tsgo only while a probe runs and is unlinked
+//                     after. It is transient, so an item from it
+//                     appears in one session and not the next — the
+//                     completion surface must not offer a module that
+//                     is about to stop existing.
 export const isMirrorImportItem = (item) =>
-  [item?.labelDetails?.description, item?.detail].some((s) => typeof s === 'string' && /(?:^|[\\/])__external__(?:[\\/]|$)/.test(s));
+  [item?.labelDetails?.description, item?.detail].some((s) => typeof s === 'string'
+    && (/(?:^|[\\/])__external__(?:[\\/]|$)/.test(s) || /__rip_probe__/.test(s)));
 
 // TS-face spellings scrubbed from user-visible STRINGS (labels,
 // details, documentation — never positions): the definite-assignment
