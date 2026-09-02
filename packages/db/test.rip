@@ -4,6 +4,7 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'fs'
+import * as fsMod from 'fs'
 import { spawnSync } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -16,6 +17,7 @@ import {
   makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
   createMcpServer,
 } from 'rip/db'
+import { socketFor } from '../../src/runtime/duckdb.js'
 import { __schema, SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
 import { camelCase } from '../../src/runtime/vocab.js'
 import { __schemaSetAdapter, transaction as ormTransaction } from '../../src/runtime/orm.js'
@@ -1319,33 +1321,54 @@ test "resolveTarget: unix:// spelling carries the socket path, dummy base", ->
   t = resolveTarget 'unix:///run/harbor/x.sock', {}
   eq t, { base: 'http://harbor', unix: '/run/harbor/x.sock', token: null, shown: 'unix:///run/harbor/x.sock' }
 
-test "resolveTarget: harbor:<name> desugars from the registry — socket preferred, token read", ->
+test "resolveTarget: harbor:<name> derives the socket from the attached path — no token", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
-    mkdirSync join(home, 'runtime')
-    writeFileSync join(home, 'runtime', 'demo.json'), JSON.stringify { socket: '/tmp/demo.sock', port: null }
-    writeFileSync join(home, 'runtime', 'demo.token'), "sekret\n"
+    dbFile = join home, 'data.duckdb'
+    writeFileSync dbFile, ''
+    writeFileSync join(home, 'config.toml'), "[connection.demo]\npath = \"#{dbFile}\"\n"
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
-    eq t, { base: 'http://harbor', unix: '/tmp/demo.sock', token: 'sekret', shown: 'harbor:demo (unix:///tmp/demo.sock)' }
+    expected = socketFor fsMod, "#{home}/runtime", dbFile
+    eq t, { base: 'http://harbor', unix: expected, token: null, shown: "harbor:demo (unix://#{expected})" }
+    # The derivation itself: basename readable, fnv1a32 hash carrying identity.
+    ok /\/runtime\/data\.duckdb-[0-9a-f]{8}\.sock$/.test t.unix
+    # Same file, different spelling — same socket (identity is canonical).
+    eq socketFor(fsMod, "#{home}/runtime", "#{home}/./data.duckdb"), expected
   finally
     rmSync home, recursive: true, force: true
 
-test "resolveTarget: harbor:<name> falls back to the registered TCP port", ->
+test "resolveTarget: harbor:<name> with a configured port falls back to TCP when the socket is not live", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
-    mkdirSync join(home, 'runtime')
-    writeFileSync join(home, 'runtime', 'demo.json'), JSON.stringify { socket: null, port: 9500, bind: null }
+    dbFile = join home, 'data.duckdb'
+    writeFileSync dbFile, ''
+    writeFileSync join(home, 'config.toml'), "[connection.demo]\npath = \"#{dbFile}\"\nport = 9500\n"
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
     eq t, { base: 'http://127.0.0.1:9500', unix: null, token: null, shown: 'harbor:demo (http://127.0.0.1:9500)' }
   finally
     rmSync home, recursive: true, force: true
 
-test "resolveTarget: harbor:<name> with no registry throws ConnectionError naming the path", ->
+test "resolveTarget: harbor:<name> resolves a remote url entry with its token", ->
+  home = mkdtempSync join(tmpdir(), 'rip-harbor-')
+  try
+    writeFileSync join(home, 'config.toml'),
+      '[connection.prod]\nurl = "https://db.example.com/"\ntoken = "sekret"\n'
+    t = resolveTarget 'harbor:prod', { HARBOR_HOME: home }
+    eq t, { base: 'https://db.example.com', unix: null, token: 'sekret', shown: 'harbor:prod (https://db.example.com)' }
+  finally
+    rmSync home, recursive: true, force: true
+
+test "resolveTarget: harbor:<name> without a config throws ConnectionError naming it", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
     err = trap!(-> resolveTarget 'harbor:ghost', { HARBOR_HOME: home })
     ok err instanceof ConnectionError
-    ok err.message.includes 'ghost.json'
+    ok err.message.includes 'config.toml'
+    # A config that exists but lacks the entry names the missing section.
+    writeFileSync join(home, 'config.toml'), '[connection.other]\npath = "/tmp/x.duckdb"\n'
+    err = trap!(-> resolveTarget 'harbor:ghost', { HARBOR_HOME: home })
+    ok err instanceof ConnectionError
+    ok err.message.includes '[connection.ghost]'
   finally
     rmSync home, recursive: true, force: true
 

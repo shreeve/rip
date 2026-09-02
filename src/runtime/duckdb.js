@@ -52,14 +52,22 @@ function envToken() {
 // `http(s)://host:port` dials TCP. `unix:///path/to.sock` dials a unix
 // domain socket — Bun's fetch `unix` option; the dummy hostname in the
 // URL is never resolved. `harbor:<name>` is resolution sugar, never a
-// third transport: it reads the berth registry `harbor serve` maintains
-// (see harborRoot below for where that is) and desugars to
-// whichever spelling the berth registered — socket preferred, TCP port
-// otherwise. It also resolves the bearer token from <name>.token, the
-// one thing a raw spelling cannot carry; precedence stays caller's
-// option → registry → RIP_DB_TOKEN.
+// third transport: it mirrors harbor's own contract (crates/common:
+// config.rs, paths.rs). The NAME lives in harbor's config.toml as
+// `[connection.<name>]`; identity is DERIVED, never registered — a
+// berth's socket is
 //
-// Reading the registry needs a filesystem, which this otherwise
+//   <state>/runtime/<basename ≤40>-<fnv1a32(canonical path)>.sock
+//
+// and carries no token: the 0700 runtime dir is the credential. A
+// `url` entry is a remote — the url verbatim, token from `token` /
+// `token-file` / RIP_DB_TOKEN (never `token-cmd`: the one sh -c path
+// belongs to interactive fleet consumers, not a server booting). A
+// berth entry with `port` may be serving TCP instead of the socket
+// (an explicit start honors the port; a summon never does), so a live
+// socket wins and the configured port is the fallback.
+//
+// Reading the config needs a filesystem, which this otherwise
 // runtime-portable module must not import unconditionally.
 // `process.getBuiltinModule` (Bun, Node ≥ 22.3) is the guarded door: in
 // a runtime without it, `harbor:` names fail naming the reason while
@@ -69,14 +77,16 @@ function builtinFs() {
   try { return process.getBuiltinModule('node:fs'); } catch { return null; }
 }
 
-// Where harbor keeps the fleet. This mirrors `state_root()` in harbor's
-// crates/common/src/paths.rs and must not drift from it: config is the
-// user's to edit and lives under ~/.config, runtime state is harbor's to
-// write and lives under ~/.local/state, where deleting it is always safe.
-// A relative $HARBOR_HOME is ignored rather than resolved, exactly as
-// harbor ignores it — a relative root would silently look for sockets in
-// whatever directory the process happened to start in, and find none,
-// which reads as an empty fleet rather than a broken environment.
+// Harbor's two roots. These mirror `config_root()` / `state_root()` in
+// harbor's crates/common/src/paths.rs and must not drift from them:
+// config is the user's to edit and lives under ~/.config, runtime state
+// is harbor's to write and lives under ~/.local/state, where deleting
+// it is always safe; an absolute $HARBOR_HOME collapses both onto one
+// directory. A relative $HARBOR_HOME is ignored rather than resolved,
+// exactly as harbor ignores it — a relative root would silently look
+// for sockets in whatever directory the process happened to start in,
+// and find none, which reads as an empty fleet rather than a broken
+// environment.
 function harborRoot(env) {
   const home = env.HARBOR_HOME;
   if (home && home.startsWith('/')) return home;
@@ -84,35 +94,128 @@ function harborRoot(env) {
   return `${env.HOME || ''}/.local/state/harbor`;
 }
 
+function harborConfigRoot(env) {
+  const home = env.HARBOR_HOME;
+  if (home && home.startsWith('/')) return home;
+  if (env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.startsWith('/')) return `${env.XDG_CONFIG_HOME}/harbor`;
+  return `${env.HOME || ''}/.config/harbor`;
+}
+
+// The slice of TOML this resolver needs: `[section]` headers and scalar
+// `key = value` pairs (quoted strings, bare integers). Everything else
+// — arrays, inline tables, continuation lines — is skipped, not parsed:
+// the keys read here (path, url, token, token-file, port, bind) are all
+// scalars in harbor's schema, and a full TOML parser is not a
+// dependency this runtime-portable module gets to have.
+function tomlScalars(text) {
+  const sections = {};
+  let current = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const section = line.match(/^\[([^\]]+)\]$/);
+    if (section) { current = sections[section[1]] ??= {}; continue; }
+    const kv = current && line.match(/^([\w-]+)\s*=\s*(.+)$/);
+    if (!kv) continue;
+    const value = kv[2];
+    const quoted = value.match(/^"([^"]*)"/) || value.match(/^'([^']*)'/);
+    if (quoted) current[kv[1]] = quoted[1];
+    else if (/^\d+\s*(#.*)?$/.test(value)) current[kv[1]] = Number.parseInt(value, 10);
+  }
+  return sections;
+}
+
+function expandTilde(p, env) {
+  return p.startsWith('~/') || p === '~' ? `${env.HOME || ''}${p.slice(1)}` : p;
+}
+
+// FNV-1a over the canonical path's UTF-8 bytes, truncated to u32 —
+// byte-for-byte the hash in harbor's socket_for, hand-rolled there for
+// the same reason it is here: the socket name must be STABLE across
+// releases and runtimes.
+function fnv1a32(str) {
+  let h = 0xcbf29ce484222325n;
+  for (const b of new TextEncoder().encode(str)) {
+    h = ((h ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return (h & 0xffffffffn).toString(16).padStart(8, '0');
+}
+
+// The canonical identity of a database path, as harbor spells it:
+// symlinks resolved and absolutized; a not-yet-created file
+// canonicalizes its parent and keeps its own name.
+function canonicalDb(fs, p) {
+  try { return fs.realpathSync(p); } catch { /* the file may not exist yet */ }
+  const cut = p.lastIndexOf('/');
+  const dir = cut > 0 ? p.slice(0, cut) : cut === 0 ? '/' : '.';
+  return `${fs.realpathSync(dir)}/${p.slice(cut + 1)}`;
+}
+
+// The one true socket for a database file — harbor's socket_for, in
+// JavaScript: basename for readability (byte-truncated on char
+// boundaries to fit sun_path's ~104-byte budget), the hash for
+// identity.
+function socketFor(fs, runtime, db) {
+  const canon = canonicalDb(fs, db);
+  const hash = fnv1a32(canon);
+  const base = canon.slice(canon.lastIndexOf('/') + 1) || 'db';
+  const encoder = new TextEncoder();
+  const budget = 103 - (encoder.encode(runtime).length + 1 + 1 + 8 + 5); // '/', '-', hash8, ".sock"
+  if (budget <= 0) {
+    throw new ConnectionError(
+      `db: runtime dir is too deep for a unix socket (${runtime}) — shorten $HARBOR_HOME`);
+  }
+  const cut = Math.min(40, budget);
+  const chars = Array.from(base);
+  while (chars.length && encoder.encode(chars.join('')).length > cut) chars.pop();
+  return `${runtime}/${chars.join('')}-${hash}.sock`;
+}
+
 function resolveHarborName(name, env) {
   const fs = builtinFs();
   if (!fs) {
     throw new ConnectionError(
-      `db: harbor:${name} needs filesystem access to read the berth registry — ` +
+      `db: harbor:${name} needs filesystem access to read harbor's config — ` +
       'use an http:// or unix:// url in this runtime');
   }
-  const home = `${harborRoot(env)}/runtime`;
-  const registryPath = `${home}/${name}.json`;
-  let berth;
+  const configPath = `${harborConfigRoot(env)}/config.toml`;
+  let sections;
   try {
-    berth = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    sections = tomlScalars(fs.readFileSync(configPath, 'utf8'));
   } catch (cause) {
     const error = new ConnectionError(
-      `db: harbor:${name} — no readable berth registry at ${registryPath} (is the berth running?)`);
+      `db: harbor:${name} — no readable harbor config at ${configPath} ` +
+      `(attach the database first: harbor <db.duckdb> attach)`);
     error.cause = cause;
     throw error;
   }
-  let token = null;
-  try { token = fs.readFileSync(`${home}/${name}.token`, 'utf8').trim() || null; } catch { /* unauthenticated berth */ }
-  if (berth.socket) {
-    return { base: 'http://harbor', unix: berth.socket, token, shown: `harbor:${name} (unix://${berth.socket})` };
+  const conn = sections[`connection.${name}`];
+  if (!conn) {
+    throw new ConnectionError(
+      `db: harbor:${name} — no [connection.${name}] in ${configPath} ` +
+      `(attach the database first: harbor <db.duckdb> attach)`);
   }
-  if (berth.port) {
-    const host = berth.bind || '127.0.0.1';
-    return { base: `http://${host}:${berth.port}`, unix: null, token, shown: `harbor:${name} (http://${host}:${berth.port})` };
+  if (conn.url) {
+    const base = String(conn.url).replace(/\/+$/, '');
+    let token = conn.token || null;
+    if (!token && conn['token-file']) {
+      try { token = fs.readFileSync(expandTilde(conn['token-file'], env), 'utf8').trim() || null; } catch { /* unreadable → fall through */ }
+    }
+    token ||= env.RIP_DB_TOKEN || null;
+    return { base, unix: null, token, shown: `harbor:${name} (${displayUrl(base)})` };
   }
-  throw new ConnectionError(
-    `db: harbor:${name} — the registry at ${registryPath} names neither a socket nor a port`);
+  if (!conn.path) {
+    throw new ConnectionError(
+      `db: harbor:${name} — [connection.${name}] in ${configPath} names neither a path nor a url`);
+  }
+  const runtime = `${harborRoot(env)}/runtime`;
+  const unix = socketFor(fs, runtime, expandTilde(conn.path, env));
+  if (conn.port && !fs.existsSync(unix)) {
+    const host = conn.bind || '127.0.0.1';
+    const base = `http://${host}:${conn.port}`;
+    return { base, unix: null, token: env.RIP_DB_TOKEN || null, shown: `harbor:${name} (${base})` };
+  }
+  return { base: 'http://harbor', unix, token: null, shown: `harbor:${name} (unix://${unix})` };
 }
 
 // The one resolver every dialer uses. For plain http(s) URLs this is
@@ -690,7 +793,7 @@ function harborAdapter(opts = {}) {
 }
 
 export {
-  harborAdapter, resolveUrl, resolveTarget, envToken, toResult,
+  harborAdapter, resolveUrl, resolveTarget, socketFor, envToken, toResult,
   DbError, ConnectionError, QueryError, CancelledError, isDbError,
   temporalKind, decodeTemporal, decodeRows, encodeParam, encodeParams,
   parseNdjson, parseBody, isPlainObject, abortable,

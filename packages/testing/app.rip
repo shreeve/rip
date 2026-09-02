@@ -58,8 +58,11 @@ export scratchDb = (migrationsDir, opts = {}) ->
     process.env.RIP_DB_URL = url
     process.env.RIP_DB_TOKEN = token
     process.env.DB_FILE = file
-    args = [launcher, 'serve', file, '--bind', '127.0.0.1', '--port', String(port),
-            '--token', token, '--name', "scratch-#{process.pid}-#{attempt}"]
+    # `<db> start` is the explicit-server verb; identity is derived from
+    # the file, so there is no name to pass. HARBOR_HOME below keeps the
+    # runtime litter in the scratch dir.
+    args = [launcher, file, 'start', '--bind', '127.0.0.1', '--port', String(port),
+            '--token', token]
     if process.env.HARBOR_STATEMENT_TIMEOUT_MS
       args.push '--statement-timeout', "#{process.env.HARBOR_STATEMENT_TIMEOUT_MS}ms"
     proc = Bun.spawn args,
