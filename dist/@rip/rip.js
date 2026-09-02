@@ -17726,9 +17726,11 @@ ${this.replayPad}}` : " }");
           const headVars = headId !== null ? this.stores.role(headId, "vars") : null;
           const decl = headVars?.sourceStart != null ? this.stores.primitiveSpans(itemVar, headVars.sourceStart, headVars.sourceEnd)[0] ?? null : null;
           this.b.emit("(");
-          if (decl)
+          if (decl) {
+            const at = this.b.offset;
             this.b.markSpan(headId, "identifier", decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
-          else
+            this.loopVars.push([at, this.b.offset]);
+          } else
             this.b.emit(itemVar);
         }
         if (keyItemType !== null)
@@ -17837,9 +17839,12 @@ ${this.replayPad}}` : " }");
           this.b.emit(", ");
         const emitOne = () => {
           const decl = declSpans.get(n);
-          if (decl)
+          if (decl) {
+            const at = this.b.offset;
             this.b.markSpan(decl.id, "identifier", decl.start, decl.end, () => this.b.emit(n));
-          else
+            if (this.isRenderLoopName(n))
+              this.loopVars.push([at, this.b.offset]);
+          } else
             this.emitPrimitive(n);
           if (!this.ts)
             return;
