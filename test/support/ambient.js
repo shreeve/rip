@@ -20,6 +20,7 @@
 // still caught. Names the table types nothing for fall back to `any` — the face
 // never depends on their shape.
 import { _runtimeTable } from '../../src/emitter.js';
+import { CLASS_VALUE_DECL } from '../../src/ts/dom-types.js';
 
 const NAMES = [
   '__state', '__computed', '__effect', '__batch', '__readonly',
@@ -51,5 +52,9 @@ if (stale.length > 0) {
   );
 }
 
+// The signatures may reference face-declared aliases (an inline face
+// emits __RipClassValue beside its types assertion); the ambient
+// carries the same alias so the declared shapes resolve here too.
 export const AMBIENT =
+  `${CLASS_VALUE_DECL}\n` +
   `declare const ${NAMES.map((n) => `${n}: ${TYPES.get(n) ?? 'any'}`).join(', ')};\n`;

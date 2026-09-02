@@ -11,6 +11,8 @@
 // tsgo binary in @typescript/typescript-<os>-<arch>) already lives in
 // tsgoBinaryPath(); reuse it rather than keep a second copy in sync, and
 // wrap only the error with the repo-root install hint the gates want.
+import fs from 'node:fs';
+import path from 'node:path';
 import { tsgoBinaryPath } from '../../packages/vscode/src/tsgo.js';
 
 export function resolveTsc() {
@@ -22,4 +24,19 @@ export function resolveTsc() {
       '(the tsc-spawning validation gates need the repo\'s pinned TypeScript).',
     );
   }
+}
+
+// The pinned lib's own lib.dom.d.ts — the DOM oracle for gates that read
+// the standard library as DATA rather than spawning the compiler. It sits
+// beside the binary in the platform package, and the resolution goes
+// through the real path so the node_modules/.bin shim lands in the same
+// directory the direct hit would.
+export function resolveDomLib() {
+  const lib = path.join(path.dirname(fs.realpathSync(resolveTsc())), 'lib.dom.d.ts');
+  if (!fs.existsSync(lib)) {
+    throw new Error(
+      `the pinned TypeScript has no lib.dom.d.ts at ${lib} — run \`bun install\` at the repository root.`,
+    );
+  }
+  return lib;
 }

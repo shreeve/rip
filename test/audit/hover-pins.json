@@ -1,9 +1,53 @@
 {
-  "23-functions.rip": {
-    "decls": [
+  "03-collections.rip": {
+    "positions": [
       {
-        "name": "titleCase",
-        "expect": "(property) String.titleCase: () => string"
+        "line": 9,
+        "character": 12,
+        "token": "alpha",
+        "expect": null,
+        "rule": "key of a *{} literal",
+        "why": "the literal lowers to a Map constructor and the key reaches the face as a string literal with no symbol — ruled silent"
+      },
+      {
+        "line": 9,
+        "character": 22,
+        "token": "beta",
+        "expect": null,
+        "rule": "key of a *{} literal",
+        "why": "the same"
+      }
+    ]
+  },
+  "04-assignments.rip": {
+    "positions": [
+      {
+        "line": 163,
+        "character": 19,
+        "token": "target",
+        "expect": null,
+        "rule": "new.target member",
+        "why": "the lowering rewrites the meta-property away, so no face symbol stands at the word — the only available answer was the enclosing declaration through its cover, a wrong subject; RULINGS: the hover model"
+      }
+    ]
+  },
+  "06-loops.rip": {
+    "positions": [
+      {
+        "line": 85,
+        "character": 4,
+        "token": "mark",
+        "expect": "let mark: number",
+        "rule": "loop value binding",
+        "why": "the value name answers its own binding, the plain-answer rule for a loop variable"
+      },
+      {
+        "line": 85,
+        "character": 10,
+        "token": "k",
+        "expect": "let k: number",
+        "rule": "loop index binding",
+        "why": "the index name's declaring occurrence is a source variable and owns its own row in every for…in form, stepped or bare — so the word answers its own binding and never the loop's value variable"
       }
     ]
   },
@@ -60,14 +104,46 @@
       {
         "name": "Terse",
         "expect": "let Terse: typeof Terse"
+      },
+      {
+        "name": "Held",
+        "expect": "let Held: typeof Held"
+      },
+      {
+        "name": "Teaser",
+        "expect": "let Teaser: typeof Teaser"
+      },
+      {
+        "name": "Anchor",
+        "expect": "component Anchor extends a props: { label: string }"
+      },
+      {
+        "name": "Gauge",
+        "expect": "let Gauge: typeof Gauge"
+      },
+      {
+        "name": "Step",
+        "expect": "let Step: typeof Step"
+      },
+      {
+        "name": "Stepper",
+        "expect": "let Stepper: typeof Stepper"
       }
     ],
     "positions": [
       {
+        "line": 8,
+        "character": 11,
+        "token": "info",
+        "expect": null,
+        "rule": "annotation literal",
+        "why": "a quoted literal inside a type annotation declines with the other string interiors — a literal is a value, not a symbol, and the only answer would echo the bytes under the cursor; RULINGS: the hover model"
+      },
+      {
         "line": 10,
         "character": 2,
         "token": "shade",
-        "expect": "(property) Badge.shade: \"#06f\" | \"#a60\"",
+        "expect": "(computed) shade: \"#06f\" | \"#a60\"",
         "rule": "member declaration (computed)",
         "why": "the value-first answer every other member kind serves — the face now types an unannotated computed from an INFERRED position (a declaration with no type node, which TypeScript prints resolved) rather than through the lowering behavior object, so no machinery name can be spelled here; the cell wrapper strips as it does for every member declaration. The minted kind label `(computed)` stays the open half, exactly as for the other kinds"
       },
@@ -75,31 +151,39 @@
         "line": 13,
         "character": 9,
         "token": "class",
-        "expect": null,
+        "expect": "(attribute) class: ClassValue | ClassValue[]",
         "rule": "attr/prop name (intrinsic)",
-        "why": "the prop's type is the target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "why": "served — the class key answers as the attribute the author wrote, with the type its road admits; the road (the surface's className property) is never in the head; RULINGS: attr name on an intrinsic"
       },
       {
         "line": 19,
         "character": 3,
         "token": "label",
-        "expect": "(property) Field.label: string | undefined",
+        "expect": "(prop) label?: string | undefined",
         "rule": "member declaration (prop)",
-        "why": "value-first; the optional marker widens the value, which is the prop's own type"
+        "why": "value-first; the optional marker rides the kind record — the face declares the member required, so only the record knows the author wrote `?` — and the widened value is the prop’s own type"
+      },
+      {
+        "line": 19,
+        "character": 8,
+        "token": "?",
+        "expect": "(prop) label?: string | undefined",
+        "rule": "opt marker on a reactive binding",
+        "why": "the marker abuts its name, and the byte after a word belongs to that word"
       },
       {
         "line": 28,
         "character": 8,
         "token": "value",
-        "expect": null,
-        "rule": "bind target (intrinsic)",
-        "why": "interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "expect": "(bind) value: string",
+        "rule": "bind target",
+        "why": "the `<=>` target is a channel word the census spends, so the answer comes from the compiler's record — an intrinsic bind reads the cell side, a component bind the minted props key's container, in one form for both; RULINGS: bind target"
       },
       {
         "line": 36,
         "character": 2,
         "token": "people",
-        "expect": "(property) Roster.people: string[]",
+        "expect": "(state) people: string[]",
         "rule": "member declaration (state)",
         "why": "value-first, the ruled interim served; the minted `(state)` kind is the open half"
       },
@@ -107,7 +191,7 @@
         "line": 39,
         "character": 2,
         "token": "inputEl",
-        "expect": "(property) Roster.inputEl: HTMLInputElement | null",
+        "expect": "(state) inputEl: HTMLInputElement | null",
         "rule": "member declaration (ref cell)",
         "why": "value-first; the annotation is the author's own"
       },
@@ -115,7 +199,7 @@
         "line": 40,
         "character": 2,
         "token": "cap",
-        "expect": "(property) Roster.cap: number",
+        "expect": "(readonly) cap: number",
         "rule": "member declaration (readonly)",
         "why": "value-first — a `=!` member annotates its value type directly, so no container ever stood here"
       },
@@ -123,49 +207,49 @@
         "line": 48,
         "character": 6,
         "token": "input",
-        "expect": null,
+        "expect": "(element) input: HTMLElementTagNameMap['input']",
         "rule": "element tag",
-        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
+        "why": "served from the compiler's intrinsics record — the tag word's face position is a string literal with no symbol; RULINGS: element tag"
       },
       {
         "line": 48,
         "character": 12,
         "token": "ref",
-        "expect": null,
+        "expect": "ref — writes HTMLElementTagNameMap['input'] into inputEl",
         "rule": "ref word",
-        "why": "typed-channel target; interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "why": "served from the compiler's intrinsics record — the channel word names the write it performs, the cell by the user's own binding; RULINGS: ref word"
       },
       {
         "line": 48,
         "character": 17,
         "token": "inputEl",
-        "expect": null,
+        "expect": "(state) inputEl: HTMLInputElement | null",
         "rule": "name after ref:",
-        "why": "target is the state binding's type; interim silence, served — the cover-`this` leak closed"
+        "why": "served — the cell bytes ride the __ripRefCell wrap and the name's span joins the value-first channel, so the binding answers its element type, never the container; RULINGS: the name after ref:"
       },
       {
         "line": 50,
         "character": 14,
         "token": "click",
-        "expect": null,
+        "expect": "(event) @click: HTMLElementEventMap['click'] & { target: <button>; currentTarget: <button> }",
         "rule": "event word",
-        "why": "handler-signature target; interim silence, served — the cover-`this` leak closed"
+        "why": "the handler signature, served from the compiler's intrinsics record — the word's face position is the listener call's string literal, no symbol; RULINGS: event word"
       },
       {
         "line": 51,
         "character": 23,
         "token": "e",
-        "expect": "(parameter) e: PointerEvent & { target: any; currentTarget: any; }",
+        "expect": "(parameter) e: PointerEvent & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button']; }",
         "rule": "value position (handler param)",
-        "why": "correct today — the principles' value-position answer, pinned as-is"
+        "why": "the value-position answer with the host-element claim — target/currentTarget name the listening element (RULINGS.md, the target re-ruling superseding any-by-design)"
       },
       {
         "line": 60,
         "character": 13,
         "token": "key",
-        "expect": null,
+        "expect": "(key) key: string",
         "rule": "key: in a render loop",
-        "why": "interim silence, served — the minted scaffold local (`_elN`) no longer leaks"
+        "why": "the key expression’s own type, read off the keyFn the loop setup emits — the typed position the word spends"
       },
       {
         "line": 60,
@@ -179,55 +263,79 @@
         "line": 61,
         "character": 6,
         "token": "slot",
-        "expect": null,
+        "expect": "(slot) children?: Children | undefined",
         "rule": "slot",
-        "why": "interim silence, served — the cover-`this` leak closed with the render-DSL finding"
+        "why": "the children the word projects, read off the `children` member — `Children` is the minted alias over the runtime’s admission, and the absence arm rides the optional key"
       },
       {
         "line": 70,
         "character": 4,
         "token": "div",
-        "expect": null,
+        "expect": "(element) div: HTMLElementTagNameMap['div']",
         "rule": "element tag",
-        "why": "intrinsic-element target; interim silence, served — the cover-`this` leak closed"
+        "why": "served from the compiler's intrinsics record; RULINGS: element tag"
       },
       {
         "line": 71,
         "character": 6,
         "token": "Field",
-        "expect": null,
+        "expect": "component Field extends input props: { label?: string value?: string error?: string }",
         "rule": "component name at a use site",
-        "why": "props-signature target; measured null 2026-07-23 — the pin asserts the interim"
+        "why": "the component's signature, served — the use-site name's exact row reaches tsgo's construct signature and presentComponentSignatureHover re-dresses it: bind twins, children, and the extends passthrough out, container unions collapsed value-first"
       },
       {
         "line": 72,
         "character": 8,
         "token": "label",
-        "expect": "(property) label?: string | { value: string | undefined; read(): string | undefined; touch?(): void; } | undefined",
+        "expect": "(property) label?: string | undefined",
         "rule": "attr/prop name (component)",
-        "why": "the props surface's real declared type — truthful interim; the container arm rides the bind slot by design, and an optional no-default prop's slot is the void slot, T | undefined inside"
+        "why": "the prop's type, served value-first (presentPropSlotHover): the bind-slot container arm collapses under the brand check; the trailing `undefined` stays — tsgo's optional-property convention, and the slot admits an explicit undefined"
       },
       {
         "line": 73,
         "character": 8,
         "token": "value",
-        "expect": null,
-        "rule": "bind target (component)",
-        "why": "interim silence, served — the minted `__bind_value__` slot no longer leaks"
+        "expect": "(bind) value: string",
+        "rule": "bind target",
+        "why": "the `<=>` target is a channel word the census spends, so the answer comes from the compiler's record — an intrinsic bind reads the cell side, a component bind the minted props key's container, in one form for both; RULINGS: bind target"
       },
       {
         "line": 73,
         "character": 18,
         "token": "text",
+        "expect": "(state) text: string",
+        "rule": "the name in a bind",
+        "why": "the author's own binding, value-first — the bind SHARES the container, but this position is the author's vocabulary and not a consumer's read of an instance; RULINGS: the name in a bind"
+      },
+      {
+        "line": 78,
+        "character": 5,
+        "token": "Generic",
         "expect": null,
-        "rule": "name in a bind",
-        "why": "VALUE-type target; interim silence, served — the bind cover's `__bind_value__` no longer leaks"
+        "rule": "comment interior",
+        "why": "the positive hover model: a comment byte is outside every author-symbol token, so hover declines — a cover otherwise answered about a neighboring symbol; RULINGS: the hover model"
+      },
+      {
+        "line": 84,
+        "character": 10,
+        "token": "chip",
+        "expect": null,
+        "rule": "string interior",
+        "why": "the positive hover model: a string literal's interior declines — the platform's own convention; RULINGS: the hover model"
+      },
+      {
+        "line": 91,
+        "character": 6,
+        "token": "for",
+        "expect": null,
+        "rule": "structure keyword",
+        "why": "the positive hover model: a structure word declines rather than answering about a neighbor; RULINGS: the hover model"
       },
       {
         "line": 105,
         "character": 2,
         "token": "stats",
-        "expect": "(property) Routed.stats: any",
+        "expect": "(gate) stats: any",
         "rule": "gate target name",
         "why": "value-first; an unannotated gate target's value IS any — truthful, and the kind label stays undecided"
       },
@@ -264,6 +372,22 @@
         "why": "the path leaf; ruled silent — measured null 2026-07-23, green"
       },
       {
+        "line": 106,
+        "character": 21,
+        "token": "flags",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
+      },
+      {
+        "line": 107,
+        "character": 19,
+        "token": "rows",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
+      },
+      {
         "line": 107,
         "character": 24,
         "token": "params",
@@ -283,9 +407,57 @@
         "line": 108,
         "character": 2,
         "token": "user",
-        "expect": "(property) Routed.user: { name: string; }",
+        "expect": "(gate) user: { name: string; }",
         "rule": "gate target name",
         "why": "value-first, the annotated spelling — the author's own type, so the answer is the annotation back"
+      },
+      {
+        "line": 108,
+        "character": 38,
+        "token": "user",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
+      },
+      {
+        "line": 109,
+        "character": 28,
+        "token": "mode",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
+      },
+      {
+        "line": 110,
+        "character": 29,
+        "token": "entries",
+        "expect": null,
+        "rule": "gate path segment",
+        "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
+      },
+      {
+        "line": 162,
+        "character": 6,
+        "token": "aria-busy",
+        "expect": "(attribute) aria-busy: string | number | boolean | undefined",
+        "rule": "attr name on an intrinsic (attribute road)",
+        "why": "the key’s face position is a string literal, so the answer comes from the compiler’s intrinsics record — the value type the instantiated setAttribute beside it admits; RULINGS: attr name on an intrinsic"
+      },
+      {
+        "line": 163,
+        "character": 6,
+        "token": "data-kind",
+        "expect": "(attribute) data-kind: string | number | boolean | undefined",
+        "rule": "attr name on an intrinsic (template key)",
+        "why": "a data-/aria- suffix rides the surface’s template row, and the served type is that row’s own; RULINGS: attr name on an intrinsic"
+      },
+      {
+        "line": 182,
+        "character": 13,
+        "token": "number",
+        "expect": null,
+        "rule": "aligned annotation type word",
+        "why": "the padded word maps through the builder's layout-twin segments to the face's own `number` keyword, which has no symbol to describe — so it declines; before the segments it fell to the member cover and answered the container's value slot"
       }
     ]
   },
@@ -379,31 +551,31 @@
         "token": "string",
         "expect": null,
         "rule": "field type word",
-        "why": "the type is the target; the body serves silence, the ruled interim — measured 2026-08-24"
+        "why": "a primitive keyword has no symbol — the same decline a plain `x: string` annotation gives"
       },
       {
         "line": 13,
         "character": 2,
         "token": "name",
-        "expect": null,
+        "expect": "(field) name: string",
         "rule": "field name",
-        "why": "ruled (field) name: string; the body serves silence, the ruled interim — green, measured 2026-07-23"
+        "why": "the body answers from its own member in the companion alias"
       },
       {
         "line": 13,
         "character": 6,
         "token": "!",
-        "expect": null,
+        "expect": "(field) name: string",
         "rule": "! marker",
-        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+        "why": "a marker abuts its name, and the byte after a word belongs to that word"
       },
       {
         "line": 14,
         "character": 5,
         "token": "?",
-        "expect": null,
+        "expect": "(field) age?: number | undefined",
         "rule": "? marker",
-        "why": "punctuation is silent, permanently — green, measured 2026-07-23"
+        "why": "the same, on an optional field — tsgo prints an optional property's type with its absence arm under strict"
       },
       {
         "line": 15,
@@ -411,7 +583,15 @@
         "token": "'guest'",
         "expect": null,
         "rule": "default-value expression",
-        "why": "ruled normal expression hovers; today the bracket serves silence — the pin moves when expression hovers reach it"
+        "why": "a default is a literal by grammar, and a literal is a value — the literal-interior rule, final"
+      },
+      {
+        "line": 18,
+        "character": 11,
+        "token": "Address",
+        "expect": "type Address = { street: string; city: string; zip?: string; }",
+        "rule": "field type word",
+        "why": "a named type expands, exactly as it does in a plain annotation"
       },
       {
         "line": 20,
@@ -425,25 +605,73 @@
         "line": 41,
         "character": 18,
         "token": "it",
-        "expect": null,
+        "expect": "(parameter) it: any",
         "rule": "it in a transform",
-        "why": "ruled it: <input record> — the record under validation; interim silence — green, measured 2026-07-23"
+        "why": "the declared `any` boundary, stated at the word"
       },
       {
         "line": 53,
         "character": 2,
         "token": "subtotal",
-        "expect": null,
-        "rule": "computed field name",
-        "why": "the !> spelling of the computed row; ruled (computed), interim silence — green, measured 2026-07-23"
+        "expect": "(derived) subtotal: number",
+        "rule": "eager derived field name",
+        "why": "`!>` declares an eager derived field, and the label names that construct"
+      },
+      {
+        "line": 53,
+        "character": 16,
+        "token": "items",
+        "expect": "(property) items: number[]",
+        "rule": "callable body word",
+        "why": "the body compiles into the descriptor function with the instance as `this`, so `@items` is an ordinary member read on a mapped face position"
       },
       {
         "line": 54,
         "character": 2,
         "token": "total",
-        "expect": null,
+        "expect": "(computed) total: number",
         "rule": "computed field name",
-        "why": "ruled (computed) total: number, interim silence — green, measured 2026-07-23"
+        "why": "`~>` declares a computed getter, and the label names that construct"
+      },
+      {
+        "line": 55,
+        "character": 2,
+        "token": "describe",
+        "expect": "(method) describe: () => string",
+        "rule": "method name",
+        "why": "the declared signature; the `this` parameter is the lowering's calling convention, never the author's"
+      },
+      {
+        "line": 56,
+        "character": 41,
+        "token": "c",
+        "expect": "(parameter) c: CartData",
+        "rule": "callable body word",
+        "why": "an `@ensure` predicate’s parameter types as the data shape"
+      },
+      {
+        "line": 84,
+        "character": 2,
+        "token": "EmailContact",
+        "expect": "type EmailContact = { kind: \"email\"; address: string; }",
+        "rule": "union constituent",
+        "why": "the name reaches the alias as a type reference, so it answers the companion type expanded"
+      },
+      {
+        "line": 85,
+        "character": 2,
+        "token": "PhoneContact",
+        "expect": "type PhoneContact = { kind: \"phone\"; number: string; }",
+        "rule": "union constituent",
+        "why": "the same"
+      },
+      {
+        "line": 99,
+        "character": 9,
+        "token": "Stamped",
+        "expect": "type Stamped = { createdBy: string; }",
+        "rule": "@mixin target",
+        "why": "the name reaches the alias as `& Stamped`, a type reference, so it answers the companion type expanded"
       },
       {
         "line": 124,
@@ -452,6 +680,14 @@
         "expect": "type Person = { name: string; age?: number; role?: string; tier: \"basic\" | \"pro\"; scores: number[]; home?: Address; }",
         "rule": "companion type at a use site",
         "why": "the annotation position serves the full structural expansion — the ruled target, already served; measured 2026-07-23"
+      }
+    ]
+  },
+  "23-functions.rip": {
+    "decls": [
+      {
+        "name": "titleCase",
+        "expect": "(property) String.titleCase: () => string"
       }
     ]
   },
@@ -503,9 +739,9 @@
         "line": 42,
         "character": 3,
         "token": "shades",
-        "expect": "(property) Palette<TShade extends string>.shades: TShade[]",
+        "expect": "(prop) shades?: TShade[]",
         "rule": "member declaration (prop)",
-        "why": "value-first on a GENERIC component — the containing type carries its parameter list into the answer, the one spelling 13-components cannot show"
+        "why": "value-first on a GENERIC component, marker carried — the containing type carries its parameter list into the answer, the one spelling 13-components cannot show"
       }
     ]
   },
@@ -538,6 +774,64 @@
       {
         "name": "parcel",
         "expect": "let parcel: Parcel"
+      }
+    ]
+  },
+  "27-components-lib.rip": {
+    "decls": [
+      {
+        "name": "Tag",
+        "expect": "const Tag: typeof Tag"
+      }
+    ],
+    "positions": []
+  },
+  "27-components-use.rip": {
+    "decls": [
+      {
+        "name": "Board",
+        "expect": "let Board: typeof Board"
+      }
+    ],
+    "positions": []
+  },
+  "held.rip": {
+    "positions": [
+      {
+        "line": 9,
+        "character": 9,
+        "token": "pad",
+        "expect": null,
+        "rule": "import from an absent module",
+        "why": "nothing resolves, so nothing answers — the gradual fixture holds exactly this case"
+      },
+      {
+        "line": 14,
+        "character": 12,
+        "token": "pad",
+        "expect": null,
+        "rule": "use of an absent import",
+        "why": "the same, at a use"
+      }
+    ]
+  },
+  "published.rip": {
+    "positions": [
+      {
+        "line": 6,
+        "character": 9,
+        "token": "missing",
+        "expect": null,
+        "rule": "import from an absent module",
+        "why": "nothing resolves, so nothing answers"
+      },
+      {
+        "line": 25,
+        "character": 28,
+        "token": "active",
+        "expect": "(property) active: boolean",
+        "rule": "object key inside a callable body",
+        "why": "the compiled body is the author’s code — its key claims its occurrence and lands on the typed face position"
       }
     ]
   }

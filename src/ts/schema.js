@@ -35,8 +35,8 @@
 // identifier in a shipped artifact (emitting it bare would be a
 // as-is and its artifact fails any self-contained checker).
 //
-// Computed/derived members type `unknown` and methods
-// `(...args: any[]) => unknown` — @times
+// Computed/derived members type `unknown`; a method states its declared
+// parameter list and types its output `unknown` — @times
 // and @softDelete columns type `string`/`string | null` — the
 // runtime writes ISO strings and its own JSON-Schema export says so
 //
@@ -51,7 +51,7 @@
 // one is known; dts wraps them as DtsError and the TS face as a
 // positioned emitter diagnostic.
 
-import { derivedSchemaDescriptors, behaviorName } from '../schema.js';
+import { derivedSchemaDescriptors, behaviorName, paramsOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
 // renderer cannot drift from it. src/runtime/orm.js is still never
@@ -517,7 +517,7 @@ const braced = (props) => (props.length ? `{ ${props.join('; ')} }` : '{}');
 //                the projection algebra present)
 //   thisTypes  — entry index → the callable's `this` type ()
 //   typeNames  — every type name these lines bind (collision fodder)
-export function schemaTypeStory(decl, byName, known) {
+export function schemaTypeStory(decl, byName, known, source = null) {
   const { name, descriptor } = decl;
   const kind = descriptor.kind;
 
@@ -588,10 +588,21 @@ export function schemaTypeStory(decl, byName, known) {
   const scopeIdx = [];    // entries whose `this` is the query builder
   const ensureIdx = [];   // `@ensure` predicates — their param IS the data
   const out = (e, face) => (face ? `ReturnType<typeof ${bname}.${e.name}>` : 'unknown');
+  // A METHOD's parameters are part of what it promises, so the member
+  // states them. The face reads the whole signature off the behavior
+  // object, which carries the author's own annotations; the dts, which
+  // has no behavior object to reach, respells the declared list and
+  // keeps `unknown` for the output. An unannotated parameter is `any`
+  // outright — a bare name in a type position would be implicitly `any`
+  // anyway, and saying so keeps arity checkable on both roads.
+  const sig = (e) => paramsOf(e.paramTokens ?? [], `'${e.name}'`,
+    (msg, start) => { throw new SchemaTypeError(msg, start); }, source)
+    .map((p) => (p.type === null ? `${p.name}${p.optional ? '?' : ''}: any` : `${p.name}: ${p.type}`)).join(', ');
   const member = (e, face) =>
     e.tag === 'derived' ? `${e.name}: ${out(e, face)}`
       : e.tag === 'computed' ? `readonly ${e.name}: ${out(e, face)}`
-        : `${e.name}: (...args: any[]) => ${out(e, face)}`;
+        : face ? `${e.name}: typeof ${bname}.${e.name}`
+          : `${e.name}: (${sig(e)}) => unknown`;
   descriptor.entries.forEach((e, i) => {
     if (e.tag === 'derived') { derived.push(e); instanceIdx.push(i); }
     else if (e.tag === 'computed') { computed.push(e); instanceIdx.push(i); }
@@ -706,7 +717,7 @@ export function schemaTypeStory(decl, byName, known) {
 // vocabulary, another emitted alias, or a user-declared type name.
 // Returns null when the module declares no named schema (the zero-
 // cost path: no intrinsics, no aliases, nothing).
-export function buildSchemaTypeStory(programSexpr) {
+export function buildSchemaTypeStory(programSexpr, source = null) {
   const decls = collectSchemaDecls(programSexpr);
   if (decls.length === 0) return null;
   // A DERIVED binding (`UserPublic = User.pick("id", "email")`) builds
@@ -793,7 +804,7 @@ export function buildSchemaTypeStory(programSexpr) {
   };
   const stories = [];
   for (const d of decls) {
-    const story = schemaTypeStory(d, byName, known);
+    const story = schemaTypeStory(d, byName, known, source);
     for (const t of story.typeNames) claim(t, `schema '${d.name}'`, d.descriptor.start ?? null);
     // A field's `[default]` is a bare JS value in the runtime
     // descriptor, related to the field's declared type by nothing the
@@ -836,7 +847,7 @@ export function buildSchemaTypeStory(programSexpr) {
   const derivations = [];
   for (const d of derived) {
     if (assignedNames.get(d.name) > 1) continue;
-    const story = schemaTypeStory({ name: d.name, descriptor: d.descriptor }, byName, known);
+    const story = schemaTypeStory({ name: d.name, descriptor: d.descriptor }, byName, known, source);
     for (const t of story.typeNames) claim(t, `the derived schema '${d.name}'`, null, d.node);
     // `constType` is the DECLARATION road's alone. A face has the
     // algebra call to infer from and must not re-state it; a .d.ts has

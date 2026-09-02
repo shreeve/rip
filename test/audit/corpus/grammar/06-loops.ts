@@ -93,7 +93,7 @@ let waves = (() => {
 
 console.log('loop:', spins, waves)
 
-// ── for…in over arrays: plain, guard, step, and the two guard/step orders ──
+// ── for…in over arrays: plain, guard, step, the bare index, and the two guard/step orders ──
 
 let scores = [3, 8, 5, 9]
 for (let score of scores) {
@@ -107,6 +107,10 @@ for (let score of scores) {
 for (let _i = 0; _i < scores.length; _i += 2) {
   let even = scores[_i]
   console.log('stepped:', even)
+}
+for (let k = 0; k < scores.length; k++) {
+  let mark = scores[k]
+  console.log('index:', mark, k)
 }
 for (let i = 0; i < scores.length; i += 2) {
   let late = scores[i]

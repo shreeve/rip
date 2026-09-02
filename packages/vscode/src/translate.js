@@ -136,6 +136,224 @@ export function diagnosticTagsFor(code) {
   return [];
 }
 
+// The one walk over a printed type: every character outside a string
+// literal (escapes honored) visits with its bracket depth, a `>`
+// closing an arrow (`=>`) counting as none. Stops where `visit`
+// answers false and returns that index; -1 when the walk runs out.
+export function walkType(text, from, visit) {
+  let depth = 0, quote = null;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (quote !== null) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+    if ('<([{'.includes(c)) depth++;
+    else if (')]}'.includes(c) || (c === '>' && text[i - 1] !== '=')) depth--;
+    if (visit(i, c, depth) === false) return i;
+  }
+  return -1;
+}
+// The pieces of a printed type around its depth-0 `sep`s: a separator
+// inside a literal, a bracket pair, or a function type's own arms
+// belongs to that nested type, never to this list. Pieces come back
+// untrimmed and possibly empty.
+export function splitTypeAt(text, sep) {
+  const parts = [];
+  let start = 0;
+  walkType(text, 0, (i, c, depth) => {
+    if (c === sep && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  });
+  parts.push(text.slice(start));
+  return parts;
+}
+// The index of the bracket closing the one at `from`, or -1.
+export const balancedTo = (text, from) => walkType(text, from, (i, c, depth) => !(i > from && depth === 0));
+// A printed union's own arms, trimmed — the depth-0 split.
+export function unionArms(type) {
+  return splitTypeAt(type, '|').map((arm) => arm.trim()).filter(Boolean);
+}
+// The reactive-cell shape `{ value: T; read(): T }` — both Ts equal, the
+// brand doctrine keeping user literals out of it — with the marker
+// rows a component's bind slot adds. Answers the value type T (and
+// whether the cell is readonly), or null for any other type.
+export function cellShape(text) {
+  const m = /^\{ (readonly )?value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(text.trim());
+  if (!m || m[2].trim() !== m[3].trim()) return null;
+  return { value: m[2].trim(), readonly: m[1] !== undefined };
+}
+
+// A reactive CELL, `{ value: T; read(): T; touch?(): void }`, plays two
+// parts, and only one of them is the lowering's. BESIDE its own value type
+// in a union — `T | { value: T; … } | undefined`, a shared prop slot's
+// admission, a `<=>` channel's — the cell arm is the plumbing that lets a
+// container ride the same slot as a value, and it reads as T (the brand
+// check — value and read() agreeing — keeps a user literal of that shape
+// out). STANDALONE, a cell is a thing the author holds or passed: a
+// reactive import IS the cell the importer receives, and a `:=` cell handed
+// where a value belongs is exactly that. Those stay named as cells, because
+// collapsing one would make `n: number = count` complain that number is
+// not assignable to number. A text with no cell arm comes back untouched:
+// the diagnostic path hands this every quoted span of a message, and a
+// quoted operator (`'|'`) is not a union to normalize.
+export function collapseCellArms(type) {
+  if (typeof type !== 'string') return type;
+  const top = unionArms(type);
+  // A PARENTHESIZED union is a union too — a required prop's slot prints
+  // `string | ((string | { value: … } | undefined) & …)` — so a `(…)` arm
+  // collapses inside its parens, and drops them when one arm remains.
+  const inner = (arm) => {
+    // An INTERSECTION's pieces each collapse on their own.
+    const pieces = splitTypeAt(arm, '&');
+    if (pieces.length > 1) {
+      const done = pieces.map((p) => { const t = p.trim(); const c = inner(t); return c === t ? p : p.replace(t, c); });
+      return done.every((p, i) => p === pieces[i]) ? arm : done.join('&');
+    }
+    if (!(arm.startsWith('(') && balancedTo(arm, 0) === arm.length - 1)) return arm;
+    const within = collapseCellArms(arm.slice(1, -1));
+    if (within === arm.slice(1, -1)) return arm;
+    return unionArms(within).length === 1 ? within : `(${within})`;
+  };
+  if (top.length < 2) {
+    if (top.length === 1) {
+      const one = inner(top[0]);
+      if (one !== top[0]) return type.replace(top[0], one);
+    }
+    return type;
+  }
+  let collapsed = false;
+  const arms = top.map((arm) => {
+    const cell = cellShape(arm);
+    if (cell !== null) { collapsed = true; return cell.value; }
+    const grouped = inner(arm);
+    if (grouped !== arm) collapsed = true;
+    return grouped;
+  });
+  if (!collapsed) return type;
+  // A collapsed cell's value type may itself be a union, so the arms
+  // flatten once more and an arm already present folds into it.
+  return [...new Set(arms.flatMap(unionArms))].join(' | ');
+}
+
+// A typed head and its type: `(property) variant?: T`, `(parameter) x: T`,
+// a `const N: T` — the text every type-bearing presentation prints, with
+// the cell arms of T collapsed and the head kept as written. The head
+// splits off first because the collapse re-splits the union: left in,
+// the head would ride the first arm and its literal could reappear as a
+// second copy. A text with no head collapses whole; one with no cell arm
+// comes back untouched.
+export function collapseTypedHead(text) {
+  if (typeof text !== 'string') return text;
+  const head = /^((?:\(alias\) )*(?:\([a-z ]+\) )?(?:readonly )?(?:const |let |var )?(?:[\w$.]+|\[[^\]]*\])(?:<[^>]*>)?\??: )([^]*)$/.exec(text);
+  if (!head) return collapseCellArms(text);
+  const collapsed = collapseCellArms(head[2]);
+  return collapsed === head[2] ? text : head[1] + collapsed;
+}
+
+// A printed type on its way to the screen — a completion's detail, a
+// symbol's, a signature's row: the face's names scrubbed, and a cell arm
+// collapsed onto its value. tsgo prints a long member type across lines
+// and the brand check reads the one-line shape, so a text carrying a
+// cell flattens first (a type reads as one line either way); a text with
+// no cell keeps its layout. Prose — a doc comment, a name, an action
+// title — takes scrubFaceArtifacts alone: it is not a type to collapse.
+export function presentType(text) {
+  if (typeof text !== 'string') return text;
+  const scrubbed = scrubFaceArtifacts(text);
+  if (!/\{\s*(?:readonly )?value: [^]*?read\(\)/.test(scrubbed)) return scrubbed;
+  const flat = scrubbed.replace(/\s+/g, ' ').trim();
+  const collapsed = collapseTypedHead(flat);
+  return collapsed === flat ? scrubbed : collapsed;
+}
+
+// The quick fixes the editor OFFERS: the import fixes, and nothing else.
+// tsgo's code-action rows carry no fix identity — title, kind,
+// diagnostics, edit — so the title is the key. The three spellings are
+// TypeScript's own for the import family: the new-line import, the merge
+// into an existing clause, and the whole-file batch of both. Every other
+// quick fix TypeScript grows — a declared property, an underscore prefix,
+// an inferred parameter type, an inserted `await` — edits in TypeScript
+// syntax, which has no place landing inside rip source.
+export const isImportFixTitle = (title) => typeof title === 'string'
+  && /^(?:Add import from |Update import from |Add all missing imports$)/.test(title);
+
+// The BOUNDARY pass: every response leaves the server through it, and
+// every DISPLAY field — text a person reads — is presented once more
+// (scrubbed; a type field collapsed) on the way out. The presenters
+// upstream are the real fix, and a well-behaved response passes through
+// unchanged; a field the pass has to change is a presenter that was
+// forgotten, and `onRescue(method, field)` reports it so a suite or a
+// lane can fail on it rather than let the net become the only
+// presenter. Fields that travel back INTO the buffer — `newText`,
+// `insertText`, `filterText`, `sortText`, every edit — are never
+// touched: the scrub is display-only by design, and rewriting an edit
+// would corrupt the file it lands in.
+const TYPE_FIELDS = new Set(['detail', 'description', 'label']);
+export function presentOutgoing(method, result, onRescue = () => {}) {
+  if (result === null || result === undefined) return result;
+  const rescue = (field) => onRescue(method, field);
+  const text = (value, field, type = false) => {
+    if (typeof value !== 'string') return value;
+    const out = type ? presentType(value) : scrubFaceArtifacts(value);
+    if (out !== value) rescue(field);
+    return out;
+  };
+  const markup = (doc, field) => {
+    if (typeof doc === 'string') return text(doc, field);
+    if (doc && typeof doc.value === 'string') { const v = text(doc.value, field); return v === doc.value ? doc : { ...doc, value: v }; }
+    return doc;
+  };
+  const item = (it) => {
+    if (!it || typeof it !== 'object') return it;
+    const out = { ...it };
+    if (out.detail !== undefined) out.detail = text(out.detail, 'detail', true);
+    if (out.labelDetails?.description !== undefined) {
+      const d = text(out.labelDetails.description, 'labelDetails.description', true);
+      if (d !== out.labelDetails.description) out.labelDetails = { ...out.labelDetails, description: d };
+    }
+    if (out.documentation !== undefined) out.documentation = markup(out.documentation, 'documentation');
+    return out;
+  };
+  const symbol = (sym) => {
+    if (!sym || typeof sym !== 'object') return sym;
+    const out = { ...sym };
+    if (out.name !== undefined) out.name = text(out.name, 'name');
+    if (out.detail !== undefined) out.detail = text(out.detail, 'detail', true);
+    if (out.containerName !== undefined) out.containerName = text(out.containerName, 'containerName');
+    if (Array.isArray(out.children)) out.children = out.children.map(symbol);
+    return out;
+  };
+  switch (method) {
+    case 'textDocument/hover': {
+      const c = result.contents;
+      if (c && typeof c.value === 'string') { const v = text(c.value, 'contents'); return v === c.value ? result : { ...result, contents: { ...c, value: v } }; }
+      return result;
+    }
+    case 'textDocument/completion': {
+      if (Array.isArray(result)) return result.map(item);
+      return Array.isArray(result.items) ? { ...result, items: result.items.map(item) } : result;
+    }
+    case 'completionItem/resolve': return item(result);
+    case 'textDocument/signatureHelp': {
+      if (!Array.isArray(result.signatures)) return result;
+      return { ...result, signatures: result.signatures.map((sig) => ({
+        ...sig,
+        label: text(sig.label, 'label', true),
+        ...(sig.documentation !== undefined ? { documentation: markup(sig.documentation, 'documentation') } : {}),
+        ...(Array.isArray(sig.parameters) ? { parameters: sig.parameters.map((p) => ({ ...p, ...(typeof p.label === 'string' ? { label: text(p.label, 'parameters.label', true) } : {}), ...(p.documentation !== undefined ? { documentation: markup(p.documentation, 'parameters.documentation') } : {}) })) } : {}),
+      })) };
+    }
+    case 'textDocument/documentSymbol':
+    case 'workspace/symbol':
+      return Array.isArray(result) ? result.map(symbol) : result;
+    case 'textDocument/codeAction':
+      return Array.isArray(result) ? result.map((a) => (a && typeof a.title === 'string' ? { ...a, title: text(a.title, 'title') } : a)) : result;
+    default: return result;
+  }
+}
+
 // Route-union display prettifying, two passes over the same member
 // list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
 // reads as the parameterized display the route file spells
@@ -264,7 +482,23 @@ export function sourceOffsetToGenerated(mappings, offset, source = null, code = 
 // glyph, synthetic-only territory — answers null rather than landing
 // a destructive request on whatever sits at a cover row's start.
 export function sourceOffsetToGeneratedExact(mappings, offset, source = null, code = null) {
-  return preciseSourceToGenerated(mappings, offset, source, code);
+  const at = preciseSourceToGenerated(mappings, offset, source, code);
+  if (at !== null) return at;
+  // The END BOUNDARY. Rows are end-exclusive, so a cursor one past an
+  // identifier's last character sits in no row — yet that is exactly
+  // where the editor's own gestures leave it: double-clicking a word
+  // selects it and puts the caret at its end, and F2 there must rename
+  // the word just left, not decline. A symbol-identifying request
+  // resolves through the identifier that ENDS here, at its last
+  // character, which names the same symbol.
+  //
+  // This widens only the STRICT flavor. The decline it relaxes is about
+  // end-exclusivity, not about verbatim correspondence: the step-back
+  // position must itself map precisely, so a comment, a keyword glyph,
+  // or synthetic-only territory still answers null.
+  if (source === null || offset <= 0) return null;
+  if (!/[\w$]/.test(source[offset - 1] ?? '')) return null;
+  return preciseSourceToGenerated(mappings, offset - 1, source, code);
 }
 
 // The stale-hover alignment guard: an offset map between the CURRENT
@@ -699,9 +933,39 @@ export function exactSpanMapper(mappings) {
 // their internals) and the `_ref` temp family (hoisted chain-comparison
 // caches). Both namespaces are the compiler's by construction — temps
 // dodge every user identifier, and the runtime ships under `__`.
-export function isScaffoldingLabel(label) {
-  return /^__/.test(label) || /^_ref\d*$/.test(label);
+// The lowering's own names never surface as completion items: the `__`
+// runtime helpers, the `_ref` temps, the render locals (`_el3`, `_t1`,
+// `_inst9`, `_factoryChildren`), the block factories (`create_block_5`),
+// and the component runtime's private surface (`_init`, `_teardown`,
+// `_mountSetup`, …). A `_`-prefixed name the SOURCE spells is the
+// author's own and stays offered.
+const RUNTIME_PRIVATE = new Set([
+  '_init', '_teardown', '_mountSetup', '_mountCreate', '_beginMount', '_failMount', '_hmrRerender',
+  '_setRestProp', '_updateProp', '_applyInheritedProp', '_applyPlainInheritedProp', '_applyRestToInheritedEl',
+]);
+export function isScaffoldingLabel(label, source = '') {
+  if (/^__/.test(label) || /^_ref\d*$/.test(label)) return true;
+  if (!/^_(?:el|t|inst|frag|anchor|empty|slot)\d+$|^_factory[A-Za-z]*$|^create_block_\d+$/.test(label) && !RUNTIME_PRIVATE.has(label)) return false;
+  return !source.includes(label);
 }
+
+// An auto-import item whose module is one only THIS SERVER spells, so
+// the specifier it would insert is one no author can write and its
+// description prints the mirror's own layout. Two such modules exist:
+//
+//   `__external__/…`  a source outside the workspace, mirrored under a
+//                     path of the server's own making — what the same
+//                     program reaches by a real specifier (`rip/app`)
+//                     is offered under that name instead;
+//   `….__rip_probe__` the pin probe's sibling file, which is open in
+//                     tsgo only while a probe runs and is unlinked
+//                     after. It is transient, so an item from it
+//                     appears in one session and not the next — the
+//                     completion surface must not offer a module that
+//                     is about to stop existing.
+export const isMirrorImportItem = (item) =>
+  [item?.labelDetails?.description, item?.detail].some((s) => typeof s === 'string'
+    && (/(?:^|[\\/])__external__(?:[\\/]|$)/.test(s) || /__rip_probe__/.test(s)));
 
 // TS-face spellings scrubbed from user-visible STRINGS (labels,
 // details, documentation — never positions): the definite-assignment
@@ -712,7 +976,36 @@ export function isScaffoldingLabel(label) {
 export function scrubFaceArtifacts(text) {
   return text
     .replace(/([A-Za-z_$][\w$]*)!:/g, '$1:')
-    .replace(/\.rip\.ts(?=["'`])/g, '.rip');
+    .replace(/\.rip\.ts(?=["'`])/g, '.rip')
+    // The intrinsic-element surfaces (src/ts/dom-types.js): a receiver
+    // or attribute-values interface reads as the element it types, and
+    // the ref-cell admission helper reads as the channel word. Display
+    // only — never applied to text that travels back into an edit.
+    .replace(/\b__RipEl_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
+    .replace(/\b__RipAttrVals_(?:svg_)?([A-Za-z][\w]*)/g, '<$1>')
+    .replace(/\b__ripRefCell(?:Svg)?\b/g, 'ref')
+    // The class-vocabulary alias is recursive (an array of itself), so
+    // it cannot expand away — it reads back under the clsx ecosystem's
+    // own name for the same union, in the declaration's own order
+    // (scalar first; tsgo's display normalization flips it).
+    .replace(/\b__RipClassValue\b/g, 'ClassValue')
+    .replace(/\b__RipChildren\b/g, 'Children')
+    // The per-tag rest alias reads as `Rest<tag>` — the tag shorthand's own idiom.
+    .replace(/\b__RipRest_([A-Za-z][\w]*)\b/g, 'Rest<$1>')
+    // A schema's behavior object is the face's own home for the
+    // methods the author declared ON the schema — `__Cart__behavior`
+    // reads back as Cart, whose behavior it is.
+    .replace(/\b__([A-Za-z$][\w$]*)__behavior\b/g, '$1')
+    .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]');
+}
+
+// A hover's markdown body reduced to its bare type text, for pinning
+// and comparison: the code fences go, and every run of whitespace
+// (the multi-line display of an object type included) becomes one
+// space. Empty in, empty out — the caller decides what an empty
+// answer means.
+export function flattenHover(markdown) {
+  return markdown.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim();
 }
 
 // Inserted-import text made idiomatic Rip: statement semicolons drop
@@ -770,6 +1063,91 @@ export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {
     if (v.kind === 'render-channel' || v.kind === 'gate-prefix') spans.push([v.start, v.end]);
   }
   for (const s of silences) spans.push(s);
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
+// The POSITIVE hover model, read off the lexer's own tokens: hover
+// answers only where the author wrote a symbol. IDENTIFIER and
+// PROPERTY tokens are the author's names; a TYPE token is an opaque
+// annotation whose words tsgo resolves (the type name answers, and
+// the mapping decides); an import specifier's STRING serves the
+// module hover v3 served. Everything else — structure keywords,
+// string and regex literals, numbers, operators, comments, blank
+// bytes — declines, which is the platform's own convention (TS hovers
+// nothing at `if`, `42`, `'text'`, or whitespace) and what the render
+// rulings already pinned word by word. RULINGS.md, the hover model.
+// The token payloads a schema body captures instead of lowering inline:
+// a callable's parameters and body, a transform's body, a directive's
+// arguments. Their identifiers are the author's words as much as any
+// top-level token's — the lowering compiles them into the descriptor,
+// where the mapping already lands each on its typed face position — so
+// the hover model has to reach them, or the whole body declines.
+export const SCHEMA_PAYLOADS = ['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens'];
+
+export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null) {
+  const spans = [];
+  const comments = trivia.filter((t) => t.kind === 'comment');
+  let prevWord = null, prevPrev = null;
+  for (const t of tokens) {
+    if (typeof t.start !== 'number' || t.start === t.end) { continue; }
+    if (t.kind === 'SCHEMA_BODY') {
+      for (const e of t.value?.entries ?? []) {
+        for (const k of SCHEMA_PAYLOADS) {
+          for (const n of e[k] ?? []) {
+            if ((n.kind === 'IDENTIFIER' || n.kind === 'PROPERTY') && typeof n.start === 'number' && n.start !== n.end) {
+              spans.push([n.start, n.end]);
+            }
+          }
+        }
+      }
+      prevPrev = prevWord; prevWord = t.kind;
+      continue;
+    }
+    // A type-parameter list is ONE lexer token (`<T, U extends Base>`);
+    // each name inside it is a symbol the author wrote, and hovers.
+    // Only the parameter NAMES — the word after `<` or a `,` — are its
+    // declarations; a constraint's words (`extends string`) are types,
+    // and stay out the way an annotation's do.
+    if (t.kind === 'TYPE_PARAMS' && typeof t.value === 'string' && typeof t.start === 'number') {
+      for (const m of t.value.matchAll(/(?:^<|,)\s*([A-Za-z_$][\w$]*)/g)) {
+        const at = t.start + m.index + m[0].length - m[1].length;
+        spans.push([at, at + m[1].length]);
+      }
+      continue;
+    }
+    if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY'
+        || (t.kind === 'STRING' && (prevWord === 'FROM' || prevWord === 'IMPORT'))) {
+      // `new.target`'s member is the meta-property's second half: the
+      // lowering rewrites the construct away, so no face symbol stands
+      // at the word — a hover could only answer through the enclosing
+      // declaration's cover, about something the word never named. It
+      // declines instead.
+      if (!(t.kind === 'PROPERTY' && prevWord === '.' && prevPrev === 'NEW_TARGET')) {
+        spans.push([t.start, t.end]);
+      }
+    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL') && source !== null) {
+      // An annotation or a type/interface DECLARATION is one opaque
+      // token; its WORDS answer (tsgo resolves the names) while its
+      // punctuation, spaces, and quote bytes decline like everyone
+      // else's. The words come off the SOURCE slice — the token's
+      // value normalizes spelling and may not cover the span — and a
+      // word inside a comment the body carries stays declined. So does
+      // a word inside a quoted literal ('primary' in a union): a
+      // literal is a value, not a symbol, and its only answer would be
+      // an echo of the bytes under the cursor.
+      const slice = source.slice(t.start, t.end);
+      const veiled = [...comments.map((c) => [c.start - t.start, c.end - t.start])];
+      for (const q of slice.matchAll(/'[^'\n]*'|"[^"\n]*"/g)) {
+        veiled.push([q.index, q.index + q[0].length]);
+      }
+      for (const m of slice.matchAll(/[A-Za-z_$][\w$]*/g)) {
+        const a = m.index, b = m.index + m[0].length;
+        if (!veiled.some(([s, e]) => a < e && b > s)) spans.push([t.start + a, t.start + b]);
+      }
+    }
+    prevPrev = prevWord;
+    prevWord = t.kind;
+  }
   return spans.sort((a, b) => a[0] - b[0]);
 }
 

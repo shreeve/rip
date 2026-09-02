@@ -529,10 +529,10 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // render). Unannotated members with literal initializers infer
       // their syntactic type, so the value here is `number`, not `any`.
       const state = await hoverAt(client, 3, 3);
-      expect(state.contents.value).toContain('(property) Card.count: number');
+      expect(state.contents.value).toContain('(state) count: number');
       expect(state.contents.value).not.toContain('read()');
       const typedProp = await hoverAt(client, 1, 4);
-      expect(typedProp.contents.value).toContain('(property) Card.title: string');
+      expect(typedProp.contents.value).toContain('(prop) title: string');
       // An unannotated computed answers value-first like every other
       // member kind. Its face type once read through the lowering's
       // behavior object, so nothing spellable for it was in the author's
@@ -541,15 +541,20 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // which TypeScript prints resolved — so the projection is gone and
       // so is the reason to decline. `count * 2` is number.
       const computed = await hoverAt(client, 4, 3);
-      expect(computed.contents.value).toContain('(property) Card.total: number');
+      expect(computed.contents.value).toContain('(computed) total: number');
       expect(computed.contents.value).not.toContain('__Card__computed');
       expect(computed.contents.value).not.toContain('read()');
-      // A member READ inside a render block is the CONSUMER position and
-      // keeps the container: `@title.value` is real there, and the
-      // declaration's vocabulary is not the reader's.
+      // A member READ inside a render block answers value-first like
+      // every other in-body read — the author wrote `@title` and the
+      // lowering appended `.value`, so the sigil spelling presents
+      // exactly as the bare spelling does. A consumer holding an
+      // INSTANCE (`inst.title.value`) still keeps the container: that
+      // position never rides the value-first channel.
       const renderRead = await hoverAt(client, 10, 9);
-      expect(renderRead.contents.value).toContain('value: string');
-      expect(renderRead.contents.value).toContain('read()');
+      // The sigil read carries the member's minted kind, like every other
+      // occurrence of it: one binding never answers two ways.
+      expect(renderRead.contents.value).toContain('(prop) title: string');
+      expect(renderRead.contents.value).not.toContain('read()');
       // The accept member is the honest cross-component boundary: the
       // offered container's type is not knowable statically — any.
       const accepted = await hoverAt(client, 5, 10);
@@ -704,7 +709,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect((await wait()).diagnostics).toEqual([]);
       // A declaration answers value-first, `children` like any other prop.
       const hover = await hoverAt(client, 1, 4);
-      expect(hover.contents.value).toContain('(property) Child.children: string');
+      expect(hover.contents.value).toContain('(prop) children: string');
     } finally {
       await client.stop();
     }

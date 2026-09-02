@@ -41,6 +41,7 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
+| [68](#68-completion-resolve-prints-the-cursor-symbols-type-on-every-item) | Completion resolve prints the cursor symbol's type on every item | `editor` | `sweep.js` — the completion classes, gated by sweep.machinery |
 
 **The ordering principles.** Audience first; within a band, *silently wrong* outranks *visibly missing*: a wrong answer stated without hedging misleads, where a loud failure merely interrupts — so the loud rows (build breaks, parse errors) sink below the silent ones however broken their output is. One row remains — #16, held by an upstream release rather than a missing fix; its own body argues its place.
 
@@ -72,6 +73,22 @@ Also driven straight against the tsgo binary, bypassing rip: **not a single toke
 **vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. It surfaced late for the reason the escape slot above records.
 
 **Status.** ⬜ **Open** (2026-07-14) — **fixed upstream, waiting on a stable release.** [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635) closed 2026-07-21 (PR #4654, `declSourceFile.Path()`), and the modifier is present when the same probe runs against a build carrying it. But no stable release has it: npm `latest` is 7.0.2, published before the merge, and the only builds with the fix are `7.1.0-dev.*` under `next`. This repo pins 7.0.2, and that pin also feeds every tsc-backed gate ([tsc.js](../support/tsc.js) `resolveTsc`), so adopting it early means putting the gates on a daily build. The row's exit is a stable 7.1 reaching the pin. It still sits last because nothing here moves it — but the reason is now a release cadence, not an unfixed upstream bug.
+
+### 68. Completion resolve prints the cursor symbol's type on every item
+
+With the completion cursor inside a CALLABLE symbol's own name — a class in `new Field(`, a function in `go()` — tsgo's `completionItem/resolve` answers every item's detail as the item's own head followed by that symbol's type: `let text: new (props?: { label?: string; }) => Field`, `var SVGTransform: new (props?: …) => Field`. Inside a plain variable, at a fresh prefix, or on a blank the details are the items' own. A rip component use lowers its tag word to exactly such a callee, so a completion asked inside a component's name at a use site carried the construct signature — bind twins, cell arms, passthrough rows — on every item in the list.
+
+**Why (code)** — tsgo's resolve, not the broker and not TypeScript: driven against the tsgo binary alone on a plain `.ts` file, same answers; TypeScript's own LanguageService (6.0.3, `getCompletionEntryDetails`) on the same file at the same cursor answers each entry's own type — `let text: string` where tsgo prints the constructor. The server forwards tsgo's own item to resolve and presents what comes back.
+
+**The fix — the server drops what it can prove wrong.** At completion time the cursor symbol's type is read once (one hover at the face position); at resolve a detail whose type text equals it, on an item that is not that symbol, is not the item's type and is not shown (`onCompletionResolve`). A correct detail at every other position passes untouched. No local change can recover the item's real type without a second ask per item, which resolve's own contract exists to avoid.
+
+**Why the suite missed it.** No lane asked completions, and the hand tests asked at fresh prefixes, where the details are right. The sweep now asks at every word end, resolves each distinct item once, and judges its presentation; the callee position is a word end.
+
+**Driven** — the broker on `13-components.rip` (every item at the `Field` and `Step` tag words carried the construct type) and the tsgo binary alone on a five-line `.ts` file (the table above the fix, in the drive).
+
+**vs v3** — v3 did not have it: it resolved through the in-process JS LanguageService, whose `getCompletionEntryDetails` answers the named entry's own type at this position (the control above).
+
+**Status.** ⬜ **Open** (2026-09-02) — upstream in tsgo, not yet filed; the guard holds the editor honest meanwhile, and the sweep's completion classes gate the symptom.
 
 ## Closed
 
@@ -146,3 +163,5 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 65 | A render loop's binding classified `parameter` — the lowering made it one | `semantic-tokens` |
 | 66 | Adjacent component attributes read in two colors — suppressed, not synthesized | `semantic-tokens` |
 | 67 | A materialized mirror was never forwarded to tsgo, so a pruned module's importers kept the stub's any — masked by FSEvents on macOS, wedged on linux | the audit CI job on ubuntu (hover parity + token delivery over the corpus); the compile path forwards its touched list |
+| 69 | Declaration names the face spells without a verbatim twin | `landing.js` — landing.census, every declared name navigates |
+| 70 | A generated copy of a declared name refuses its rename | `roundtrip.js` — roundtrip.census, every declaration renames |

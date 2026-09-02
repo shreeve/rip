@@ -4,7 +4,7 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
-import {
+import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isImportFixTitle,
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
@@ -12,7 +12,7 @@ import {
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SCAFFOLD_FAMILIES, prettifyRouteUnion,
+  SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover,
 } from '../../src/translate.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -371,6 +371,14 @@ describe('TS-face artifact filters', () => {
     expect(scrubFaceArtifacts('Add import from "./util.rip.ts"')).toBe('Add import from "./util.rip"');
     // A genuine non-null assertion on a call result is not the pattern.
     expect(scrubFaceArtifacts('f()!: never happens')).toBe('f()!: never happens');
+    // The class-vocabulary alias reads back under the clsx ecosystem's
+    // own name — hover and diagnostic messages alike — in the
+    // declaration's scalar-first order, undoing tsgo's display flip.
+    expect(scrubFaceArtifacts("Type '42' is not assignable to type '__RipClassValue[] | __RipClassValue'."))
+      .toBe("Type '42' is not assignable to type 'ClassValue | ClassValue[]'.");
+    // A schema behavior member reads back under the schema's own name.
+    expect(scrubFaceArtifacts('(property) slip: (...args: any[]) => ReturnType<typeof __Parcel__behavior.slip>'))
+      .toBe('(property) slip: (...args: any[]) => ReturnType<typeof Parcel.slip>');
   });
 
   test('ripImportText: inserted import lines drop the semicolon and the mirror extension, and single-quote the specifier', () => {
@@ -451,7 +459,7 @@ describe('spans with no user symbol (the hover declines)', () => {
   // right-hand name are real reads that reach a face entity — they must
   // stay counted there while still being silent HERE, which is why the
   // compiler reports them on a second channel.
-  test('the render channel silences its own words and the names they bind', () => {
+  test('the render channel silences its own words; the names they bind answer', () => {
     const src = [
       'Panel = component',
       "  text := 'x'",
@@ -469,34 +477,47 @@ describe('spans with no user symbol (the hover declines)', () => {
 
     const renderAt = src.indexOf('  render');
     expect(silenced(at('ref:', renderAt))).toBe(true);            // the channel word
-    expect(silenced(at('inputEl', at('ref:', renderAt)))).toBe(true);   // the cell it names
-    expect(silenced(at('value', renderAt))).toBe(true);           // the bind target
-    expect(silenced(at('text', renderAt))).toBe(true);            // the name bound to it
+    // The bind TARGET is a channel word the census spends — silenced here,
+    // and answered from the compiler's record instead (RULINGS.md).
+    expect(silenced(at('value', renderAt))).toBe(true);
+    // The name BOUND to it is the author's own binding, so it answers
+    // value-first through its own position — never silenced.
+    expect(silenced(at('text', renderAt))).toBe(false);
 
-    // …and the census keeps the two reads it must still count.
+    // The cell a ref names is NOT silenced: the `__ripRefCell` wrap
+    // gives its bytes a real face position and the value-first channel
+    // serves the binding's own element type there (RULINGS.md, the
+    // ref-name row) — while the intrinsics record answers for the
+    // channel word itself.
+    const cellAt = at('inputEl', at('ref:', renderAt));
+    expect(silenced(cellAt)).toBe(false);
+    expect(r.memberDecls.some((m) => m.start === cellAt)).toBe(true);
+    expect(r.intrinsics.some((i) => i.kind === 'ref' && i.name === 'inputEl' && i.tag === 'input')).toBe(true);
+
+    // …and the census keeps the reads it must still count.
     const consumed = new Set(r.vocabulary.map((v) => v.start));
-    expect(consumed.has(at('inputEl', at('ref:', renderAt)))).toBe(false);
+    expect(consumed.has(cellAt)).toBe(false);
     expect(consumed.has(at('text', renderAt))).toBe(false);
     expect(consumed.has(at('ref:', renderAt))).toBe(true);        // the word itself IS consumed
   });
 
   // A schema transform's `it` is the DSL's own word — the grammar fixes
-  // the parameter list, so there is nothing to rename or annotate. A
-  // record FIELD the author happens to name `it` is the opposite: an
-  // ordinary member with an answer of its own. Spelling cannot tell them
-  // apart; the token kind can, and this is the only fixture anywhere that
-  // spells both on one line.
-  test("a transform silences the `it` PARAMETER, not a field named `it`", () => {
+  // the parameter list, so there is nothing to rename or annotate — and
+  // it reaches the face as the minted parameter carrying the declared
+  // `any` boundary. That boundary IS its answer (`(parameter) it: any`,
+  // RULINGS.md), so nothing silences the word: neither the parameter, nor
+  // a record FIELD the author happens to name `it`, nor any other name in
+  // the body. This is the only fixture anywhere that spells both on one
+  // line.
+  test("a transform silences nothing — the `it` PARAMETER answers its boundary, and a field named `it` is a field", () => {
     const src = "S = schema\n  label! -> it.it\n  other! -> String(it.name)\n";
     const spans = noUserSymbolSpans(compile(src, { face: 'ts', runtimeDelivery: 'inline' }));
     const first = src.indexOf('it.it');
-    expect(inNoUserSymbolSpan(spans, first)).toBe(true);          // the parameter read
+    expect(inNoUserSymbolSpan(spans, first)).toBe(false);         // the parameter read
     expect(inNoUserSymbolSpan(spans, first + 3)).toBe(false);     // the field it reaches
-    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(true);
-    // …and an ordinary identifier in the same body is untouched: the
-    // predicate is the DSL's word AND the kind, not the kind alone.
+    expect(inNoUserSymbolSpan(spans, src.indexOf('it.name'))).toBe(false);
     expect(inNoUserSymbolSpan(spans, src.indexOf('String'))).toBe(false);
-    expect(spans.length).toBe(2);                                 // two parameters, nothing else
+    expect(spans.length).toBe(0);                                 // a transform body owns no span whole
   });
 
   test('a DECLARATION outside render keeps its answer', () => {
@@ -662,5 +683,132 @@ describe('prettifyRouteUnion', () => {
     expect(prettifyRouteUnion('text', [])).toBe('text');
     expect(prettifyRouteUnion('text', undefined)).toBe('text');
     expect(prettifyRouteUnion(null, entries)).toBe(null);
+  });
+});
+
+// A reactive cell is the lowering's container, never the author's type, so
+// wherever a type text shows one it reads as its value type — the same
+// collapse the prop-slot hover and a diagnostic's quoted types share.
+describe('collapseCellArms: a cell reads as its value type', () => {
+  test('a cell arm beside its value type folds into it, absence arm kept', () => {
+    expect(collapseCellArms('boolean | { value: boolean | undefined; read(): boolean | undefined; touch?(): void; } | undefined'))
+      .toBe('boolean | undefined');
+  });
+  test('a STANDALONE cell stays a cell — a reactive import is the cell the importer holds', () => {
+    const cell = '{ value: number; read(): number; touch(): void; }';
+    expect(collapseCellArms(cell)).toBe(cell);
+  });
+  test('the brand check: a literal whose value and read() disagree is left alone', () => {
+    const literal = '{ value: string; read(): number; }';
+    expect(collapseCellArms(literal)).toBe(literal);
+  });
+  test('a type with no cell is untouched', () => {
+    expect(collapseCellArms('"/" | "/cart" | `/orders/${string}`')).toBe('"/" | "/cart" | `/orders/${string}`');
+  });
+  test('a ` | ` inside a literal arm belongs to that literal, never to the union', () => {
+    expect(collapseCellArms('"a | b" | { value: "a | b"; read(): "a | b"; touch?(): void; } | undefined'))
+      .toBe('"a | b" | undefined');
+    expect(collapseCellArms('"{" | { value: "{"; read(): "{"; touch?(): void; } | undefined'))
+      .toBe('"{" | undefined');
+  });
+  test('a cell arm inside a parenthesized group collapses within its parens — a required prop\'s slot', () => {
+    // The group's own parens go once nothing in it needs them: `&` binds
+    // tighter than `|`, so `A | (B | C) & D` reads as TypeScript prints it.
+    expect(collapseCellArms('string | ((string | { value: string; read(): string; touch?(): void; } | undefined) & { x: 1 })'))
+      .toBe('string | (string | undefined) & { x: 1 }');
+    expect(collapseCellArms('((number | { value: number; read(): number; touch?(): void; }))')).toBe('number');
+  });
+  test('a quoted operator is not a union: the message text around it survives', () => {
+    expect(collapseCellArms('|')).toBe('|');
+    expect(collapseCellArms('||')).toBe('||');
+  });
+});
+
+// Every type-bearing presentation — a completion's detail column, a
+// symbol's detail, a signature row — prints through presentType: the
+// face names scrubbed and a cell arm collapsed, with the head kept.
+describe('presentType: a printed type on its way to the screen', () => {
+  test('a completion detail with a multi-line cell arm reads value-first, head kept', () => {
+    const detail = '(property) variant?: "primary" | "secondary" | {\n    value: "primary" | "secondary";\n    read(): "primary" | "secondary";\n    touch?(): void;\n} | undefined';
+    expect(presentType(detail)).toBe('(property) variant?: "primary" | "secondary" | undefined');
+  });
+  test('the head splits off first — its literal never reappears as a second arm', () => {
+    expect(collapseTypedHead('(property) variant?: "primary" | { value: "primary" | "secondary"; read(): "primary" | "secondary"; touch?(): void; }'))
+      .toBe('(property) variant?: "primary" | "secondary"');
+  });
+  test('a text with no cell keeps its layout and only scrubs', () => {
+    expect(presentType('(property) a: {\n  b: __RipChildren\n}')).toBe('(property) a: {\n  b: Children\n}');
+  });
+  test('a standalone cell stays a cell', () => {
+    const cell = 'const c: { value: number; read(): number; touch(): void; }';
+    expect(presentType(cell)).toBe(cell);
+  });
+});
+
+// The quick-fix offer is the import family and nothing else — keyed on
+// the title, since tsgo's rows carry no fix identity.
+describe('isImportFixTitle: the quick fixes the editor offers', () => {
+  test('the three import spellings pass', () => {
+    expect(isImportFixTitle('Add import from "./util.rip"')).toBe(true);
+    expect(isImportFixTitle('Update import from "./util.rip"')).toBe(true);
+    expect(isImportFixTitle('Add all missing imports')).toBe(true);
+  });
+  test('every other fix is refused — its edit would be TypeScript syntax inside rip source', () => {
+    for (const title of [
+      "Change spelling to 'size'", "Remove unused declaration for: 'k'", "Prefix 'k' with an underscore",
+      'Infer parameter types from usage', "Add 'await'", "Declare property 'sizee'", 'Add all missing imports to file',
+    ]) expect([title, isImportFixTitle(title)]).toEqual([title, false]);
+  });
+});
+
+// The boundary pass: display fields present once more on the way out,
+// edit fields never, and a changed field is reported as a rescue.
+describe('presentOutgoing: the boundary pass', () => {
+  const cell = 'boolean | { value: boolean; read(): boolean; touch?(): void; } | undefined';
+  test('a clean response passes through and reports nothing', () => {
+    const calls = [];
+    const res = { items: [{ label: 'x', detail: '(property) x: boolean | undefined', textEdit: { newText: '__RipChildren' } }] };
+    expect(presentOutgoing('textDocument/completion', res, (m, f) => calls.push(f))).toEqual(res);
+    expect(calls).toEqual([]);
+  });
+  test('a forgotten presenter is rescued and named — the edit payload beside it is untouched', () => {
+    const calls = [];
+    const out = presentOutgoing('textDocument/completion', { items: [{ label: 'x', detail: `(property) x: ${cell}`, insertText: '__RipRest_button', textEdit: { newText: '__RipChildren' } }] }, (m, f) => calls.push(`${m} ${f}`));
+    expect(out.items[0].detail).toBe('(property) x: boolean | undefined');
+    expect(out.items[0].insertText).toBe('__RipRest_button');
+    expect(out.items[0].textEdit.newText).toBe('__RipChildren');
+    expect(calls).toEqual(['textDocument/completion detail']);
+  });
+  test('hover contents, signature labels, symbol names, and action titles are display fields', () => {
+    const calls = [];
+    const on = (m, f) => calls.push(f);
+    expect(presentOutgoing('textDocument/hover', { contents: { kind: 'markdown', value: 'x: __RipChildren' } }, on).contents.value).toBe('x: Children');
+    expect(presentOutgoing('textDocument/signatureHelp', { signatures: [{ label: `f(a: ${cell}): void`, parameters: [{ label: 'a' }] }] }, on).signatures[0].label).toBe(`f(a: ${cell}): void`);
+    expect(presentOutgoing('textDocument/documentSymbol', [{ name: '__RipEl_div', detail: 'x', children: [] }], on)[0].name).toBe('<div>');
+    expect(presentOutgoing('textDocument/codeAction', [{ title: "Add import from './a.rip.ts'" }], on)[0].title).toBe("Add import from './a.rip'");
+    expect(calls).toEqual(['contents', 'name', 'title']);
+  });
+});
+
+describe('flattenHover', () => {
+  test('strips the fences and collapses whitespace to the bare type text', () => {
+    expect(flattenHover('```typescript\n(property) a: {\n  b: string\n}\n```')).toBe('(property) a: { b: string }');
+    expect(flattenHover('  const x: number  ')).toBe('const x: number');
+  });
+
+  test('an empty or fence-only body flattens to the empty string, not null', () => {
+    expect(flattenHover('')).toBe('');
+    expect(flattenHover('```ts\n```')).toBe('');
+  });
+});
+
+describe('SCHEMA_PAYLOADS', () => {
+  test('names every token payload a schema entry captures, and hoverableSpans descends each one', () => {
+    expect(SCHEMA_PAYLOADS).toEqual(['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens']);
+    for (const k of SCHEMA_PAYLOADS) {
+      const entry = { [k]: [{ kind: 'IDENTIFIER', start: 5, end: 8 }] };
+      const spans = hoverableSpans({ tokens: [{ kind: 'SCHEMA_BODY', start: 0, end: 20, value: { entries: [entry] } }] });
+      expect(spans).toContainEqual([5, 8]);
+    }
   });
 });

@@ -152,6 +152,74 @@ Quiet = component
 Terse = component
   render null;
 
+# ── hyphenated attribute keys: the presence road and the data- template ──
+
+Held = component
+  busy := false
+
+  render
+    div
+      aria-busy: busy?!
+      data-kind: 'row'
+      'held'
+
+# ── forward use: a component referenced above its own declaration ──
+
+Teaser = component
+  render
+    Anchor label: 'ahead'
+
+Anchor = component extends a
+  @label: string
+
+  render
+    a label
+
+# ── aligned annotations: padding between the colon and the type ──
+
+Gauge = component
+  needleRef: HTMLDivElement | null := null
+  scale:     number := 10
+
+  render
+    div
+      ref: needleRef
+      "gauge #{scale}"
+
+# ── Component use shapes: an inline use and a multi-line one, a bare boolean prop, a handler calling the author's own method, a positional text child, uses inside a loop, and a nested use ──
+
+type Item = { name: string, quantity: number }
+
+Step = component extends button
+  @outline?: boolean := false
+  @label?: string := ''
+
+  render
+    button class: { outline: outline }
+      label
+      slot
+
+Stepper = component
+  items: Item[] := [{ name: 'a', quantity: 1 }, { name: 'b', quantity: 2 }]
+
+  remove: (item: Item) -> console.log('remove', item.name)
+  bump: (item: Item, delta: number) -> console.log('bump', item.name, delta)
+
+  render
+    div
+      Step outline, label: 'reset'
+      Step
+        label: 'apply'
+        outline: true
+        'Apply'
+      for item in items
+        div.row
+          Step outline, @click: (-> remove(item)), '-'
+          Step @click: (-> bump(item, 1)), '+'
+      Step label: 'wrap'
+        Step label: 'inner', 'in'
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
+console.log('use shapes:', typeof Step, typeof Stepper)
 console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))

@@ -27,13 +27,16 @@ const withRed = (name, why) => withoutReds().map((c) => (c.name === name ? { ...
 // shape the predicates touch. Built fresh per test: a shared object mutated by
 // one case would leak into the next.
 const cleanStates = () => ({
-  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, famZero: 0, darkSpellings: 0, kindQueued: 0, kindHeld: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0 } },
+  gr: { unparsed: 0, uncovered: 0, badExclusions: 0, negatives: { kindBad: 0, vocabUnfalsified: 0, famZero: 0, darkSpellings: 0, kindQueued: 0, kindHeld: 0, claimsAbsent: 0, claimsBroken: 0, cellsMissing: 0, staleMints: 0, headsUnseen: 0, badSpellingExclusions: 0, claimsBadParks: 0, splitDividers: 0, memberReadDrift: 0, memberReadStale: 0, bareProvided: 0 } },
   mp: { missing: 0, drifted: 0, census: 0, decompositionDrift: 0, badExclusions: 0 },
   fails: 0,
   el: { problems: [] },
   gl: { held: 1, published: 1, problems: [] },
   hp: { gap: 0, snapChanged: 0, violations: [], silentLeaks: 0, ruledDiverging: 0, stalePinKeys: [], ruledPopulation: 1, untyped: 0 },
-  tk: { missing: [], badType: [], badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
+  tk: { missing: [], badType: [], badKind: [], kindAsserted: 0, badReadonly: [], survDrops: [], survUnclassified: 0, unexplained: [], exclusionDrift: [], facesAvailable: true },
+  sw: { machinery: 0, census: 0, misdirection: 0 },
+  ld: { answers: 0, silent: 0 },
+  rt: { edits: 0, refused: 0 },
 });
 const allRan = () => true;
 
@@ -135,6 +138,8 @@ describe('the audit contract judges in both directions', () => {
       'claims.parks': (s) => { s.gr.negatives.claimsBadParks = 1; },
       'claims.carriage': (s) => { s.gr.negatives.claimsAbsent = 1; },
       'corpus.dividers': (s) => { s.gr.negatives.splitDividers = 1; },
+      'corpus.memberReads': (s) => { s.gr.negatives.memberReadDrift = 1; },
+      'corpus.providedNames': (s) => { s.gr.negatives.bareProvided = 1; },
       'mapping.identity': (s) => { s.mp.drifted = 1; },
       'mapping.spans': (s) => { s.mp.missing = 1; },
       'mapping.census': (s) => { s.mp.census = 1; },
@@ -142,6 +147,7 @@ describe('the audit contract judges in both directions', () => {
       'mapping.exclusions': (s) => { s.mp.badExclusions = 1; },
       'type.dimensions': (s) => { s.fails = 1; },
       'diagnostics.codes': (s) => { s.el.problems = [{ kind: 'missing' }]; },
+      'diagnostics.messages': (s) => { s.el.problems.push({ kind: 'message', note: 'x' }); },
       'diagnostics.positions': (s) => { s.el.problems = [{ kind: 'position', file: '09-classes.errors.rip' }]; },
       'diagnostics.positions.element': (s) => { s.el.problems = [{ kind: 'position', file: '11-types.errors.rip' }]; },
       'diagnostics.positions.arity': (s) => { s.el.problems = [{ kind: 'position', file: '02-operations.errors.rip' }]; },
@@ -155,12 +161,20 @@ describe('the audit contract judges in both directions', () => {
       'hover.ruled.population': (s) => { s.hp.ruledPopulation = 0; },
       'token.delivery': (s) => { s.tk.missing = [{}]; },
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
+      'token.type.nested': (s) => { s.tk.badKind = [{}]; },
       'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
       'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
       'token.delivery.oracle': (s) => { s.tk.survUnclassified = 1; },
       'token.delivery.explained': (s) => { s.tk.unexplained = [{ file: 'x.rip', line: 1, character: 0, name: 'x' }]; },
       'token.delivery.excused': (s) => { s.tk.exclusionDrift = [{ file: 'x.rip', key: '1:0:x' }]; },
+      'sweep.machinery': (s) => { s.sw.machinery = 1; },
+      'sweep.census': (s) => { s.sw.census = 1; },
+      'sweep.misdirection': (s) => { s.sw.misdirection = 1; },
+      'landing.answers': (s) => { s.ld.answers = 1; },
+      'landing.census': (s) => { s.ld.silent = 1; },
+      'roundtrip.edits': (s) => { s.rt.edits = 1; },
+      'roundtrip.census': (s) => { s.rt.refused = 1; },
     };
     expect(Object.keys(fire).sort()).toEqual(CONTRACT.map((c) => c.name).sort());
     for (const [name, seed] of Object.entries(fire)) {

@@ -14,6 +14,8 @@ The law no gate checks and no source states: what earns a fixture, where it goes
 
 **Numbering.** The grammar bucket numbers from 01, the claims bucket from 20; basenames stay unique corpus-wide.
 
+**The app bucket.** `corpus/app/` is an app-shaped tree — `index.rip` and `package.json` at its root, `app/stash.rip`, routes under `app/routes/` — because the editor anchors a stash to the nearest directory holding both root files, and the gate rows' typed arm exists only where a stash is discovered. It is its own workspace root for the lanes that take one (the sweep, the landing, the round-trip); the flat probe passes do not enter it. A fixture there carries the shapes only a stash makes real: every gate form, the `@app` and `@router` reads, the router's typed ambience.
+
 **The corpus retires.** A fixture whose productions the rest already cover is removable — the unique-contribution line names it.
 
 ## Comments

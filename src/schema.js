@@ -119,6 +119,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { counter } from './counter.js';
+import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
 // runtimes that also need them (src/runtime/schema.js validates
 // declared names, src/runtime/orm.js validates hand-built descriptors).
@@ -536,7 +537,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       for (const p of pairs) {
         entries.push({
           tag: 'ensure', name: 'ensure',
-          message: p.message, field: p.field, async: isAsync,
+          message: p.message, field: p.field, fieldStart: p.fieldStart, async: isAsync,
           paramTokens: p.paramTokens, bodyTokens: p.bodyTokens,
           start: first.start,
         });
@@ -638,6 +639,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercerArray = false;
   let typeConsumed = false;
   let typeFirst = line[pos];
+  const typeAt = pos;
   const unionMemberAt = (p) => {
     if (line[p]?.kind === 'STRING' && line[p].value.startsWith('"')) {
       return { value: JSON.parse(line[p].value), bracketed: false, start: line[p].start, end: line[p].end, next: p + 1 };
@@ -732,6 +734,16 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   if (array && literals) {
     fail(`array-of-literal-union is not supported — use 'string[]' for an array of strings`, typeFirst.start);
   }
+
+  // The type slot's own span, whatever spelling filled it — an
+  // identifier, a `~coercion`'s word, a literal union, each with an
+  // optional `[]`. The editor answers a hover here from the companion
+  // member's annotation, so the span covers the whole slot the annotation
+  // stands for — from the WORD, not the `~` ahead of it: the marker is
+  // punctuation, and unlike `!`/`?` it precedes its word, so no cursor
+  // bias makes it the word's own byte.
+  const typeWord = typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~' ? line[typeAt + 1] : typeFirst;
+  const typeSpan = typeConsumed ? [typeWord.start, line[pos - 1].end] : null;
 
   // Trailers: `,`-separated parts, each self-identifying by head shape.
   let rest = line.slice(pos);
@@ -885,7 +897,7 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     tag: 'field', name, modifiers, typeName, array,
     literals, coerce, coercer, constraints, transformTokens,
     unique: uniqueAttr, primary: primaryAttr, attrs,
-    start: first.start,
+    start: first.start, typeSpan,
     defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end],
   });
 }
@@ -1568,7 +1580,9 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   }
   const msgTok = messagePart[0];
   const message = JSON.parse(msgTok.value);
-  const field = fieldPart ? symWordAt(fieldPart, 0).value : null;
+  const fieldTok = fieldPart ? symWordAt(fieldPart, 0) : null;
+  const field = fieldPart ? fieldTok.value : null;
+  const fieldStart = fieldTok?.start ?? null;
   if (!fnPart?.length) {
     fail(`@ensure: missing function after message`, msgTok.start);
   }
@@ -1596,24 +1610,47 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   }
   const bodyTokens = fnPart.slice(pos + 1);
   if (!bodyTokens.length) fail(`@ensure: predicate function body is empty`, arrowTok.start);
-  return { message, field, paramTokens, bodyTokens };
+  return { message, field, fieldStart, paramTokens, bodyTokens };
 }
 
-// Parameter names from a captured `(a, b)` slice. Each parameter is a
-// plain identifier, optionally typed (`other: Money`) — the annotation
-// is type-surface only and never reaches the emitted JS, exactly like
-// annotations everywhere else in the language.
-export function paramNamesOf(paramTokens, what, fail) {
+// Each parameter of a captured `(a, b)` slice: a plain identifier,
+// optionally typed (`other: Money`). The name is what the runtime
+// spelling emits; the annotation is type-surface only and never reaches
+// the emitted JS, exactly like annotations everywhere else in the
+// language, so it reaches the face as a spliced segment instead. Its
+// text is sliced from SOURCE rather than rebuilt from tokens, and
+// lowers through normalizeTypeText like every other annotation — the
+// rip boolean spellings, single-quoted literals, and a comment inside
+// a wrapped annotation all read as TS on both roads.
+export function paramsOf(paramTokens, what, fail, source = null) {
   if (!paramTokens.length) return [];
+  const params = paramsRaw(paramTokens, what, fail, source);
+  // JS ARITY, the same rule an ordinary function's parameters follow
+  // (emitParams): a TRAILING run of parameters the author never
+  // annotated is optional, because calling with fewer arguments is
+  // legal in rip as in JavaScript. A run stops at the first annotated
+  // parameter — TypeScript admits no required parameter after an
+  // optional one.
+  for (let i = params.length - 1; i >= 0 && params[i].type === null; i--) params[i].optional = true;
+  return params;
+}
+
+function paramsRaw(paramTokens, what, fail, source) {
+  const carries = (t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT';
   return splitTopLevelByComma(paramTokens).map((part) => {
-    const toks = part.filter((t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT' && t.kind !== 'TYPE');
+    const toks = part.filter((t) => carries(t) && t.kind !== 'TYPE');
     // A typed parameter's name arrives as PROPERTY (the lexer's
     // `word:` tagging) with the raw ':' following it.
     const typed = toks.length >= 3 && (toks[0].kind === 'IDENTIFIER' || toks[0].kind === 'PROPERTY') && toks[1].kind === ':';
     if (!typed && (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER')) {
       fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
     }
-    return toks[0].value;
+    // The span runs to the last token the PART carries, not the last
+    // the filter kept — a TYPE token inside the annotation is dropped
+    // from the scan but still occupies source.
+    const last = typed ? [...part].filter(carries).pop() : null;
+    const type = typed && source !== null ? normalizeTypeText(source.slice(toks[1].end, last.end)).trim() : null;
+    return { name: toks[0].value, type, optional: false };
   });
 }
 
@@ -1820,18 +1857,22 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
     else segs.push(s);
   };
   const emitTs = (s, span = null) => segs.push({ ts: s, span });
+  // Compiled BODY text — a callable's function, the adapter's expression
+  // — rides its own segment kind: it is the author's code, where a `word:`
+  // is an object key or a ternary arm, never the descriptor's vocabulary.
+  const emitBody = (s) => segs.push({ body: s });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName) emit(`, name: ${JSON.stringify(schemaName)}`);
   emit(`, entries: [`);
   descriptor.entries.forEach((e, i) => {
     if (i > 0) emit(', ');
     entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace, defaultTypes?.get(i) ?? null,
-      ensureTypes?.get(i) ?? null);
+      ensureTypes?.get(i) ?? null, emitBody);
   });
   emit(']');
   // `schema :model, on: <expr>` — evaluated at declaration time in
   // the user's scope.
-  if (adapterCode) emit(`, adapter: ${adapterCode}`);
+  if (adapterCode) { emit(', adapter: '); emitBody(adapterCode); }
   emit('}');
   return segs;
 }
@@ -1853,30 +1894,54 @@ export function behaviorObjectText(descriptor, name, fns, thisTypes) {
     if (fnCode === undefined) return;
     const thisType = thisTypes?.get(i) ?? null;
     let code = fnText(fnCode);
-    if (thisType !== null && typeof fnCode !== 'string') {
-      const { thisAt } = fnCode;
-      code = code.slice(0, thisAt) + `this: ${thisType}${code[thisAt] === ')' ? '' : ', '}` + code.slice(thisAt);
+    // The behavior object is a TS-only line whole, so the face-only
+    // annotations go in as plain text — spliced from the back so each
+    // recorded offset still addresses the code it was measured against.
+    for (const [at, text] of tsInserts(fnCode, thisType).reverse()) {
+      code = code.slice(0, at) + text + code.slice(at);
     }
     props.push(`${e.name}: ${code}`);
   });
   return props.length ? `const ${behaviorName(name)} = {${props.join(', ')}};` : null;
 }
 
-// A compiled callable's code, with the face-only `this: T` parameter
-// inserted at the recorded parameter-list offset when the entry
-// carries a `this` type.
-function fnSegments(fnCode, thisType, emit, emitTs) {
-  if (thisType === null || typeof fnCode === 'string') {
-    emit(fnText(fnCode));
-    return;
+// Every face-only annotation a compiled callable carries, as
+// [offset, text] into its own code, ascending: the `this` parameter its
+// calling convention gives it, and each parameter type the author
+// declared. Both are TypeScript the runtime spelling must not contain,
+// so they are recorded rather than emitted, and spliced by whichever
+// road can carry them.
+function tsInserts(fnCode, thisType, annots = true) {
+  if (typeof fnCode === 'string') return [];
+  const inserts = annots ? (fnCode.annots ?? []).map(([at, text]) => [at, text]) : [];
+  if (thisType !== null) {
+    const { code, thisAt } = fnCode;
+    inserts.push([thisAt, `this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`]);
   }
-  const { code, thisAt } = fnCode;
-  emit(code.slice(0, thisAt));
-  emitTs(`this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`);
-  emit(code.slice(thisAt));
+  return inserts.sort((a, b) => a[0] - b[0]);
 }
 
-function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null) {
+// A compiled callable's code with its face-only annotations spliced in
+// as ts segments. Only the FACE produces them: `tsOnly` records a region
+// for the strip gate but still emits, so a segment produced on the JS
+// road would ship — the gate is a check on the face, not a filter.
+function fnSegments(fnCode, thisType, emitBody, emitTs, tsFace = false) {
+  const inserts = tsInserts(fnCode, thisType, tsFace);
+  if (inserts.length === 0) {
+    emitBody(fnText(fnCode));
+    return;
+  }
+  const { code } = fnCode;
+  let prev = 0;
+  for (const [at, text] of inserts) {
+    emitBody(code.slice(prev, at));
+    emitTs(text);
+    prev = at;
+  }
+  emitBody(code.slice(prev));
+}
+
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null, emitBody = emit) {
   switch (e.tag) {
     case 'computed':
     case 'method':
@@ -1885,7 +1950,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaul
     case 'scope':
     case 'defaultScope':
       emit(`{tag: ${JSON.stringify(e.tag)}, name: ${JSON.stringify(e.name)}, fn: `);
-      fnSegments(fnCode, thisType, emit, emitTs);
+      fnSegments(fnCode, thisType, emitBody, emitTs, tsFace);
       emit('}');
       return;
     default:

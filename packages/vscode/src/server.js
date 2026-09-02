@@ -67,9 +67,10 @@ import {
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
-  staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
+  staleOffsetMap, isScaffoldingLabel, isMirrorImportItem, scrubFaceArtifacts, presentType, presentOutgoing, isImportFixTitle, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
+  splitTypeAt, balancedTo, unionArms, cellShape,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
@@ -509,6 +510,11 @@ function warnOnMirrorCollision(mirrorPath, source) {
 // What the broker declares to tsgo. The feature handlers consume
 // exactly these shapes: resolve-lazy completion items, literal code
 // actions, prepare-supported rename, relative-encoded semantic tokens.
+// The code-action kinds the editor serves, advertised to the client and
+// asked of tsgo alike: the quick fix, and organize imports. Nothing else
+// in the source.* family is offered (see onCodeAction).
+const CODE_ACTION_KINDS = ['quickfix', 'source.organizeImports'];
+
 const TSGO_CLIENT_CAPABILITIES = {
   textDocument: {
     hover: { contentFormat: ['markdown', 'plaintext'] },
@@ -539,19 +545,11 @@ const TSGO_CLIENT_CAPABILITIES = {
     },
     definition: {},
     typeDefinition: {},
-    implementation: {},
     references: {},
     documentSymbol: { hierarchicalDocumentSymbolSupport: true },
     rename: { prepareSupport: true },
     codeAction: {
-      codeActionLiteralSupport: {
-        codeActionKind: {
-          valueSet: [
-            'quickfix',
-            'source.organizeImports', 'source.removeUnusedImports', 'source.sortImports', 'source.fixAll',
-          ],
-        },
-      },
+      codeActionLiteralSupport: { codeActionKind: { valueSet: CODE_ACTION_KINDS } },
     },
     semanticTokens: {
       requests: { full: true, range: true },
@@ -589,9 +587,30 @@ function tsgoDiagnosticRefreshRequest() {
 // parity — VS Code ships the typescript.* contributions regardless of
 // our extension); a client without configuration support answers null
 // per item, which leaves tsgo's own defaults in charge.
+// tsgo truncates quickinfo at `js/ts.hover.maximumLength` (default
+// 5000), and a component's lowered construct type — every intrinsic
+// passthrough row of an `extends <tag>` — can exceed that. A truncated
+// construct loses the tail the signature presenter keys on, so the raw
+// machinery would pass through to the user. The broker floors the
+// preference high enough that whole constructs always arrive; the
+// presenter collapses them to a few lines, and a user's LARGER setting
+// still wins.
+const HOVER_LENGTH_FLOOR = 262144;
+function floorHoverLength(items, answers) {
+  return answers.map((answer, i) => {
+    // The preference has no VS Code config path — tsgo reads it from a
+    // section's `unstable` blob (raw-name lookup), and `js/ts` is the
+    // last section in its precedence order.
+    if (items[i]?.section !== 'js/ts') return answer;
+    const given = answer?.unstable?.maximumHoverLength;
+    if (typeof given === 'number' && given >= HOVER_LENGTH_FLOOR) return answer;
+    return { ...(answer ?? {}), unstable: { ...(answer?.unstable ?? {}), maximumHoverLength: HOVER_LENGTH_FLOOR } };
+  });
+}
+
 async function tsgoConfigurationRequest(params) {
   const items = params?.items ?? [];
-  if (!clientSupportsConfiguration) return items.map(() => null);
+  if (!clientSupportsConfiguration) return floorHoverLength(items, items.map(() => null));
   // The handshake window: tsgo boots INSIDE this server's own
   // initialize handler and asks for configuration immediately, but the
   // editor's languageclient installs its workspace/configuration
@@ -600,17 +619,18 @@ async function tsgoConfigurationRequest(params) {
   // nulls directly (its own defaults, the same answer the bounce
   // produced), and save the forward — and the failure log — for
   // requests the editor can actually serve.
-  if (!clientInitialized) return items.map(() => null);
+  if (!clientInitialized) return floorHoverLength(items, items.map(() => null));
   try {
-    return await connection.workspace.getConfiguration(
+    const answers = await connection.workspace.getConfiguration(
       items.map((item) => ({
         ...(item.section !== undefined ? { section: item.section } : {}),
         ...(item.scopeUri !== undefined ? { scopeUri: item.scopeUri } : {}),
       })),
     );
+    return floorHoverLength(items, answers);
   } catch (err) {
     connection.console.log(`[rip] configuration forward failed: ${err.message}`);
-    return items.map(() => null);
+    return floorHoverLength(items, items.map(() => null));
   }
 }
 
@@ -1552,7 +1572,6 @@ connection.onInitialize(async (params) => {
       hoverProvider: true,
       definitionProvider: true,
       typeDefinitionProvider: true,
-      implementationProvider: true,
       referencesProvider: true,
       documentSymbolProvider: true,
       workspaceSymbolProvider: true,
@@ -1564,12 +1583,7 @@ connection.onInitialize(async (params) => {
         triggerCharacters: tsCaps.signatureHelpProvider?.triggerCharacters ?? ['(', ',', '<'],
         retriggerCharacters: tsCaps.signatureHelpProvider?.retriggerCharacters ?? [')'],
       },
-      codeActionProvider: {
-        codeActionKinds: [
-          'quickfix',
-          'source.organizeImports', 'source.removeUnusedImports', 'source.sortImports', 'source.fixAll',
-        ],
-      },
+      codeActionProvider: { codeActionKinds: CODE_ACTION_KINDS },
       renameProvider: { prepareProvider: true },
       semanticTokensProvider: {
         legend: semanticTokensLegend,
@@ -1817,6 +1831,12 @@ async function refresh(document) {
     // Generated key/value spans of the `__ripRoute` attribute wraps —
     // the diagnostics road re-anchors a whole-value mismatch on the key.
     routeWraps: result.routeWraps ?? [],
+    // Per render pair, the key's source span and the road's generated
+    // relation sites — a diagnostic standing on a site re-anchors on the
+    // key (diagnostics.js, recordedAnchor; RULINGS.md).
+    renderPairs: result.renderPairs ?? [],
+    // Minted kind labels by declaration span (RULINGS.md, the kind rows).
+    kinds: result.kinds ?? [],
     // Parse/lex rejections the tolerant compile carried through —
     // published beside the mapped TS diagnostics, so an incomplete
     // buffer still says it is incomplete.
@@ -1852,6 +1872,14 @@ async function refresh(document) {
     // SOURCE spans the lowering owns whole — hover declines there rather
     // than describing the machinery the face put in their place.
     silent: noUserSymbolSpans(result),
+    // SOURCE spans of intrinsic-element positions served from the
+    // compiler's own record — the tag word and the `ref` channel word
+    // (RULINGS.md, the render rows; see the hover handler).
+    intrinsics: result.intrinsics ?? [],
+    // SOURCE spans where hover may answer at all — the positive model
+    // (hoverableSpans, translate.js): the author's own symbol tokens,
+    // annotations, and import specifiers; every other byte declines.
+    hoverable: hoverableSpans(result, text),
     // SOURCE spans of component member declaration names — where a hover
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
@@ -2440,7 +2468,7 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
 
 // The request context for a feature call, or null when the position
 // does not survive translation.
-function requestContext(params) {
+function requestContext(params, { wordEndBias = false } = {}) {
   const state = states.get(params.textDocument.uri);
   const good = state?.lastGood;
   if (!good || !tsgo || !state.tsOpen) return null;
@@ -2451,7 +2479,18 @@ function requestContext(params) {
   const align = staleOffsetMap(currentText, good.source);
   const ctx = { state, good, document, currentText, curLineStarts, align };
   if (params.position) {
-    const curOffset = positionToOffset(curLineStarts, currentText.length, params.position);
+    let curOffset = positionToOffset(curLineStarts, currentText.length, params.position);
+    // HOVER ONLY: a cursor at a word's END boundary is on that word —
+    // VS Code's own word-under-cursor semantics — while every span
+    // channel here is end-EXCLUSIVE, so the boundary byte otherwise
+    // falls past the word's silence or serve and lands on whatever the
+    // cover holds (the sweep's boundary-cover class). Completion and
+    // the symbol surfaces keep exact cursor semantics.
+    if (wordEndBias && curOffset > 0
+        && /[\w$]/.test(currentText[curOffset - 1] ?? '')
+        && !/[\w$]/.test(currentText[curOffset] ?? '')) {
+      curOffset -= 1;
+    }
     const offset = align.toGood(curOffset);
     if (offset === null) return null;
     ctx.offset = offset;
@@ -2473,6 +2512,16 @@ function requestContext(params) {
   return ctx;
 }
 
+// The identifier-shaped word around `at` in `text`, or '' when the
+// position sits on none (the hover machinery guard compares it to a
+// hover's declared name, so a non-word position must never equal one).
+function wordAtOffset(text, at) {
+  let s = at, e = at;
+  while (s > 0 && /[\w$]/.test(text[s - 1])) s--;
+  while (e < text.length && /[\w$]/.test(text[e])) e++;
+  return text.slice(s, e);
+}
+
 // A generated [start, end) range in `face` coordinates → a source
 // range in that face's text (last-good for open buffers, disk text for
 // mirrors), or null (synthetic/unmapped). The verbatim edit-span
@@ -2486,8 +2535,20 @@ function requestContext(params) {
 function faceRangeToSourceRange(face, range, { strict = false } = {}) {
   const s = positionToOffset(face.genLineStarts, face.code.length, range.start);
   const e = positionToOffset(face.genLineStarts, face.code.length, range.end);
-  const span = generatedEditSpanToSource(face.mappings, s, e, face.source, face.code)
+  let span = generatedEditSpanToSource(face.mappings, s, e, face.source, face.code)
     ?? (strict ? null : generatedSpanToSource(face.mappings, s, e));
+  // An anonymous default export has no NAME for a strict landing: tsgo
+  // targets the whole `export default …` statement, whose body is the
+  // lowering's spelling. The statement's head is verbatim on both sides,
+  // and the `default` keyword is the landing TypeScript itself uses for
+  // it — so a strict miss whose face and source both open on
+  // `export default ` lands there.
+  if (!span && strict) {
+    const cover = generatedSpanToSource(face.mappings, s, e);
+    if (cover && /^export default\b/.test(face.code.slice(s, s + 15)) && /^export default\b/.test(face.source.slice(cover[0], cover[0] + 15))) {
+      span = [cover[0] + 'export '.length, cover[0] + 'export default'.length];
+    }
+  }
   if (!span) return null;
   return {
     start: offsetToPosition(face.srcLineStarts, span[0]),
@@ -2508,11 +2569,30 @@ function goodRangeToCurrent(ctx, range) {
 }
 
 // tsUri → the open buffer's state, for result attribution.
+//
+// Compared as PATHS, never as uri strings. tsgo percent-encodes the
+// characters a uri reserves — `[`, `]`, `(`, `)`, a space — so a result
+// in `app/routes/(app)/page.rip` comes back as `%28app%29`, while the
+// state's own tsUri was built by concatenation and spells the bytes.
+// A string comparison misses exactly the paths a rip app is most likely
+// to have (a dynamic route's `[id]`, a route group's `(app)`), and the
+// open buffer then loses every answer about itself: its references
+// vanish from its own list, and a definition falls back to a mirror
+// whose face need not match the buffer.
 function stateByTsUri(tsUri) {
+  const wanted = fsPathOfUri(tsUri);
+  if (wanted === null) return null;
   for (const [uri, state] of states) {
-    if (state.tsUri === tsUri && state.lastGood) return { uri, state };
+    if (state.lastGood && fsPathOfUri(state.tsUri) === wanted) return { uri, state };
   }
   return null;
+}
+
+// A `file:` uri's path, decoded, or null when it names no file. Both
+// spellings of one path answer alike, which is the whole point.
+function fsPathOfUri(uri) {
+  if (typeof uri !== 'string' || !uri.startsWith('file://')) return null;
+  try { return fileURLToPath(uri); } catch { return null; }
 }
 
 // One tsgo result uri, classified. This is the SHARED policy — which
@@ -2582,9 +2662,32 @@ function ripLocation(uri, range, { strict = false } = {}) {
   return srcRange ? { uri: 'file://' + sourcePath, range: srcRange } : null;
 }
 
-// Location | Location[] | LocationLink[] → Rip locations (flat).
+// The rip text a mapped location covers, and the line it starts on —
+// from the open buffer when there is one, else the disk file. Null when
+// neither can be read.
+function ripSourceText(uri) {
+  const document = documents.get(uri);
+  if (document) return document.getText();
+  try { return fs.readFileSync(fileURLToPath(uri), 'utf8'); } catch { return null; }
+}
+function ripTextAt(uri, range) {
+  const text = ripSourceText(uri);
+  if (text === null) return null;
+  const ls = lineStartsOf(text);
+  return text.slice(ls[range.start.line] + range.start.character, ls[range.end.line] + range.end.character);
+}
+function ripLineAt(uri, line) {
+  const text = ripSourceText(uri);
+  return text === null ? null : (text.split('\n')[line] ?? null);
+}
+
+// Location | Location[] | LocationLink[] → Rip locations (flat). STRICT:
+// a definition, type definition, or reference IDENTIFIES a symbol, so
+// each range maps verbatim or drops — a cover landing would present a
+// construct's whole span as the name (translate.js states the rule for
+// the request direction; this is the answer direction).
 function ripLocations(result) {
-  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range)).filter(Boolean);
+  return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range, { strict: true })).filter(Boolean);
 }
 
 // The identifier under a cursor, by the compiler's own vocabulary.
@@ -2698,6 +2801,10 @@ const HOVER_EVOLVING_ANY = /^```typescript\r?\n(?:let|var) [A-Za-z_$][\w$]*: any
 const HOVER_LET_DECL = /^```typescript\r?\n(?:let|var) /;
 const REF_PROBE_LIMIT = 16;
 
+// A regex source for a name tsgo printed — every metacharacter an
+// identifier can carry (`$`) reads literally.
+const reSource = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Alias-union hover ordering (the old runtime/TS6 display parity): TS7 renders
 // literal unions in checker-internal order (effectively sorted), but
 // authors read their unions in DECLARATION order ('pending' before
@@ -2711,26 +2818,11 @@ function reorderUnionHover(ctx, contents) {
   const fence = /(```(?:typescript|ts)\n)(\s*(?:export )?type ([A-Za-z_$][\w$]*)\s*=\s*)([^\n]+?);?\n(```)/.exec(value);
   if (!fence) return null;
   const [, open, head, name, rhs, close] = fence;
-  const splitUnion = (t) => {
-    const parts = [];
-    let depth = 0, cur = '', inStr = null;
-    for (let i = 0; i < t.length; i++) {
-      const c = t[i];
-      if (inStr) { if (c === '\\') { cur += c + (t[i + 1] ?? ''); i++; continue; } if (c === inStr) inStr = null; cur += c; continue; }
-      if (c === '"' || c === "'") { inStr = c; cur += c; continue; }
-      if ('<([{'.includes(c)) depth++;
-      else if ('>)]}'.includes(c)) depth--;
-      if (c === '|' && depth === 0) { parts.push(cur.trim()); cur = ''; }
-      else cur += c;
-    }
-    parts.push(cur.trim());
-    return parts.filter((p) => p !== '');
-  };
-  const hoverMembers = splitUnion(rhs);
+  const hoverMembers = unionArms(rhs);
   if (hoverMembers.length < 2) return null;
-  const decl = new RegExp(`^(?:export )?type ${name}\\s*=\\s*(.+?);?$`, 'm').exec(ctx.good.code);
+  const decl = new RegExp(`^(?:export )?type ${reSource(name)}\\s*=\\s*(.+?);?$`, 'm').exec(ctx.good.code);
   if (!decl) return null;
-  const declMembers = splitUnion(decl[1]);
+  const declMembers = unionArms(decl[1]);
   if (declMembers.length !== hoverMembers.length) return null;
   const set = new Set(hoverMembers);
   if (!declMembers.every((mem) => set.has(mem))) return null;
@@ -2775,19 +2867,184 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   // arrives with its parameter list (`Palette<TShade extends string>`),
   // and anything narrower silently leaves the container standing on every
   // generic component. The greedy run cannot swallow the type, which is
-  // anchored behind `: { … value: `.
-  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): \{ (readonly )?value: (.+); read\(\): (.+?)(?:; touch\??\(\): void)?;? \}$/.exec(flat);
+  // anchored behind `: {` and judged whole by the cell-shape check.
+  const m = /^(?:(const|let) ([A-Za-z_$][\w$]*)|\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)): (\{ .+ \})$/.exec(flat);
   if (!m) return null;
-  const [, , plain, qualified, ro, t, readT] = m;
+  const [, , plain, qualified, type] = m;
   const member = qualified !== undefined;
   if (member && !atMemberDecl) return null;
-  // depth guard: the `;` split above is greedy on `t` — verify T and
-  // read()'s return agree after the same normalization (the brand
-  // shape), else pass through.
-  if (t.trim() !== readT.trim()) return null;
-  const head = member ? `(property) ${qualified}` : `${ro ? 'const' : 'let'} ${plain}`;
-  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${t.trim()}${fence[3]}`);
+  const cell = cellShape(type);
+  if (cell === null) return null;
+  const head = member ? `(property) ${qualified}` : `${cell.readonly ? 'const' : 'let'} ${plain}`;
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${cell.value}${fence[3]}`);
   return { ...contents, value: reworded };
+}
+
+// The props block of a component's construct signature — the `{` at
+// `open` through the intersection groups and optional tail that follow it
+// — as the AUTHOR's rows, plus the tag an `extends` component's
+// passthrough reported and the offset the signature's return tail starts
+// at. Null where the text is not that shape. The one reading of the
+// block, shared by the component-name hover and the call's signature
+// help, so the two surfaces cannot present the same props differently.
+function componentPropsAt(flat, open) {
+  const extendsTag = { tag: null };
+  const membersOf = (inner) => {
+    const out = [];
+    for (const raw of splitTypeAt(inner, ';')) {
+      const row = raw.trim();
+      // The DEFAULT projection slot stays out of the signature — it is the
+      // channel every component has, not a prop this one declares — under
+      // either spelling of its minted type; a declared `@children: T` shows.
+      if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
+      // A passthrough row types through the tag's DOM interface — bare, or
+      // parenthesized where the attribute road widened it (`style`) — and
+      // the two class spellings take the clsx admission; all of them are
+      // the extends surface's, never props this component declares.
+      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: \(?(?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
+      if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
+      if (/^(?:class|className)\??: (?:__RipClassValue \| __RipClassValue\[\]|ClassValue \| ClassValue\[\])$/.test(row)) continue;
+      if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
+      const colon = row.indexOf(': ');
+      let kept = row;
+      if (colon !== -1) {
+        const arms = unionArms(row.slice(colon + 2));
+        const keptArms = arms.filter((arm) => cellShape(arm) === null);
+        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.join(' | ');
+      }
+      // tsgo spells string literals double-quoted; the corpus spelling
+      // is single quotes, and the grammar colors the two forms apart.
+      // Only a literal with nothing to re-escape converts.
+      out.push(kept.replace(/"([^"'\\]*)"/g, "'$1'"));
+    }
+    return out;
+  };
+  // The base block holds every prop in optional spelling; each REQUIRED
+  // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
+  // group, whose author-named alternative supersedes the base row.
+  const close = balancedTo(flat, open);
+  if (close === -1) return null;
+  const props = membersOf(flat.slice(open + 1, close));
+  let at = close + 1;
+  while (flat.startsWith(' & (', at)) {
+    const groupEnd = balancedTo(flat, at + 3);
+    if (groupEnd === -1) return null;
+    const named = unionArms(flat.slice(at + 4, groupEnd))
+      .filter((a) => a.startsWith('{') && a.endsWith('}'))
+      .flatMap((a) => membersOf(a.slice(1, -1)));
+    if (named.length !== 1) return null;
+    const propName = named[0].slice(0, named[0].indexOf(':')).replace(/\?$/, '');
+    const idx = props.findIndex((p) => p.slice(0, p.indexOf(':')).replace(/\?$/, '') === propName);
+    if (idx === -1) return null;
+    props[idx] = named[0];
+    at = groupEnd + 1;
+  }
+  // Under strict null posture an optional props param prints its own
+  // `| undefined` between the block and the paren.
+  if (flat.startsWith(' | undefined', at)) at += ' | undefined'.length;
+  return { props, extendsTag, at };
+}
+
+// A component-name hover arrives as the lowered construct signature —
+// `const Button: new (props?: { … }) => Button` — whose props block
+// speaks the lowering's vocabulary: every author prop unions its
+// reactive container, the two-way channel mints a `__bind_x__` twin
+// per prop, and the children slot rides along. The author's answer is
+// the component's SIGNATURE (RULINGS.md, the component-use row):
+// `component <Name>` with the props in value-first spelling. Every
+// structural expectation is verified before rewriting — a hover that
+// is not exactly the construct shape passes through untouched.
+function presentComponentSignatureHover(contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
+  if (!fence) return null;
+  // The rows are re-rendered from scratch, so tsgo's line breaks carry
+  // nothing — flatten once and parse the one-line shape.
+  const flat = fence[2].replace(/\s+/g, ' ').trim();
+  // An import-bound use hovers the same construct behind tsgo's alias
+  // dress — `(alias) const N: …` with a trailing `import N` line; a
+  // mutable module binding holding a component hovers `let`. The
+  // binding's name says nothing about the construct: another binding
+  // can hold a component (`Local = Button`), so the served name is the
+  // one the tail constructs.
+  // Two printings of the one construct: a lone construct signature
+  // prints in arrow form (`new (props: …) => Name`), and the hoisted
+  // binding's published type with its static `mount` beside it prints
+  // as the object it is (`{ new (props?: …): Name; mount(target?: any):
+  // Name; }`) — a forward-used declaration answers that form.
+  // A GENERIC component's use site carries the inferred instantiation
+  // — `new <"alpha">(props?: {…}) => Chip<"alpha">` — and the args
+  // ride into the served head: `component Chip<'alpha'>`.
+  const head = /^(?:\(alias\) )?(?:const|let|var) [A-Za-z_$][\w$]*: (\{ )?new /.exec(flat);
+  if (!head) return null;
+  const objectForm = head[1] !== undefined;
+  let typeArgs = null;
+  let propsAt = head[0].length;
+  if (flat[propsAt] === '<') {
+    const argsEnd = balancedTo(flat, propsAt);
+    if (argsEnd === -1) return null;
+    typeArgs = flat.slice(propsAt + 1, argsEnd);
+    propsAt = argsEnd + 1;
+  }
+  const propsHead = /^\(props\??: \{/.exec(flat.slice(propsAt));
+  if (!propsHead) return null;
+  // A `{ … }` block's member rows, split at depth-0 semicolons, each
+  // in the author's spelling: bind twins and the minted children slot
+  // drop; an `extends <tag>` component's intrinsic passthrough (the
+  // per-attribute template rows and the `data-`/`aria-` index rows)
+  // collapses into the reported tag; and a container union collapses
+  // to its value type under the same brand check the reactive-cell
+  // presenter applies (both Ts equal). Any other union is the author's
+  // own type and stands.
+  const open = propsAt + propsHead[0].length - 1;
+  const presented = componentPropsAt(flat, open);
+  if (presented === null) return null;
+  const { props, extendsTag, at } = presented;
+  const tail = (objectForm
+    ? /^\): ([A-Za-z_$][\w$]*)(?:<.*>)?(?:; mount\(target\?: any\): \1(?:<.*>)?)?;? \}$/
+    : /^\) => ([A-Za-z_$][\w$]*)(?:<.*>)?(?: import [A-Za-z_$][\w$]*)?$/
+  ).exec(flat.slice(at).trim());
+  if (!tail) return null;
+  const name = tail[1];
+  // The signature is rip vocabulary, so it renders in a `rip` fence —
+  // the extension's own grammar colors `component`/`extends` and the
+  // prop annotations the way the source does — and the rows carry no
+  // TS semicolons.
+  const requote = (t) => t.replace(/"([^"'\\]*)"/g, "'$1'");
+  const shownName = typeArgs === null ? name : `${name}<${requote(typeArgs)}>`;
+  const headLine = extendsTag.tag === null ? `component ${shownName}` : `component ${shownName} extends ${extendsTag.tag}`;
+  const signature = props.length === 0
+    ? headLine
+    : `${headLine}\nprops: {\n${props.map((p) => `  ${p}`).join('\n')}\n}`;
+  return { ...contents, value: value.replace(fence[0], '```rip\n' + signature + fence[3]) };
+}
+
+// A component PROP KEY at a use site hovers the props surface's slot:
+// `(property) outline?: boolean | { value: …; read(): …; touch?(): void; }
+// | undefined` — the container arm is the bind-channel admission. The
+// author's answer is the prop's type (RULINGS.md, the prop-name row):
+// the cell arms collapse under the reactive-cell presenter's brand
+// check, and NOTHING else — the trailing `undefined` is tsgo's own
+// optional-property convention, kept so these keys hover like every
+// other optional property (and the slot truly admits an explicit
+// `undefined`). A `(property)` hover whose union carries no brand arm
+// passes through untouched.
+function presentPropSlotHover(contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
+  if (!fence) return null;
+  const flat = fence[2].replace(/\s+/g, ' ').trim();
+  const head = /^\(property\) ((?:.+\.)?[A-Za-z_$][\w$]*)(\??): (.+)$/.exec(flat);
+  if (!head) return null;
+  const [, name, opt, type] = head;
+  // The cell arms collapse onto their value type (collapseCellArms — the
+  // same collapse a diagnostic's quoted types take).
+  const collapsed = collapseCellArms(type);
+  if (collapsed === type) return null;
+  const reworded = `(property) ${name}${opt}: ${collapsed}`;
+  return { ...contents, value: value.replace(fence[0], `${fence[1]}${reworded}${fence[3]}`) };
 }
 
 async function enrichEvolvingAnyHover(ctx, hover) {
@@ -2805,8 +3062,12 @@ async function enrichEvolvingAnyHover(ctx, hover) {
     context: { includeDeclaration: false },
   }, 'hover-enrichment references');
   if (Array.isArray(refs) && refs.length) {
+    // Same-file references first — by PATH, since tsgo percent-encodes a
+    // uri's reserved characters and the state's own tsUri spells them.
+    const here = fsPathOfUri(state.tsUri);
+    const isHere = (u) => (here !== null && fsPathOfUri(u) === here ? 0 : 1);
     const ordered = [...refs].sort((a, b) =>
-      (a.uri === state.tsUri ? 0 : 1) - (b.uri === state.tsUri ? 0 : 1)
+      isHere(a.uri) - isHere(b.uri)
       || (a.uri < b.uri ? -1 : a.uri > b.uri ? 1 : 0)
       || a.range.start.line - b.range.start.line
       || a.range.start.character - b.range.start.character);
@@ -2826,15 +3087,155 @@ async function enrichEvolvingAnyHover(ctx, hover) {
   return result;
 }
 
-connection.onHover(async (params) => {
+// Add the absence arms to a union without repeating a member it already has.
+function withAbsenceArms(type) {
+  const arms = unionArms(type);
+  if (!arms.includes('undefined')) arms.push('undefined');
+  return arms.join(' | ');
+}
+
+// Every display response leaves through the boundary pass
+// (translate.js presentOutgoing). A field it has to change names a
+// presenter that was forgotten upstream, and is logged as a RESCUE — the
+// sweep counts those lines as findings, so the net stays an instrument
+// and never becomes the only presenter.
+const presented = (method, handler) => async (...args) => presentOutgoing(method, await handler(...args), (m, field) => {
+  connection.console.log(`[rip] presentation rescue: ${m} ${field}`);
+});
+
+connection.onHover(presented('textDocument/hover', async (params) => {
   await tsgoReady;
   // Position-identifying surfaces (definition, references) survive a stale
   // face because staleOffsetMap re-aligns coordinates. A TYPE cannot be
   // re-aligned: change a binding's annotation and hover inside the debounce
   // and the old type is simply the wrong answer. So hover settles too.
   await settleDocument(params.textDocument.uri);
-  const ctx = requestContext(params);
+  const ctx = requestContext(params, { wordEndBias: true });
   if (!ctx || ctx.genPosition === null) return null;
+  // Intrinsic-element positions the compiler recorded answer from the
+  // record itself (RULINGS.md, the render rows) — checked BEFORE the
+  // silence decline, because the `ref` word is census-excluded yet
+  // ruled to answer. The tag word's face position is a string literal
+  // (no symbol — tsgo has nothing to say), so the served text is the
+  // native lib.dom spelling of what the lowering does there.
+  const intr = (ctx.good.intrinsics ?? []).find((r) => ctx.offset >= r.start && ctx.offset < r.end);
+  // What tsgo says at a chosen face offset, flattened. The served records
+  // below point at the position that NAMES a type the author's word cannot.
+  const askAt = async (offset) => {
+    const probe = await tsgoRequest('textDocument/hover', {
+      textDocument: { uri: ctx.state.tsUri },
+      position: offsetToPosition(ctx.good.genLineStarts, offset),
+    }, 'served-record quickinfo');
+    return typeof probe?.contents?.value === 'string' ? probe.contents.value.replace(/```\w*\n?/g, '').replace(/\s+/g, ' ').trim() : '';
+  };
+  if (intr) {
+    const map = intr.svg ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
+    let body;
+    if (intr.kind === 'tag') {
+      body = `(element) ${intr.tag}: ${map}['${intr.tag}']`;
+    } else if (intr.kind === 'event') {
+      // The event word serves the handler's event type — the claim the
+      // lowering's casts enforce (RULINGS.md, the event-word row) — in
+      // the `(kind)` head form the other served rows use. Host
+      // elements read back in the `<tag>` shorthand; a component's
+      // root element is a runtime fact, so its known events carry no
+      // host claim, and a name outside the DOM vocabulary reads as the
+      // custom event it is. No prose in the fence: the grammar
+      // tokenizes the body as TypeScript, so an apostrophe would open
+      // a string scope.
+      body = intr.type === null
+        ? `(custom event) @${intr.name}: any`
+        : `(event) @${intr.name}: ${intr.type.replace(/(?:HTML|SVG)ElementTagNameMap\['([\w-]+)'\]/g, '<$1>')}`;
+    } else if (intr.kind === 'attr') {
+      // The attribute KEY answers the value type its road admits
+      // (RULINGS.md, the attr-name row). A road that spells presence
+      // carries the type outright; every other key reads it off the
+      // INSTANTIATED method the record points at — the call is generic
+      // over the key, so tsgo prints the one value type this attribute
+      // takes. No shape to read means no honest type to name, and the
+      // ruled interim is silence.
+      // A route-checked href carries the route union; it reads in the same
+      // display form the diagnostics use (`/orders/:id`, never `${string}`).
+      let type = intr.type === undefined ? null : (intr.route ? prettifyRouteUnion(intr.type, ctx.good.routeEntries) : intr.type);
+      if (type === null && typeof intr.gen === 'number') {
+        const flat = await askAt(intr.gen);
+        const m = /\(name: "[^"]*", (?:value|force\??): (.+?)\): void/.exec(flat);
+        // The call takes the value ALREADY NARROWED past the absence fork,
+        // so its parameter names what lands on the element. The road admits
+        // the two absence spellings on top, and the answer says so — unless
+        // the value type already carries one (a DOM property spelled
+        // `string | null`), which must not be said twice.
+        // Through the same scrub every served answer takes: a surface
+        // name reads back as what the author wrote, never its face spelling.
+        if (m) type = withAbsenceArms(scrubFaceArtifacts(m[1]));
+      }
+      if (type === null) return null;
+      body = `(attribute) ${intr.name}: ${type}`;
+    } else if (intr.kind === 'classkey') {
+      // A `class:` merged with a selector class emits no key of its own — the
+      // pair dissolves into one `__clsx` argument — so it answers from the
+      // typed `className` the merge writes, which is the SAME answer the
+      // unmerged spelling gives. The key does not change meaning because a
+      // selector appeared on the tag.
+      const head = /^\(property\) (?:.+\.)?[\w$]+\??: (.+)$/.exec(await askAt(intr.gen));
+      if (head === null) return null;
+      // The merged key answers as the attribute the author wrote, like every
+      // other element key — never as the surface's `className` property.
+      body = `(attribute) ${intr.name}: ${scrubFaceArtifacts(head[1])}`;
+    } else if (intr.kind === 'bind') {
+      // The `<=>` target names a channel, not a symbol: the census spends the
+      // word, so the answer comes from the record. Both receivers land on a
+      // typed face position — an element property for an intrinsic bind, the
+      // minted props key for a component one — and the component's key holds
+      // the CONTAINER, whose value type is what the author bound.
+      const head = /^\(property\) (?:.+\.)?[\w$]+\??: (.+)$/.exec(await askAt(intr.gen));
+      if (head === null) return null;
+      // A bindable prop's slot is the CONTAINER, and an optional one arrives
+      // as a union with its absence arm — so the arms are split and the cell
+      // among them gives up the value type the author bound.
+      const cell = unionArms(head[1]).map(cellShape).find((c) => c !== null);
+      body = `(bind) ${intr.name}: ${scrubFaceArtifacts(cell ? cell.value : head[1].trim())}`;
+    } else if (intr.kind === 'key' || intr.kind === 'slot') {
+      // Two channel words whose typed position is what they spend: a
+      // loop's `key:` reads its expression's type off the expression's
+      // last name (the bind technique); `slot` reads the children it
+      // projects off the `children` member (RULINGS.md, render rows).
+      const head = /^\((?:parameter|property|method|accessor)\) (?:.*?\.)?[\w$]+(\??): ([^]+)$/.exec(scrubFaceArtifacts(await askAt(intr.gen)));
+      if (head === null) return null;
+      // An optional member keeps its marker beside its absence arm — the
+      // form every optional member answers in (`label?: string | undefined`).
+      body = intr.kind === 'key' ? `(key) key: ${head[2].trim()}` : `(slot) children${head[1]}: ${head[2].trim()}`;
+    } else if (intr.kind === 'schema') {
+      // A schema body's words are descriptor string literals in the face
+      // and carry no symbol, so each answers from its own member in the
+      // companion alias (RULINGS.md, Schema). A name row keeps tsgo's
+      // type and takes rip's word for the head — the body declared a
+      // field or a callable, never the `property` the alias spells. A
+      // type-slot row lands on an annotation already, so it passes
+      // through whatever that position answers.
+      const flat = scrubFaceArtifacts(await askAt(intr.gen));
+      if (flat === '') return null;
+      if (intr.label === null) { body = flat; }
+      else {
+        const head = new RegExp(`^\\(property\\) (?:.*?\\.)?${reSource(intr.name)}\\??: ([^]+)$`).exec(flat);
+        if (head === null) return null;
+        // The `this` parameter is the lowering's own calling convention,
+        // not a parameter the author declared — it is spent making the
+        // body's `@name` reads resolve, so it never reaches the answer.
+        const type = head[1].trim().replace(/^\(this: [^,)]+(?:, )?/, '(');
+        body = `(${intr.label}) ${intr.name}${intr.optional ? '?' : ''}: ${type}`;
+      }
+    } else {
+      body = `ref — writes ${map}['${intr.tag}'] into ${intr.name}`;
+    }
+    return { contents: { kind: 'markdown', value: `\`\`\`typescript\n${body}\n\`\`\`` } };
+  }
+  // The POSITIVE hover model: outside the author's own symbol tokens
+  // (and the served records above, which answered already) there is
+  // nothing to ask about — a keyword, a literal's interior, a comment,
+  // or a blank byte otherwise falls to a cover row and answers about
+  // a NEIGHBOR. Declining here is the platform's own convention.
+  if (!inNoUserSymbolSpan(ctx.good.hoverable ?? [], ctx.offset)) return null;
   // A position the lowering owns whole answers nothing. tsgo would
   // describe the minted symbol its own emission put there — truthfully,
   // and about something the user never wrote.
@@ -2853,14 +3254,81 @@ connection.onHover(async (params) => {
   // `: any` requirement spares an author's own single-underscore
   // binding, whose hover carries a real type.
   if (typeof hover.contents?.value === 'string' && SCAFFOLD_HOVER.test(hover.contents.value)) return null;
+  // The same decline for the lowering's MINTED `__` names (`__effect`,
+  // `__clsx`, the generated interfaces): a cover-row landing can put a
+  // position on one of them, and tsgo then describes the helper. The
+  // author's own `__`-prefixed binding is spared by the source check —
+  // it spells the hover's declared name at the hovered position;
+  // machinery never does.
+  // Judged on the SCRUBBED text: a `__` spelling the presentation
+  // layer translates (`__RipEl_span` → `<span>`) is presentable, not
+  // machinery — what gates is a minted name no translation covers.
+  const minted = typeof hover.contents?.value === 'string'
+    ? /(?:\b(?:let|const|var|function|class|interface|type) |\((?:property|parameter|method)\) )(__[A-Za-z$][\w$]*)/.exec(scrubFaceArtifacts(hover.contents.value)) : null;
+  if (minted && wordAtOffset(ctx.good.source, ctx.offset) !== minted[1]) return null;
+  // The cover-`this` answer: a position with no landing of its own
+  // falls to a render cover whose generated start sits on the lowered
+  // receiver, and tsgo reports `this: this` over the whole construct.
+  // Machinery, not an answer (RULINGS.md names it among what the
+  // declines replaced) — unless the author is actually on a `this`.
+  if (typeof hover.contents?.value === 'string'
+      && /^```(?:typescript|ts)\n\s*this: this\s*\n?```/.test(hover.contents.value)
+      && wordAtOffset(ctx.good.source, ctx.offset) !== 'this') return null;
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
   contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
+  contents = presentComponentSignatureHover(contents) ?? contents;
+  contents = presentPropSlotHover(contents) ?? contents;
+  // The declaration's own kind. tsgo names the CELL the lowering binds
+  // (`const count: number`), which describes the emission and not the
+  // construct the author declared — the same leak the token audit refuses
+  // in the color. Rip mints its own labels, mirroring TypeScript's
+  // (RULINGS.md, Principles), so the head is replaced and the type it
+  // resolved stands untouched.
+  const kind = (ctx.good.kinds ?? []).find((k) => ctx.offset >= k.start && ctx.offset < k.end);
+  if (kind && typeof contents?.value === 'string') {
+    // Two heads to displace: the `const`/`let` tsgo gives a module binding,
+    // and the `(property) Owner.` it gives a class member. The owner is
+    // dropped with it — at a member's own declaration the class is the line
+    // above, and the ruled form names the member alone.
+    // Two heads to displace. A class member arrives as `(property) Owner.name`
+    // — and the owner can carry type parameters, so the replacement is
+    // anchored on the member's OWN name rather than on a shape for the owner.
+    // A module binding arrives as `const`/`let`.
+    const esc = kind.name === null ? null : reSource(kind.name);
+    contents = { ...contents, value: contents.value
+      // The marker is re-emitted from the record, never read off tsgo's text:
+      // the face declares an optional member required, so only the record
+      // knows the author wrote `?`.
+      .replace(esc === null ? /(?!)/ : new RegExp(`\\(property\\) [^\\n]*?\\b${esc}\\??(?=:)`), `(${kind.label}) ${kind.name}${kind.optional ? '?' : ''}`)
+      .replace(/\b(?:const|let|var) (?=[A-Za-z_$])/, `(${kind.label}) `) };
+  }
   // A route union in the hover renders for READING — the same
   // display-only re-labeling the diagnostics road applies.
   if (typeof contents?.value === 'string' && ctx.good.routeEntries?.length) {
     contents = { ...contents, value: prettifyRouteUnion(contents.value, ctx.good.routeEntries) };
+  }
+  // Face artifacts read back in the author's vocabulary — the
+  // intrinsic-surface names among them (display only).
+  if (typeof contents?.value === 'string') {
+    contents = { ...contents, value: scrubFaceArtifacts(contents.value) };
+  }
+  // An element KEY answers as the attribute the author wrote, whichever
+  // road the lowering took it down. A property-road key (`class:`,
+  // `value:`, `innerHTML:`) lands on the surface's real property, so tsgo
+  // heads it `(property) <tag>.className` — the road and the DOM's own
+  // name for it, neither of which the author spelled. The attribute and
+  // boolean roads already answer `(attribute) key: T`; this makes the
+  // three one form: the word under the cursor, and the type the road
+  // admits (RULINGS.md, attr name on an intrinsic).
+  if (typeof contents?.value === 'string' && typeof ctx.genExact === 'number'
+      && (ctx.good.attrNames ?? []).some(([s, e]) => ctx.genExact >= s && ctx.genExact < e)) {
+    const span = (ctx.good.hoverable ?? []).find(([a, b]) => ctx.offset >= a && ctx.offset < b);
+    const word = span ? ctx.good.source.slice(span[0], span[1]) : null;
+    if (word !== null) {
+      contents = { ...contents, value: contents.value.replace(/\(property\) <[\w-]+>\.[\w$]+\??: /, `(attribute) ${word}: `) };
+    }
   }
 
   // The response range travels the reverse path: generated → last-good
@@ -2872,7 +3340,7 @@ connection.onHover(async (params) => {
     if (srcRange) range = goodRangeToCurrent(ctx, srcRange) ?? undefined;
   }
   return { contents, ...(range ? { range } : {}) };
-});
+}));
 
 // The import/export specifier STRING span the last-good offset sits in
 // (stores coordinates, quotes included), or null. Membership is the
@@ -2926,7 +3394,21 @@ connection.onDefinition(async (params) => {
   }, 'definition');
   // A position inside a specifier asked about the MODULE, and the answer
   // is read as one (ripModuleLocations).
-  let locations = span ? ripModuleLocations(result) : ripLocations(result);
+  // A NAMESPACE or DEFAULT import's definition is the module — tsgo
+  // targets the whole file, or the `export default` statement whose
+  // body is the lowering's spelling. Neither has a name to land on
+  // verbatim: the whole-file target answers the module (its start,
+  // like a specifier's), and the default statement lands on its
+  // `default` keyword (faceRangeToSourceRange). Every other target is a
+  // symbol and maps strictly.
+  let locations = span ? ripModuleLocations(result) : flattenLocations(result).map(({ uri, range }) => {
+    const wholeFile = range.start.line === 0 && range.start.character === 0 && (range.end.line > 0 || range.end.character > 0);
+    return wholeFile && classifyTsUri(uri)?.kind !== 'real' ? ripModuleLocation(uri, range) : ripLocation(uri, range, { strict: true });
+  }).filter(Boolean);
+  // …and of the SYMBOL locations that mapping produced, the ones that
+  // actually name the symbol under the cursor: the two rules compose —
+  // this one chooses among mapped answers, the mapping above decides
+  // what each answer IS.
   if (!span && locations.length > 1) locations = preferNamingLocations(params, locations);
   const origin = span && locations.length ? specifierOriginOf(ctx, span) : null;
   if (clientDefinitionLinks && origin) {
@@ -2957,23 +3439,28 @@ connection.onTypeDefinition(async (params) => {
     textDocument: { uri: ctx.state.tsUri },
     position,
   }, 'type definition');
-  return span ? ripModuleLocations(result) : ripLocations(result);
+  if (span) return ripModuleLocations(result);
+  // tsgo answers a TYPE ALIAS with its body as the selection (`{ name:
+  // string; … }`), not its name. A landing that is not an identifier,
+  // on a line declaring a type or interface, re-lands on the declared
+  // name — the symbol the command names.
+  return ripLocations(result).map((loc) => {
+    const text = ripTextAt(loc.uri, loc.range);
+    if (text === null || /^[A-Za-z_$][\w$]*$/.test(text)) return loc;
+    const line = ripLineAt(loc.uri, loc.range.start.line);
+    const decl = line === null ? null : /^\s*(?:export\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/.exec(line);
+    if (!decl) return loc;
+    const character = line.indexOf(decl[1], decl[0].length - decl[1].length);
+    return { uri: loc.uri, range: { start: { line: loc.range.start.line, character }, end: { line: loc.range.start.line, character: character + decl[1].length } } };
+  });
 });
 
-// Implementation and references take NO module treatment: at a
-// specifier, tsgo answers the import-site string literals — verbatim
-// spans in each importing face that the ordinary range map-back serves.
-connection.onImplementation(async (params) => {
-  await tsgoReady;
-  const ctx = requestContext(params);
-  if (!ctx || ctx.genExactPosition === null) return null;
-  const result = await tsgoRequest('textDocument/implementation', {
-    textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
-  }, 'implementation');
-  return ripLocations(result);
-});
-
+// References take NO module treatment: at a specifier, tsgo answers
+// the import-site string literals — verbatim spans in each importing
+// face that the ordinary range map-back serves. (Implementation is not
+// served: rip's libraries state contracts structurally, and nothing in
+// the language's idiom declares an `implements` relationship for the
+// command to follow.)
 connection.onReferences(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -3087,6 +3574,57 @@ function relayableCompletionContext(context) {
   return completionTriggerCharacters.includes(context.triggerCharacter) ? context : null;
 }
 
+// The TYPE half of a one-line declaration head: what follows the first
+// `: ` after the head's name (`let text: string` → `string`, `(property)
+// P.count: number` → `number`); a construct or call head (`constructor
+// Field(props): Field`) is its own type. Null where no head is found.
+function typeTextOf(flat) {
+  if (typeof flat !== 'string' || flat === '') return null;
+  if (/^(?:constructor |\(method\) |function )/.test(flat)) return flat;
+  const m = /^(?:\(alias\) )*(?:\([a-z ]+\) )?(?:readonly )?(?:const |let |var )?[\w$.]+(?:<[^>]*>)?\??: ([^]*)$/.exec(flat);
+  return m ? m[1] : null;
+}
+
+// A completion item's detail column is a typed line, the same thing a
+// hover's fenced block is, and it takes the hover's own presenters
+// before the type presenter: a component's construct signature reads as
+// its rip signature on one line (`component Button extends button props:
+// { … }`), and a reactive member of a component THIS file declares reads
+// value-first, the in-body answer (RULINGS.md, the member rows) — a
+// consumer's instance member, declared elsewhere, keeps its container.
+// Everything else is presentType's.
+function presentCompletionDetail(good, detail) {
+  const fence = { kind: 'markdown', value: '```typescript\n' + detail + '\n```' };
+  const asComponent = presentComponentSignatureHover(fence);
+  if (asComponent) {
+    const body = /```rip\n([^]*?)\n```/.exec(asComponent.value);
+    if (body) {
+      const lines = body[1].split('\n');
+      return lines.length > 1 ? `${lines[0]} props: { ${lines.slice(2, -1).map((l) => l.trim()).join('; ')} }` : lines[0];
+    }
+  }
+  const flat = detail.replace(/\s+/g, ' ').trim();
+  // tsgo cuts a long resolved detail short (`…Record<'accesskey', ...`),
+  // and a cut construct signature parses as nothing: the props block is
+  // open-ended. The construct's own head still says what it is, and a
+  // component whose rows cannot be read presents as the component alone
+  // — never as the lowering's cut text.
+  const construct = /^(?:\(alias\) )?(?:const|let|var) ([A-Za-z_$][\w$]*): (?:\{ )?new (?:<[^(]*>)?\(props\??: \{/.exec(flat);
+  if (construct) return `component ${construct[1]}`;
+  const member = /^\(property\) (?:[\w$]+\.)*([A-Za-z_$][\w$]*)\.[A-Za-z_$][\w$]*: \{/.exec(flat);
+  if (member && new RegExp(`(?:^|\\n)(?:export )?${member[1]}(?:<[^>\\n]*>)?\\s*=\\s*component\\b`).test(good.source)) {
+    const asMember = presentReactiveCellHover({ ...fence, value: '```typescript\n' + flat + '\n```' }, true);
+    const body = asMember ? /```typescript\n([^]*?)\n```/.exec(asMember.value) : null;
+    if (body) return presentType(body[1]);
+  }
+  return presentType(detail);
+}
+
+// A completion's documentation, either LSP spelling, face names scrubbed.
+function scrubDocumentation(doc) {
+  return typeof doc === 'string' ? scrubFaceArtifacts(doc) : { ...doc, value: scrubFaceArtifacts(doc.value ?? '') };
+}
+
 function ripCompletionItem(ctx, raw, index) {
   const item = {
     label: raw.label,
@@ -3096,14 +3634,17 @@ function ripCompletionItem(ctx, raw, index) {
   if (raw.labelDetails) {
     item.labelDetails = { ...raw.labelDetails };
     if (item.labelDetails.description) {
-      item.labelDetails.description = scrubFaceArtifacts(item.labelDetails.description);
+      item.labelDetails.description = presentType(item.labelDetails.description);
     }
   }
   for (const key of ['sortText', 'filterText', 'insertText', 'preselect', 'tags']) {
     if (raw[key] !== undefined) item[key] = raw[key];
   }
-  if (raw.detail) item.detail = scrubFaceArtifacts(raw.detail);
-  if (raw.documentation) item.documentation = raw.documentation;
+  // The detail column is a printed type and the documentation is prose:
+  // the type presents (presentType — scrubbed, a cell arm collapsed), the
+  // prose only scrubs.
+  if (raw.detail) item.detail = presentCompletionDetail(ctx.good, raw.detail);
+  if (raw.documentation) item.documentation = scrubDocumentation(raw.documentation);
   if (raw.textEdit?.range) {
     const mapped = faceEditsToCurrent(ctx, [raw.textEdit]);
     // An unmappable primary edit degrades to label insertion at the
@@ -3238,33 +3779,40 @@ async function dotProbeCompletion(params) {
   } catch { return null; }
   const at = result.code.indexOf(DOT_PROBE_MARK);
   if (at < 0) return null;
-  // OVERLAY, not a new document: the probe text rides the buffer's own
-  // face document (a project member by construction — a freshly minted
-  // probe file answers before tsgo has admitted it to the project, and
-  // an unadmitted file resolves no imports). The overlay swaps in, one
-  // completion asks against it, and the CURRENT last-good face swaps
-  // back in the finally — read at restore time, because a refresh can
-  // complete while the probe awaits tsgo. The version counter is the
-  // state's own so both roads stay monotonic. A buffer that has NEVER
-  // compiled has no face document yet: the probe face becomes its
-  // first (mirror written so the project holds a real file), stays
-  // open, and the next good compile didChanges over it.
+  const items = await overlayCompletionAsk(state, result.code, at);
+  return items.length ? { isIncomplete: false, items } : null;
+}
+
+// One completion ask against a PROBE face, returned as bare-label
+// items (scaffolding filtered). OVERLAY, not a new document: the probe
+// text rides the buffer's own face document (a project member by
+// construction — a freshly minted probe file answers before tsgo has
+// admitted it to the project, and an unadmitted file resolves no
+// imports). The overlay swaps in, one completion asks against it, and
+// the CURRENT last-good face swaps back in the finally — read at
+// restore time, because a refresh can complete while the probe awaits
+// tsgo. The version counter is the state's own so both roads stay
+// monotonic. A buffer that has NEVER compiled has no face document
+// yet: the probe face becomes its first (mirror written so the project
+// holds a real file), stays open, and the next good compile didChanges
+// over it.
+async function overlayCompletionAsk(state, code, at) {
   const coldOpen = !(state.tsOpen && state.lastGood);
   try {
     state.tsVersion += 1;
     if (!state.tsOpen) {
-      try { writeMirror(state.mirrorPath, result.code); } catch { return null; }
+      try { writeMirror(state.mirrorPath, code); } catch { return []; }
       state.tsOpen = true;
       tsgo.client.notify('textDocument/didOpen', {
-        textDocument: { uri: state.tsUri, languageId: 'typescript', version: state.tsVersion, text: result.code },
+        textDocument: { uri: state.tsUri, languageId: 'typescript', version: state.tsVersion, text: code },
       });
     } else {
       tsgo.client.notify('textDocument/didChange', {
         textDocument: { uri: state.tsUri, version: state.tsVersion },
-        contentChanges: [{ text: result.code }],
+        contentChanges: [{ text: code }],
       });
     }
-    const position = offsetToPosition(lineStartsOf(result.code), at);
+    const position = offsetToPosition(lineStartsOf(code), at);
     let res = await tsgoRequest('textDocument/completion', {
       textDocument: { uri: state.tsUri }, position,
     }, 'completion probe');
@@ -3280,7 +3828,7 @@ async function dotProbeCompletion(params) {
     const raw = Array.isArray(res) ? res : res?.items ?? [];
     const items = [];
     for (const item of raw) {
-      if (isScaffoldingLabel(item.label)) continue;
+      if (isScaffoldingLabel(item.label) || isMirrorImportItem(item)) continue;
       // Labels only: the probe overlay is transient, so resolve-lazy
       // detail and tsgo text edits have nothing durable to point at —
       // a member name inserted at the cursor's own (empty) word range
@@ -3291,7 +3839,7 @@ async function dotProbeCompletion(params) {
       }
       items.push(out);
     }
-    return items.length ? { isIncomplete: false, items } : null;
+    return items;
   } finally {
     // Restore the face CURRENT at this moment, never the pre-probe
     // snapshot: a debounced refresh may have completed while the probe
@@ -3311,16 +3859,89 @@ async function dotProbeCompletion(params) {
   }
 }
 
-connection.onCompletion(async (params) => {
+// Whether a cursor sits in RENDER content, judged on the last good
+// compile's own record: the cursor's line, or the line above it, holds
+// a render pair or an intrinsic position. The cursor reaches the good
+// source through the stale alignment — its line start stands in when
+// the cursor's own bytes are the edit. A buffer without a good compile,
+// or a cursor the alignment cannot place, is not judged.
+function inRenderContent(state, text, cursor) {
+  const good = state.lastGood;
+  if (!good) return true;
+  const align = staleOffsetMap(text, good.source);
+  const at = align.toGood(cursor) ?? align.toGood(text.lastIndexOf('\n', cursor - 1) + 1);
+  if (at === null) return true;
+  const lineOf = (offset) => offsetToPosition(good.srcLineStarts, offset).line;
+  const line = lineOf(at);
+  const spans = [
+    ...(good.renderPairs ?? []).map((p) => p.pair),
+    ...(good.intrinsics ?? []).map((r) => [r.start, r.end]),
+  ];
+  return spans.some(([s, e]) => lineOf(s) <= line && lineOf(Math.max(s, e - 1)) >= line - 1);
+}
+
+// The pair-splice probe: an ATTRIBUTE-KEY ask the buffer cannot answer
+// through its own face — a bare prefix (`pla`) or an empty slot inside
+// an element body, positions whose real compile either fails or lands
+// the cursor on bytes that are not a key. The probe splices the ask
+// into a well-formed pair (`pla` → `<mark>: null`), compiles it
+// tolerant, and asks completions INSIDE the spliced key — where the
+// receiver surface's string-literal union answers with the tag's own
+// attribute vocabulary. Same overlay contract as the dot probe. The
+// probe costs a compile and two face swaps, so it runs only where a
+// key can be asked for: inside render content.
+async function pairSpliceProbe(params) {
+  const state = states.get(params.textDocument.uri);
+  const document = documents.get(params.textDocument.uri);
+  if (!state?.mirrorPath || !document || !tsgo || !compile) return null;
+  const text = document.getText();
+  const curLineStarts = lineStartsOf(text);
+  const cursor = positionToOffset(curLineStarts, text.length, params.position);
+  if (text.includes(DOT_PROBE_MARK)) return null;
+  // The ask must sit at the END of its word (attr words carry `-`).
+  if (cursor < text.length && /[\w$-]/.test(text[cursor])) return null;
+  let s = cursor;
+  while (s > 0 && /[\w$-]/.test(text[s - 1])) s--;
+  const prev = s > 0 ? text[s - 1] : '';
+  // Member (`.`), value (`:`), and event (`@`) asks are other roads.
+  if (prev === '.' || prev === ':' || prev === '@' || prev === '#') return null;
+  if (s === cursor) {
+    // An EMPTY-slot ask only on an otherwise-blank line tail — an
+    // empty prefix anywhere else is every other completion in the file.
+    const lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
+    if (text.slice(lineStart, cursor).trim() !== '') return null;
+  }
+  if (!inRenderContent(state, text, cursor)) return null;
+  let result;
+  try {
+    const fsPath = fileURLToPath(document.uri);
+    const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
+    const routes = appRoutesFor(fsPath, workspaceRoot);
+    result = compile(text.slice(0, s) + DOT_PROBE_MARK + ': null' + text.slice(cursor), {
+      path: document.uri, runtimeDelivery: 'inline', face: 'ts', strict: state.strict, tolerant: true,
+      appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params,
+    });
+  } catch { return null; }
+  const at = result.code.indexOf(DOT_PROBE_MARK);
+  if (at < 0) return null;
+  // One byte INSIDE the mark: the key lands as a string literal on the
+  // attribute road, and a completion ask at the literal's first byte
+  // reads as outside the string (the identifier scope) — inside it,
+  // the constrained union answers.
+  const items = await overlayCompletionAsk(state, result.code, at + 1);
+  return items.length ? { isIncomplete: false, items } : null;
+}
+
+connection.onCompletion(presented('textDocument/completion', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
   // text of 100ms ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
-  if (!ctx) return dotProbeCompletion(params);
+  if (!ctx) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
   const genCursor = ctx.genSlot ?? ctx.genExact;
-  if (genCursor === null) return dotProbeCompletion(params);
+  if (genCursor === null) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
   // A member-dot ask must land in the face AS the same member-dot —
   // same typed prefix, right of a `.`. Two faces betray it: a STALE
   // face (the trailing dot failed to compile, and the fresh `.` sits
@@ -3342,6 +3963,22 @@ connection.onCompletion(async (params) => {
       const probed = await dotProbeCompletion(params);
       if (probed) return probed;
     }
+  } else {
+    // A bare-WORD ask whose bytes do not survive into the face at the
+    // mapped position is the pair-splice probe's case: a broken
+    // attribute line compiles stale, and the cursor lands on whatever
+    // the last good compile put there.
+    let ws = cursor;
+    while (ws > 0 && /[\w$-]/.test(ctx.currentText[ws - 1])) ws--;
+    if (ws < cursor) {
+      let fs = genCursor;
+      while (fs > 0 && /[\w$-]/.test(ctx.good.code[fs - 1])) fs--;
+      const faithful = ctx.good.code.slice(fs, genCursor) === ctx.currentText.slice(ws, cursor);
+      if (!faithful) {
+        const probed = await pairSpliceProbe(params);
+        if (probed) return probed;
+      }
+    }
   }
   const context = relayableCompletionContext(params.context);
   const result = await tsgoRequest('textDocument/completion', {
@@ -3349,32 +3986,69 @@ connection.onCompletion(async (params) => {
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
     ...(context ? { context } : {}),
   }, 'completion');
-  if (!result) return null;
+  if (!result) return pairSpliceProbe(params);
   const rawItems = Array.isArray(result) ? result : result.items ?? [];
   ctx.state.lastCompletion = rawItems;
+  // tsgo's resolve, asked with the cursor inside a CALLABLE symbol's own
+  // name (a class in `new Field(`, a function in `go()`), prints every
+  // item's detail with that symbol's type after the item's own head —
+  // `let text: new (props?) => Field`. The cursor symbol's type is read
+  // once here, and a resolved detail that merely repeats it is dropped
+  // (onCompletionResolve) rather than shown wrong. At a fresh prefix,
+  // a blank, or a plain variable the details are tsgo's own and pass.
+  ctx.state.lastCompletionCursorType = null;
+  ctx.state.lastCompletionCursorWord = null;
+  if (/[\w$]/.test(ctx.currentText[cursor - 1] ?? '') || /[\w$]/.test(ctx.currentText[cursor] ?? '')) {
+    let ws = cursor, we = cursor;
+    while (ws > 0 && /[\w$]/.test(ctx.currentText[ws - 1])) ws--;
+    while (we < ctx.currentText.length && /[\w$]/.test(ctx.currentText[we])) we++;
+    ctx.state.lastCompletionCursorWord = ctx.currentText.slice(ws, we);
+    const probe = await tsgoRequest('textDocument/hover', {
+      textDocument: { uri: ctx.state.tsUri }, position: offsetToPosition(ctx.good.genLineStarts, genCursor),
+    }, 'completion cursor type');
+    const flat = typeof probe?.contents?.value === 'string' ? probe.contents.value.replace(/```\w*\n?/g, '').replace(/\s+/g, ' ').trim() : '';
+    ctx.state.lastCompletionCursorType = typeTextOf(flat);
+  }
   const items = [];
   for (let i = 0; i < rawItems.length; i++) {
-    if (isScaffoldingLabel(rawItems[i].label)) continue;
+    if (isScaffoldingLabel(rawItems[i].label, ctx.good.source) || isMirrorImportItem(rawItems[i])) continue;
     const item = ripCompletionItem(ctx, rawItems[i], i);
     if (item) items.push(item);
   }
   finishRouteStringItems(ctx, genCursor, items);
+  if (items.length === 0) {
+    // Nothing survived the face ask — an attribute-key position whose
+    // mapped bytes answer no completions falls to the probe.
+    const probed = await pairSpliceProbe(params);
+    if (probed) return probed;
+  }
   return { isIncomplete: Array.isArray(result) ? false : !!result.isIncomplete, items };
-});
+}));
 
-connection.onCompletionResolve(async (item) => {
+connection.onCompletionResolve(presented('completionItem/resolve', async (item) => {
   const { uri, index } = item.data ?? {};
   const state = uri === undefined ? null : states.get(uri);
   const raw = state?.lastCompletion?.[index];
   if (!raw || !tsgo) return item;
   const resolved = await tsgoRequest('completionItem/resolve', raw, 'completion resolve');
   if (!resolved) return item;
-  if (resolved.detail) item.detail = scrubFaceArtifacts(resolved.detail);
-  if (resolved.documentation) {
-    item.documentation = typeof resolved.documentation === 'string'
-      ? scrubFaceArtifacts(resolved.documentation)
-      : { ...resolved.documentation, value: scrubFaceArtifacts(resolved.documentation.value ?? '') };
+  // The positional leak (see onCompletion): a detail whose type is the
+  // cursor symbol's own, on an item that is not that symbol, is not the
+  // item's type and does not show.
+  // The item that IS the cursor symbol carries its own type by right. Every
+  // other item's detail is the leak when it carries the cursor type — whole,
+  // as a variable's type, or as the PARAMETER LIST a function head wears
+  // (`function scroll(props?: { … }): Tag` for a construct `new (props?: {
+  // … }) => Tag`), which is the same body under another head.
+  const leaked = state.lastCompletionCursorType;
+  const own = item.label.replace(/\?$/, '') === state.lastCompletionCursorWord;
+  const leakedBody = leaked === null ? null : /\((?:.|\n)*\)(?= =>|:)/.exec(leaked)?.[0] ?? null;
+  const flatDetail = resolved.detail ? resolved.detail.replace(/\s+/g, ' ').trim() : '';
+  const carriesLeak = leaked !== null && !own && (typeTextOf(flatDetail) === leaked || (leakedBody !== null && leakedBody.length > 8 && flatDetail.includes(leakedBody)));
+  if (resolved.detail && !carriesLeak) {
+    item.detail = state.lastGood ? presentCompletionDetail(state.lastGood, resolved.detail) : presentType(resolved.detail);
   }
+  if (resolved.documentation) item.documentation = scrubDocumentation(resolved.documentation);
   if (resolved.additionalTextEdits?.length) {
     const ctx = requestContext({ textDocument: { uri } });
     const mapped = ctx ? faceEditsToCurrent(ctx, resolved.additionalTextEdits) : null;
@@ -3382,7 +4056,7 @@ connection.onCompletionResolve(async (item) => {
     else connection.console.log(`[rip] auto-import edit for '${item.label}' did not map — inserted without the import`);
   }
   return item;
-});
+}));
 
 // ---- signature help: the position maps with cursor semantics (the
 // active position sits between a call's argument tokens); the response
@@ -3391,7 +4065,7 @@ connection.onCompletionResolve(async (item) => {
 // keeps the indices correct across bodiless overload rows (the face
 // prints them adjacent to their implementation, and tsgo numbers the
 // overload list itself).
-connection.onSignatureHelp(async (params) => {
+connection.onSignatureHelp(presented('textDocument/signatureHelp', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
@@ -3407,14 +4081,110 @@ connection.onSignatureHelp(async (params) => {
     ...(params.context ? { context: params.context } : {}),
   }, 'signature help');
   if (!result?.signatures) return null;
+  // The calls the LOWERING wrote never show. A positional text child
+  // lowers to the text-node call, an element tag to createElement, a
+  // handler's arrow into the runtime's `__batch` wrapper: a cursor there
+  // lands inside a call the author never wrote, and tsgo would describe
+  // ITS signature. The face's callee says whose call this is; and when
+  // the wrapper's paren sits on an earlier face line, the answer itself
+  // says so — a signature whose callee is a minted `__` name the source
+  // never spells.
+  if (insideLoweredCall(ctx.good.code, genCursor)) return null;
+  // The general form of the same rule: the call's CALLEE must be a word
+  // the author wrote. The lowering inserts calls whose callee is a lib
+  // name — `__out.push(` for a comprehension, `Object.assign(` for a
+  // spread, `Array.isArray(`/`.includes(` for `in`, `new RegExp(` for a
+  // heregex, `toMatchable(` for `=~` — and a signature there describes
+  // the lowering. A callee whose face bytes map back to source
+  // verbatim is the author's; one with no such twin is not.
+  if (!authoredCallee(ctx, genCursor)) return null;
+  const active = result.signatures[result.activeSignature ?? 0];
+  const mintedCallee = /^(__[A-Za-z$][\w$]*)\(/.exec(active?.label ?? '');
+  if (mintedCallee && !ctx.good.source.includes(mintedCallee[1])) return null;
+  // A COMPONENT USE declines. Its props are named keys, so there is no
+  // positional parameter for the highlight to track, and the hover on
+  // the component's name already answers the signature in the author's
+  // spelling; what signature help would add is the same rows in a call
+  // shape. The construction is recognized by its own signature — the
+  // one-parameter `Name(props?: { … }): Name` row whose block reads as
+  // a props block — so a class the author constructs positionally
+  // answers as any call does.
+  if (isComponentConstruction(active)) return null;
   return {
     ...result,
-    signatures: result.signatures.map((sig) => ({
-      ...sig,
-      label: scrubFaceArtifacts(sig.label),
-    })),
+    signatures: result.signatures.map((sig) => ({ ...sig, label: presentType(sig.label) })),
   };
-});
+}));
+
+// Whether the face position `gen` sits inside the argument list of a call
+// the LOWERING minted on that line — the text-node call a render child
+// becomes. Walks back over the line's balanced parens to each enclosing
+// open paren and reads its callee.
+// The calls the lowering writes around an author's bytes: the DOM
+// constructors, the `String` wrap a text read takes, the runtime's `__`
+// helpers, and any method called on a render local (`this._el3.
+// setAttribute(`, `_el0.addEventListener(`) — the attribute, event, and
+// presence roads. Judged at the INNERMOST call: the call nearest the
+// cursor is the one a signature would describe, and a call the author
+// wrote inside a handler (`console.log(1)` under the `__batch` wrapper)
+// answers as itself.
+const LOWERED_CALLEES = /(?:^|[^\w$.])(?:document\.create(?:TextNode|Element|ElementNS|Comment)|String|__[A-Za-z$][\w$]*|\(?(?:this\.)?_(?:el|t|inst|frag|anchor|empty|slot)\d+(?: as [\w$<>]+)?\)?\.[A-Za-z]+)$/;
+function insideLoweredCall(code, gen) {
+  const call = enclosingCall(code, gen);
+  return call !== null && LOWERED_CALLEES.test(call.before);
+}
+
+// The innermost CALL whose argument list holds the face position `gen`,
+// on gen's own face line: the text before its open paren (the callee
+// sits at its end) and the paren's offset. A paren that opens no call —
+// a grouping `(`, an arrow's parameter list, a keyword's `if (` — is
+// passed over for the next one out: a cursor inside the ternary the
+// loop lowering pushes is inside `push(`, whatever parens the ternary
+// wears. Null when no call on the line opens around the position.
+const NOT_A_CALLEE = /\b(?:if|while|for|switch|catch|return|typeof|await|yield|else|in|of|void|delete|instanceof)$/;
+function enclosingCall(code, gen) {
+  const lineStart = code.lastIndexOf('\n', gen - 1) + 1;
+  let depth = 0;
+  for (let i = gen - 1; i >= lineStart; i--) {
+    const c = code[i];
+    if (c === ')') depth++;
+    else if (c === '(') {
+      if (depth > 0) { depth--; continue; }
+      const before = code.slice(lineStart, i);
+      if (/[\w$)\]]\s*$/.test(before) && !NOT_A_CALLEE.test(before.trimEnd())) return { before, open: i };
+    }
+  }
+  return null;
+}
+
+
+
+// Whether the innermost call around the face position `gen` has a
+// callee the author wrote: its identifier bytes in the face map back
+// to source verbatim (the precise map, the same one an edit needs). A
+// position inside no call answers true — there is nothing to judge, and
+// tsgo decides.
+function authoredCallee(ctx, gen) {
+  const call = enclosingCall(ctx.good.code, gen);
+  if (call === null) return true;
+  const callee = /([A-Za-z_$][\w$]*)\s*$/.exec(call.before);
+  if (callee === null) return true;
+  const end = call.open - (call.before.length - callee.index - callee[0].length) - (callee[0].length - callee[1].length);
+  const start = end - callee[1].length;
+  return generatedEditSpanToSource(ctx.good.mappings, start, end, ctx.good.source, ctx.good.code) !== null;
+}
+
+// Whether a signature row is a component's construction — `Name(props?:
+// { … }): Name`, one parameter whose block reads as a props block
+// (componentPropsAt, the same reading the component-name hover takes).
+function isComponentConstruction(sig) {
+  if (typeof sig?.label !== 'string') return false;
+  const flat = sig.label.replace(/\s+/g, ' ').trim();
+  const head = /^([A-Za-z_$][\w$]*)(<[^(]*>)?\(props(\??): \{/.exec(flat);
+  if (!head) return false;
+  const presented = componentPropsAt(flat, head[0].length - 1);
+  return presented !== null && /^\): [A-Za-z_$][\w$]*(?:<.*>)?$/.test(flat.slice(presented.at));
+}
 
 // ---- semantic tokens: tsgo's relative-encoded data decodes against
 // the FACE text; each token's generated span maps to Rip only where
@@ -3687,6 +4457,13 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
     if (!selSrc) continue;
     const selection = goodRangeToCurrent(ctx, selSrc);
     if (!selection) continue;
+    // A selection that maps to NOTHING (an anonymous callback's arrow, a
+    // name the face spells where the source spells none) is no entry:
+    // an outline row must be its own name. Its children still list.
+    if (selection.start.line === selection.end.line && selection.start.character === selection.end.character) {
+      if (sym.children?.length) out.push(...ripDocumentSymbols(ctx, sym.children, seen));
+      continue;
+    }
     const key = `${sym.name}@${selection.start.line}:${selection.start.character}:${selection.end.line}:${selection.end.character}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -3703,7 +4480,7 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
     out.push({
       name: scrubFaceArtifacts(sym.name),
       kind: sym.kind,
-      ...(sym.detail ? { detail: scrubFaceArtifacts(sym.detail) } : {}),
+      ...(sym.detail ? { detail: presentType(sym.detail) } : {}),
       ...(sym.tags ? { tags: sym.tags } : {}),
       range,
       selectionRange: selection,
@@ -3713,7 +4490,7 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
   return out;
 }
 
-connection.onDocumentSymbol(async (params) => {
+connection.onDocumentSymbol(presented('textDocument/documentSymbol', async (params) => {
   await tsgoReady;
   // Cached by the editor exactly like semantic tokens, and asked once when
   // the editor opens — before the first compile that is a null, and the
@@ -3737,7 +4514,7 @@ connection.onDocumentSymbol(async (params) => {
     return out;
   }
   return ripDocumentSymbols(ctx, result);
-});
+}));
 
 // Workspace symbols search the ACTIVE PROGRAM (the open
 // buffers' closure; out-of-program files are honestly out of scope).
@@ -3746,7 +4523,7 @@ connection.onDocumentSymbol(async (params) => {
 // recompile-for-mappings, real
 // TypeScript files pass through; synthetic landings drop. The same
 // one-symbol-per-declaration dedup as the outline.
-connection.onWorkspaceSymbol(async (params) => {
+connection.onWorkspaceSymbol(presented('workspace/symbol', async (params) => {
   await tsgoReady;
   if (!tsgo) return null;
   const result = await tsgoRequest('workspace/symbol', { query: params.query ?? '' }, 'workspace symbols');
@@ -3770,7 +4547,7 @@ connection.onWorkspaceSymbol(async (params) => {
     });
   }
   return out;
-});
+}));
 
 // ---- WorkspaceEdit mapping (rename, code actions): every edit in
 // every touched file must land on Rip source — all-or-nothing. Edits
@@ -3804,7 +4581,7 @@ function earliestIncompleteness(face) {
 // is the opposite shape: one local insertion, whose only requirement is
 // that its OWN span is settled text, so it passes `atomic: false` and is
 // judged positionally.
-function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
+function mapWorkspaceEditToRip(edit, { atomic = true, derived = false } = {}) {
   const byUri = new Map(); // tsUri → TextEdit[]
   for (const [uri, edits] of Object.entries(edit?.changes ?? {})) {
     byUri.set(uri, edits);
@@ -3871,7 +4648,36 @@ function mapWorkspaceEditToRip(edit, { atomic = true } = {}) {
     for (const e of edits) {
       const srcEdit = faceEditToSourceEdit(face, e);
       if (!srcEdit) {
-        return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source` };
+        const at = positionToOffset(face.genLineStarts, face.code.length, e.range.start);
+        const end = positionToOffset(face.genLineStarts, face.code.length, e.range.end);
+        // A RENAME edit that replaces a proper part of a longer identifier
+        // (`Cart` inside `__Cart__behavior` or `CartData`) names a word the
+        // lowering DERIVED from the author's; the compiler re-derives it
+        // from the renamed source, so the edit is dropped, never refused.
+        if (derived && (/[\w$]/.test(face.code[at - 1] ?? '') || /[\w$]/.test(face.code[end] ?? ''))) continue;
+        // An edit inside a face ECHO — the TS-only restatement of a body
+        // the real lowering already emitted (a component's behavior
+        // object restates its computed members) — names bytes the REAL
+        // copy also spells, and that copy's own edit carries the source.
+        // Dropping the echo's edit keeps a rename that is well-formed in
+        // the source; refusing it would lose the whole rename over a
+        // duplicate. The diagnostic mapper declines echo positions on the
+        // same ground.
+        // An edit inside a face ECHO — the TS-only restatement of a body
+        // the real lowering already emitted (a component's behavior
+        // object restates its computed members) — names bytes the REAL
+        // copy also spells, and that copy's own edit carries the source.
+        // Dropping the echo's edit keeps a rename that is well-formed in
+        // the source; refusing it would lose the whole rename over a
+        // duplicate. The diagnostic mapper declines echo positions on the
+        // same ground.
+        if (face.echoSpans?.some(([a, b]) => at >= a && at < b)) continue;
+        // The refusal names the generated bytes it could not place, and
+        // where, so the reader sees WHICH copy of the name the lowering
+        // spelled on its own.
+        const lineStart = face.code.lastIndexOf('\n', at - 1) + 1;
+        const around = face.code.slice(Math.max(lineStart, at - 40), Math.min(face.code.length, at + 50)).replace(/\s+/g, ' ').trim().slice(0, 90);
+        return { failure: `an edit in ${ripUri.split('/').pop()} lands on generated-only bytes with no Rip source (face ${e.range.start.line + 1}:${e.range.start.character + 1}: ${JSON.stringify(around)})` };
       }
       if (incompleteFrom !== null && !beforePosition(srcEdit.range.end, incompleteFrom)) {
         return { failure: `an edit in ${ripUri.split('/').pop()} lands on an incomplete expression — finish it and retry` };
@@ -3945,19 +4751,21 @@ connection.onRenameRequest(async (params) => {
     newName: params.newName,
   }, 'rename');
   if (!result) return null;
-  const { changes, failure } = mapWorkspaceEditToRip(result);
+  const { changes, failure } = mapWorkspaceEditToRip(result, { derived: true });
   if (failure) refuse(failure);
   return { changes };
 });
 
-// ---- code actions: quickfix plus the source.* family (the
-// organizeImports/removeUnusedImports/sortImports rewrites land
-// through the whole-import-line mapping; fixAll's auto-imports
-// land through the standing insertion rules). The request range and
+// ---- code actions: the import quick fixes and organize imports. The
+// organize rewrite lands through the whole-import-line mapping and the
+// quick fixes' auto-imports through the standing insertion rules. Those
+// are the whole offer: a quick fix outside the import family
+// (isImportFixTitle), the sort and remove-unused subsets of organize,
+// and the fix-all batch are not served — whatever tsgo would rewrite. The request range and
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose
 // edit cannot land on Rip source is dropped, never shown broken.
-connection.onCodeAction(async (params) => {
+connection.onCodeAction(presented('textDocument/codeAction', async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx) return null;
@@ -3980,8 +4788,8 @@ connection.onCodeAction(async (params) => {
     return sourceOffsetToGeneratedExact(ctx.good.mappings, offset, ctx.good.source, ctx.good.code)
       ?? sourceCursorToGenerated(ctx.good.mappings, offset);
   };
-  // A pure source.* ask (VS Code's organize-imports command, fix-all
-  // on save) is document-scoped by nature: the face's whole range
+  // A pure source.* ask (VS Code's organize-imports command, on save
+  // or from the palette) is document-scoped by nature: the face's whole range
   // serves, so a request range past the last mapped construct (the
   // full-document range clients send) cannot refuse the ask.
   const onlySource = (params.context?.only?.length ?? 0) > 0
@@ -4023,7 +4831,8 @@ connection.onCodeAction(async (params) => {
   if (!Array.isArray(result)) return null;
   const actions = [];
   for (const action of result) {
-    if (action.kind && !action.kind.startsWith('quickfix') && !action.kind.startsWith('source.')) continue;
+    if (action.kind && !action.kind.startsWith('quickfix') && !CODE_ACTION_KINDS.includes(action.kind)) continue;
+    if (action.kind?.startsWith('quickfix') && !isImportFixTitle(action.title)) continue;
     if (!action.edit) continue; // command-only actions execute inside tsgo — not brokered
     const { changes, failure } = mapWorkspaceEditToRip(action.edit, { atomic: false });
     if (failure) {
@@ -4039,7 +4848,7 @@ connection.onCodeAction(async (params) => {
     });
   }
   return actions;
-});
+}));
 
 documents.listen(connection);
 connection.listen();

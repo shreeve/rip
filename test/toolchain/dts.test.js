@@ -490,11 +490,14 @@ describe('component declarations: the class shape, the props surface, the extend
 
   test('extends: the attribute surface for the extended tag, the index signature, the rest view', () => {
     const d = compile('Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
-    expect(d).toContain('rest: { value: Record<string, any>; read(): Record<string, any>; touch(): void };');
+    // The rest view holds the passthrough object itself, spelled inline in a
+    // declaration file — DOM-typed per attribute, never a catch-all.
+    expect(d).toContain(`rest: { value: { accesskey?: HTMLElementTagNameMap["button"] extends Record<'accesskey', infer T> ? T : any;`);
+    expect(d).not.toContain('Record<string, any>');
     expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any`); // per-tag, DOM-typed
     expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
     expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed
-    expect(d).toContain('[key: string]: any');   // rest admits any key
+    expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
   });
 
   test('a component with no annotations still declares — the props surface is structural (prop-name completions)', () => {
@@ -521,6 +524,20 @@ describe('component declarations: the class shape, the props surface, the extend
     const d = compile('Chart = component extends svg\n  n := 1\n  render\n    svg viewBox: "0 0 10 10"\n      = n\n').declarations;
     expect(d).toContain('viewBox?: any');
     expect(d).toContain("'stroke-width'?: any");
+  });
+
+  test('a declaration file that names a DOM global opens with the dom lib reference; one that names none has no directive', () => {
+    const card = compile('export Card = component\n  @title := "x"\n  render\n    div\n      = @title\n').declarations;
+    expect(card.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    expect(card).toContain('children?: Node | string | number | boolean | null;');
+    const push = compile('export Push = component extends button\n  @label := "x"\n  render\n    button\n      = @label\n').declarations;
+    expect(push.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    // A component that owns `children` and extends nothing spells no
+    // DOM global — the reference follows the names the file uses, so
+    // a schema-only or function-only module stays directive-free too.
+    expect(compile('export Own = component\n  @children: string\n').declarations).not.toContain('<reference');
+    expect(compile('export S = schema :input\n  email! email\n').declarations).not.toContain('<reference');
+    expect(compile('export def f(a: number): string\n  String(a)\n').declarations).not.toContain('<reference');
   });
 
   test('non-binding components declare nothing (a d.ts is a module boundary)', () => {

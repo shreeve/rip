@@ -141,6 +141,23 @@ export const CONTRACT = [
     red: (s) => (s.gr.negatives.kindQueued - s.gr.negatives.kindHeld) > 0,
   },
   {
+    // The house rule for member reads, judged both ways like the spelling
+    // exclusions: a sigil read of a declared member that no coverage row
+    // lists is drift, and a listed read the corpus no longer writes is a
+    // row that measures nothing.
+    name: 'corpus.memberReads', lane: 'grammar',
+    property: 'every read of a declared member in a positive fixture is bare, save the reads the gate lists as the `@name` path\'s coverage — and every listed read is still written',
+    red: (s) => s.gr.negatives.memberReadDrift + s.gr.negatives.memberReadStale > 0,
+  },
+  {
+    // A provided name spelled bare is not a member read at all — it is a
+    // free variable the emitter passes through — so the rule is the read
+    // reaching the instance, not a spelling preference.
+    name: 'corpus.providedNames', lane: 'grammar',
+    property: 'every provided name a positive fixture reads — app, router, params, query, rest — takes the sigil, so the read reaches the instance',
+    red: (s) => s.gr.negatives.bareProvided > 0,
+  },
+  {
     name: 'negatives.falsifiability', lane: 'grammar',
     property: 'every type-vocabulary class the positives claim carries at least one error-lane instance',
     red: (s) => s.gr.negatives.vocabUnfalsified > 0,
@@ -221,7 +238,16 @@ export const CONTRACT = [
   {
     name: 'diagnostics.codes', lane: 'errors',
     property: 'every diagnostic the twin publishes is published by the fixture, and none besides',
-    red: (s) => s.el.problems.some((p) => p.kind !== 'position'),
+    red: (s) => s.el.problems.some((p) => p.kind !== 'position' && p.kind !== 'message'),
+  },
+  {
+    // The message is the author's view of a complaint, and it is judged in
+    // its own right: no minted `__` spelling and no reactive cell in it. The
+    // hover and the diagnostic answer about the same slot; they must name
+    // the same type.
+    name: 'diagnostics.messages', lane: 'errors',
+    property: 'no published message carries a face shape — a minted spelling or a reactive cell',
+    red: (s) => s.el.problems.some((p) => p.kind === 'message'),
   },
   // Position holds as THREE invariants, one general and two named by fixture.
   // A single row joined by `AND` can only recover as a whole, so while either
@@ -309,6 +335,77 @@ export const CONTRACT = [
     red: (s) => s.hp.ruledPopulation === 0,
   },
   {
+    // The machinery-decline doctrine, judged exhaustively: the sweep hovers
+    // EVERY word position (corpora and the cart demo) and these four classes
+    // are its hard violations — a minted `__` spelling, a scaffold local, the
+    // bare cover-`this`, or a face spelling in a diagnostic message. The
+    // sweep's other two halves gate on their own rows below: the name
+    // census and the misdirection classes.
+    name: 'sweep.machinery', lane: 'sweep',
+    property: 'no position in the sweep answers with the lowering\'s machinery — in a hover, a completion item\'s presentation, or a signature label — and no diagnostic message carries a face spelling',
+    red: (s) => s.sw.machinery > 0,
+  },
+  {
+    // The other half of the same walk. The machinery row judges what a
+    // position ANSWERS; this one judges that a name answers at all: every
+    // identifier the compiler's own lexer produces either hovers or is a
+    // ruled silence pinned null in hover-pins.json. The population is the
+    // lexer's, never the server's own hoverable set, so a word the server
+    // never knew about is exactly what turns this red.
+    name: 'sweep.census', lane: 'sweep',
+    property: 'every name the lexer produces either hovers or is a ruled silence',
+    red: (s) => s.sw.census > 0,
+  },
+  {
+    // Graduated when the last misdirection row drained. The sweep's cover
+    // classes — an answer about a different symbol than the word under the
+    // cursor, at the word, at its end boundary, or at a blank byte — were
+    // gauges while the decline work ran; from the day they hit zero a
+    // nonzero count is a regression, per the rule at the top of this file.
+    name: 'sweep.misdirection', lane: 'sweep',
+    property: 'every answering position answers about the word under the cursor, and a signature help answer describes a call the author wrote',
+    red: (s) => s.sw.misdirection > 0,
+  },
+  {
+    // A navigation answer IDENTIFIES a symbol, so it lands on a name, and
+    // the name it lands on is the one that was asked — a definition, type
+    // definition, or reference on other bytes is a wrong symbol however
+    // plausible; an outline entry that is not its own name, or is the
+    // lowering's, is not the author's outline; a link whose target is
+    // missing is not a link. Judged over every name the author declared,
+    // at every occurrence (landing.js).
+    name: 'landing.answers', lane: 'landing',
+    property: 'every navigation answer — definition, type definition, references, outline, workspace symbol, document link — lands on the name that was asked',
+    red: (s) => s.ld.answers > 0,
+  },
+  {
+    // The census half: a name the author declared that navigates NOWHERE
+    // — no definition, or no references from a position that defines in
+    // rip. Every other class judges an answer, so over-declining is
+    // invisible to them.
+    name: 'landing.census', lane: 'landing',
+    property: 'every name the author declared has a definition, and references that include the asked position',
+    red: (s) => s.ld.silent > 0,
+  },
+  {
+    // An edit surface changes exactly what it names and leaves a program:
+    // a rename replaces the name's own bytes with the new name and the
+    // file compiles (so the reverse rename is byte-identical); organize
+    // imports touches import lines alone, compiles, and leaves the
+    // diagnostics less the unused imports it removed; the import quick fix
+    // restores a dropped specifier so the name resolves and the import set
+    // is the original's (roundtrip.js).
+    name: 'roundtrip.edits', lane: 'roundtrip',
+    property: 'every rename, organize-imports, and import quick fix over the corpus changes only what it names and leaves a compiling file',
+    red: (s) => s.rt.edits > 0,
+  },
+  {
+    // The census half: a top-level declaration rename refuses at.
+    name: 'roundtrip.census', lane: 'roundtrip',
+    property: 'every top-level declaration can be renamed',
+    red: (s) => s.rt.refused > 0,
+  },
+  {
     name: 'token.delivery', lane: 'token',
     property: 'the server delivers a semantic token for every probed declaration',
     red: (s) => s.tk.missing.length > 0,
@@ -320,6 +417,26 @@ export const CONTRACT = [
     name: 'token.type', lane: 'token',
     property: "each declaration's token type is the one its binding form fixes, outside the form agreed below",
     red: (s) => s.tk.badType.some((r) => r.want?.type !== 'enum'),
+  },
+  {
+    // The half `token.type` cannot reach. Its population is a line-shape
+    // heuristic over column 0, so a binding nested inside a construct — a
+    // render loop's item, several indents into a component — has no wanted
+    // type there at all.
+    //
+    // The expectation comes from the GRAMMAR, read off the source: a `for`
+    // head binds its names, and the author declared a loop variable however
+    // the construct lowers (a render loop becomes a block factory, which
+    // makes the binding a parameter in the face). It must NOT come from the
+    // compiler's `loopVars` channel, which is what the editor reads to
+    // correct tsgo: an expectation drawn from there asserts only that
+    // positions the compiler called loop variables are colored as loop
+    // variables, and goes quiet on the day the compiler stops calling one —
+    // which is the regression this exists to catch. The first version of
+    // this row did exactly that and stayed green against a live defect.
+    name: 'token.type.nested', lane: 'token',
+    property: "a name a construct's own syntax binds carries that type wherever it appears, not only where it starts a line",
+    red: (s) => s.tk.badKind.length > 0,
   },
   {
     name: 'token.type.enum', lane: 'token',

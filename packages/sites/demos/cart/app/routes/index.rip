@@ -29,7 +29,7 @@ export Products = component
     queryString = params.toString()
     @router.replace(@router.path + (if queryString then "?#{queryString}" else ''))
 
-  clearFilters: -> @setQuery({ search: '', sort: '' })
+  clearFilters: -> setQuery({ search: '', sort: '' })
 
   render
     h1 'Products'
@@ -38,10 +38,10 @@ export Products = component
         type: 'search'
         placeholder: 'Search products...'
         value: search
-        @input: (e) -> @setQuery({ search: e.target.value })
+        @input: (e) -> setQuery({ search: e.target.value })
       select
         value: sort
-        @change: (e) -> @setQuery({ sort: e.target.value })
+        @change: (e) -> setQuery({ sort: e.target.value })
         option value: '', disabled, 'Sort'
         option value: 'price-asc', 'Price: Low to High'
         option value: 'price-desc', 'Price: High to Low'
@@ -58,4 +58,4 @@ export Products = component
               Button outline, @click: (-> cart.addItem(product)), 'Add to Cart'
     else
       p 'No products found. '
-        Button outline, link: true, @click: @clearFilters, 'Clear Filters'
+        Button outline, link, @click: clearFilters, 'Clear Filters'

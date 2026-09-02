@@ -166,9 +166,9 @@ The editor currently materializes the import closure of open files.
 Workspace-wide references, rename, and auto-import may expand that
 closure lazily; the feature that requests the expansion owns its cost.
 
-### Render-DSL intelligence
+### Render-DSL intelligence — CLOSED
 
-The TypeScript face lowers render-block attributes to string literals, leaving no typed position for the language service. The route-checking slice has shipped through a face-region wrapper (typed `<a href:>`, component `href:` props, `router.push`/`replace`, ambient `RoutePath`, per-route `@params` — docs/TYPES.md § Typed routes), which closes the checking half for that one attribute. Full typed-attribute intelligence — every attribute a tsgo-native typed position, completion included — remains open, scheduled with the UI stage.
+Every render attribute, event, property, ref, and tag position is a tsgo-native typed position in the face (docs/TYPES.md § Intrinsic element typing): generated per-tag surfaces plus TS-only receiver casts make the existing lowering's own bytes check, complete, and hover, with shipped output byte-identical under the strip gate. What remains is not a gap but decided semantics, named there: a `<=>` bind checks the element→cell direction and lets the DOM coerce the write back, a presence value is a truthiness position by the `?!` operator's own meaning, and selector-token words share one lexer token (no per-word rows).
 
 ## Rip-native hypermedia
 

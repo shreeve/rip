@@ -2104,7 +2104,7 @@ type ":shape emits Data + Instance types", '''
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
   type AddressData = { street: string; city: string };
-  type Address = AddressData & { readonly full: unknown; normalize: (...args: any[]) => unknown };
+  type Address = AddressData & { readonly full: unknown; normalize: () => unknown };
   declare const Address: Schema<Address, AddressData>;
   export {};
   '''

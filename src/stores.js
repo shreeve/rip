@@ -188,6 +188,13 @@ const stabIntervalTree = (root, x, out) => {
 // on the first query (rows are complete by query time) and rebuilt if
 // the row count has moved since — the count is the staleness signal
 // for an append-only table.
+// The roles a caller-supplied span may carry (CodeBuilder.markSpan's
+// allowlist): every row under one is a COPY of source bytes the construct's
+// own role also places — a companion alias head, a descriptor string, a
+// directive comment, a shorthand key — never the construct's own
+// manifestation.
+export const CALLER_SPAN_ROLES = new Set(['tsDirective', 'shorthandProp', 'identifier', 'literal']);
+
 export class Mappings {
   constructor(rows) {
     this.rows = rows;
@@ -261,8 +268,18 @@ export class Mappings {
     return this.atGenerated(offset).find(Mappings.isDirect) ?? null;
   }
 
+  // Among the innermost direct rows, the construct's OWN manifestation
+  // (a RoleStore role) answers before a caller-spanned copy of the same
+  // bytes: a hoisted companion alias head (`type Address = …`) precedes
+  // the binding it names (`let Address`) in the face, and a question at
+  // the declaration is about the binding. Copies answer, in generated
+  // order, only where no own row holds the span.
   directAtSource(offset) {
-    return this.atSource(offset).find(Mappings.isDirect) ?? null;
+    const direct = this.atSource(offset).filter(Mappings.isDirect);
+    if (direct.length === 0) return null;
+    const width = (r) => r.sourceEnd - r.sourceStart;
+    const innermost = direct.filter((r) => width(r) === width(direct[0]));
+    return innermost.find((r) => !CALLER_SPAN_ROLES.has(r.role)) ?? direct[0];
   }
 
   // The zero-width exact row AT this source offset, or null. Zero-width

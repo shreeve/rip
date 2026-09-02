@@ -25,6 +25,7 @@
 // flatten of the whole growing buffer.
 
 import { counter } from './counter.js';
+import { CALLER_SPAN_ROLES } from './stores.js';
 
 export class CodeBuilder {
   constructor(stores, { source = null, primitives = false } = {}) {
@@ -160,6 +161,9 @@ export class CodeBuilder {
     let { mappingKind } = f;
     if (mappingKind === null) {
       mappingKind = this.matchesSource(f) ? 'exact' : 'cover';
+      if (mappingKind === 'cover' && CodeBuilder.NORMALIZED_ROLES.has(f.role)) {
+        this.layoutTwinSegments(f);
+      }
     }
     this.rows.push({
       nodeId: f.nodeId, role: f.role, mappingKind,
@@ -169,6 +173,53 @@ export class CodeBuilder {
     });
     if (this.trackPrimitives && mappingKind === 'exact') {
       this.exactSourceSpans.add(`${f.sourceStart}:${f.sourceEnd}`);
+    }
+  }
+
+  // The roles whose emission NORMALIZES whitespace by design (the face
+  // renders annotation text through normalizeTypeText), so an author's
+  // aligned spelling demotes the frame to a cover on whitespace alone.
+  // Only these frames attempt layout-twin segmentation: a JS-face
+  // multiline cover is also a whitespace twin of its emission, but
+  // segmenting it would ripple into every sourcemap for no reader gain.
+  static NORMALIZED_ROLES = new Set(['annotation', 'returnType']);
+
+  // A LAYOUT TWIN: the face renders annotation text with normalized
+  // spacing, so an author's ALIGNED annotation (`menuRef:    HTMLElement`)
+  // demotes its role frame to a cover on whitespace alone — and every
+  // identifier read inside it would lose its exact row, resolving only
+  // while a downstream tolerance holds. When such a frame's source and
+  // emission differ ONLY in whitespace-run lengths, each non-space
+  // segment is verbatim by construction and earns its own exact row,
+  // so reads inside the frame stay census-clean. The size gate keeps
+  // the join off big covers, which are never layout twins.
+  layoutTwinSegments(f) {
+    if (this.source === null) return;
+    const srcLen = f.sourceEnd - f.sourceStart;
+    const genLen = this.length - f.generatedStart;
+    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256) return;
+    const src = this.source.slice(f.sourceStart, f.sourceEnd);
+    const gen = this.chunks.slice(f.chunkStart).join('');
+    if (src.replace(/\s+/g, ' ') !== gen.replace(/\s+/g, ' ')) return;
+    let si = 0, gi = 0;
+    while (si < src.length && gi < gen.length) {
+      if (/\s/.test(src[si])) {
+        while (si < src.length && /\s/.test(src[si])) si++;
+        while (gi < gen.length && /\s/.test(gen[gi])) gi++;
+        continue;
+      }
+      let len = 0;
+      while (si + len < src.length && !/\s/.test(src[si + len])) len++;
+      this.rows.push({
+        nodeId: f.nodeId, role: f.role, mappingKind: 'exact',
+        sourceStart: f.sourceStart + si, sourceEnd: f.sourceStart + si + len,
+        generatedStart: f.generatedStart + gi, generatedEnd: f.generatedStart + gi + len,
+        fileId: 0,
+      });
+      if (this.trackPrimitives) {
+        this.exactSourceSpans.add(`${f.sourceStart + si}:${f.sourceStart + si + len}`);
+      }
+      si += len; gi += len;
     }
   }
 
@@ -188,7 +239,7 @@ export class CodeBuilder {
   // splits by what the claimed value SPELLS — a literal's row is cover
   // where an identifier's is exact, so a name that told neither apart
   // would make the mapping audit's role breakdown unreadable.
-  static SPAN_ROLES = new Set(['tsDirective', 'shorthandProp', 'identifier', 'literal']);
+  static SPAN_ROLES = CALLER_SPAN_ROLES;
 
   // A mark whose source span is supplied by the CALLER — the channel
   // for trivia-sourced emission (TS directive comments), whose spans
@@ -268,10 +319,27 @@ export class CodeBuilder {
     // name, so every byte check downstream agrees with it.
     const pool = unplaced.length > 0 ? unplaced : free;
     const owned = pool.filter((c) => c.nodeId === f.nodeId);
-    const p = (owned.length > 0 ? owned : pool)[0];
-    // Every occurrence in this frame is spoken for — decline, rather than hand
-    // a second generated position a row on a source read that already has one.
-    if (p === undefined) return null;
+    let p = (owned.length > 0 ? owned : pool)[0];
+    // Every occurrence in this frame is spoken for. A further emission of the
+    // same name from this frame is a lowering re-reading the bytes it already
+    // placed — the `in` operator evaluating its operand three ways, a soak's
+    // second read of its receiver, a loop's iterable read inside the body —
+    // and it maps to the occurrence most recently placed: both generated
+    // positions then hold one source read, which is what a rename of that
+    // read must reach. A frame that placed nothing declines.
+    if (p === undefined) {
+      const last = [...taken].pop();
+      p = last === undefined ? undefined : candidates.find((c) => c.sourceStart === last);
+      // A frame that placed nothing itself re-reads what an enclosing or
+      // earlier frame placed — a soak's second read of its receiver, emitted
+      // under the soak's own mark: the most recent placed occurrence in
+      // this frame's span is the read it repeats.
+      if (p === undefined) {
+        const placed = candidates.filter((c) => this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`));
+        p = placed[placed.length - 1];
+      }
+      if (p === undefined) return null;
+    }
     taken.add(p.sourceStart);
     // A SIGIL-carrying token records the sigil inside its span — the symbol
     // `alpha` is lexed as `:alpha` — so the recorded span is wider than the

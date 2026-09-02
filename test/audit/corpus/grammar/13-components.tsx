@@ -135,6 +135,82 @@ function Terse() {
   return null
 }
 
+// ── hyphenated attribute keys: the presence road and the data- template ──
+
+function Held() {
+  let busy = false
+  return (
+    <div aria-busy={busy ? true : undefined} data-kind='row'>held</div>
+  )
+}
+
+// ── forward use: a component referenced above its own declaration ──
+
+function Teaser() {
+  return (
+    <Anchor label='ahead' />
+  )
+}
+
+type AnchorProps = ComponentProps<'a'> & {
+  label: string
+}
+
+function Anchor({ label, ...props }: AnchorProps) {
+  return (
+    <a {...props}>{label}</a>
+  )
+}
+
+// ── aligned annotations: padding between the colon and the type ──
+
+function Gauge() {
+  const needleRef = useRef<HTMLDivElement | null>(null)
+  let scale = 10
+  return (
+    <div ref={needleRef}>gauge {scale}</div>
+  )
+}
+
+// ── Component use shapes ──
+
+type Item = { name: string; quantity: number }
+
+function Step({ outline = false, label = '', children, ...props }: ComponentProps<'button'> & { outline?: boolean; label?: string }) {
+  return (
+    <button {...props} className={outline ? 'outline' : undefined}>
+      {label}
+      {children}
+    </button>
+  )
+}
+
+function Stepper() {
+  let items: Item[] = [{ name: 'a', quantity: 1 }, { name: 'b', quantity: 2 }]
+
+  const remove = (item: Item) => console.log('remove', item.name)
+  const bump = (item: Item, delta: number) => console.log('bump', item.name, delta)
+
+  return (
+    <div>
+      <Step outline label='reset' />
+      <Step label='apply' outline>
+        Apply
+      </Step>
+      {items.map((item) => (
+        <div className='row' key={item.name}>
+          <Step outline onClick={() => remove(item)}>-</Step>
+          <Step onClick={() => bump(item, 1)}>+</Step>
+        </div>
+      ))}
+      <Step label='wrap'>
+        <Step label='inner'>in</Step>
+      </Step>
+    </div>
+  )
+}
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
-console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse)
+console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
+console.log('use shapes:', typeof Step, typeof Stepper)
 console.log('rip-native constructs:', true, true, true)

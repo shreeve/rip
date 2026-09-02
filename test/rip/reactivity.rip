@@ -398,7 +398,7 @@ code 'render block with identifier property value compiles to reactive setAttrib
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.setAttribute('href', this.href.value); });
+      __effect(() => { { const __v = this.href.value; __v == null ? this._el0.removeAttribute('href') : this._el0.setAttribute('href', __v); } });
     }
   };
   '''

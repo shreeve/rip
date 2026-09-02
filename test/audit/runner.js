@@ -238,6 +238,7 @@
 // Lane, so the verdict dimension means zero diagnostics absolutely.
 
 import fs from 'node:fs';
+import { Stores } from '../../src/stores.js';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -252,7 +253,7 @@ import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
 import { renderTypeDecl } from '../../src/ts/types.js';
 import { judge } from './contract.js';
-import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition, flattenHover } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -265,6 +266,12 @@ const CLM = path.join(CORPUS, 'claims');
 // nothing in errors/ can join another audit's denominator, and
 // tsconfig.json excludes it from the twin type-check.
 const ERRD = path.join(CORPUS, 'errors');
+// Fixture listings must reject non-files: opening a fixture in the
+// editor drops the live server's face mirror — a DIRECTORY named
+// `.rip` — into the bucket, and a bare endsWith('.rip') would read it.
+const ripFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.rip'))
+  .map((e) => e.name);
 // The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
 // re-pin exists; the run prints paste-ready rows for divergences and
 // unpinned symbols). Two sections per fixture, one discipline — reviewed
@@ -495,6 +502,52 @@ const AUDITS = [
     judge: 'the .rip SOURCE ITSELF — a binding\'s form fixes what its token must be, so no\n'
          + 'twin and no baseline are involved and the check cannot self-confirm',
   },
+  {
+    key: 'sweep', flag: '--sweep', name: 'Sweep Audit',
+    // Its own server, opened over the corpus — the audit's population,
+    // like every lane. Direct `bun test/audit/sweep.js` runs add the
+    // cart demo (or any file set) as DISCOVERY.
+    runs: 'drives its own editor server',
+    blurb: 'hover EVERY BYTE of the corpus and flag machinery-shaped answers',
+    judge: 'NEGATIVE invariants over the server\'s own answers — no twin, no pin, no\n'
+         + 'oracle: an answer may not name a minted `__` spelling, a scaffold local, or\n'
+         + 'the bare cover-`this`, and no diagnostic message may carry a face spelling\n'
+         + '(sweep.machinery gates the four together); the name census (a name the\n'
+         + 'lexer produces that declines) and the misdirection classes (subject,\n'
+         + 'boundary, blank, keyword and comment covers, whole-construct ranges)\n'
+         + 'each gate at zero, having drained (sweep.census, sweep.misdirection). Direct\n'
+         + '`bun test/audit/sweep.js <files>` runs the same engine over any file set —\n'
+         + 'the cart demo by default, the DISCOVERY side; a class it exposes earns a\n'
+         + 'corpus fixture, never a gate row',
+  },
+  {
+    key: 'landing', flag: '--landing', name: 'Landing Audit',
+    // Its own server, opened over the corpus. Direct `bun test/audit/landing.js`
+    // runs take any file set.
+    runs: 'drives its own editor server',
+    blurb: 'ask definition, type definition, and references at every name the author declared, plus the outline, workspace symbols, and document links — and judge where each lands',
+    judge: 'NEGATIVE invariants over the server\'s own answers — no twin, no pin: a\n'
+         + 'navigation answer lands on a NAME, and the name it lands on is the one that\n'
+         + 'was asked (an alias, a default export, an index signature, and a class\'s\n'
+         + '`this` pass under TypeScript\'s own conventions); the outline lists every\n'
+         + 'top-level declaration under its own name and nothing of the lowering\'s; a\n'
+         + 'workspace query by exact name finds the declaration; a link\'s target exists\n'
+         + '(landing.answers). The census half — a declared name with no definition, or\n'
+         + 'no references from a position that defines in rip — gates at zero\n'
+         + '(landing.census).',
+  },
+  {
+    key: 'roundtrip', flag: '--roundtrip', name: 'Round-trip Audit',
+    runs: 'drives its own editor server',
+    blurb: 'rename every top-level declaration, organize every file\'s imports, and take the import quick fix — then judge what the file is afterwards',
+    judge: 'NEGATIVE invariants over the file AFTER an edit surface acted — no twin, no\n'
+         + 'pin: a rename replaces the name\'s own bytes with the new name and the file\n'
+         + 'compiles (the reverse rename is then byte-identical); organize imports touches\n'
+         + 'import lines alone, compiles, and leaves the diagnostics less the unused\n'
+         + 'imports it removed; the import quick fix restores a dropped specifier so the\n'
+         + 'name resolves and the import set is the original\'s (roundtrip.edits). A\n'
+         + 'declaration rename refuses at is the census half (roundtrip.census).',
+  },
 ];
 // DECLINED LANES — ruled against, recorded here because this registry is where
 // either would be built, and the reasoning must meet whoever re-proposes one.
@@ -509,17 +562,20 @@ const AUDITS = [
 // the day a symmetry defect appears that the mapping invariants cannot see.
 //
 // Content oracles (hover content at USE sites, completion, signature help,
-// twin-judged corpus-wide — the once-planned "M5"): not owed, not built, and
-// the dark area is real — the hover lane probes declarations only, and the
-// incomplete-expression work closed on per-buffer hand gates instead. Build it
-// when use-site answers start rotting, and carry the one constraint those
-// gates taught: a barriered request proves what a face CONTAINS and is blind
-// to whether the answer ARRIVES (test/toolchain/arrival.test.js holds the
-// counter-shape), so an oracle that settles before it asks inherits exactly
-// that blindness.
+// twin-judged corpus-wide — the once-planned "M5"): the NEGATIVE half of this
+// is built — the Sweep Audit above — because its build-when condition arrived:
+// use-site answers rotting (machinery in hovers, completion items, and
+// signature labels at positions no pin covers), a class with live specimens. What remains declined is the twin-judged CONTENT
+// half: whether a use-site answer is RIGHT stays with the per-buffer hand
+// gates and the pinned rulings — the sweep asserts only that an answer is
+// never the lowering's own vocabulary. The constraint those gates taught
+// still binds both halves: a barriered request proves what a face CONTAINS
+// and is blind to whether the answer ARRIVES (test/toolchain/arrival.test.js
+// holds the counter-shape), so an oracle that settles before it asks inherits
+// exactly that blindness — the sweep asks the live server, per request.
 const FLAGS = [
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
-  ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, and every flagged mapping read'],
+  ['--verbose', '-v', 'every list a section summarizes — exclusions, queue members, claims rows, hover divergences, unasserted tokens, every flagged mapping read, and the sweep\'s gauge rows'],
   ['--help', '-h', 'this message'],
 ];
 // Every accepted flag: the audits' own, plus the modifiers above (a row may
@@ -579,6 +635,9 @@ if (unknown.length) {
   process.exit(1);
 }
 const VERBOSE = ARGV.includes('--verbose') || ARGV.includes('-v');
+// Every listing the default view folds says so in place: a reader must
+// never have to guess that -v holds more.
+const hiddenHint = (n, what, indent = 4) => { if (!VERBOSE && n > 0) console.log(`${' '.repeat(indent)}${dim(`${n} ${what} hidden — -v prints them`)}`); };
 // Fixtures probe a few at a time because the cost is waiting, not computing.
 // `--serial` collapses that to one lane: if a result ever looks wrong, run it
 // and see whether concurrency was the cause. The two must agree — and if they
@@ -599,6 +658,9 @@ const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
 const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
+const RUN_SWEEP = ranAudit('sweep');
+const RUN_LANDING = ranAudit('landing');
+const RUN_ROUNDTRIP = ranAudit('roundtrip');
 const RUN_MAP = ranAudit('map');
 const RUN_GRAMMAR = ranAudit('grammar');
 const RUN_ERRORS = ranAudit('errors');
@@ -779,7 +841,7 @@ function dimTwin(twinBase, byFile) {
 const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
-  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(dir, f));
   const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
   tscfg.include = ['.'];   // the fixtures are flat here, not under corpus/
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
@@ -869,7 +931,7 @@ const normHover = (h) => {
   if (!h) return null;
   const raw = typeof h.contents === 'string' ? h.contents
     : (h.contents?.value ?? (Array.isArray(h.contents) ? h.contents.map((c) => c.value ?? c).join('\n') : ''));
-  return raw.replace(/```typescript\n?/g, '').replace(/```/g, '').replace(/\s+/g, ' ').trim() || null;
+  return flattenHover(raw) || null;
 };
 // Top-level declarations: a name at column 0, optionally after a leading
 // export/def/class/interface/enum/type keyword. Heuristic, not a parser.
@@ -1062,7 +1124,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
+    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
     // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -1710,6 +1772,48 @@ function expectedTokenType(d, form) {
   if (form === 'plain' && IS_ARROW.test(val)) return 'function';
   return 'variable';
 }
+// A LOOP HEAD declares its bindings, and the audit reads that from the
+// SOURCE. `for item in items` binds `item`; `for k, v of pairs` binds
+// both. Whatever the construct lowers to — a render loop becomes a block
+// factory, so the binding genuinely IS a parameter in the face — the
+// author declared a loop variable, and that is the token the editor owes.
+//
+// SOURCE, deliberately, and not the compiler's own `loopVars` channel.
+// That channel is what the editor READS to correct tsgo, so an expectation
+// taken from it says only "positions the compiler called loop variables
+// are colored as loop variables" — trivially true on the day the compiler
+// stops calling one, which is the regression this exists to catch. The
+// grammar is the independent authority: a `for` head binds its names
+// whether or not anything downstream remembered.
+//
+// This is the half `declsOf` cannot reach at all. That population is a
+// name at column 0 with its form read off the line, so a binding nested
+// inside a construct — a render loop's item, several indents into a
+// component — has no wanted type anywhere.
+// EVERY loop head rip spells, or the invariant under-covers in silence:
+// `in` and `of` over a collection, `as` over a generator, each with its
+// optional `await` and the dammit form (`as!`), and `own` on a key loop.
+// A form left out is not a smaller gate — it is a form nothing checks.
+const LOOP_HEAD = /^\s*for\s+(?:await\s+)?(?:own\s+)?([A-Za-z_$][\w$]*)\s*(?:,\s*([A-Za-z_$][\w$]*))?\s+(?:in|of|as!?)\s/;
+function loopBindings(src) {
+  const out = [];
+  src.split('\n').forEach((raw, line) => {
+    // Strings blanked and a trailing comment cut, offsets preserved: a
+    // loop head is source, never text that merely reads like one.
+    const text = codeOf(raw);
+    const m = LOOP_HEAD.exec(text);
+    if (!m) return;
+    for (const name of [m[1], m[2]]) {
+      if (!name) continue;
+      // The name's own column, found after the head it follows, so a
+      // binding spelled like a word in that head cannot mis-place.
+      const from = text.indexOf(name, text.indexOf('for') + 3);
+      if (from >= 0) out.push({ name, line, character: from, type: 'variable' });
+    }
+  });
+  return out;
+}
+
 function expectedToken(d) {
   const raw = d.keyword ?? bindingForm(d.code);
   const type = expectedTokenType(d, raw);
@@ -1921,8 +2025,8 @@ function mappingScan(src, code, mappings, vocabulary = []) {
 // identically (the buckets differ only in which instrument justifies a
 // fixture's existence — judged in the grammar audit). Basenames must be
 // unique across buckets: twins, pins, and CLAIMS carriers all key on them.
-const grammarFixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
-const claimsFixtures = fs.existsSync(CLM) ? fs.readdirSync(CLM).filter((f) => f.endsWith('.rip')).sort() : [];
+const grammarFixtures = ripFilesIn(FIX).sort();
+const claimsFixtures = fs.existsSync(CLM) ? ripFilesIn(CLM).sort() : [];
 {
   const dup = grammarFixtures.filter((f) => claimsFixtures.includes(f));
   if (dup.length) {
@@ -1951,7 +2055,7 @@ const fixtures = [...grammarFixtures, ...claimsFixtures].sort();
 }
 // The Diagnostics Audit's fixtures, listed here beside the flat walk so the
 // pool below can size itself to the lane's workload.
-const errorFixtures = fs.existsSync(ERRD) ? fs.readdirSync(ERRD).filter((f) => f.endsWith('.rip')).sort() : [];
+const errorFixtures = fs.existsSync(ERRD) ? ripFilesIn(ERRD).sort() : [];
 // ── shared presentation helpers
 const useColor = Bun.enableANSIColors;
 const paint = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -2192,6 +2296,77 @@ if (RUN_GRAMMAR) {
   // that parsed. For the same reason the first NON-EMPTY line is taken — an
   // error whose text opens with a newline still names itself.
   const firstLine = (s) => String(s).split('\n').find((l) => l.trim()) ?? 'no message';
+  // ── Member-read spelling: the house rule, judged both ways ──
+  // A component reads what it DECLARES bare — state, computed, readonly,
+  // methods, gates, and props at their reads — and spells what it is
+  // PROVIDED with the sigil: `@app`, `@router`, `@params`, `@query`, and
+  // `@rest` under `extends`. The `@name` read of a declared member is still a
+  // path the mapping must carry (ThisProperty maps the member through a
+  // span-less `this`), so this table lists the reads that keep it exercised,
+  // by fixture and member. Like the spelling exclusions, both directions are
+  // judged: a sigil read of a declared member no row lists is drift, and a
+  // listed read the fixture no longer writes is a row that measures nothing.
+  const SIGIL_READ_COVERAGE = new Map([
+    ['13-components.rip', new Map([
+      ['bump', 'the `@name` read path — one token keeps the ThisProperty mapping exercised while every other member read in the corpus is bare'],
+    ])],
+  ]);
+  const PROVIDED_NAMES = new Set(['app', 'router', 'params', 'query', 'rest']);
+  const MEMBER_DECL_HEADS = new Set(['typed-var', 'state', 'readonly', 'computed', '=', 'gate']);
+  const isThisProp = (x) => Array.isArray(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && typeof x[2] === 'string';
+  const isWriteHead = (h) => typeof h === 'string' && (h === '++' || h === '--'
+    || (h.endsWith('=') && !['==', '!=', '<=', '>=', '===', '!=='].includes(h)));
+  const bindNames = (ps, out) => {
+    if (!Array.isArray(ps)) { if (typeof ps === 'string') out.add(ps); return; }
+    for (const q of ps) {
+      if (typeof q === 'string') out.add(q);
+      else if (Array.isArray(q)) {
+        if (q[0] === 'default' || q[0] === 'rest') bindNames([q[1]], out);
+        else if (q[0] === 'object' || q[0] === 'array') for (const e of q.slice(1)) bindNames([e], out);
+        else bindNames(q, out);
+      }
+    }
+  };
+  // Every `@name` read of a declared member, and every bare read of a provided
+  // name, inside each component of one tree. Declaration targets, write
+  // targets, object and attribute keys, and gate lines (an erased address and
+  // an erased key) are names, never reads; a local bound as a provided name
+  // is the author's own.
+  const memberReadCensus = (sexpr) => {
+    const sigil = [], bare = [];
+    const blockOf = (n) => { for (let i = 1; i < n.length; i++) if (Array.isArray(n[i]) && n[i][0] === 'block') return n[i]; return null; };
+    const walk = (n) => {
+      if (!Array.isArray(n)) return;
+      if (n[0] !== 'component') { for (const c of n) walk(c); return; }
+      const b = blockOf(n);
+      const members = new Set();
+      if (b) for (const st of b.slice(1)) {
+        if (!Array.isArray(st)) continue;
+        if (st[0] === 'gate' && typeof st[1] === 'string') members.add(st[1]);
+        else if (st[0] === 'object') { for (const q of st.slice(1)) if (Array.isArray(q) && q[0] === ':') { const nm = isThisProp(q[1]) ? q[1][2] : q[1]; if (typeof nm === 'string') members.add(nm); } }
+        else if (MEMBER_DECL_HEADS.has(st[0])) { if (isThisProp(st[1])) members.add(st[1][2]); else if (typeof st[1] === 'string') members.add(st[1]); }
+      }
+      const body = (x, bound) => {
+        if (!Array.isArray(x)) {
+          if (typeof x === 'string' && PROVIDED_NAMES.has(x) && !members.has(x) && !bound.has(x)) bare.push({ name: x });
+          return;
+        }
+        if (x[0] === 'gate') return;
+        if (isThisProp(x)) { if (members.has(x[2])) sigil.push({ name: x[2], node: x }); return; }
+        let nb = bound;
+        if ((x[0] === '->' || x[0] === '=>' || x[0] === 'for-in' || x[0] === 'for-of') && Array.isArray(x[1])) { nb = new Set(bound); bindNames(x[1], nb); }
+        for (let i = 0; i < x.length; i++) {
+          if (i === 1 && (MEMBER_DECL_HEADS.has(x[0]) || isWriteHead(x[0]) || x[0] === ':')) continue;
+          body(x[i], nb);
+        }
+      };
+      if (b) body(b, new Set());
+    };
+    walk(sexpr);
+    return { sigil, bare };
+  };
+  const sigilReadDrift = [], bareProvided = [];
+  const coverageSeen = new Set();   // `${fixture} ${member}` listed reads the corpus still writes
   const fixtureRows = [];
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
@@ -2218,6 +2393,23 @@ if (RUN_GRAMMAR) {
         continue;
       }
       walkPairs(tree.sexpr, []);
+      {
+        const { sigil, bare } = memberReadCensus(tree.sexpr);
+        const listed = SIGIL_READ_COVERAGE.get(f);
+        // The line is decoration on the finding, read through the parse
+        // tree's own stores; a lookup that fails names the read without it.
+        let lineOf = () => null;
+        try {
+          const st = new Stores(tree.stores);
+          lineOf = (node) => { const id = st.idOf(node); const span = id === null ? null : st.selfSpan(id); return span ? offsetToPosition(lineStartsOf(text), span[0]).line + 1 : null; };
+        } catch { /* decoration only */ }
+        for (const { name, node } of sigil) {
+          if (listed?.has(name)) { coverageSeen.add(`${f} ${name}`); continue; }
+          const line = lineOf(node);
+          sigilReadDrift.push(`${f}${line === null ? '' : `:${line}`} @${name}`);
+        }
+        for (const { name } of bare) bareProvided.push(`${f} ${name}`);
+      }
       // Coverage folds in only once the parse SUCCEEDS. Reductions performed on
       // the way to a rejected token are not evidence that the corpus exercises
       // a production — a file the compiler refuses cannot be the reason a rule
@@ -2287,6 +2479,7 @@ if (RUN_GRAMMAR) {
     // A production name is itself most of a line, so its reason goes BENEATH
     // rather than beside: a label column that wide leaves the prose a gutter
     // too narrow to read, and the pair is legible stacked.
+    hiddenHint(excludedIdx.length, 'excluded productions', 6);
     if (VERBOSE) for (const i of excludedIdx) {
       out(`      ${dim(names[i])}`);
       out(`        ${dim(EXCLUDED.get(names[i]))}`);
@@ -2672,6 +2865,7 @@ if (RUN_GRAMMAR) {
     // name has to know the heads to answer, and this was the one denominator
     // the report counted without ever showing.
     if (VERBOSE) wrapList([...CONSTRUCT_HEADS].sort(), dim);
+    hiddenHint(CONSTRUCT_HEADS.size, 'containment constructs (the denominator)', 6);
 
     // Not "the denominator below the productions": `below` was a layering
     // metaphor (source, then lexer, then parser) competing with the plain
@@ -2696,6 +2890,7 @@ if (RUN_GRAMMAR) {
       out(`    ${red(`${darkSpellings.length} never written by the corpus — violating lexer.written:`)} ${dim('write each spelling into a positive fixture, or exclude it as redundant (EXCLUDED_SPELLINGS, with the reason)')}`);
       for (const s of darkSpellings) console.log(`      ${red(pad(s.spelling, 8))} ${dim(`→ ${s.becomes}`)}`);
     } else out(`    ${green('every rewritten spelling is written somewhere in the corpus')}`);
+    hiddenHint(spellings.filter((x) => spellingSeen.has(x.spelling)).length, 'rewritten spellings, each with what it lexes as', 6);
     if (VERBOSE) for (const s of spellings.filter((x) => spellingSeen.has(x.spelling))) {
       out(`      ${pad(s.spelling, 8)} ${dim(`→ ${s.becomes} · lexes as ${[...spellingSeen.get(s.spelling)].join(', ')}`)}`);
     }
@@ -2727,6 +2922,7 @@ if (RUN_GRAMMAR) {
     } else out(`    ${green('every kind claimed or excluded')}`);
     for (const k of heldButClaimed) out(`    ${red('✗')} ${red('held but claimed:')} ${k} ${dim('— the finding closed; drop the hold')}`);
     for (const k of staleHeldKinds) out(`    ${red('✗')} ${red('held kind not in the universe:')} ${k} ${dim('— stale; fix the census hold table')}`);
+    hiddenHint(EXCLUDED_KINDS.size, 'excluded type kinds, each with its reason', 6);
     if (VERBOSE) for (const [label, why] of groupByReason(EXCLUDED_KINDS)) labeled(6, label, 26, `excluded — ${why}`);
     for (const k of claimedOutside) out(`    ${red('✗')} ${red('claimed kind outside the census universe:')} ${k} ${dim('— extend the universe derivation in classifyTypeTexts')}`);
     for (const k of falseKindExclusions) out(`    ${red('✗')} ${red('excluded but claimed:')} ${k} ${dim("— the exclusion claim is false; fix the census exclusion table")}`);
@@ -2743,11 +2939,10 @@ if (RUN_GRAMMAR) {
     // exactly the workaround notes a reader cannot reconstruct from the code.
     // Reported every run, because a header reaching eighteen lines unnoticed
     // is what this measures.
-    const commentFiles = [
-      ...fs.readdirSync(FIX).map((f) => [FIX, f]),
-      ...fs.readdirSync(CLM).map((f) => [CLM, f]),
-      ...fs.readdirSync(ERRD).map((f) => [ERRD, f]),
-    ].filter(([, f]) => /\.(rip|ts|tsx)$/.test(f));
+    const commentFiles = [FIX, CLM, ERRD]
+      .flatMap((d) => fs.readdirSync(d, { withFileTypes: true })
+        .filter((e) => e.isFile() && /\.(rip|ts|tsx)$/.test(e.name))
+        .map((e) => [d, e.name]));
     const splitDividers = [];
     // A rip line opening `#` is not necessarily a comment: `#{…}` is string
     // interpolation, and inside a heredoc or heregex a `#` line is content
@@ -2798,12 +2993,23 @@ if (RUN_GRAMMAR) {
     out(`    ${dim(`${negParsed} error fixtures`)}${dim(' · ')}${famZero.length
       ? red(`no negative at all for: ${famZero.join(', ')}`) + ' ' + dim('— violating negatives.families: author one in the family\'s corpus/errors pair (fixture + line-aligned twin, diagnostics asserted)')
       : green('every construct family has at least one negative')}`);
+    hiddenHint(famPos.size, 'construct families with their negative counts', 6);
     if (VERBOSE) for (const [g, n] of [...famPos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       out(`      ${pad(g, 24)} ${dim(`${String(famNeg.get(g) ?? 0).padStart(3)} of ${String(n).padStart(3)} exercised productions appear in a negative`)}`);
     }
     out(`    ${dim(`type vocabulary: positives claim ${claimed.length} classes`)}${unfalsified.length ? `${dim(' · ')}${red(`${unfalsified.length} unfalsified (no negative instance) — every claimed class needs one`)}` : `${dim(' · ')}${green('every claimed class has a negative instance')}`}`);
     if (unfalsified.length) wrapList(unfalsified, red);
+    hiddenHint(claimed.length, 'type-vocabulary classes with their positive and negative counts', 6);
     if (VERBOSE) for (const [c, n] of claimed) console.log(`      ${pad(c, 24)} ${dim(`${String(n).padStart(4)} in positives · ${String(negVocab.get(c) ?? 0).padStart(3)} in the error lane`)}`);
+    const sigilReadStale = [];
+    for (const [file, rows] of SIGIL_READ_COVERAGE) for (const name of rows.keys()) if (!coverageSeen.has(`${file} ${name}`)) sigilReadStale.push(`${file} @${name}`);
+    const readsBad = sigilReadDrift.length + sigilReadStale.length + bareProvided.length;
+    out(`    ${dim('member reads:')} ${readsBad === 0
+      ? green('every declared member reads bare, every listed @ read stands, every provided name takes the sigil')
+      : red(`${sigilReadDrift.length} sigil read${sigilReadDrift.length === 1 ? '' : 's'} of a declared member unlisted · ${sigilReadStale.length} listed read${sigilReadStale.length === 1 ? '' : 's'} no longer written · ${bareProvided.length} provided name${bareProvided.length === 1 ? '' : 's'} read bare`)}`);
+    if (sigilReadDrift.length) wrapList(sigilReadDrift.map((x) => `${x} — spell it bare, or list it in SIGIL_READ_COVERAGE`), red);
+    if (sigilReadStale.length) wrapList(sigilReadStale.map((x) => `${x} — the row measures nothing; remove it or restore the read`), red);
+    if (bareProvided.length) wrapList(bareProvided.map((x) => `${x} — a bare provided name is a free variable; spell it with the sigil`), red);
     ng = {
       darkSpellings: darkSpellings.length, spellings: spellings.length, staleMints: staleMints.length,
       badSpellingExclusions: falseSpellingExclusions.length + staleSpellingExclusions.length,
@@ -2813,6 +3019,7 @@ if (RUN_GRAMMAR) {
         + heldButClaimed.length + staleHeldKinds.length,
       headsUnseen: headsUnseen.length, headsTotal: CONSTRUCT_HEADS.size, pairs: pairsSeen.size,
       splitDividers: splitDividers.length, splitDividerRows: splitDividers, dividerFiles: commentFiles.length,
+      memberReadDrift: sigilReadDrift.length, memberReadStale: sigilReadStale.length, bareProvided: bareProvided.length,
     };
     // ── CORPUS CLAIMS (CLAIMS.md) — the decision record for coverage with
     // no syntactic denominator: checker behaviors (carrier presence-checked
@@ -2920,6 +3127,7 @@ if (RUN_GRAMMAR) {
       // the pool the cells below are drawn from.
       out(`    ${dim('containment: ')}${(cellsMissing ? red : green)(`${cells.length - cellsMissing} of ${cells.length} cells carried`)}${dim(` · ${pairsSeen.size} pairs available to name`)}`);
       for (const r of (VERBOSE ? [...loud, ...parkedRows, ...quiet] : loud)) out(`      ${r}`);
+      hiddenHint(parkedRows.length + quiet.length, 'carried and parked claims rows', 6);
       ng.claimsAbsent = absent; ng.claimsBroken = broken + claimsOrphans; ng.cellsMissing = cellsMissing;
       ng.claimsParked = parked; ng.claimsBadParks = staleParks.length + orphanParks.length;
     }
@@ -3002,13 +3210,15 @@ if (RUN_MAP) {
   // prints every one. The summary is unconditional either way: it is the
   // completeness claim, and it must not depend on there being a problem.
   let tabled = 0;
+  let cleanRows = null;
   for (const r of fileRows) {
     if (r.skip) { out(`    ${yellow('skip')} ${pad(r.f, NAME_W + 2)} ${dim('does not compile — no face to walk: ' + r.skip)}`); tabled++; continue; }
-    if (r.flagged === 0 && !VERBOSE) continue;
+    if (r.flagged === 0 && !VERBOSE) { cleanRows = (cleanRows ?? 0) + 1; continue; }
     tabled++;
     console.log(`    ${r.flagged === 0 ? green('✓') : yellow('·')} ${pad(r.f, NAME_W + 2)} ${dim(String(r.reads).padStart(READ_W) + ' reads')}   `
       + (r.flagged === 0 ? green('all placed') : yellow(String(r.flagged).padStart(FLAG_W) + ' unmapped')));
   }
+  hiddenHint(cleanRows ?? 0, 'files with every read placed', 4);
 
   // The blank separates the summary FROM the table; with no table it would
   // sit under the banner's own, opening the audit on two empty lines.
@@ -3018,7 +3228,7 @@ if (RUN_MAP) {
   // rewrite REFUSES (no resolved position to hold wrong text), mark-width
   // RESOLVES to the wrong bytes — so `unplaced` and `mistext` partition the
   // flagged set, and each is the root the other cannot catch.
-  out(`\n  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
+  out(`  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
   // The note column is where a wrap has to hang — 4 indent, a 10-wide label,
   // a 4-wide count, and the gaps between them. `out` would hang it at 6,
   // under the label, which reads as a second row whose name went missing.
@@ -3031,7 +3241,7 @@ if (RUN_MAP) {
   // definitions rather than the findings.
   const invLine = (label, n, note) => {
     const head = `    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}`;
-    if (n === 0 && !VERBOSE) { console.log(head); return false; }
+    if (n === 0 && !VERBOSE) { console.log(head + dim('   (-v shows the note)')); return false; }
     const lines = wrapText(note, TERM_W - NOTE_COL, 0);
     console.log(`${head}   ${dim(lines[0])}`);
     for (const l of lines.slice(1)) console.log(' '.repeat(NOTE_COL) + dim(l));
@@ -3115,6 +3325,7 @@ if (RUN_MAP) {
     console.log(`      ${dim(pad(kind, KIND_W))} ${dim(String(byKind.get(kind)).padStart(4))}   ${dim(gloss[0])}`);
     for (const l of gloss.slice(1)) console.log(' '.repeat(KIND_NOTE) + dim(l));
   }
+  hiddenHint(liveKinds.length, 'netted-out reads, each with the argument for netting it', 4);
   if (VERBOSE && liveKinds.length) {
     out(`\n    ${bold('Why each is netted out')} ${dim('(the argument to judge, if you are auditing the table rather than reading it)')}`);
     for (const kind of liveKinds) {
@@ -3140,6 +3351,7 @@ if (RUN_MAP) {
   // below and for the same reason: the point of printing all 32 is that a
   // reader can go look at one, and a byte offset is not a place anyone can
   // navigate to. Same columns, so the two listings read the same way.
+  hiddenHint(excRows.length, 'excluded reads with their positions', 4);
   if (VERBOSE && excRows.length) {
     // A SIBLING of the justification section, not a child of it: this listing
     // belongs to the `excluded` row, and indenting it one level deeper made it
@@ -3208,6 +3420,7 @@ if (RUN_MAP) {
   // reader scans for the one row they want. Wrapping the tail would stagger
   // every column after it. A narrow terminal loses the last column here; the
   // alternative loses the listing.
+  hiddenHint(totFlag, 'flagged reads, each at its line:col', 4);
   if (VERBOSE && totFlag) {
     out(`\n  ${bold('Flagged reads')} ${dim('(every one, so each can be checked against the editor at its line:col)')}`);
     // Widths from the rows themselves — a name one character over a
@@ -3600,6 +3813,19 @@ if (RUN_ERRORS) {
     // fixtures are visible to no other audit, so a narrower filter here would
     // make warnings on them invisible everywhere.
     const ds = (await dsP).filter((d) => (d.severity ?? 1) <= 2);
+    // What a complaint SAYS is judged too: a published message may carry no
+    // face artifact — neither a minted `__` spelling nor a reactive cell ARM
+    // (`T | { value: T; read(): T; … }`, the slot admission the lowering
+    // spells for a shared prop or a `<=>` channel). The editor collapses that
+    // arm onto its value type and scrubs minted names before publishing; a
+    // message that still shows either is the face leaking into the author's
+    // view. A STANDALONE cell is not an artifact: a reactive import is the
+    // cell the importer holds, and a message naming it is the truth.
+    for (const d of ds) {
+      if (/__[A-Za-z]|\| \{ value: [^}]*; read\(\)|\{ value: [^}]*; read\(\)[^}]*\} \|/.test(d.message)) {
+        problems.push({ kind: 'message', note: `TS${d.code} at ${d.range.start.line + 1}:${d.range.start.character + 1} publishes a face shape — ${d.message.replace(/\s+/g, ' ').slice(0, 140)}` });
+      }
+    }
     const unmatched = [...ds];
     for (const e of expected) {
       // Exact column first, so two same-code diagnostics on one line each
@@ -3791,7 +4017,12 @@ const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 // The pin file, loaded once for the probe pass, the coverage gate, and the
 // comparison alike (see HOVERS above for the shape and discipline).
 const hoverPins = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : {};
-const staleHoverPinKeys = Object.keys(hoverPins).filter((f) => !fixtures.includes(f));
+// A pin key names a fixture the hover lane probes — or one only the sweep's
+// census walks (corpus/gradual), whose ruled silences live in this same file
+// so the two instruments read one set of decisions. Anything else is stale.
+const { corpusSets: sweepCorpusSets } = await import('./sweep.js');
+const censusFixtures = new Set(sweepCorpusSets().flatMap((set) => set.files.map((f) => path.basename(f))));
+const staleHoverPinKeys = Object.keys(hoverPins).filter((f) => !fixtures.includes(f) && !censusFixtures.has(f));
 const declPinsOf = (f) => hoverPins[f]?.decls ?? [];
 const positionPinsOf = (f) => hoverPins[f]?.positions ?? [];
 let hskip = 0;
@@ -4114,6 +4345,42 @@ if (RUN_HOVER) {
     return parts.length > 1 ? [...parts].map((x) => x.trim()).sort().join(' | ') : null;
   };
   const eq = (a, b) => canon(a) === canon(b);
+  // A MINTED KIND is not a divergence to reconcile — it is derived from the
+  // declaration's own spelling, exactly as the Token Audit derives a token
+  // type. So the twin stays the oracle for the TYPE, and the kind is checked
+  // against the syntax: the answer must be the twin's with `const`/`let`
+  // replaced by the label the operator mints, and nothing else moved. A
+  // wrong kind fails here as loudly as a wrong type.
+  const MINTED_KIND = /^\((state|computed|readonly|effect|field)\) /;
+  // The kind a declaration's OWN SPELLING mints, read off the code line the
+  // row already carries. This is the whole point of deriving rather than
+  // pinning: a label that does not match the operator fails here.
+  const spelledKind = (row) => {
+    const code = row?.code ?? '';
+    const at = code.indexOf(row?.name ?? '\u0000');
+    if (at < 0) return null;
+    const rest = code.slice(at + row.name.length);
+    if (/(?:^|\s):=/.test(rest)) return 'state';
+    if (/(?:^|\s)~=/.test(rest)) return 'computed';
+    if (/(?:^|\s)=!/.test(rest)) return 'readonly';
+    if (/(?:^|\s)~>/.test(rest)) return 'effect';
+    return null;
+  };
+  // The kind belongs to the NAME, not to the line the probe sits on: a write
+  // (`pulse = 3`) is the same binding as its declaration and answers the same
+  // way, which is the token audit's rule for the color as well. So the
+  // declaration is found once per file and every occurrence reads from it.
+  const declaredKinds = new Map();
+  for (const r of allRows) {
+    const k = spelledKind(r);
+    if (k !== null) declaredKinds.set(`${r.file}\u0000${r.name}`, k);
+  }
+  const kindFromSpelling = (row) => declaredKinds.get(`${row?.file}\u0000${row?.name}`) ?? null;
+  const eqKinded = (row) => {
+    const m = MINTED_KIND.exec((row.hover ?? '').trim());
+    if (m === null || m[1] !== kindFromSpelling(row)) return false;
+    return eq(row.hover.trim().replace(MINTED_KIND, ''), (row.ts ?? '').trim().replace(/^(?:const|let|var) /, ''));
+  };
   const eqType = (a, b) => { if (eq(a, b)) return true; const ka = unionSet(a); return ka != null && ka === unionSet(b); };
 
   // A rip-NATIVE construct — component / schema / reactive — has no
@@ -4147,13 +4414,19 @@ if (RUN_HOVER) {
   //   gap          hover ≠ tsgo twin on a COMPARABLE type — the actionable bucket
   //   rip-native   component / schema / reactive — the twin is not an oracle there
   //   pinned-only  no twin symbol — hover-pins alone covers it
-  const tally = { agree: 0, gap: 0, native: 0, pinnedOnly: 0, order: 0 };
+  const tally = { agree: 0, gap: 0, native: 0, pinnedOnly: 0, order: 0, kinded: 0 };
   const gaps = [], natives = [], pinnedOnly = [];
   for (const r of allRows) {
     if (r.ts != null) {
-      if (eqType(r.hover, r.ts)) {
+      // A spelling that mints a kind REQUIRES it: matching the twin exactly
+      // is the failure here, not the pass — it means the label went missing
+      // and the lowering's own word came back.
+      if (kindFromSpelling(r) !== null) {
+        if (eqKinded(r)) { tally.agree++; tally.kinded++; }
+        else { tally.gap++; gaps.push(r); }
+      } else if (eqType(r.hover, r.ts)) {
         tally.agree++;
-        if (!eq(r.hover, r.ts)) tally.order++; // agreed modulo union order
+        if (!eq(r.hover, r.ts)) tally.order++;              // agreed modulo union order
       } else if (ripNative(r)) { tally.native++; natives.push(r); }
       else { tally.gap++; gaps.push(r); }
     } else if (ripNative(r)) { tally.native++; natives.push(r); }
@@ -4199,7 +4472,7 @@ if (RUN_HOVER) {
   }
 
   const probed = allRows.length;
-  out(`\n  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file${hskip === 1 ? '' : 's'} skipped` : ''} — the first four partition them; the rest are separate checks)`)}`);
+  out(`  ${bold('Parity')} ${dim(`(${probed} probes${hskip ? `, ${hskip} file${hskip === 1 ? '' : 's'} skipped` : ''} — the first four partition them; the rest are separate checks)`)}`);
   // Rows buffer so every value shares ONE right-aligned field: a fraction is
   // wider than a count, and printing each as it came left the notes in two
   // columns. `silence` and `ruled` count what HOLDS out of a population where
@@ -4210,7 +4483,10 @@ if (RUN_HOVER) {
   const prow = (label, n, color, note) => prows.push({ label, text: String(n), color, note });
   const pgap = () => prows.push(null);
   const pfrac = (label, ok, of, note) => prows.push({ label, text: `${ok} / ${of}`, color: ok === of ? green : red, note });
-  prow('agree', tally.agree, green, tally.order ? `${tally.order} of them after normalizing union-member order` : 'every twin-checked hover matches TypeScript');
+  prow('agree', tally.agree, green, [
+    tally.order ? `${tally.order} after normalizing union-member order` : null,
+    tally.kinded ? `${tally.kinded} carrying the minted kind their spelling derives` : null,
+  ].filter(Boolean).join(' · ') || 'every twin-checked hover matches TypeScript');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : 'no hover disagrees with the tsgo twin on a comparable type');
   prow('rip-native', tally.native, dim, 'component / schema / reactive — the twin uses React/zod, so it has no answer to compare');
   prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');
@@ -4284,6 +4560,7 @@ if (RUN_HOVER) {
     // WHICH RULES are diverging, since that is the part that says where
     // the regression concentrates.
     out(`\n    ${bold('Ruled positions diverging from their pins')} ${dim('(RULINGS.md, Components / render; gated by hover.ruled)')}`);
+    hiddenHint(ruledDiverging.length, 'diverging ruled positions', 6);
     if (VERBOSE) {
       for (const r of ruledDiverging) {
         console.log(`      ${red('✗')} ${r.file}:${r.line}:${r.character} ${bold(r.token)} ${dim(`[${r.rule}]`)}`);
@@ -4297,6 +4574,7 @@ if (RUN_HOVER) {
       out(`      ${dim(`${ruledDiverging.length} across ${byRule.size} ruled position${byRule.size === 1 ? '' : 's'}: ${ranked.join(', ')}; -v shows each pin and answer`)}`);
     }
   }
+  hiddenHint(natives.length + pinnedOnly.length, 'rip-native and pinned-only hover rows', 4);
   if (VERBOSE) for (const [label, rowset] of [['rip-native (expected divergences — twin uses React/zod)', natives], ['pinned-only (no twin symbol)', pinnedOnly]]) {
     if (!rowset.length) continue;
     console.log(`\n    ${dim(label)}`);
@@ -4340,6 +4618,9 @@ if (RUN_TOKENS) {
   }
   {
     const missing = [], badType = [], badReadonly = [], unasserted = [];
+    // The compiler-stated half: nested positions the line-shape population
+    // cannot enumerate. Same comparison, a different source of `want`.
+    const badKind = []; let kindAsserted = 0;
     // Face-survival accumulators: survivors, the dropped
     // classified names ({name, count} per fixture), and `unclassified` — server
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
@@ -4417,6 +4698,14 @@ if (RUN_TOKENS) {
         for (const u of survival.unexplained) survUnexplained.push({ ...u, file: f });
         for (const key of survival.exclusionDrift) survExcuseDrift.push({ file: f, key, reason: SURVIVAL_EXCUSED?.[f]?.[key] });
       }
+      for (const e of loopBindings(fs.readFileSync(fixPath(f), 'utf8'))) {
+        const got = at.get(`${e.line}:${e.character}`);
+        // Only a DELIVERED token is judged here: whether one is owed at all
+        // is `token.delivery.use-site`'s question, over its own population.
+        if (!got) continue;
+        kindAsserted++;
+        if (got.type !== e.type) badKind.push({ ...e, file: f, want: { type: e.type }, got, text: e.name });
+      }
       for (const d of decls) {
         // `String::titleCase = …` extends an EXISTING prototype: the
         // leading name is a reference, not a declaration (declsOf's
@@ -4474,7 +4763,7 @@ if (RUN_TOKENS) {
       }
     };
 
-    out(`\n  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file${tskip === 1 ? '' : 's'} skipped` : ''} — every expectation derived from .rip syntax)`)}`);
+    out(`  ${bold('Invariants')} ${dim(`(${probed} declarations${tskip ? `, ${tskip} file${tskip === 1 ? '' : 's'} skipped` : ''} — every expectation derived from .rip syntax)`)}`);
     // Every row here is `label  N / M  [count]  note`, and the note is the
     // only part that can run long — so a wrap hangs at the note's own column
     // rather than at the line's indent, where it would read as a nameless
@@ -4510,6 +4799,7 @@ if (RUN_TOKENS) {
     };
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
+    irow('type · nested', badKind.length, kindAsserted, 'a loop head\'s binding carries the loop variable\'s type');
     irow('readonly', badReadonly.length, roAsserted + stateUses, `readonly IFF the binding is immutable in rip, at declarations AND at every use${probed - roAsserted ? ` · ${probed - roAsserted} unasserted` : ''}`);
     // Face-survival — USE-SITE delivery, the direction the source-enumerated
     // invariants above cannot see: they enumerate declarations, and this is the
@@ -4568,6 +4858,7 @@ if (RUN_TOKENS) {
     }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
+    show(badKind, 'Wrong token type at a nested binding', (r) => `${r.name} @ ${r.file}:${r.line + 1}:${r.character + 1}  ${r.got.type} — the loop head declares a ${r.want.type}`);
     show(badType, 'Wrong token type', (r) => {
       console.log(`        ${dim('expected')} ${green(r.want.type)}`);
       console.log(`        ${dim('actual  ')} ${yellow(fmt(r.got))}`);
@@ -4650,16 +4941,149 @@ if (RUN_TOKENS) {
       await abort('The Token Audit found no state USE sites to judge',
         ['the readonly ruling covers writes and reads, and the corpus must carry a `:=` name read or written away from its declaration']);
     }
+    hiddenHint(unasserted.length, 'unasserted tokens', 4);
     if (VERBOSE && unasserted.length) {
       out(`\n    ${dim('unasserted — rip source does not pin a token type (schema declares a value AND a type)')}`);
       for (const r of unasserted) out(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, survSurvived, survDrops, survUnclassified, unexplained: survUnexplained, exclusionDrift: survExcuseDrift, facesAvailable };
+    tk = { probed, missing, badType, badKind, kindAsserted, badReadonly, survSurvived, survDrops, survUnclassified, unexplained: survUnexplained, exclusionDrift: survExcuseDrift, facesAvailable };
   }
 }
 
 await Promise.all(pool.map((s) => s.stop()));
+
+// ── THE SWEEP AUDIT ─ every word position, negative invariants only.
+// Its own engine and its own server (test/audit/sweep.js — `bun run
+// sweep` is the same engine standalone with the full row listing). The
+// GATED classes are the machinery-decline doctrine's hard violations
+// and print unconditionally, each row a doctrine break; the name census
+// (sweep.census) and the misdirection classes (sweep.misdirection) gate
+// too, each having drained to zero — from that day a row is a regression.
+let sw = null;
+let ld = null;
+let rt = null;
+if (RUN_SWEEP) {
+  const { runSweep, corpusSets, GATED, KIND_NOTES, kindOf, organize } = await import('./sweep.js');
+  // The CORPUS only — the audit's own population. The cart rides the
+  // discovery side (direct sweep.js runs), never this gate: a demo
+  // edit must not move the audit's exit code.
+  const sets = await runSweep(corpusSets());
+  auditBanner('SWEEP AUDIT', `machinery-shaped answers at ANY byte · ${sets.map((s) => `${s.name} ${s.files} files`).join(' · ')}`);
+  sw = { machinery: 0, census: 0, misdirection: 0, probes: 0, answered: 0, asks: 0, items: 0, signatures: 0, gaugeRows: [], rows: [] };
+  for (const set of sets) {
+    sw.probes += set.probes;
+    sw.answered += set.answered;
+    sw.asks += set.asks ?? 0;
+    sw.items += set.items ?? 0;
+    sw.signatures += set.signatures ?? 0;
+    for (const f of set.findings) {
+      if (GATED.has(kindOf(f))) { sw.machinery++; sw.rows.push(f); }
+      else { if (kindOf(f) === 'silent-name') sw.census++; else sw.misdirection++; sw.gaugeRows.push(f); }
+    }
+  }
+  const base = (f) => f.slice(f.lastIndexOf('/') + 1);
+  const at = (f) => `${base(f.file)}:${f.line + 1}:${f.ch + 1}`;
+  // The summary table, in the lanes' shared shape: one right-aligned
+  // count column, gated classes first — each printed even at zero (a
+  // reassurance row, like the hover lane's `pins 0`) — then the gauges.
+  {
+    const srows = [];
+    const srow = (label, n, note, gated) => srows.push({ label, n, note, gated });
+    const counts = {};
+    for (const f of [...sw.rows, ...sw.gaugeRows]) counts[kindOf(f)] = (counts[kindOf(f)] ?? 0) + 1;
+    srow('minted', counts['minted'] ?? 0, 'answers naming a minted `__` spelling', true);
+    srow('scaffold', counts['scaffold'] ?? 0, 'answers naming a `_elN` render local', true);
+    srow('cover-this', counts['cover-this'] ?? 0, 'the bare `this: this` cover answer', true);
+    srow('cell', counts['cell'] ?? 0, 'answers showing a reactive cell ARM beside its value type — the slot admission', true);
+    srow('diagnostics', counts['minted-in-diagnostic'] ?? 0, 'face spellings in published messages', true);
+    srow('completion', (counts['completion-minted'] ?? 0) + (counts['completion-scaffold'] ?? 0) + (counts['completion-cell'] ?? 0), 'completion items — label, description, detail, documentation — naming machinery or a cell arm', true);
+    srow('signature', (counts['signature-minted'] ?? 0) + (counts['signature-scaffold'] ?? 0) + (counts['signature-cell'] ?? 0), 'signature labels naming machinery or a cell arm', true);
+    // Both halves of the walk are gated now, so like the four machinery
+    // rows each prints at zero — a reassurance row, not an absence. The
+    // misdirection classes share one invariant and one row when empty;
+    // any that fire print by class.
+    const gauges = organize(sw.gaugeRows);
+    if (!gauges.some((g) => g.kind === 'silent-name')) srow('silent-name', 0, KIND_NOTES['silent-name'].split(';')[0] + ' — gated: sweep.census', false);
+    if (!gauges.some((g) => g.kind !== 'silent-name')) srow('misdirection', 0, 'answers about a symbol other than the word under the cursor — at the word, its end boundary, or a blank byte — gated: sweep.misdirection', false);
+    for (const g of gauges) srow(g.kind, g.count, g.note.split(';')[0] + (g.kind === 'silent-name' ? ' — gated: sweep.census' : ' — gated: sweep.misdirection'), false);
+    // The header names the population once; each surface's own count sits
+    // on its own row beneath it, so nothing wraps.
+    out(`  ${bold('Positions')} ${dim(`(${sw.probes} probed — every byte of the corpus's valid programs, the position dimension closed)`)}`);
+    out(`    ${dim(pad('hover', 14))} ${dim(`${sw.answered} answers`)}`);
+    out(`    ${dim(pad('signature help', 14))} ${dim(`${sw.signatures} answers`)}`);
+    out(`    ${dim(pad('completion', 14))} ${dim(`${sw.asks} asks — every member and sigil ask, and one bare ask per line · ${sw.items} distinct items judged`)}`);
+    console.log('');
+    const W = Math.max(...srows.filter(Boolean).map((s) => String(s.n).length));
+    // A label column followed by prose: the note wraps at ITS OWN column,
+    // not two in from the label's (the `labeled` rule) — a hang under the
+    // label reads as a second row with a blank label.
+    const gutter = 4 + 14 + 1 + W + 3;
+    for (const s of srows) {
+      if (!s) { console.log(''); continue; }
+      const color = s.n === 0 ? green : red;
+      const lines = wrapText(s.note + (s.gated ? ' — gated: sweep.machinery' : ''), TERM_W - gutter, 0);
+      console.log(`    ${pad(s.label, 14)} ${color(String(s.n).padStart(W))}   ${dim(lines[0])}`);
+      for (const l of lines.slice(1)) console.log(' '.repeat(gutter) + dim(l));
+    }
+  }
+  // The gate's own rows, each a doctrine break: fix, never excuse.
+  // The Gaps-row anatomy: bold name, dim position, dim source-line
+  // parenthetical; `leaks` names the minted spellings (the violation
+  // itself, scannable), `hover` gives the answer ONE ellipsized line —
+  // a direct sweep.js run carries it whole.
+  if (sw.rows.length) {
+    out(`\n    ${bold('Machinery-shaped answers')} ${dim('(each is a doctrine break — gated: sweep.machinery)')}`);
+    for (const f of sw.rows) {
+      out(`      ${red('✗')} ${bold(f.word)} ${dim(`@ ${at(f)}`)}${f.src ? `  ${dim(`(${f.src})`)}` : ''}`);
+      if (f.hits?.length) out(`        ${pad('leaks', 6)} ${red(f.hits.join(', '))}`);
+      const room = Math.max(24, TERM_W - 16);
+      out(`        ${dim(pad('hover', 6))} ${dim(f.text.length > room ? f.text.slice(0, room) + '…' : f.text)}`);
+    }
+  }
+  // The gauge subsections hold whatever gauge rows exist — misdirected
+  // answers, and names that decline — expected empty, since every known
+  // class is ruled one way or the other — and
+  // print under -v, where every other lane's full listings live; the
+  // default view is a status, not a scroll. The chatty classes roll up
+  // per file+line: their unit of fixing is one rule, so the useful map
+  // is WHERE. The rest group positions under each distinct answer.
+  if (!VERBOSE && sw.gaugeRows.length) {
+    out(`\n    ${dim(`${sw.gaugeRows.length} gauge rows — misdirected answers and silent names, to rule or fix; -v prints every one, per class`)}`);
+  }
+  for (const g of VERBOSE ? organize(sw.gaugeRows) : []) {
+    out(`\n    ${bold(g.kind)} ${dim(`(${g.count} — ${g.note})`)}`);
+    if (g.rollup) {
+      for (const e of g.rollup) {
+        for (const l of wrapText(`${bold(base(e.file))} ${dim(`${e.count} row${e.count === 1 ? '' : 's'} · lines ${e.lines.join(', ')}`)}`, TERM_W - 8, 2)) out(`      ${l}`);
+      }
+    } else if (g.byLine) {
+      // One row per POSITION, led by `file:line:col` — the shape a terminal
+      // links — then the word, then the source line on the first row of
+      // each line: the word in the context a reader needs to say whether
+      // silence there is right. Printed directly rather than through `out`:
+      // a row is one line by construction, the source ellipsized to the
+      // room its columns leave, and a paragraph wrap would fold that tail
+      // under the location.
+      const loc = (e, w) => `${base(e.file)}:${e.line + 1}:${w.ch + 1}`;
+      const locW = Math.max(...g.byLine.flatMap((e) => e.words.map((w) => loc(e, w).length)));
+      const wordW = Math.max(...g.byLine.flatMap((e) => e.words.map((w) => w.word.length)));
+      const room = Math.max(24, TERM_W - (6 + locW + 2 + wordW + 2 + 2));
+      for (const e of g.byLine) {
+        const src = e.src.length > room ? e.src.slice(0, room - 1) + '…' : e.src;
+        e.words.forEach((w, i) => console.log(`      ${pad(loc(e, w), locW)}  ${bold(pad(w.word, wordW))}  ${dim('│ ' + (i === 0 ? src : ''))}`));
+      }
+    } else {
+      for (const e of g.detail) {
+        const [first, ...more] = wrapText(e.text, TERM_W - 10, 0);
+        out(`      ${dim('•')} ${first}`);
+        for (const l of more) out(`        ${l}`);
+        for (const l of wrapText(e.positions.map((f) => `${at(f)} '${f.word}'`).join(' · '), TERM_W - 10, 0)) out(`          ${dim(l)}`);
+      }
+    }
+  }
+  console.log('');
+}
 
 // ── combined totals
 //
@@ -4674,7 +5098,99 @@ await Promise.all(pool.map((s) => s.stop()));
 // text instead of butting straight into the number. A hand-picked 12 left it
 // one space, which reads as a run-on where every other lane has a clean
 // column. Adding a lane with a longer name widens the column by itself.
-const TOTAL_LABELS = ['Grammar', 'Mapping', 'Type', 'Diagnostics', 'Hover', 'Token'];
+// ── LANDING AUDIT: where the navigation answers land (landing.js).
+if (RUN_LANDING) {
+  const { runLanding, corpusSets: landingSets, GATED: LANDING_GATED, KIND_NOTES: LANDING_NOTES, organize: organizeLanding } = await import('./landing.js');
+  const sets = await runLanding(landingSets());
+  auditBanner('LANDING AUDIT', `navigation answers land on the asked name · ${sets.map((s) => `${s.name} ${s.files} files`).join(' · ')}`);
+  ld = { answers: 0, silent: 0, asked: 0, served: 0, rows: [], gaugeRows: [] };
+  for (const set of sets) {
+    ld.asked += set.asked;
+    ld.served += set.served ?? 0;
+    for (const f of set.findings) {
+      if (LANDING_GATED.has(f.kind)) { ld.answers++; ld.rows.push(f); }
+      else { ld.silent++; ld.gaugeRows.push(f); }
+    }
+  }
+  const lat = (f) => `${f.file.slice(f.file.lastIndexOf('/') + 1)}:${f.line + 1}:${f.ch + 1}`;
+  out(`  ${bold('Names')} ${dim(`(${ld.asked} asked — every occurrence of every name the author declared)`)}`);
+  out(`    ${dim(pad('served', 18))} ${dim(`${ld.served} more answer from the compiler's own records and are not asked`)}`);
+  console.log('');
+  const groups = organizeLanding([...ld.rows, ...ld.gaugeRows]);
+  const W = Math.max(1, ...groups.map((g) => String(g.count).length));
+  const gutter = 4 + 18 + 1 + W + 3;
+  const line = (label, n, note, gated) => {
+    const color = n === 0 ? green : red;
+    const lines = wrapText(note + (gated ? ' — gated: landing.answers' : ' — gated: landing.census'), TERM_W - gutter, 0);
+    console.log(`    ${pad(label, 18)} ${color(String(n).padStart(W))}   ${dim(lines[0])}`);
+    for (const l of lines.slice(1)) console.log(' '.repeat(gutter) + dim(l));
+  };
+  if (ld.answers === 0) line('answers', 0, 'every navigation answer lands on the asked name', true);
+  if (ld.silent === 0) line('census', 0, 'every declared name has a definition and references', false);
+  for (const g of groups) line(g.kind, g.count, g.note, LANDING_GATED.has(g.kind));
+  const landingHidden = groups.filter((g) => !LANDING_GATED.has(g.kind)).reduce((n, g) => n + g.count, 0);
+  if (!VERBOSE && landingHidden) out(`    ${dim(`${landingHidden} census row${landingHidden === 1 ? '' : 's'} hidden — -v prints every one, with the hover head at each`)}`);
+  if (VERBOSE || ld.answers > 0) {
+    for (const g of groups) {
+      if (!VERBOSE && !LANDING_GATED.has(g.kind)) continue;
+      out(`\n    ${bold(g.kind)} ${dim(`(${g.count})`)}`);
+      // One row per position, never wrapped: the location, the word, and
+      // the answer's head, cut to the terminal — the source line is one
+      // click away through the location.
+      for (const e of g.byLine) for (const w of e.words) {
+        const head = `      ${LANDING_GATED.has(g.kind) ? '✗' : '·'} ${lat({ file: e.file, line: e.line, ch: w.ch })}  ${w.word}`;
+        const room = Math.max(12, TERM_W - head.length - 5);
+        const tail = w.text ? `  → ${w.text.length > room ? w.text.slice(0, room - 1) + '…' : w.text}` : '';
+        out(`      ${LANDING_GATED.has(g.kind) ? red('✗') : yellow('·')} ${lat({ file: e.file, line: e.line, ch: w.ch })}  ${bold(w.word)}${dim(tail)}`);
+      }
+    }
+  }
+}
+
+// ── ROUND-TRIP AUDIT: what the file is after an edit surface acted (roundtrip.js).
+if (RUN_ROUNDTRIP) {
+  const { runRoundtrip, corpusSets: roundtripSets, GATED: RT_GATED, organize: organizeRoundtrip } = await import('./roundtrip.js');
+  const sets = await runRoundtrip(roundtripSets());
+  auditBanner('ROUND-TRIP AUDIT', `edit surfaces change what they name and leave a program · ${sets.map((s) => `${s.name} ${s.files} files`).join(' · ')}`);
+  rt = { edits: 0, refused: 0, renames: 0, organized: 0, fixed: 0, rows: [], gaugeRows: [] };
+  for (const set of sets) {
+    rt.renames += set.renames; rt.organized += set.organized; rt.fixed += set.fixed;
+    for (const f of set.findings) {
+      if (RT_GATED.has(f.kind)) { rt.edits++; rt.rows.push(f); }
+      else { rt.refused++; rt.gaugeRows.push(f); }
+    }
+  }
+  const rat = (f) => `${f.file.slice(f.file.lastIndexOf('/') + 1)}:${f.line + 1}:${f.ch + 1}`;
+  out(`  ${bold('Edits')} ${dim(`(${rt.renames} renames of top-level declarations, ${rt.organized} files organized, ${rt.fixed} specifiers restored through the quick fix)`)}`);
+  const groups = organizeRoundtrip([...rt.rows, ...rt.gaugeRows]);
+  const W = Math.max(1, ...groups.map((g) => String(g.count).length));
+  const gutter = 4 + 22 + 1 + W + 3;
+  const line = (label, n, note, gated) => {
+    const color = n === 0 ? green : red;
+    const lines = wrapText(note + (gated ? ' — gated: roundtrip.edits' : ' — gated: roundtrip.census'), TERM_W - gutter, 0);
+    console.log(`    ${pad(label, 22)} ${color(String(n).padStart(W))}   ${dim(lines[0])}`);
+    for (const l of lines.slice(1)) console.log(' '.repeat(gutter) + dim(l));
+  };
+  if (rt.edits === 0) line('edits', 0, 'every edit changed only what it named and left a compiling file', true);
+  if (rt.refused === 0) line('census', 0, 'every top-level declaration renames', false);
+  for (const g of groups) line(g.kind, g.count, g.note, RT_GATED.has(g.kind));
+  const rtHidden = groups.filter((g) => !RT_GATED.has(g.kind)).reduce((n, g) => n + g.count, 0);
+  if (!VERBOSE && rtHidden) out(`    ${dim(`${rtHidden} refusal row${rtHidden === 1 ? '' : 's'} hidden — -v prints every one, quoting the generated bytes it hit`)}`);
+  if (VERBOSE || rt.edits > 0) {
+    for (const g of groups) {
+      if (!VERBOSE && !RT_GATED.has(g.kind)) continue;
+      out(`\n    ${bold(g.kind)} ${dim(`(${g.count})`)}`);
+      for (const e of g.byLine) for (const w of e.words) {
+        const head = `      ${RT_GATED.has(g.kind) ? '✗' : '·'} ${rat({ file: e.file, line: e.line, ch: w.ch })}  ${w.word}`;
+        const room = Math.max(12, TERM_W - head.length - 5);
+        const tail = w.text ? `  → ${w.text.length > room ? w.text.slice(0, room - 1) + '…' : w.text}` : '';
+        out(`      ${RT_GATED.has(g.kind) ? red('✗') : yellow('·')} ${rat({ file: e.file, line: e.line, ch: w.ch })}  ${bold(w.word)}${dim(tail)}`);
+      }
+    }
+  }
+}
+
+const TOTAL_LABELS = ['Grammar', 'Mapping', 'Type', 'Diagnostics', 'Hover', 'Token', 'Sweep', 'Landing', 'Round-trip'];
 const TOTAL_W = Math.max(...TOTAL_LABELS.map((l) => l.length)) + 2;
 // Wrap on VISIBLE width (ANSI-stripped) at ` · ` segment boundaries: a totals
 // line longer than the terminal would otherwise hard-break mid-word at column
@@ -4743,6 +5259,8 @@ if (gr) {
   if (gr.uncovered) broken.push(`${s(gr.uncovered, 'production')} uncovered — write the fixture, or rule an exclusion`);
   if (n.badSpellingExclusions || n.staleMints) broken.push(s((n.badSpellingExclusions ?? 0) + (n.staleMints ?? 0), 'spelling-census violation'));
   if (n.kindBad) broken.push(s(n.kindBad, 'census violation'));
+  if (n.memberReadDrift || n.memberReadStale) broken.push(`${s((n.memberReadDrift ?? 0) + (n.memberReadStale ?? 0), 'member-read spelling violation')} — bare for declared members, the listed @ reads kept`);
+  if (n.bareProvided) broken.push(`${s(n.bareProvided, 'provided name')} read bare — spell it with the sigil`);
   if (n.vocabUnfalsified) broken.push(`${n.vocabUnfalsified}/${n.vocabClaimed} vocabulary classes unfalsified`);
   if (n.headsUnseen) broken.push(`${s(n.headsUnseen, 'containment construct')} no fixture spells`);
   // The contract judged this all along, but Totals never did — so a wrapped
@@ -4856,6 +5374,23 @@ if (tk) {
       ? dim(' — server DELIVERY, not mapping: every read owns its own span (the census gates it), so what is dropped here is dropped on the way out')
       : dim(' — nothing dropped')));
 }
+if (sw) {
+  totalLine('Sweep', `${sw.answered} answers over ${sw.probes} positions: `
+    + (sw.machinery === 0 ? green('no machinery-shaped answer anywhere') : red(`${sw.machinery} machinery-shaped answer${sw.machinery === 1 ? '' : 's'}`))
+    + (sw.gaugeRows.length === 0
+      ? dim(' · no gauge row either — every position answers its own symbol, or is a ruled silence')
+      : dim(` · ${sw.gaugeRows.length} gauge row${sw.gaugeRows.length === 1 ? '' : 's'} — misdirected answers and silent names`)));
+}
+if (rt) {
+  totalLine('Round-trip', `${rt.renames} renames, ${rt.organized} organized, ${rt.fixed} fixed: `
+    + (rt.edits === 0 ? green('every edit changed only what it named') : red(`${rt.edits} edit${rt.edits === 1 ? '' : 's'} beyond the name`))
+    + (rt.refused === 0 ? dim(' · every declaration renames') : dim(` · ${rt.refused} declaration${rt.refused === 1 ? '' : 's'} refuse to rename`)));
+}
+if (ld) {
+  totalLine('Landing', `${ld.asked} names asked: `
+    + (ld.answers === 0 ? green('every navigation answer lands on the asked name') : red(`${ld.answers} answer${ld.answers === 1 ? '' : 's'} on other bytes`))
+    + (ld.silent === 0 ? dim(' · every declared name navigates') : dim(` · ${ld.silent} declared name${ld.silent === 1 ? '' : 's'} with no landing`)));
+}
 
 // ── what this run did NOT cover. The default runs one of the audits, so say
 // so on the way out: an audit nobody knows about is an audit nobody runs. Reads
@@ -4891,7 +5426,7 @@ if (tk) {
   // detail-of-detail and left a gap under a section that has no middle tier.
   const reason = (text) => { for (const l of wrapText(text, TERM_W - 6, 0)) console.log(`      ${dim(l)}`); };
   const { verdicts, failures, drift } = judge({
-    states: { gr, mp, el, gl, hp, tk, fails },
+    states: { gr, mp, el, gl, hp, tk, sw: sw ?? { machinery: 0 }, ld: ld ?? { answers: 0, silent: 0 }, rt: rt ?? { edits: 0, refused: 0 }, fails },
     ran: (lane) => AUDITS.find((a) => a.key === lane).ran,
   });
   // STRUCTURAL refusal, not a verdict: a predicate read a field no summary

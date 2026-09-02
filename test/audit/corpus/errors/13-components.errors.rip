@@ -59,3 +59,17 @@ Heads = component
       for item in missingList
         span item
       = missingExpr
+
+Truthy = component
+  @label: string
+  render
+    button
+      disabled: @label
+
+
+
+Names = component
+  render
+    div
+      input value: wrongValue
+      img alt: "#{wrongInterp}"

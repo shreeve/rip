@@ -74,6 +74,6 @@ export Cart = component
               td
       div.cart-actions
         Button loading: placeOrder.pending, @click: (-> placeOrder()), 'Place Order'
-        Button variant: 'secondary', outline, link: true, @click: (-> cart.clear()), 'Clear Cart'
+        Button variant: 'secondary', outline, link, @click: (-> cart.clear()), 'Clear Cart'
       if errors.form
         p.error errors.form

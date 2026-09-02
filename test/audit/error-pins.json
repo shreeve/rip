@@ -1,18 +1,27 @@
 {
+  "11-types.errors.rip": [
+    {
+      "line": 84,
+      "character": 11,
+      "code": 2307,
+      "token": ": import('./nowhere.rip').Parcel",
+      "why": "an import type naming a module nothing answers — the specifier lives inside opaque TYPE TEXT, which carries no per-token spans, so the diagnostic covers the annotation where TypeScript's own anchors on the string; the twin's line spells a RESOLVING import type instead, so it witnesses the construct while staying quiet rather than deriving a position rip cannot reach. A specifier that resolves for BOTH judges cannot exist in this lane (10-modules.errors.rip states why)"
+    }
+  ],
   "13-components.errors.rip": [
     {
       "line": 25,
       "character": 10,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+      "why": "the ref-cell mismatch (an HTMLInputElement cell on a div) — the __ripRefCell admission rejects the cell argument (TS2345, anchored through the pair's cover); rip-native: React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 27,
       "character": 8,
       "code": 2322,
       "token": "label",
-      "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel; the container-typed message is the channel's real contract; pinned per the components ruling (RULINGS.md)"
+      "why": "the two-way bind mismatch (number state into a string prop) — no TSX line can spell the <=> channel, so the twin cannot derive it; the message names the value types on both sides (`number` into `string | undefined`), the channel's cell collapsed like every other; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 47,
@@ -20,6 +29,13 @@
       "code": 2322,
       "token": "@wrongPlain",
       "why": "a wrong-typed member write in the `@` spelling — the diagnostic anchors on the sigil (the lowering's `this` maps back through the member's own cover), and no TSX line spells `@`, so the twin cannot transfer the position; the bare spelling one line above is the derived pair"
+    },
+    {
+      "line": 67,
+      "character": 6,
+      "code": 1360,
+      "token": "disabled",
+      "why": "a boolean attribute admits `boolean | null | undefined`, not any truthy value — the road states that type on the author's OWN expression, so an uncoerced string rejects where `!!` would have taken it; rip-native: a JSX attribute is an assignment (TS2322) and cannot spell a type stated on the expression, so the twin coerces (`!!label`) and stays quiet; pinned per the components ruling (RULINGS.md)"
     }
   ],
   "14-schema.errors.rip": [
@@ -42,16 +58,16 @@
     {
       "line": 47,
       "character": 12,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "a non-nullable cell receiving an element ref — the cell's own nullability is what rejects, and React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
+      "why": "a non-nullable cell receiving an element ref — the __ripRefCell admission gates on `null extends V` (teardown writes null) and rejects the cell argument (TS2345); React's ref rejection fires for a different reason (a raw element is not a Ref shape), so the twin cannot honestly judge it; pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 48,
       "character": 14,
-      "code": 2322,
+      "code": 2345,
       "token": "ref",
-      "why": "a tag-typed cell on a foreign tag — the same rip-native ref surface as the row above, one tag apart; pinned per the components ruling (RULINGS.md)"
+      "why": "a tag-typed cell on a foreign tag — the same rip-native __ripRefCell admission as the row above, one tag apart (TS2345 on the cell argument); pinned per the components ruling (RULINGS.md)"
     },
     {
       "line": 49,
@@ -66,15 +82,6 @@
       "code": 2322,
       "token": "entries",
       "why": "an array-typed reactive member whose initializer carries a wrong element — the mismatch rip publishes is between CELLS (the declared `{value: string[]}` against the inferred `{value: (string | number)[]}`), so it anchors on the member rather than on the element the twin flags; the twin's own array is correct and stays quiet"
-    }
-  ],
-  "11-types.errors.rip": [
-    {
-      "line": 84,
-      "character": 11,
-      "code": 2307,
-      "token": ": import('./nowhere.rip').Parcel",
-      "why": "an import type naming a module nothing answers — the specifier lives inside opaque TYPE TEXT, which carries no per-token spans, so the diagnostic covers the annotation where TypeScript's own anchors on the string; the twin's line spells a RESOLVING import type instead, so it witnesses the construct while staying quiet rather than deriving a position rip cannot reach. A specifier that resolves for BOTH judges cannot exist in this lane (10-modules.errors.rip states why)"
     }
   ]
 }

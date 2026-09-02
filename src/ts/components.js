@@ -24,9 +24,11 @@
 //     everything else is optional; `@x?: T` renders `x?: T | …`.
 //   - `extends <tag>`: the props surface gains the tag's attribute
 //     names (src/dom.js — spec-derived data, the #125 table)
-//     and a string index signature (undeclared props are REST props
-//     by the runtime-root design; excess-property checking stays ON
-//     for non-extends components — the #131 fix's editor twin).
+//     and the data-/aria- template index signatures (undeclared rest
+//     props ride the templates — a misspelled DECLARED prop draws the
+//     excess-property did-you-mean instead of falling through a
+//     catch-all; excess-property checking stays ON for non-extends
+//     components — the #131 fix's editor twin).
 //
 // Renderers produce SEGMENT lists ({ text } | { text, node, role })
 // so the face can mark each named piece under its recorded store row
@@ -36,6 +38,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor } from '../dom.js';
+import { CAMEL, CLASS_TYPE } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
@@ -638,7 +641,70 @@ export const propsParamOptional = (info) => !publicProps(info).some(isRequiredPr
 // prop making it non-optional — passable as the plain slot or the
 // container slot (the base keeps both keys optional so _init's
 // `props.x` / `props.__bind_x__` reads type on every arm).
-export function propsTypeSegments(info) {
+// The projection channel's type. The union is the runtime's admission
+// and is what the .d.ts road spells inline (a declaration file owes its
+// reader a self-contained type); the FACE road names it through the
+// `__RipChildren` alias the editor scrubs to `Children` — a name at the
+// hover, the union one hop behind it.
+export const CHILDREN_UNION = 'Node | string | number | boolean | null';
+const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNION);
+
+// The passthrough object an `extends` component admits beyond what it
+// declares — the same object on two surfaces: the props ctor spells it
+// inline (less the keys declared props own), and the `rest` view holds
+// it. Intrinsic attr typing: each attribute types through the tag's DOM
+// interface — `disabled?:` on a button is boolean, not any — via an
+// extends-Record guard so attributes with no matching property fall back
+// to any instead of erroring. Attributes whose DOM property is camelCased
+// get BOTH spellings (authors write maxLength; the spec list says
+// maxlength) — the shared CAMEL bridge, the same one the intrinsic
+// surfaces read. Undeclared rest props ride the data-/aria- templates —
+// the same admission the intrinsic surfaces make. A misspelled DECLARED
+// prop must draw the excess-property did-you-mean instead of falling
+// through a catch-all, so there is no string index.
+export const REST_TEMPLATES = '[key: `data-${string}`]: any; [key: `aria-${string}`]: any';
+export function restPassthroughEntries(tag, road = 'dts') {
+  const tagMap = `HTMLElementTagNameMap[${JSON.stringify(tag)}]`;
+  const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
+  const isHtmlTag = attributeNamesFor(tag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(tag);
+  const out = [];
+  const seen = new Set();
+  const put = (key, t) => { if (!seen.has(key)) { seen.add(key); out.push([key, t]); } };
+  for (const attr of attributeNamesFor(tag)) {
+    // Two keys take the element roads' own types rather than the DOM guard.
+    // `class` has no property of its name (the property is `className`, no
+    // camel-casing of it) and the runtime applies it through __clsx, so both
+    // spellings admit the clsx vocabulary — on the face; the clsx alias is
+    // recursive and the declaration road ships no minted names, so a .d.ts
+    // keeps `any` there. `style` is a string or an object at runtime, the
+    // attribute road's admission: the DOM property widened by `| string`.
+    if (attr === 'class') {
+      const t = road === 'face' ? CLASS_TYPE : 'any';
+      put('class', t); put('className', t);
+      continue;
+    }
+    const prop = CAMEL[attr] ?? attr;
+    const t = !isHtmlTag ? 'any' : attr === 'style' ? `(${guarded('style')}) | string` : guarded(prop);
+    put(attr, t);
+    if (prop !== attr) put(prop, t);
+  }
+  return out;
+}
+// The `rest` view's value type, spelled whole: what the face names through
+// the per-tag `__RipRest_<tag>` alias (the editor shows it as `Rest<tag>`),
+// and what the shipped declarations spell inline.
+export const restPassthroughText = (tag, road = 'dts') =>
+  `{ ${restPassthroughEntries(tag, road).map(([k, t]) => `${keyText(k)}?: ${t}`).join('; ')}; ${REST_TEMPLATES} }`;
+export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g, '_')}`;
+// Every DOM-lib global the minted declaration text can spell: `Node`
+// in the children union, the tag map under `extends`. A declaration
+// file naming one carries its own `dom` lib reference (src/ts/dts.js),
+// so a consumer compiled with the language lib alone still resolves
+// every name the file uses; a new DOM global in the minted text joins
+// this list or the consumer's TS2304 is the only gate that sees it.
+export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap'];
+
+export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);
   const segs = [{ text: '{ ' }];
   const used = new Set();
@@ -670,36 +736,17 @@ export function propsTypeSegments(info) {
   // same member-wide suppression instanceTypeLines carries).
   if (!info.members.some((m) => m.name === 'children')) {
     sep();
-    segs.push({ text: 'children?: any' });
+    segs.push({ text: `children?: ${childrenType(road)}` });
   }
   used.add('children');
   if (info.extendsTag !== null) {
-    // Intrinsic attr typing: passthrough attributes
-    // type through the tag's DOM interface — `disabled?:` on a button
-    // is boolean, not any — via an extends-Record guard so attributes
-    // with no matching property fall back to any instead of erroring.
-    // Attributes whose DOM property is camelCased get BOTH spellings
-    // (authors write maxLength; the spec list says maxlength).
-    const CAMEL = {
-      maxlength: 'maxLength', minlength: 'minLength', readonly: 'readOnly',
-      tabindex: 'tabIndex', colspan: 'colSpan', rowspan: 'rowSpan',
-      contenteditable: 'contentEditable', formaction: 'formAction',
-      formenctype: 'formEnctype', formmethod: 'formMethod',
-      formnovalidate: 'formNoValidate', formtarget: 'formTarget',
-      novalidate: 'noValidate', crossorigin: 'crossOrigin',
-      usemap: 'useMap', srclang: 'srcLang', autocomplete: 'autocomplete',
-    };
-    const tagMap = `HTMLElementTagNameMap[${JSON.stringify(info.extendsTag)}]`;
-    const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
-    const isHtmlTag = attributeNamesFor(info.extendsTag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(info.extendsTag);
-    for (const attr of attributeNamesFor(info.extendsTag)) {
-      if (used.has(attr)) continue;
-      const prop = CAMEL[attr] ?? attr;
-      const t = isHtmlTag ? guarded(prop) : 'any';
-      segs.push({ text: `; ${keyText(attr)}?: ${t}` });
-      if (prop !== attr && !used.has(prop)) segs.push({ text: `; ${prop}?: ${t}` });
+    // The passthrough object (restPassthroughEntries), less any key a
+    // declared prop already owns.
+    for (const [key, t] of restPassthroughEntries(info.extendsTag, road)) {
+      if (used.has(key)) continue;
+      segs.push({ text: `; ${keyText(key)}?: ${t}` });
     }
-    segs.push({ text: '; [key: string]: any' });
+    segs.push({ text: `; ${REST_TEMPLATES}` });
   }
   segs.push({ text: ' }' });
   for (const m of props.filter(isRequiredProp)) {
@@ -714,7 +761,7 @@ export function propsTypeSegments(info) {
   return segs;
 }
 
-export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
+export const propsTypeText = (info, opts = {}) => segmentsText(propsTypeSegments(info, opts));
 
 // ── the constructor surface ──────────────────────────────────────────
 // The members of the type a component BINDING carries, each a complete
@@ -724,7 +771,21 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // module read the same component type. `self` is the instance type as
 // this surface must name it (a generic component's own parameters,
 // applied).
-export const componentCtorMembers = (info, name, typeParams = '', self = name) => {
+// The same constructor type as SEGMENTS — the props block carrying each
+// member's node — for the hoist line, where the face declares a
+// forward-used component's binding: a prop key at a use site navigates
+// to its declaration through this text, so the names in it map.
+export const componentCtorSegments = (info, name, typeParams = '', self = name, opts = {}) => {
+  if (info.members.some((m) => m.kind === 'gate')) return [{ text: `{ readonly prototype: ${name}${anyArgsOf(typeParams)}; }` }];
+  const optional = propsParamOptional(info);
+  return [
+    { text: `{ new ${typeParams}(props${optional ? '?' : ''}: ` },
+    ...propsTypeSegments(info, opts),
+    { text: `): ${self};${optional ? ` mount${typeParams}(target?: any): ${self};` : ''} }` },
+  ];
+};
+
+export const componentCtorMembers = (info, name, typeParams = '', self = name, opts = {}) => {
   // The GATED branch has no constructor to declare a parameter list on,
   // so the prototype cannot NAME one — `${name}<T>` would put an unbound
   // T inside a value's object type. It applies `any` per parameter: the
@@ -734,7 +795,7 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name) =
     return [`readonly prototype: ${name}${anyArgsOf(typeParams)};`];
   }
   const optional = propsParamOptional(info);
-  const members = [`new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info)}): ${self};`];
+  const members = [`new ${typeParams}(props${optional ? '?' : ''}: ${propsTypeText(info, opts)}): ${self};`];
   // The static mount mirror constructs with NO props (`new this()` in
   // the runtime), so a component with a REQUIRED prop must not offer it
   // — the call would be tsc-clean while the runtime yields a required
@@ -912,7 +973,7 @@ export const stashProjection = (m, info) =>
 export const COMPONENT_FAILURE_TYPE =
   '{ name: string; message: string; error: unknown; status?: number; path?: string; file?: string }';
 
-export function instanceTypeLines(info, selfType) {
+export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   const lines = [];
   let hasChildren = false;
   const memberNames = new Set();
@@ -1004,8 +1065,10 @@ export function instanceTypeLines(info, selfType) {
     }
     lines.push({ segs: [{ text: `${name}?: any;` }] });
   }
-  if (!hasChildren) lines.push({ segs: [{ text: 'children?: any;' }] });
-  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType('Record<string, any>', '', MINTED)};` }] });
+  if (!hasChildren) lines.push({ segs: [{ text: `children?: ${childrenType(road)};` }] });
+  // The rest view: the passthrough object, named on the face and inline
+  // in the declarations (a .d.ts owes its reader a self-contained type).
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag), '', MINTED)};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }

@@ -6,12 +6,12 @@ export Button = component extends button
 
   render
     button
-      aria-busy: @loading
-      disabled: @loading or @rest.disabled
+      aria-busy: loading
+      disabled: loading or @rest.disabled
       class: [
-        @variant
-        @outline and 'outline'
-        @link and 'link'
+        variant
+        outline and 'outline'
+        link and 'link'
         @rest.class
       ]
       slot
@@ -24,8 +24,8 @@ export ButtonLink = component extends a
     a
       role: 'button'
       class: [
-        @variant
-        @outline and 'outline'
+        variant
+        outline and 'outline'
         @rest.class
       ]
       slot

@@ -60,3 +60,19 @@ function Heads() {
     {
     missingExpr}
   </div> }
+
+function Truthy({ label }: { label: string }) {
+  return (
+    <button
+      disabled={!!label} />
+  )
+}
+
+function Names() {
+  return (
+    <div>
+      <input value={wrongValue} />
+      <img alt={`${wrongInterp}`} />
+    </div>
+  )
+}

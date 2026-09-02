@@ -1,0 +1,4 @@
+{
+  "name": "rip-audit-app",
+  "rip": { "strict": true }
+}

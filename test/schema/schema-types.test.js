@@ -45,10 +45,10 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('declare const S: Schema<S, S>;');
   });
 
-  test(':shape with behavior — Data split; computed readonly, methods honest fallbacks', () => {
+  test(':shape with behavior — Data split; computed readonly, a method states its declared parameters', () => {
     const d = dts('A = schema :shape\n  street! string\n  full: ~> @street\n  label: (p) -> p\n  size: !> @street.length');
     expect(d).toContain('type AData = { street: string };');
-    expect(d).toContain('type A = AData & { size: unknown; readonly full: unknown; label: (...args: any[]) => unknown };');
+    expect(d).toContain('type A = AData & { size: unknown; readonly full: unknown; label: (p?: any) => unknown };');
     expect(d).toContain('declare const A: Schema<A, AData>;');
   });
 
@@ -251,7 +251,7 @@ describe('schema type story on the TS face', () => {
     expect(f.code).toContain('{tag: "hook", name: "beforeSave", fn: (function(this: M) {');
     expect(f.code).toContain('{tag: "computed", name: "slug", fn: (function(this: M) {');
     expect(f.code).toContain('{tag: "derived", name: "tag", fn: (function(this: M) {');
-    expect(f.code).toContain('{tag: "method", name: "greet", fn: (function(this: M, p) {');
+    expect(f.code).toContain('{tag: "method", name: "greet", fn: (function(this: M, p?) {');
     // query `this` for scope/defaultScope (the alias exists — a named scope does)
     expect(f.code).toContain('{tag: "scope", name: "live", fn: (function(this: MQuery) {');
     expect(f.code).toContain('{tag: "defaultScope", name: "defaultScope", fn: (function(this: MQuery) {');
@@ -282,7 +282,7 @@ describe('schema type story on the TS face', () => {
 
   test('a :shape callable gets the instance this too', () => {
     const f = face('A = schema :shape\n  street! string\n  label: (p) -> p + @street');
-    expect(f.code).toContain('fn: (function(this: A, p) {');
+    expect(f.code).toContain('fn: (function(this: A, p?) {');
   });
 
   test(':mixin bindings cast like every other kind — to what a mixin actually serves', () => {
@@ -606,5 +606,33 @@ describe('naming drift gates: the shared rules vs the runtime\'s installed names
       // truthful (owner ruling on PORT-AUDIT D2: Date at the wire).
       expect(inst.updatedAt instanceof Date).toBe(true);
     });
+  });
+});
+
+// ── 5. method parameter annotations ──────────────────────────────────
+// A schema method's parameter annotation is type text like any other
+// annotation: it lowers through normalizeTypeText on its way to BOTH
+// the face (the behavior object's spliced segment) and the `.d.ts` (the
+// member's respelled signature), so the rip spellings a type position
+// admits never reach tsgo verbatim.
+
+describe('schema method parameter annotations normalize on both roads', () => {
+  const src = (ann) => `Flag = schema :shape\n  n! number\n  set: (v: ${ann}) -> v\n`;
+  const faceLine = (ann) => face(src(ann)).code.split('\n').find((l) => l.startsWith('const __Flag__behavior'));
+  const dtsLine = (ann) => dts(src(ann)).split('\n').find((l) => l.startsWith('type Flag ='));
+
+  test('the boolean spellings lower to TS', () => {
+    expect(faceLine('on | off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('on | off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
+  });
+
+  test('a single-quoted literal union displays double-quoted', () => {
+    expect(faceLine("'a' | 'b'")).toBe('const __Flag__behavior = {set: (function(this: Flag, v: "a" | "b") { return v; })};');
+    expect(dtsLine("'a' | 'b'")).toBe('type Flag = FlagData & { set: (v: "a" | "b") => unknown };');
+  });
+
+  test('a comment inside a wrapped annotation drops with its layout', () => {
+    expect(faceLine('on | # which\n    off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('on | # which\n    off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
   });
 });

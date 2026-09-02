@@ -24,8 +24,10 @@ import { tmpdir } from 'os';
 // unattributed: [line] } — unattributed lines (global tsc errors, or
 // diagnostics against a file the caller did not register) must be
 // asserted empty by the caller, so no diagnostic can vanish between
-// the rows.
-export function tscBatch(tsc, files, extraArgs = []) {
+// the rows. The default `lib` is the consumer posture most programs
+// carry (the DOM beside the language); a row that proves an artifact
+// declares its OWN lib dependency passes a narrower one.
+export function tscBatch(tsc, files, extraArgs = [], { lib = 'es2022,dom' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'rip-tsc-batch-'));
   try {
     const names = Object.keys(files);
@@ -34,7 +36,7 @@ export function tscBatch(tsc, files, extraArgs = []) {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, files[name]);
     }
-    const r = spawnSync(tsc, ['--noEmit', '--target', 'es2022', '--lib', 'es2022,dom', ...extraArgs, ...names], {
+    const r = spawnSync(tsc, ['--noEmit', '--target', 'es2022', '--lib', lib, ...extraArgs, ...names], {
       cwd: dir,
       encoding: 'utf8',
     });

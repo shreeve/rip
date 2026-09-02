@@ -623,6 +623,40 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component extends button\n  rest := 1\n  render\n    button "x"', /cannot declare a member named 'rest'/);
   });
 
+  test('an extends component reaches the rest view only as `@rest` — bare `rest` is provided, not declared', () => {
+    // A read in render, a read in a method, and a write: every bare
+    // spelling rejects, positioned, and names the sigil form.
+    emitFails('C = component extends button\n  render\n    button title: rest.class', /spell it `@rest`/);
+    emitFails('C = component extends button\n  go: -> p rest.class\n  render\n    button "x"', /spell it `@rest`/);
+    emitFails('C = component extends button\n  go: -> rest = 1\n  render\n    button "x"', /spell it `@rest`/);
+    // A local the author binds as `rest` is their own name: it shadows
+    // the view and stays bare.
+    const { code } = compile('C = component extends button\n  go: (rest) -> p rest\n  render\n    button "x"\n');
+    expect(code).toContain('p(rest)');
+    // Outside `extends` there is no view to reach: bare `rest` is an
+    // ordinary free name, untouched.
+    const plain = compile('C = component\n  go: -> p rest\n  render\n    div "x"\n');
+    expect(plain.code).toContain('p(rest)');
+  });
+
+  test('the rest view is never assigned — every write shape through `@rest` rejects, positioned', () => {
+    const H = 'C = component extends button\n  go: -> ';
+    const T = '\n  render\n    button "x"';
+    // The member itself, chains rooted at it (dot, index, optional),
+    // compound and update forms, and a destructuring pattern that
+    // reaches it: one rule, one message.
+    for (const w of ['@rest = {}', "@rest.title = 't'", '@rest.a.b = 1', "@rest['title'] = 1", "@rest?.title = 't'",
+      "@rest.title += 't'", '@rest.count++', "@rest.title ?= 't'", '[@rest.title] = [1]']) {
+      emitFails(H + w + T, /never assigned/);
+    }
+    // Reads stay open, and a NON-extends component's own `rest` member
+    // is an ordinary member: the rule keys on the synthesized view.
+    const { code } = compile('C = component extends button\n  render\n    button title: @rest.title\n');
+    expect(code).toContain('this.rest.value.title');
+    const own = compile('C = component\n  rest := {}\n  go: -> @rest.x = 1\n  render\n    div "x"\n');
+    expect(own.code).toContain('this.rest.value.x = 1');
+  });
+
   test('render/offer/accept outside a component body reject with \'s rule', () => {
     emitFails('render\n  div.card\n    "x"', /render blocks can only be used inside a component/);
     emitFails('x = render div "hi"', /render blocks can only be used inside a component/);
@@ -733,10 +767,11 @@ describe('the static render DSL: emission pins', () => {
     // reactive lowerings pinned in the boolean-attributes fork above).
     expect(compile('P = component\n  render\n    button disabled: true\n').code)
       .toContain(`if (true) this._el0.setAttribute('disabled', '')`);
-    // RFC 12: the TypeScript face lowers identically (the added type
-    // bytes ride tsOnly regions; the flag line itself is face-neutral).
+    // RFC 12: the TypeScript face lowers identically — the receiver
+    // cast rides tsOnly regions (the strip gate holds byte identity),
+    // and the flag NAME answers through the tag's typed surface.
     expect(compile('P = component\n  render\n    button\n      disabled\n', { face: 'ts' }).code)
-      .toContain(`this._el0.setAttribute('disabled', '')`);
+      .toContain(`(this._el0 as __RipEl_button).setAttribute('disabled', '')`);
   });
 
   test('bare `@click` validates: DOM event + method existence (#124 middle); explicit bindings stay unvalidated', () => {
@@ -825,7 +860,7 @@ describe('the static render DSL: emission pins', () => {
 
   test('a member chain in an attribute value keeps the subtraction reading — never a rewritten property name', () => {
     const { code } = compile('T = component\n  box := { w: 10 }\n  render\n    div width: @box.w-pad\n');
-    expect(code).toContain("setAttribute('width', (this.box.value.w - pad))");
+    expect(code).toContain("const __v = (this.box.value.w - pad);");
     // Class-SELECTOR chains keep the hyphen consumption: tag-rooted
     // and bare line-start dots.
     const cls = compile('T = component\n  render\n    .counter-display "a"\n    span.badge.big-x "c"\n').code;
@@ -833,7 +868,7 @@ describe('the static render DSL: emission pins', () => {
     expect(cls).toContain("className = 'badge big-x'");
     // Capitalized roots are value chains too: `Math.max-1` subtracts.
     expect(compile('T = component\n  render\n    div width: Math.max-1\n').code)
-      .toContain("setAttribute('width', (Math.max - 1))");
+      .toContain("const __v = (Math.max - 1);");
   });
 
   test('a parameterized chain continuation under an element rejects — never minted nonsense DOM', () => {
@@ -1831,8 +1866,23 @@ App = component
     expect(code.match(/children:/g)).toHaveLength(1);
   });
 
-  test('a bare TEMPLATE-TAG word under a child component rejects as ambiguous ', () => {
-    emitFails('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card\n      div\n',
+  test('a bare TEMPLATE-TAG word under a child component is a PROP, and the props type judges it', () => {
+    // Resolving to nothing, it is boolean-prop shorthand like any other
+    // bare word. The reading is not silent: an undeclared prop is TS2353
+    // against the component's own props type, at the word, which names
+    // the prop and the type the emitter could only call ambiguous — and
+    // does so for an IMPORTED component too, where the emitter can see
+    // no props at all. The refusal is kept for the one reading the type
+    // layer cannot see (below).
+    const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card\n      div\n');
+    expect(code).toContain('div: true');
+  });
+
+  test('a bare TEMPLATE-TAG word that ALSO names a module value rejects — the value would win silently', () => {
+    // The reading the props type cannot judge: a value passed as children
+    // is well-typed, so `Card div` beside `div = "TEXT"` renders the
+    // string with no element and no error anywhere.
+    emitFails('div = "TEXT"\nCard = component\n  render\n    section\n      slot\nApp = component\n  render\n    Card\n      div\n',
       /bare 'div' under a child component is ambiguous/s);
   });
 
