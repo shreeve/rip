@@ -172,6 +172,45 @@ function Gauge() {
   )
 }
 
+// ── Component use shapes ──
+
+type Item = { name: string; quantity: number }
+
+function Step({ outline = false, label = '', children, ...props }: ComponentProps<'button'> & { outline?: boolean; label?: string }) {
+  return (
+    <button {...props} className={outline ? 'outline' : undefined}>
+      {label}
+      {children}
+    </button>
+  )
+}
+
+function Stepper() {
+  let items: Item[] = [{ name: 'a', quantity: 1 }, { name: 'b', quantity: 2 }]
+
+  const remove = (item: Item) => console.log('remove', item.name)
+  const bump = (item: Item, delta: number) => console.log('bump', item.name, delta)
+
+  return (
+    <div>
+      <Step outline label='reset' />
+      <Step label='apply' outline>
+        Apply
+      </Step>
+      {items.map((item) => (
+        <div className='row' key={item.name}>
+          <Step outline onClick={() => remove(item)}>-</Step>
+          <Step onClick={() => bump(item, 1)}>+</Step>
+        </div>
+      ))}
+      <Step label='wrap'>
+        <Step label='inner'>in</Step>
+      </Step>
+    </div>
+  )
+}
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
+console.log('use shapes:', typeof Step, typeof Stepper)
 console.log('rip-native constructs:', true, true, true)

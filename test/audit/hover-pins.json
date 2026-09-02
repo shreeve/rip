@@ -120,6 +120,14 @@
       {
         "name": "Gauge",
         "expect": "let Gauge: typeof Gauge"
+      },
+      {
+        "name": "Step",
+        "expect": "let Step: typeof Step"
+      },
+      {
+        "name": "Stepper",
+        "expect": "let Stepper: typeof Stepper"
       }
     ],
     "positions": [

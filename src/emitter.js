@@ -1829,6 +1829,15 @@ class Emitter {
     if (hit !== null) this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
 
+  // The class words of a tag shorthand (`div.row`, `.card.active`) are the
+  // DSL's own vocabulary, consumed into the element's class string: no
+  // symbol stands at any of them, so each is recorded as consumed rather
+  // than left as a read the census would count as silent. Anchored on the
+  // render node, under wordSpanIn's place-or-decline rule.
+  noteShorthandClasses(classes, node) {
+    for (const cls of classes) this.noteVocabulary('render-channel', cls, node);
+  }
+
   // Record a node's own HEAD keyword as consumed vocabulary. A keyword the
   // grammar folds into the rule head (`offer`, `accept`) is never a carried
   // token value, so it has no PrimitiveStore occurrence and the anchored scan
@@ -9839,6 +9848,7 @@ class Emitter {
   // A static element: create, id, data-part (the component's first
   // element), children/attributes, classes.
   renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -9922,6 +9932,7 @@ class Emitter {
   // __clsx effect merging selector classes, the call's expressions,
   // and any `class:` attribute values.
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
+    this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);

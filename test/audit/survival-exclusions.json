@@ -107,7 +107,15 @@
     "163:6:data": "lowered into a string — the face holds these bytes inside a literal",
     "163:11:kind": "lowered into a string — the face holds these bytes inside a literal",
     "185:4:div": "lowered into a string — the face holds these bytes inside a literal",
-    "186:6:ref": "component `ref` prop — lowers to `this`-rooted wiring; the face holds no such identifier at this position"
+    "186:6:ref": "component `ref` prop — lowers to `this`-rooted wiring; the face holds no such identifier at this position",
+    "193:25:button": "lowered into a string — the face holds these bytes inside a literal",
+    "198:4:button": "lowered into a string — the face holds these bytes inside a literal",
+    "200:6:slot": "render DSL word — lowers into a string",
+    "209:4:div": "lowered into a string — the face holds these bytes inside a literal",
+    "216:8:div": "lowered into a string — the face holds these bytes inside a literal",
+    "217:25:click": "lowered into a string — the face holds these bytes inside a literal",
+    "218:16:click": "lowered into a string — the face holds these bytes inside a literal",
+    "216:12:row": "render DSL class shorthand — lowers into the class string"
   },
   "14-schema.rip": {
     "8:2:street": "lowered into a string — the face holds these bytes inside a literal",
