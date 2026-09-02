@@ -1066,6 +1066,129 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
     });
   }, 30000);
 
+  test('a declaration the face COPIES renames whole: a schema derivation, the names its companion spells, and a component prop\'s alias', async () => {
+    // Every generated copy of a declared name is a copy the rename must
+    // reach; ONE copy the face spells on its own refuses the whole
+    // rename. The forms here are the ones a real app spells and the
+    // fixture corpus does not: a derived schema's own alias head
+    // (`UserPublic = User.pick(…)`), another schema named inside a
+    // companion's body (`items: OrderItem[]`), the descriptor's own
+    // registered `name:`, and a type alias annotating a component prop
+    // (the constructor and `_init` both restate the props type).
+    await inWorkspace({}, async (api) => {
+      await api.open('models.rip', [
+        'export Item = schema :shape',
+        '  sku! string',
+        '',
+        'export Order = schema :model',
+        '  total! integer, 0..',
+        '  items! Item[]',
+        '',
+        'export OrderBrief = Order.pick(\'id\', \'total\')',
+        '',
+      ].join('\n'));
+
+      // The derivation's own head — its span opens on its own name.
+      // prepareRename is what the EDITOR gates on: it needs a verbatim
+      // twin at the position, so an unmarked head shows "The element
+      // can't be renamed" and rename is never sent.
+      expect(await api.prepareRename('models.rip', 7, 8)).not.toBeNull();
+      const brief = await api.rename('models.rip', 7, 8, 'OrderDigest');
+      expect(Object.keys(brief.changes ?? {}).length).toBeGreaterThan(0);
+
+      // A schema the companion body names, and the descriptor's `name:`.
+      const item = await api.rename('models.rip', 0, 8, 'Sku');
+      expect(Object.keys(item.changes ?? {}).length).toBeGreaterThan(0);
+
+      const order = await api.rename('models.rip', 3, 8, 'Purchase');
+      expect(Object.keys(order.changes ?? {}).length).toBeGreaterThan(0);
+    });
+
+    await inWorkspace({}, async (api) => {
+      await api.open('button.rip', [
+        "type Variant = 'primary' | 'secondary'",
+        '',
+        'export Button = component',
+        "  @variant?: Variant := 'primary'",
+        '  render',
+        '    button variant',
+        '',
+      ].join('\n'));
+      const edit = await api.rename('button.rip', 0, 5, 'Kind');
+      const edits = Object.values(edit.changes ?? {}).flat();
+      expect(edits.length).toBeGreaterThan(0);
+      // Every edit names the alias itself, never a neighbour.
+      for (const e of edits) expect(e.newText).toBe('Kind');
+    });
+
+    // An IMPORTED alias annotating a prop: its copies mark a USE, so the
+    // rename agrees whichever end it starts from — the specifier's own
+    // bytes take the alias form when the LOCAL binding is renamed, and a
+    // copy marked there would demand two texts over one span.
+    await inWorkspace({ 'tone.rip': "export type Tone = 'info' | 'warn'\n" }, async (api) => {
+      await api.open('tone.rip', "export type Tone = 'info' | 'warn'\n");
+      await api.open('tag.rip', [
+        "import { Tone } from './tone.rip'",
+        '',
+        'export Tag = component',
+        "  @tone?: Tone := 'info'",
+        '  render',
+        '    span tone',
+        '',
+      ].join('\n'));
+      const atUse = await api.rename('tag.rip', 0, 9, 'Shade'); // the import specifier
+      expect(Object.values(atUse.changes ?? {}).flat().length).toBeGreaterThan(0);
+      const atDecl = await api.rename('tone.rip', 0, 12, 'Hue');
+      expect(Object.keys(atDecl.changes ?? {}).length).toBe(2); // both files
+    });
+  }, 30000);
+
+  test('a rename edit inside a face ECHO is dropped, not refused — the real copy carries the source', async () => {
+    // A component's behavior object restates its computed bodies as a
+    // TS-only echo. tsgo returns an edit in that restatement too; the
+    // real copy's edit already carries the author's bytes, so the echo's
+    // is redundant. Refusing it would lose a rename that is entirely
+    // well-formed in the source.
+    await inWorkspace({ 'lib.rip': 'export const scale = (n) => n * 2\n' }, async (api) => {
+      await api.open('lib.rip', 'export scale = (n) -> n * 2\n');
+      await api.open('app.rip', [
+        'import { scale } from "./lib.rip"',
+        '',
+        'export Panel = component',
+        '  count := 3',
+        '  doubled ~= scale(count)',
+        '  render',
+        '    p doubled',
+        '',
+      ].join('\n'));
+      const edit = await api.rename('lib.rip', 0, 7, 'twice');
+      const edits = Object.values(edit.changes ?? {}).flat();
+      expect(edits.length).toBeGreaterThan(0);
+      for (const e of edits) expect(e.newText).toBe('twice');
+    });
+  }, 30000);
+
+  test('the cursor at a name\'s END boundary renames it — double-click then F2 leaves the caret exactly there', async () => {
+    // Mapping rows are end-exclusive, so the position one past a name's
+    // last character sits in no row. Every editor gesture that selects a
+    // word leaves the caret there, and a symbol request must resolve
+    // through the identifier that ENDS at the position, not decline.
+    await inWorkspace({}, async (api) => {
+      const SRC = 'export total = 41\nnext = total + 1\n';
+      await api.open('app.rip', SRC);
+      const end = 'export total'.length; // one past the final 'l'
+      expect(await api.prepareRename('app.rip', 0, end)).not.toBeNull();
+      const edit = await api.rename('app.rip', 0, end, 'sum');
+      const edits = Object.values(edit.changes ?? {}).flat();
+      expect(edits.length).toBe(2);
+      for (const e of edits) expect(e.newText).toBe('sum');
+      // The relaxation is about end-exclusivity only: a comment's word
+      // has no verbatim twin and still declines.
+      await api.change('app.rip', `# a note here\n${SRC}`);
+      expect(await api.prepareRename('app.rip', 0, '# a note'.length)).toBeNull();
+    });
+  }, 30000);
+
   test('a rename in a broken buffer refuses whole with a clear message (fail-safe)', async () => {
     await inWorkspace({}, async (api) => {
       const GOOD = 'total = 41\nnext = total + 1\n';

@@ -482,7 +482,23 @@ export function sourceOffsetToGenerated(mappings, offset, source = null, code = 
 // glyph, synthetic-only territory — answers null rather than landing
 // a destructive request on whatever sits at a cover row's start.
 export function sourceOffsetToGeneratedExact(mappings, offset, source = null, code = null) {
-  return preciseSourceToGenerated(mappings, offset, source, code);
+  const at = preciseSourceToGenerated(mappings, offset, source, code);
+  if (at !== null) return at;
+  // The END BOUNDARY. Rows are end-exclusive, so a cursor one past an
+  // identifier's last character sits in no row — yet that is exactly
+  // where the editor's own gestures leave it: double-clicking a word
+  // selects it and puts the caret at its end, and F2 there must rename
+  // the word just left, not decline. A symbol-identifying request
+  // resolves through the identifier that ENDS here, at its last
+  // character, which names the same symbol.
+  //
+  // This widens only the STRICT flavor. The decline it relaxes is about
+  // end-exclusivity, not about verbatim correspondence: the step-back
+  // position must itself map precisely, so a comment, a keyword glyph,
+  // or synthetic-only territory still answers null.
+  if (source === null || offset <= 0) return null;
+  if (!/[\w$]/.test(source[offset - 1] ?? '')) return null;
+  return preciseSourceToGenerated(mappings, offset - 1, source, code);
 }
 
 // The stale-hover alignment guard: an offset map between the CURRENT

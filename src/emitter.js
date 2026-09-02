@@ -2377,43 +2377,98 @@ class Emitter {
   emitSegments(segs) {
     for (const s of segs) {
       if (s.node !== undefined) this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
-      else this.b.emit(s.text);
+      else this.emitDeclaredTypeCopies(s.text);
     }
   }
 
   // A generated text that repeats a declared NAME (`Schema<Hop, Hop>`
-  // beside `Hop = schema`, `mount(): Badge` in a component's surface)
-  // emits in slices, every whole-word copy marking the declaration's own
-  // span — so a rename reaching the copy lands where the declaration is,
-  // and the coincident-span dedup folds the edits into one. A minted
-  // `__Name__behavior` is one word to the underscore and is not a copy.
+  // beside `Hop = schema`, `mount(): Badge` in a component's surface,
+  // `props?: { variant?: Variant }` in a constructor) emits in slices,
+  // every whole-word copy marking the declaration's own span — so a
+  // rename reaching the copy lands where the declaration is, and the
+  // coincident-span dedup folds the edits into one. The owning
+  // construct's own name and every TYPE the module declares are copies
+  // alike: a props type names the aliases its members are annotated
+  // with, and one unmarked copy refuses the whole rename. Words are
+  // taken maximally, so a minted `__Name__behavior` is one word and is
+  // not a copy.
+  // Generated text with no name of its OWN to copy — a props type's
+  // structural pieces, an `_init` parameter — still spells the module's
+  // declared types. Each copy marks its declaration; the owner is the
+  // construct being emitted, since the SPAN is what identifies the
+  // source bytes a rename must reach.
+  emitDeclaredTypeCopies(text, id = null) {
+    const owner = id ?? this.b.currentMark?.nodeId ?? null;
+    if (owner === null || !this.ts) { this.b.emit(text); return; }
+    this.emitNamedCopies(text, null, owner, null);
+  }
+
   emitNamedCopies(text, name, id, span) {
-    if (id === null || span === null || !this.ts) { this.b.emit(text); return; }
-    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+    if (id === null || !this.ts) { this.b.emit(text); return; }
+    const declared = this.moduleTypeDeclarationSpans();
+    if (name !== null && span !== null) declared.set(name, span);
+    if (declared.size === 0) { this.b.emit(text); return; }
     let cursor = 0;
-    for (const m of text.matchAll(re)) {
+    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      const at = declared.get(m[0]);
+      if (at === undefined || m.index < cursor) continue;
       this.b.emit(text.slice(cursor, m.index));
-      this.b.markSpan(id, 'identifier', span[0], span[1], () => this.b.emit(name));
-      cursor = m.index + name.length;
+      this.b.markSpan(id, 'identifier', at[0], at[1], () => this.b.emit(m[0]));
+      cursor = m.index + m[0].length;
     }
     this.b.emit(text.slice(cursor));
   }
 
-  // The module's own TYPE declarations — `type X`, `interface X`, `enum X`,
-  // `X = schema` — each at its name's declaration span, scanned once per
-  // module: a generated text that repeats one of these names marks it.
+  // The module's own type-shaped declarations, by name: `type`/`interface`
+  // /`enum` heads, schema declarations, and schema DERIVATIONS
+  // (`UserPublic = User.pick(…)`), whose companion alias is a declaration
+  // like any other. Spans come from the match's own group bounds, never a
+  // search of the matched text — a derivation names two schemas on one
+  // line, and a search cannot tell which occurrence declares.
+  // A COPY per call: a caller adds its own construct's name to the map,
+  // and a shared map would carry that into the next caller's answer.
   moduleTypeDeclarationSpans() {
-    if (this._typeDeclSpans !== undefined) return this._typeDeclSpans;
-    const spans = new Map();
-    if (this.b.source !== null) {
-      for (const m of this.b.source.matchAll(/^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b)/gm)) {
-        const name = m[1] ?? m[2];
-        if (spans.has(name)) continue;
-        spans.set(name, [m.index + m[0].lastIndexOf(name), m.index + m[0].lastIndexOf(name) + name.length]);
+    if (this._typeDeclSpans === undefined) {
+      const spans = new Map();
+      if (this.b.source !== null) {
+        const DECL = /^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b|([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$]*\s*\.\s*(?:pick|omit|partial|required|extend)\b)/gmd;
+        for (const m of this.b.source.matchAll(DECL)) {
+          const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
+          const name = this.b.source.slice(at[0], at[1]);
+          if (spans.has(name)) continue;
+          spans.set(name, [at[0], at[1]]);
+        }
+        // An IMPORTED name has no declaration in this file, and a
+        // generated text still spells it (a props type names the alias
+        // its member is annotated with). Its copies mark the name's first
+        // USE below the import — never the specifier, whose bytes a
+        // rename of the LOCAL binding rewrites to the alias form
+        // (`Tone as Shade`) while every use takes the bare new name; a
+        // copy marked there would demand two different texts over one
+        // span. Marked at a use, the copy's edit matches that use's own
+        // and the coincident-span dedup folds them, whichever end the
+        // rename started from. A local declaration of the same spelling
+        // already claimed the name above and keeps it.
+        // The captured group is the LOCAL name either way: the alias in
+        // `Origin as local`, otherwise the specifier's own word.
+        const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
+        for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
+          const [from] = clause.indices[1];
+          const after = clause.index + clause[0].length;
+          for (const sp of clause[1].matchAll(SPEC)) {
+            const [start, end] = sp.indices[1];
+            const name = clause[1].slice(start, end);
+            if (spans.has(name)) continue;
+            const use = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w$])`, 'g');
+            use.lastIndex = after;
+            const hit = use.exec(this.b.source);
+            if (hit !== null) spans.set(name, [hit.index, hit.index + name.length]);
+          }
+        }
       }
+      this._typeDeclSpans = spans;
     }
-    this._typeDeclSpans = spans;
-    return spans;
+    return new Map(this._typeDeclSpans);
   }
 
   // The span a binding's own name occupies in the source, from the node
@@ -2428,7 +2483,10 @@ class Emitter {
     // whole-word occurrence ahead of the node's own span (`Hop = schema`).
     const self = this.stores.selfSpan(id);
     if (self === null) return null;
-    let from = self[0];
+    // `+ 1` so an occurrence starting exactly AT the span admits: a
+    // derivation's own span opens on its name (`UserPublic = User.pick(…)`),
+    // where a search strictly ahead of the span finds nothing.
+    let from = self[0] + 1;
     while (from > 0) {
       const i = this.b.source.lastIndexOf(name, from - 1);
       if (i < 0) break;
@@ -4257,15 +4315,7 @@ class Emitter {
                 // binding's own span, copy by copy.
                 for (const seg of componentCtorSegments(info, name, '', name, { road: 'face' })) {
                   if (seg.node !== undefined) { this.mark(seg.node, seg.role, () => this.b.emit(seg.text)); continue; }
-                  if (bindSpan === null) { this.b.emit(seg.text); continue; }
-                  const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
-                  let cursor = 0;
-                  for (const m of seg.text.matchAll(re)) {
-                    this.b.emit(seg.text.slice(cursor, m.index));
-                    this.b.markSpan(bindId, 'identifier', bindSpan[0], bindSpan[1], () => this.b.emit(name));
-                    cursor = m.index + name.length;
-                  }
-                  this.b.emit(seg.text.slice(cursor));
+                  this.emitNamedCopies(seg.text, name, bindId, bindSpan);
                 }
               } else this.b.emit(ctorType);
             });
@@ -4282,7 +4332,12 @@ class Emitter {
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined) this.b.tsOnly(() => {
               const at = this.b.offset;
-              this.b.emit(`${this.strict ? '' : '!'}: ${pinType}`);
+              this.b.emit(`${this.strict ? '' : '!'}: `);
+              // The pin is a TYPE the checker inferred, and it spells the
+              // module's own type names (`(h: NavHandlers) => void`);
+              // each is a copy of that declaration, like every other
+              // generated copy.
+              this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
               this.pinSpans.push([at, this.b.offset]);
             });
           }
@@ -5182,12 +5237,22 @@ class Emitter {
     // else owns the declaration.
     this.schemaPins = this.ts ? new Map() : null;
     this.schemaPinNode = nodeId;
+    const pinSpan = (key, span, name) => {
+      if (span === null || span === undefined) return;
+      const k = `${key}:${name}`;
+      if (!this.schemaPins.has(k)) this.schemaPins.set(k, []);
+      this.schemaPins.get(k).push([span[0], span[1]]);
+    };
+    // The descriptor's OWN `name:` — the schema's registered name — is a
+    // copy of the declaration, and queued first so the head's `name:`
+    // takes it ahead of any entry that shares the spelling.
+    if (this.ts && schemaName !== null) {
+      pinSpan('name', this.moduleTypeDeclarationSpans().get(schemaName) ?? null, schemaName);
+    }
     for (const e of this.ts ? descriptor.entries : []) {
       const pin = (key, name, start) => {
         if (typeof start !== 'number' || typeof name !== 'string') return;
-        const k = `${key}:${name}`;
-        if (!this.schemaPins.has(k)) this.schemaPins.set(k, []);
-        this.schemaPins.get(k).push([start, start + name.length]);
+        pinSpan(key, [start, start + name.length], name);
       };
       if (e.tag === 'union-member') pin('name', e.name, e.start);
       else if (e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER') pin('target', e.argTokens[0].value, e.argTokens[0].start);
@@ -9163,7 +9228,7 @@ class Emitter {
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
-      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit(`: ${propsTypeText(tsInfo, { road: 'face' })}`));
+      if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
       this.scopes.push(initNames);
       this.rframes.push({ reactive: new Set(), bound: initNames });
@@ -16743,24 +16808,6 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
   // return, a self-reference — to the one declaration span; a minted
   // head (`ParcelData`) has no source occurrence and marks nothing, and
   // a minted `__Name__behavior` is one word to the underscore, not a copy.
-  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
-  if (selfSpan !== null && emitter.b.source !== null) {
-    const src = emitter.b.source;
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
-    for (const headName of heads) {
-      let from = selfSpan[0], nameAt = -1;
-      while (from > 0) {
-        const i = src.lastIndexOf(headName, from - 1);
-        if (i < 0) break;
-        if (!/[\w$]/.test(src[i - 1] ?? ' ') && !/[\w$]/.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
-        from = i;
-      }
-      if (nameAt < 0) continue;
-      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(headName)}(?![\\w$])`, 'g'))) {
-        marks.push({ at: m.index, len: headName.length, start: nameAt, end: nameAt + headName.length });
-      }
-    }
-  }
   for (const e of block.story?.decl?.descriptor?.entries ?? []) {
     // A schema NAMED in the body — a union's constituent, an `@mixin`
     // target — is a copy of that schema's name, and marks the word the
@@ -16788,6 +16835,43 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
         const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
         const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
         if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
+      }
+    }
+  }
+  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
+  if (selfSpan !== null && emitter.b.source !== null) {
+    const src = emitter.b.source;
+    // Every DECLARED name these lines spell marks the bytes the author
+    // wrote for it — the block's own heads AND the other declarations the
+    // lines reach: a field's element type (`items: OrderItem[]`), a
+    // relation's target (`Promise<User | null>`), a derived alias's
+    // expansion. Each is a copy, so a rename of the declaration must
+    // reach it; unmarked, one such copy refuses the whole rename.
+    const named = emitter.moduleTypeDeclarationSpans();
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    for (const headName of heads) {
+      if (named.has(headName)) continue;
+      // `+ 1` admits an occurrence starting exactly AT the span (see
+      // bindingNameSpan); a MINTED head (`UserData`) has no source
+      // occurrence and contributes nothing.
+      let from = selfSpan[0] + 1, nameAt = -1;
+      while (from > 0) {
+        const i = src.lastIndexOf(headName, from - 1);
+        if (i < 0) break;
+        if (!/[\w$]/.test(src[i - 1] ?? ' ') && !/[\w$]/.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
+        from = i;
+      }
+      if (nameAt >= 0) named.set(headName, [nameAt, nameAt + headName.length]);
+    }
+    // A copy fills in only where nothing already marks: an entry above
+    // mapped a USE SITE to the bytes the author wrote there (a field's
+    // type word, a union constituent, a mixin target), and that position
+    // answers about the use, not about the declaration it names.
+    const claimed = (at, len) => marks.some((mk) => at < mk.at + mk.len && mk.at < at + len);
+    for (const [name, span] of named) {
+      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`, 'g'))) {
+        if (claimed(m.index, name.length)) continue;
+        marks.push({ at: m.index, len: name.length, start: span[0], end: span[1] });
       }
     }
   }
