@@ -67,7 +67,7 @@ import {
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
-  staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
+  staleOffsetMap, isScaffoldingLabel, scrubFaceArtifacts, presentType, isImportFixTitle, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
   splitTypeAt, balancedTo, unionArms, cellShape,
@@ -510,6 +510,11 @@ function warnOnMirrorCollision(mirrorPath, source) {
 // What the broker declares to tsgo. The feature handlers consume
 // exactly these shapes: resolve-lazy completion items, literal code
 // actions, prepare-supported rename, relative-encoded semantic tokens.
+// The code-action kinds the editor serves, advertised to the client and
+// asked of tsgo alike: the quick fix, and organize imports. Nothing else
+// in the source.* family is offered (see onCodeAction).
+const CODE_ACTION_KINDS = ['quickfix', 'source.organizeImports'];
+
 const TSGO_CLIENT_CAPABILITIES = {
   textDocument: {
     hover: { contentFormat: ['markdown', 'plaintext'] },
@@ -540,19 +545,11 @@ const TSGO_CLIENT_CAPABILITIES = {
     },
     definition: {},
     typeDefinition: {},
-    implementation: {},
     references: {},
     documentSymbol: { hierarchicalDocumentSymbolSupport: true },
     rename: { prepareSupport: true },
     codeAction: {
-      codeActionLiteralSupport: {
-        codeActionKind: {
-          valueSet: [
-            'quickfix',
-            'source.organizeImports', 'source.removeUnusedImports', 'source.sortImports', 'source.fixAll',
-          ],
-        },
-      },
+      codeActionLiteralSupport: { codeActionKind: { valueSet: CODE_ACTION_KINDS } },
     },
     semanticTokens: {
       requests: { full: true, range: true },
@@ -1575,7 +1572,6 @@ connection.onInitialize(async (params) => {
       hoverProvider: true,
       definitionProvider: true,
       typeDefinitionProvider: true,
-      implementationProvider: true,
       referencesProvider: true,
       documentSymbolProvider: true,
       workspaceSymbolProvider: true,
@@ -1587,12 +1583,7 @@ connection.onInitialize(async (params) => {
         triggerCharacters: tsCaps.signatureHelpProvider?.triggerCharacters ?? ['(', ',', '<'],
         retriggerCharacters: tsCaps.signatureHelpProvider?.retriggerCharacters ?? [')'],
       },
-      codeActionProvider: {
-        codeActionKinds: [
-          'quickfix',
-          'source.organizeImports', 'source.removeUnusedImports', 'source.sortImports', 'source.fixAll',
-        ],
-      },
+      codeActionProvider: { codeActionKinds: CODE_ACTION_KINDS },
       renameProvider: { prepareProvider: true },
       semanticTokensProvider: {
         legend: semanticTokensLegend,
@@ -2784,6 +2775,71 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   return { ...contents, value: reworded };
 }
 
+// The props block of a component's construct signature — the `{` at
+// `open` through the intersection groups and optional tail that follow it
+// — as the AUTHOR's rows, plus the tag an `extends` component's
+// passthrough reported and the offset the signature's return tail starts
+// at. Null where the text is not that shape. The one reading of the
+// block, shared by the component-name hover and the call's signature
+// help, so the two surfaces cannot present the same props differently.
+function componentPropsAt(flat, open) {
+  const extendsTag = { tag: null };
+  const membersOf = (inner) => {
+    const out = [];
+    for (const raw of splitTypeAt(inner, ';')) {
+      const row = raw.trim();
+      // The DEFAULT projection slot stays out of the signature — it is the
+      // channel every component has, not a prop this one declares — under
+      // either spelling of its minted type; a declared `@children: T` shows.
+      if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
+      // A passthrough row types through the tag's DOM interface — bare, or
+      // parenthesized where the attribute road widened it (`style`) — and
+      // the two class spellings take the clsx admission; all of them are
+      // the extends surface's, never props this component declares.
+      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: \(?(?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
+      if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
+      if (/^(?:class|className)\??: (?:__RipClassValue \| __RipClassValue\[\]|ClassValue \| ClassValue\[\])$/.test(row)) continue;
+      if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
+      const colon = row.indexOf(': ');
+      let kept = row;
+      if (colon !== -1) {
+        const arms = unionArms(row.slice(colon + 2));
+        const keptArms = arms.filter((arm) => cellShape(arm) === null);
+        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.join(' | ');
+      }
+      // tsgo spells string literals double-quoted; the corpus spelling
+      // is single quotes, and the grammar colors the two forms apart.
+      // Only a literal with nothing to re-escape converts.
+      out.push(kept.replace(/"([^"'\\]*)"/g, "'$1'"));
+    }
+    return out;
+  };
+  // The base block holds every prop in optional spelling; each REQUIRED
+  // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
+  // group, whose author-named alternative supersedes the base row.
+  const close = balancedTo(flat, open);
+  if (close === -1) return null;
+  const props = membersOf(flat.slice(open + 1, close));
+  let at = close + 1;
+  while (flat.startsWith(' & (', at)) {
+    const groupEnd = balancedTo(flat, at + 3);
+    if (groupEnd === -1) return null;
+    const named = unionArms(flat.slice(at + 4, groupEnd))
+      .filter((a) => a.startsWith('{') && a.endsWith('}'))
+      .flatMap((a) => membersOf(a.slice(1, -1)));
+    if (named.length !== 1) return null;
+    const propName = named[0].slice(0, named[0].indexOf(':')).replace(/\?$/, '');
+    const idx = props.findIndex((p) => p.slice(0, p.indexOf(':')).replace(/\?$/, '') === propName);
+    if (idx === -1) return null;
+    props[idx] = named[0];
+    at = groupEnd + 1;
+  }
+  // Under strict null posture an optional props param prints its own
+  // `| undefined` between the block and the paren.
+  if (flat.startsWith(' | undefined', at)) at += ' | undefined'.length;
+  return { props, extendsTag, at };
+}
+
 // A component-name hover arrives as the lowered construct signature —
 // `const Button: new (props?: { … }) => Button` — whose props block
 // speaks the lowering's vocabulary: every author prop unions its
@@ -2836,61 +2892,10 @@ function presentComponentSignatureHover(contents) {
   // to its value type under the same brand check the reactive-cell
   // presenter applies (both Ts equal). Any other union is the author's
   // own type and stands.
-  const extendsTag = { tag: null };
-  const membersOf = (inner) => {
-    const out = [];
-    for (const raw of splitTypeAt(inner, ';')) {
-      const row = raw.trim();
-      // The DEFAULT projection slot stays out of the signature — it is the
-      // channel every component has, not a prop this one declares — under
-      // either spelling of its minted type; a declared `@children: T` shows.
-      if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
-      // A passthrough row types through the tag's DOM interface — bare, or
-      // parenthesized where the attribute road widened it (`style`) — and
-      // the two class spellings take the clsx admission; all of them are
-      // the extends surface's, never props this component declares.
-      const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: \(?(?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
-      if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
-      if (/^(?:class|className)\??: (?:__RipClassValue \| __RipClassValue\[\]|ClassValue \| ClassValue\[\])$/.test(row)) continue;
-      if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
-      const colon = row.indexOf(': ');
-      let kept = row;
-      if (colon !== -1) {
-        const arms = unionArms(row.slice(colon + 2));
-        const keptArms = arms.filter((arm) => cellShape(arm) === null);
-        if (keptArms.length > 0 && keptArms.length < arms.length) kept = row.slice(0, colon + 2) + keptArms.join(' | ');
-      }
-      // tsgo spells string literals double-quoted; the corpus spelling
-      // is single quotes, and the grammar colors the two forms apart.
-      // Only a literal with nothing to re-escape converts.
-      out.push(kept.replace(/"([^"'\\]*)"/g, "'$1'"));
-    }
-    return out;
-  };
-  // The base block holds every prop in optional spelling; each REQUIRED
-  // prop then rides one `& ({ p: … } | { __bind_p__: … })` intersection
-  // group, whose author-named alternative supersedes the base row.
   const open = propsAt + propsHead[0].length - 1;
-  const close = balancedTo(flat, open);
-  if (close === -1) return null;
-  const props = membersOf(flat.slice(open + 1, close));
-  let at = close + 1;
-  while (flat.startsWith(' & (', at)) {
-    const groupEnd = balancedTo(flat, at + 3);
-    if (groupEnd === -1) return null;
-    const named = unionArms(flat.slice(at + 4, groupEnd))
-      .filter((a) => a.startsWith('{') && a.endsWith('}'))
-      .flatMap((a) => membersOf(a.slice(1, -1)));
-    if (named.length !== 1) return null;
-    const propName = named[0].slice(0, named[0].indexOf(':')).replace(/\?$/, '');
-    const idx = props.findIndex((p) => p.slice(0, p.indexOf(':')).replace(/\?$/, '') === propName);
-    if (idx === -1) return null;
-    props[idx] = named[0];
-    at = groupEnd + 1;
-  }
-  // Under strict null posture an optional props param prints its own
-  // `| undefined` between the block and the paren.
-  if (flat.startsWith(' | undefined', at)) at += ' | undefined'.length;
+  const presented = componentPropsAt(flat, open);
+  if (presented === null) return null;
+  const { props, extendsTag, at } = presented;
   const tail = (objectForm
     ? /^\): ([A-Za-z_$][\w$]*)(?:<.*>)?(?:; mount\(target\?: any\): \1(?:<.*>)?)?;? \}$/
     : /^\) => ([A-Za-z_$][\w$]*)(?:<.*>)?(?: import [A-Za-z_$][\w$]*)?$/
@@ -3304,20 +3309,12 @@ connection.onTypeDefinition(async (params) => {
   return span ? ripModuleLocations(result) : ripLocations(result);
 });
 
-// Implementation and references take NO module treatment: at a
-// specifier, tsgo answers the import-site string literals — verbatim
-// spans in each importing face that the ordinary range map-back serves.
-connection.onImplementation(async (params) => {
-  await tsgoReady;
-  const ctx = requestContext(params);
-  if (!ctx || ctx.genExactPosition === null) return null;
-  const result = await tsgoRequest('textDocument/implementation', {
-    textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
-  }, 'implementation');
-  return ripLocations(result);
-});
-
+// References take NO module treatment: at a specifier, tsgo answers
+// the import-site string literals — verbatim spans in each importing
+// face that the ordinary range map-back serves. (Implementation is not
+// served: rip's libraries state contracts structurally, and nothing in
+// the language's idiom declares an `implements` relationship for the
+// command to follow.)
 connection.onReferences(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -3431,6 +3428,11 @@ function relayableCompletionContext(context) {
   return completionTriggerCharacters.includes(context.triggerCharacter) ? context : null;
 }
 
+// A completion's documentation, either LSP spelling, face names scrubbed.
+function scrubDocumentation(doc) {
+  return typeof doc === 'string' ? scrubFaceArtifacts(doc) : { ...doc, value: scrubFaceArtifacts(doc.value ?? '') };
+}
+
 function ripCompletionItem(ctx, raw, index) {
   const item = {
     label: raw.label,
@@ -3440,14 +3442,17 @@ function ripCompletionItem(ctx, raw, index) {
   if (raw.labelDetails) {
     item.labelDetails = { ...raw.labelDetails };
     if (item.labelDetails.description) {
-      item.labelDetails.description = scrubFaceArtifacts(item.labelDetails.description);
+      item.labelDetails.description = presentType(item.labelDetails.description);
     }
   }
   for (const key of ['sortText', 'filterText', 'insertText', 'preselect', 'tags']) {
     if (raw[key] !== undefined) item[key] = raw[key];
   }
-  if (raw.detail) item.detail = scrubFaceArtifacts(raw.detail);
-  if (raw.documentation) item.documentation = raw.documentation;
+  // The detail column is a printed type and the documentation is prose:
+  // the type presents (presentType — scrubbed, a cell arm collapsed), the
+  // prose only scrubs.
+  if (raw.detail) item.detail = presentType(raw.detail);
+  if (raw.documentation) item.documentation = scrubDocumentation(raw.documentation);
   if (raw.textEdit?.range) {
     const mapped = faceEditsToCurrent(ctx, [raw.textEdit]);
     // An unmappable primary edit degrades to label insertion at the
@@ -3815,12 +3820,8 @@ connection.onCompletionResolve(async (item) => {
   if (!raw || !tsgo) return item;
   const resolved = await tsgoRequest('completionItem/resolve', raw, 'completion resolve');
   if (!resolved) return item;
-  if (resolved.detail) item.detail = scrubFaceArtifacts(resolved.detail);
-  if (resolved.documentation) {
-    item.documentation = typeof resolved.documentation === 'string'
-      ? scrubFaceArtifacts(resolved.documentation)
-      : { ...resolved.documentation, value: scrubFaceArtifacts(resolved.documentation.value ?? '') };
-  }
+  if (resolved.detail) item.detail = presentType(resolved.detail);
+  if (resolved.documentation) item.documentation = scrubDocumentation(resolved.documentation);
   if (resolved.additionalTextEdits?.length) {
     const ctx = requestContext({ textDocument: { uri } });
     const mapped = ctx ? faceEditsToCurrent(ctx, resolved.additionalTextEdits) : null;
@@ -3853,14 +3854,74 @@ connection.onSignatureHelp(async (params) => {
     ...(params.context ? { context: params.context } : {}),
   }, 'signature help');
   if (!result?.signatures) return null;
+  // The calls the LOWERING wrote never show. A positional text child
+  // lowers to the text-node call, an element tag to createElement, a
+  // handler's arrow into the runtime's `__batch` wrapper: a cursor there
+  // lands inside a call the author never wrote, and tsgo would describe
+  // ITS signature. The face's callee says whose call this is; and when
+  // the wrapper's paren sits on an earlier face line, the answer itself
+  // says so — a signature whose callee is a minted `__` name the source
+  // never spells.
+  if (insideLoweredCall(ctx.good.code, genCursor)) return null;
+  const active = result.signatures[result.activeSignature ?? 0];
+  const mintedCallee = /^(__[A-Za-z$][\w$]*)\(/.exec(active?.label ?? '');
+  if (mintedCallee && !ctx.good.source.includes(mintedCallee[1])) return null;
+  // A COMPONENT USE declines. Its props are named keys, so there is no
+  // positional parameter for the highlight to track, and the hover on
+  // the component's name already answers the signature in the author's
+  // spelling; what signature help would add is the same rows in a call
+  // shape. The construction is recognized by its own signature — the
+  // one-parameter `Name(props?: { … }): Name` row whose block reads as
+  // a props block — so a class the author constructs positionally
+  // answers as any call does.
+  if (isComponentConstruction(active)) return null;
   return {
     ...result,
-    signatures: result.signatures.map((sig) => ({
-      ...sig,
-      label: scrubFaceArtifacts(sig.label),
-    })),
+    signatures: result.signatures.map((sig) => ({ ...sig, label: presentType(sig.label) })),
   };
 });
+
+// Whether the face position `gen` sits inside the argument list of a call
+// the LOWERING minted on that line — the text-node call a render child
+// becomes. Walks back over the line's balanced parens to each enclosing
+// open paren and reads its callee.
+const LOWERED_CALLEES = /(?:^|[^\w$.])(?:document\.create(?:TextNode|Element|ElementNS|Comment)|__[A-Za-z$][\w$]*)$/;
+function insideLoweredCall(code, gen) {
+  const call = enclosingCall(code, gen);
+  return call !== null && LOWERED_CALLEES.test(call.before);
+}
+
+// The innermost call whose argument list holds the face position `gen`,
+// on gen's own face line: the text before its open paren (the callee
+// sits at its end) and the paren's offset. Null when no paren on the
+// line opens around the position.
+function enclosingCall(code, gen) {
+  const lineStart = code.lastIndexOf('\n', gen - 1) + 1;
+  let depth = 0;
+  for (let i = gen - 1; i >= lineStart; i--) {
+    const c = code[i];
+    if (c === ')') depth++;
+    else if (c === '(') {
+      if (depth > 0) { depth--; continue; }
+      return { before: code.slice(lineStart, i), open: i };
+    }
+  }
+  return null;
+}
+
+
+
+// Whether a signature row is a component's construction — `Name(props?:
+// { … }): Name`, one parameter whose block reads as a props block
+// (componentPropsAt, the same reading the component-name hover takes).
+function isComponentConstruction(sig) {
+  if (typeof sig?.label !== 'string') return false;
+  const flat = sig.label.replace(/\s+/g, ' ').trim();
+  const head = /^([A-Za-z_$][\w$]*)(<[^(]*>)?\(props(\??): \{/.exec(flat);
+  if (!head) return false;
+  const presented = componentPropsAt(flat, head[0].length - 1);
+  return presented !== null && /^\): [A-Za-z_$][\w$]*(?:<.*>)?$/.test(flat.slice(presented.at));
+}
 
 // ---- semantic tokens: tsgo's relative-encoded data decodes against
 // the FACE text; each token's generated span maps to Rip only where
@@ -4149,7 +4210,7 @@ function ripDocumentSymbols(ctx, symbols, seen = new Set()) {
     out.push({
       name: scrubFaceArtifacts(sym.name),
       kind: sym.kind,
-      ...(sym.detail ? { detail: scrubFaceArtifacts(sym.detail) } : {}),
+      ...(sym.detail ? { detail: presentType(sym.detail) } : {}),
       ...(sym.tags ? { tags: sym.tags } : {}),
       range,
       selectionRange: selection,
@@ -4396,10 +4457,12 @@ connection.onRenameRequest(async (params) => {
   return { changes };
 });
 
-// ---- code actions: quickfix plus the source.* family (the
-// organizeImports/removeUnusedImports/sortImports rewrites land
-// through the whole-import-line mapping; fixAll's auto-imports
-// land through the standing insertion rules). The request range and
+// ---- code actions: the import quick fixes and organize imports. The
+// organize rewrite lands through the whole-import-line mapping and the
+// quick fixes' auto-imports through the standing insertion rules. Those
+// are the whole offer: a quick fix outside the import family
+// (isImportFixTitle), the sort and remove-unused subsets of organize,
+// and the fix-all batch are not served — whatever tsgo would rewrite. The request range and
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose
 // edit cannot land on Rip source is dropped, never shown broken.
@@ -4426,8 +4489,8 @@ connection.onCodeAction(async (params) => {
     return sourceOffsetToGeneratedExact(ctx.good.mappings, offset, ctx.good.source, ctx.good.code)
       ?? sourceCursorToGenerated(ctx.good.mappings, offset);
   };
-  // A pure source.* ask (VS Code's organize-imports command, fix-all
-  // on save) is document-scoped by nature: the face's whole range
+  // A pure source.* ask (VS Code's organize-imports command, on save
+  // or from the palette) is document-scoped by nature: the face's whole range
   // serves, so a request range past the last mapped construct (the
   // full-document range clients send) cannot refuse the ask.
   const onlySource = (params.context?.only?.length ?? 0) > 0
@@ -4469,7 +4532,8 @@ connection.onCodeAction(async (params) => {
   if (!Array.isArray(result)) return null;
   const actions = [];
   for (const action of result) {
-    if (action.kind && !action.kind.startsWith('quickfix') && !action.kind.startsWith('source.')) continue;
+    if (action.kind && !action.kind.startsWith('quickfix') && !CODE_ACTION_KINDS.includes(action.kind)) continue;
+    if (action.kind?.startsWith('quickfix') && !isImportFixTitle(action.title)) continue;
     if (!action.edit) continue; // command-only actions execute inside tsgo — not brokered
     const { changes, failure } = mapWorkspaceEditToRip(action.edit, { atomic: false });
     if (failure) {

@@ -87,6 +87,8 @@ async function inWorkspace(files, fn, { traceTsgo = false } = {}) {
     },
     hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
     completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
+    resolve: (item) => client.request('completionItem/resolve', item),
+    signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
     semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
     tsgoNotifications: () => (trace ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean) : []),
   };
@@ -514,6 +516,58 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // sitting on the lowered receiver — the cover-`this` answer
       // (`this: this`) declines rather than describing machinery.
       expect(await api.hover('tone.rip', 2, 4)).toBeNull();           // the `render` word
+    });
+  });
+
+  test('a prop key\'s completion detail presents value-first; signature help declines on the use', async () => {
+    // The props surface's slot admits the prop's value OR its container,
+    // and mints a bind twin per prop; the hover collapses that (the
+    // prop-name row). The completion item's detail column, resolved
+    // lazily, presents the same slot: no container arm.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const button = [
+        'export Button = component extends button',           // 0
+        "  @variant?: 'primary' | 'secondary' := 'primary'",  // 1
+        '  render',                                           // 2
+        '    button class: [@variant]',                       // 3
+        "      'x'",                                          // 4
+        '',
+      ].join('\n');
+      const form = [
+        "import { Button } from './button.rip'",  // 0
+        'export Form = component',                // 1
+        '  render',                               // 2
+        '    div',                                // 3
+        "      Button variant: 'primary'",        // 4
+        "      Button variant: 'primary', 'label'", // 5
+        '      Button',                            // 6
+        "        variant: 'secondary'",            // 7
+        '        ',                                // 8 — an indented blank line inside the props block
+        '      div',                               // 9
+        "      Button variant: 'primary', @click: (-> console.log(1)), 'x'",   // 10
+        '',
+      ].join('\n');
+      await api.open('button.rip', button);
+      await api.open('form.rip', form);
+      const completion = await api.completion('form.rip', 4, 15);   // inside `variant`
+      const item = (completion?.items ?? []).find((i) => i.label === 'variant?');
+      expect(item).toBeDefined();
+      const resolved = await api.resolve(item);
+      expect(resolved.detail).toBe('(property) variant?: "primary" | "secondary" | undefined');
+
+      // Signature help DECLINES on a component use: the props are named
+      // keys, so there is no positional parameter to track, and the hover
+      // on the name already answers the signature. Every position of the
+      // use declines — the tag word, a prop key, a value, the separator, a
+      // positional child, the end of the line — and so does the lowering's
+      // own machinery around it: an element tag word (createElement), a
+      // handler's arrow (the `__batch` wrapper). A call the author wrote
+      // inside a handler answers as itself.
+      const labelAt = async (line, ch) => (await api.signatureHelp('form.rip', line, ch))?.signatures?.[0]?.label ?? null;
+      for (const [line, ch] of [[4, 8], [4, 15], [4, 24], [4, 31], [5, 32], [5, 35], [6, 12], [7, 29], [8, 8], [9, 8], [10, 35], [10, 43]]) {
+        expect([line, ch, await labelAt(line, ch)]).toEqual([line, ch, null]);
+      }
+      expect(await labelAt(10, 57)).toContain('log('); // inside `console.log(` in the handler
     });
   });
 

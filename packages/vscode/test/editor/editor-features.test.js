@@ -8,7 +8,7 @@
 //     specifier) in BOTH spellings — a new import line and a merge into
 //     an existing clause; staleness respected (a broken buffer's changed
 //     region answers null, aligned positions serve).
-//   DEFINITION (+implementation): same-doc, cross-file into an UNOPENED
+//   DEFINITION: same-doc, cross-file into an UNOPENED
 //     dependency (recompile-for-mappings), and pass-through into a
 //     real .ts sibling.
 //   SIGNATURE HELP: active parameter indices correct across the
@@ -122,7 +122,6 @@ async function inWorkspace(files, fn) {
     resolveItem: (item) => client.request('completionItem/resolve', item),
     definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
     typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
-    implementation: (rel, line, character) => client.request('textDocument/implementation', at(rel, line, character)),
     references: (rel, line, character) => client.request('textDocument/references', { ...at(rel, line, character), context: { includeDeclaration: true } }),
     signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
     prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
@@ -482,7 +481,7 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
+describe.skipIf(!tsgoAvailable)('definition', () => {
   test('same-doc definition lands on the Rip declaration', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', 'total = 41\nnext = total + 1\n');
@@ -505,11 +504,6 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       expect(defs[0].range).toEqual({
         start: { line: 2, character: 7 }, end: { line: 2, character: 13 },
       });
-
-      // Implementation crosses the same boundary (the def function).
-      const impls = await api.implementation('app.rip', 0, 12);
-      expect(impls.length).toBeGreaterThanOrEqual(1);
-      expect(impls[0].uri).toBe(api.uriOf('util.rip'));
     });
   }, 30000);
 
@@ -1141,33 +1135,6 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
     });
   }, 30000);
 
-  test('sort imports is a pure reorder: both statements keep their source bytes', async () => {
-    await inWorkspace({ 'util.rip': UTIL, 'zed.rip': 'export zz = 1\n' }, async (api) => {
-      const SRC = 'import { zz } from "./zed.rip"\nimport { answer } from "./util.rip"\nexport k = answer + zz\n';
-      await api.open('app.rip', SRC);
-      const actions = await api.codeAction('app.rip', WHOLE_DOC, [], ['source.sortImports']);
-      expect(actions).toHaveLength(1);
-      const applied = applyEdits(SRC, actions[0].edit.changes[api.uriOf('app.rip')]);
-      expect(applied).toBe('import { answer } from "./util.rip"\nimport { zz } from "./zed.rip"\nexport k = answer + zz\n');
-      await api.change('app.rip', applied);
-      expect(api.diagnostics('app.rip')).toEqual([]);
-    });
-  }, 30000);
-
-  test('fix-all lands its auto-import through the standing insertion rules', async () => {
-    await inWorkspace({ 'util.rip': UTIL }, async (api) => {
-      const SRC = 'import { answer } from "./util.rip"\nexport k = answer\nexport y = shout("hi")\n';
-      await api.open('app.rip', SRC);
-      const actions = await api.codeAction('app.rip', WHOLE_DOC, [], ['source.fixAll']);
-      expect(actions).toHaveLength(1);
-      expect(actions[0].kind).toBe('source.fixAll');
-      const applied = applyEdits(SRC, actions[0].edit.changes[api.uriOf('app.rip')]);
-      expect(applied).toContain('import { answer, shout } from "./util.rip"');
-      await api.change('app.rip', applied);
-      expect(api.diagnostics('app.rip')).toEqual([]);
-    });
-  }, 30000);
-
   test('clause NARROWING keeps the user\'s quote style: only the removed specifier changes bytes (the #67 review MAJOR)', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       // `shout` is unused; narrowing rewrites the clause, and the
@@ -1176,11 +1143,15 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
       // shipping the face's single-quote spelling.
       const SRC = 'import { answer, shout } from "./util.rip"\nexport k = answer + 1\n';
       await api.open('app.rip', SRC);
-      for (const kind of ['source.organizeImports', 'source.removeUnusedImports']) {
-        const actions = await api.codeAction('app.rip', WHOLE_DOC, [], [kind]);
-        expect(actions).toHaveLength(1);
-        const applied = applyEdits(SRC, actions[0].edit.changes[api.uriOf('app.rip')]);
-        expect(applied).toBe('import { answer } from "./util.rip"\nexport k = answer + 1\n');
+      const actions0 = await api.codeAction('app.rip', WHOLE_DOC, [], ['source.organizeImports']);
+      expect(actions0).toHaveLength(1);
+      expect(applyEdits(SRC, actions0[0].edit.changes[api.uriOf('app.rip')]))
+        .toBe('import { answer } from "./util.rip"\nexport k = answer + 1\n');
+      // The subsets of organize and the fix-all batch are not offered:
+      // an ask for those kinds alone answers nothing, though tsgo would
+      // rewrite for each of them.
+      for (const kind of ['source.removeUnusedImports', 'source.sortImports', 'source.fixAll']) {
+        expect(await api.codeAction('app.rip', WHOLE_DOC, [], [kind])).toEqual([]);
       }
       // The single-quote control: the user's style already matches the
       // face's spelling and survives identically.

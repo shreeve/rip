@@ -4,7 +4,7 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
-import { collapseCellArms,
+import { collapseCellArms, collapseTypedHead, presentType, isImportFixTitle,
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
@@ -714,6 +714,43 @@ describe('collapseCellArms: a cell reads as its value type', () => {
   test('a quoted operator is not a union: the message text around it survives', () => {
     expect(collapseCellArms('|')).toBe('|');
     expect(collapseCellArms('||')).toBe('||');
+  });
+});
+
+// Every type-bearing presentation — a completion's detail column, a
+// symbol's detail, a signature row — prints through presentType: the
+// face names scrubbed and a cell arm collapsed, with the head kept.
+describe('presentType: a printed type on its way to the screen', () => {
+  test('a completion detail with a multi-line cell arm reads value-first, head kept', () => {
+    const detail = '(property) variant?: "primary" | "secondary" | {\n    value: "primary" | "secondary";\n    read(): "primary" | "secondary";\n    touch?(): void;\n} | undefined';
+    expect(presentType(detail)).toBe('(property) variant?: "primary" | "secondary" | undefined');
+  });
+  test('the head splits off first — its literal never reappears as a second arm', () => {
+    expect(collapseTypedHead('(property) variant?: "primary" | { value: "primary" | "secondary"; read(): "primary" | "secondary"; touch?(): void; }'))
+      .toBe('(property) variant?: "primary" | "secondary"');
+  });
+  test('a text with no cell keeps its layout and only scrubs', () => {
+    expect(presentType('(property) a: {\n  b: __RipChildren\n}')).toBe('(property) a: {\n  b: Children\n}');
+  });
+  test('a standalone cell stays a cell', () => {
+    const cell = 'const c: { value: number; read(): number; touch(): void; }';
+    expect(presentType(cell)).toBe(cell);
+  });
+});
+
+// The quick-fix offer is the import family and nothing else — keyed on
+// the title, since tsgo's rows carry no fix identity.
+describe('isImportFixTitle: the quick fixes the editor offers', () => {
+  test('the three import spellings pass', () => {
+    expect(isImportFixTitle('Add import from "./util.rip"')).toBe(true);
+    expect(isImportFixTitle('Update import from "./util.rip"')).toBe(true);
+    expect(isImportFixTitle('Add all missing imports')).toBe(true);
+  });
+  test('every other fix is refused — its edit would be TypeScript syntax inside rip source', () => {
+    for (const title of [
+      "Change spelling to 'size'", "Remove unused declaration for: 'k'", "Prefix 'k' with an underscore",
+      'Infer parameter types from usage', "Add 'await'", "Declare property 'sizee'", 'Add all missing imports to file',
+    ]) expect([title, isImportFixTitle(title)]).toEqual([title, false]);
   });
 });
 

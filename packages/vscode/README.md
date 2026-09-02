@@ -18,10 +18,10 @@ browser import.
 
 - **Hover & diagnostics** — inferred and declared types, and type errors, on your Rip source.
 - **Completions & auto-import** — member and scope completions; accepting an import inserts an idiomatic Rip import line.
-- **Go-to-definition, type definition & implementation** — within a file, across files (even ones you haven't opened), and into `.ts`/`.d.ts`.
-- **Signature help** — parameter hints, including across `def` overloads.
+- **Go-to-definition & type definition** — within a file, across files (even ones you haven't opened), and into `.ts`/`.d.ts`.
+- **Signature help** — parameter hints inside a call's parentheses, including across `def` overloads.
 - **Find references & rename** — across your whole program; rename is all-or-nothing, never a partial edit.
-- **Code actions** — organize, sort, and remove-unused imports, and fix-all — preserving your own import style.
+- **Code actions** — import quick fixes and organize imports, preserving your own import style.
 - **Semantic highlighting** — type-aware token colors.
 - **Outline & workspace symbols** — one entry per declaration.
 - **Document links** — clickable relative paths in comments.

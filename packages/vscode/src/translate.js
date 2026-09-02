@@ -215,6 +215,48 @@ export function collapseCellArms(type) {
   return [...new Set(arms.flatMap(unionArms))].join(' | ');
 }
 
+// A typed head and its type: `(property) variant?: T`, `(parameter) x: T`,
+// a `const N: T` — the text every type-bearing presentation prints, with
+// the cell arms of T collapsed and the head kept as written. The head
+// splits off first because the collapse re-splits the union: left in,
+// the head would ride the first arm and its literal could reappear as a
+// second copy. A text with no head collapses whole; one with no cell arm
+// comes back untouched.
+export function collapseTypedHead(text) {
+  if (typeof text !== 'string') return text;
+  const head = /^((?:\(alias\) )*(?:\([a-z ]+\) )?(?:readonly )?(?:const |let |var )?(?:[\w$.]+|\[[^\]]*\])(?:<[^>]*>)?\??: )([^]*)$/.exec(text);
+  if (!head) return collapseCellArms(text);
+  const collapsed = collapseCellArms(head[2]);
+  return collapsed === head[2] ? text : head[1] + collapsed;
+}
+
+// A printed type on its way to the screen — a completion's detail, a
+// symbol's, a signature's row: the face's names scrubbed, and a cell arm
+// collapsed onto its value. tsgo prints a long member type across lines
+// and the brand check reads the one-line shape, so a text carrying a
+// cell flattens first (a type reads as one line either way); a text with
+// no cell keeps its layout. Prose — a doc comment, a name, an action
+// title — takes scrubFaceArtifacts alone: it is not a type to collapse.
+export function presentType(text) {
+  if (typeof text !== 'string') return text;
+  const scrubbed = scrubFaceArtifacts(text);
+  if (!/\{\s*(?:readonly )?value: [^]*?read\(\)/.test(scrubbed)) return scrubbed;
+  const flat = scrubbed.replace(/\s+/g, ' ').trim();
+  const collapsed = collapseTypedHead(flat);
+  return collapsed === flat ? scrubbed : collapsed;
+}
+
+// The quick fixes the editor OFFERS: the import fixes, and nothing else.
+// tsgo's code-action rows carry no fix identity — title, kind,
+// diagnostics, edit — so the title is the key. The three spellings are
+// TypeScript's own for the import family: the new-line import, the merge
+// into an existing clause, and the whole-file batch of both. Every other
+// quick fix TypeScript grows — a declared property, an underscore prefix,
+// an inferred parameter type, an inserted `await` — edits in TypeScript
+// syntax, which has no place landing inside rip source.
+export const isImportFixTitle = (title) => typeof title === 'string'
+  && /^(?:Add import from |Update import from |Add all missing imports$)/.test(title);
+
 // Route-union display prettifying, two passes over the same member
 // list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
 // reads as the parameterized display the route file spells
