@@ -73,7 +73,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -2587,6 +2587,57 @@ function ripLocations(result) {
   return flattenLocations(result).map(({ uri, range }) => ripLocation(uri, range)).filter(Boolean);
 }
 
+// The identifier under a cursor, by the compiler's own vocabulary.
+// Null off-identifier; a cursor at either edge of a run counts as on it
+// (LSP convention).
+function identifierAtCursor(text, lineStarts, position) {
+  const lineStart = lineStarts[position.line];
+  if (lineStart === undefined) return null;
+  const at = lineStart + position.character;
+  let i = lineStart;
+  while (i <= at && i < text.length && text[i] !== '\n') {
+    const run = identifierRunAt(text, i);
+    if (run) {
+      if (at >= run.start && at <= run.end) return run.value;
+      i = run.end;
+    } else {
+      i++;
+    }
+  }
+  return null;
+}
+
+// tsgo's definition for a CALL through a typed binding answers plain-TS
+// style: the resolved call signature (a span inside the type's
+// declaration) AND the binding itself. Rip's answer is the SYMBOL — of
+// several mapped locations, keep the ones whose target text spells
+// exactly the identifier under the cursor; a signature span never does.
+// When none qualifies (a position off any identifier, an answer set
+// with no naming site), the full set stands: the filter only ever
+// sharpens, never empties.
+function preferNamingLocations(params, locations) {
+  const doc = documents.get(params.textDocument.uri);
+  if (!doc) return locations;
+  const text = doc.getText();
+  const name = identifierAtCursor(text, lineStartsOf(text), params.position);
+  if (!name) return locations;
+  const naming = locations.filter((loc) => {
+    const { start, end } = loc.range;
+    if (start.line !== end.line || end.character - start.character !== name.length) return false;
+    let target;
+    const open = documents.get(loc.uri);
+    if (open) {
+      target = open.getText();
+    } else {
+      try { target = fs.readFileSync(fileURLToPath(loc.uri), 'utf8'); } catch { return false; }
+    }
+    const lineStart = lineStartsOf(target)[start.line];
+    if (lineStart === undefined) return false;
+    return target.slice(lineStart + start.character, lineStart + end.character) === name;
+  });
+  return naming.length ? naming : locations;
+}
+
 // A definition answer FOR A MODULE SPECIFIER names a file, not a symbol:
 // for a FACE target the uri is the whole content of the answer. The
 // range tsgo reports lives in face coordinates that need not survive the
@@ -2875,7 +2926,8 @@ connection.onDefinition(async (params) => {
   }, 'definition');
   // A position inside a specifier asked about the MODULE, and the answer
   // is read as one (ripModuleLocations).
-  const locations = span ? ripModuleLocations(result) : ripLocations(result);
+  let locations = span ? ripModuleLocations(result) : ripLocations(result);
+  if (!span && locations.length > 1) locations = preferNamingLocations(params, locations);
   const origin = span && locations.length ? specifierOriginOf(ctx, span) : null;
   if (clientDefinitionLinks && origin) {
     return locations.map((loc) => ({

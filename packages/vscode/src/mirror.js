@@ -23,6 +23,9 @@ const compilerModule = async (rel, what) => {
   throw new Error(`rip ${what} not found (looked for ../../../src/${rel} and ../compiler/src/${rel})`);
 };
 const { identifierRunAt } = await compilerModule('ident.js', 'identifier vocabulary');
+// Re-exported for the server's definition filter — one identifier
+// vocabulary, one loader.
+export { identifierRunAt };
 // One spelling of which checkout owns a path, shared with the runtime
 // loader: a second copy here could drift, and then a file would type
 // against one tree and execute against another.
