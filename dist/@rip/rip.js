@@ -15614,7 +15614,6 @@ ${pad ?? ""}`);
       stmts: [],
       forceNonStatic: false,
       root: null,
-      params: null,
       originNode: renderNode,
       renameHazardNames: new Set
     };
@@ -16069,8 +16068,7 @@ ${pad ?? ""}`);
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
     this.renderLine(node, () => this.b.emit("this._applyRestToInheritedEl()"));
   }
-  renderTag(node, tag, classes, args, id) {
-    this.noteShorthandClasses(classes, node);
+  renderElementPrologue(node, tag) {
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -16091,12 +16089,22 @@ ${pad ?? ""}`);
       }
       this.b.emit(")");
     });
+    return { el, isSvg };
+  }
+  renderElementBasics(node, tag, el, id) {
+    const R = this.rstate;
     if (id)
       this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
     if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === "class") {
       this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
     }
+  }
+  renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
+    const R = this.rstate;
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
     const prevKeys = R.pendingClassKeys;
@@ -16150,31 +16158,8 @@ ${pad ?? ""}`);
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
     this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
-    const el = this.newRenderVar();
-    R.tags.set(el, tag);
-    if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
-      R.transitionSlot.el = el;
-    }
-    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
-    if (isSvg)
-      R.svgEls.add(el);
-    this.renderLine(node, () => {
-      if (isSvg)
-        this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
-      else
-        this.b.emit(`${el} = document.createElement(`);
-      const span = this.emitQuotedPrimitive(tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: "tag", tag, svg: isSvg });
-      }
-      this.b.emit(")");
-    });
-    if (id)
-      this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
-    this.bindInheritedTarget(node, tag, el);
-    if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === "class") {
-      this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
-    }
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     for (const expr of classExprs)
       this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
@@ -17281,7 +17266,8 @@ ${this.replayPad}}` : " }");
     const R = this.rstate;
     if (!R)
       return;
-    const visible = (n) => R.sink.locals.has(n) || this.loopVarNames().has(n);
+    const loopVars = this.loopVarNames();
+    const visible = (n) => R.sink.locals.has(n) || loopVars.has(n);
     for (let r = R.sink.parent;r !== null; r = r.parent) {
       if (r.locals.size === 0)
         continue;
