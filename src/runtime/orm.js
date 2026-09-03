@@ -1525,11 +1525,13 @@ class SchemaQuery {
   }
   where(cond, ...params) {
     // The string form is the O4-trusted overload: caller-authored SQL,
-    // passed through verbatim with its parameters. The object form is
-    // STRUCTURED — every key validates against the model's persisted
-    // columns and quotes through the identifier helper.
+    // passed through with its parameters. Trust covers the SQL's
+    // content, not its composition: clauses join with AND, so a
+    // caller's top-level OR would regroup under SQL precedence and
+    // swallow every clause beside it — the soft-delete filter and
+    // @defaultScope included. Parentheses keep each clause atomic.
     if (typeof cond === 'string') {
-      this._clauses.push(cond);
+      this._clauses.push('(' + cond + ')');
       this._params.push(...params);
     } else if (cond && typeof cond === 'object') {
       const norm = this._def._normalize();

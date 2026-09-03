@@ -171,7 +171,7 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.calls.map((c) => c.sql)).toEqual([
  'SELECT * FROM "users" WHERE "name" = ?',
  'SELECT * FROM "users" WHERE "id" IN (?, ?, ?)',
- 'SELECT * FROM "users" WHERE "name" LIKE ? ORDER BY name DESC LIMIT 10 OFFSET 20',
+ 'SELECT * FROM "users" WHERE ("name" LIKE ?) ORDER BY name DESC LIMIT 10 OFFSET 20',
  'SELECT * FROM "users" WHERE "email" IS NULL LIMIT 1',
     ]);
   });
@@ -290,7 +290,7 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.calls.map((c) => c.sql)).toEqual([
  'SELECT * FROM "users" WHERE "id" = ? LIMIT 1',
  'SELECT COUNT(*) FROM "users"',
- 'SELECT * FROM "users" WHERE "id" IN (?, ?)',
+ 'SELECT * FROM "users" WHERE ("id" IN (?, ?))',
     ]);
     expect(r.value.n).toBe(7);
   });
@@ -306,7 +306,7 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     });
     expect(r.calls.map((c) => ({ sql: c.sql, params: c.params }))).toEqual([
       { sql: 'SELECT * FROM "users" WHERE "name" = ? LIMIT 2', params: ['E'] },
-      { sql: 'SELECT * FROM "users" WHERE name = ? LIMIT 2', params: ['E'] },
+      { sql: 'SELECT * FROM "users" WHERE (name = ?) LIMIT 2', params: ['E'] },
       { sql: 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1', params: ['u-5'] },
     ]);
   });
@@ -929,8 +929,8 @@ describe('orm: paired reference — relations and eager loading', () => {
     });
     expect(r.value.sqls).toEqual([
       'SELECT * FROM "posts"',
-      'SELECT * FROM "users" WHERE "id" IN (?)',
-      'SELECT * FROM "users" WHERE "id" IN (?)',
+      'SELECT * FROM "users" WHERE ("id" IN (?))',
+      'SELECT * FROM "users" WHERE ("id" IN (?))',
     ]);
     expect(r.value.followUps).toBe(0);
     expect(r.value.author).toBe('Ann');
@@ -3082,7 +3082,7 @@ describe('orm: runtime delivery', () => {
       await Item.withDeleted().all();
       expect(adapter.calls.map((c) => c.sql)).toEqual([
  'SELECT * FROM "items" WHERE "active" = ? AND "deleted_at" IS NULL ORDER BY id',
- 'SELECT * FROM "items" WHERE created_at > ? AND "deleted_at" IS NULL ORDER BY id',
+ 'SELECT * FROM "items" WHERE (created_at > ?) AND "deleted_at" IS NULL ORDER BY id',
  'SELECT * FROM "items" ORDER BY id',
       ]);
       const norm = Item._normalize();
@@ -3303,7 +3303,7 @@ describe('orm: runtime delivery', () => {
       expect(adapter.calls.map((c) => c.sql)).toEqual([
         'SELECT * FROM "users"',
         'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?, ?)',
-        'SELECT * FROM "teams" WHERE "id" IN (?, ?)',
+        'SELECT * FROM "teams" WHERE ("id" IN (?, ?))',
       ]);
       // the accessors resolve from the memo — no fourth query
       expect((await us[0].teams()).map((t) => t.label)).toEqual(['red', 'blue']);
@@ -3334,7 +3334,7 @@ describe('orm: runtime delivery', () => {
       expect((await u.teams()).map((t) => t.label)).toEqual(['red']);
       expect(adapter.calls.map((c) => c.sql)).toEqual([
         'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?)',
-        'SELECT * FROM "teams" WHERE "id" IN (?)',
+        'SELECT * FROM "teams" WHERE ("id" IN (?))',
       ]);
     });
   });
@@ -3397,7 +3397,7 @@ describe('orm: runtime delivery', () => {
       expect(badge.kind).toBe('gold');
       expect(adapter.calls.map((c) => c.sql)).toEqual([
         'SELECT "user_id", "badge_id" FROM "memberships" WHERE "user_id" IN (?)',
-        'SELECT * FROM "badges" WHERE "id" IN (?)',
+        'SELECT * FROM "badges" WHERE ("id" IN (?))',
       ]);
       // …and the batched path agrees with the lone accessor
       adapter.calls.length = 0;
@@ -3458,7 +3458,7 @@ describe('orm: runtime delivery', () => {
       adapter.on(/DELETE/, { columns: [], data: [], rowCount: 1 });
       expect(await u.removeLabels(10)).toBe(1);
       expect(adapter.calls[0].sql).toBe(
-        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?)');
+        'DELETE FROM "memberships" WHERE ("user_id" = ? AND "team_id" IN (?))');
       expect(adapter.calls[0].params).toEqual([1, 10]);
 
       // set = both halves off ONE read of the current set
@@ -3466,7 +3466,7 @@ describe('orm: runtime delivery', () => {
       expect(await u.setLabels([11, 12], { role: 'member' })).toEqual({ added: 2, removed: 1 });
       expect(adapter.calls.map((c) => c.sql)).toEqual([
         'SELECT "user_id", "team_id" FROM "memberships" WHERE "user_id" IN (?)',
-        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?)',
+        'DELETE FROM "memberships" WHERE ("user_id" = ? AND "team_id" IN (?))',
         'INSERT INTO "memberships" ("role", "user_id", "team_id") VALUES (?, ?, ?), (?, ?, ?) RETURNING *',
       ]);
     });
@@ -3908,15 +3908,35 @@ describe('orm: SQL structure ownership', () => {
     expect(r.calls[0].sql).toContain('ON CONFLICT ("email")');
   });
 
-  test('trusted string overloads pass through untouched (O4)', async () => {
+  test('trusted string content passes through untouched; the clause is parenthesized (O4)', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT/, rows(['id'], [1]));
       const { User } = makeWorld(k);
       await User.where('"name" LIKE ? OR "email" = ?', 'A%', 'x').order('created_at DESC, name').all();
       return null;
     });
-    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE "name" LIKE ? OR "email" = ? ORDER BY created_at DESC, name');
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE ("name" LIKE ? OR "email" = ?) ORDER BY created_at DESC, name');
     expect(r.calls[0].params).toEqual(['A%', 'x']);
+  });
+
+  test('a string clause with a top-level OR cannot swallow the soft-delete filter', async () => {
+    const src = [
+ 'Item = schema :model',
+ '  name! string',
+ '  nick! string',
+ '  @softDelete',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const { Item } = new Function('__schema', `${code}\nreturn { Item };`)(rt4.__schema);
+      await Item.where('name = ? OR nick = ?', 'a', 'b').all();
+      // Unparenthesized, AND-precedence regroups this predicate and
+      // soft-deleted rows matching `name` come back.
+      expect(adapter.calls[0].sql).toBe(
+        'SELECT * FROM "items" WHERE (name = ? OR nick = ?) AND "deleted_at" IS NULL');
+    });
   });
 });
 
@@ -4165,7 +4185,7 @@ describe('orm: through-write integrity', () => {
       const adapter = recordingAdapter();
       K4.setAdapter(adapter);
       adapter.on(/^SELECT "user_id", "friend_id"/, rows(['user_id', 'friend_id'], [1, 2]));
-      adapter.on(/FROM "users" WHERE "id" IN/, rows(['id', 'name'], [2, 'b']));
+      adapter.on(/FROM "users" WHERE \("id" IN/, rows(['id', 'name'], [2, 'b']));
       const U = K4.__schema(model('User', field('name'),
         dir('hasMany', { target: 'User', as: 'friends', through: 'Friendship', foreignKey: 'user_id', targetKey: 'friend_id' })));
       K4.__schema(model('Friendship',
@@ -4196,7 +4216,7 @@ describe('orm: through-write integrity', () => {
       await u.removeTeams(10);
       const del = adapter.calls.find((c) => /^DELETE/.test(c.sql));
       expect(del.sql).toBe(
-        'DELETE FROM "memberships" WHERE "user_id" = ? AND "team_id" IN (?) AND "kind" = ?');
+        'DELETE FROM "memberships" WHERE ("user_id" = ? AND "team_id" IN (?)) AND "kind" = ?');
       expect(del.params).toEqual([1, 10, 'active']);
     });
   });
