@@ -408,47 +408,43 @@ grammar =
   # declaration has no guardable statement form).
   # ============================================================================
 
+  # The reactive-declaration value forms: inline, wrapped onto the
+  # next line, or an indented single expression. Pass-throughs — the
+  # value is the Expression; the family rule that uses the form owns
+  # the node. The wrapped form carries the declaration tier's
+  # precedence (REACTIVE_ASSIGN, COMPUTED_ASSIGN, READONLY_ASSIGN and
+  # EFFECT share it), so an operator after the value shifts — the
+  # expression reads greedily, exactly as the inline form does.
+  Rhs: [
+    o 'Expression'
+    o 'TERMINATOR Expression'    , 2, prec: 'REACTIVE_ASSIGN'
+    o 'INDENT Expression OUTDENT', 2
+  ]
+
+  # As Rhs, with a full Block as the indented form (bodies that
+  # compute, not single values).
+  BlockRhs: [
+    o 'Expression'
+    o 'TERMINATOR Expression', 2, prec: 'REACTIVE_ASSIGN'
+    o 'Block'
+  ]
+
+  # Optional-marked declarations: `@name? := default` — an optional
+  # PROP with a default. OPT_MARKER is the lexer-minted marker token
+  # (a tight `?` on a name whose line continues with `:=` — a
+  # distinct kind, so the postfix existence check's grammar is
+  # untouched). The template DROPS it: the sexpr is byte-identical to
+  # the unmarked form and the marker's span records as the side-band
+  # optionalMarker role for the face/type story. The lowering is the
+  # unmarked one (optionality changes nothing at runtime). Typed
+  # twins drop the TYPE token the same way, as the side-band
+  # annotation role (erasure by construction).
   ReactiveAssign: [
-    o 'Assignable REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 3]', 'state: _, target, value'
-    o 'Assignable REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 4]', 'state: _, target, value'
-    # Optional-marked declarations: `@name? := default` — an
-    # optional PROP with a default. OPT_MARKER is the lexer-minted
-    # marker token (a tight `?` on a name whose line continues with
-    # `:=` — a distinct kind, so the postfix existence check's grammar
-    # is untouched). The
-    # template DROPS it: the sexpr is byte-identical to the unmarked
-    # form and the marker's span records as the side-band
-    # optionalMarker role for the face/type story. The
-    # lowering is the unmarked one (optionality changes nothing
-    # at runtime).
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 6]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 6]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 5]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]', '["state", @target, @value]', 'state: _, target, value'
   ]
 
   ComputedAssign: [
-    o 'Assignable COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 3]', 'computed: _, target, value'
-    o 'Assignable COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 3]', 'computed: _, target, value'
-    # Optional-marked computed members — the OPT_MARKER drops
-    # as the side-band optionalMarker role; the lowering is the
-    # unmarked one.
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 6]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 4]', 'computed: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? COMPUTED_ASSIGN[operator] BlockRhs[value]', '["computed", @target, @value]', 'computed: _, target, value'
   ]
 
   # Render-ready gates bind a private reactive component member to a
@@ -456,14 +452,13 @@ grammar =
   # target visibility, path shape, and keyed-source form. A called path
   # keeps its argument list as a spread `key` role so bad arity still
   # reaches the emitter as a precise diagnostic and every key span is a
-  # first-class RFC-12 fact.
+  # first-class RFC-12 fact. The call rows reduce-reduce against the
+  # plain Arguments reading and rule order picks the keyed-gate form —
+  # declared, with rationale, in the expectedConflicts manifest.
   Gate: [
-    o 'Assignable GATE[operator] Value'                                      , '["gate", 1, 3]', 'gate: _, target, rhs'
-    o 'Assignable GATE[operator] Value CALL_START CALL_END'                   , '["gate", 1, 3]', 'gate: _, target, rhs'
-    o 'Assignable GATE[operator] Value CALL_START ArgList OptComma CALL_END'  , '["gate", 1, 3, ...5]', 'gate: _, target, rhs, ...key'
-    o 'Assignable TYPE[annotation] GATE[operator] Value'                                      , '["gate", 1, 4]', 'gate: _, target, rhs'
-    o 'Assignable TYPE[annotation] GATE[operator] Value CALL_START CALL_END'                   , '["gate", 1, 4]', 'gate: _, target, rhs'
-    o 'Assignable TYPE[annotation] GATE[operator] Value CALL_START ArgList OptComma CALL_END'  , '["gate", 1, 4, ...6]', 'gate: _, target, rhs, ...key'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs]'                                          , '["gate", @target, @rhs]', 'gate: _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START CALL_END'                      , '["gate", @target, @rhs]', 'gate: _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START ArgList[key] OptComma CALL_END', '["gate", @target, @rhs, ...@key]', 'gate: _, target, rhs, ...key'
   ]
 
   # Readonly declarations. The head is a plain sexpr
@@ -479,21 +474,7 @@ grammar =
   # label (erasure by construction).
 
   Readonly: [
-    o 'Assignable READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 3]', 'readonly: _, target, value'
-    o 'Assignable READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 4]', 'readonly: _, target, value'
-    # Optional-marked readonly members — the OPT_MARKER drops
-    # as the side-band optionalMarker role; the lowering is the
-    # unmarked one.
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 6]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 6]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 5]', 'readonly: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? READONLY_ASSIGN[operator] Rhs[value]', '["readonly", @target, @value]', 'readonly: _, target, value'
   ]
 
   # ============================================================================
@@ -513,15 +494,8 @@ grammar =
   # ============================================================================
 
   Effect: [
-    o 'Assignable EFFECT[operator] Expression'               , '["effect", 1, 3]', 'effect: _, target, value'
-    o 'Assignable EFFECT[operator] TERMINATOR Expression'    , '["effect", 1, 4]', 'effect: _, target, value'
-    o 'Assignable EFFECT[operator] Block'                    , '["effect", 1, 3]', 'effect: _, target, value'
-    o 'EFFECT[operator] Expression'                          , '["effect", null, 2]', 'effect: _, target, value'
-    o 'EFFECT[operator] TERMINATOR Expression'               , '["effect", null, 3]', 'effect: _, target, value'
-    o 'EFFECT[operator] Block'                               , '["effect", null, 2]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] Expression'           , '["effect", 1, 4]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] TERMINATOR Expression', '["effect", 1, 5]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] Block'                , '["effect", 1, 4]', 'effect: _, target, value'
+    o 'Assignable[target] TYPE[annotation]? EFFECT[operator] BlockRhs[value]', '["effect", @target, @value]', 'effect: _, target, value'
+    o 'EFFECT[operator] BlockRhs[value]'                                     , '["effect", null, @value]'  , 'effect: _, target, value'
   ]
 
   SimpleAssignable: [
@@ -1176,6 +1150,10 @@ grammar =
   # ============================================================================
   # Try / Catch / Throw
   # ============================================================================
+  # The family's dangling-catch/finally shifts are deliberate greedy
+  # attachment — every entry is declared, with its rationale, in the
+  # expectedConflicts manifest at the end of this file.
+  # ============================================================================
 
   Try: [
     o 'TRY Block'                    , '["try", 2]'      , 'try: _, body'
@@ -1433,7 +1411,149 @@ displays =
   IMPORT_TYPE: 'type'
 
 # ==============================================================================
+# Kind Schema
+# ==============================================================================
+# The semantic-kind registry: every kind an annotation may name, with
+# the full role vocabulary that kind may carry (individual rules use
+# subsets). Solar fails generation on drift in either direction — an
+# annotation using an undeclared kind or role, or a declared kind no
+# rule uses — and the failure prints the actual inventory for
+# review-and-paste. This is the single place the tree's semantic
+# surface is enumerated; executable actions carry no annotation and
+# sit outside the schema by design.
+
+kinds =
+  'accept':        ['name']
+  'array':         ['elisions', 'items']
+  'as':            ['alias', 'name']
+  'assign':        ['annotation', 'operator', 'optionalMarker', 'target', 'typeParams', 'value', 'voidMarker']
+  'await':         ['operator', 'value']
+  'binary':        ['left', 'operator', 'right']
+  'block':         ['statements']
+  'call':          ['args', 'callee']
+  'cast':          ['annotation', 'value']
+  'catch':         ['binding', 'body']
+  'class':         ['body', 'name', 'parent']
+  'component':     ['body', 'parent']
+  'comprehension': ['value']
+  'computed':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'dammit':        ['operator', 'target']
+  'def':           ['body', 'name', 'params', 'returnType', 'typeParams', 'voidMarker']
+  'default':       ['name', 'value']
+  'defsig':        ['name', 'params', 'returnType']
+  'doiife':        ['func']
+  'dynamicKey':    ['key']
+  'dynimport':     ['args', 'keyword']
+  'effect':        ['annotation', 'operator', 'target', 'value']
+  'enum':          ['body', 'name']
+  'existence':     ['operator', 'value']
+  'expansion':     []
+  'export':        ['source', 'spec']
+  'foras':         ['await', 'body', 'guard', 'iterable', 'vars']
+  'forin':         ['body', 'guard', 'iterable', 'step', 'vars']
+  'forof':         ['body', 'guard', 'object', 'own', 'vars']
+  'func':          ['body', 'kind', 'params', 'returnType']
+  'gate':          ['annotation', 'key', 'operator', 'rhs', 'target']
+  'heregex':       ['flags', 'parts']
+  'if':            ['condition', 'else', 'then']
+  'import':        ['extra', 'source', 'spec', 'typeOnly']
+  'index':         ['key', 'object', 'operator']
+  'loop':          ['body', 'count']
+  'map':           ['pairs']
+  'maybe-dammit':  ['args', 'callee', 'operator']
+  'member':        ['object', 'operator', 'property']
+  'object':        ['pairs']
+  'offer':         ['value']
+  'optcall':       ['args', 'callee']
+  'optindex':      ['key', 'object']
+  'pair':          ['key', 'operator', 'value', 'voidMarker']
+  'pick':          ['items', 'source']
+  'pickitem':      ['default', 'key', 'target']
+  'presence':      ['value']
+  'program':       ['body']
+  'range':         ['from', 'operator', 'to']
+  'readonly':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'regexindex':    ['capture', 'key', 'object']
+  'relation':      ['left', 'operator', 'right']
+  'render':        ['body']
+  'rest':          ['name']
+  'return':        ['value']
+  'schema':        ['body']
+  'splat':         ['value']
+  'state':         ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'str':           ['parts']
+  'super':         ['args']
+  'switch':        ['cases', 'default', 'subject']
+  'symbol':        ['name']
+  'tagged':        ['str', 'tag']
+  'ternary':       ['condition', 'else', 'operator', 'then']
+  'throw':         ['value']
+  'try':           ['body', 'finalizer', 'handler']
+  'typedecl':      ['declaration']
+  'typedvar':      ['annotation', 'optionalMarker', 'target']
+  'unary':         ['operand', 'operator']
+  'update':        ['operator', 'prefix', 'target']
+  'when':          ['body', 'conditions']
+  'while':         ['body', 'condition', 'guard']
+  'yield':         ['value']
+  'yieldfrom':     ['value']
+
+# ==============================================================================
+# Expected Conflicts
+# ==============================================================================
+# The grammar's declared ambiguities: every reduce-reduce and ambiguous
+# shift-reduce default the parse table may contain, rule by rule, with
+# its resolution count. Solar fails generation on any drift — a new
+# conflicted rule, a vanished one, or a changed count — so a grammar
+# edit that introduces a genuine ambiguity cannot resolve silently.
+#
+# Each entry is a decision, not an accident:
+#
+# • Try/Finalizer family — the dangling-catch/finally decision: after
+#   `try E`, a following CATCH/FINALLY (or an expression continuation)
+#   could attach to this try or end it. Shift attaches greedily to the
+#   nearest try, matching every brace language; canonical LR(1) would
+#   keep these conflicts too.
+# • Statement → Return — after the guard-return idiom (`E && return V`,
+#   `||`, `??`), the four postfix modifiers (POST_IF POST_UNLESS WHILE
+#   UNTIL) sit in the lookaheads of both the completed Operation and
+#   the bare Return-as-Statement; rule order keeps the statement
+#   reading, and the pinned behavior is modifier-binds-widest
+#   (`c && return 3 if flag` compiles to `if (flag) if (c) return 3`).
+# • Arguments — after `target ~= path(...)`, the trailing call
+#   completes the gate's keyed-source form (Gate → … CALL_END, which
+#   owns the arguments as key spans) or a plain call expression as the
+#   gate's value; rule order picks the keyed-gate reading.
+# • SimpleObjAssignable → Identifier — an LALR-merged state serves both
+#   `export { name }` and object-literal shorthand; on the four shared
+#   boundary tokens (`,` `}` TERMINATOR INDENT) rule order picks
+#   ExportSpecifier, and only export context reaches those cells.
+# • ObjSpreadExpr — after `{ ...x`, a boundary token ends the rest
+#   value (ObjRestValue → ... SimpleObjAssignable) or the inner name
+#   keeps growing into a spread expression; rule order closes the
+#   plain rest reading.
+# • TypeDecl — after `def f(...) T`, INDENT opens the declaration's
+#   annotated body rather than reducing the bare signature; shift
+#   keeps the body with the declaration.
+
+expectedConflicts = [
+  ['reduce-reduce', 'Statement → Return',                               12]
+  ['reduce-reduce', 'Arguments → CALL_START CALL_END',                  84]
+  ['reduce-reduce', 'Arguments → CALL_START ArgList OptComma CALL_END', 84]
+  ['reduce-reduce', 'SimpleObjAssignable → Identifier',                  4]
+  ['reduce-reduce', 'ObjSpreadExpr → SimpleObjAssignable',               5]
+  ['ambiguous',     'Try → TRY Block',                                   2]
+  ['ambiguous',     'Try → TRY Expression',                             23]
+  ['ambiguous',     'Try → TRY Statement',                               6]
+  ['ambiguous',     'Try → TRY Block Catch',                             1]
+  ['ambiguous',     'Try → TRY Expression Catch',                        1]
+  ['ambiguous',     'Try → TRY Statement Catch',                         1]
+  ['ambiguous',     'Finalizer → FINALLY Expression',                   21]
+  ['ambiguous',     'TypeDecl → DEF Identifier OptParams TYPE',          1]
+]
+
+# ==============================================================================
 # Export
 # ==============================================================================
 
-export default {grammar, operators, displays, start: 'Root'}
+export default {grammar, operators, displays, kinds, expectedConflicts, start: 'Root'}

@@ -162,6 +162,7 @@ class Generator
       @timing 'buildLRAutomaton' , => @buildLRAutomaton()     # Build LR(0) automaton
       @timing 'computeLookaheads', => @computeLookaheads()    # Compute FIRST/FOLLOW and assign lookaheads
       @timing 'buildParseTable'  , => @buildParseTable()      # Build parse table with default actions
+      @_checkExpectedConflicts grammar.expectedConflicts      # Declared-ambiguity gate
       @timing 'buildRepairTable' , => @buildRepairTable()     # Compute per-state tolerant-repair candidates
 
   # ============================================================================
@@ -197,6 +198,39 @@ class Generator
     if @unannotatedConstructors.length > 0
       list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
       throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
+    @_checkKindSchema grammar.kinds
+
+  # The kind-schema gate: a grammar that ships a `kinds` registry
+  # declares every semantic kind an annotation may name, with the full
+  # role vocabulary that kind may carry. Every annotated rule's kind
+  # must be declared and its roles drawn from the kind's vocabulary; a
+  # declared kind no rule uses is equally a failure. Drift prints the
+  # actual inventory for review-and-paste. Grammars without a registry
+  # are ungated.
+  _checkKindSchema!: (kinds) ->
+    return unless kinds?
+
+    used = Map.new()
+    for own ruleId, sem of @semantics
+      entry = used.get(sem.kind) or Set.new()
+      entry.add role.name for role in sem.roles
+      used.set sem.kind, entry
+
+    problems = []
+    for [kind, roles] as used
+      declared = kinds[kind]
+      unless declared?
+        problems.push "  • undeclared kind '#{kind}' (roles: #{[...roles].sort().join ', '})"
+        continue
+      for role as roles when role not in declared
+        problems.push "  • kind '#{kind}' carries undeclared role '#{role}'"
+    for own kind of kinds when not used.has kind
+      problems.push "  • declared kind '#{kind}' is used by no rule"
+
+    if problems.length
+      inventory = ([...used].sort (a, b) -> a[0].localeCompare b[0]).map ([kind, roles]) ->
+        "  #{kind}: [#{[...roles].sort().map((r) -> "'#{r}'").join ', '}]"
+      throw Error.new "kind schema: annotations drifted from the declared kinds registry:\n#{problems.join '\n'}\n\nActual inventory:\n#{inventory.join '\n'}"
 
   _processOperators!: (ops) ->
     for precedence, i in ops
@@ -225,7 +259,7 @@ class Generator
       addSymbol lhs
       @nonterminals[lhs] = @symbolTable.get lhs
 
-      handles = rules[..]
+      handles = rules.flatMap (handle) => @_expandOptionals handle
 
       for handle in handles
         [symbols, action, annotation, precedence, labels] = @_parseHandle handle, lhs
@@ -306,12 +340,44 @@ class Generator
 
     @ruleActions = "(#{parameters}) => {\n#{actionsCode}\n#{@indent}}"
 
+  # 'SYMBOL?' pattern sugar — a pattern token with a trailing '?'
+  # (labels ride along: 'TYPE[annotation]?') is optional: the rule
+  # expands into every present/absent combination, absent-first in
+  # binary-counting order, so the barest form takes the lowest rule
+  # id. Named bindings make one shared action legal across variants;
+  # a '@name' bound to an optional symbol fails generation in the
+  # absent variants (a template's arity is constant). The '?' and
+  # '??' terminals never read as sugar: only a token whose stripped
+  # symbol is itself '?'-free expands.
+  _expandOptionals: (handle) ->
+    pattern = if Array.isArray handle
+      if typeof handle[0] is 'string' then handle[0] else handle[0].join ' '
+    else if typeof handle is 'string'
+      handle
+    return [handle] unless pattern and /\S\?(?:\s|$)/.test pattern
+
+    changed = false
+    variants = [[]]
+    for token in pattern.trim().split /\s+/
+      bare = token[...-1]
+      if token.length > 1 and token.endsWith('?') and not bare.endsWith('?')
+        changed = true
+        variants = variants.flatMap (v) -> [v, [...v, bare]]
+      else
+        v.push token for v in variants
+    return [handle] unless changed
+
+    for v in variants
+      p = v.join ' '
+      if Array.isArray handle then [p, ...handle[1..]] else p
+
   _parseHandle: (handle, lhs) ->
     if Array.isArray handle
       pattern = if typeof handle[0] is 'string' then handle[0].trim() else handle[0].join(' ')
       [symbols, labels] = @_parseLabels pattern, lhs
 
       action = handle[1] ?? 1
+      [action, labels] = @_resolveNamedRefs action, labels, lhs, pattern
 
       # Trailing arguments are distinguished by type: string → semantic
       # annotation, object → options.
@@ -377,6 +443,59 @@ class Generator
       symbols.push symbol
       labels.push {name, position: i + 1}
     [symbols, labels]
+
+  # Named template bindings — an action references a labeled pattern
+  # symbol as '@name' ('...@name' for spreads) instead of a 1-based
+  # position, so one action text serves every pattern that labels the
+  # same symbols, wherever marker tokens land. Bindings resolve to
+  # positions here, before any template classification, and every
+  # downstream consumer sees plain refs. A label an action consumes is
+  # a binding, not a side-band role — the ref carries the value and its
+  # span — while unconsumed labels keep their side-band meaning.
+  # References resolve outside string literals only; an unknown name
+  # fails generation. Construction templates take bare positions;
+  # an action that is not a flat template takes executable '$n' refs
+  # (decided by classifying the bare-position resolution).
+  _resolveNamedRefs: (action, labels, lhs, pattern) ->
+    return [action, labels] unless typeof action is 'string' and action.includes '@'
+
+    byName = Map.new()
+    byName.set label.name, label for label in labels
+    consumed = Set.new()
+
+    resolve = (form) =>
+      out = ''
+      quote = null
+      i = 0
+      while i < action.length
+        ch = action[i]
+        if quote
+          if ch is '\\'
+            out += ch + (action[i + 1] ?? '')
+            i += 2
+            continue
+          quote = null if ch is quote
+          out += ch
+        else if ch is '"' or ch is "'"
+          quote = ch
+          out += ch
+        else if ch is '@'
+          m = action[i..].match /^@([A-Za-z$][\w$-]*|_[\w$-]+)/
+          throw Error.new "Grammar error in '#{lhs} → #{pattern}': '@' in an action must spell a binding (@name)" unless m
+          label = byName.get m[1]
+          throw Error.new "Grammar error in '#{lhs} → #{pattern}': binding '@#{m[1]}' has no matching pattern label" unless label
+          consumed.add m[1]
+          out += (if form is 'dollar' then '$' else '') + label.position
+          i += m[0].length
+          continue
+        else
+          out += ch
+        i++
+      out
+
+    resolved = resolve 'bare'
+    resolved = resolve 'dollar' unless @_templateElements(resolved, true)?
+    [resolved, labels.filter (l) -> not consumed.has l.name]
 
   # Classify an action as an array construction template and extract its
   # elements, one entry per element in template order: position refs as
@@ -1058,6 +1177,46 @@ class Generator
             state[@symbolIds[stackSymbol]] = undefined
 
     @parseTable = states
+
+  # The declared-ambiguity gate: a grammar that ships an
+  # expectedConflicts manifest states every reduce-reduce and
+  # ambiguous default the parse table may contain — rule by rule,
+  # with its resolution count. Any drift (a new conflicted rule, a
+  # vanished one, a changed count) fails generation, so a grammar
+  # edit that introduces a genuine ambiguity cannot resolve
+  # silently. The failure prints the actual manifest so an
+  # intentional change is a review-and-paste.
+  _checkExpectedConflicts!: (expected) ->
+    return unless expected?
+
+    actual = Map.new()
+    for c in @conflictDetails
+      key = "#{c.category}|#{c.lhs} → #{c.ruleSymbols}"
+      actual.set key, (actual.get(key) or 0) + 1
+
+    declared = Map.new()
+    for [category, rule, count] in expected
+      key = "#{category}|#{rule}"
+      throw Error.new "expectedConflicts: duplicate entry for [#{category}] #{rule}" if declared.has key
+      declared.set key, count
+
+    problems = []
+    for [key, count] as actual
+      [category, rule] = key.split '|'
+      want = declared.get key
+      if not want?
+        problems.push "  • undeclared: [#{category}] #{rule} — #{count} resolution(s)"
+      else if want isnt count
+        problems.push "  • count drift: [#{category}] #{rule} — declared #{want}, actual #{count}"
+    for [key, want] as declared when not actual.has key
+      [category, rule] = key.split '|'
+      problems.push "  • declared but absent: [#{category}] #{rule} — declared #{want}"
+
+    if problems.length
+      manifest = [...actual].sort().map ([key, count]) ->
+        [category, rule] = key.split '|'
+        "  ['#{category}', '#{rule}', #{count}]"
+      throw Error.new "expectedConflicts: parse-table conflicts drifted from the declared manifest:\n#{problems.join '\n'}\n\nActual manifest:\n#{manifest.join '\n'}"
 
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (rule, op, reduce, shift) ->
