@@ -129,7 +129,8 @@ class Generator
     @rules     = []
     @operators = {}
     @conflicts = 0
-    @conflictDetails = []  # Track conflict details for debugging
+    @conflictDetails = []  # The problematic subset (reduce-reduce, ambiguous)
+    @resolutionDetails = []  # EVERY by-default resolution, categorized
 
     # Semantic side table: ruleId → {kind, roles: [{name, grammarRef, childSlot, spread}]}
     @semantics = {}
@@ -919,34 +920,44 @@ class Generator
             solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], which
 
             if solution.bydefault
-              # Categorize conflict type
+              # Categorize the default resolution. REDUCE-REDUCE is
+              # tested FIRST: an r/r conflict is the automaton picking
+              # between two completed rules by lowest id, and neither
+              # an empty rule, a passthrough shape, nor rule precedence
+              # makes that choice principled — shape-based buckets
+              # excuse only shift-over-reduce defaults.
               isEmpty = item.rule.symbols.length is 0 or (item.rule.symbols.length is 1 and item.rule.symbols[0] is '')
               isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]  # Single nonterminal
               hasPrecedence = op and item.rule.precedence > 0
               isReduceReduce = which[0] is REDUCE
 
-              # Determine category
-              category = 'empty-optional' if isEmpty
-              category = 'passthrough' if !isEmpty and isPassthrough
-              category = 'precedence' if !isEmpty and !isPassthrough and hasPrecedence
-              category = 'reduce-reduce' if !isEmpty and !isPassthrough and !hasPrecedence and isReduceReduce
-              category = 'ambiguous' if !isEmpty and !isPassthrough and !hasPrecedence and !isReduceReduce
+              category =
+                if      isReduceReduce then 'reduce-reduce'
+                else if isEmpty        then 'empty-optional'
+                else if isPassthrough  then 'passthrough'
+                else if hasPrecedence  then 'precedence'
+                else                       'ambiguous'
 
-              # Only count and track problematic conflicts (exclude benign ones)
+              detail = {
+                state: k,
+                lookahead: stackSymbol,
+                lookaheadName: @tokenNames[@symbolIds[stackSymbol]] or stackSymbol,
+                rule: item.rule.id,
+                lhs: item.rule.lhs,
+                ruleSymbols: item.rule.symbols.join(' '),
+                shift: if which[0] is SHIFT then which[1] else null,
+                reduce: item.rule.id,
+                resolution: if which[0] is SHIFT then 'shift' else 'reduce',
+                category: category
+              }
+              # EVERY default resolution is recorded — a "Conflicts: 0"
+              # that silently accepted hundreds of default shifts is a
+              # weaker claim than it reads. The problematic two still
+              # gate the headline count.
+              @resolutionDetails.push detail
               if category is 'reduce-reduce' or category is 'ambiguous'
                 @conflicts++
-                @conflictDetails.push {
-                  state: k,
-                  lookahead: stackSymbol,
-                  lookaheadName: @tokenNames[@symbolIds[stackSymbol]] or stackSymbol,
-                  rule: item.rule.id,
-                  lhs: item.rule.lhs,
-                  ruleSymbols: item.rule.symbols.join(' '),
-                  shift: if which[0] is SHIFT then which[1] else null,
-                  reduce: item.rule.id,
-                  resolution: if which[0] is SHIFT then 'shift' else 'reduce',
-                  category: category
-                }
+                @conflictDetails.push detail
             else
               action = solution.action
           else
@@ -1589,18 +1600,56 @@ if isRunAsScript
       • Opted-out constructor rules: #{optedOut}
       """
 
+      # Every default resolution, by category — the honest ledger
+      # behind the headline count. 'Conflicts' above counts only
+      # reduce-reduce and ambiguous; the rest were resolved by a
+      # default shift the categories explain.
+      if generator.resolutionDetails?.length
+        byCategory = {}
+        for r in generator.resolutionDetails
+          byCategory[r.category] = (byCategory[r.category] or 0) + 1
+        parts = ("#{name}: #{count}" for [name, count] as Object.entries(byCategory).sort())
+        console.log "\n⚖️ Default resolutions (#{generator.resolutionDetails.length} total): #{parts.join(', ')}"
+
       if optedOut > 0
         console.log "\n📋 Opted-out constructor rules (intentional, with reasons):"
         for desc in generator.optedOutConstructors
           console.log "  • #{desc}"
 
-      # Show conflict details if requested
+      # Show conflict details if requested — grouped by rule, because
+      # one state-level decision fans out to one entry per lookahead
+      # and the rule is the reviewable unit.
       if options.conflicts and generator.conflictDetails?.length
-        console.log "\n🔧 Conflict Details (first 30):"
-        for conflict, i in generator.conflictDetails.slice(0, 30)
-          console.log "\n  #{i + 1}. State #{conflict.state}, lookahead '#{conflict.lookaheadName}':"
-          console.log "     Rule #{conflict.rule}: #{conflict.lhs} → #{conflict.ruleSymbols}"
-          console.log "     Resolution: #{conflict.resolution} (by default)"
+        groups = Map.new()
+        for c in generator.conflictDetails
+          key = "#{c.category}|#{c.rule}"
+          entry = groups.get(key) or { first: c, count: 0, states: Set.new(), lookaheads: Set.new() }
+          entry.count++
+          entry.states.add c.state
+          entry.lookaheads.add c.lookaheadName
+          groups.set key, entry
+        console.log "\n🔧 Conflicts by rule (#{groups.size} distinct):"
+        for [, g] as groups
+          c = g.first
+          las = [...g.lookaheads].slice(0, 6).join(', ') + (if g.lookaheads.size > 6 then ", … #{g.lookaheads.size} total" else '')
+          console.log "\n  [#{c.category}] rule #{c.rule}: #{c.lhs} → #{c.ruleSymbols}"
+          console.log "     #{g.count} resolution(s) across state(s) #{[...g.states].join(', ')} — #{c.resolution} by default"
+          console.log "     lookaheads: #{las}"
+
+      # And the benign-bucket samples: one line per distinct
+      # rule × category, so a hidden genuine ambiguity in the
+      # passthrough pile has somewhere to be seen.
+      if options.conflicts and generator.resolutionDetails?.length
+        seen = Set.new()
+        lines = []
+        for r in generator.resolutionDetails when r.category isnt 'reduce-reduce' and r.category isnt 'ambiguous'
+          key = "#{r.category}|#{r.rule}"
+          continue if seen.has key
+          seen.add key
+          lines.push "  [#{r.category}] rule #{r.rule}: #{r.lhs} → #{r.ruleSymbols} (e.g. state #{r.state}, lookahead '#{r.lookaheadName}')"
+        if lines.length
+          console.log "\n⚖️ Default-shift resolutions by rule (#{lines.length} distinct):"
+          console.log lines.join('\n')
 
     # Parse command line
     options = {help: false, version: false, info: false, conflicts: false, output: 'parser.js'}
