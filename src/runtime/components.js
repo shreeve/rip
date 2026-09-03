@@ -809,6 +809,13 @@ const __styleKeys = new WeakMap();
 class __Component {
   constructor(props = {}) {
     this._state = 'new';
+    // Validate BEFORE any injection: the ambient assignments below put
+    // `app`/`router`/`params`/`query` on the instance, and a declared
+    // prop of the same name is supported shadowing (the emitter and
+    // the type face both spell it) — checked after injection, the
+    // verdict depended on whether the first-constructed instance
+    // happened to carry the ambients.
+    __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
     const mount = __pendingGateConstruction;
     const rendererAuthorized =
@@ -847,7 +854,6 @@ class __Component {
     // are navigation state, not app state.
     if (this.app == null && globalThis.__ripApp != null) this.app = globalThis.__ripApp;
     if (this.router == null && globalThis.__ripRouter != null) this.router = globalThis.__ripRouter;
-    __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
     let rest = null;

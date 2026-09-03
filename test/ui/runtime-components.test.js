@@ -1366,6 +1366,26 @@ describe('defect battery: constructor props are declared-only', () => {
     Method.prototype.save = function () {};
     expect(() => new Method({})).toThrow("declared prop 'save' collides with a component member");
   });
+
+  test('a declared prop named after an ambient (app/router) is supported shadowing, launch globals or not', () => {
+    // The check runs before injection: with the launch globals live,
+    // an `app` prop must construct exactly as it does without them —
+    // checked after, the first-constructed instance's ambients decided
+    // the verdict and the per-class cache locked it in.
+    const AppProp = defineComponent(RT, { name: 'AppProp', props: ['app'] });
+    const hadApp = Object.prototype.hasOwnProperty.call(globalThis, '__ripApp');
+    const prevApp = globalThis.__ripApp;
+    globalThis.__ripApp = { fake: true };
+    try {
+      expect(() => new AppProp({})).not.toThrow();
+      const inst = new AppProp({});
+      expect(inst.app).toEqual({ fake: true }); // ambient still lands when the prop is unwired
+    } finally {
+      if (hadApp) globalThis.__ripApp = prevApp;
+      else delete globalThis.__ripApp;
+    }
+    expect(() => new AppProp({})).not.toThrow();
+  });
 });
 
 describe('defect battery: non-reactive prop updates are loud in ;  drops them silently', () => {
