@@ -28,6 +28,21 @@ export { createRouter, browserAdapter }
 # out of the shipped JS, and the face carries Router for the `@router`
 # ambience splice.
 export type Router = __Router
+
+# The live stash and router, for code that runs outside any component
+# and loads before launch() has built them — an HTTP hook, a timer, a
+# socket handler. Read at call time, never at import: launch installs
+# both on globalThis and destroy() clears them, so the answer is
+# undefined before the first launch and after the last destroy, and a
+# caller in that window must expect it. The globals themselves are
+# lifecycle state, not vocabulary (docs/TYPES.md), which is why this is
+# a function in the barrel rather than a declared global.
+export currentStash = (): StashMethods | undefined ->
+  g = globalThis
+  g.__ripStash
+export currentRouter = (): Router | undefined ->
+  g = globalThis
+  g.__ripRouter
 export { createRenderer } from './renderer.rip'
 export { persistStash } from './persist.rip'
 export { launch, validatePrepared } from './launch.rip'

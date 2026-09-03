@@ -1,3 +1,4 @@
+import { currentStash } from 'rip/app'
 import { MoodBadge } from '../mood.rip'
 
 export Home = component
@@ -25,7 +26,7 @@ export Home = component
 
   refresh: ->
     # The source cell refetches; the render gate re-reads and the list updates.
-    globalThis.__ripStash.source('statuses').refetch()
+    currentStash()?.source('statuses').refetch()
 
   post: ->
     return if text is ""

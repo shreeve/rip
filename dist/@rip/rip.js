@@ -25216,6 +25216,8 @@ __export(exports_app, {
   createRouter: () => createRouter,
   createStash: () => createStash,
   createWorkspace: () => createWorkspace,
+  currentRouter: () => currentRouter,
+  currentStash: () => currentStash,
   debounce: () => debounce,
   delay: () => delay,
   hold: () => hold,
@@ -29333,6 +29335,16 @@ var check = function(files) {
   }));
   return rash(new TextEncoder().encode(inventory));
 };
+// packages/app/index.rip
+var currentStash = function() {
+  let g = globalThis;
+  return g.__ripStash;
+};
+var currentRouter = function() {
+  let g = globalThis;
+  return g.__ripRouter;
+};
+
 // src/watch.js
 (() => {
   if (typeof document === "undefined" || typeof WebSocket === "undefined")

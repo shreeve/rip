@@ -16,6 +16,8 @@ test('public entry exposes named substrate exports only', () => {
     'createRouter',
     'createStash',
     'createWorkspace',
+    'currentRouter',
+    'currentStash',
     'debounce',
     'delay',
     'hold',
