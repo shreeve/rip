@@ -58,7 +58,7 @@ repository root; consulted for UNDERSTANDING → docs/.
  is a grammar (or lexer-token) bug; a correct tree that serializes
  wrong is an emitter bug. Do not paper over a parse-shape defect
  with an emitter special case, or re-detect structure in a token
- rewriter that the SLR table should own.
+ rewriter that the LALR table should own.
 
 5. **No backward compatibility, no legacy modes, no historical
  comments.** Code states present facts only. Never write "we used

@@ -12,7 +12,7 @@
 #
 # With a label, the report is also saved as JSON to
 # misc/grammar-bench/<label>.json so two runs can be diffed
-# (e.g. `slr-baseline` before a lookahead-algorithm change, `lalr` after).
+# (e.g. `before` and `after` around a grammar or generator change).
 
 import * as fs from 'fs'
 import * as path from 'path'

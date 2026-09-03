@@ -854,9 +854,9 @@ class Generator
   #                    has nullable γ and β walks p' to p
   #
   # A reduction by A → ω in state q then takes the union of Follow(p, A)
-  # over every transition on A that reaches q along ω (lookback). Same
-  # automaton and state count as SLR; only reductions whose context
-  # actually permits a terminal keep it as a lookahead.
+  # over every transition on A that reaches q along ω (lookback). The
+  # automaton is plain LR(0) — lookaheads never split states — and a
+  # reduction keeps a terminal only when its left context permits it.
   _assignItemLookaheads!: ->
     return unless @states
 

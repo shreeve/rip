@@ -280,7 +280,7 @@ export function tagCompoundKeys(tokens) {
 // function is VOID (implicit return suppressed). The scanner mints
 // every unspaced post-name `!` as DAMMIT (call-plus-await sugar); this
 // retag pass resolves the two definition contexts one adjacency check
-// decides — the SLR table cannot (an `Identifier . DAMMIT` state would
+// decides — the LALR table cannot (an `Identifier . DAMMIT` state would
 // need the token AFTER the bang to choose between the dammit reduce
 // and a definition shift):
 //   - assign definition: DAMMIT directly before a `=` token

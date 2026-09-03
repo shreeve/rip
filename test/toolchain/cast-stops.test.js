@@ -13,7 +13,7 @@
 // below. A new clause keyword or operator fails here at unit speed until the
 // scanner is taught where its type text ends.
 //
-// The derivation walks the SLR table: each state's GOTO on Expression names
+// The derivation walks the LALR table: each state's GOTO on Expression names
 // the state the parser lands in after reducing one, and that target state's
 // terminal actions are exactly the tokens legal in the next position.
 
