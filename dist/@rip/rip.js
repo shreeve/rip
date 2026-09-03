@@ -16099,9 +16099,11 @@ ${pad ?? ""}`);
     }
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     if (classes.length > 0) {
       R.pendingClassArgs = [`'${classes.join(" ")}'`];
       R.pendingClassEl = el;
+      R.pendingClassKeys = null;
     }
     if (isSvg)
       R.svgDepth++;
@@ -16139,7 +16141,7 @@ ${pad ?? ""}`);
           this.b.emit(isSvg ? "));" : ");");
         });
       }
-      R.pendingClassKeys = null;
+      R.pendingClassKeys = prevKeys;
       R.pendingClassArgs = prevArgs;
       R.pendingClassEl = prevEl;
     }
@@ -16177,21 +16179,29 @@ ${pad ?? ""}`);
       this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     R.pendingClassArgs = [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e))
     ];
     R.pendingClassEl = el;
+    R.pendingClassKeys = null;
     if (isSvg)
       R.svgDepth++;
     this.renderChildren(el, children);
     if (isSvg)
       R.svgDepth--;
     const parts = R.pendingClassArgs;
+    const keys = R.pendingClassKeys ?? [];
     if (parts.length > 0) {
       this.renderEffect(node, () => {
         const clsx = this.runtimeName("__clsx");
-        this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
+        this.b.emit(`${el}`);
+        const gen = this.b.offset + 1;
+        this.b.emit(isSvg ? `.setAttribute('class', ${clsx}(` : `.className = ${clsx}(`);
+        for (const k of keys) {
+          this.intrinsics.push(isSvg ? { start: k[0], end: k[1], kind: "attr", name: "class", gen } : { start: k[0], end: k[1], kind: "classkey", gen });
+        }
         parts.forEach((p, i) => {
           if (i > 0)
             this.b.emit(", ");
@@ -16203,6 +16213,7 @@ ${pad ?? ""}`);
         this.b.emit(isSvg ? "));" : ");");
       });
     }
+    R.pendingClassKeys = prevKeys;
     R.pendingClassArgs = prevArgs;
     R.pendingClassEl = prevEl;
     return el;
