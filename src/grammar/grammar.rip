@@ -408,47 +408,43 @@ grammar =
   # declaration has no guardable statement form).
   # ============================================================================
 
+  # The reactive-declaration value forms: inline, wrapped onto the
+  # next line, or an indented single expression. Pass-throughs — the
+  # value is the Expression; the family rule that uses the form owns
+  # the node. The wrapped form carries the declaration tier's
+  # precedence (REACTIVE_ASSIGN, COMPUTED_ASSIGN, READONLY_ASSIGN and
+  # EFFECT share it), so an operator after the value shifts — the
+  # expression reads greedily, exactly as the inline form does.
+  Rhs: [
+    o 'Expression'
+    o 'TERMINATOR Expression'    , 2, prec: 'REACTIVE_ASSIGN'
+    o 'INDENT Expression OUTDENT', 2
+  ]
+
+  # As Rhs, with a full Block as the indented form (bodies that
+  # compute, not single values).
+  BlockRhs: [
+    o 'Expression'
+    o 'TERMINATOR Expression', 2, prec: 'REACTIVE_ASSIGN'
+    o 'Block'
+  ]
+
+  # Optional-marked declarations: `@name? := default` — an optional
+  # PROP with a default. OPT_MARKER is the lexer-minted marker token
+  # (a tight `?` on a name whose line continues with `:=` — a
+  # distinct kind, so the postfix existence check's grammar is
+  # untouched). The template DROPS it: the sexpr is byte-identical to
+  # the unmarked form and the marker's span records as the side-band
+  # optionalMarker role for the face/type story. The lowering is the
+  # unmarked one (optionality changes nothing at runtime). Typed
+  # twins drop the TYPE token the same way, as the side-band
+  # annotation role (erasure by construction).
   ReactiveAssign: [
-    o 'Assignable[target] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
-    # Optional-marked declarations: `@name? := default` — an
-    # optional PROP with a default. OPT_MARKER is the lexer-minted
-    # marker token (a tight `?` on a name whose line continues with
-    # `:=` — a distinct kind, so the postfix existence check's grammar
-    # is untouched). The
-    # template DROPS it: the sexpr is byte-identical to the unmarked
-    # form and the marker's span records as the side-band
-    # optionalMarker role for the face/type story. The
-    # lowering is the unmarked one (optionality changes nothing
-    # at runtime).
-    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
-    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]', '["state", @target, @value]', 'state: _, target, value'
   ]
 
   ComputedAssign: [
-    o 'Assignable COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 3]', 'computed: _, target, value'
-    o 'Assignable COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 3]', 'computed: _, target, value'
-    # Optional-marked computed members — the OPT_MARKER drops
-    # as the side-band optionalMarker role; the lowering is the
-    # unmarked one.
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 6]', 'computed: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] Expression'           , '["computed", 1, 4]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] TERMINATOR Expression', '["computed", 1, 5]', 'computed: _, target, value'
-    o 'Assignable TYPE[annotation] COMPUTED_ASSIGN[operator] Block'                , '["computed", 1, 4]', 'computed: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? COMPUTED_ASSIGN[operator] BlockRhs[value]', '["computed", @target, @value]', 'computed: _, target, value'
   ]
 
   # Render-ready gates bind a private reactive component member to a
@@ -458,12 +454,9 @@ grammar =
   # reaches the emitter as a precise diagnostic and every key span is a
   # first-class RFC-12 fact.
   Gate: [
-    o 'Assignable GATE[operator] Value'                                      , '["gate", 1, 3]', 'gate: _, target, rhs'
-    o 'Assignable GATE[operator] Value CALL_START CALL_END'                   , '["gate", 1, 3]', 'gate: _, target, rhs'
-    o 'Assignable GATE[operator] Value CALL_START ArgList OptComma CALL_END'  , '["gate", 1, 3, ...5]', 'gate: _, target, rhs, ...key'
-    o 'Assignable TYPE[annotation] GATE[operator] Value'                                      , '["gate", 1, 4]', 'gate: _, target, rhs'
-    o 'Assignable TYPE[annotation] GATE[operator] Value CALL_START CALL_END'                   , '["gate", 1, 4]', 'gate: _, target, rhs'
-    o 'Assignable TYPE[annotation] GATE[operator] Value CALL_START ArgList OptComma CALL_END'  , '["gate", 1, 4, ...6]', 'gate: _, target, rhs, ...key'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs]'                                          , '["gate", @target, @rhs]', 'gate: _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START CALL_END'                      , '["gate", @target, @rhs]', 'gate: _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START ArgList[key] OptComma CALL_END', '["gate", @target, @rhs, ...@key]', 'gate: _, target, rhs, ...key'
   ]
 
   # Readonly declarations. The head is a plain sexpr
@@ -479,21 +472,7 @@ grammar =
   # label (erasure by construction).
 
   Readonly: [
-    o 'Assignable READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 3]', 'readonly: _, target, value'
-    o 'Assignable READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 4]', 'readonly: _, target, value'
-    # Optional-marked readonly members — the OPT_MARKER drops
-    # as the side-band optionalMarker role; the lowering is the
-    # unmarked one.
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 6]', 'readonly: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 6]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] Expression'               , '["readonly", 1, 4]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] TERMINATOR Expression'    , '["readonly", 1, 5]', 'readonly: _, target, value'
-    o 'Assignable TYPE[annotation] READONLY_ASSIGN[operator] INDENT Expression OUTDENT', '["readonly", 1, 5]', 'readonly: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? READONLY_ASSIGN[operator] Rhs[value]', '["readonly", @target, @value]', 'readonly: _, target, value'
   ]
 
   # ============================================================================
@@ -513,15 +492,8 @@ grammar =
   # ============================================================================
 
   Effect: [
-    o 'Assignable EFFECT[operator] Expression'               , '["effect", 1, 3]', 'effect: _, target, value'
-    o 'Assignable EFFECT[operator] TERMINATOR Expression'    , '["effect", 1, 4]', 'effect: _, target, value'
-    o 'Assignable EFFECT[operator] Block'                    , '["effect", 1, 3]', 'effect: _, target, value'
-    o 'EFFECT[operator] Expression'                          , '["effect", null, 2]', 'effect: _, target, value'
-    o 'EFFECT[operator] TERMINATOR Expression'               , '["effect", null, 3]', 'effect: _, target, value'
-    o 'EFFECT[operator] Block'                               , '["effect", null, 2]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] Expression'           , '["effect", 1, 4]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] TERMINATOR Expression', '["effect", 1, 5]', 'effect: _, target, value'
-    o 'Assignable TYPE[annotation] EFFECT[operator] Block'                , '["effect", 1, 4]', 'effect: _, target, value'
+    o 'Assignable[target] TYPE[annotation]? EFFECT[operator] BlockRhs[value]', '["effect", @target, @value]', 'effect: _, target, value'
+    o 'EFFECT[operator] BlockRhs[value]'                                     , '["effect", null, @value]'  , 'effect: _, target, value'
   ]
 
   SimpleAssignable: [
