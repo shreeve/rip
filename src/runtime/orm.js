@@ -3348,6 +3348,18 @@ SchemaDef.prototype._getClass = function () {
     enumerable: false, configurable: true, writable: true,
     value: async function () { return save(def, this); },
   });
+  // A key names a WRITABLE property when it reaches a declared field
+  // or a belongsTo FK (either spelling). set() and markDirty() share
+  // the test, so the two verbs cannot drift on what counts as
+  // declared. Returns the normalized field name, or null.
+  const writableField = (nm, key) => {
+    const n = fieldFor(nm, key);
+    if (nm.fields.has(n)) return n;
+    for (const [, rel] of nm.relations) {
+      if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) return n;
+    }
+    return null;
+  };
   // set(attrs) — assign-and-save in one call (Ruby's update). Every
   // key must name a declared field or belongsTo FK (either spelling);
   // an unknown key throws rather than silently assigning a property
@@ -3362,17 +3374,7 @@ SchemaDef.prototype._getClass = function () {
       }
       const nm = def._normalize();
       for (const key of Object.keys(attrs)) {
-        const n = fieldFor(nm, key);
-        let valid = nm.fields.has(n);
-        if (!valid) {
-          for (const [, rel] of nm.relations) {
-            if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
-              valid = true;
-              break;
-            }
-          }
-        }
-        if (!valid) {
+        if (writableField(nm, key) === null) {
           throw new Error("schema: set() — '" + key + "' is not a declared field or belongsTo FK on " +
             (def.name || 'anon'));
         }
@@ -3413,19 +3415,10 @@ SchemaDef.prototype._getClass = function () {
           "schema: markDirty('" + name + "') is only valid on persisted instances; INSERT writes every set field");
       }
       const nm = def._normalize();
-      const n = fieldFor(nm, name);
-      let valid = nm.fields.has(n);
-      if (!valid) {
-        for (const [, rel] of nm.relations) {
-          if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
-            valid = true;
-            break;
-          }
-        }
-      }
-      if (!valid) {
+      const n = writableField(nm, name);
+      if (n === null) {
         throw new Error(
-          "schema: markDirty('" + name + "') — '" + n + "' is not a declared field or belongsTo FK on " + (def.name || 'anon'));
+          "schema: markDirty('" + name + "') — '" + fieldFor(nm, name) + "' is not a declared field or belongsTo FK on " + (def.name || 'anon'));
       }
       this._dirty.add(n);
       this._dirtyVersions.set(n, ++this._dirtyVersion);
