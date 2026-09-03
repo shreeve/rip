@@ -1405,6 +1405,94 @@ displays =
   IMPORT_TYPE: 'type'
 
 # ==============================================================================
+# Kind Schema
+# ==============================================================================
+# The semantic-kind registry: every kind an annotation may name, with
+# the full role vocabulary that kind may carry (individual rules use
+# subsets). Solar fails generation on drift in either direction — an
+# annotation using an undeclared kind or role, or a declared kind no
+# rule uses — and the failure prints the actual inventory for
+# review-and-paste. This is the single place the tree's semantic
+# surface is enumerated; executable actions carry no annotation and
+# sit outside the schema by design.
+
+kinds =
+  'accept':        ['name']
+  'array':         ['elisions', 'items']
+  'as':            ['alias', 'name']
+  'assign':        ['annotation', 'operator', 'optionalMarker', 'target', 'typeParams', 'value', 'voidMarker']
+  'await':         ['operator', 'value']
+  'binary':        ['left', 'operator', 'right']
+  'block':         ['statements']
+  'call':          ['args', 'callee']
+  'cast':          ['annotation', 'value']
+  'catch':         ['binding', 'body']
+  'class':         ['body', 'name', 'parent']
+  'component':     ['body', 'parent']
+  'comprehension': ['value']
+  'computed':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'dammit':        ['operator', 'target']
+  'def':           ['body', 'name', 'params', 'returnType', 'typeParams', 'voidMarker']
+  'default':       ['name', 'value']
+  'defsig':        ['name', 'params', 'returnType']
+  'doiife':        ['func']
+  'dynamicKey':    ['key']
+  'dynimport':     ['args', 'keyword']
+  'effect':        ['annotation', 'operator', 'target', 'value']
+  'enum':          ['body', 'name']
+  'existence':     ['operator', 'value']
+  'expansion':     []
+  'export':        ['source', 'spec']
+  'foras':         ['await', 'body', 'guard', 'iterable', 'vars']
+  'forin':         ['body', 'guard', 'iterable', 'step', 'vars']
+  'forof':         ['body', 'guard', 'object', 'own', 'vars']
+  'func':          ['body', 'kind', 'params', 'returnType']
+  'gate':          ['annotation', 'key', 'operator', 'rhs', 'target']
+  'heregex':       ['flags', 'parts']
+  'if':            ['condition', 'else', 'then']
+  'import':        ['extra', 'source', 'spec', 'typeOnly']
+  'index':         ['key', 'object', 'operator']
+  'loop':          ['body', 'count']
+  'map':           ['pairs']
+  'maybe-dammit':  ['args', 'callee', 'operator']
+  'member':        ['object', 'operator', 'property']
+  'object':        ['pairs']
+  'offer':         ['value']
+  'optcall':       ['args', 'callee']
+  'optindex':      ['key', 'object']
+  'pair':          ['key', 'operator', 'value', 'voidMarker']
+  'pick':          ['items', 'source']
+  'pickitem':      ['default', 'key', 'target']
+  'presence':      ['value']
+  'program':       ['body']
+  'range':         ['from', 'operator', 'to']
+  'readonly':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'regexindex':    ['capture', 'key', 'object']
+  'relation':      ['left', 'operator', 'right']
+  'render':        ['body']
+  'rest':          ['name']
+  'return':        ['value']
+  'schema':        ['body']
+  'splat':         ['value']
+  'state':         ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'str':           ['parts']
+  'super':         ['args']
+  'switch':        ['cases', 'default', 'subject']
+  'symbol':        ['name']
+  'tagged':        ['str', 'tag']
+  'ternary':       ['condition', 'else', 'operator', 'then']
+  'throw':         ['value']
+  'try':           ['body', 'finalizer', 'handler']
+  'typedecl':      ['declaration']
+  'typedvar':      ['annotation', 'optionalMarker', 'target']
+  'unary':         ['operand', 'operator']
+  'update':        ['operator', 'prefix', 'target']
+  'when':          ['body', 'conditions']
+  'while':         ['body', 'condition', 'guard']
+  'yield':         ['value']
+  'yieldfrom':     ['value']
+
+# ==============================================================================
 # Expected Conflicts
 # ==============================================================================
 # The grammar's declared ambiguities: every reduce-reduce and ambiguous
@@ -1462,4 +1550,4 @@ expectedConflicts = [
 # Export
 # ==============================================================================
 
-export default {grammar, operators, displays, expectedConflicts, start: 'Root'}
+export default {grammar, operators, displays, kinds, expectedConflicts, start: 'Root'}

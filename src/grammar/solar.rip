@@ -198,6 +198,39 @@ class Generator
     if @unannotatedConstructors.length > 0
       list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
       throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
+    @_checkKindSchema grammar.kinds
+
+  # The kind-schema gate: a grammar that ships a `kinds` registry
+  # declares every semantic kind an annotation may name, with the full
+  # role vocabulary that kind may carry. Every annotated rule's kind
+  # must be declared and its roles drawn from the kind's vocabulary; a
+  # declared kind no rule uses is equally a failure. Drift prints the
+  # actual inventory for review-and-paste. Grammars without a registry
+  # are ungated.
+  _checkKindSchema!: (kinds) ->
+    return unless kinds?
+
+    used = Map.new()
+    for own ruleId, sem of @semantics
+      entry = used.get(sem.kind) or Set.new()
+      entry.add role.name for role in sem.roles
+      used.set sem.kind, entry
+
+    problems = []
+    for [kind, roles] as used
+      declared = kinds[kind]
+      unless declared?
+        problems.push "  • undeclared kind '#{kind}' (roles: #{[...roles].sort().join ', '})"
+        continue
+      for role as roles when role not in declared
+        problems.push "  • kind '#{kind}' carries undeclared role '#{role}'"
+    for own kind of kinds when not used.has kind
+      problems.push "  • declared kind '#{kind}' is used by no rule"
+
+    if problems.length
+      inventory = ([...used].sort (a, b) -> a[0].localeCompare b[0]).map ([kind, roles]) ->
+        "  #{kind}: [#{[...roles].sort().map((r) -> "'#{r}'").join ', '}]"
+      throw Error.new "kind schema: annotations drifted from the declared kinds registry:\n#{problems.join '\n'}\n\nActual inventory:\n#{inventory.join '\n'}"
 
   _processOperators!: (ops) ->
     for precedence, i in ops
