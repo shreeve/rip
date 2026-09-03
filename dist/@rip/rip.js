@@ -24622,6 +24622,7 @@ var __styleKeys = new WeakMap;
 class __Component {
   constructor(props = {}) {
     this._state = "new";
+    __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
     const mount = __pendingGateConstruction;
     const rendererAuthorized = mount?.brand === __GATE_CONSTRUCTION_BRAND && mount.component === this.constructor && mount.used !== true;
@@ -24652,7 +24653,6 @@ class __Component {
       this.app = globalThis.__ripApp;
     if (this.router == null && globalThis.__ripRouter != null)
       this.router = globalThis.__ripRouter;
-    __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
     let rest = null;
