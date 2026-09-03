@@ -3064,11 +3064,11 @@ class Emitter {
   // ordinary Rip comment, the error stays visible, and no spurious
   // TS2578 appears. Placements, and what still declines:
   //   - a live statement — ALWAYS, on its own head line, however many
-  //     lines the statement emits (`withTsDirectives`). A multi-line
-  //     emission used to decline here, which silently deleted the
-  //     author's escape hatch on the dominant case (an arrow assigned
-  //     to a typed binding, whose error lands on the head line the
-  //     directive governs). An error that lands on an INNER line of a
+  //     lines the statement emits (`withTsDirectives`) — declining on
+  //     multi-line emissions would silently delete the author's escape
+  //     hatch on the dominant case (an arrow assigned to a typed
+  //     binding, whose error lands on the head line the directive
+  //     governs). An error that lands on an INNER line of a
   //     lowering is simply not suppressed, and surfaces as TS2578
   //     (unused) — visible and actionable, not a silent drop;
   //   - the scope's hoist line for a bare typed forward, ONLY when that
@@ -11733,7 +11733,7 @@ class Emitter {
       // The receiver surface types the KEY (its exact row is already
       // recorded below) and, through the generic setAttribute, the
       // VALUE — the widened `propertyType | string` road. Only where
-      // no surface exists does the old value-quieting `as any` remain.
+      // no surface exists does a value-quieting `as any` ride.
       const recv = this.tsElReceiver(el);
       // NULLISH IS ABSENCE on the attribute road: a value that reaches
       // `null`/`undefined` removes the attribute instead of stringifying
@@ -12100,10 +12100,9 @@ class Emitter {
       kind, name, parent, self: 'ctx',
       // OWN vars FIRST, then the threaded outer names — the runtime's
       // calling convention: __reconcile invokes `factory(ctx, item, i,
-      // ...outer)` and `block.p(ctx, item, i, ...outer)` — the
-      // order is load-bearing (the reversed
-      // order bound nested-loop parameters CROSSWISE — the inner item
-      // arrived in the outer-row slot).
+      // ...outer)` and `block.p(ctx, item, i, ...outer)`. The order is
+      // load-bearing: reversed, nested-loop parameters bind CROSSWISE
+      // — the inner item arrives in the outer-row slot.
       paramNames: [...ownVars, ...outerVars],
       frameVar: '__fr', ownerVar: '__o',
       creates: [], setups: [], vars: new Set(),

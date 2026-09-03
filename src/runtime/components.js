@@ -18,7 +18,9 @@
 //                               key REJECTS loudly (hasContext is the
 //                               optional-use probe)
 //   hasContext(key)           - is a provider in reach?
-//   __gateBind(c, path, key?) - computed last-good app-data binding
+//   __gateBind(self, index)   - computed last-good app-data binding
+//                               (resolves the renderer's captured
+//                               source through __gateMetadata)
 //   __hmrRegistry             - id → { definition, instances }
 //   __hmrLookup(id)           - registry entry or undefined
 //   __hmrRegisterDefinition(c)- record/replace a component definition
@@ -1022,9 +1024,9 @@ class __Component {
     // every path — _create runs under the child protocol's push,
     // _setRestProp pushes it around this call — so the writer dies on
     // the CHILD's unmount, never the caller's; its disposer joins the
-    // per-key writer map above — assigning the raw signal object to
-    // the DOM property would drop every later update (the
-    // #164).
+    // per-key writer map above. Assigning the raw signal object to
+    // the DOM property would drop every later update — a reactive
+    // value forwards through an effect, never by reference.
     if (value != null && typeof value === 'object' && typeof value.read === 'function') {
       (this._restWriters ??= {})[key] = __effect(() => { this._applyPlainInheritedProp(el, key, value.value); });
       return;
