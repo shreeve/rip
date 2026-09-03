@@ -5937,8 +5937,10 @@ ${baseline}`).join(`
   };
   const stripHeredocChunks = (ctx) => {
     const closer = tokens[tokens.length - 1];
-    const closerLine = /([^\n]*)$/.exec(text.slice(0, closer.start).replace(/\r\n?/g, `
-`))[1];
+    const lineFrom = closer.start - 1;
+    const lineBreak = lineFrom < 0 ? -1 : Math.max(text.lastIndexOf(`
+`, lineFrom), text.lastIndexOf("\r", lineFrom));
+    const closerLine = text.slice(lineBreak + 1, closer.start);
     const closerIndent = /^[^\S\n]*$/.test(closerLine) ? closerLine : null;
     const values = ctx.chunkIdx.map((idx) => tokens[idx].value.slice(1, -1).replace(/\r\n?/g, `
 `));

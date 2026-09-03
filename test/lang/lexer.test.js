@@ -608,6 +608,16 @@ describe('CRLF line endings', () => {
     expect(src.slice(str.start, str.end)).toBe('"""\r\n  a\r\n  b\r\n  """');
   });
 
+  test('an INTERPOLATED heredoc dedents identically under CRLF and LF', () => {
+    // The closer's indentation is read from the closer's own source
+    // line, so a CRLF file must dedent exactly as the LF file does —
+    // the line-terminator spelling is not part of the baseline.
+    const chunks = (src) => tokenize(src).tokens.filter(t => t.kind === 'STRING').map(t => t.value);
+    expect(chunks('x = """\r\n  a#{v}b\r\n  c\r\n  """'))
+      .toEqual(chunks('x = """\n  a#{v}b\n  c\n  """'));
+    expect(chunks('x = """\n  a#{v}b\n  c\n  """')).toEqual(['"a"', '"b\nc"']);
+  });
+
   test('bare \\r (not followed by \\n) rejects loudly', () => {
     expect(() => tokenize('x = 1\ry = 2')).toThrow(/bare carriage return/);
     expect(() => tokenize('x = "a\rb"')).toThrow(/unterminated string/);
