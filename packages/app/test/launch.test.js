@@ -145,7 +145,7 @@ describe('launch', () => {
   test('seed data overlays the stash without touching source cells', () => {
     let fetches = 0;
     const result = boot({
-      stash: {
+      declaration: {
         user: source({ fetch: async () => { fetches += 1; return { name: 'live' }; } }),
         theme: 'dark',
       },
@@ -174,9 +174,9 @@ describe('launch', () => {
     expect(fetches).toBe(0);
   });
 
-  test('an explicit stash option overrides the bundle stash module', () => {
+  test('an explicit declaration option overrides the bundle stash module', () => {
     const result = boot({
-      stash: { theme: 'light' },
+      declaration: { theme: 'light' },
       bundle: withStash({ stash: { theme: 'dark' } }),
     });
     expect(result.stash.theme).toBe('light');
@@ -238,7 +238,7 @@ describe('launch reconciliation', () => {
   test('a seed never touches nested sources or keyed families', () => {
     let fetches = 0;
     const result = boot({
-      stash: {
+      declaration: {
         users: source({ kind: 'keyed', fetch: async id => { fetches += 1; return { id }; } }),
         settings: {
           user: source({ fetch: async () => ({ live: true }) }),
@@ -283,7 +283,7 @@ describe('launch reconciliation', () => {
 
   test('reset preserves nested sources and never aliases the baseline', () => {
     const result = boot({
-      stash: { settings: { user: source({ fetch: async () => ({ id: 1 }) }), theme: 'dark' } },
+      declaration: { settings: { user: source({ fetch: async () => ({ id: 1 }) }), theme: 'dark' } },
       bundle: bundle({ data: { count: 5 } }),
     });
     result.stash.settings.theme = 'mutated';

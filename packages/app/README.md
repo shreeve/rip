@@ -272,7 +272,7 @@ then the result is stamped as the reset baseline), loads the component
 registry, derives the route manifest, and wires router and renderer
 together before starting. The application declares its stash in the
 bundle module `stash.rip` through its `stash` export — a stash
-module without the export rejects loudly — and the `stash` option
+module without the export rejects loudly — and the `declaration` option
 overrides it for tests and embedding hosts. It installs `__ripStash` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and
 `destroy()` tears down in reverse and restores every global. Bundles
@@ -344,8 +344,8 @@ Workspace changes. Signature classify selects **patch**, **migrate**, or
 Focus, selection, and scroll are snapshotted around the refresh. A compile or
 activation failure keeps the last-known-good App interactive and shows a
 dismissible overlay; the next good generation (or reload) clears it. Editing
-`stash.rip` / `data.rip` (the stash *definition*) reloads the document —
-runtime stash *value* updates never reload. See
+`stash.rip` (the stash declaration) or `data.rip` (its seed) reloads the
+document — runtime stash *value* updates never reload. See
 [docs/HMR.md](../../docs/HMR.md).
 
 ## Test

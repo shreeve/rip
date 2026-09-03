@@ -25868,7 +25868,7 @@ function _stampDefaults(stash) {
   Object.defineProperty(raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true });
   return;
 }
-function _cloneSeed(value) {
+function _cloneDeclaration(value) {
   if (_isSourceCell(value))
     return value;
   if (!plainObject(value))
@@ -25878,7 +25878,7 @@ function _cloneSeed(value) {
     return (() => {
       const result = [];
       for (let item of raw) {
-        result.push(_cloneSeed(item));
+        result.push(_cloneDeclaration(item));
       }
       return result;
     })();
@@ -25888,7 +25888,7 @@ function _cloneSeed(value) {
     if (!Object.hasOwn(raw, key))
       continue;
     let nested = raw[key];
-    Object.defineProperty(out, key, { value: _cloneSeed(nested), writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(out, key, { value: _cloneDeclaration(nested), writable: true, enumerable: true, configurable: true });
   }
   return out;
 }
@@ -28366,7 +28366,7 @@ validComponents = function(store) {
   }
   return store;
 };
-var validatePrepared = function(value, stash = null) {
+var validatePrepared = function(value, declaration = null) {
   let bundle = validBundle(value);
   let paths = new Set([...Object.keys(bundle.modules ?? {}), ...Object.keys(bundle.compiled ?? {})]);
   let routePaths = [...paths].filter(function(path) {
@@ -28374,14 +28374,14 @@ var validatePrepared = function(value, stash = null) {
   });
   buildRoutes(routePaths, ROUTE_ROOT);
   let stashModule = bundle.compiled?.["stash.rip"];
-  let seed = stash ?? stashModule?.stash;
-  if (!(seed != null) && stashModule != null) {
+  let declared = declaration ?? stashModule?.stash;
+  if (!(declared != null) && stashModule != null) {
     fail2("the bundle's 'stash.rip' module must export 'stash'");
   }
-  if (seed != null && (typeof seed !== "object" || Array.isArray(seed))) {
+  if (declared != null && (typeof declared !== "object" || Array.isArray(declared))) {
     fail2("the application stash must be a plain object");
   }
-  return { bundle, seed };
+  return { bundle, declaration: declared };
 };
 defaultTarget = function() {
   if (!(typeof document !== "undefined" && typeof document.querySelector === "function")) {
@@ -28401,12 +28401,12 @@ function launch(opts) {
     fail2("launch requires an options object");
   if (globalThis.__ripStash != null)
     fail2("an application is already launched; destroy it first");
-  let prepared = validatePrepared(opts.bundle, opts.stash);
+  let prepared = validatePrepared(opts.bundle, opts.declaration);
   let bundle = prepared.bundle;
   let target = opts.target ?? defaultTarget();
   let adapter = opts.adapter ?? browserAdapter();
-  let seed = prepared.seed;
-  let stash = createStash(_cloneSeed(seed ?? {}));
+  let declaration = prepared.declaration;
+  let stash = createStash(_cloneDeclaration(declaration ?? {}));
   _mergePlain(stash, bundle.data ?? {});
   _stampDefaults(stash);
   let components = opts.components != null ? validComponents(opts.components) : createComponents();

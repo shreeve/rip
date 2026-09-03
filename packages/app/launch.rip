@@ -1,7 +1,8 @@
 # Launch — the one supported application boot path.
 #
-# launch() receives a bundle OBJECT and assembles the app: stash with
-# seed data, component registry, route manifest, router, and renderer,
+# launch() receives a bundle OBJECT and assembles the app: the stash
+# from its declaration, seeded; component registry, route manifest,
+# router, and renderer,
 # wired together and started. Fetching bundles, compiling sources, and
 # watch transports belong to browser delivery; launch stays
 # Node-testable by taking every host concern as an option with the
@@ -15,8 +16,10 @@
 #              overwrites a source cell
 #
 # The application declares its stash in the bundle module
-# `stash.rip` through its `stash` export; the `stash` option
-# overrides it for tests and embedding hosts.
+# `stash.rip` through its `stash` export; the `declaration` option
+# overrides it for tests and embedding hosts. The declaration is the
+# baseline (cells by reference, plain values as defaults); the bundle's
+# `data` is the seed overlaid on top of it.
 #
 # The `components` option injects the component store (Workspace implements
 # the same interface); omitted,
@@ -26,7 +29,7 @@
 # bundle. destroy() tears down in reverse and restores every global it
 # installed.
 
-import { createStash, _cloneSeed, _stampDefaults, _mergePlain } from './stash.rip'
+import { createStash, _cloneDeclaration, _stampDefaults, _mergePlain } from './stash.rip'
 import { createComponents, ComponentsStore } from './components.rip'
 import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter, RouterAdapter, Router } from './router.rip'
@@ -41,7 +44,7 @@ export type LaunchOpts =
   adapter?: RouterAdapter
   base?: string
   hash?: boolean
-  stash?: Record<string, any>
+  declaration?: Record<string, any>
   components?: ComponentsStore
   links?: LinkHost
   persist?: boolean | 'local' | 'session'
@@ -79,7 +82,7 @@ validComponents = (store) ->
       fail "launch components store is missing '#{method}'"
   store
 
-export validatePrepared = (value, stash = null) ->
+export validatePrepared = (value, declaration = null) ->
   bundle = validBundle value
   paths = Set.new [
     ...Object.keys(bundle.modules ?? {})
@@ -88,12 +91,12 @@ export validatePrepared = (value, stash = null) ->
   routePaths = [...paths].filter (path) -> path.startsWith ROUTE_ROOT + '/'
   buildRoutes routePaths, ROUTE_ROOT
   stashModule = bundle.compiled?['stash.rip']
-  seed = stash ?? stashModule?.stash
-  if not seed? and stashModule?
+  declared = declaration ?? stashModule?.stash
+  if not declared? and stashModule?
     fail "the bundle's 'stash.rip' module must export 'stash'"
-  if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
+  if declared? and (typeof declared isnt 'object' or Array.isArray(declared))
     fail 'the application stash must be a plain object'
-  { bundle, seed }
+  { bundle, declaration: declared }
 
 defaultTarget = ->
   unless typeof document isnt 'undefined' and typeof document.querySelector is 'function'
@@ -108,20 +111,20 @@ defaultTarget = ->
 export def launch(opts: LaunchOpts): LaunchResult
   fail 'launch requires an options object' unless opts? and typeof opts is 'object'
   fail 'an application is already launched; destroy it first' if globalThis.__ripStash?
-  prepared = validatePrepared opts.bundle, opts.stash
+  prepared = validatePrepared opts.bundle, opts.declaration
   bundle = prepared.bundle
   target = opts.target ?? defaultTarget()
   adapter = opts.adapter ?? browserAdapter()
 
-  # The stash: an explicit option wins; otherwise the bundle's
+  # The declaration: an explicit option wins; otherwise the bundle's
   # `stash.rip` module provides it through its `stash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
-  seed = prepared.seed
-  # The seed clones on the way in (cells by reference): the declaration
+  declaration = prepared.declaration
+  # The declaration clones on the way in (cells by reference): the
   # object outlives this launch, and its next launch must start from
   # the declared baseline, not this session's writes.
-  stash = createStash _cloneSeed(seed ?? {})
+  stash = createStash _cloneDeclaration(declaration ?? {})
 
   # Seed overlay: bundle data merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is
