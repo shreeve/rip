@@ -8655,6 +8655,9 @@ var instanceTypeLines = () => {
 var containerType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
+var restContainerType = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
 var MINTED = "";
 var syntacticLiteralType = () => null;
 var selfArgsOf = () => "";
@@ -10291,7 +10294,7 @@ class Emitter {
     if (info.extendsTag !== null) {
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true;
-      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), "", MINTED)};`));
+      line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     }
     for (const text of runtimeApiDeclares("this"))
       line(() => this.b.emit(text));
