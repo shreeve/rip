@@ -55,7 +55,7 @@ const liveRenderer = (entries, info) => {
   const router = { current: info, navigating: false };
   const renderer = createRenderer({
     router,
-    app: { data: createStash({}) },
+    stash: createStash({}),
     components: registry(entries),
     target: target(),
   });
@@ -90,13 +90,13 @@ describe('renderer remountDirty', () => {
 
     expect(await renderer.remountDirty(['stash.rip'])).toBe('escape');
     expect(await renderer.remountDirty(['stash/foo.rip'])).toBe('escape');
-    expect(await renderer.remountDirty(['data.rip'])).toBe('escape');
+    expect(await renderer.remountDirty(['seed.rip'])).toBe('escape');
     expect(await renderer.remountDirty(['page.rip', 'stash.rip'])).toBe('escape');
 
     await renderer.mount(info);
     renderer.stop();
     expect(await renderer.remountDirty(['stash/cart.rip'])).toBe('escape');
-    expect(await renderer.remountDirty(['data.rip'])).toBe('escape');
+    expect(await renderer.remountDirty(['seed.rip'])).toBe('escape');
   });
 
   test('narrow-remounts when the live page file is dirty', async () => {
@@ -270,7 +270,7 @@ describe('renderer remountDirty', () => {
     const router = { current: info, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });
@@ -298,7 +298,7 @@ describe('renderer remountDirty', () => {
     const router = { current: info, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });
@@ -323,7 +323,7 @@ describe('renderer remountDirty', () => {
     const router = { current: info, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });
@@ -354,7 +354,7 @@ describe('renderer remountDirty', () => {
     const failures = [];
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
       onError: failure => failures.push(failure),
@@ -398,7 +398,7 @@ describe('renderer remountDirty', () => {
     const router = { current: a, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });
@@ -435,7 +435,7 @@ describe('renderer remountDirty', () => {
     const router = { current: info, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });
@@ -477,7 +477,7 @@ describe('renderer remountDirty', () => {
     const router = { current: info, navigating: false };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: target(),
     });

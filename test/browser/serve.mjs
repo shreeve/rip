@@ -16,7 +16,7 @@ const MODULES = {
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
-  'data.rip': "export data = { title: 'certification' }",
+  'seed.rip': "export seed = { title: 'certification' }",
   'routes/index.rip': [
     'export Home = component',
     '  render',
@@ -25,7 +25,7 @@ const MODULES = {
   ].join('\n'),
   'routes/profile.rip': [
     'export Profile = component',
-    '  user <~ @app.data.user',
+    '  user <~ @stash.user',
     '  render',
     '    h1#title user.name',
   ].join('\n'),

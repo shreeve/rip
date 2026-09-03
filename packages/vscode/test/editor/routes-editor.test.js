@@ -120,7 +120,7 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       // an overlay of the buffer's own face document.
       const valid = [
         'export Home = component',
-        '  user <~ @app.data.user',
+        '  user <~ @stash.user',
         '  render',
         "    div 'home'",
         '',
@@ -128,51 +128,51 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       await api.open('app/routes/index.rip', valid);
       const broken = [
         'export Home = component',
-        "  u ~= @app.data.source('user').",
+        "  u ~= @stash.source('user').",
         '',
-        '  user <~ @app.data.user',
+        '  user <~ @stash.user',
         '  render',
         "    div 'home'",
         '',
       ].join('\n');
       await api.change('app/routes/index.rip', broken, 2);
-      const completion = await api.completion('app/routes/index.rip', 1, "  u ~= @app.data.source('user').".length);
+      const completion = await api.completion('app/routes/index.rip', 1, "  u ~= @stash.source('user').".length);
       const labels = (completion?.items ?? []).map((i) => i.label);
       expect(labels).toEqual(expect.arrayContaining(['value', 'loading', 'error', 'refetch', 'reset']));
 
       // The NEAR-MISS face — the shape real typing leaves behind. The
-      // buffer one keystroke ago (`@app.data`) compiled clean, so
+      // buffer one keystroke ago (`@stash`) compiled clean, so
       // lastGood is not missing the line, it is missing one CHARACTER,
       // and the alignment guard lands the fresh `.`'s cursor on the end
-      // of `data` in the old face — where tsgo answers `data` among
-      // `@app`'s members: non-empty, plausible, one segment wrong. The
+      // of `stash` in the old face — where tsgo answers `stash` among
+      // `this`'s members: non-empty, plausible, one segment wrong. The
       // stale gate must hand this ask to the probe too.
       const nearMiss = (tail) => [
         'export Home = component',
-        `  p ~= @app.data${tail}`,
+        `  p ~= @stash${tail}`,
         '',
-        '  user <~ @app.data.user',
+        '  user <~ @stash.user',
         '  render',
         "    div 'home'",
         '',
       ].join('\n');
       await api.change('app/routes/index.rip', nearMiss(''), 3);
       await api.change('app/routes/index.rip', nearMiss('.'), 4);
-      const stale = await api.completion('app/routes/index.rip', 1, '  p ~= @app.data.'.length);
+      const stale = await api.completion('app/routes/index.rip', 1, '  p ~= @stash.'.length);
       const staleLabels = (stale?.items ?? []).map((i) => i.label);
       expect(staleLabels).toEqual(expect.arrayContaining(['user', 'count']));
-      expect(staleLabels).not.toContain('data');
+      expect(staleLabels).not.toContain('stash');
 
       // The DANGLING dot that COMPILES: when the next member is not a
       // gate (`mounted:` here), the tolerant emit passes the trailing
-      // dot through verbatim — `this.app.data.` in the face, current,
+      // dot through verbatim — `this.stash.` in the face, current,
       // syntactically invalid TS. The cursor mapping again lands on the
-      // end of `data`; the ask-fidelity gate (source prefix must equal
+      // end of `stash`; the ask-fidelity gate (source prefix must equal
       // face prefix at the landing) is what hands THIS one to the probe
       // — staleness never enters, the face is the buffer's own.
       const dangling = [
         'export Home = component',
-        '  p ~= @app.data.',
+        '  p ~= @stash.',
         '',
         "  mounted: -> document.title = 'home'",
         '  render',
@@ -180,10 +180,10 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         '',
       ].join('\n');
       await api.change('app/routes/index.rip', dangling, 5);
-      const current = await api.completion('app/routes/index.rip', 1, '  p ~= @app.data.'.length);
+      const current = await api.completion('app/routes/index.rip', 1, '  p ~= @stash.'.length);
       const currentLabels = (current?.items ?? []).map((i) => i.label);
       expect(currentLabels).toEqual(expect.arrayContaining(['user', 'count']));
-      expect(currentLabels).not.toContain('data');
+      expect(currentLabels).not.toContain('stash');
     });
   }, 90_000);
 
@@ -193,7 +193,7 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       const text = [
         'export Home = component',
         "  go: -> @router.push('/cartz')",
-        "  peek: -> @app.data.source('user').value",
+        "  peek: -> @stash.source('user').value",
         '  render',
         '    a href: "/", "home"',
         "    a href: '/x', 'single'",

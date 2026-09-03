@@ -9612,7 +9612,7 @@ class Emitter {
   checkBareRest(node, name) {
     if (name !== "rest" || this.memberKindOf(name) !== "rest")
       return;
-    const err = this.positionedError(node, "emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@app` and `@router`");
+    const err = this.positionedError(node, "emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@stash` and `@router`");
     if (typeof err.start !== "number" && this.b.currentMark) {
       err.start = this.b.currentMark.sourceStart;
       err.end = this.b.currentMark.sourceEnd;
@@ -10325,7 +10325,7 @@ class Emitter {
       line(() => this.b.emit("declare children?: __RipChildren;"));
     this._needsChildren = true;
     const ambientLines = ambientClassDeclares(info);
-    if (ambientLines.some((t) => t.includes("__ripAmbientApp(")))
+    if (ambientLines.some((t) => t.includes("__ripAmbientStash(")))
       this._needsAmbienceHelper = true;
     for (const text of ambientLines)
       line(() => this.b.emit(text));
@@ -10357,7 +10357,7 @@ class Emitter {
           this.b.emit(".");
         this.emitPrimitive(seg);
       });
-      if (this.ts && (segs[0] === "app" || segs[0] === "router")) {
+      if (this.ts && (segs[0] === "stash" || segs[0] === "router")) {
         const id = this.stores.idOf(src.pathNode);
         const span = id !== null ? this.stores.selfSpan(id) : null;
         const hit = span !== null ? this.stores.primitiveSpans(segs[0], span[0], span[1])[0] ?? null : null;
@@ -14852,10 +14852,10 @@ ${pad ?? ""}`);
       return { error: "arity", node };
     const key = keys[0] ?? null;
     const segments = Emitter.gateChain(pathNode);
-    if (segments === null || segments.length < 4 || segments[0] !== "this" || segments[1] !== "app" || segments[2] !== "data") {
+    if (segments === null || segments.length < 3 || segments[0] !== "this" || segments[1] !== "stash") {
       return { error: "path", node: pathNode };
     }
-    const path = segments.slice(3).join(".");
+    const path = segments.slice(2).join(".");
     if (key === null)
       return { path, pathNode, key: null, keyCode: null, keyParts: null };
     if (typeof key === "string" && (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(key.replace(/_/g, "")) || /^["'][^]*["']$/.test(key) || key === "true" || key === "false")) {
@@ -15041,10 +15041,10 @@ ${pad ?? ""}`);
         }
         const source = Emitter.gateSource(stmt);
         if (source.error === "arity") {
-          gateError(stmt, "key", source.node, "emitter: a keyed render gate takes exactly one key argument — use @app.data.name(params.id)");
+          gateError(stmt, "key", source.node, "emitter: a keyed render gate takes exactly one key argument — use @stash.name(params.id)");
         }
         if (source.error === "path") {
-          gateError(stmt, "rhs", source.node, "emitter: '<~' requires a literal @app.data.<path> on the right-hand side, optionally called with one key");
+          gateError(stmt, "rhs", source.node, "emitter: '<~' requires a literal @stash.<path> on the right-hand side, optionally called with one key");
         }
         if (source.error === "key") {
           gateError(stmt, "key", source.node, "emitter: a keyed render gate key may only be a literal or a params/query path (for example params.id or @query.tab)");
@@ -15250,8 +15250,7 @@ ${pad ?? ""}`);
             this.b.emit(", ");
           const twinned = this.ts && tsInfo !== null && tsInfo.members.some((m) => m.node === gate.node && this.gateTwinSource(m, tsInfo) !== null);
           if (!twinned) {
-            this.noteVocabulary("gate-prefix", "app", gate.pathNode);
-            this.noteVocabulary("gate-prefix", "data", gate.pathNode);
+            this.noteVocabulary("gate-prefix", "stash", gate.pathNode);
             for (const seg of gate.keyParts ?? [])
               this.noteSilence(seg, gate.key);
           }
@@ -18577,7 +18576,7 @@ ${this.replayPad}}` : " }");
         break;
       root = root[slot];
     }
-    if (!isNode(root) || root[0] !== "." || root[1] !== "this" || root[2] !== "app" && root[2] !== "router")
+    if (!isNode(root) || root[0] !== "." || root[1] !== "this" || root[2] !== "stash" && root[2] !== "router")
       return;
     if (this.cframes[this.cframes.length - 1].members?.has(root[2]))
       return;
@@ -18677,13 +18676,10 @@ ${this.replayPad}}` : " }");
     const callee = node[0];
     if (!isNode(callee) || callee[0] !== "." || callee.length !== 3 || callee[2] !== "source")
       return null;
-    const data = callee[1];
-    if (!isNode(data) || data[0] !== "." || data.length !== 3 || data[2] !== "data")
+    const stash = callee[1];
+    if (!isNode(stash) || stash[0] !== "." || stash.length !== 3 || stash[1] !== "this" || stash[2] !== "stash")
       return null;
-    const app = data[1];
-    if (!isNode(app) || app[0] !== "." || app.length !== 3 || app[1] !== "this" || app[2] !== "app")
-      return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("app"))
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("stash"))
       return null;
     return arg;
   }
@@ -21501,7 +21497,7 @@ type RoutePath = ${emitter.routesUnion};
   }
   if (emitter._needsAmbienceHelper === true) {
     builder.tsOnly(() => builder.emit(`
-declare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };
+declare function __ripAmbientStash<T>(v: T): T;
 `));
   }
   if (emitter._needsRouteHelper === true) {
@@ -24318,7 +24314,7 @@ function __claimGateConstructor() {
       component: Component,
       gates: metadata.gates,
       parent: metadata.parent ?? null,
-      app: metadata.app ?? null,
+      stash: metadata.stash ?? null,
       router: metadata.router ?? null,
       used: false
     };
@@ -24710,8 +24706,8 @@ class __Component {
       __gateMetadata.set(this, mount);
       if (mount.parent)
         this._parent = mount.parent;
-      if (mount.app != null)
-        this.app = mount.app;
+      if (mount.stash != null)
+        this.stash = mount.stash;
       if (mount.router != null) {
         this.router = mount.router;
         Object.defineProperty(this, "params", {
@@ -24724,8 +24720,8 @@ class __Component {
         });
       }
     }
-    if (this.app == null && globalThis.__ripApp != null)
-      this.app = globalThis.__ripApp;
+    if (this.stash == null && globalThis.__ripStash != null)
+      this.stash = globalThis.__ripStash;
     if (this.router == null && globalThis.__ripRouter != null)
       this.router = globalThis.__ripRouter;
     const declared = this.constructor.__props ?? [];
@@ -25872,7 +25868,7 @@ function _stampDefaults(stash) {
   Object.defineProperty(raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true });
   return;
 }
-function _cloneSeed(value) {
+function _cloneDeclaration(value) {
   if (_isSourceCell(value))
     return value;
   if (!plainObject(value))
@@ -25882,7 +25878,7 @@ function _cloneSeed(value) {
     return (() => {
       const result = [];
       for (let item of raw) {
-        result.push(_cloneSeed(item));
+        result.push(_cloneDeclaration(item));
       }
       return result;
     })();
@@ -25892,7 +25888,7 @@ function _cloneSeed(value) {
     if (!Object.hasOwn(raw, key))
       continue;
     let nested = raw[key];
-    Object.defineProperty(out, key, { value: _cloneSeed(nested), writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(out, key, { value: _cloneDeclaration(nested), writable: true, enumerable: true, configurable: true });
   }
   return out;
 }
@@ -27174,16 +27170,16 @@ componentFrom = function(components, file) {
   return found[0];
 };
 function createRenderer(opts) {
-  let app, components, mount, onError, router, target;
+  let components, mount, onError, router, stash, target;
   if (!(opts != null && typeof opts === "object")) {
     throw new TypeError("Rip App: createRenderer expects an options object");
   }
-  ({ router, app, components, target, onError } = opts);
+  ({ router, stash, components, target, onError } = opts);
   if (!(router != null && typeof router === "object")) {
     throw new TypeError("Rip App: createRenderer requires a router object");
   }
-  if (!(app?.data != null)) {
-    throw new TypeError("Rip App: createRenderer requires app.data");
+  if (!(stash != null && unwrapStash(stash) !== stash)) {
+    throw new TypeError("Rip App: createRenderer requires a stash built by createStash");
   }
   if (!(components != null && typeof components.getCompiled === "function")) {
     throw new TypeError("Rip App: createRenderer requires a component registry");
@@ -27215,7 +27211,7 @@ function createRenderer(opts) {
     });
   };
   let resolveGateCell = function(path) {
-    let value = unwrapStash(app.data);
+    let value = unwrapStash(stash);
     let segments = path.split(".");
     for (let index = 0;index < segments.length; index++) {
       let segment = segments[index];
@@ -27362,7 +27358,7 @@ function createRenderer(opts) {
     return true;
   };
   let construct = function(entry, parent) {
-    return constructGateComponent(entry.cls, { gates: entry.bindings, parent, app, router });
+    return constructGateComponent(entry.cls, { gates: entry.bindings, parent, stash, router });
   };
   let cleanup = function(list) {
     let errors = [];
@@ -27852,7 +27848,7 @@ function createRenderer(opts) {
     if (!(Array.isArray(paths) && paths.length > 0))
       return "noop";
     for (let path of paths) {
-      if (path === "stash.rip" || path.startsWith("stash/") || path === "data.rip")
+      if (path === "stash.rip" || path.startsWith("stash/") || path === "seed.rip")
         return "escape";
     }
     let info = router.current;
@@ -28017,9 +28013,9 @@ resolveStorage = function(opts) {
   }
   return opts.local ? window.localStorage : window.sessionStorage;
 };
-function persistStash(app, opts = {}) {
+function persistStash(stash, opts = {}) {
   let saved;
-  let target = unwrapStash(app) || app;
+  let target = unwrapStash(stash) || stash;
   if (target[PERSISTED])
     return function() {
       return null;
@@ -28031,13 +28027,13 @@ function persistStash(app, opts = {}) {
   try {
     saved = storage.getItem(storageKey);
     if (saved)
-      _mergePlain(app.data, JSON.parse(saved));
+      _mergePlain(stash, JSON.parse(saved));
   } catch (error) {}
   let pending = null;
   let save = function() {
     pending = null;
     try {
-      storage.setItem(storageKey, JSON.stringify(unwrapStash(app.data), sourceReplacer));
+      storage.setItem(storageKey, JSON.stringify(unwrapStash(stash), sourceReplacer));
     } catch (error) {}
     return;
   };
@@ -28057,23 +28053,20 @@ function persistStash(app, opts = {}) {
   });
   if (typeof window !== "undefined")
     window.addEventListener("beforeunload", save);
-  let dataRaw = unwrapStash(app.data);
-  if (dataRaw != null && typeof dataRaw === "object") {
-    Object.defineProperty(dataRaw, PURGE2, {
-      value() {
-        if (pending != null) {
-          clearTimeout(pending);
-          pending = null;
-        }
-        try {
-          storage.removeItem(storageKey);
-        } catch (error) {}
-        return;
-      },
-      configurable: true,
-      writable: true
-    });
-  }
+  Object.defineProperty(target, PURGE2, {
+    value() {
+      if (pending != null) {
+        clearTimeout(pending);
+        pending = null;
+      }
+      try {
+        storage.removeItem(storageKey);
+      } catch (error) {}
+      return;
+    },
+    configurable: true,
+    writable: true
+  });
   let disposed = false;
   return function() {
     if (disposed)
@@ -28083,8 +28076,7 @@ function persistStash(app, opts = {}) {
     if (typeof window !== "undefined")
       window.removeEventListener("beforeunload", save);
     save();
-    if (dataRaw != null && typeof dataRaw === "object")
-      dataRaw[PURGE2] = null;
+    target[PURGE2] = null;
     target[PERSISTED] = false;
     return;
   };
@@ -28358,8 +28350,8 @@ var validBundle = function(bundle) {
       fail2(`launch bundle ${key} must be an object of store paths`);
     }
   }
-  if (bundle.data != null && (typeof bundle.data !== "object" || Array.isArray(bundle.data))) {
-    fail2("launch bundle data must be an object");
+  if (bundle.seed != null && (typeof bundle.seed !== "object" || Array.isArray(bundle.seed))) {
+    fail2("launch bundle seed must be an object");
   }
   return bundle;
 };
@@ -28374,7 +28366,7 @@ validComponents = function(store) {
   }
   return store;
 };
-var validatePrepared = function(value, stash = null) {
+var validatePrepared = function(value, declaration = null) {
   let bundle = validBundle(value);
   let paths = new Set([...Object.keys(bundle.modules ?? {}), ...Object.keys(bundle.compiled ?? {})]);
   let routePaths = [...paths].filter(function(path) {
@@ -28382,14 +28374,14 @@ var validatePrepared = function(value, stash = null) {
   });
   buildRoutes(routePaths, ROUTE_ROOT);
   let stashModule = bundle.compiled?.["stash.rip"];
-  let seed = stash ?? stashModule?.stash;
-  if (!(seed != null) && stashModule != null) {
+  let declared = declaration ?? stashModule?.stash;
+  if (!(declared != null) && stashModule != null) {
     fail2("the bundle's 'stash.rip' module must export 'stash'");
   }
-  if (seed != null && (typeof seed !== "object" || Array.isArray(seed))) {
+  if (declared != null && (typeof declared !== "object" || Array.isArray(declared))) {
     fail2("the application stash must be a plain object");
   }
-  return { bundle, seed };
+  return { bundle, declaration: declared };
 };
 defaultTarget = function() {
   if (!(typeof document !== "undefined" && typeof document.querySelector === "function")) {
@@ -28407,16 +28399,16 @@ function launch(opts) {
   let removeClicks, removePreload;
   if (!(opts != null && typeof opts === "object"))
     fail2("launch requires an options object");
-  if (globalThis.__ripApp != null)
+  if (globalThis.__ripStash != null)
     fail2("an application is already launched; destroy it first");
-  let prepared = validatePrepared(opts.bundle, opts.stash);
+  let prepared = validatePrepared(opts.bundle, opts.declaration);
   let bundle = prepared.bundle;
   let target = opts.target ?? defaultTarget();
   let adapter = opts.adapter ?? browserAdapter();
-  let seed = prepared.seed;
-  let app = createStash({ data: _cloneSeed(seed ?? {}) });
-  _mergePlain(app.data, bundle.data ?? {});
-  _stampDefaults(app.data);
+  let declaration = prepared.declaration;
+  let stash = createStash(_cloneDeclaration(declaration ?? {}));
+  _mergePlain(stash, bundle.seed ?? {});
+  _stampDefaults(stash);
   let components = opts.components != null ? validComponents(opts.components) : createComponents();
   if (bundle.modules != null)
     components.load(bundle.modules);
@@ -28440,7 +28432,7 @@ function launch(opts) {
     hash: opts.hash,
     onError: opts.onError
   });
-  let renderer = createRenderer({ router, app, components, target, onError: opts.onError });
+  let renderer = createRenderer({ router, stash, components, target, onError: opts.onError });
   let unwatch = components.watch(function(_event, path) {
     return path.startsWith(ROUTE_ROOT + "/") ? router.rebuild() : undefined;
   });
@@ -28460,7 +28452,7 @@ function launch(opts) {
   }
   let disposePersist = null;
   if (opts.persist) {
-    disposePersist = persistStash(app, { local: opts.persist === "local", key: "__rip_app", storage: opts.storage });
+    disposePersist = persistStash(stash, { local: opts.persist === "local", key: "__rip_app", storage: opts.storage });
   }
   let destroyed = false;
   let destroy = function() {
@@ -28494,8 +28486,8 @@ function launch(opts) {
     run(function() {
       return disposePersist?.();
     });
-    if (globalThis.__ripApp === app)
-      delete globalThis.__ripApp;
+    if (globalThis.__ripStash === stash)
+      delete globalThis.__ripStash;
     if (globalThis.__ripRouter === router)
       delete globalThis.__ripRouter;
     if (errors.length === 1) {
@@ -28506,7 +28498,7 @@ function launch(opts) {
     }
     return;
   };
-  globalThis.__ripApp = app;
+  globalThis.__ripStash = stash;
   globalThis.__ripRouter = router;
   try {
     if (typeof target.replaceChildren === "function") {
@@ -28519,7 +28511,7 @@ function launch(opts) {
     destroy();
     throw error;
   }
-  return { app, components, router, renderer, destroy };
+  return { stash, components, router, renderer, destroy };
 }
 // packages/app/workspace.rip
 var prepared;
@@ -30047,9 +30039,9 @@ async function bootApp(opts = {}) {
   const watch = opts.watch === true || opts.feed != null;
   const program = createProgram(sources, debug, { hmr: watch });
   const workspace = createWorkspace();
-  const dataFor = (modules) => modules["data.rip"]?.data;
+  const seedFor = (modules) => modules["seed.rip"]?.seed;
   const launchWith = (modules) => launch({
-    bundle: { compiled: modules, data: dataFor(modules) },
+    bundle: { compiled: modules, seed: seedFor(modules) },
     components: workspace,
     target: opts.target,
     adapter: opts.adapter,
@@ -30165,7 +30157,7 @@ async function bootApp(opts = {}) {
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
       applyPaths = staged.invalidated.filter((path) => !path.startsWith("rip/"));
-      validatePrepared2({ compiled: nextCompiled, data: dataFor(nextCompiled) });
+      validatePrepared2({ compiled: nextCompiled, seed: seedFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
       rejected.add(change.hash);

@@ -5,7 +5,7 @@ import { title } from '../config.rip'
 import { createMutation } from 'rip/app'
 
 export Profile = component
-  user <~ @app.data.user
+  user <~ @stash.user
   form: User := { ...user }
   errors: ApiErrors<keyof User> := {}
 
@@ -14,7 +14,7 @@ export Profile = component
   updateUser = createMutation (data: User) -> User.parse(api.patch!('user', { json: data }).json!),
     onSuccess: (user) =>
       errors = {}
-      @app.data.user = user
+      @stash.user = user
     onError: (err) => errors = parseApiError!(err)
 
   render

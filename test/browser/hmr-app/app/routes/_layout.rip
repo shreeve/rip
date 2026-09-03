@@ -1,7 +1,7 @@
 # Layout — the ancestor a route-level remount must keep. `#brand` is the
 # layout's own render-edit target; `#hits` reads the stash.
 export Layout = component
-  counter ~= @app.data.counter
+  counter ~= @stash.counter
 
   render
     nav

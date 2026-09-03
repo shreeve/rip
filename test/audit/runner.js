@@ -1934,7 +1934,7 @@ const MAP_EXCLUSIONS = new Map([
     why: "the compiler consumes every one of them — a bind's target the lexer folds into a minted `__bind_x__` props key — so none reaches a face entity to resolve to. What such a pair BINDS is the opposite case: a ref cell, a bind's right-hand side, ordinary reads that do reach one and stay counted",
   }],
   ['gate-prefix', {
-    is: 'the `@app.data` in a gate — the lowering keeps only the route name after it',
+    is: 'the `@stash` in a gate — the lowering keeps only the route name after it',
     why: "erased whole, so no part of it reaches the face; RULINGS.md independently pins these segments to silence, and counting them here would leave two instruments disagreeing about the same bytes",
   }],
   ['context-channel', {
@@ -2299,7 +2299,7 @@ if (RUN_GRAMMAR) {
   // ── Member-read spelling: the house rule, judged both ways ──
   // A component reads what it DECLARES bare — state, computed, readonly,
   // methods, gates, and props at their reads — and spells what it is
-  // PROVIDED with the sigil: `@app`, `@router`, `@params`, `@query`, and
+  // PROVIDED with the sigil: `@stash`, `@router`, `@params`, `@query`, and
   // `@rest` under `extends`. The `@name` read of a declared member is still a
   // path the mapping must carry (ThisProperty maps the member through a
   // span-less `this`), so this table lists the reads that keep it exercised,
@@ -2311,7 +2311,7 @@ if (RUN_GRAMMAR) {
       ['bump', 'the `@name` read path — one token keeps the ThisProperty mapping exercised while every other member read in the corpus is bare'],
     ])],
   ]);
-  const PROVIDED_NAMES = new Set(['app', 'router', 'params', 'query', 'rest']);
+  const PROVIDED_NAMES = new Set(['stash', 'router', 'params', 'query', 'rest']);
   const MEMBER_DECL_HEADS = new Set(['typed-var', 'state', 'readonly', 'computed', '=', 'gate']);
   const isThisProp = (x) => Array.isArray(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && typeof x[2] === 'string';
   const isWriteHead = (h) => typeof h === 'string' && (h === '++' || h === '--'

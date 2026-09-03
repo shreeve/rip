@@ -319,7 +319,7 @@ source list:
 ```
 
 The list may contain authored browser Rip, browser-safe package source,
-generated browser schema projections, and authored `data.rip` when present. It
+generated browser schema projections, and authored `seed.rip` when present. It
 does not contain ordinary assets, API implementation, ORM model behavior, or
 `rip/app`.
 `rip/app` and the browser compiler/runtime are already embedded in

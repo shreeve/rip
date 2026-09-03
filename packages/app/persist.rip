@@ -26,8 +26,8 @@ resolveStorage = (opts) ->
 # What persistence needs of a storage: the three Web Storage calls it makes.
 export type StashStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
-  target = unwrapStash(app) or app
+export def persistStash(stash, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
+  target = unwrapStash(stash) or stash
   return (-> null) if target[PERSISTED]
   target[PERSISTED] = true
   storage = resolveStorage opts
@@ -36,7 +36,7 @@ export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: n
 
   try
     saved = storage.getItem storageKey
-    _mergePlain app.data, JSON.parse(saved) if saved
+    _mergePlain stash, JSON.parse(saved) if saved
   catch error
     null
 
@@ -44,7 +44,7 @@ export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: n
   save = ->
     pending = null
     try
-      storage.setItem storageKey, JSON.stringify(unwrapStash(app.data), sourceReplacer)
+      storage.setItem storageKey, JSON.stringify(unwrapStash(stash), sourceReplacer)
     catch error
       null
     return
@@ -65,20 +65,18 @@ export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: n
 
   # Purge cancels any pending debounced save, so reset()'s own baseline
   # writes cannot re-create the snapshot one debounce later.
-  dataRaw = unwrapStash app.data
-  if dataRaw? and typeof dataRaw is 'object'
-    Object.defineProperty dataRaw, PURGE,
-      value: ->
-        if pending?
-          clearTimeout pending
-          pending = null
-        try
-          storage.removeItem storageKey
-        catch error
-          null
-        return
-      configurable: true
-      writable: true
+  Object.defineProperty target, PURGE,
+    value: ->
+      if pending?
+        clearTimeout pending
+        pending = null
+      try
+        storage.removeItem storageKey
+      catch error
+        null
+      return
+    configurable: true
+    writable: true
 
   disposed = false
   ->
@@ -87,6 +85,6 @@ export def persistStash(app, opts: { local?: boolean, key?: string, debounce?: n
     disposeEffect?()
     window.removeEventListener 'beforeunload', save if typeof window isnt 'undefined'
     save()
-    dataRaw[PURGE] = null if dataRaw? and typeof dataRaw is 'object'
+    target[PURGE] = null
     target[PERSISTED] = false
     return

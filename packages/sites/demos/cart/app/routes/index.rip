@@ -2,8 +2,8 @@ import { Button } from '../components/button.rip'
 import { title, formatPrice } from '../config.rip'
 
 export Products = component
-  products <~ @app.data.products
-  cart     ~= @app.data.cart
+  products <~ @stash.products
+  cart     ~= @stash.cart
 
   search ~= @router.query.search ?? ''
   sort   ~= @router.query.sort ?? ''

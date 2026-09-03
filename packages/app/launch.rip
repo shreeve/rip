@@ -1,7 +1,8 @@
 # Launch — the one supported application boot path.
 #
-# launch() receives a bundle OBJECT and assembles the app: stash with
-# seed data, component registry, route manifest, router, and renderer,
+# launch() receives a bundle OBJECT and assembles the app: the stash
+# from its declaration, seeded; component registry, route manifest,
+# router, and renderer,
 # wired together and started. Fetching bundles, compiling sources, and
 # watch transports belong to browser delivery; launch stays
 # Node-testable by taking every host concern as an option with the
@@ -11,12 +12,14 @@
 #
 #   modules    route/app sources keyed by store path (registry text)
 #   compiled   precompiled module objects keyed by store path
-#   data       seed values overlaid onto the stash — a seed never
+#   seed       values overlaid onto the stash at boot — a seed never
 #              overwrites a source cell
 #
 # The application declares its stash in the bundle module
-# `stash.rip` through its `stash` export; the `stash` option
-# overrides it for tests and embedding hosts.
+# `stash.rip` through its `stash` export; the `declaration` option
+# overrides it for tests and embedding hosts. The declaration is the
+# baseline (cells by reference, plain values as defaults); the bundle's
+# `seed` is overlaid on top of it.
 #
 # The `components` option injects the component store (Workspace implements
 # the same interface); omitted,
@@ -26,7 +29,7 @@
 # bundle. destroy() tears down in reverse and restores every global it
 # installed.
 
-import { createStash, _cloneSeed, _stampDefaults, _mergePlain } from './stash.rip'
+import { createStash, _cloneDeclaration, _stampDefaults, _mergePlain } from './stash.rip'
 import { createComponents, ComponentsStore } from './components.rip'
 import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter, RouterAdapter, Router } from './router.rip'
@@ -41,7 +44,7 @@ export type LaunchOpts =
   adapter?: RouterAdapter
   base?: string
   hash?: boolean
-  stash?: Record<string, any>
+  declaration?: Record<string, any>
   components?: ComponentsStore
   links?: LinkHost
   persist?: boolean | 'local' | 'session'
@@ -49,7 +52,7 @@ export type LaunchOpts =
   onError?: (failure: GateFailure | { status: number, path: string }) => void
 
 export type LaunchResult =
-  app: Record<string, any>
+  stash: Record<string, any>
   components: ComponentsStore
   router: Router
   renderer: Renderer
@@ -66,8 +69,8 @@ validBundle = (bundle) ->
     continue unless section?
     unless typeof section is 'object' and not Array.isArray(section)
       fail "launch bundle #{key} must be an object of store paths"
-  if bundle.data? and (typeof bundle.data isnt 'object' or Array.isArray(bundle.data))
-    fail 'launch bundle data must be an object'
+  if bundle.seed? and (typeof bundle.seed isnt 'object' or Array.isArray(bundle.seed))
+    fail 'launch bundle seed must be an object'
   bundle
 
 STORE_METHODS = ['read', 'write', 'del', 'exists', 'size', 'list', 'listAll', 'load', 'watch', 'getCompiled', 'setCompiled']
@@ -79,7 +82,7 @@ validComponents = (store) ->
       fail "launch components store is missing '#{method}'"
   store
 
-export validatePrepared = (value, stash = null) ->
+export validatePrepared = (value, declaration = null) ->
   bundle = validBundle value
   paths = Set.new [
     ...Object.keys(bundle.modules ?? {})
@@ -88,12 +91,12 @@ export validatePrepared = (value, stash = null) ->
   routePaths = [...paths].filter (path) -> path.startsWith ROUTE_ROOT + '/'
   buildRoutes routePaths, ROUTE_ROOT
   stashModule = bundle.compiled?['stash.rip']
-  seed = stash ?? stashModule?.stash
-  if not seed? and stashModule?
+  declared = declaration ?? stashModule?.stash
+  if not declared? and stashModule?
     fail "the bundle's 'stash.rip' module must export 'stash'"
-  if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
+  if declared? and (typeof declared isnt 'object' or Array.isArray(declared))
     fail 'the application stash must be a plain object'
-  { bundle, seed }
+  { bundle, declaration: declared }
 
 defaultTarget = ->
   unless typeof document isnt 'undefined' and typeof document.querySelector is 'function'
@@ -107,27 +110,27 @@ defaultTarget = ->
 
 export def launch(opts: LaunchOpts): LaunchResult
   fail 'launch requires an options object' unless opts? and typeof opts is 'object'
-  fail 'an application is already launched; destroy it first' if globalThis.__ripApp?
-  prepared = validatePrepared opts.bundle, opts.stash
+  fail 'an application is already launched; destroy it first' if globalThis.__ripStash?
+  prepared = validatePrepared opts.bundle, opts.declaration
   bundle = prepared.bundle
   target = opts.target ?? defaultTarget()
   adapter = opts.adapter ?? browserAdapter()
 
-  # The stash: an explicit option wins; otherwise the bundle's
+  # The declaration: an explicit option wins; otherwise the bundle's
   # `stash.rip` module provides it through its `stash` export.
   # A stash module without the export is a named mistake, never a
   # silently empty application.
-  seed = prepared.seed
-  # The seed clones on the way in (cells by reference): the declaration
+  declaration = prepared.declaration
+  # The declaration clones on the way in (cells by reference): the
   # object outlives this launch, and its next launch must start from
   # the declared baseline, not this session's writes.
-  app = createStash { data: _cloneSeed(seed ?? {}) }
+  stash = createStash _cloneDeclaration(declaration ?? {})
 
-  # Seed overlay: bundle data merges onto plain keys at every depth; a
+  # Seed overlay: the bundle seed merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is
   # never touched by a JSON seed.
-  _mergePlain app.data, bundle.data ?? {}
-  _stampDefaults app.data
+  _mergePlain stash, bundle.seed ?? {}
+  _stampDefaults stash
 
   components = if opts.components? then validComponents(opts.components) else createComponents()
   components.load bundle.modules if bundle.modules?
@@ -145,7 +148,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   renderer = createRenderer
     router: router
-    app: app
+    stash: stash
     components: components
     target: target
     onError: opts.onError
@@ -178,7 +181,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   disposePersist = null
   if opts.persist
-    disposePersist = persistStash app,
+    disposePersist = persistStash stash,
       local: opts.persist is 'local'
       key: '__rip_app'
       storage: opts.storage
@@ -188,7 +191,7 @@ export def launch(opts: LaunchOpts): LaunchResult
     return if destroyed
     destroyed = true
     # Every disposer runs; errors aggregate. Globals ALWAYS clear — a
-    # stuck __ripApp bricks every future launch. Destroy latches
+    # stuck __ripStash bricks every future launch. Destroy latches
     # `destroyed` before work so a mid-teardown throw cannot leave the
     # sentinel set with no recovery path.
     errors = []
@@ -204,7 +207,7 @@ export def launch(opts: LaunchOpts): LaunchResult
     run -> router.destroy()
     run -> unwatch()
     run -> disposePersist?()
-    delete globalThis.__ripApp if globalThis.__ripApp is app
+    delete globalThis.__ripStash if globalThis.__ripStash is stash
     delete globalThis.__ripRouter if globalThis.__ripRouter is router
     if errors.length is 1
       throw errors[0]
@@ -214,7 +217,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   # A failing start must not wedge the process: destroy clears the
   # globals even when a disposer throws, then the failure propagates.
-  globalThis.__ripApp = app
+  globalThis.__ripStash = stash
   globalThis.__ripRouter = router
   try
     # #app may hold a static loader; from here the mount point is the
@@ -229,4 +232,4 @@ export def launch(opts: LaunchOpts): LaunchResult
     destroy()
     throw error
 
-  { app, components, router, renderer, destroy }
+  { stash, components, router, renderer, destroy }

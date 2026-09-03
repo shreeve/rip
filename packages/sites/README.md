@@ -849,7 +849,7 @@ package, or server-only browser code rejects before publication.
   "hash": "APP123",
   "list": [
     ["rip/http/index.rip", "export class HTTPError ..."],
-    ["data.rip", "export data = ..."],
+    ["seed.rip", "export seed = ..."],
     ["routes/index.rip", "export Index = component ..."]
   ]
 }

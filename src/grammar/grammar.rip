@@ -455,7 +455,7 @@ grammar =
   ]
 
   # Render-ready gates bind a private reactive component member to a
-  # literal @app.data path. The emitter validates component placement,
+  # literal @stash path. The emitter validates component placement,
   # target visibility, path shape, and keyed-source form. A called path
   # keeps its argument list as a spread `key` role so bad arity still
   # reaches the emitter as a precise diagnostic and every key span is a

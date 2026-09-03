@@ -350,22 +350,14 @@
       {
         "line": 105,
         "character": 12,
-        "token": "app",
+        "token": "stash",
         "expect": null,
         "rule": "gate path segment",
         "why": "ruled silent — measured null 2026-07-23, green"
       },
       {
         "line": 105,
-        "character": 16,
-        "token": "data",
-        "expect": null,
-        "rule": "gate path segment",
-        "why": "ruled silent — measured null 2026-07-23, green"
-      },
-      {
-        "line": 105,
-        "character": 21,
+        "character": 18,
         "token": "stats",
         "expect": null,
         "rule": "gate path segment",
@@ -373,7 +365,7 @@
       },
       {
         "line": 106,
-        "character": 21,
+        "character": 18,
         "token": "flags",
         "expect": null,
         "rule": "gate path segment",
@@ -381,7 +373,7 @@
       },
       {
         "line": 107,
-        "character": 19,
+        "character": 16,
         "token": "rows",
         "expect": null,
         "rule": "gate path segment",
@@ -389,7 +381,7 @@
       },
       {
         "line": 107,
-        "character": 24,
+        "character": 21,
         "token": "params",
         "expect": null,
         "rule": "gate key params",
@@ -397,7 +389,7 @@
       },
       {
         "line": 107,
-        "character": 31,
+        "character": 28,
         "token": "id",
         "expect": null,
         "rule": "gate key params",
@@ -413,7 +405,7 @@
       },
       {
         "line": 108,
-        "character": 38,
+        "character": 35,
         "token": "user",
         "expect": null,
         "rule": "gate path segment",
@@ -421,7 +413,7 @@
       },
       {
         "line": 109,
-        "character": 28,
+        "character": 25,
         "token": "mode",
         "expect": null,
         "rule": "gate path segment",
@@ -429,7 +421,7 @@
       },
       {
         "line": 110,
-        "character": 29,
+        "character": 26,
         "token": "entries",
         "expect": null,
         "rule": "gate path segment",

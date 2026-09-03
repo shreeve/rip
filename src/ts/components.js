@@ -834,7 +834,7 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name, o
 // state) — that site names this constant as its co-owner, and a name
 // added there without a line here resurfaces as a TS7022 cycle on the
 // first computed that reads it.
-export const AMBIENT_FIELDS = ['app', 'router', 'params', 'query'];
+export const AMBIENT_FIELDS = ['stash', 'router', 'params', 'query'];
 
 // The API every component instance carries from the runtime BASE
 // (src/runtime/components.js). The inlined runtime is destructured
@@ -862,7 +862,7 @@ export const runtimeApiDeclares = (self) =>
 
 // The CLASS road's half of the ambience: with a discovered stash the
 // class declares the same runtime-injected members the companion
-// interface carries, so the REAL copies of `@app`/`@router` reads (the
+// interface carries, so the REAL copies of `@stash`/`@router` reads (the
 // `_init` lowering, hooks, methods — where `this` is the class) type
 // and hover as what the runtime injects instead of falling to
 // error-`any` — which also swallowed wrong stash paths whole. NON-
@@ -879,12 +879,12 @@ export const ambientClassDeclares = (info) => {
   for (const name of AMBIENT_FIELDS) {
     if (taken.has(name)) continue;
     // Not a `declare`: the written object type would echo its import()
-    // splices verbatim in the hover. Inferred through `__ripAmbientApp`
+    // splices verbatim in the hover. Inferred through `__ripAmbientStash`
     // (the emitter declares it once at module scope, from the emit()
     // tail), the member's type is INSTANTIATED and prints resolved.
     // TS-only like every line here; the runtime's injection remains the
     // only real assignment.
-    if (name === 'app') lines.push(`app = __ripAmbientApp(0 as any as ${appDataType(info.appStashSpec)} & ${stashMethodsType(info.appStashSpec)});`);
+    if (name === 'stash') lines.push(`stash = __ripAmbientStash(0 as any as ${stashAmbienceType(info.appStashSpec)});`);
     else if (name === 'router') lines.push(`declare router: ${routerAmbienceType(info)};`);
     else if (name === 'params') lines.push(`declare params: ${info.routeParams ?? 'Record<string, string>'};`);
     else lines.push(`declare ${name}: Record<string, string>;`);
@@ -914,8 +914,8 @@ export const routerAmbienceType = (info) => {
   return `Omit<import('rip/app').Router, 'push' | 'replace'> & { ${nav('push')} ${nav('replace')} }`;
 };
 
-export const appDataType = (spec) =>
-  `import('rip/app').AppData<import(${JSON.stringify(spec)}).__RipStash>`;
+export const stashDataType = (spec) =>
+  `import('rip/app').StashData<import(${JSON.stringify(spec)}).__RipStash>`;
 
 // The stash-method surface, instantiated at the projected data shape so
 // `source()` answers TYPED handles: a top-level key resolves through
@@ -925,35 +925,35 @@ export const appDataType = (spec) =>
 // purpose, never an inline re-spelling of `source`: an anonymous type
 // literal's signature internals print AS WRITTEN in hover, so an
 // inlined overload pair echoes its `import(...)` splices on every
-// `@app` hover — the same leak the `__ripAmbientApp` indirection
+// `@stash` hover — the same leak the `__ripAmbientStash` indirection
 // exists to prevent, and the editor's no-leak sweep gates it. The cost
 // is that a typo'd top-level key passes untyped instead of erroring:
 // telling a dotted path from a typo needs a template-literal type,
 // which the package cannot spell (Rip's structured types carry none)
 // and this splice must not inline.
 export const stashMethodsType = (spec) =>
-  `import('rip/app').StashMethods<${appDataType(spec)}>`;
+  `import('rip/app').StashMethods<${stashDataType(spec)}>`;
 
-// The ambience's `app` member — ONE spelling for the interface road and
-// the class road. `data` is what the runtime delivers: a Stash — the
+// The ambience's `stash` member — ONE spelling for the interface road
+// and the class road: what the runtime delivers is a Stash — the
 // projected entries plus the StashMethods surface (`source()`, `inc`,
 // `reset`, …), spelled as an intersection. gateProjection stays on the
-// bare AppData: a gate path names a data entry, never a method.
-export const appAmbienceType = (spec) =>
-  `{ data: ${appDataType(spec)} & ${stashMethodsType(spec)}; [key: string]: any }`;
+// bare StashData: a gate path names a stash entry, never a method.
+export const stashAmbienceType = (spec) =>
+  `${stashDataType(spec)} & ${stashMethodsType(spec)}`;
 
 // A render gate's member type, projected from the stash the gate reads:
-// `<~` admits only a literal `@app.data.<path>` (the emitter rejects the
-// rest), so the member IS `NonNullable<AppData[…path]>` — non-null by the
+// `<~` admits only a literal `@stash.<path>` (the emitter rejects the
+// rest), so the member IS `NonNullable<StashData[…path]>` — non-null by the
 // gate's own contract (the body does not render until the value exists) —
 // and a keyed gate is the family's return, un-nulled the same way.
 export const gateProjection = (m, spec) => {
   const chain = (n) => (typeof n === 'string' ? [n]
     : Array.isArray(n) && n[0] === '.' && n.length === 3 ? (chain(n[1]) ?? []).concat([n[2]]) : null);
   const segs = Array.isArray(m.node) && m.node.length >= 3 ? chain(m.node[2]) : null;
-  if (!segs || segs.length < 4 || segs[0] !== 'this' || segs[1] !== 'app' || segs[2] !== 'data') return null;
-  let t = appDataType(spec);
-  for (const p of segs.slice(3)) t = `${t}[${JSON.stringify(p)}]`;
+  if (!segs || segs.length < 3 || segs[0] !== 'this' || segs[1] !== 'stash') return null;
+  let t = stashDataType(spec);
+  for (const p of segs.slice(2)) t = `${t}[${JSON.stringify(p)}]`;
   if (m.node.length > 3) t = `ReturnType<Extract<${t}, (...args: any) => any>>`;
   return `NonNullable<${t}>`;
 };
@@ -1043,8 +1043,8 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
     if (memberNames.has(name)) continue;
     // With a discovered stash, the ambience carries the runtime's real
     // types (still optional — a hand-built value owes none of them):
-    // `app.data` is the app's own surface (AppData projects each entry to
-    // what the runtime delivers, so an unannotated `cart ~= @app.data.cart`
+    // `stash` is the app's data surface (StashData projects each entry to
+    // what the runtime delivers, so an unannotated `cart ~= @stash.cart`
     // infers), `router` is the Router the runtime injects, and
     // `params`/`query` are its live route-state views (getters onto
     // `router.params`/`router.query` — src/runtime/components.js). The
@@ -1052,8 +1052,8 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
     // discovery that found the stash is what guarantees `rip/app` rides
     // the closure.
     if (info.appStashSpec) {
-      if (name === 'app') {
-        lines.push({ segs: [{ text: `app?: ${appAmbienceType(info.appStashSpec)};` }] });
+      if (name === 'stash') {
+        lines.push({ segs: [{ text: `stash?: ${stashAmbienceType(info.appStashSpec)};` }] });
         continue;
       }
       if (name === 'router') {

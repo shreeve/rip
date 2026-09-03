@@ -50,12 +50,12 @@ export type SourceValue<T, A extends SourceArgs> = A extends [] ? T | null : A e
 export type SourceDeclaration<T, A extends SourceArgs> = { readonly __ripSource: { value: T, args: A } }
 
 # The app's data surface as a TYPE: each stash entry projected to what
-# `@app.data.<key>` delivers at runtime — a source declaration to its
+# `@stash.<key>` delivers at runtime — a source declaration to its
 # SourceValue (`T | null` for a singleton, the callable family for a
 # keyed source), everything else to itself. The component face splices
-# `AppData<import('<stash>').__RipStash>` into the `app` ambience, which
-# is how an unannotated `cart ~= @app.data.cart` infers.
-export type AppData<S> = { [K in keyof S]: S[K] extends SourceDeclaration<infer T, infer A> ? SourceValue<T, A> : S[K] }
+# `StashData<import('<stash>').__RipStash>` into the `stash` ambience, which
+# is how an unannotated `cart ~= @stash.cart` infers.
+export type StashData<S> = { [K in keyof S]: S[K] extends SourceDeclaration<infer T, infer A> ? SourceValue<T, A> : S[K] }
 
 SOURCE =! :rip.source
 SOURCE_FAMILY =! :rip.source.family

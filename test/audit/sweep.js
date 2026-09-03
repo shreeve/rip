@@ -220,7 +220,7 @@ function subjectOf(flat) {
   // The parenthesized heads: TypeScript's own, and the kinds rip mints in
   // their place — a `(state)`, `(prop)`, `(field)` … head is followed by
   // the same `name:` shape, so the one walk below names its subject.
-  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot|rest|app|router)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
+  const head = /^(?:\(alias\) )*(?:\((?:property|parameter|method|accessor|local class|local function|state|prop|computed|readonly|effect|gate|derived|field|bind|key|slot|rest|stash|router)\) )?(?:readonly )?(?:const |let |var |function |import )?/.exec(flat)
   if (head !== null) {
     // Walk a dotted name whose segments may carry generic argument
     // lists: `Array<Pick<…>>.slice` names `slice`.

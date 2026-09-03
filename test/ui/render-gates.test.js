@@ -22,7 +22,7 @@ const fails = (source, pattern) => {
 
 describe('render gates', () => {
   test('only adjacent `<~` tokenizes as GATE', () => {
-    const tight = tokenize('x <~ @app.data.x').tokens;
+    const tight = tokenize('x <~ @stash.x').tokens;
     expect(tight.find((token) => token.kind === 'GATE')).toMatchObject({
       value: '<~',
       start: 2,
@@ -37,10 +37,10 @@ describe('render gates', () => {
   test('path and key analysis emits only literal app descriptors', () => {
     const source = [
       'A = component',
-      '  account <~ @app.data.accounts.current',
-      '  byParam <~ @app.data.order(params.id)',
-      '  byQuery <~ @app.data.search(@query.term)',
-      '  byLiteral <~ @app.data.page(2)',
+      '  account <~ @stash.accounts.current',
+      '  byParam <~ @stash.order(params.id)',
+      '  byQuery <~ @stash.search(@query.term)',
+      '  byLiteral <~ @stash.page(2)',
       '  render null',
     ].join('\n');
     const { code } = compile(source, { runtimeDelivery: 'none' });
@@ -51,29 +51,29 @@ describe('render gates', () => {
   });
 
   test('placement, target, path, arity, and key failures are precisely positioned', () => {
-    const outside = 'user <~ @app.data.user';
+    const outside = 'user <~ @stash.user';
     const outsideError = fails(outside, /only be used as a direct component body line/);
     expect(outside.slice(outsideError.start, outsideError.end)).toBe(outside);
 
-    const publicTarget = 'C = component\n  @user <~ @app.data.user\n  render null';
+    const publicTarget = 'C = component\n  @user <~ @stash.user\n  render null';
     const publicError = fails(publicTarget, /render gate 'user' must be private/);
     expect(publicTarget.slice(publicError.start, publicError.end)).toBe('@user');
 
     const nonliteral = 'C = component\n  user <~ someVar.user\n  render null';
-    const pathError = fails(nonliteral, /requires a literal @app\.data\.<path>/);
+    const pathError = fails(nonliteral, /requires a literal @stash\.<path>/);
     expect(nonliteral.slice(pathError.start, pathError.end)).toBe('someVar.user');
 
-    const arity = 'C = component\n  user <~ @app.data.user(params.id, query.tab)\n  render null';
+    const arity = 'C = component\n  user <~ @stash.user(params.id, query.tab)\n  render null';
     const arityError = fails(arity, /takes exactly one key argument/);
     expect(arity.slice(arityError.start, arityError.end)).toBe('params.id, query.tab');
 
-    const badKey = 'C = component\n  user <~ @app.data.user(local)\n  render null';
+    const badKey = 'C = component\n  user <~ @stash.user(local)\n  render null';
     const keyError = fails(badKey, /key may only be a literal or a params\/query path/);
     expect(badKey.slice(keyError.start, keyError.end)).toBe('local');
   });
 
   test('gate lowering records target, operator, rhs, and key mapping facts', () => {
-    const source = 'A = component\n  order <~ @app.data.order(params.id)\n  render null';
+    const source = 'A = component\n  order <~ @stash.order(params.id)\n  render null';
     const result = compile(source, { runtimeDelivery: 'none' });
     const gate = result.stores.nodesByKind('gate')[0];
     expect(result.stores.rolesOf(gate.nodeId).map((row) => row.role))
@@ -106,7 +106,7 @@ describe('render gates', () => {
     const source = [
       '__gateBind = null',
       'A = component',
-      '  user <~ @app.data.user',
+      '  user <~ @stash.user',
       '  render null',
     ].join('\n');
     for (const runtimeDelivery of ['none', 'import', 'inline']) {
@@ -124,7 +124,7 @@ describe('render gates', () => {
   test('the TypeScript face makes gated constructors and static mount private', () => {
     const { code } = compile([
       'Page = component',
-      '  user: { name: string } <~ @app.data.user',
+      '  user: { name: string } <~ @stash.user',
       '  render null',
     ].join('\n'), { face: 'ts', runtimeDelivery: 'none' });
     expect(code).toContain('declare static mount: never;');
@@ -135,7 +135,7 @@ describe('render gates', () => {
   test('import and inline delivery reject direct gated construction', () => {
     const source = [
       'A = component',
-      '  user <~ @app.data.user',
+      '  user <~ @stash.user',
       '  render null',
       'A.new()',
     ].join('\n');

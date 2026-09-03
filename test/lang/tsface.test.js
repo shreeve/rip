@@ -80,8 +80,8 @@ const REGION_SHAPES = [
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
   /^declare function __ripRoute<const T extends \(.*\)>\(s: T\): T;$/su, // the route helper declare, union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
-  /^app = __ripAmbientApp\(0 as any as .*\);$/su,           // the stash ambience member (class road)
-  /^declare function __ripAmbientApp<T>\(v: T\): \{ data: T; \[key: string\]: any \};$/u, // the ambience helper declare
+  /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
+  /^declare function __ripAmbientStash<T>\(v: T\): T;$/u, // the ambience helper declare
   /^declare function __ripSourceKey<const T extends \(.*\)>\(s: T\): T;$/su, // the stash-key helper declare
 ];
 
@@ -211,9 +211,9 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     const stashed = [
       'Page = component',
       '  ok: ->',
-      "    @app.data.source('user.name').reset()",
+      "    @stash.source('user.name').reset()",
       "    key = 'user'",
-      '    @app.data.source(key).reset()',
+      '    @stash.source(key).reset()',
       '  render null',
       '',
     ].join('\n');
@@ -1479,14 +1479,14 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   });
 
   test('a provided name notes its kind at the chain root from every body position, a call\'s callee included', () => {
-    // `@app` / `@router` are read like members but declared by the runtime
+    // `@stash` / `@router` are read like members but declared by the runtime
     // (RULINGS.md, Components): the read's own bytes carry the provision's
     // label wherever the chain sits — a computed, a method body, and the
     // callee of a call, which the chain driver enters as a call node.
     // Source order: the emitter notes a method body's read after the members'.
-    const rows = (src) => ts(src).kinds.filter((k) => k.label === 'app' || k.label === 'router').sort((a, b) => a.start - b.start).map((k) => `${k.start}:${src.slice(k.start, k.end)}:${k.label}`);
-    const src = 'C = component\n  a ~= @router.query.q\n  mounted: -> @router.onNavigate(-> 1)\n  b: -> @app.data.x?.y()\n';
-    expect(rows(src)).toEqual(['22:router:router', '52:router:router', '85:app:app']);
+    const rows = (src) => ts(src).kinds.filter((k) => k.label === 'stash' || k.label === 'router').sort((a, b) => a.start - b.start).map((k) => `${k.start}:${src.slice(k.start, k.end)}:${k.label}`);
+    const src = 'C = component\n  a ~= @router.query.q\n  mounted: -> @router.onNavigate(-> 1)\n  b: -> @stash.x?.y()\n';
+    expect(rows(src)).toEqual(['22:router:router', '52:router:router', '85:stash:stash']);
   });
 
   test('a served `key:` / `<=>` record points at a wrap member typed as the whole expression', () => {
@@ -1919,7 +1919,7 @@ describe('soak prototype access', () => {
 // `declare global` the bare name resolves to the global being declared
 // (TS2502, driven against real tsc). Plain `=` and non-top-level `??=`
 // deliberately declare nothing: overwrites (fetch mocks) and lifecycle
-// installs (an app's guarded __ripApp, deleted on destroy) are not
+// installs (an app's guarded __ripStash, deleted on destroy) are not
 // vocabulary.
 describe('globalThis ??= declares the global', () => {
   test('top-level ??= emits the declare-global block, typed through the alias', () => {

@@ -118,7 +118,7 @@ materializeSharedSchemas = (modules, moduleFiles, appDir, appRoot) ->
 
   consumed
 
-export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null, appDir = null, appRoot = null } = {}) ->
+export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = null, appRoot = null } = {}) ->
   unless modules? and typeof modules is 'object'
     throw TypeError.new 'rip: assembleBundle requires a modules object'
 
@@ -130,7 +130,6 @@ export assembleBundle = ({ modules, packagesDir, data = null, moduleFiles = null
   for path in Object.keys bundle.modules
     if path is 'rip/app' or path.startsWith('rip/app/')
       throw Error.new "rip: App module '#{path}' collides with embedded browser package 'rip/app'"
-  bundle.data = data if data?
 
   if moduleFiles? and appDir?
     projectionInputs = materializeSharedSchemas(bundle.modules, moduleFiles, appDir, appRoot) or []

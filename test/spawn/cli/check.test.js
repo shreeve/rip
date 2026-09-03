@@ -4253,7 +4253,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const files = {
       'index.rip': "console.log 'serve'\n",
       'app/stash.rip': "export type Todo =\n  id: number\n  label: string\n\ntodos: Todo[] = []\n\nexport stash =\n  todos: todos\n",
-      'app/routes/page.rip': "export Page = component\n  todos ~= @app.data.todos\n  labels ~= todos.map((t) -> t.label)\n  q ~= @router.query.q ?? ''\n  render null\n",
+      'app/routes/page.rip': "export Page = component\n  todos ~= @stash.todos\n  labels ~= todos.map((t) -> t.label)\n  q ~= @router.query.q ?? ''\n  render null\n",
     };
     const dir = workspace(files, { strict: true });
     try {
@@ -4263,7 +4263,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(JSON.parse(single.stdout)).toEqual([]);
       // The face carries the splice; the stash face carries its type.
       const face = fs.readFileSync(path.join(dir, '.rip/check/app/routes/page.rip.ts'), 'utf8');
-      expect(face).toContain("import('rip/app').AppData<import(\"../stash.rip\").__RipStash>");
+      expect(face).toContain("import('rip/app').StashData<import(\"../stash.rip\").__RipStash>");
       // The router rides the same discovery: the ambience carries the
       // runtime's Router — with a route tree present, the union-checked
       // construction (Omit keeps every non-navigation member, so the
@@ -4275,7 +4275,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // ambience types the `_init` copy — the mapped one) AND on the
       // gate road (the face twin IS the read the author wrote) — instead
       // of collapsing to error-`any`.
-      fs.writeFileSync(path.join(dir, 'app/routes/typo.rip'), "export Typo = component\n  bad ~= @app.data.missing\n  worse <~ @app.data.absent\n  render null\n");
+      fs.writeFileSync(path.join(dir, 'app/routes/typo.rip'), "export Typo = component\n  bad ~= @stash.missing\n  worse <~ @stash.absent\n  render null\n");
       const typo = check(dir, ['app/routes/typo.rip', '--json']);
       const typoRows = JSON.parse(typo.stdout);
       expect(typoRows.some((d) => d.code === 2339 && /missing/.test(d.message))).toBe(true);
@@ -4434,9 +4434,9 @@ describeExtended('rip check: typed routes over the real server', () => {
         "    @router.push (@router.path ?? '/') + '?page=2'",
         '    @router.push @data.href',
         '    @router.back()',
-        "    @app.data.source('user').reset()",
-        "    @app.data.source('user.name').reset()",
-        "    @app.data.source('order', 'o1').value?.total",
+        "    @stash.source('user').reset()",
+        "    @stash.source('user.name').reset()",
+        "    @stash.source('order', 'o1').value?.total",
         '  render',
         "    a href: '/cart', 'literal'",
         "    a href: '/settings', 'grouped'",
@@ -4474,7 +4474,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       // A typo'd source key errors AT THE KEY — the `__ripSourceKey`
       // wrap checks syntactic literals against the stash's key union
       // (dotted paths under a real key stay legal on the template arm).
-      "    @app.data.source('userz').reset()",
+      "    @stash.source('userz').reset()",
       '  render',
       "    a href: '/carts', 'typo'",
       '    a href: "/orderz/#{1}", \'template-typo\'',

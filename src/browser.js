@@ -776,9 +776,9 @@ export async function bootApp(opts = {}) {
   const watch = opts.watch === true || opts.feed != null;
   const program = createProgram(sources, debug, { hmr: watch });
   const workspace = app.createWorkspace();
-  const dataFor = modules => modules['data.rip']?.data;
+  const seedFor = modules => modules['seed.rip']?.seed;
   const launchWith = modules => app.launch({
-    bundle: { compiled: modules, data: dataFor(modules) },
+    bundle: { compiled: modules, seed: seedFor(modules) },
     components: workspace,
     target: opts.target,
     adapter: opts.adapter,
@@ -902,7 +902,7 @@ export async function bootApp(opts = {}) {
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
       applyPaths = staged.invalidated.filter(path => !path.startsWith('rip/'));
-      validatePrepared({ compiled: nextCompiled, data: dataFor(nextCompiled) });
+      validatePrepared({ compiled: nextCompiled, seed: seedFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
       rejected.add(change.hash);

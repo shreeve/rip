@@ -1048,7 +1048,7 @@ export function ripImportText(newText) {
 //
 //   the CONSUMED VOCABULARY the render walk records as it reads it
 //   (`noteVocabulary`, src/emitter.js) — DSL words the lowering spends
-//   whole: the render channel's own names and a gate's `@app.data`
+//   whole: the render channel's own names and a gate's `@stash`
 //   marker, which the lowering erases entirely, keeping only the route.
 //   RULINGS.md pins both to silence as their interim.
 export function noUserSymbolSpans({ stores, vocabulary = [], silences = [] }) {

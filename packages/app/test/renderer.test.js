@@ -72,8 +72,8 @@ const registry = entries => {
   return components;
 };
 
-describe('renderer injects app/router/params/query', () => {
-  test('constructed route instances see @app, @router, @params, and @query', async () => {
+describe('renderer injects stash/router/params/query', () => {
+  test('constructed route instances see @stash, @router, @params, and @query', async () => {
     const host = target();
     const pageRoot = node('page');
     let seen;
@@ -85,16 +85,16 @@ describe('renderer injects app/router/params/query', () => {
       get query() { return query; },
       path: '/orders/7',
     };
-    const app = { data: createStash({ cart: { items: [] } }) };
+    const stash = createStash({ cart: { items: [] } });
 
     class Page extends __Component {
       _init() {
         seen = {
-          app: this.app,
+          stash: this.stash,
           router: this.router,
           params: this.params,
           query: this.query,
-          cart: this.app.data.cart,
+          cart: this.stash.cart,
         };
       }
       _create() { return pageRoot; }
@@ -102,12 +102,12 @@ describe('renderer injects app/router/params/query', () => {
 
     const renderer = createRenderer({
       router,
-      app,
+      stash,
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
     await renderer.mount(route('page.rip', { params, query }));
-    expect(seen.app).toBe(app);
+    expect(seen.stash).toBe(stash);
     expect(seen.router).toBe(router);
     expect(seen.params).toEqual({ id: '7' });
     expect(seen.query).toEqual({ tab: 'posts' });
@@ -135,19 +135,17 @@ describe('renderer render gates', () => {
       _create() { return null; }
     }
 
-    const app = {
-      data: createStash({
-        settings: source({
-          fetch: async () => {
-            calls++;
-            return pending.promise;
-          },
-        }),
+    const stash = createStash({
+      settings: source({
+        fetch: async () => {
+          calls++;
+          return pending.promise;
+        },
       }),
-    };
+    });
     const renderer = createRenderer({
       router: { current: null, navigating: false },
-      app,
+      stash,
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -182,7 +180,7 @@ describe('renderer render gates', () => {
     const failures = [];
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ user: source({ fetch: async () => { throw problem; } }) }) },
+      stash: createStash({ user: source({ fetch: async () => { throw problem; } }) }),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
       onError: failure => failures.push(failure),
@@ -215,13 +213,11 @@ describe('renderer render gates', () => {
       _create() { return null; }
     }
 
-    const app = {
-      data: createStash({
-        plain: { value: 1 },
-        order: source({ kind: 'keyed', fetch: async key => ({ key }) }),
-        user: source({ fetch: async () => ({ name: 'Ada' }) }),
-      }),
-    };
+    const stash = createStash({
+      plain: { value: 1 },
+      order: source({ kind: 'keyed', fetch: async key => ({ key }) }),
+      user: source({ fetch: async () => ({ name: 'Ada' }) }),
+    });
     const components = registry({
       'plain.rip': { Plain },
       'missing.rip': { MissingKey },
@@ -229,7 +225,7 @@ describe('renderer render gates', () => {
     });
     const renderer = createRenderer({
       router: { current: null },
-      app,
+      stash,
       components,
       target: target(),
     });
@@ -255,7 +251,7 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ selection: source({ fetch: async () => null }) }) },
+      stash: createStash({ selection: source({ fetch: async () => null }) }),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -282,7 +278,7 @@ describe('renderer render gates', () => {
     for (const profile of [{}, { name: null }]) {
       const renderer = createRenderer({
         router: { current: null },
-        app: { data: createStash({ profile: source({ fetch: async () => profile }) }) },
+        stash: createStash({ profile: source({ fetch: async () => profile }) }),
         components: registry({ 'page.rip': { SingletonPage } }),
         target: target(),
       });
@@ -293,11 +289,9 @@ describe('renderer render gates', () => {
 
     const keyedRenderer = createRenderer({
       router: { current: null },
-      app: {
-        data: createStash({
-          order: source({ kind: 'keyed', fetch: async id => ({ id, detail: {} }) }),
-        }),
-      },
+      stash: createStash({
+        order: source({ kind: 'keyed', fetch: async id => ({ id, detail: {} }) }),
+      }),
       components: registry({ 'page.rip': { KeyedPage } }),
       target: target(),
     });
@@ -327,18 +321,16 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: {
-        data: createStash({
-          order: source({ kind: 'keyed', fetch: async id => {
-            calls.push(['order', id]);
-            return { id };
-          } }),
-          search: source({ kind: 'keyed', fetch: async term => {
-            calls.push(['search', term]);
-            return { term };
-          } }),
-        }),
-      },
+      stash: createStash({
+        order: source({ kind: 'keyed', fetch: async id => {
+          calls.push(['order', id]);
+          return { id };
+        } }),
+        search: source({ kind: 'keyed', fetch: async term => {
+          calls.push(['search', term]);
+          return { term };
+        } }),
+      }),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -369,18 +361,16 @@ describe('renderer render gates', () => {
       _create() { return null; }
     }
 
-    const app = {
-      data: createStash({
-        order: source({
-          kind: 'keyed',
-          fetch: async id => ({ detail: { total: id === 'o1' ? 42 : 0 } }),
-          staleTime: 'forever',
-        }),
+    const stash = createStash({
+      order: source({
+        kind: 'keyed',
+        fetch: async id => ({ detail: { total: id === 'o1' ? 42 : 0 } }),
+        staleTime: 'forever',
       }),
-    };
+    });
     const renderer = createRenderer({
       router: { current: null },
-      app,
+      stash,
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -389,7 +379,7 @@ describe('renderer render gates', () => {
     expect(binding.value).toBe(42);
     expect(binding.value).toBe(42);
     expect(keyCalls).toBe(1);
-    unwrapStash(app.data).order.cellFor('o1').write({ detail: { total: 43 } });
+    unwrapStash(stash).order.cellFor('o1').write({ detail: { total: 43 } });
     expect(binding.value).toBe(43);
     expect(keyCalls).toBe(1);
   });
@@ -407,28 +397,26 @@ describe('renderer render gates', () => {
       }
       _create() { return null; }
     }
-    const app = {
-      data: createStash({
-        user: source({
-          fetch: async () => ({
-            get profile() {
-              reads++;
-              return { name: 'Ada' };
-            },
-          }),
+    const stash = createStash({
+      user: source({
+        fetch: async () => ({
+          get profile() {
+            reads++;
+            return { name: 'Ada' };
+          },
         }),
       }),
-    };
+    });
     const renderer = createRenderer({
       router: { current: null },
-      app,
+      stash,
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
     await renderer.mount(route('page.rip'));
     expect(reads).toBe(1);
     expect(seen).toBe('Ada');
-    unwrapStash(app.data).user.write({
+    unwrapStash(stash).user.write({
       get profile() {
         reads++;
         return { name: 'Grace' };
@@ -452,12 +440,10 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: {
-        data: createStash({
-          peek: source({ fetch: async () => ({ name: 'peek' }) }),
-          reset: source({ fetch: async () => ({ name: 'reset' }) }),
-        }),
-      },
+      stash: createStash({
+        peek: source({ fetch: async () => ({ name: 'peek' }) }),
+        reset: source({ fetch: async () => ({ name: 'reset' }) }),
+      }),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -511,7 +497,7 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({
         'outer.rip': { Outer },
         'inner.rip': { Inner },
@@ -541,7 +527,7 @@ describe('renderer render gates', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({
         'layout.rip': { Layout },
         'page.rip': { Page },
@@ -575,7 +561,7 @@ describe('renderer render gates', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({
         'layout.rip': { Layout },
         'page.rip': { Page },
@@ -610,7 +596,7 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({
         'good.rip': { Good },
         'layout.rip': { PartialLayout },
@@ -672,7 +658,7 @@ describe('renderer render gates', () => {
     });
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components,
       target: host,
       onError: failure => failures.push(failure),
@@ -727,7 +713,7 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({
         'default.rip': { default: Page, Helper },
         'ambiguous.rip': { Helper, Other },
@@ -757,7 +743,7 @@ describe('renderer render gates', () => {
     };
     const renderer = createRenderer({
       router,
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     }).start();
@@ -787,12 +773,10 @@ describe('renderer render gates', () => {
 
     const renderer = createRenderer({
       router: { current: null, navigating: false },
-      app: {
-        data: createStash({
-          slow: source({ fetch: async () => staleLoad.promise }),
-          stopped: source({ fetch: async () => stopLoad.promise }),
-        }),
-      },
+      stash: createStash({
+        slow: source({ fetch: async () => staleLoad.promise }),
+        stopped: source({ fetch: async () => stopLoad.promise }),
+      }),
       components: registry({
         'slow.rip': { Slow },
         'stopped.rip': { Stopped },
@@ -852,7 +836,7 @@ describe('renderer render gates', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ user: source({ fetch: async () => ({ name: 'Ada' }) }) }) },
+      stash: createStash({ user: source({ fetch: async () => ({ name: 'Ada' }) }) }),
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -868,11 +852,17 @@ describe('renderer render gates', () => {
     expect(() => new Page()).toThrow('cannot be constructed directly');
   });
 
+  test('a stash option that is not a createStash proxy rejects at construction', () => {
+    const plain = { user: { name: 'Ada' } };
+    expect(() => createRenderer({ router: { current: null }, stash: plain, components: registry({}), target: target() }))
+      .toThrow(/built by createStash/);
+  });
+
   test('plain components reject renderer-only prop names', () => {
     class Plain extends __Component {
       _create() { return null; }
     }
-    for (const key of ['app', 'params', 'query']) {
+    for (const key of ['stash', 'params', 'query']) {
       expect(() => new Plain({ [key]: {} })).toThrow(`unknown prop '${key}'`);
     }
   });
@@ -904,7 +894,7 @@ describe('renderer navigation integration', () => {
     class B extends __Component { _create() { return node('b'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'a.rip': { A }, 'b.rip': { B } }),
       target: host,
     });
@@ -929,7 +919,7 @@ describe('renderer navigation integration', () => {
     class B extends __Component { _create() { return node('b'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'layout.rip': { Layout }, 'other.rip': { Other }, 'a.rip': { A }, 'b.rip': { B } }),
       target: host,
     });
@@ -950,7 +940,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
@@ -971,7 +961,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
@@ -994,7 +984,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
@@ -1018,7 +1008,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
@@ -1046,7 +1036,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'page.rip': { Page } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1077,7 +1067,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'home.rip': { Home }, 'page.rip': { Page } }),
       target: host,
     });
@@ -1102,7 +1092,7 @@ describe('renderer navigation integration', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'home.rip': { Home }, 'page.rip': { Page } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1142,7 +1132,7 @@ describe('renderer boundary reconciliation', () => {
     class Other extends __Component { _create() { return node('other'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'a.rip': { A }, 'b.rip': { B }, 'page.rip': { Page }, 'other.rip': { Other } }),
       target: host,
     });
@@ -1176,7 +1166,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'page.rip': { Page } }),
       target: host,
     });
@@ -1208,7 +1198,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'a.rip': { A }, 'broken.rip': { Broken } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1244,7 +1234,7 @@ describe('renderer boundary reconciliation', () => {
     class Settings extends __Component { _create() { return node('settings'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'profile.rip': { Profile }, 'settings.rip': { Settings } }),
       target: host,
     });
@@ -1278,7 +1268,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'outer.rip': { Outer }, 'inner.rip': { Inner }, 'page.rip': { Page } }),
       target: host,
     });
@@ -1303,7 +1293,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'page.rip': { Page } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1323,7 +1313,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
@@ -1348,7 +1338,7 @@ describe('renderer boundary reconciliation', () => {
     class C extends __Component { _create() { return node('c'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'layout.rip': { Layout }, 'a.rip': { A }, 'b.rip': { B }, 'c.rip': { C } }),
       target: host,
     });
@@ -1368,7 +1358,7 @@ describe('renderer boundary reconciliation', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({}) },
+      stash: createStash({}),
       components: registry({ 'page.rip': { Page } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1398,7 +1388,7 @@ describe('renderer boot failure card', () => {
     const failures = [];
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ broken: failingSource() }) },
+      stash: createStash({ broken: failingSource() }),
       components: registry({ 'page.rip': { Page: brokenPage() } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1420,7 +1410,7 @@ describe('renderer boot failure card', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ broken: failingSource() }) },
+      stash: createStash({ broken: failingSource() }),
       components: registry({ 'layout.rip': { Layout }, 'page.rip': { Page: brokenPage() } }),
       target: host,
     });
@@ -1436,7 +1426,7 @@ describe('renderer boot failure card', () => {
     class Home extends __Component { _create() { return node('home'); } }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data: createStash({ broken: failingSource() }) },
+      stash: createStash({ broken: failingSource() }),
       components: registry({ 'home.rip': { Home }, 'page.rip': { Page: brokenPage() } }),
       target: host,
       onError: failure => failures.push(failure),
@@ -1460,7 +1450,7 @@ describe('renderer boot failure card', () => {
     });
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page: brokenPage() } }),
       target: host,
     });
@@ -1484,7 +1474,7 @@ describe('renderer link-intent preloading', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -1509,7 +1499,7 @@ describe('renderer link-intent preloading', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page } }),
       target: target(),
     });
@@ -1544,7 +1534,7 @@ describe('renderer link-intent preloading', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'a.rip': { A }, 'b.rip': { B } }),
       target: node('host'),
     });
@@ -1576,7 +1566,7 @@ describe('renderer link-intent preloading', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'layout.rip': { Layout }, 'b.rip': { B } }),
       target: node('host'),
     });
@@ -1602,7 +1592,7 @@ describe('renderer link-intent preloading', () => {
     }
     const renderer = createRenderer({
       router: { current: null },
-      app: { data },
+      stash: data,
       components: registry({ 'page.rip': { Page }, 'bare.rip': { Bare } }),
       target: target(),
     });
