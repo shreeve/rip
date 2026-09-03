@@ -6,6 +6,7 @@ import { rmSync } from 'node:fs'
 import { test, eq, ok, throws } from 'rip/testing'
 import { fake } from 'rip/fake'
 import * as mod from 'rip/fake'
+import { toPhone } from 'rip/validate'
 import { __schemaSetAdapter } from '../../src/runtime/orm.js'
 import { recordingAdapter, row } from '../../test/support/recording-adapter.js'
 
@@ -32,7 +33,6 @@ test "names come from gendered pools", ->
 
 test "phones are NANP-legal, fax matches, extensions opt in", ->
   fake.seed 7
-  toPhone = import!('rip/validate').toPhone
   for i in [0...200]
     ph = fake.phone()
     m = ph.match /^\((\d{3})\) (\d{3})-\d{4}$/
