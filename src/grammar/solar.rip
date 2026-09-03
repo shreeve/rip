@@ -313,6 +313,7 @@ class Generator
       [symbols, labels] = @_parseLabels pattern, lhs
 
       action = handle[1] ?? 1
+      [action, labels] = @_resolveNamedRefs action, labels, lhs, pattern
 
       # Trailing arguments are distinguished by type: string → semantic
       # annotation, object → options.
@@ -378,6 +379,59 @@ class Generator
       symbols.push symbol
       labels.push {name, position: i + 1}
     [symbols, labels]
+
+  # Named template bindings — an action references a labeled pattern
+  # symbol as '@name' ('...@name' for spreads) instead of a 1-based
+  # position, so one action text serves every pattern that labels the
+  # same symbols, wherever marker tokens land. Bindings resolve to
+  # positions here, before any template classification, and every
+  # downstream consumer sees plain refs. A label an action consumes is
+  # a binding, not a side-band role — the ref carries the value and its
+  # span — while unconsumed labels keep their side-band meaning.
+  # References resolve outside string literals only; an unknown name
+  # fails generation. Construction templates take bare positions;
+  # an action that is not a flat template takes executable '$n' refs
+  # (decided by classifying the bare-position resolution).
+  _resolveNamedRefs: (action, labels, lhs, pattern) ->
+    return [action, labels] unless typeof action is 'string' and action.includes '@'
+
+    byName = Map.new()
+    byName.set label.name, label for label in labels
+    consumed = Set.new()
+
+    resolve = (form) =>
+      out = ''
+      quote = null
+      i = 0
+      while i < action.length
+        ch = action[i]
+        if quote
+          if ch is '\\'
+            out += ch + (action[i + 1] ?? '')
+            i += 2
+            continue
+          quote = null if ch is quote
+          out += ch
+        else if ch is '"' or ch is "'"
+          quote = ch
+          out += ch
+        else if ch is '@'
+          m = action[i..].match /^@([A-Za-z$][\w$-]*|_[\w$-]+)/
+          throw Error.new "Grammar error in '#{lhs} → #{pattern}': '@' in an action must spell a binding (@name)" unless m
+          label = byName.get m[1]
+          throw Error.new "Grammar error in '#{lhs} → #{pattern}': binding '@#{m[1]}' has no matching pattern label" unless label
+          consumed.add m[1]
+          out += (if form is 'dollar' then '$' else '') + label.position
+          i += m[0].length
+          continue
+        else
+          out += ch
+        i++
+      out
+
+    resolved = resolve 'bare'
+    resolved = resolve 'dollar' unless @_templateElements(resolved, true)?
+    [resolved, labels.filter (l) -> not consumed.has l.name]
 
   # Classify an action as an array construction template and extract its
   # elements, one entry per element in template order: position refs as

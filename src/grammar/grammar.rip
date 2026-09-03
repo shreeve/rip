@@ -409,9 +409,9 @@ grammar =
   # ============================================================================
 
   ReactiveAssign: [
-    o 'Assignable REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 3]', 'state: _, target, value'
-    o 'Assignable REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 4]', 'state: _, target, value'
+    o 'Assignable[target] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
     # Optional-marked declarations: `@name? := default` — an
     # optional PROP with a default. OPT_MARKER is the lexer-minted
     # marker token (a tight `?` on a name whose line continues with
@@ -422,15 +422,15 @@ grammar =
     # optionalMarker role for the face/type story. The
     # lowering is the unmarked one (optionality changes nothing
     # at runtime).
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 6]', 'state: _, target, value'
-    o 'Assignable OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 6]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] Expression'               , '["state", 1, 4]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression'    , '["state", 1, 5]', 'state: _, target, value'
-    o 'Assignable TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression OUTDENT', '["state", 1, 5]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] Expression[value]'               , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] TERMINATOR Expression[value]'    , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] TYPE[annotation] REACTIVE_ASSIGN[operator] INDENT Expression[value] OUTDENT', '["state", @target, @value]', 'state: _, target, value'
   ]
 
   ComputedAssign: [
