@@ -226,7 +226,7 @@ class Generator
       addSymbol lhs
       @nonterminals[lhs] = @symbolTable.get lhs
 
-      handles = rules[..]
+      handles = rules.flatMap (handle) => @_expandOptionals handle
 
       for handle in handles
         [symbols, action, annotation, precedence, labels] = @_parseHandle handle, lhs
@@ -306,6 +306,37 @@ class Generator
     parameters += ', ' + @parseParams.join(', ') if @parseParams?.length
 
     @ruleActions = "(#{parameters}) => {\n#{actionsCode}\n#{@indent}}"
+
+  # 'SYMBOL?' pattern sugar — a pattern token with a trailing '?'
+  # (labels ride along: 'TYPE[annotation]?') is optional: the rule
+  # expands into every present/absent combination, absent-first in
+  # binary-counting order, so the barest form takes the lowest rule
+  # id. Named bindings make one shared action legal across variants;
+  # a '@name' bound to an optional symbol fails generation in the
+  # absent variants (a template's arity is constant). The '?' and
+  # '??' terminals never read as sugar: only a token whose stripped
+  # symbol is itself '?'-free expands.
+  _expandOptionals: (handle) ->
+    pattern = if Array.isArray handle
+      if typeof handle[0] is 'string' then handle[0] else handle[0].join ' '
+    else if typeof handle is 'string'
+      handle
+    return [handle] unless pattern and /\S\?(?:\s|$)/.test pattern
+
+    changed = false
+    variants = [[]]
+    for token in pattern.trim().split /\s+/
+      bare = token[...-1]
+      if token.length > 1 and token.endsWith('?') and not bare.endsWith('?')
+        changed = true
+        variants = variants.flatMap (v) -> [v, [...v, bare]]
+      else
+        v.push token for v in variants
+    return [handle] unless changed
+
+    for v in variants
+      p = v.join ' '
+      if Array.isArray handle then [p, ...handle[1..]] else p
 
   _parseHandle: (handle, lhs) ->
     if Array.isArray handle
