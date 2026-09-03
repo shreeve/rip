@@ -73,7 +73,7 @@ const table = (name, cols, opts = {}) => ({
 });
 
 // A Contract-v2 fake with the introspect() capability, a history
-// store for `_rip_migrations`, and per-migration transactionality
+// store, and per-migration transactionality
 // when built with {tx: true} — BEGIN/stmt/COMMIT/ROLLBACK land in
 // the call log as sentinels, and history writes inside an open
 // transaction stage until COMMIT (a rolled-back history row must
@@ -576,10 +576,9 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(deployed.tables).toEqual([]);
   });
 
-  // Both names: `schema` is where the runner keeps its state now, and
-  // the retired names still exist in databases nobody has migrated yet.
-  // Either one reaching a diff would be planned as drop-table.
-  test.each(['schema', '_rip_migrations', '_rip_migration_lock', '_rip_migration_operations'])(
+  // The runner's own table reaching a diff would be planned as
+  // drop-table.
+  test.each(['schema'])(
     'the runner state table %s never enters the diff: filtered at introspect() AND inside diffSchemas', async (stateName) => {
     const historySpec = {
       name: stateName, sequence: null, primaryKey: 'version',
@@ -2488,15 +2487,14 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(r.transactional).toBe(true);
       // The lock and the table-ensure are orthogonal infrastructure: the
       // lock rows are addressed by the reserved '@lock' key, and the
-      // ensure is the adopt-rename / create / verify / add-column /
-      // drop-legacy sequence that runs once before anything else. The
-      // catalog read is that verify — one per migrate, before the first
-      // write, confirming the schema table is the runner's own.
+      // ensure is the create / verify / retention sequence that runs
+      // once before anything else. The catalog read is that verify —
+      // one per migrate, before the first write, confirming the schema
+      // table is the runner's own.
       const infra = (c) => /@lock/.test(JSON.stringify(c.params ?? [])) ||
         c.sql === '<CATALOG>' ||
-        /_rip_migration/.test(c.sql) ||
         /^DELETE FROM schema WHERE version LIKE/.test(c.sql) ||
-        /^(ALTER TABLE|CREATE TABLE IF NOT EXISTS schema|DROP TABLE)/.test(c.sql);
+        /^CREATE TABLE IF NOT EXISTS schema/.test(c.sql);
       const stream = adapter.calls
         .filter((c) => !infra(c))
         .map((c) => (c.sql.startsWith('<') ? c.sql : (c.tx ? 'stmt' : 'main')));
@@ -2715,28 +2713,11 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       });
     });
 
-    test('adoption onto an occupied name refuses, naming both tables', async () => {
-      await withDir(async (mdir) => {
-        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] }, {
-          failOn: /RENAME TO schema/,
-          failMessage: 'Catalog Error: Could not rename "_rip_migrations" to ""schema"": another entry with this name already exists!',
-        });
-        await scoped(adapter, async () => {
-          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(
-            /cannot adopt _rip_migrations — a table named schema already exists[\s\S]*drop the empty one/);
-        });
-        expect(adapter.history).toEqual([]);
-      });
-    });
 
-    test('a genuinely absent table is still swallowed: a fresh database migrates', async () => {
+    test('a fresh database migrates: the ensure creates the table and every file applies', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] }, {
-          failOn: /RENAME TO schema|DROP TABLE _rip_migration/,
-          failMessage: 'Catalog Error: Table with name _rip_migrations does not exist!',
-        });
+        const adapter = migrateAdapter({ tables: [] });
         const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
         expect(r.ran).toEqual(['0001_a']);
       });
@@ -2812,23 +2793,6 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
         expect(adapter.history.map((h) => h.version)).toEqual(['0000', '0001']);
         const st = await scoped(adapter, () => mig.status({ dir: mdir }));
         expect(st.applied.map((a) => a.version)).toEqual(['0000', '0001']);
-      });
-    });
-
-    // Create-before-rename would win: the legacy table would keep the
-    // history, `schema` would be empty, and the next run would re-apply
-    // every file against a populated database.
-    test('adoption renames the legacy table BEFORE creating the new one', async () => {
-      await withDir(async (mdir) => {
-        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] });
-        await scoped(adapter, () => mig.migrate({ dir: mdir }));
-        const at = (re) => adapter.calls.findIndex((c) => re.test(c.sql));
-        const rename = at(/^ALTER TABLE _rip_migrations RENAME TO schema/);
-        const create = at(/^CREATE TABLE IF NOT EXISTS schema/);
-        expect(rename).toBeGreaterThanOrEqual(0);
-        expect(create).toBeGreaterThanOrEqual(0);
-        expect(rename).toBeLessThan(create);
       });
     });
 
@@ -3057,46 +3021,6 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       expect(out.describe).toContain('EXPIRED');
     });
 
-    // Adoption is destructive to a run already in flight under the OLD
-    // code: the rename takes its history table away mid-apply, and the
-    // drop takes its mutex. The two runners arbitrate through different
-    // tables and cannot see each other, so nothing else would notice.
-    test('adoption refuses while an older runner holds the legacy lock', async () => {
-      await withDir(async (mdir) => {
-        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] });
-        const original = adapter.query.bind(adapter);
-        adapter.query = async (sql, params = []) => {
-          if (/count\(\*\) AS n FROM _rip_migration_lock/.test(sql)) {
-            return { columns: [{ name: 'n' }], data: [[1]], rowCount: 1 };
-          }
-          return original(sql, params);
-        };
-        await scoped(adapter, async () => {
-          await expect(mig.migrate({ dir: mdir }))
-            .rejects.toThrow(/an older `rip schema migrate` holds the lock[\s\S]*Nothing was adopted/);
-        });
-        // Refused BEFORE the rename, which is the destructive half.
-        expect(adapter.calls.some((c) => /RENAME TO schema/.test(c.sql))).toBe(false);
-        expect(adapter.calls.some((c) => /DROP TABLE _rip_migration/.test(c.sql))).toBe(false);
-        expect(adapter.history).toEqual([]);
-      });
-    });
-
-    test('the legacy tables are dropped only under the lock', async () => {
-      await withDir(async (mdir) => {
-        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
-        const adapter = migrateAdapter({ tables: [] });
-        await scoped(adapter, () => mig.migrate({ dir: mdir }));
-        const at = (re) => adapter.calls.findIndex((c) => re.test(c.sql));
-        const acquired = adapter.calls.findIndex(
-          (c) => /^INSERT INTO schema \(version, name, applied_at\)/.test(c.sql) && (c.params ?? []).includes('@lock'));
-        expect(acquired).toBeGreaterThan(-1);
-        expect(at(/DROP TABLE _rip_migration_lock/)).toBeGreaterThan(acquired);
-        expect(at(/DROP TABLE _rip_migration_operations/)).toBeGreaterThan(acquired);
-      });
-    });
-
     test('coordinated runs reject unsafe overrides and durably bracket the outcome', async () => {
       await withDir(async (mdir) => {
         writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
@@ -3128,7 +3052,7 @@ describe('migrate: the CLI-only boundary — no migration bytes in delivered out
     expect(code).toContain('CLI-only');
     // Markers that exist ONLY in src/cli/migrate.js — any of them in
     // delivered output means the machinery leaked past the boundary.
-    for (const marker of ['diffSchemas', 'rename-table', 'conflicting migration files', '_rip_migrations', 'topoOrder']) {
+    for (const marker of ['diffSchemas', 'rename-table', 'conflicting migration files', 'appliedMigrations', 'topoOrder']) {
       expect(code).not.toContain(marker);
     }
   });
