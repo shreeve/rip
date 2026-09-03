@@ -2408,9 +2408,25 @@ function gatePlan(steps, opts, who) {
 
 export async function make(name, opts = {}) {
   const dir = opts.dir || 'migrations';
-  const steps = await plan();
+  // The plan diffs against the DEPLOYED database, so an unapplied
+  // file's changes would be planned again — a second file repeating
+  // the first, and migrate then fails loudly mid-way through the
+  // repeat. Refuse, exactly as push does.
+  const st = await status({ dir });
+  if (st.pending.length) {
+    throw new Error('schema.make: pending migration(s) ' + st.pending.map(migrationLabel).join(', ') +
+      ' — apply them first with `rip schema migrate` (the plan diffs against the deployed database, ' +
+      'so a new file would repeat their changes)');
+  }
+  const steps = st.steps;
   if (!steps.length) return null;
   gatePlan(steps, opts, 'schema.make');
+  // Note steps are facts, not migrations — they never resolve, so
+  // writing them would mint a fresh comment-only migration on every
+  // make forever (push's rule, shared). The notes still print.
+  if (steps.every((s) => s.kind.startsWith('note-'))) {
+    return { file: null, version: null, steps };
+  }
 
   const fs = await import('node:fs');
   const path = await import('node:path');

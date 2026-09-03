@@ -13,7 +13,7 @@
 //   DEFECT BATTERY — the silent-failure classes this machinery
 //   rejects loudly, each pinned beside its rejection.
 import { test, expect, describe } from 'bun:test';
-import { writeFileSync, mkdtempSync, rmSync, readFileSync, appendFileSync } from 'fs';
+import { writeFileSync, mkdtempSync, rmSync, readFileSync, readdirSync, appendFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -1933,13 +1933,15 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
 
   test('writes <UTC>_slug.sql from the plan; the clock names it, not the directory; slug normalizes', async () => {
     await withDir(async (mdir) => {
-      // A legacy file with a HIGHER sequential number must not influence
-      // the name at all — timestamps are minted from the clock, never
-      // from the max of what is already there.
+      // A pre-rename file with a HIGHER sequential number must not
+      // influence the name at all — timestamps are minted from the
+      // clock, never from the max of what is already there. Applied
+      // first: make refuses a directory with pending files.
       writeFileSync(join(mdir, '0007_old.sql'), '-- placeholder\nSELECT 1;\n');
       const out = await K4.scope(async () => {
         K4.setAdapter(migrateAdapter({ tables: [] }));
         K4.__schema(model('User', field('name')));
+        await mig.migrate({ dir: mdir });
         return mig.make('Add Users!', { dir: mdir, now: '2026-08-29T17:45:01Z' });
       });
       expect(out.file).toBe(join(mdir, '20260829174501_add_users.sql'));
@@ -1976,15 +1978,38 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
     });
   });
 
-  test('two makes inside one second: the second refuses on the existing file', async () => {
+  test('a second make refuses: on the pending file, or — applied — on the same-second name', async () => {
     await withDir(async (mdir) => {
       await K4.scope(async () => {
         K4.setAdapter(migrateAdapter({ tables: [] }));
         K4.__schema(model('User', field('name')));
         await mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' });
+        // The unapplied file is the loud refusal — a new file would
+        // repeat its changes, and migrate would fail mid-repeat.
+        await expect(mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' }))
+          .rejects.toThrow(/pending migration/);
+        // Applied, the same-second collision is what remains.
+        await mig.migrate({ dir: mdir });
         await expect(mig.make('init', { dir: mdir, now: '2026-08-29T17:45:01Z' }))
           .rejects.toThrow(/already exists \(two makes inside one second\)/);
       });
+    });
+  });
+
+  test('an all-notes plan writes nothing — permanent facts cannot mint a file per make', async () => {
+    await withDir(async (mdir) => {
+      const out = await K4.scope(async () => {
+        // Deployed matches the model except a hand-written composite
+        // UNIQUE — a fact the planner states and can never resolve.
+        K4.setAdapter(migrateAdapter({ tables: [table('users', [
+          col('name', 'VARCHAR', { notNull: true }), col('a'), col('b'),
+        ], { uniqueConstraints: [{ columns: ['a', 'b'] }] })] }));
+        K4.__schema(model('User', field('name'), field('a', 'string', { optional: true }), field('b', 'string', { optional: true })));
+        return mig.make('noop', { dir: mdir, now: '2026-08-29T17:45:01Z' });
+      });
+      expect(out.file).toBeNull();
+      expect(out.steps.every((s) => s.kind.startsWith('note-'))).toBe(true);
+      expect(readdirSync(mdir)).toEqual([]);
     });
   });
 

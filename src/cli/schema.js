@@ -297,6 +297,9 @@ try {
     });
     if (!out) {
       console.log('no changes — nothing to write');
+    } else if (!out.file) {
+      printSteps(out.steps);
+      console.log('\nnothing to write — informational notes only');
     } else {
       printSteps(out.steps);
       console.log(`\nwrote ${out.file}`);
