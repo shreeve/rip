@@ -3879,7 +3879,7 @@ function renderIndex(spec, ix) {
 // inline UNIQUE, and the differ's foldSpec folds it into the column
 // flag — and the two MUST agree or the differ would plan an index
 // that already exists.
-export function isAutoUniqueIndex(spec, ix) {
+function isAutoUniqueIndex(spec, ix) {
   return ix.unique === true && ix.columns.length === 1 &&
     ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
 }
@@ -3996,7 +3996,7 @@ const schema = {
 // The last two are the build-an-unsaved-instance seam rip/fake's
 // Model.factory() augmentation composes with — normalize caller
 // input, construct without saving.
-export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
+export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, isAutoUniqueIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and
