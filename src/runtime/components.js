@@ -673,19 +673,37 @@ function __transition(el, name, dir, done) {
   const active = name + '-' + dir + '-active';
   const to = name + '-' + dir + '-to';
   let completed = false;
+  let timer = null;
   cl.add(from, active);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
       const end = (event) => {
-        if (completed || event.target !== el) return;
+        if (completed || (event && event.target !== el)) return;
         completed = true;
+        clearTimeout(timer);
         el.removeEventListener('transitionend', end);
+        el.removeEventListener('transitioncancel', end);
         cl.remove(active, to);
         if (done) done();
       };
       el.addEventListener('transitionend', end);
+      // An interrupted transition fires transitioncancel, never
+      // transitionend — without this, the leaving node strands in the
+      // DOM and the listener leaks.
+      el.addEventListener('transitioncancel', end);
+      // And a name with no matching CSS fires neither: complete on a
+      // computed-duration fallback (50ms grace past the longest
+      // duration+delay; zero when styles are unreadable or absent).
+      let ms = 0;
+      try {
+        const cs = getComputedStyle(el);
+        const longest = (v) => Math.max(0, ...String(v).split(',')
+          .map((s) => (parseFloat(s) || 0) * (/ms\s*$/.test(s.trim()) ? 1 : 1000)));
+        ms = longest(cs.transitionDuration) + longest(cs.transitionDelay);
+      } catch {}
+      timer = setTimeout(() => end(), ms + 50);
     });
   });
 }

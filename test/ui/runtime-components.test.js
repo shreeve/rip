@@ -1066,7 +1066,34 @@ describe('render helpers', () => {
     ]);
   });
 
-  test('__transition accepts only the element own event and completes once without a timeout', async () => {
+  test('__transition completes on transitioncancel — an interrupted leave cannot strand the node', async () => {
+    const el = document.createElement('div');
+    let done = 0;
+    RT.__transition(el, 'fade', 'leave', () => { done++; });
+    await tick();
+    await tick();
+    // A mid-flight interruption fires transitioncancel, never
+    // transitionend — the completion must ride both.
+    el.dispatchEvent({ type: 'transitioncancel', target: el, bubbles: false });
+    expect(done).toBe(1);
+    expect(el.classList.contains('fade-leave-active')).toBe(false);
+    expect(el.classList.contains('fade-leave-to')).toBe(false);
+  });
+
+  test('__transition with no matching CSS completes on the duration fallback', async () => {
+    const el = document.createElement('div');
+    let done = 0;
+    RT.__transition(el, 'no-such-name', 'enter', () => { done++; });
+    await tick();
+    await tick();
+    // No CSS names this transition, so no event ever fires; the
+    // computed duration reads zero and the grace timer completes it.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(done).toBe(1);
+    expect(el.classList.contains('no-such-name-enter-active')).toBe(false);
+  });
+
+  test('__transition accepts only the element own event and completes exactly once', async () => {
     const el = document.createElement('div');
     const child = document.createElement('span');
     el.appendChild(child);
