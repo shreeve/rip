@@ -16297,10 +16297,7 @@ ${pad ?? ""}`);
             recv.emit();
             this.b.emit(".setAttribute(");
             this.emitQuotedPrimitive(arg);
-            this.b.emit(", true");
-            if (this.ts)
-              this.b.tsOnly(() => this.b.emit(" as any"));
-            this.b.emit(")");
+            this.b.emit(", '')");
           });
           continue;
         }
