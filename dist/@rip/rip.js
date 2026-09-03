@@ -8491,14 +8491,26 @@ var CAMEL = {
   crossorigin: "crossOrigin",
   usemap: "useMap",
   srclang: "srcLang",
-  autocomplete: "autocomplete",
   inputmode: "inputMode",
   cellpadding: "cellPadding",
   cellspacing: "cellSpacing",
   bgcolor: "bgColor",
   valign: "vAlign",
   nowrap: "noWrap",
-  for: "htmlFor"
+  for: "htmlFor",
+  datetime: "dateTime",
+  ismap: "isMap",
+  nomodule: "noModule",
+  playsinline: "playsInline",
+  dirname: "dirName",
+  accesskey: "accessKey",
+  enterkeyhint: "enterKeyHint",
+  referrerpolicy: "referrerPolicy",
+  fetchpriority: "fetchPriority",
+  imagesrcset: "imageSrcset",
+  imagesizes: "imageSizes",
+  popovertargetaction: "popoverTargetAction",
+  allowfullscreen: "allowFullscreen"
 };
 var CLASS_VALUE_DECL = "type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];";
 var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n" + "type __RipChildren = Node | string | number | boolean | null;";
