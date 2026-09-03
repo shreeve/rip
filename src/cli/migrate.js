@@ -816,7 +816,7 @@ function rebuildForUnique(p, wanted) {
   // cannot silently transpose the way `INSERT ... SELECT *` allows.
   const names = columns.map((c) => quoteIdent(c.name, null, 'column')).join(', ');
   return [
-    ...renderCreate({ ...p, name: tmp, sequence: null, indexes: [], notes: [], columns }),
+    ...renderCreate({ ...p, name: tmp, sequence: null, indexes: [], columns }),
     'INSERT INTO ' + quoteIdent(tmp, null, 'table') + ' (' + names + ') SELECT ' + names +
       ' FROM ' + quoteIdent(p.name, null, 'table') + ';',
     'DROP TABLE ' + quoteIdent(p.name, null, 'table') + ';',

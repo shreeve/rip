@@ -3698,7 +3698,6 @@ SchemaDef.prototype._tableSpec = function (options) {
   }
 
   const foreignKeys = [];
-  const notes = [];
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
     const targetDef = SchemaRegistry.get(rel.target);
@@ -3809,7 +3808,7 @@ SchemaDef.prototype._tableSpec = function (options) {
     name: table,
     sequence: norm.naturalKey ? null : { name: seq, start: idStart, shared: shared != null },
     primaryKey: norm.primaryKeyColumn,
-    columns, indexes, foreignKeys, notes,
+    columns, indexes, foreignKeys,
     tableWas: norm.tableWas || null,
   };
 };
@@ -3916,7 +3915,6 @@ function renderCreate(spec) {
     ' (\n' + lines.join(',\n') + '\n);');
   const ix = indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
-  if (spec.notes && spec.notes.length) blocks.push(spec.notes.join('\n'));
   return blocks;
 }
 
