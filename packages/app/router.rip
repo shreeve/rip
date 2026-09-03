@@ -50,6 +50,15 @@ export type RouterMatch = RouteMatch & { query: Record<string, string>, hash: st
 
 export type RouteClaim = RouterMatch & { path: string, url: string }
 
+# What a navigation hands its listeners: the match plus the path it
+# resolved from.
+export type NavigationInfo = RouterMatch & { path: string }
+
+# What `current` holds between navigations. The hash is deliberately
+# absent: a fragment-only navigation must not look like a route change
+# to the renderer, so `router.hash` tracks it apart.
+export type RouterCurrent = RouteMatch & { layouts: readonly string[], query: Record<string, string> }
+
 export type Router =
   init: () => Router
   push: (url: string, opts?: { noScroll?: boolean }) => boolean
@@ -58,11 +67,11 @@ export type Router =
   forward: () => void
   match: (url: string) => RouterMatch | null
   claims: (url: string) => RouteClaim | null
-  onNavigate: (fn: (info: Record<string, any>) => void) => () => void
+  onNavigate: (fn: (info: NavigationInfo) => void) => () => void
   rebuild: () => void
   destroy: () => void
   navigating: boolean
-  readonly current: Record<string, any> | null
+  readonly current: RouterCurrent | null
   readonly path: string | null
   readonly hash: string
   readonly params: Record<string, string>

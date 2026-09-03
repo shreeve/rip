@@ -1,4 +1,4 @@
-import { unwrapStash } from './stash.rip'
+import { unwrapStash, Stash } from './stash.rip'
 import { _isSourceCell, _isSourceFamily, SourceCell } from './source.rip'
 import {
   __claimGateConstructor
@@ -38,7 +38,7 @@ export type Renderer =
 
 export type RendererOpts =
   router: Record<string, any>
-  stash: Record<string, any>
+  stash: Stash
   components: Record<string, any>
   target: Record<string, any>
   onError?: (failure: GateFailure) => void
