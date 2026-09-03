@@ -24521,21 +24521,32 @@ function __transition(el, name, dir, done) {
   const active = name + "-" + dir + "-active";
   const to = name + "-" + dir + "-to";
   let completed = false;
+  let timer = null;
   cl.add(from, active);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
       const end = (event) => {
-        if (completed || event.target !== el)
+        if (completed || event && event.target !== el)
           return;
         completed = true;
+        clearTimeout(timer);
         el.removeEventListener("transitionend", end);
+        el.removeEventListener("transitioncancel", end);
         cl.remove(active, to);
         if (done)
           done();
       };
       el.addEventListener("transitionend", end);
+      el.addEventListener("transitioncancel", end);
+      let ms = 0;
+      try {
+        const cs = getComputedStyle(el);
+        const longest = (v) => Math.max(0, ...String(v).split(",").map((s) => (parseFloat(s) || 0) * (/ms\s*$/.test(s.trim()) ? 1 : 1000)));
+        ms = longest(cs.transitionDuration) + longest(cs.transitionDelay);
+      } catch {}
+      timer = setTimeout(() => end(), ms + 50);
     });
   });
 }
