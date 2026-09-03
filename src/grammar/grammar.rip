@@ -452,7 +452,9 @@ grammar =
   # target visibility, path shape, and keyed-source form. A called path
   # keeps its argument list as a spread `key` role so bad arity still
   # reaches the emitter as a precise diagnostic and every key span is a
-  # first-class RFC-12 fact.
+  # first-class RFC-12 fact. The call rows reduce-reduce against the
+  # plain Arguments reading and rule order picks the keyed-gate form —
+  # declared, with rationale, in the expectedConflicts manifest.
   Gate: [
     o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs]'                                          , '["gate", @target, @rhs]', 'gate: _, target, rhs'
     o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START CALL_END'                      , '["gate", @target, @rhs]', 'gate: _, target, rhs'
@@ -1147,6 +1149,10 @@ grammar =
 
   # ============================================================================
   # Try / Catch / Throw
+  # ============================================================================
+  # The family's dangling-catch/finally shifts are deliberate greedy
+  # attachment — every entry is declared, with its rationale, in the
+  # expectedConflicts manifest at the end of this file.
   # ============================================================================
 
   Try: [
