@@ -10470,17 +10470,19 @@ class Emitter {
               `attribute and validates against the standard vocabulary ` +
               '(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`', this.rstate.node);
           }
-          // The receiver surface types the NAME; the `true` the road
-          // writes is the lowering's own byte (never the author's), so
-          // its quieting cast stays.
+          // The empty string is the boolean-attribute serialization
+          // (the own-line flag road and the docs both spell it) —
+          // setAttribute(name, true) wrote name="true", which is the
+          // same DOM state but not the documented markup, and for a
+          // non-boolean known attribute wrote a literal "true" value.
+          // '' satisfies the widened attribute type, so no quieting
+          // cast rides.
           const recv = this.tsElReceiver(el);
           this.renderLine(null, () => {
             recv.emit();
             this.b.emit('.setAttribute(');
             this.emitQuotedPrimitive(arg);
-            this.b.emit(', true');
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
-            this.b.emit(')');
+            this.b.emit(", '')");
           });
           continue;
         }

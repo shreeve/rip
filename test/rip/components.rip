@@ -4896,7 +4896,7 @@ code 'bare-ident shorthand — known name is a boolean attribute', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.setAttribute('hidden', true);
+      this._el0.setAttribute('hidden', '');
       return this._el0;
     }
   };

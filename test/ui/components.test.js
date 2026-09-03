@@ -724,11 +724,11 @@ describe('the static render DSL: emission pins', () => {
   test('bare-identifier boolean shorthand validates against the vocabulary (#125 fork)', () => {
     // Legal idioms stay legal.
     expect(compile('P = component\n  render\n    form noValidate\n').code)
-      .toContain(`setAttribute('noValidate', true)`);
+      .toContain(`setAttribute('noValidate', '')`);
     expect(compile('P = component\n  render\n    div hidden\n').code)
-      .toContain(`setAttribute('hidden', true)`);
+      .toContain(`setAttribute('hidden', '')`);
     expect(compile('P = component\n  render\n    input required\n').code)
-      .toContain(`setAttribute('required', true)`);
+      .toContain(`setAttribute('required', '')`);
     // The misspelling space rejects, positioned (the old runtime ships markup).
     emitFails('P = component\n  count := 0\n  render\n    span countt\n', /'countt' is not a known attribute of <span>/s);
     emitFails('P = component\n  render\n    div claas\n', /not a known attribute of <div>/);
