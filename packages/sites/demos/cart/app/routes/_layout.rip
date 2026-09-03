@@ -3,7 +3,9 @@ export Layout = component
   cart ~= @app.data.cart
   gateError?: string := undefined
 
-  mounted: -> @router.onNavigate(-> gateError = undefined)
+  mounted: ->
+    document.getElementById('app-loader')?.remove()
+    @router.onNavigate(-> gateError = undefined)
 
   onError: (err) -> console.error(err); gateError = "Couldn't load this page"
 
