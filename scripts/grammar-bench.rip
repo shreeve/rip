@@ -1,0 +1,166 @@
+# Grammar benchmark harness — three axes, one report:
+#
+#   1. Grammar complexity: rules, symbols, states, honest conflict counts,
+#      default-resolution histogram, generated parser source size.
+#   2. Generation speed: in-process wall time for table construction
+#      (Generator.new) and for full source emission (.generate()).
+#   3. Parse throughput: tokenize + rewrite + parse over a fixed corpus
+#      using the shipping src/parser.js, reported as MB/s.
+#
+# Usage:
+#   bun bin/rip scripts/grammar-bench.rip [label]
+#
+# With a label, the report is also saved as JSON to
+# misc/grammar-bench/<label>.json so two runs can be diffed
+# (e.g. `slr-baseline` before a lookahead-algorithm change, `lalr` after).
+
+import * as fs from 'fs'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
+
+import { Generator } from '../src/grammar/solar.rip'
+import grammar from '../src/grammar/grammar.rip'
+import { Parser } from '../src/parser.js'
+import { makeParserLexer } from '../src/lexer.js'
+
+root = path.resolve path.dirname(fileURLToPath(import.meta.url)), '..'
+
+GEN_RUNS   = 7   # timed Generator.new + generate() runs (after one warmup)
+PARSE_RUNS = 7   # timed full-corpus parse rounds (after one warmup)
+
+median = (xs) ->
+  s = [...xs].sort (a, b) -> a - b
+  mid = Math.floor s.length / 2
+  if s.length % 2 then s[mid] else (s[mid - 1] + s[mid]) / 2
+
+ms = (x) -> "#{x.toFixed 1}ms"
+
+# ==============================================================================
+# 1. Complexity
+# ==============================================================================
+
+probe = Generator.new grammar
+source = probe.generate()
+
+histogram = {}
+for r in probe.resolutionDetails
+  histogram[r.category] = (histogram[r.category] or 0) + 1
+
+conflictRules = Set.new()
+conflictStates = Set.new()
+for c in probe.conflictDetails
+  conflictRules.add c.rule
+  conflictStates.add c.state
+
+complexity =
+  terminals:          Object.keys(probe.tokenNames or {}).length
+  nonterminals:       Object.keys(probe.nonterminals or {}).length
+  rules:              probe.rules.length
+  states:             probe.states.length
+  conflicts:          probe.conflicts
+  conflictRules:      conflictRules.size
+  conflictStates:     conflictStates.size
+  resolutions:        histogram
+  resolutionsTotal:   probe.resolutionDetails.length
+  parserSourceBytes:  Buffer.byteLength source, 'utf8'
+  parserSourceLines:  source.split('\n').length
+
+# ==============================================================================
+# 2. Generation speed
+# ==============================================================================
+
+buildTimes = []
+emitTimes  = []
+Generator.new grammar  # warmup
+for _ in [1..GEN_RUNS]
+  t0 = performance.now()
+  g = Generator.new grammar
+  t1 = performance.now()
+  g.generate()
+  t2 = performance.now()
+  buildTimes.push t1 - t0
+  emitTimes.push t2 - t1
+
+generation =
+  runs:        GEN_RUNS
+  buildMedian: median buildTimes
+  buildMin:    Math.min ...buildTimes
+  emitMedian:  median emitTimes
+  emitMin:     Math.min ...emitTimes
+  totalMedian: median(buildTimes) + median(emitTimes)
+
+# ==============================================================================
+# 3. Parse throughput (tokenize + rewrite + parse via src/parser.js)
+# ==============================================================================
+
+corpusDir = path.join root, 'test/corpus'
+corpusFiles = (path.join(corpusDir, f) for f in fs.readdirSync(corpusDir).sort() when f.endsWith '.rip')
+corpusFiles.push path.join(root, 'src/grammar/grammar.rip')
+corpusFiles.push path.join(root, 'src/grammar/solar.rip')
+
+docs = ({ file: f, src: fs.readFileSync(f, 'utf8') } for f in corpusFiles)
+totalBytes = 0
+totalBytes += Buffer.byteLength(d.src, 'utf8') for d in docs
+
+parseAll = ->
+  for d in docs
+    parser = Parser()
+    parser.lexer = makeParserLexer d.file
+    parser.parse d.src
+  return
+
+parseAll()  # warmup
+parseTimes = []
+for _ in [1..PARSE_RUNS]
+  t0 = performance.now()
+  parseAll()
+  parseTimes.push performance.now() - t0
+
+med = median parseTimes
+throughput =
+  runs:        PARSE_RUNS
+  files:       docs.length
+  bytes:       totalBytes
+  medianMs:    med
+  minMs:       Math.min ...parseTimes
+  mbPerSecond: (totalBytes / 1024 / 1024) / (med / 1000)
+
+# ==============================================================================
+# Report
+# ==============================================================================
+
+resolutionParts = ("#{name}: #{count}" for [name, count] as Object.entries(histogram).sort())
+
+console.log """
+Grammar benchmark
+
+Complexity
+  Terminals:            #{complexity.terminals}
+  Nonterminals:         #{complexity.nonterminals}
+  Rules:                #{complexity.rules}
+  States:               #{complexity.states}
+  Conflicts:            #{complexity.conflicts} (#{complexity.conflictRules} distinct rules across #{complexity.conflictStates} states)
+  Default resolutions:  #{complexity.resolutionsTotal} (#{resolutionParts.join ', '})
+  Parser source:        #{complexity.parserSourceBytes} bytes, #{complexity.parserSourceLines} lines
+
+Generation (#{GEN_RUNS} runs, median / min)
+  Table construction:   #{ms generation.buildMedian} / #{ms generation.buildMin}
+  Source emission:      #{ms generation.emitMedian} / #{ms generation.emitMin}
+  Total (median):       #{ms generation.totalMedian}
+
+Parse throughput (#{PARSE_RUNS} rounds over #{throughput.files} files, #{(totalBytes / 1024).toFixed 0} KB)
+  Round:                #{ms throughput.medianMs} median / #{ms throughput.minMs} min
+  Throughput:           #{throughput.mbPerSecond.toFixed 2} MB/s
+"""
+
+# ==============================================================================
+# Snapshot
+# ==============================================================================
+
+label = process.argv[2]
+if label
+  outDir = path.join root, 'misc/grammar-bench'
+  fs.mkdirSync outDir, recursive: true
+  outFile = path.join outDir, "#{label}.json"
+  fs.writeFileSync outFile, JSON.stringify({ label, complexity, generation, throughput }, null, 2) + '\n'
+  console.log "Snapshot saved: #{path.relative process.cwd(), outFile}"
