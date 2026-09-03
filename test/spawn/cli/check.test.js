@@ -4705,21 +4705,36 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
     }
   }, 120_000);
 
+  test('an unknown attribute name reports as a DIAGNOSTIC, on the word, naming the spelling that works', () => {
+    // The vocabulary is one rule the typed surface already enforces, so
+    // the emitter does not also reject it here: a fatal second voice
+    // would cost the file every other diagnostic. Both roads — the bare
+    // word and the pair — answer at their own bytes, beside the rest.
+    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt']) });
+    try {
+      expect(diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12]]);
+      const out = check(dir, ['--json']).stdout;
+      expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(2);
+      // Nothing near it: the reading it took, and the two ways out.
+      expect(out).toContain('a bare word sets the boolean attribute it names');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
   test('the value policy: property road strict, attribute road widened by | string', () => {
     const dir = workspace({
       'app.rip': comp([
         'input value: q',            // property road, string := string — clean
         'img width: \'400\'',        // number property, widened — clean
         'img alt: 42',               // string property — the number errors
-        'input maxlength: 5',        // both spellings legal, number | string
-        "input maxLength: '5'",
+        'input maxlength: 5',        // the attribute's own spelling — number | string
+        "input maxLength: '5'",      // a DOM property's name is NOT an attribute name — TS2345
         "label for: 'q'",            // the spec spelling is legal (v3 rejected it)
         'div data-count: 5',         // templates admit serializable primitives
         "div aria-labl: 'z'",        // template admission — any suffix is legal
       ]),
     }, { strict: true });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 7, 11]]);   // img alt: 42 — anchored on the key, as in the editor
+      expect(diagsOf(dir)).toEqual([[2345, 7, 11], [2345, 9, 13]]);   // img alt: 42, then maxLength — anchored on the key, as in the editor
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
@@ -4834,7 +4849,7 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
 
   test('bare shorthand stays clean through the typed surface', () => {
     const dir = workspace({
-      'app.rip': comp(['form noValidate', 'input required', 'button disabled', "  'go'"]),
+      'app.rip': comp(['form novalidate', 'input required', 'button disabled', "  'go'"]),
     }, { strict: true });
     try {
       expect(diagsOf(dir)).toEqual([]);

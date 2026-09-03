@@ -662,13 +662,13 @@ const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNI
 // it. Intrinsic attr typing: each attribute types through the tag's DOM
 // interface — `disabled?:` on a button is boolean, not any — via an
 // extends-Record guard so attributes with no matching property fall back
-// to any instead of erroring. Attributes whose DOM property is camelCased
-// get BOTH spellings (authors write maxLength; the spec list says
-// maxlength) — the shared CAMEL bridge, the same one the intrinsic
-// surfaces read. Undeclared rest props ride the data-/aria- templates —
-// the same admission the intrinsic surfaces make. A misspelled DECLARED
-// prop must draw the excess-property did-you-mean instead of falling
-// through a catch-all, so there is no string index.
+// to any instead of erroring. An attribute answers to ONE spelling — its
+// own — and its camelCased DOM property name is where the VALUE type is
+// read from, never a second key: the shared CAMEL bridge, the same one
+// the intrinsic surfaces read. Undeclared rest props ride the
+// data-/aria- templates — the same admission those surfaces make. A
+// misspelled DECLARED prop must draw the excess-property did-you-mean
+// instead of falling through a catch-all, so there is no string index.
 export const REST_TEMPLATES = '[key: `data-${string}`]: any; [key: `aria-${string}`]: any';
 export function restPassthroughEntries(tag, road = 'dts') {
   const tagMap = `HTMLElementTagNameMap[${JSON.stringify(tag)}]`;
@@ -693,7 +693,6 @@ export function restPassthroughEntries(tag, road = 'dts') {
     const prop = CAMEL[attr] ?? attr;
     const t = !isHtmlTag ? 'any' : attr === 'style' ? `(${guarded('style')}) | string` : guarded(prop);
     put(attr, t);
-    if (prop !== attr) put(prop, t);
   }
   return out;
 }

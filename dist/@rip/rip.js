@@ -2745,16 +2745,53 @@ function attributeNamesFor(tag) {
       names.add(a);
   return [...names];
 }
-function knownBareAttribute(tag, name) {
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 2)
+    return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1;i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1;j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+function suggestAttribute(tag, name) {
+  const attrs = attributeNamesFor(tag);
   const lower = String(name).toLowerCase();
-  if (lower.startsWith("data-") || lower.startsWith("aria-"))
+  const fold = attrs.find((a) => a.toLowerCase() === lower);
+  if (fold !== undefined && fold !== name)
+    return fold;
+  if (String(name).length < 3)
+    return null;
+  let best = null;
+  let bestD = 3;
+  let tied = false;
+  for (const a of attrs) {
+    if (a === String(name))
+      continue;
+    const d = editDistance(String(name), a);
+    if (d < bestD) {
+      best = a;
+      bestD = d;
+      tied = false;
+    } else if (d === bestD)
+      tied = true;
+  }
+  return best !== null && !tied ? best : null;
+}
+function knownBareAttribute(tag, name) {
+  const attr = String(name);
+  if (attr.startsWith("data-") || attr.startsWith("aria-"))
     return true;
-  if (GLOBAL_ATTRS.has(lower))
+  if (GLOBAL_ATTRS.has(attr))
     return true;
   const perTag = PER_TAG_ATTRS[String(tag).toLowerCase()];
-  if (perTag && perTag.has(lower))
+  if (perTag && perTag.has(attr))
     return true;
-  if (SVG_TAGS.has(tag) && SVG_ATTRS.has(String(name)))
+  if (SVG_TAGS.has(tag) && SVG_ATTRS.has(attr))
     return true;
   return false;
 }
@@ -8493,18 +8530,15 @@ var attrValsName = (tag, svg) => `__RipAttrVals_${svg ? "svg_" : ""}${tag}`;
 var elSurfaceName = (tag, svg) => `__RipEl_${svg ? "svg_" : ""}${tag}`;
 var hostText = (tag, svg) => `${svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap"}['${tag}']`;
 var surfaceableTag = (tag, svg) => typeof tag === "string" && (svg ? SVG_TAGS.has(tag) : HTML_TAGS.has(tag));
-function htmlMemberRows(tag, attr, host) {
+function htmlMemberRows(attr, host) {
   const prop = CAMEL[attr] ?? attr;
   const value = attr === "class" ? CLASS_TYPE : `__RipAV<${host}, '${prop}'>`;
-  const rows = [`  ${keyText(attr)}: ${value};`];
-  if (prop !== attr && knownBareAttribute(tag, prop))
-    rows.push(`  ${keyText(prop)}: ${value};`);
-  return rows;
+  return [`  ${keyText(attr)}: ${value};`];
 }
 function globalAttrValsDecl() {
   const rows = [];
   for (const attr of GLOBAL_ATTRS)
-    rows.push(...htmlMemberRows("div", attr, "HTMLElement"));
+    rows.push(...htmlMemberRows(attr, "HTMLElement"));
   return `interface __RipGlobalAttrVals {
 ${rows.join(`
 `)}
@@ -8532,7 +8566,7 @@ function attrValsDecl(tag, svg) {
     if (svg)
       rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : "string | number"};`);
     else
-      rows.push(...htmlMemberRows(tag, attr, hostText(tag, svg)));
+      rows.push(...htmlMemberRows(attr, hostText(tag, svg)));
   }
   const body = rows.length ? `
 ${rows.join(`
@@ -9811,6 +9845,41 @@ class Emitter {
     if (hits.length !== 1)
       return null;
     return [hits[0].sourceStart, hits[0].sourceEnd];
+  }
+  bareChildSpan(args, k, owner) {
+    const spanOf = (x) => {
+      const id = isNode(x) ? this.stores.idOf(x) : null;
+      return id !== null ? this.stores.selfSpan(id) : null;
+    };
+    const outer = spanOf(owner) ?? spanOf(this.rstate?.node ?? null);
+    if (outer === null)
+      return null;
+    let [lo, hi] = outer;
+    for (let j = k - 1;j >= 0; j--) {
+      const sp = spanOf(args[j]);
+      if (sp) {
+        lo = sp[1];
+        break;
+      }
+    }
+    for (let j = k + 1;j < args.length; j++) {
+      const sp = spanOf(args[j]);
+      if (sp) {
+        hi = sp[0];
+        break;
+      }
+    }
+    const hits = this.stores.primitiveSpans(args[k], lo, hi);
+    return hits.length === 1 ? [hits[0].sourceStart, hits[0].sourceEnd] : null;
+  }
+  unknownAttrMessage(tag, name, { bare, svg }) {
+    const near = suggestAttribute(tag, name);
+    if (near !== null)
+      return `'${name}' is not a known attribute of <${tag}> — did you mean '${near}'?`;
+    if (bare) {
+      return `'${name}' is not a known attribute of <${tag}> — a bare word sets the boolean attribute it ` + `names; render a value with \`= ${name}\`, or spell \`name: value\``;
+    }
+    return `'${name}' is not a known attribute of <${tag}> — ` + (svg ? "SVG attribute names are the spec's own, case-sensitive (`viewBox`)" : "HTML attribute names are the spec's own, lowercase") + "; `data-`/`aria-` names take any suffix";
   }
   emitRewrittenPrimitive(storedValue, emittedValue) {
     const owner = this.b.currentMark;
@@ -16084,7 +16153,7 @@ ${pad ?? ""}`);
     }
     if (isSvg)
       R.svgDepth++;
-    this.renderChildren(el, args);
+    this.renderChildren(el, args, node);
     if (isSvg)
       R.svgDepth--;
     if (classes.length > 0) {
@@ -16142,7 +16211,7 @@ ${pad ?? ""}`);
     R.pendingClassKeys = null;
     if (isSvg)
       R.svgDepth++;
-    this.renderChildren(el, children);
+    this.renderChildren(el, children, node);
     if (isSvg)
       R.svgDepth--;
     const parts = R.pendingClassArgs;
@@ -16189,8 +16258,9 @@ ${pad ?? ""}`);
     }
     return this.walkChildStmts(stmts);
   }
-  renderChildren(el, args) {
-    for (const arg of args) {
+  renderChildren(el, args, owner = null) {
+    for (let k = 0;k < args.length; k++) {
+      const arg = args[k];
       if (isFunc(arg)) {
         if (isNode(arg[1]) && arg[1].length > 0) {
           throw this.positionedError(arg, "emitter: a parameterized function is not a render child — element children arrows carry no parameters " + "(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one " + "line or bind it in a method)", this.rstate.node);
@@ -16254,14 +16324,30 @@ ${pad ?? ""}`);
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
           const tag = this.renderTagOf(el);
-          if (!knownBareAttribute(tag, arg)) {
-            throw this.positionedError(arg, `emitter: '${arg}' is not a known attribute of <${tag}> — bare-identifier shorthand sets a boolean ` + `attribute and validates against the standard vocabulary ` + "(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`", this.rstate.node);
+          let unknownAt = null;
+          if (this.ts && !knownBareAttribute(tag, arg)) {
+            const at = this.bareChildSpan(args, k, owner);
+            if (at !== null) {
+              unknownAt = at;
+              this.intrinsics.push({
+                start: at[0],
+                end: at[1],
+                kind: "unknown-attr",
+                tag,
+                name: arg,
+                message: this.unknownAttrMessage(tag, arg, { bare: true, svg: this.rstate?.svgEls?.has(el) === true })
+              });
+            }
           }
           const recv = this.tsElReceiver(el);
+          const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
           this.renderLine(null, () => {
             recv.emit();
             this.b.emit(".setAttribute(");
-            this.emitQuotedPrimitive(arg);
+            if (ownerId !== null) {
+              this.b.markSpan(ownerId, "identifier", unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(arg));
+            } else
+              this.emitQuotedPrimitive(arg);
             this.b.emit(", '')");
           });
           continue;
@@ -17125,6 +17211,17 @@ ${this.replayPad}}` : " }");
           return;
         attrRecorded = true;
         this.intrinsics.push(routeWrap ? { start: attrSpan[0], end: attrSpan[1], kind: "attr", name: key, type: this.routesUnion, route: true } : { start: attrSpan[0], end: attrSpan[1], kind: "attr", name: key, gen: attrGen });
+        const attrTag = this.renderTagOf(el);
+        if (!knownBareAttribute(attrTag, key)) {
+          this.intrinsics.push({
+            start: attrSpan[0],
+            end: attrSpan[1],
+            kind: "unknown-attr",
+            tag: attrTag,
+            name: key,
+            message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true })
+          });
+        }
       };
       const emitSetAttribute = () => {
         attrGen = this.b.offset + 1;

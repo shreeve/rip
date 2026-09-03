@@ -29,7 +29,7 @@ import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
-import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom.js';
+import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
@@ -1932,6 +1932,51 @@ class Emitter {
     const hits = this.stores.primitiveSpans(word, span[0], span[1]);
     if (hits.length !== 1) return null;
     return [hits[0].sourceStart, hits[0].sourceEnd];
+  }
+
+  // The SOURCE span of a bare identifier CHILD: the search window is
+  // the ELEMENT's own span, narrowed further to the gap between the
+  // nearest siblings that carry spans, so one word repeated under
+  // several elements resolves to its OWN occurrence. A window holding
+  // the word exactly once answers; anything else DECLINES, and the
+  // caller then leaves the name unanchored rather than pointing at a
+  // guess. Primitive spans are a ts-face side band, so this answers
+  // only there — the road that has a reader for the answer.
+  bareChildSpan(args, k, owner) {
+    const spanOf = (x) => {
+      const id = isNode(x) ? this.stores.idOf(x) : null;
+      return id !== null ? this.stores.selfSpan(id) : null;
+    };
+    const outer = spanOf(owner) ?? spanOf(this.rstate?.node ?? null);
+    if (outer === null) return null;
+    let [lo, hi] = outer;
+    for (let j = k - 1; j >= 0; j--) { const sp = spanOf(args[j]); if (sp) { lo = sp[1]; break; } }
+    for (let j = k + 1; j < args.length; j++) { const sp = spanOf(args[j]); if (sp) { hi = sp[0]; break; } }
+    const hits = this.stores.primitiveSpans(args[k], lo, hi);
+    return hits.length === 1 ? [hits[0].sourceStart, hits[0].sourceEnd] : null;
+  }
+
+  // The reading a rejected attribute NAME gets. tsgo's own report is
+  // the generic-argument mismatch, whose parameter type is the tag's
+  // WHOLE name union — sixty names, elided, with the one the author
+  // meant among the hidden ones. Both roads record this instead: the
+  // nearest spelling when the tables hold one (a DOM property's
+  // camelCase name folds to its attribute, and that fold is certain),
+  // and otherwise the road's own admission.
+  unknownAttrMessage(tag, name, { bare, svg }) {
+    const near = suggestAttribute(tag, name);
+    if (near !== null) return `'${name}' is not a known attribute of <${tag}> — did you mean '${near}'?`;
+    if (bare) {
+      return `'${name}' is not a known attribute of <${tag}> — a bare word sets the boolean attribute it ` +
+        `names; render a value with \`= ${name}\`, or spell \`name: value\``;
+    }
+    // Each namespace spells its own vocabulary: HTML lowercases, SVG
+    // is verbatim and case-SENSITIVE. Naming the wrong rule would send
+    // an author to the wrong fix.
+    return `'${name}' is not a known attribute of <${tag}> — ` + (svg
+      ? 'SVG attribute names are the spec\'s own, case-sensitive (`viewBox`)'
+      : "HTML attribute names are the spec's own, lowercase") +
+      '; `data-`/`aria-` names take any suffix';
   }
 
   emitRewrittenPrimitive(storedValue, emittedValue) {
@@ -10285,7 +10330,7 @@ class Emitter {
       R.pendingClassKeys = null;
     }
     if (isSvg) R.svgDepth++;
-    this.renderChildren(el, args);
+    this.renderChildren(el, args, node);
     if (isSvg) R.svgDepth--;
     if (classes.length > 0) {
       if (R.pendingClassArgs.length === 1) {
@@ -10346,7 +10391,7 @@ class Emitter {
     R.pendingClassEl = el;
     R.pendingClassKeys = null;
     if (isSvg) R.svgDepth++;
-    this.renderChildren(el, children);
+    this.renderChildren(el, children, node);
     if (isSvg) R.svgDepth--;
     const parts = R.pendingClassArgs;
     // This element's merging pairs recorded their key spans here —
@@ -10400,8 +10445,9 @@ class Emitter {
   }
 
   // The shared child/attribute walk for element argument lists.
-  renderChildren(el, args) {
-    for (const arg of args) {
+  renderChildren(el, args, owner = null) {
+    for (let k = 0; k < args.length; k++) {
+      const arg = args[k];
       if (isFunc(arg)) {
         // A PARAMETERIZED function has no render-child reading — the
         // injected children arrows are always bare `->`; a user-spelled
@@ -10475,15 +10521,33 @@ class Emitter {
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
           // Bare identifier resolving to NOTHING in scope: boolean-
-          // attribute shorthand — validated against the spec-derived
-          // known-attribute vocabulary (the known-vocabulary fork: a
-          // misspelling must never silently become markup).
+          // attribute shorthand. This arm is TOTAL — the readings above
+          // it (an in-scope value, a tag, a component) have all
+          // declined, so the name is an attribute, whatever it spells.
+          //
+          // WHETHER THE VOCABULARY HOLDS IT is the typed surface's
+          // question, never emission's: the name is a string-literal
+          // union member there, admitted from the same tables this file
+          // reads (the lockstep test pins the two equal). Emission
+          // rejects nothing here, because the JS face rejects no other
+          // name either — `= someUndefinedName` compiles to a runtime
+          // ReferenceError, and `notAnAttr: 'x'` to markup, both
+          // silently. A gate here would be the one name question the
+          // untyped road answers, and it would answer the least costly
+          // one. What the ts face gets instead is the author's span on
+          // the emitted name, so the surface's complaint lands on the
+          // word, and a recorded row that re-words it (both roads).
           const tag = this.renderTagOf(el);
-          if (!knownBareAttribute(tag, arg)) {
-            throw this.positionedError(arg,
-              `emitter: '${arg}' is not a known attribute of <${tag}> — bare-identifier shorthand sets a boolean ` +
-              `attribute and validates against the standard vocabulary ` +
-              '(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`', this.rstate.node);
+          let unknownAt = null;
+          if (this.ts && !knownBareAttribute(tag, arg)) {
+            const at = this.bareChildSpan(args, k, owner);
+            if (at !== null) {
+              unknownAt = at;
+              this.intrinsics.push({
+                start: at[0], end: at[1], kind: 'unknown-attr', tag, name: arg,
+                message: this.unknownAttrMessage(tag, arg, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
+              });
+            }
           }
           // The empty string is the boolean-attribute serialization
           // (the own-line flag road and the docs both spell it) —
@@ -10493,10 +10557,16 @@ class Emitter {
           // '' satisfies the widened attribute type, so no quieting
           // cast rides.
           const recv = this.tsElReceiver(el);
+          const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
           this.renderLine(null, () => {
             recv.emit();
             this.b.emit('.setAttribute(');
-            this.emitQuotedPrimitive(arg);
+            // The name is a bare WORD in source and a string literal in
+            // the emission: a caller-supplied span is the only way the
+            // call's own complaint reaches the bytes the author wrote.
+            if (ownerId !== null) {
+              this.b.markSpan(ownerId, 'identifier', unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(arg));
+            } else this.emitQuotedPrimitive(arg);
             this.b.emit(", '')");
           });
           continue;
@@ -10537,8 +10607,9 @@ class Emitter {
     }
   }
 
-  // The element's tag name, recovered for the #125 vocabulary check
-  // (var names are allocation-ordered; the frame records tags).
+  // The element's tag name: which attribute vocabulary an element's
+  // keys answer to (var names are allocation-ordered; the frame
+  // records tags).
   renderTagOf(el) {
     return this.rstate.tags?.get(el) ?? 'div';
   }
@@ -11778,6 +11849,15 @@ class Emitter {
         this.intrinsics.push(routeWrap
           ? { start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, type: this.routesUnion, route: true }
           : { start: attrSpan[0], end: attrSpan[1], kind: 'attr', name: key, gen: attrGen });
+        // The name the surface will reject — recorded so the mapper can
+        // say which spelling works, the same row the bare road keeps.
+        const attrTag = this.renderTagOf(el);
+        if (!knownBareAttribute(attrTag, key)) {
+          this.intrinsics.push({
+            start: attrSpan[0], end: attrSpan[1], kind: 'unknown-attr', tag: attrTag, name: key,
+            message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true }),
+          });
+        }
       };
       // The method the record points at stands one byte past the dot the
       // call opens with.

@@ -36,7 +36,7 @@ Panel = component
       p class: "static"
       section $open: true, $my-thing: "x"
       article data-lucide: "search"
-      form noValidate
+      form novalidate
       . role: "note"
         "dot attributes"
       .counter-display "hyphenated"

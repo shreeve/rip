@@ -8,12 +8,15 @@
 //     al.; explicit `@name:` bindings are NOT gated on this set —
 //     custom events are legal DOM).
 //   knownBareAttribute(tag, name) — the known-attribute
-//     vocabulary: a bare identifier in element-argument position is
-//     boolean-attribute shorthand ONLY when the name is a real
-//     attribute for that element — the HTML GLOBAL attribute set, the
-//     per-tag content attributes (the WHATWG HTML attributes index),
-//     `data-`/`aria-` patterns, or (on SVG elements) the SVG attribute
-//     set. Unknown bare names REJECT at the caller, positioned.
+//     vocabulary: whether a name is a real attribute for that element
+//     — the HTML GLOBAL attribute set, the per-tag content attributes
+//     (the WHATWG HTML attributes index), `data-`/`aria-` patterns, or
+//     (on SVG elements) the SVG attribute set. The generated type
+//     surfaces admit exactly this set, and REJECTING an unknown name
+//     is theirs alone; emission reads the answer only to record what a
+//     rejection should say.
+//   suggestAttribute(tag, name) — the name a rejection should offer
+//     instead, or null when nothing is near enough to name.
 
 export const HTML_TAGS = new Set([
   'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base',
@@ -191,11 +194,6 @@ export const SVG_ATTRS = new Set([
   'keyTimes', 'keySplines', 'calcMode', 'restart', 'min', 'max',
 ]);
 
-// The vocabulary check for BARE-identifier boolean-attribute
-// shorthand (`form noValidate` → novalidate=""). HTML attribute names
-// are case-insensitive; SVG names match verbatim. `data-`/`aria-`
-// names are always legal (unreachable for a bare identifier — no
-// hyphen — but part of the vocabulary's contract).
 // The attribute NAMES a template tag takes — the same tables
 // knownBareAttribute accepts from, read as a list (the extends-props
 // surface renders them as completion members; `data-`/`aria-`
@@ -212,12 +210,62 @@ export function attributeNamesFor(tag) {
   return [...names];
 }
 
-export function knownBareAttribute(tag, name) {
+// Levenshtein, capped: anything past the suggestion threshold answers
+// 3 without measuring, so a long vocabulary costs a length check.
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// The nearest attribute name to a rejected one, or null when nothing
+// is near enough to name. An exact case FOLD answers first and answers
+// certainly — a DOM property's camelCase spelling is the common miss,
+// and the attribute it folds to is the one the author meant. Otherwise
+// the single closest name within two edits; a tie or a more distant
+// best DECLINES, because a wrong suggestion costs more than none.
+export function suggestAttribute(tag, name) {
+  const attrs = attributeNamesFor(tag);
   const lower = String(name).toLowerCase();
-  if (lower.startsWith('data-') || lower.startsWith('aria-')) return true;
-  if (GLOBAL_ATTRS.has(lower)) return true;
+  const fold = attrs.find((a) => a.toLowerCase() === lower);
+  if (fold !== undefined && fold !== name) return fold;
+  if (String(name).length < 3) return null;
+  let best = null;
+  let bestD = 3;
+  let tied = false;
+  for (const a of attrs) {
+    // Never the name itself: the answer is what to write INSTEAD, so a
+    // caller asking about a legal name must get null, not an echo.
+    if (a === String(name)) continue;
+    const d = editDistance(String(name), a);
+    if (d < bestD) { best = a; bestD = d; tied = false; }
+    else if (d === bestD) tied = true;
+  }
+  return best !== null && !tied ? best : null;
+}
+
+// The vocabulary check for BARE-identifier boolean-attribute
+// shorthand (`form novalidate` → novalidate=""). An attribute answers
+// to ONE spelling — its own, as the tables store it: the HTML spec's
+// (lowercase) and the SVG spec's (verbatim, `viewBox`). A DOM
+// property's camelCase name is not an attribute name and does not
+// answer here; it reaches the value type through the CAMEL bridge
+// alone. `data-`/`aria-` names are always legal (unreachable for a
+// bare identifier — no hyphen — but part of the vocabulary's
+// contract).
+export function knownBareAttribute(tag, name) {
+  const attr = String(name);
+  if (attr.startsWith('data-') || attr.startsWith('aria-')) return true;
+  if (GLOBAL_ATTRS.has(attr)) return true;
   const perTag = PER_TAG_ATTRS[String(tag).toLowerCase()];
-  if (perTag && perTag.has(lower)) return true;
-  if (SVG_TAGS.has(tag) && SVG_ATTRS.has(String(name))) return true;
+  if (perTag && perTag.has(attr)) return true;
+  if (SVG_TAGS.has(tag) && SVG_ATTRS.has(attr)) return true;
   return false;
 }

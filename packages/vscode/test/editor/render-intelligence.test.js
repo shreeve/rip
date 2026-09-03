@@ -719,7 +719,9 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       const hit = diags.find((d) => d.code === 2345);
       expect(hit).toBeTruthy();
       expect(hit.range.start).toEqual({ line: 7, character: 8 });
-      expect(hit.message).toContain(`'"placeholdr"'`);
+      // The name's own claim, not tsgo's parameter union — the union
+      // elides the very name the author wanted.
+      expect(hit.message).toBe("'placeholdr' is not a known attribute of <input> — did you mean 'placeholder'?");
     });
   });
 
@@ -786,12 +788,22 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       const before = swaps();
       await api.completion('app.rip', 12, 14);             // after `wor`, inside the literal
       expect(swaps() - before).toBe(0);
+      // A bare PREFIX compiles now — an unknown attribute name is a
+      // diagnostic, not a rejection — so the buffer's own face carries
+      // the ask into the `setAttribute` name position and answers it
+      // there, at no probe cost.
       const broken = APP.replace('      input ref: el', '      input pla');
       await api.change('app.rip', broken, { waitPublish: false });
       const settled = swaps();
-      const labels = labelsOf(await api.completion('app.rip', 10, 15));   // after `pla`
-      expect(labels).toContain('placeholder');
-      expect(swaps() - settled).toBeGreaterThanOrEqual(2);  // the probe face and its restore
+      expect(labelsOf(await api.completion('app.rip', 10, 15))).toContain('placeholder');
+      expect(swaps() - settled).toBe(0);
+      // The EMPTY slot is what the buffer's face still cannot answer:
+      // the cursor stands on no key at all, so the probe splices one.
+      const withSlot = APP.replace('        value: q', '        value: q\n        ');
+      await api.change('app.rip', withSlot, { waitPublish: false });
+      const beforeSlot = swaps();
+      expect(labelsOf(await api.completion('app.rip', 9, 8))).toContain('required');
+      expect(swaps() - beforeSlot).toBeGreaterThanOrEqual(2);  // the probe face and its restore
     }, { traceTsgo: true });
   });
 

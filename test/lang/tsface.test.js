@@ -1355,14 +1355,16 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('declare rest: { readonly value: __RipRest_section; read(): __RipRest_section; touch(): void };');
     expect(code).toContain('type __RipRest_section = { ');
     // Intrinsic attrs type through the tag's DOM interface with an
-    // extends-Record guard; camelCased DOM twins get
-    // their own entries (tabindex/tabIndex).
+    // extends-Record guard. Each answers to ONE spelling — its own —
+    // and the camelCased DOM property is where its type is read from,
+    // never a second key.
     expect(code).toContain(`id?: HTMLElementTagNameMap["section"] extends Record<'id', infer T> ? T : any`);
+    expect(code).toContain(`tabindex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? T : any`);
+    expect(code).not.toContain('tabIndex?:');
     // `class` takes the element road's own admission, both spellings — no DOM
     // property is named `class`, and the runtime applies it through __clsx.
     expect(code).toContain('class?: __RipClassValue | __RipClassValue[]');
     expect(code).toContain('className?: __RipClassValue | __RipClassValue[]');
-    expect(code).toContain(`tabIndex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? T : any`);
     // Undeclared rest props ride the data-/aria- templates — no string
     // catch-all, so a misspelled declared prop draws the
     // excess-property did-you-mean instead of falling through.

@@ -8,10 +8,10 @@
 
 import { describe, test, expect } from 'bun:test';
 import {
-  CAMEL, domSurfaceDecls, attrValsName, elSurfaceName, hostText, surfaceableTag,
+  domSurfaceDecls, attrValsName, elSurfaceName, hostText, surfaceableTag,
   CLASS_VALUE_DECL, CLSX_TYPE,
 } from '../../src/ts/dom-types.js';
-import { attributeNamesFor, knownBareAttribute, HTML_TAGS, SVG_TAGS, SVG_ONLY_TAGS } from '../../src/dom.js';
+import { attributeNamesFor, knownBareAttribute, suggestAttribute, HTML_TAGS, SVG_TAGS, SVG_ONLY_TAGS } from '../../src/dom.js';
 
 // Member keys of one `interface <name> ... { ... }` block in the
 // generated text (quoted or bare, methods excluded by the `(` check;
@@ -33,19 +33,14 @@ function membersOf(text, name) {
 }
 
 // The full key set one HTML tag's surface must answer: the tables'
-// names plus each CAMEL double the bare validator also accepts (a
-// dual-namespace tag's SVG-sourced names take no case fold).
+// names, and ONLY those — a DOM property's camelCase name is not an
+// attribute name and is never a key.
 function expectedHtmlKeys(tag) {
-  const keys = new Set(attributeNamesFor(tag));
-  for (const attr of [...keys]) {
-    const prop = CAMEL[attr];
-    if (prop && prop !== attr && knownBareAttribute(tag, prop)) keys.add(prop);
-  }
-  return keys;
+  return new Set(attributeNamesFor(tag));
 }
 
 describe('dom-types ↔ dom.js lockstep', () => {
-  test('every HTML tag surface carries exactly the tables\' names plus the CAMEL doubles', () => {
+  test('every HTML tag surface carries exactly the tables\' names', () => {
     for (const tag of HTML_TAGS) {
       const text = domSurfaceDecls([{ tag, svg: false }]);
       const own = new Set([
@@ -99,15 +94,14 @@ describe('dom-types ↔ dom.js lockstep', () => {
 
   test('the value policy rows: widened attribute road, strict property road, class contract, templates', () => {
     const text = domSurfaceDecls([{ tag: 'input', svg: false }, { tag: 'label', svg: false }]);
-    // maxlength and maxLength share the property's type, widened.
+    // The attribute answers to its OWN spelling, typed through the DOM
+    // property it reflects: the property name is a lookup, never a key.
     expect(text).toContain(`maxlength: __RipAV<HTMLElementTagNameMap['input'], 'maxLength'>`);
-    expect(text).toContain(`maxLength: __RipAV<HTMLElementTagNameMap['input'], 'maxLength'>`);
-    // `for:` types through the htmlFor property — but htmlFor is NOT an
-    // attr-road key (setAttribute case-folds it to the unrelated
-    // `htmlfor` attribute; only case folds that land on the real
-    // attribute earn a doubled spelling).
+    expect(text).not.toContain('maxLength:');
+    expect(text).toContain(`readonly: __RipAV<HTMLElementTagNameMap['input'], 'readOnly'>`);
+    expect(text).not.toContain('readOnly:');
     expect(text).toContain(`for: __RipAV<HTMLElementTagNameMap['label'], 'htmlFor'>`);
-    expect(text).not.toContain(`htmlFor: __RipAV`);
+    expect(text).not.toContain('htmlFor:');
     // class rides the clsx contract, never a string lookup.
     expect(text).toContain('class: __RipClassValue | __RipClassValue[]');
     // property road strict (no | string): the receiver surface's value/checked.
@@ -143,5 +137,42 @@ describe('dom-types ↔ dom.js lockstep', () => {
     expect(on).toContain('declare function __ripRefCellSvg<K extends keyof SVGElementTagNameMap');
     expect(on).toContain('0 extends (1 & V) ? unknown');
     expect(on).toContain('[V] extends [null] ? unknown');
+  });
+});
+
+describe('suggestAttribute: what a rejected name is offered instead', () => {
+  // A case FOLD is the certain answer — the DOM property spelling of a
+  // real attribute, which is what an author arriving from JSX writes.
+  test('a DOM property spelling folds to its attribute', () => {
+    expect(suggestAttribute('input', 'readOnly')).toBe('readonly');
+    expect(suggestAttribute('form', 'noValidate')).toBe('novalidate');
+    expect(suggestAttribute('td', 'colSpan')).toBe('colspan');
+    expect(suggestAttribute('label', 'htmlFor')).toBe(null);   // a RENAME, not a fold
+  });
+
+  // SVG names are verbatim, so the fold runs the other way there.
+  test('an SVG name folds to its own case', () => {
+    expect(suggestAttribute('svg', 'viewbox')).toBe('viewBox');
+    expect(suggestAttribute('svg', 'VIEWBOX')).toBe('viewBox');
+  });
+
+  // A near miss earns one name, within two edits.
+  test('a typo within two edits earns the closest name', () => {
+    expect(suggestAttribute('div', 'claas')).toBe('class');
+    expect(suggestAttribute('a', 'hrf')).toBe('href');
+    expect(suggestAttribute('img', 'srcc')).toBe('src');
+    expect(suggestAttribute('input', 'tpe')).toBe('type');
+  });
+
+  // Nothing near, a tie, or too short to judge: DECLINE. A wrong
+  // suggestion sends the author to the wrong fix, which costs more
+  // than saying nothing.
+  test('a distant name, a tie, or a very short one declines', () => {
+    expect(suggestAttribute('span', 'countt')).toBe(null);
+    expect(suggestAttribute('input', 'zzzzzz')).toBe(null);
+    expect(suggestAttribute('div', 'xy')).toBe(null);
+    // Already legal names are never "suggested" onto themselves.
+    expect(suggestAttribute('input', 'readonly')).toBe(null);
+    expect(suggestAttribute('div', 'class')).toBe(null);
   });
 });

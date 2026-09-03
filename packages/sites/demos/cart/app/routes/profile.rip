@@ -38,7 +38,7 @@ export Profile = component
       div.grid
         label
           'Email'
-          input value: form.email, type: 'email', readOnly: true
+          input value: form.email, type: 'email', readonly
         label
           'Phone'
           input

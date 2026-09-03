@@ -72,7 +72,7 @@ let Panel = class extends __Component {
     this._el5.setAttribute('data-lucide', "search");
     this._el0.appendChild(this._el5);
     this._el6 = document.createElement('form');
-    this._el6.setAttribute('noValidate', '');
+    this._el6.setAttribute('novalidate', '');
     this._el0.appendChild(this._el6);
     this._el7 = document.createElement('div');
     this._el7.setAttribute('role', "note");

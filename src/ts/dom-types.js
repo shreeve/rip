@@ -28,18 +28,21 @@
 //     (serializable primitives; any suffix is legal by design, so a
 //     misspelled `aria-labl` passes — same admission v3 made).
 //
-// Attribute names answer in BOTH spellings on HTML surfaces — the
-// spec's lowercase form and the DOM property's camelCase where the two
-// differ (the CAMEL table; HTML attribute names are case-insensitive,
-// so `maxLength:` serializes identically to `maxlength:`). SVG names
-// are case-SENSITIVE and match verbatim — no doubling.
+// An attribute answers to ONE spelling — its own, as src/dom.js stores
+// it: the HTML spec's lowercase form, and SVG's verbatim case. The
+// DOM property's camelCase name (the CAMEL table) is how the VALUE
+// type is looked up, never a key an author may write: `maxLength:` is
+// not an attribute name, and rejects against the setAttribute road's
+// name union — TS2345, re-worded at publish to name the spelling that
+// works (src/emitter.js unknownAttrMessage).
 
-import { attributeNamesFor, knownBareAttribute, GLOBAL_ATTRS, SVG_ATTRS, SVG_TAGS, HTML_TAGS } from '../dom.js';
+import { attributeNamesFor, GLOBAL_ATTRS, SVG_ATTRS, SVG_TAGS, HTML_TAGS } from '../dom.js';
 
 // Attribute spellings whose DOM property is camelCased — the
-// attribute→property bridge the guarded value lookup reads through,
-// and the source of the doubled HTML key spellings. `for` maps to
-// `htmlFor` (the one rename rather than a case fold).
+// attribute→property bridge the guarded value lookup reads through.
+// Keys are attribute names (what an author writes), values are
+// property names (where the type comes from); `for` maps to `htmlFor`
+// (the one rename rather than a case fold).
 export const CAMEL = {
   __proto__: null,
   maxlength: 'maxLength', minlength: 'minLength', readonly: 'readOnly',
@@ -107,19 +110,16 @@ export const hostText = (tag, svg) =>
 export const surfaceableTag = (tag, svg) =>
   typeof tag === 'string' && (svg ? SVG_TAGS.has(tag) : HTML_TAGS.has(tag));
 
-// One HTML attribute member (+ its camelCase double where one exists):
-// the attr spelling and the property spelling share one value type,
-// looked up through the property name. The double rides only when the
-// bare validator accepts it too (a dual-namespace tag's SVG-sourced
-// names are verbatim — `crossorigin` on an HTML <a> arrives from the
-// SVG table and takes no case fold), so the two vocabularies cannot
-// drift — the lockstep test reads them back against each other.
-function htmlMemberRows(tag, attr, host) {
+// One HTML attribute member: the attribute's own spelling, valued
+// through its DOM property (the CAMEL bridge — lib.dom carries no
+// `readonly`, only `readOnly`). The bridge names the TYPE and never a
+// key, so the surface answers to exactly the names the tables hold and
+// cannot drift from the bare validator — the lockstep test reads the
+// two back against each other.
+function htmlMemberRows(attr, host) {
   const prop = CAMEL[attr] ?? attr;
   const value = attr === 'class' ? CLASS_TYPE : `__RipAV<${host}, '${prop}'>`;
-  const rows = [`  ${keyText(attr)}: ${value};`];
-  if (prop !== attr && knownBareAttribute(tag, prop)) rows.push(`  ${keyText(prop)}: ${value};`);
-  return rows;
+  return [`  ${keyText(attr)}: ${value};`];
 }
 
 // The HTML GLOBAL base — shared by every HTML surface; per-tag
@@ -127,7 +127,7 @@ function htmlMemberRows(tag, attr, host) {
 // value lookups guard against HTMLElement (what globals live on).
 function globalAttrValsDecl() {
   const rows = [];
-  for (const attr of GLOBAL_ATTRS) rows.push(...htmlMemberRows('div', attr, 'HTMLElement'));
+  for (const attr of GLOBAL_ATTRS) rows.push(...htmlMemberRows(attr, 'HTMLElement'));
   return `interface __RipGlobalAttrVals {\n${rows.join('\n')}\n${TEMPLATE_ROWS}\n}`;
 }
 
@@ -151,7 +151,7 @@ function attrValsDecl(tag, svg) {
   for (const attr of attributeNamesFor(tag)) {
     if (baseNames.has(attr)) continue;
     if (svg) rows.push(`  ${keyText(attr)}: ${attr === 'class' ? CLASS_TYPE : 'string | number'};`);
-    else rows.push(...htmlMemberRows(tag, attr, hostText(tag, svg)));
+    else rows.push(...htmlMemberRows(attr, hostText(tag, svg)));
   }
   const body = rows.length ? `\n${rows.join('\n')}\n` : '';
   return `interface ${attrValsName(tag, svg)} extends ${base} {${body}}`;

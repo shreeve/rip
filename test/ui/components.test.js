@@ -11,7 +11,7 @@
 //     statements), #122 (duplicate render), #123 (duplicate members),
 //     #127 (offer shapes), plus the new loud classes (#140 bound
 //     effects, non-function hooks)
-//   - the static render DSL with the #124/#125 fork implementations;
+//   - the static render DSL with the #124 fork implementation;
 //     dynamic constructs and composition reject loudly
 //   - sexpr spot checks where the corpus
 //     stream tier cannot carry the source; the LINE-level byte tier
@@ -721,17 +721,25 @@ describe('the static render DSL: emission pins', () => {
     expect(code).toContain('__effect(() => { this._el0.value = this.name.value; });');
   });
 
-  test('bare-identifier boolean shorthand validates against the vocabulary (#125 fork)', () => {
+  test('a bare identifier that resolves to nothing sets the attribute it names', () => {
     // Legal idioms stay legal.
-    expect(compile('P = component\n  render\n    form noValidate\n').code)
-      .toContain(`setAttribute('noValidate', '')`);
+    expect(compile('P = component\n  render\n    form novalidate\n').code)
+      .toContain(`setAttribute('novalidate', '')`);
     expect(compile('P = component\n  render\n    div hidden\n').code)
       .toContain(`setAttribute('hidden', '')`);
     expect(compile('P = component\n  render\n    input required\n').code)
       .toContain(`setAttribute('required', '')`);
-    // The misspelling space rejects, positioned (the old runtime ships markup).
-    emitFails('P = component\n  count := 0\n  render\n    span countt\n', /'countt' is not a known attribute of <span>/s);
-    emitFails('P = component\n  render\n    div claas\n', /not a known attribute of <div>/);
+    // The arm is TOTAL: whatever the word spells, the readings above it
+    // having declined, it is the attribute it names. Emission asks
+    // nothing about the vocabulary — that is the typed surface's
+    // question (test/spawn/cli/check.test.js pins the diagnostic and
+    // its wording) — because the untyped road answers no other name
+    // question either: both lines below compile, and the FIRST is the
+    // one that breaks at runtime.
+    expect(compile('P = component\n  render\n    div\n      = someUndefinedName\n').code)
+      .toContain('someUndefinedName');
+    expect(compile('P = component\n  render\n    span countt\n').code)
+      .toContain(`setAttribute('countt', '')`);
   });
 
   test('own-line bare boolean flag sets the attribute on the enclosing element (v3 semantics, restored)', () => {

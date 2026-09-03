@@ -197,6 +197,19 @@ export function mapTsDiagnostic(good, d) {
   // channel — reads as its value type on both sides of a complaint, the
   // same collapse the prop-slot hover makes (collapseCellArms).
   message = message.replace(/'([^'\n]*)'/g, (m, t) => `'${collapseCellArms(t)}'`);
+  // AN ATTRIBUTE NAME THE VOCABULARY DOES NOT HOLD. tsgo reports the
+  // generic-argument mismatch, whose parameter type is the tag's whole
+  // name union — sixty names, elided, with the one the author meant
+  // among the hidden ones. The emitter records the tag, the name, and
+  // the nearest spelling at the key's own span (both roads: a bare word
+  // and a `name: value` pair), so the claim reads as what it is. The row
+  // must START the diagnostic — a pair's complaint may run past the key
+  // to the whole pair, but one merely CONTAINING a key belongs to the
+  // enclosing construct and keeps its own words.
+  if (d.code === 2345) {
+    const row = (good.intrinsics ?? []).find((r) => r.kind === 'unknown-attr' && r.start === span[0]);
+    if (row) message = row.message;
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,

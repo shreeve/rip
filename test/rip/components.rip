@@ -4881,9 +4881,11 @@ test 'unmount before mount disposes init effects without mounted-only hooks', ''
   [a._state, a._frame.disposed, log]
   ''', ['unmounted', true, [0]]
 
-# Bare-identifier shorthand sets a boolean attribute — validated
-# against the standard vocabulary so a misspelling can never silently
-# set a bogus attribute.
+# Bare-identifier shorthand sets a boolean attribute. The arm is TOTAL
+# — the readings above it having declined, the word is the attribute it
+# names, in or out of the standard vocabulary. Whether the vocabulary
+# holds it is the typed surface's question; emission asks no name
+# question here, because it asks none anywhere on the untyped road.
 
 code 'bare-ident shorthand — known name is a boolean attribute', '''
   export A = component
@@ -4902,11 +4904,22 @@ code 'bare-ident shorthand — known name is a boolean attribute', '''
   };
   '''
 
-fail 'bare-ident shorthand — unknown name rejects against the vocabulary', '''
+code 'bare-ident shorthand — an unknown name is still the attribute it names', '''
   export A = component
     render
       div outline
-  ''', "not a known attribute of <div>"
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('outline', '');
+      return this._el0;
+    }
+  };
+  '''
 
 # Transition presets ride the branch-root claim — a '~name' directive
 # is legal only on the FIRST top-level element of an if/else branch
