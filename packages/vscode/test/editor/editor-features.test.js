@@ -1484,7 +1484,7 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
   test('a bare gate at its declaration hovers the RESOLVED stash type, never the projection formula', async () => {
     // The face carries the projection as an inferred position (the class
     // declare rides `__computed`), so quickinfo prints the resolved type;
-    // a written node would echo the `AppData<...>` machinery verbatim.
+    // a written node would echo the `StashData<...>` machinery verbatim.
     await inWorkspace({
       'index.rip': "console.log 'serve'\n",
       'package.json': '{}',
@@ -1498,7 +1498,7 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
         await api.sleep(200);
       }
       expect(h.contents.value).toContain('Todo[]');
-      expect(h.contents.value).not.toContain('AppData');
+      expect(h.contents.value).not.toContain('StashData');
       // The typed router ambience rides the same discovery: a bare
       // computed over `@router.query` infers string, no annotation.
       const rq = await api.hover('app/routes/page.rip', 2, 2);
@@ -1513,7 +1513,7 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
       // expression) gives every path segment a typed span — the same
       // answers a computed line serves, v3's construction.
       const gd = await api.hover('app/routes/page.rip', 1, 17);
-      expect(gd.contents.value).toContain('AppData');
+      expect(gd.contents.value).toContain('StashData');
       const gt = await api.hover('app/routes/page.rip', 1, 22);
       expect(gt.contents.value).toContain('todos: Todo[]');
       // An IN-BODY read answers value-first like the declaration — the
@@ -1531,7 +1531,7 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
 
   test('no hover leaks rip internals anywhere in a stash-anchored component', async () => {
     // The standing property: at EVERY position, a hover either answers
-    // in the author's vocabulary (framework type NAMES like AppData or
+    // in the author's vocabulary (framework type NAMES like StashData or
     // Router included) or declines — never a minted `__` name, an
     // import() splice, or lowering scaffold. Swept position by position
     // over a component exercising every member kind and a full render.

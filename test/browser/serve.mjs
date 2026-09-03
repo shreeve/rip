@@ -16,7 +16,7 @@ const MODULES = {
     "  user: source fetch: -> (await fetch('/user.json')).json()",
     '}',
   ].join('\n'),
-  'data.rip': "export data = { title: 'certification' }",
+  'seed.rip': "export seed = { title: 'certification' }",
   'routes/index.rip': [
     'export Home = component',
     '  render',

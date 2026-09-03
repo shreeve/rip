@@ -27848,7 +27848,7 @@ function createRenderer(opts) {
     if (!(Array.isArray(paths) && paths.length > 0))
       return "noop";
     for (let path of paths) {
-      if (path === "stash.rip" || path.startsWith("stash/") || path === "data.rip")
+      if (path === "stash.rip" || path.startsWith("stash/") || path === "seed.rip")
         return "escape";
     }
     let info = router.current;
@@ -28350,8 +28350,8 @@ var validBundle = function(bundle) {
       fail2(`launch bundle ${key} must be an object of store paths`);
     }
   }
-  if (bundle.data != null && (typeof bundle.data !== "object" || Array.isArray(bundle.data))) {
-    fail2("launch bundle data must be an object");
+  if (bundle.seed != null && (typeof bundle.seed !== "object" || Array.isArray(bundle.seed))) {
+    fail2("launch bundle seed must be an object");
   }
   return bundle;
 };
@@ -28407,7 +28407,7 @@ function launch(opts) {
   let adapter = opts.adapter ?? browserAdapter();
   let declaration = prepared.declaration;
   let stash = createStash(_cloneDeclaration(declaration ?? {}));
-  _mergePlain(stash, bundle.data ?? {});
+  _mergePlain(stash, bundle.seed ?? {});
   _stampDefaults(stash);
   let components = opts.components != null ? validComponents(opts.components) : createComponents();
   if (bundle.modules != null)
@@ -30039,9 +30039,9 @@ async function bootApp(opts = {}) {
   const watch = opts.watch === true || opts.feed != null;
   const program = createProgram(sources, debug, { hmr: watch });
   const workspace = createWorkspace();
-  const dataFor = (modules) => modules["data.rip"]?.data;
+  const seedFor = (modules) => modules["seed.rip"]?.seed;
   const launchWith = (modules) => launch({
-    bundle: { compiled: modules, data: dataFor(modules) },
+    bundle: { compiled: modules, seed: seedFor(modules) },
     components: workspace,
     target: opts.target,
     adapter: opts.adapter,
@@ -30157,7 +30157,7 @@ async function bootApp(opts = {}) {
       const staged = await program.compile(changedRip);
       nextCompiled = staged.compiled;
       applyPaths = staged.invalidated.filter((path) => !path.startsWith("rip/"));
-      validatePrepared2({ compiled: nextCompiled, data: dataFor(nextCompiled) });
+      validatePrepared2({ compiled: nextCompiled, seed: seedFor(nextCompiled) });
     } catch (error) {
       program.sources(activeSources());
       rejected.add(change.hash);

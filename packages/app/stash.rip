@@ -17,7 +17,7 @@ export type SourceHandle<T = unknown> =
 export type SourceHandleFor<V> = unknown extends V ? SourceHandle : V extends SourceFamily<infer T, any> ? SourceHandle<T> : SourceHandle<NonNullable<V>>
 
 # `D` is the data shape `source()` paths resolve against (the ambience
-# splices the AppData projection here). A path naming a top-level entry
+# splices the StashData projection here). A path naming a top-level entry
 # answers that entry's typed handle; any other string — dotted paths
 # included — stays legal and answers the untyped handle. Rip's
 # structured types carry no template-literal types, so the dotted shape

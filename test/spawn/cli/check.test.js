@@ -4263,7 +4263,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(JSON.parse(single.stdout)).toEqual([]);
       // The face carries the splice; the stash face carries its type.
       const face = fs.readFileSync(path.join(dir, '.rip/check/app/routes/page.rip.ts'), 'utf8');
-      expect(face).toContain("import('rip/app').AppData<import(\"../stash.rip\").__RipStash>");
+      expect(face).toContain("import('rip/app').StashData<import(\"../stash.rip\").__RipStash>");
       // The router rides the same discovery: the ambience carries the
       // runtime's Router — with a route tree present, the union-checked
       // construction (Omit keeps every non-navigation member, so the

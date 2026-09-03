@@ -12,14 +12,14 @@
 #
 #   modules    route/app sources keyed by store path (registry text)
 #   compiled   precompiled module objects keyed by store path
-#   data       seed values overlaid onto the stash — a seed never
+#   seed       values overlaid onto the stash at boot — a seed never
 #              overwrites a source cell
 #
 # The application declares its stash in the bundle module
 # `stash.rip` through its `stash` export; the `declaration` option
 # overrides it for tests and embedding hosts. The declaration is the
 # baseline (cells by reference, plain values as defaults); the bundle's
-# `data` is the seed overlaid on top of it.
+# `seed` is overlaid on top of it.
 #
 # The `components` option injects the component store (Workspace implements
 # the same interface); omitted,
@@ -69,8 +69,8 @@ validBundle = (bundle) ->
     continue unless section?
     unless typeof section is 'object' and not Array.isArray(section)
       fail "launch bundle #{key} must be an object of store paths"
-  if bundle.data? and (typeof bundle.data isnt 'object' or Array.isArray(bundle.data))
-    fail 'launch bundle data must be an object'
+  if bundle.seed? and (typeof bundle.seed isnt 'object' or Array.isArray(bundle.seed))
+    fail 'launch bundle seed must be an object'
   bundle
 
 STORE_METHODS = ['read', 'write', 'del', 'exists', 'size', 'list', 'listAll', 'load', 'watch', 'getCompiled', 'setCompiled']
@@ -126,10 +126,10 @@ export def launch(opts: LaunchOpts): LaunchResult
   # the declared baseline, not this session's writes.
   stash = createStash _cloneDeclaration(declaration ?? {})
 
-  # Seed overlay: bundle data merges onto plain keys at every depth; a
+  # Seed overlay: the bundle seed merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is
   # never touched by a JSON seed.
-  _mergePlain stash, bundle.data ?? {}
+  _mergePlain stash, bundle.seed ?? {}
   _stampDefaults stash
 
   components = if opts.components? then validComponents(opts.components) else createComponents()

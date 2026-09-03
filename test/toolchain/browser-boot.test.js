@@ -55,7 +55,7 @@ const route = (name, text) => [
 ].join('\n');
 
 const APP_MODULES = {
-  'data.rip': "export data = { title: 'probe' }",
+  'seed.rip': "export seed = { title: 'probe' }",
   'stash.rip': [
     "import { source } from 'rip/app'",
     'export stash = {',
@@ -96,7 +96,7 @@ describe('fetchBundle', () => {
 });
 
 describe('bootApp publication', () => {
-  test('compiles, launches, navigates, and reads data.rip seed data', async () => {
+  test('compiles, launches, navigates, and reads the seed.rip seed', async () => {
     const result = await bootApp({ bundle: bundleFor(), target: node('host'), adapter: fakeAdapter('/') });
     try {
       await settle();

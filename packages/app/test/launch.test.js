@@ -87,7 +87,7 @@ describe('launch', () => {
     expect(() => launch()).toThrow(/options object/);
     expect(() => launch({ bundle: null, target: node('t'), adapter: fakeAdapter() })).toThrow(/bundle object/);
     expect(() => launch({ bundle: { modules: [] }, target: node('t'), adapter: fakeAdapter() })).toThrow(/store paths/);
-    expect(() => launch({ bundle: { data: [] }, target: node('t'), adapter: fakeAdapter() })).toThrow(/data must be an object/);
+    expect(() => launch({ bundle: { seed: [] }, target: node('t'), adapter: fakeAdapter() })).toThrow(/seed must be an object/);
   });
 
   test('boots the app end to end and mounts the initial route', async () => {
@@ -149,7 +149,7 @@ describe('launch', () => {
         user: source({ fetch: async () => { fetches += 1; return { name: 'live' }; } }),
         theme: 'dark',
       },
-      bundle: bundle({ data: { user: { name: 'stale-json' }, theme: 'light', extra: 1 } }),
+      bundle: bundle({ seed: { user: { name: 'stale-json' }, theme: 'light', extra: 1 } }),
     });
     const raw = unwrapStash(result.stash);
     expect(typeof raw.user.read).toBe('function');
@@ -191,7 +191,7 @@ describe('launch', () => {
   });
 
   test('reset returns to the seeded baseline', () => {
-    const result = boot({ bundle: bundle({ data: { count: 5 } }) });
+    const result = boot({ bundle: bundle({ seed: { count: 5 } }) });
     result.stash.count = 99;
     result.stash.junk = true;
     result.stash.reset();
@@ -246,7 +246,7 @@ describe('launch reconciliation', () => {
         },
       },
       bundle: bundle({
-        data: {
+        seed: {
           users: 'clobber',
           settings: { theme: 'light', user: { stale: true } },
         },
@@ -276,7 +276,7 @@ describe('launch reconciliation', () => {
   });
 
   test('a __proto__ seed key becomes inert own data', () => {
-    const result = boot({ bundle: bundle({ data: JSON.parse('{"__proto__":{"polluted":"yes"}}') }) });
+    const result = boot({ bundle: bundle({ seed: JSON.parse('{"__proto__":{"polluted":"yes"}}') }) });
     expect(result.stash.polluted).toBeUndefined();
     expect({}.polluted).toBeUndefined();
   });
@@ -284,7 +284,7 @@ describe('launch reconciliation', () => {
   test('reset preserves nested sources and never aliases the baseline', () => {
     const result = boot({
       declaration: { settings: { user: source({ fetch: async () => ({ id: 1 }) }), theme: 'dark' } },
-      bundle: bundle({ data: { count: 5 } }),
+      bundle: bundle({ seed: { count: 5 } }),
     });
     result.stash.settings.theme = 'mutated';
     result.stash.reset();

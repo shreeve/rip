@@ -65,7 +65,7 @@ private files are not public unless a file root explicitly exposes them.
   "hash": "APP123",
   "list": [
     ["rip/http/index.rip", "export class HTTPError ..."],
-    ["data.rip", "export data = ..."],
+    ["seed.rip", "export seed = ..."],
     ["routes/index.rip", "export Index = component ..."]
   ]
 }
@@ -77,7 +77,7 @@ It contains:
 - authored browser `.rip` modules;
 - browser-safe package `.rip` modules;
 - generated browser schema projections; and
-- `data.rip`, when the App defines it.
+- `seed.rip`, when the App defines it.
 
 It does not contain CSS, HTML, images, fonts, videos, API implementation,
 server-only packages, or `rip/app`. The complete App package is already

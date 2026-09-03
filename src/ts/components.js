@@ -914,8 +914,8 @@ export const routerAmbienceType = (info) => {
   return `Omit<import('rip/app').Router, 'push' | 'replace'> & { ${nav('push')} ${nav('replace')} }`;
 };
 
-export const appDataType = (spec) =>
-  `import('rip/app').AppData<import(${JSON.stringify(spec)}).__RipStash>`;
+export const stashDataType = (spec) =>
+  `import('rip/app').StashData<import(${JSON.stringify(spec)}).__RipStash>`;
 
 // The stash-method surface, instantiated at the projected data shape so
 // `source()` answers TYPED handles: a top-level key resolves through
@@ -932,19 +932,19 @@ export const appDataType = (spec) =>
 // which the package cannot spell (Rip's structured types carry none)
 // and this splice must not inline.
 export const stashMethodsType = (spec) =>
-  `import('rip/app').StashMethods<${appDataType(spec)}>`;
+  `import('rip/app').StashMethods<${stashDataType(spec)}>`;
 
 // The ambience's `stash` member — ONE spelling for the interface road
 // and the class road: what the runtime delivers is a Stash — the
 // projected entries plus the StashMethods surface (`source()`, `inc`,
 // `reset`, …), spelled as an intersection. gateProjection stays on the
-// bare AppData: a gate path names a stash entry, never a method.
+// bare StashData: a gate path names a stash entry, never a method.
 export const stashAmbienceType = (spec) =>
-  `${appDataType(spec)} & ${stashMethodsType(spec)}`;
+  `${stashDataType(spec)} & ${stashMethodsType(spec)}`;
 
 // A render gate's member type, projected from the stash the gate reads:
 // `<~` admits only a literal `@stash.<path>` (the emitter rejects the
-// rest), so the member IS `NonNullable<AppData[…path]>` — non-null by the
+// rest), so the member IS `NonNullable<StashData[…path]>` — non-null by the
 // gate's own contract (the body does not render until the value exists) —
 // and a keyed gate is the family's return, un-nulled the same way.
 export const gateProjection = (m, spec) => {
@@ -952,7 +952,7 @@ export const gateProjection = (m, spec) => {
     : Array.isArray(n) && n[0] === '.' && n.length === 3 ? (chain(n[1]) ?? []).concat([n[2]]) : null);
   const segs = Array.isArray(m.node) && m.node.length >= 3 ? chain(m.node[2]) : null;
   if (!segs || segs.length < 3 || segs[0] !== 'this' || segs[1] !== 'stash') return null;
-  let t = appDataType(spec);
+  let t = stashDataType(spec);
   for (const p of segs.slice(2)) t = `${t}[${JSON.stringify(p)}]`;
   if (m.node.length > 3) t = `ReturnType<Extract<${t}, (...args: any) => any>>`;
   return `NonNullable<${t}>`;
@@ -1043,7 +1043,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
     if (memberNames.has(name)) continue;
     // With a discovered stash, the ambience carries the runtime's real
     // types (still optional — a hand-built value owes none of them):
-    // `stash` is the app's data surface (AppData projects each entry to
+    // `stash` is the app's data surface (StashData projects each entry to
     // what the runtime delivers, so an unannotated `cart ~= @stash.cart`
     // infers), `router` is the Router the runtime injects, and
     // `params`/`query` are its live route-state views (getters onto

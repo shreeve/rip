@@ -1,21 +1,21 @@
-import { source, AppData as __AppData } from './source.rip'
+import { source, StashData as __StashData } from './source.rip'
 export { source }
 # The projection re-exported as a type alone: the import above erases
 # from the shipped JS (type-only use), so the runtime surface is
-# untouched while the face carries AppData for the `@stash` splice.
-export type AppData<S> = __AppData<S>
+# untouched while the face carries StashData for the `@stash` splice.
+export type StashData<S> = __StashData<S>
 import { createStash, unwrapStash, StashMethods as __StashMethods, SourceHandle as __SourceHandle, SourceHandleFor as __SourceHandleFor } from './stash.rip'
 export { createStash, unwrapStash }
 # Erasure road again: `@stash` IS a Stash at runtime — the projected
 # entries plus this method surface (`source()`, `inc`, `reset`, …) — so
-# the ambience splice intersects the AppData projection with it,
+# the ambience splice intersects the StashData projection with it,
 # instantiated at the projected shape so `source()` answers typed
 # handles. The handle types ride along for the splice's own overloads.
 # The bound gets a NAME first: an alias-head parameter default carrying
 # nested angle brackets (`<D = Record<string, any>>`) does not survive
 # the alias scanner, while a named bound does.
-type StashData = Record<string, any>
-export type StashMethods<D extends StashData = StashData> = __StashMethods<D>
+type StashRecord = Record<string, any>
+export type StashMethods<D extends StashRecord = StashRecord> = __StashMethods<D>
 export type SourceHandle<T = unknown> = __SourceHandle<T>
 export type SourceHandleFor<V> = __SourceHandleFor<V>
 export { createMutation } from './mutation.rip'
@@ -24,7 +24,7 @@ export { createComponents } from './components.rip'
 export { buildRoutes, parseQuery } from './routes.rip'
 import { createRouter, browserAdapter, Router as __Router } from './router.rip'
 export { createRouter, browserAdapter }
-# The same erasure road as AppData: the type-only use keeps the import
+# The same erasure road as StashData: the type-only use keeps the import
 # out of the shipped JS, and the face carries Router for the `@router`
 # ambience splice.
 export type Router = __Router

@@ -695,7 +695,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   remountDirty = (paths, candidate = components) ->
     return 'noop' unless Array.isArray(paths) and paths.length > 0
     for path in paths
-      return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'data.rip'
+      return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'seed.rip'
     info = router.current
     return 'noop' unless info?.route?.file and lastRoute?
     layoutFiles = info.layouts ?? info.route.layouts ?? []

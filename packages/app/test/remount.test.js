@@ -90,13 +90,13 @@ describe('renderer remountDirty', () => {
 
     expect(await renderer.remountDirty(['stash.rip'])).toBe('escape');
     expect(await renderer.remountDirty(['stash/foo.rip'])).toBe('escape');
-    expect(await renderer.remountDirty(['data.rip'])).toBe('escape');
+    expect(await renderer.remountDirty(['seed.rip'])).toBe('escape');
     expect(await renderer.remountDirty(['page.rip', 'stash.rip'])).toBe('escape');
 
     await renderer.mount(info);
     renderer.stop();
     expect(await renderer.remountDirty(['stash/cart.rip'])).toBe('escape');
-    expect(await renderer.remountDirty(['data.rip'])).toBe('escape');
+    expect(await renderer.remountDirty(['seed.rip'])).toBe('escape');
   });
 
   test('narrow-remounts when the live page file is dirty', async () => {

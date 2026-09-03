@@ -344,7 +344,7 @@ Workspace changes. Signature classify selects **patch**, **migrate**, or
 Focus, selection, and scroll are snapshotted around the refresh. A compile or
 activation failure keeps the last-known-good App interactive and shows a
 dismissible overlay; the next good generation (or reload) clears it. Editing
-`stash.rip` (the stash declaration) or `data.rip` (its seed) reloads the
+`stash.rip` (the declaration) or `seed.rip` (the seed) reloads the
 document — runtime stash *value* updates never reload. See
 [docs/HMR.md](../../docs/HMR.md).
 

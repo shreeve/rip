@@ -323,7 +323,7 @@ async function widthOf(ck, type, owns, functionTypeId, members) {
   if ((type.flags & TypeFlags.Object) === 0) return null;
   // A MAPPED type has no members until its parameter is bound, and reading
   // that emptiness as `{}` calls every generic alias information-free —
-  // `AppData<S>` describes its shape entirely in terms of `S`.
+  // `StashData<S>` describes its shape entirely in terms of `S`.
   if ((type.objectFlags & ObjectFlags.Mapped) !== 0) return null;
   const { signatures, props, indexInfos } = await membersOf(ck, type, members);
   if (props.length > 0) return null;

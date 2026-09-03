@@ -148,7 +148,7 @@ Defined in detail by [WORKSPACE.md](WORKSPACE.md). HMR-critical facts:
   clears overlay/quarantine.
 - Reconnect that sees a still-newer `latest.json` (missed recovery while
   disconnected) reloads for a complete publication.
-- `stash.rip` / `data.rip` **definition** edits request document reload.
+- `stash.rip` (the declaration) and `seed.rip` (the seed) edits request document reload.
   Runtime stash *value* updates never reload.
 - CSS refreshes through HTTP identity; HTML and other managed assets
   reload.
