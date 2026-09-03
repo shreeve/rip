@@ -4708,15 +4708,29 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
   test('an unknown attribute name reports as a DIAGNOSTIC, on the word, naming the spelling that works', () => {
     // The vocabulary is one rule the typed surface already enforces, so
     // the emitter does not also reject it here: a fatal second voice
-    // would cost the file every other diagnostic. Both roads — the bare
-    // word and the pair — answer at their own bytes, beside the rest.
-    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt']) });
+    // would cost the file every other diagnostic. Every road — the
+    // inline bare word, the bare word on its own line under the
+    // element, and the pair — answers at its own bytes, beside the rest.
+    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly']) });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12]]);
+      expect(diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
       const out = check(dir, ['--json']).stdout;
-      expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(2);
+      expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(3);
       // Nothing near it: the reading it took, and the two ways out.
       expect(out).toContain('a bare word sets the boolean attribute it names');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('an unknown name on the absence road reports ONCE — the scratch const\'s own miss on the same name folds into the row', () => {
+    // A nullable value lowers through a scratch const annotated with the
+    // tag's value surface indexed by the key, so tsgo also reports
+    // TS2339 there — the same fact the row already words, on the same
+    // span. One claim, one diagnostic.
+    const dir = workspace({
+      'app.rip': ['export P = component', '  val: string | null := null', '  render', '    div', '      div notAnAttr: val', ''].join('\n'),
+    });
+    try {
+      expect(diagsOf(dir)).toEqual([[2345, 5, 11]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

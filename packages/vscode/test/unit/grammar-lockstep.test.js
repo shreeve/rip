@@ -1,17 +1,21 @@
 // The grammar LOCKSTEP check for own-line bare boolean flags: the
 // TextMate grammar paints a line holding only a known HTML
 // boolean-attribute name as an attribute, because the compiler sets
-// that attribute on the ENCLOSING element (v3's bare-flag semantics —
-// never a bogus child element). The painted list is DATA in
-// rip.tmLanguage.json — nothing structural stops it drifting from the
-// compiler's BOOLEAN_ATTRS — so this suite is the lockstep:
+// that attribute on the ENCLOSING element. The compiler reads EVERY
+// bare word on its own line that resolves to nothing as an attribute
+// (a tag word and a component name keep their element readings, and
+// an in-scope value its text reading); the grammar, blind to scope and
+// to the tag tables, paints only the list it can be sure of. That list
+// is DATA in rip.tmLanguage.json — nothing structural stops it drifting
+// from the compiler's BOOLEAN_ATTRS — so this suite is the lockstep:
 //
 //   1. the grammar's alternation equals BOOLEAN_ATTRS minus `loop`
 //      and `default` (those keywords claim the line at parse,
 //      exactly as the compiler does), and
 //   2. every painted name COMPILES as a flag of its enclosing element
 //      through the real render DSL, in both faces, while an unlisted
-//      word keeps its element reading and stays unpainted.
+//      word stays unpainted (the grammar guesses no identifier's
+//      reading) and still compiles as an attribute.
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'node:path';
@@ -60,13 +64,17 @@ describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
     }
   });
 
-  test('an unlisted bare word stays an element and stays unpainted', () => {
+  test('an unlisted bare word stays unpainted and is still an attribute of its element', () => {
     const re = new RegExp(flagRule.match);
     expect('      spacer').not.toMatch(re);
+    expect('      readOnly').not.toMatch(re);        // one spelling: the grammar paints the attribute's own
     expect('      disabled: busy').not.toMatch(re); // the colon form is the key rule's
-    const { code } = compile('P = component\n  render\n    div\n      spacer\n',
-      { runtimeDelivery: 'none' });
-    expect(code).toContain(`createElement('spacer')`);
+    for (const word of ['spacer', 'readOnly']) {
+      const { code } = compile(`P = component\n  render\n    div\n      ${word}\n`,
+        { runtimeDelivery: 'none' });
+      expect(code).toContain(`setAttribute('${word}', '')`);
+      expect(code).not.toContain(`createElement('${word}')`);
+    }
   });
 });
 

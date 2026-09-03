@@ -10461,17 +10461,18 @@ class Emitter {
         }
         const block = arg[2];
         if (isBlock(block)) {
-          for (const child of block.slice(1)) {
+          for (let j = 1; j < block.length; j++) {
+            const child = block[j];
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else if (!this.renderBareFlag(el, child)) {
+            } else if (!this.renderOwnLineWord(el, child, block, j, owner)) {
               const v = this.renderNode(child);
               if (v == null) continue;
               this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
             }
           }
         } else if (block) {
-          if (!this.renderBareFlag(el, block)) {
+          if (!this.renderOwnLineWord(el, block, [block], 0, owner)) {
             const v = this.renderNode(block);
             if (v != null) this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
           }
@@ -10520,55 +10521,7 @@ class Emitter {
           continue;
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
-          // Bare identifier resolving to NOTHING in scope: boolean-
-          // attribute shorthand. This arm is TOTAL — the readings above
-          // it (an in-scope value, a tag, a component) have all
-          // declined, so the name is an attribute, whatever it spells.
-          //
-          // WHETHER THE VOCABULARY HOLDS IT is the typed surface's
-          // question, never emission's: the name is a string-literal
-          // union member there, admitted from the same tables this file
-          // reads (the lockstep test pins the two equal). Emission
-          // rejects nothing here, because the JS face rejects no other
-          // name either — `= someUndefinedName` compiles to a runtime
-          // ReferenceError, and `notAnAttr: 'x'` to markup, both
-          // silently. A gate here would be the one name question the
-          // untyped road answers, and it would answer the least costly
-          // one. What the ts face gets instead is the author's span on
-          // the emitted name, so the surface's complaint lands on the
-          // word, and a recorded row that re-words it (both roads).
-          const tag = this.renderTagOf(el);
-          let unknownAt = null;
-          if (this.ts && !knownBareAttribute(tag, arg)) {
-            const at = this.bareChildSpan(args, k, owner);
-            if (at !== null) {
-              unknownAt = at;
-              this.intrinsics.push({
-                start: at[0], end: at[1], kind: 'unknown-attr', tag, name: arg,
-                message: this.unknownAttrMessage(tag, arg, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
-              });
-            }
-          }
-          // The empty string is the boolean-attribute serialization
-          // (the own-line flag road and the docs both spell it) —
-          // setAttribute(name, true) wrote name="true", which is the
-          // same DOM state but not the documented markup, and for a
-          // non-boolean known attribute wrote a literal "true" value.
-          // '' satisfies the widened attribute type, so no quieting
-          // cast rides.
-          const recv = this.tsElReceiver(el);
-          const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
-          this.renderLine(null, () => {
-            recv.emit();
-            this.b.emit('.setAttribute(');
-            // The name is a bare WORD in source and a string literal in
-            // the emission: a caller-supplied span is the only way the
-            // call's own complaint reaches the bytes the author wrote.
-            if (ownerId !== null) {
-              this.b.markSpan(ownerId, 'identifier', unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(arg));
-            } else this.emitQuotedPrimitive(arg);
-            this.b.emit(", '')");
-          });
+          this.renderBareAttribute(el, arg, args, k, owner);
           continue;
         }
         const t = this.newRenderText();
@@ -10614,26 +10567,76 @@ class Emitter {
     return this.rstate.tags?.get(el) ?? 'div';
   }
 
-  // The own-line bare-flag rule (v3's semantics, restored): a bare
-  // word CHILD naming a known HTML boolean attribute (the
-  // BOOLEAN_ATTRS list) that resolves to nothing in scope sets that
-  // attribute on the enclosing element — never a `<disabled>` child
-  // element (the silent mis-compile ported v3 sources hit). Any other
-  // bare word keeps its element/component reading, and an in-scope
-  // value keeps its text reading (the same shadowing precedence the
-  // inline shorthand carries). Emits the empty-string serialization —
-  // exactly what the static colon form (`disabled: true`) sets.
-  renderBareFlag(el, child) {
-    if (typeof child !== 'string' || !Emitter.BOOLEAN_ATTRS.has(child)) return false;
-    if (this.renderVarKind(child, child) !== null) return false;
-    if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
+  // A bare identifier CHILD resolving to NOTHING in scope is boolean-
+  // attribute shorthand for the enclosing element, on both bare roads
+  // — the inline word (`button disabled`) and the word on its own line
+  // under the element (`button` / `  disabled`). The arm is TOTAL: the
+  // readings above it (an in-scope value, a tag, a component) have all
+  // declined, so the name is an attribute, whatever it spells — never
+  // a TAG. A non-hyphen word outside the tag tables names no custom
+  // element (the platform requires the hyphen, and a hyphenated word
+  // parses as subtraction here), so an element built from it would be
+  // a DOM node no face can see, out of what is usually a misspelled
+  // attribute (`readOnly` → `<readOnly>`); the attribute reading of the
+  // same word is inert markup the typed surface rejects on the word.
+  //
+  // WHETHER THE VOCABULARY HOLDS IT is the typed surface's question,
+  // never emission's: the name is a string-literal union member there,
+  // admitted from the same tables this file reads (the lockstep test
+  // pins the two equal). Emission rejects nothing here, because the JS
+  // face rejects no other name either — `= someUndefinedName` compiles
+  // to a runtime ReferenceError, and `notAnAttr: 'x'` to markup, both
+  // silently. A gate here would be the one name question the untyped
+  // road answers, and it would answer the least costly one. What the
+  // ts face gets instead is the author's span on the emitted name, so
+  // the surface's complaint lands on the word, and a recorded row that
+  // re-words it (the pair road keeps the same row).
+  renderBareAttribute(el, name, siblings, k, owner) {
+    const tag = this.renderTagOf(el);
+    let unknownAt = null;
+    if (this.ts && !knownBareAttribute(tag, name)) {
+      const at = this.bareChildSpan(siblings, k, owner);
+      if (at !== null) {
+        unknownAt = at;
+        this.intrinsics.push({
+          start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
+          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
+        });
+      }
+    }
+    // The empty string is the boolean-attribute serialization (the
+    // docs spell it) — setAttribute(name, true) wrote name="true",
+    // which is the same DOM state but not the documented markup, and
+    // for a non-boolean known attribute wrote a literal "true" value.
+    // '' satisfies the widened attribute type, so no quieting cast
+    // rides.
     const recv = this.tsElReceiver(el);
+    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
     this.renderLine(null, () => {
       recv.emit();
       this.b.emit('.setAttribute(');
-      this.emitQuotedPrimitive(child);
+      // The name is a bare WORD in source and a string literal in the
+      // emission: a caller-supplied span is the only way the call's own
+      // complaint reaches the bytes the author wrote.
+      if (ownerId !== null) {
+        this.b.markSpan(ownerId, 'identifier', unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+      } else this.emitQuotedPrimitive(name);
       this.b.emit(", '')");
     });
+  }
+
+  // The own-line child that is a bare attribute word (renderBareAttribute)
+  // — true when it rendered as one. The precedence is the inline road's:
+  // an in-scope value keeps its text reading, a tag word (`slot` among
+  // them) and a component name keep their element readings, and only a
+  // plain identifier resolving to nothing reaches the attribute arm.
+  // Everything else (quoted text, a call, a chain) is renderNode's.
+  renderOwnLineWord(el, child, siblings, k, owner) {
+    if (typeof child !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(child)) return false;
+    if (isHtmlTag(child) || isComponentName(child)) return false;
+    if (this.renderVarKind(child, child) !== null) return false;
+    if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
+    this.renderBareAttribute(el, child, siblings, k, owner);
     return true;
   }
 

@@ -4886,6 +4886,9 @@ test 'unmount before mount disposes init effects without mounted-only hooks', ''
 # names, in or out of the standard vocabulary. Whether the vocabulary
 # holds it is the typed surface's question; emission asks no name
 # question here, because it asks none anywhere on the untyped road.
+# The word on its own line under the element is the same arm: a tag
+# word there is a child element, any other unbound word an attribute
+# of the enclosing element — never an element built out of it.
 
 code 'bare-ident shorthand — known name is a boolean attribute', '''
   export A = component
@@ -4916,6 +4919,30 @@ code 'bare-ident shorthand — an unknown name is still the attribute it names',
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
       this._el0.setAttribute('outline', '');
+      return this._el0;
+    }
+  };
+  '''
+
+code 'bare-ident shorthand — a word on its own line is an attribute of the enclosing element, a tag word a child', '''
+  export A = component
+    render
+      button
+        readOnly
+        hr
+        'Save'
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('button');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('readOnly', '');
+      this._el1 = document.createElement('hr');
+      this._el0.appendChild(this._el1);
+      this._t0 = document.createTextNode("Save");
+      this._el0.appendChild(this._t0);
       return this._el0;
     }
   };

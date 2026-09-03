@@ -742,44 +742,65 @@ describe('the static render DSL: emission pins', () => {
       .toContain(`setAttribute('countt', '')`);
   });
 
-  test('own-line bare boolean flag sets the attribute on the enclosing element (v3 semantics, restored)', () => {
-    // A bare word on its own line naming a known HTML boolean
-    // attribute is a flag of the ENCLOSING element — never a bogus
-    // `<disabled>` child element (the silent v3-port mis-compile).
+  test('a bare word on its own line under an element is an attribute of that element, whatever it spells', () => {
+    // The own-line road is the inline road's: the readings above the
+    // attribute arm (an in-scope value, a tag, a component) declined,
+    // so the word is the attribute it names — never a child element
+    // built out of it.
     const { code } = compile('P = component\n  render\n    button\n      disabled\n      "Save"\n');
     expect(code).toContain(`this._el0.setAttribute('disabled', '')`);
     expect(code).not.toContain(`createElement('disabled')`);
     expect(code).toContain('createTextNode("Save")');
-    // The whole v3 list carries the rule (spot the non-obvious ones).
     expect(compile('P = component\n  render\n    form\n      novalidate\n').code)
       .toContain(`setAttribute('novalidate', '')`);
     // (`loop` alone is unreachable — the keyword claims the line at
-    // parse; it takes the colon form, exactly as in v3.)
+    // parse; it takes the colon form.)
     const video = compile('P = component\n  render\n    video\n      muted\n      autoplay\n').code;
     expect(video).toContain(`setAttribute('muted', '')`);
     expect(video).toContain(`setAttribute('autoplay', '')`);
-    expect(compile('P = component\n  render\n    details\n      open\n').code)
-      .toContain(`setAttribute('open', '')`);
-    // The boundary: a bare word NOT on the boolean list keeps its
-    // element reading (custom elements stay spellable).
+    // The arm is TOTAL here too. A word outside the vocabulary — a
+    // misspelling, or a DOM property's camelCase — is the attribute it
+    // spells and the typed surface's to reject (test/spawn/cli/
+    // check.test.js pins the diagnostic and its wording); it is never
+    // an element, which no face could see and which changes the DOM
+    // tree. A non-hyphen word outside the tag tables names no custom
+    // element either — the platform requires the hyphen.
+    const camel = compile('P = component\n  render\n    button\n      readOnly\n      "Save"\n').code;
+    expect(camel).toContain(`setAttribute('readOnly', '')`);
+    expect(camel).not.toContain(`createElement('readOnly')`);
     const el = compile('P = component\n  render\n    div\n      spacer\n').code;
-    expect(el).toContain(`createElement('spacer')`);
-    expect(el).not.toContain(`setAttribute('spacer'`);
-    // An in-scope value shadows the flag reading — the same
+    expect(el).toContain(`setAttribute('spacer', '')`);
+    expect(el).not.toContain(`createElement('spacer')`);
+    // A tag word keeps its element reading (the tag reading sits above
+    // the attribute arm on both roads — `title` is a tag before it is
+    // a global attribute), and so does a component name.
+    expect(compile('P = component\n  render\n    div\n      title\n').code)
+      .toContain(`createElement('title')`);
+    expect(compile('P = component\n  render\n    div\n      hr\n').code)
+      .toContain(`createElement('hr')`);
+    // An in-scope value shadows the attribute reading — the same
     // precedence the inline shorthand carries (a member named `open`
     // stays a live text read).
     const shadowed = compile('P = component\n  open := true\n  render\n    div\n      open\n').code;
     expect(shadowed).toContain('this._t0.data = this.open.value;');
     expect(shadowed).not.toContain(`setAttribute('open'`);
-    // The colon form is untouched by the flag rule (static and
+    // The colon form is untouched by the bare rule (static and
     // reactive lowerings pinned in the boolean-attributes fork above).
     expect(compile('P = component\n  render\n    button disabled: true\n').code)
       .toContain(`if (true) this._el0.setAttribute('disabled', '')`);
     // RFC 12: the TypeScript face lowers identically — the receiver
     // cast rides tsOnly regions (the strip gate holds byte identity),
-    // and the flag NAME answers through the tag's typed surface.
+    // and the NAME answers through the tag's typed surface.
     expect(compile('P = component\n  render\n    button\n      disabled\n', { face: 'ts' }).code)
       .toContain(`(this._el0 as __RipEl_button).setAttribute('disabled', '')`);
+    // The ts face records the unknown name at the author's own bytes,
+    // so the surface's complaint lands on the word — one word repeated
+    // under two elements resolves to its OWN occurrence each time.
+    const src = 'P = component\n  render\n    div\n      input\n        readOnly\n      input\n        readOnly\n';
+    const rows = fullCompile(src, { face: 'ts', runtimeDelivery: 'none' }).intrinsics.filter((r) => r.kind === 'unknown-attr');
+    expect(rows.map((r) => [src.slice(r.start, r.end), r.tag])).toEqual([['readOnly', 'input'], ['readOnly', 'input']]);
+    expect(rows[0].start).toBeLessThan(rows[1].start);
+    expect(rows[0].message).toBe("'readOnly' is not a known attribute of <input> — did you mean 'readonly'?");
   });
 
   test('bare `@click` validates: DOM event + method existence (#124 middle); explicit bindings stay unvalidated', () => {

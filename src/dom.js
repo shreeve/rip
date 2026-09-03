@@ -83,10 +83,12 @@ export const DOM_EVENTS = new Set([
 
 // The HTML BOOLEAN attributes — presence is truth (the WHATWG boolean
 // attributes). The render DSL's colon form forks on this set
-// (toggleAttribute / guarded empty-string setAttribute), and a bare
-// word on its own line naming one of these sets it on the ENCLOSING
-// element (v3's bare-flag semantics). The VS Code grammar paints the
-// same list; its lockstep test pins the two together.
+// (toggleAttribute / guarded empty-string setAttribute). A bare word
+// on its own line under an element is an attribute of that element
+// whatever it spells — the set plays no part in that reading — but it
+// is the list a scope-blind grammar can paint as one: the VS Code
+// grammar paints exactly these names there, and its lockstep test pins
+// the two together.
 export const BOOLEAN_ATTRS = new Set([
   'disabled', 'hidden', 'readonly', 'required', 'checked', 'selected',
   'autofocus', 'autoplay', 'controls', 'loop', 'muted', 'multiple',

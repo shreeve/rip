@@ -206,9 +206,16 @@ export function mapTsDiagnostic(good, d) {
   // must START the diagnostic — a pair's complaint may run past the key
   // to the whole pair, but one merely CONTAINING a key belongs to the
   // enclosing construct and keeps its own words.
-  if (d.code === 2345) {
+  if (d.code === 2345 || d.code === 2339) {
     const row = (good.intrinsics ?? []).find((r) => r.kind === 'unknown-attr' && r.start === span[0]);
-    if (row) message = row.message;
+    if (row && d.code === 2345) message = row.message;
+    // The absence road's scratch const indexes the tag's value surface
+    // by the same name, and tsgo reports that miss too (TS2339 on the
+    // key) — the one fact a second time, in its own words. The row's
+    // report stands alone; the echo drops, judged on the row AND the
+    // name the message quotes, so a property miss that merely shares
+    // the span keeps its own voice.
+    if (row && d.code === 2339 && d.message.includes(`'${row.name}'`)) return null;
   }
   return {
     severity: d.severity ?? 1,

@@ -16267,10 +16267,11 @@ ${pad ?? ""}`);
         }
         const block = arg[2];
         if (isBlock(block)) {
-          for (const child of block.slice(1)) {
+          for (let j = 1;j < block.length; j++) {
+            const child = block[j];
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else if (!this.renderBareFlag(el, child)) {
+            } else if (!this.renderOwnLineWord(el, child, block, j, owner)) {
               const v = this.renderNode(child);
               if (v == null)
                 continue;
@@ -16278,7 +16279,7 @@ ${pad ?? ""}`);
             }
           }
         } else if (block) {
-          if (!this.renderBareFlag(el, block)) {
+          if (!this.renderOwnLineWord(el, block, [block], 0, owner)) {
             const v = this.renderNode(block);
             if (v != null)
               this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
@@ -16323,33 +16324,7 @@ ${pad ?? ""}`);
           continue;
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
-          const tag = this.renderTagOf(el);
-          let unknownAt = null;
-          if (this.ts && !knownBareAttribute(tag, arg)) {
-            const at = this.bareChildSpan(args, k, owner);
-            if (at !== null) {
-              unknownAt = at;
-              this.intrinsics.push({
-                start: at[0],
-                end: at[1],
-                kind: "unknown-attr",
-                tag,
-                name: arg,
-                message: this.unknownAttrMessage(tag, arg, { bare: true, svg: this.rstate?.svgEls?.has(el) === true })
-              });
-            }
-          }
-          const recv = this.tsElReceiver(el);
-          const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
-          this.renderLine(null, () => {
-            recv.emit();
-            this.b.emit(".setAttribute(");
-            if (ownerId !== null) {
-              this.b.markSpan(ownerId, "identifier", unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(arg));
-            } else
-              this.emitQuotedPrimitive(arg);
-            this.b.emit(", '')");
-          });
+          this.renderBareAttribute(el, arg, args, k, owner);
           continue;
         }
         const t = this.newRenderText();
@@ -16390,20 +16365,45 @@ ${pad ?? ""}`);
   renderTagOf(el) {
     return this.rstate.tags?.get(el) ?? "div";
   }
-  renderBareFlag(el, child) {
-    if (typeof child !== "string" || !Emitter.BOOLEAN_ATTRS.has(child))
+  renderBareAttribute(el, name, siblings, k, owner) {
+    const tag = this.renderTagOf(el);
+    let unknownAt = null;
+    if (this.ts && !knownBareAttribute(tag, name)) {
+      const at = this.bareChildSpan(siblings, k, owner);
+      if (at !== null) {
+        unknownAt = at;
+        this.intrinsics.push({
+          start: at[0],
+          end: at[1],
+          kind: "unknown-attr",
+          tag,
+          name,
+          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true })
+        });
+      }
+    }
+    const recv = this.tsElReceiver(el);
+    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
+    this.renderLine(null, () => {
+      recv.emit();
+      this.b.emit(".setAttribute(");
+      if (ownerId !== null) {
+        this.b.markSpan(ownerId, "identifier", unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+      } else
+        this.emitQuotedPrimitive(name);
+      this.b.emit(", '')");
+    });
+  }
+  renderOwnLineWord(el, child, siblings, k, owner) {
+    if (typeof child !== "string" || !/^[A-Za-z_$][\w$]*$/.test(child))
+      return false;
+    if (isHtmlTag2(child) || isComponentName2(child))
       return false;
     if (this.renderVarKind(child, child) !== null)
       return false;
     if (this.resolveBareRead(child) !== null || this.inScope(child))
       return false;
-    const recv = this.tsElReceiver(el);
-    this.renderLine(null, () => {
-      recv.emit();
-      this.b.emit(".setAttribute(");
-      this.emitQuotedPrimitive(child);
-      this.b.emit(", '')");
-    });
+    this.renderBareAttribute(el, child, siblings, k, owner);
     return true;
   }
   renderSlot(node, args) {
