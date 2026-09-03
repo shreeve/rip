@@ -3919,6 +3919,23 @@ describe('orm: SQL structure ownership', () => {
     expect(r.calls[0].params).toEqual(['A%', 'x']);
   });
 
+  test('where() rejects a scalar condition instead of silently dropping the filter', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT|^DELETE/, rows(['id'], [1]));
+      const { User } = makeWorld(k);
+      const out = [];
+      for (const bad of [42, 7n, true, null]) {
+        try { User.where(bad); out.push('accepted'); }
+        catch (e) { out.push(/conditions object or SQL text/.test(e.message) ? 'rejected' : 'wrong-message'); }
+      }
+      return out;
+    });
+    // A dropped filter widens the next bulk mutation to the whole
+    // table — where(user.id).deleteAll() must throw, not delete all.
+    expect(r.value).toEqual(['rejected', 'rejected', 'rejected', 'rejected']);
+    expect(r.calls.length).toBe(0);
+  });
+
   test('a string clause with a top-level OR cannot swallow the soft-delete filter', async () => {
     const src = [
  'Item = schema :model',

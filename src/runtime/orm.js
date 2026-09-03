@@ -1596,6 +1596,15 @@ class SchemaQuery {
           this._params.push(v);
         }
       }
+    } else {
+      // Anything else — a number, null, a boolean — is a dropped
+      // filter, and a dropped filter widens whatever runs next:
+      // `where(user.id).deleteAll()` (missing the `{id: …}` wrapper)
+      // would delete every row. Loud, like every other bad argument.
+      throw new Error('schema: where() takes a conditions object or SQL text with params; got ' +
+        (cond === null ? 'null' : typeof cond) +
+        (typeof cond === 'number' || typeof cond === 'bigint'
+          ? ' — a primary-key lookup is find(pk), or spell the filter {id: …}' : ''));
     }
     return this;
   }
