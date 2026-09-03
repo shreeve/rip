@@ -103,8 +103,8 @@ export def createRenderer(opts: RendererOpts): Renderer
   { router, stash, components, target, onError } = opts
   unless router? and typeof router is 'object'
     throw TypeError.new 'Rip App: createRenderer requires a router object'
-  unless stash? and typeof stash is 'object'
-    throw TypeError.new 'Rip App: createRenderer requires a stash'
+  unless stash? and unwrapStash(stash) isnt stash
+    throw TypeError.new 'Rip App: createRenderer requires a stash built by createStash'
   unless components? and typeof components.getCompiled is 'function'
     throw TypeError.new 'Rip App: createRenderer requires a component registry'
   unless target? and typeof target.appendChild is 'function'

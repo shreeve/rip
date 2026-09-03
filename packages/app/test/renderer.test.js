@@ -852,6 +852,12 @@ describe('renderer render gates', () => {
     expect(() => new Page()).toThrow('cannot be constructed directly');
   });
 
+  test('a stash option that is not a createStash proxy rejects at construction', () => {
+    const plain = { user: { name: 'Ada' } };
+    expect(() => createRenderer({ router: { current: null }, stash: plain, components: registry({}), target: target() }))
+      .toThrow(/built by createStash/);
+  });
+
   test('plain components reject renderer-only prop names', () => {
     class Plain extends __Component {
       _create() { return null; }

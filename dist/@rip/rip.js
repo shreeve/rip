@@ -27178,8 +27178,8 @@ function createRenderer(opts) {
   if (!(router != null && typeof router === "object")) {
     throw new TypeError("Rip App: createRenderer requires a router object");
   }
-  if (!(stash != null && typeof stash === "object")) {
-    throw new TypeError("Rip App: createRenderer requires a stash");
+  if (!(stash != null && unwrapStash(stash) !== stash)) {
+    throw new TypeError("Rip App: createRenderer requires a stash built by createStash");
   }
   if (!(components != null && typeof components.getCompiled === "function")) {
     throw new TypeError("Rip App: createRenderer requires a component registry");
