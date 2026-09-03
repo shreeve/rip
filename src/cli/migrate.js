@@ -886,7 +886,12 @@ function diffTable(d, p, steps, deps) {
   }
 
   // Column renames: declared column missing from deployed whose `was`
-  // names a deployed column.
+  // names a deployed column. The remap below lets the rest of the diff
+  // match by declared name; renamedFrom keeps the deployed spelling for
+  // the steps that run BEFORE the rename lands (the uniqueness rebuild
+  // splices at mark, ahead of these rename steps, so its DDL must
+  // speak the names the table holds at that moment).
+  const renamedFrom = new Map();
   for (const [name, col] of dCols) {
     if (pCols.has(name) || !col.was) continue;
     const old = pCols.get(col.was);
@@ -898,6 +903,7 @@ function diffTable(d, p, steps, deps) {
           ' TO ' + quoteIdent(name, null, 'rename target column') + ';'],
         notes: ['{was: "' + col.was + '"} on ' + name + ' can be removed once this migration lands'],
       });
+      renamedFrom.set(name, col.was);
       pCols.delete(col.was);
       pCols.set(name, { ...old, name });
     }
@@ -1223,7 +1229,12 @@ function diffTable(d, p, steps, deps) {
   // add can fail on existing duplicates (lossy), a drop cannot (safe).
   if (uniqueChanges.length) {
     uniqueChanges.sort((a, b) => (a.adding === b.adding ? 0 : a.adding ? -1 : 1));
-    const wanted = new Map(uniqueChanges.map((u) => [u.name, u.adding]));
+    // uniqueChanges carries declared names (the diff matched through
+    // the rename remap), but the rebuild runs before any rename step —
+    // its DDL matches p.columns, which still hold the deployed
+    // spellings. Translate, or a renamed column's flag change misses
+    // every column and the rebuild copies the table unchanged.
+    const wanted = new Map(uniqueChanges.map((u) => [renamedFrom.get(u.name) ?? u.name, u.adding]));
     const rebuild = rebuildForUnique(p, wanted);
     const cols = uniqueChanges.map((u) => u.name).join(', ');
     steps.splice(mark, 0, ...uniqueChanges.map((u, i) => ({

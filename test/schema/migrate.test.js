@@ -872,6 +872,23 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
   // which column it covers; ADD COLUMN, SET/DROP DEFAULT, and index
   // DDL stay permitted.
 
+  test('a column renamed and made unique in one change rebuilds under the DEPLOYED name', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('email', 'string', { unique: true, attrs: { was: 'mail' } })));
+      deployedRef.value = { tables: [table('users', [col('mail', 'VARCHAR', { notNull: true })])] };
+      return mig.plan();
+    });
+    // The rebuild splices ahead of the rename step, so its DDL must
+    // speak the name the table holds at that moment — keyed by the
+    // declared name it matches nothing and copies the table unchanged
+    // while the step claims the UNIQUE was added.
+    const rebuild = r.find((s) => s.kind === 'add-unique');
+    expect(rebuild.sql.join('\n')).toContain('"mail" VARCHAR NOT NULL UNIQUE');
+    expect(rebuild.sql.join('\n')).toContain('INSERT INTO "users__rip_rebuild" ("id", "mail")');
+    const order = r.map((s) => s.kind);
+    expect(order.indexOf('add-unique')).toBeLessThan(order.indexOf('rename-column'));
+  });
+
   test('a primary-key column rename via {was:} plans the rename — it is not a moved pk', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('User', dir('primary', { name: 'emailAddr' }),
