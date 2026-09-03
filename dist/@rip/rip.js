@@ -2529,7 +2529,16 @@ var BOOLEAN_ATTRS = new Set([
   "async",
   "formnovalidate",
   "allowfullscreen",
-  "inert"
+  "inert",
+  "ismap",
+  "nomodule",
+  "playsinline",
+  "default",
+  "itemscope",
+  "alpha",
+  "shadowrootdelegatesfocus",
+  "shadowrootclonable",
+  "shadowrootserializable"
 ]);
 var GLOBAL_ATTRS = new Set([
   "accesskey",
