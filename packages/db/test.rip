@@ -2042,7 +2042,7 @@ test! "include() loads a hasMany relation with one IN query", ->
       orderQueryCount: sqls().filter((s) -> s.startsWith 'SELECT * FROM "orders"').length
     }
   eq value.counts, [2, 1]
-  ok /^SELECT \* FROM "orders" WHERE "user_id" IN \(\?, \?\)/.test value.orderQuery
+  ok /^SELECT \* FROM "orders" WHERE \("user_id" IN \(\?, \?\)\)/.test value.orderQuery
   eq value.orderQueryCount, 1
 
 p "\nORM — constraint translation"

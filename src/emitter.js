@@ -34,7 +34,7 @@ import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls,
 import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
-  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
@@ -2572,7 +2572,7 @@ class Emitter {
       // per-tag alias the module declares once (restAliasName).
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true; // the alias types the view's `class`
-      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), '', MINTED)};`));
+      line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     }
     // The runtime base's API, declared because the inlined base types as
     // `any` and carries nothing into the class. `this` rather than the
@@ -3064,11 +3064,11 @@ class Emitter {
   // ordinary Rip comment, the error stays visible, and no spurious
   // TS2578 appears. Placements, and what still declines:
   //   - a live statement — ALWAYS, on its own head line, however many
-  //     lines the statement emits (`withTsDirectives`). A multi-line
-  //     emission used to decline here, which silently deleted the
-  //     author's escape hatch on the dominant case (an arrow assigned
-  //     to a typed binding, whose error lands on the head line the
-  //     directive governs). An error that lands on an INNER line of a
+  //     lines the statement emits (`withTsDirectives`) — declining on
+  //     multi-line emissions would silently delete the author's escape
+  //     hatch on the dominant case (an arrow assigned to a typed
+  //     binding, whose error lands on the head line the directive
+  //     governs). An error that lands on an INNER line of a
   //     lowering is simply not suppressed, and surfaces as TS2578
   //     (unused) — visible and actionable, not a silent drop;
   //   - the scope's hoist line for a bare typed forward, ONLY when that
@@ -9654,7 +9654,7 @@ class Emitter {
       creates: [], setups: [], vars: null,
       locals: new Set(), localDecls: new Map(), bindings: new Set(),
       refs: [], loopStack: [], stmts: [],
-      forceNonStatic: false, root: null, params: null, originNode: renderNode,
+      forceNonStatic: false, root: null, originNode: renderNode,
       renameHazardNames: new Set(),
     };
     this.rstate = {
@@ -10225,8 +10225,11 @@ class Emitter {
 
   // A static element: create, id, data-part (the component's first
   // element), children/attributes, classes.
-  renderTag(node, tag, classes, args, id) {
-    this.noteShorthandClasses(classes, node);
+  // The element prologue both walks share: mint the var, record the
+  // tag, claim the branch-root transition slot, create the (NS-forked)
+  // element with its tag-word intrinsics row, id, inherited-target
+  // binding, and the data-part stamp. Returns { el, isSvg }.
+  renderElementPrologue(node, tag) {
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -10252,16 +10255,34 @@ class Emitter {
       }
       this.b.emit(')');
     });
+    return { el, isSvg };
+  }
+
+  renderElementBasics(node, tag, el, id) {
+    const R = this.rstate;
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
     if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === 'class') {
       this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
     }
+  }
+
+  renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
+    const R = this.rstate;
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     if (classes.length > 0) {
       R.pendingClassArgs = [`'${classes.join(' ')}'`];
       R.pendingClassEl = el;
+      // Keys scope WITH the merge: a nested element's merging pairs
+      // must not deposit their spans into this element's key list (a
+      // flat slot attributed inner keys to the outer write and left
+      // the outer's own keys unrecorded).
+      R.pendingClassKeys = null;
     }
     if (isSvg) R.svgDepth++;
     this.renderChildren(el, args);
@@ -10299,7 +10320,7 @@ class Emitter {
           this.b.emit(isSvg ? '));' : ');');
         });
       }
-      R.pendingClassKeys = null;
+      R.pendingClassKeys = prevKeys;
       R.pendingClassArgs = prevArgs;
       R.pendingClassEl = prevEl;
     }
@@ -10312,45 +10333,38 @@ class Emitter {
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
     this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
-    const el = this.newRenderVar();
-    R.tags.set(el, tag);
-    if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
-      R.transitionSlot.el = el;
-    }
-    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
-    if (isSvg) R.svgEls.add(el);
-    this.renderLine(node, () => {
-      if (isSvg) this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
-      else this.b.emit(`${el} = document.createElement(`);
-      // Same intrinsics-channel record as renderTag: the tag word's
-      // ruled hover is served from here.
-      const span = this.emitQuotedPrimitive(tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: 'tag', tag, svg: isSvg });
-      }
-      this.b.emit(')');
-    });
-    if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
-    this.bindInheritedTarget(node, tag, el);
-    if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === 'class') {
-      this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
-    }
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     R.pendingClassArgs = [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e)),
     ];
     R.pendingClassEl = el;
+    R.pendingClassKeys = null;
     if (isSvg) R.svgDepth++;
     this.renderChildren(el, children);
     if (isSvg) R.svgDepth--;
     const parts = R.pendingClassArgs;
+    // This element's merging pairs recorded their key spans here —
+    // claim them against this write (the static walk's merge does the
+    // same), or a pair under a dynamic-class element leaks its keys
+    // into the next enclosing merge.
+    const keys = R.pendingClassKeys ?? [];
     if (parts.length > 0) {
       this.renderEffect(node, () => {
         const clsx = this.runtimeName('__clsx');
-        this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
+        this.b.emit(`${el}`);
+        const gen = this.b.offset + 1;
+        this.b.emit(isSvg ? `.setAttribute('class', ${clsx}(` : `.className = ${clsx}(`);
+        for (const k of keys) {
+          this.intrinsics.push(isSvg
+            ? { start: k[0], end: k[1], kind: 'attr', name: 'class', gen }
+            : { start: k[0], end: k[1], kind: 'classkey', gen });
+        }
         parts.forEach((p, i) => {
           if (i > 0) this.b.emit(', ');
           if (typeof p === 'string') this.b.emit(p);
@@ -10359,6 +10373,7 @@ class Emitter {
         this.b.emit(isSvg ? '));' : ');');
       });
     }
+    R.pendingClassKeys = prevKeys;
     R.pendingClassArgs = prevArgs;
     R.pendingClassEl = prevEl;
     return el;
@@ -10470,17 +10485,19 @@ class Emitter {
               `attribute and validates against the standard vocabulary ` +
               '(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`', this.rstate.node);
           }
-          // The receiver surface types the NAME; the `true` the road
-          // writes is the lowering's own byte (never the author's), so
-          // its quieting cast stays.
+          // The empty string is the boolean-attribute serialization
+          // (the own-line flag road and the docs both spell it) —
+          // setAttribute(name, true) wrote name="true", which is the
+          // same DOM state but not the documented markup, and for a
+          // non-boolean known attribute wrote a literal "true" value.
+          // '' satisfies the widened attribute type, so no quieting
+          // cast rides.
           const recv = this.tsElReceiver(el);
           this.renderLine(null, () => {
             recv.emit();
             this.b.emit('.setAttribute(');
             this.emitQuotedPrimitive(arg);
-            this.b.emit(', true');
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
-            this.b.emit(')');
+            this.b.emit(", '')");
           });
           continue;
         }
@@ -11132,10 +11149,15 @@ class Emitter {
             this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
         // `any` (the handler EXPRESSION is where typing lands).
+        // The listener rides the child's first tracked node, not its
+        // _root: a multi-root child's _root is the fragment, emptied
+        // at insertion, and emit() dispatches on that same first node
+        // — the two sides of the seam name one target.
+        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
         if (!this.ts) {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }
@@ -11711,7 +11733,7 @@ class Emitter {
       // The receiver surface types the KEY (its exact row is already
       // recorded below) and, through the generic setAttribute, the
       // VALUE — the widened `propertyType | string` road. Only where
-      // no surface exists does the old value-quieting `as any` remain.
+      // no surface exists does a value-quieting `as any` ride.
       const recv = this.tsElReceiver(el);
       // NULLISH IS ABSENCE on the attribute road: a value that reaches
       // `null`/`undefined` removes the attribute instead of stringifying
@@ -11899,7 +11921,8 @@ class Emitter {
   checkCrossScopeLocals(expr, node) {
     const R = this.rstate;
     if (!R) return;
-    const visible = (n) => R.sink.locals.has(n) || this.loopVarNames().has(n);
+    const loopVars = this.loopVarNames();
+    const visible = (n) => R.sink.locals.has(n) || loopVars.has(n);
     for (let r = R.sink.parent; r !== null; r = r.parent) {
       if (r.locals.size === 0) continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
@@ -12077,10 +12100,9 @@ class Emitter {
       kind, name, parent, self: 'ctx',
       // OWN vars FIRST, then the threaded outer names — the runtime's
       // calling convention: __reconcile invokes `factory(ctx, item, i,
-      // ...outer)` and `block.p(ctx, item, i, ...outer)` — the
-      // order is load-bearing (the reversed
-      // order bound nested-loop parameters CROSSWISE — the inner item
-      // arrived in the outer-row slot).
+      // ...outer)` and `block.p(ctx, item, i, ...outer)`. The order is
+      // load-bearing: reversed, nested-loop parameters bind CROSSWISE
+      // — the inner item arrives in the outer-row slot.
       paramNames: [...ownVars, ...outerVars],
       frameVar: '__fr', ownerVar: '__o',
       creates: [], setups: [], vars: new Set(),

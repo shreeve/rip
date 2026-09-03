@@ -743,11 +743,10 @@ function finishModelNorm(def, norm) {
 
   // ── the property ↔ column mapping ───────────────────────────────────
   //
-  // ONE map each way, built once, consulted everywhere. Before
-  // `{column:}` a column was always `snakeCase(property)` and the
-  // derivation could be inlined at each site; now it is a lookup, and
-  // the derivation survives only as the DEFAULT when a field declares
-  // no column of its own.
+  // ONE map each way, built once, consulted everywhere. `{column:}`
+  // makes the mapping a lookup; snakeCase(property) is only the
+  // DEFAULT when a field declares no column of its own, so inlining
+  // the derivation at a use site would be wrong.
   //
   // `columnOf` doubles as the column-OWNERSHIP guard: every table
   // column has exactly one owner. A field whose column equals a
@@ -755,9 +754,9 @@ function finishModelNorm(def, norm) {
   // column (a mixin-included `createdAt` + `@times`), or another
   // field's `{column:}` would otherwise emit duplicate-column DDL and
   // duplicate-column INSERTs that fail only at the database. Fields
-  // could not collide among themselves while name → snake_case was
-  // injective; `{column:}` is exactly what ends that, which is why
-  // fields now claim through the same gate as everything else.
+  // can only collide because `{column:}` ends the injectivity of
+  // name → snake_case, which is why fields claim through the same
+  // gate as everything else.
   const columnOf = new Map();
   const fieldOf = new Map();
   const ownerOf = new Map();
@@ -983,11 +982,9 @@ function jsonSchemaModelColumns(def, properties) {
 // one duckdb-harbor client, configured from RIP_DB_URL / RIP_DB_TOKEN.
 // `src/cli/schema.js` advertises exactly this path.
 //
-// This used to be eighty lines of hand-rolled fetch living beside the
-// real client in packages/db — a copy that drifted until it dialled the
-// wrong port, discarded DuckDB's error text, could not read harbor's
-// NDJSON, and knew nothing of timeouts or cancellation. There is one
-// client now, and this is a call into it.
+// ONE client, and this is a call into it — a hand-rolled fetch copy
+// beside the real client is a copy that drifts (wrong port, discarded
+// error text, unread NDJSON, no timeouts or cancellation).
 //
 // timeoutMs: 0 means "no client clock; inherit harbor's deployment
 // default" — not "no deadline". An app wants exactly that: the operator
@@ -1234,9 +1231,9 @@ async function transaction(optsOrFn, maybeFn = undefined) {
 // instead of running autocommit on another connection.
 //
 // This exists because a transaction opened by the other tier (rip/db's
-// `transaction`) is invisible here: `runSQL` routes on this
-// store alone, so a model write inside someone else's transaction used
-// to commit itself and survive that transaction's rollback.
+// `transaction`) is invisible here: `runSQL` routes on this store
+// alone, so without it a model write inside someone else's transaction
+// commits itself and survives that transaction's rollback.
 //
 // The caller owns begin/commit/rollback; this owns only the ambience
 // and the hooks that depend on the outcome. `fn` is handed a `settle`
@@ -1249,8 +1246,8 @@ async function transaction(optsOrFn, maybeFn = undefined) {
 // DuckDB answers a bulk UPDATE/DELETE with a one-row result set whose
 // single `Count` column carries the affected rows — so the envelope's
 // own `rowCount` is 1 for every such statement, including one that
-// matched nothing at all. Reading it reported "1 row changed" whatever
-// happened. The Count shape is the one AFFIRMATIVE affected-rows
+// matched nothing at all: read directly it says "1 row changed"
+// whatever happened. The Count shape is the one AFFIRMATIVE affected-rows
 // answer in the contract: `rowCount` counts RESULT rows (harbor
 // derives it from data.length), and a mutation without RETURNING
 // legitimately answers an empty result set whatever it matched — so a
@@ -1525,11 +1522,13 @@ class SchemaQuery {
   }
   where(cond, ...params) {
     // The string form is the O4-trusted overload: caller-authored SQL,
-    // passed through verbatim with its parameters. The object form is
-    // STRUCTURED — every key validates against the model's persisted
-    // columns and quotes through the identifier helper.
+    // passed through with its parameters. Trust covers the SQL's
+    // content, not its composition: clauses join with AND, so a
+    // caller's top-level OR would regroup under SQL precedence and
+    // swallow every clause beside it — the soft-delete filter and
+    // @defaultScope included. Parentheses keep each clause atomic.
     if (typeof cond === 'string') {
-      this._clauses.push(cond);
+      this._clauses.push('(' + cond + ')');
       this._params.push(...params);
     } else if (cond && typeof cond === 'object') {
       const norm = this._def._normalize();
@@ -1594,6 +1593,15 @@ class SchemaQuery {
           this._params.push(v);
         }
       }
+    } else {
+      // Anything else — a number, null, a boolean — is a dropped
+      // filter, and a dropped filter widens whatever runs next:
+      // `where(user.id).deleteAll()` (missing the `{id: …}` wrapper)
+      // would delete every row. Loud, like every other bad argument.
+      throw new Error('schema: where() takes a conditions object or SQL text with params; got ' +
+        (cond === null ? 'null' : typeof cond) +
+        (typeof cond === 'number' || typeof cond === 'bigint'
+          ? ' — a primary-key lookup is find(pk), or spell the filter {id: …}' : ''));
     }
     return this;
   }
@@ -1852,6 +1860,13 @@ async function preload(def, instances, specs) {
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
     const targetNorm = validateRelationTarget(def, rel, target);
     const children = [];
+    // Identity-dedup for the recursion below. The belongsTo and
+    // through paths can hand many owners the same child instance —
+    // Array.includes made that a scan per row (O(owners x targets));
+    // the hasMany path pushes without checking because its grouping
+    // already guarantees each row appears once.
+    const seen = new Set();
+    const collect = (r) => { if (!seen.has(r)) { seen.add(r); children.push(r); } };
     // Capture the cache request before any await. Reload/absorption bumps
     // the generation, and mutable FKs can change identity independently;
     // either change makes this preload result ineligible for memoization.
@@ -1877,7 +1892,7 @@ async function preload(def, instances, specs) {
         if (!current(inst, request)) continue;
         const v = request.identity != null ? (byId.get(request.identity) ?? null) : null;
         relMemoSet(inst, spec.name, request.identity, v);
-        if (v && !children.includes(v)) children.push(v);
+        if (v) collect(v);
       }
     } else if (rel.through) {
       // Three steps, all set-based: the join rows for every owner at
@@ -1895,7 +1910,7 @@ async function preload(def, instances, specs) {
         if (!r) continue; // a dangling join row names no target
         if (!groups.has(ownerId)) groups.set(ownerId, []);
         groups.get(ownerId).push(r);
-        if (!children.includes(r)) children.push(r);
+        collect(r);
       }
       for (const inst of instances) {
         const request = requests.get(inst);
@@ -3192,9 +3207,10 @@ SchemaDef.prototype._hydrate = function (columns, row) {
   // text or epoch numbers hydrates the same instant.
   const norm = this._normalize();
   // The same adapter-row validation reload() runs: two spellings for
-  // one canonical key (a legacy table carrying both `MRN_NBR` and
-  // `mrn`) would otherwise hydrate whichever value came last — and a
-  // later save would write it back through the mapped column.
+  // one canonical key (an externally-managed table carrying both
+  // `MRN_NBR` and `mrn`) would otherwise hydrate whichever value came
+  // last — and a later save would write it back through the mapped
+  // column.
   validateAdapterRow(columns, row, 'row hydration', norm);
   const data = {};
   for (let i = 0; i < columns.length; i++) {
@@ -3330,6 +3346,18 @@ SchemaDef.prototype._getClass = function () {
     enumerable: false, configurable: true, writable: true,
     value: async function () { return save(def, this); },
   });
+  // A key names a WRITABLE property when it reaches a declared field
+  // or a belongsTo FK (either spelling). set() and markDirty() share
+  // the test, so the two verbs cannot drift on what counts as
+  // declared. Returns the normalized field name, or null.
+  const writableField = (nm, key) => {
+    const n = fieldFor(nm, key);
+    if (nm.fields.has(n)) return n;
+    for (const [, rel] of nm.relations) {
+      if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) return n;
+    }
+    return null;
+  };
   // set(attrs) — assign-and-save in one call (Ruby's update). Every
   // key must name a declared field or belongsTo FK (either spelling);
   // an unknown key throws rather than silently assigning a property
@@ -3344,17 +3372,7 @@ SchemaDef.prototype._getClass = function () {
       }
       const nm = def._normalize();
       for (const key of Object.keys(attrs)) {
-        const n = fieldFor(nm, key);
-        let valid = nm.fields.has(n);
-        if (!valid) {
-          for (const [, rel] of nm.relations) {
-            if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
-              valid = true;
-              break;
-            }
-          }
-        }
-        if (!valid) {
+        if (writableField(nm, key) === null) {
           throw new Error("schema: set() — '" + key + "' is not a declared field or belongsTo FK on " +
             (def.name || 'anon'));
         }
@@ -3395,19 +3413,10 @@ SchemaDef.prototype._getClass = function () {
           "schema: markDirty('" + name + "') is only valid on persisted instances; INSERT writes every set field");
       }
       const nm = def._normalize();
-      const n = fieldFor(nm, name);
-      let valid = nm.fields.has(n);
-      if (!valid) {
-        for (const [, rel] of nm.relations) {
-          if (rel.kind === 'belongsTo' && fieldFor(nm, rel.foreignKey) === n) {
-            valid = true;
-            break;
-          }
-        }
-      }
-      if (!valid) {
+      const n = writableField(nm, name);
+      if (n === null) {
         throw new Error(
-          "schema: markDirty('" + name + "') — '" + n + "' is not a declared field or belongsTo FK on " + (def.name || 'anon'));
+          "schema: markDirty('" + name + "') — '" + fieldFor(nm, name) + "' is not a declared field or belongsTo FK on " + (def.name || 'anon'));
       }
       this._dirty.add(n);
       this._dirtyVersions.set(n, ++this._dirtyVersion);
@@ -3486,10 +3495,10 @@ function sqlEnumMembers(type) {
 }
 
 // A field's declared type → its column type. Every answer is
-// DELIBERATE: there is no catch-all, because the catch-all was
-// `VARCHAR` and it turned a typo'd type name into a shipped column
-// that nothing complained about — `amt! stirng` used to render
-// `"amt" VARCHAR` and validate every value it was handed.
+// DELIBERATE: no catch-all, because a VARCHAR catch-all turns a
+// typo'd type name into a shipped column nothing complains about —
+// `amt! stirng` renders `"amt" VARCHAR` and validates every value it
+// is handed.
 //
 // Resolved at DDL time, which is the moment a column type is committed
 // and the last moment the registry can be asked. `def` is the model
@@ -3525,16 +3534,16 @@ function columnType(field, def) {
     // An enum materializes to its member VALUE, which is what the
     // column holds — not the member name. A closed set of strings is
     // a DuckDB ENUM. A set holding a number or a boolean has no ENUM
-    // form (DuckDB enum members are strings), so it stays the VARCHAR
-    // it has always been rather than being silently restated as
-    // something the values are not.
+    // form (DuckDB enum members are strings), so it stays VARCHAR
+    // rather than being silently restated as something the values are
+    // not.
     case 'enum': {
       const values = [...new Set(nested._normalize().enumMembers.values())];
       if (!values.length || !values.every((v) => typeof v === 'string')) return 'VARCHAR';
       return sqlEnumType(values);
     }
     // A nested schema is an object, so it is a JSON document — the
-    // same answer the array form has always given.
+    // array form's answer, for the same reason.
     case 'shape': case 'input': case 'union': return 'JSON';
     case 'model':
       throw new Error("schema: field type '" + field.typeName + "'" + where +
@@ -3687,7 +3696,6 @@ SchemaDef.prototype._tableSpec = function (options) {
   }
 
   const foreignKeys = [];
-  const notes = [];
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
     const targetDef = SchemaRegistry.get(rel.target);
@@ -3798,7 +3806,7 @@ SchemaDef.prototype._tableSpec = function (options) {
     name: table,
     sequence: norm.naturalKey ? null : { name: seq, start: idStart, shared: shared != null },
     primaryKey: norm.primaryKeyColumn,
-    columns, indexes, foreignKeys, notes,
+    columns, indexes, foreignKeys,
     tableWas: norm.tableWas || null,
   };
 };
@@ -3856,13 +3864,23 @@ function renderIndex(spec, ix) {
 // no such gap: foldSpec folds an auto-named single-column unique index
 // into the column's `unique` flag, and the contract folds a deployed
 // single-column UNIQUE constraint into that SAME flag, so both shapes
-// compare equal. The predicate below is foldSpec's, exactly — the two
-// must agree or the differ would plan an index that already exists.
+// compare equal.
 //
-// Uniqueness ADDED to a table that already exists still renders as
-// CREATE UNIQUE INDEX (see the add-unique step in the migration
-// planner): DuckDB has no working ALTER TABLE ADD CONSTRAINT, so the
-// index is the only instrument available after creation.
+// Uniqueness ADDED to a table that already exists is a table REBUILD
+// (the add-unique step in the migration planner): DuckDB has no
+// working ALTER TABLE ADD CONSTRAINT, so the planner recreates the
+// table around the changed flag and renderCreate renders it inline.
+
+// The ORM's own uniqueness index: single-column, auto-named. One
+// predicate, two consumers — renderCreate folds it into the column's
+// inline UNIQUE, and the differ's foldSpec folds it into the column
+// flag — and the two MUST agree or the differ would plan an index
+// that already exists.
+function isAutoUniqueIndex(spec, ix) {
+  return ix.unique === true && ix.columns.length === 1 &&
+    ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
+}
+
 function renderCreate(spec) {
   const blocks = [];
   // A per-table sequence is part of the table's own DDL. A SHARED one
@@ -3876,9 +3894,7 @@ function renderCreate(spec) {
   const inlineUnique = new Set();
   const indexes = [];
   for (const ix of spec.indexes) {
-    const auto = ix.unique && ix.columns.length === 1 &&
-      ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
-    const col = auto ? spec.columns.find((c) => c.name === ix.columns[0]) : null;
+    const col = isAutoUniqueIndex(spec, ix) ? spec.columns.find((c) => c.name === ix.columns[0]) : null;
     if (col && !col.primary) { inlineUnique.add(col.name); continue; }
     indexes.push(ix);
   }
@@ -3887,11 +3903,16 @@ function renderCreate(spec) {
   // renderCreate is what rebuilds a table from its deployed shape.
   for (const c of spec.columns) if (c.unique && !c.primary) inlineUnique.add(c.name);
   const lines = spec.columns.map((c) => renderColumn(spec, c, inlineUnique.has(c.name)));
+  // A deployed composite UNIQUE constraint (hand-written DDL; the spec
+  // cannot declare one) rides the spec in compositeUniques — a rebuild
+  // or dump that dropped it would silently stop enforcing it.
+  for (const cols of spec.compositeUniques ?? []) {
+    lines.push('  UNIQUE (' + cols.map((c) => quoteIdent(c, null, 'unique column')).join(', ') + ')');
+  }
   blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
   const ix = indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
-  if (spec.notes && spec.notes.length) blocks.push(spec.notes.join('\n'));
   return blocks;
 }
 
@@ -3971,7 +3992,7 @@ const schema = {
 // The last two are the build-an-unsaved-instance seam rip/fake's
 // Model.factory() augmentation composes with — normalize caller
 // input, construct without saving.
-export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
+export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, isAutoUniqueIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
 
 // Process doorbell for packages that must not hard-import this file
 // (e.g. rip/db). `connect()` sets `globalThis.__ripDbAdapter` and

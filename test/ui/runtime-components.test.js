@@ -1000,6 +1000,32 @@ describe('render helpers', () => {
     ])).toEqual([[0, 1, 2], [1, 2], [1, 3], [], [3]]);
   });
 
+  test("a multi-root component's emit dispatches on its first live node — bubbling reaches ancestors", () => {
+    expect(both((api) => {
+      const log = [];
+      const C = defineComponent(api, {
+        name: 'Multi', props: [],
+        create() {
+          const root = document.createDocumentFragment();
+          const firstNode = document.createElement('i');
+          const secondNode = document.createElement('b');
+          root.appendChild(firstNode);
+          root.appendChild(secondNode);
+          this._nodes = [firstNode, secondNode];
+          return root;
+        },
+      });
+      const target = document.createElement('main');
+      // Dispatched on the fragment, the event bubbles nowhere: the
+      // fragment was emptied at insertion and sits outside the tree.
+      target.addEventListener('save', (e) => log.push(['target', e.detail]));
+      const inst = new C({});
+      inst.mount(target);
+      inst.emit('save', { x: 1 });
+      return log;
+    })).toEqual([[ 'target', { x: 1 } ]]);
+  });
+
   test('emit dispatches a bubbling CustomEvent on the mounted root; detail carried; listeners up the tree fire', () => {
     expect(both((api) => {
       const log = [];
@@ -1040,7 +1066,34 @@ describe('render helpers', () => {
     ]);
   });
 
-  test('__transition accepts only the element own event and completes once without a timeout', async () => {
+  test('__transition completes on transitioncancel — an interrupted leave cannot strand the node', async () => {
+    const el = document.createElement('div');
+    let done = 0;
+    RT.__transition(el, 'fade', 'leave', () => { done++; });
+    await tick();
+    await tick();
+    // A mid-flight interruption fires transitioncancel, never
+    // transitionend — the completion must ride both.
+    el.dispatchEvent({ type: 'transitioncancel', target: el, bubbles: false });
+    expect(done).toBe(1);
+    expect(el.classList.contains('fade-leave-active')).toBe(false);
+    expect(el.classList.contains('fade-leave-to')).toBe(false);
+  });
+
+  test('__transition with no matching CSS completes on the duration fallback', async () => {
+    const el = document.createElement('div');
+    let done = 0;
+    RT.__transition(el, 'no-such-name', 'enter', () => { done++; });
+    await tick();
+    await tick();
+    // No CSS names this transition, so no event ever fires; the
+    // computed duration reads zero and the grace timer completes it.
+    await new Promise((r) => setTimeout(r, 80));
+    expect(done).toBe(1);
+    expect(el.classList.contains('no-such-name-enter-active')).toBe(false);
+  });
+
+  test('__transition accepts only the element own event and completes exactly once', async () => {
     const el = document.createElement('div');
     const child = document.createElement('span');
     el.appendChild(child);
@@ -1365,6 +1418,26 @@ describe('defect battery: constructor props are declared-only', () => {
     const Method = defineComponent(RT, { name: 'M', props: ['save'] });
     Method.prototype.save = function () {};
     expect(() => new Method({})).toThrow("declared prop 'save' collides with a component member");
+  });
+
+  test('a declared prop named after an ambient (app/router) is supported shadowing, launch globals or not', () => {
+    // The check runs before injection: with the launch globals live,
+    // an `app` prop must construct exactly as it does without them —
+    // checked after, the first-constructed instance's ambients decided
+    // the verdict and the per-class cache locked it in.
+    const AppProp = defineComponent(RT, { name: 'AppProp', props: ['app'] });
+    const hadApp = Object.prototype.hasOwnProperty.call(globalThis, '__ripApp');
+    const prevApp = globalThis.__ripApp;
+    globalThis.__ripApp = { fake: true };
+    try {
+      expect(() => new AppProp({})).not.toThrow();
+      const inst = new AppProp({});
+      expect(inst.app).toEqual({ fake: true }); // ambient still lands when the prop is unwired
+    } finally {
+      if (hadApp) globalThis.__ripApp = prevApp;
+      else delete globalThis.__ripApp;
+    }
+    expect(() => new AppProp({})).not.toThrow();
   });
 });
 

@@ -4275,7 +4275,7 @@ test "registry: scope() runs against a fresh registry and restores", '''
 test "findMany issues one IN query; [] short-circuits with no SQL", modelHeader + '''
   User = schema :model
     name! string
-  adapter.canned['SELECT * FROM "users" WHERE "id" IN (?, ?, ?)'] =
+  adapter.canned['SELECT * FROM "users" WHERE ("id" IN (?, ?, ?))'] =
     {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"], [3, "C"]], rows: 3}
   list = User.findMany! [1, 2, 3]
   none = User.findMany! []
@@ -4302,7 +4302,7 @@ test "find is pk-only; with is the exactly-one conditions lookup (LIMIT 2)", mod
 ''', [
   'SELECT * FROM "users" WHERE "id" = ? LIMIT 1',
   'SELECT * FROM "users" WHERE "name" = ? LIMIT 2',
-  'SELECT * FROM "users" WHERE name = ? LIMIT 2',
+  'SELECT * FROM "users" WHERE (name = ?) LIMIT 2',
   5, "E", "E", true, true,
 ]
 
@@ -4524,7 +4524,7 @@ test "@scope: composes on the model and the builder, in any order", modelHeader 
   User.active().admins().since(123).all!
   User.where(role: "user").active().all!
   [
-    adapter.calls[0].sql.includes('"active" = ? AND "role" = ? AND created_at > ?')
+    adapter.calls[0].sql.includes('"active" = ? AND "role" = ? AND (created_at > ?)')
     adapter.calls[0].params
     adapter.calls[1].sql.includes('"role" = ? AND "active" = ?')
   ]
@@ -5546,7 +5546,7 @@ test '.includes(:orders) batches one IN query and fills the memo', '''
       @belongsTo User
     adapter.canned['SELECT * FROM "users"'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
-    adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =
+    adapter.canned['SELECT * FROM "orders" WHERE ("user_id" IN (?, ?))'] =
       {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 1], [9, 25, 2]], rows: 3}
     users = User.includes(:orders).all!
     queries = adapter.calls.length
@@ -5572,7 +5572,7 @@ test '.includes(:user) on belongsTo batches via findMany; instances shared', '''
       @belongsTo User
     adapter.canned['SELECT * FROM "orders"'] =
       {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 1]], rows: 2}
-    adapter.canned['SELECT * FROM "users" WHERE "id" IN (?)'] =
+    adapter.canned['SELECT * FROM "users" WHERE ("id" IN (?))'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
     orders = Order.includes(:user).all!
     u1 = orders[0].user!
@@ -5597,9 +5597,9 @@ test 'nested includes: {orders: :user} preloads two levels', '''
       @belongsTo User
     adapter.canned['SELECT * FROM "users"'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
-    adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =
+    adapter.canned['SELECT * FROM "orders" WHERE ("user_id" IN (?, ?))'] =
       {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 2]], rows: 2}
-    adapter.canned['SELECT * FROM "users" WHERE "id" IN (?, ?)'] =
+    adapter.canned['SELECT * FROM "users" WHERE ("id" IN (?, ?))'] =
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
     users = User.includes(orders: :user).all!
     total = adapter.calls.length

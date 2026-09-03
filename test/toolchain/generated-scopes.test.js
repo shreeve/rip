@@ -66,7 +66,7 @@ const INVENTORY = [
   { sig: "() => ${this.runtimeName('__detachRef')}", count: 1,
     site: 'render ref cleanup registration',
     policy: 'emitter-owned statement only — no user expression embeds' },
-  { sig: "if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}", count: 1,
+  { sig: "if (${instVar}) ${target}.addEventListener('${event}', (${ev}", count: 1,
     site: 'child-component event prop listener (head; the wrapper param takes a TS-only `: any` before the arrow tail)',
     policy: 'handler expressions are covered by findRenderControl; function handlers pass through with their own context' },
   { sig: ") => ${this.runtimeName('__batch')}(() => (`);", count: 1,

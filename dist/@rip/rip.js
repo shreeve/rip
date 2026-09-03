@@ -2529,7 +2529,16 @@ var BOOLEAN_ATTRS = new Set([
   "async",
   "formnovalidate",
   "allowfullscreen",
-  "inert"
+  "inert",
+  "ismap",
+  "nomodule",
+  "playsinline",
+  "default",
+  "itemscope",
+  "alpha",
+  "shadowrootdelegatesfocus",
+  "shadowrootclonable",
+  "shadowrootserializable"
 ]);
 var GLOBAL_ATTRS = new Set([
   "accesskey",
@@ -8482,14 +8491,26 @@ var CAMEL = {
   crossorigin: "crossOrigin",
   usemap: "useMap",
   srclang: "srcLang",
-  autocomplete: "autocomplete",
   inputmode: "inputMode",
   cellpadding: "cellPadding",
   cellspacing: "cellSpacing",
   bgcolor: "bgColor",
   valign: "vAlign",
   nowrap: "noWrap",
-  for: "htmlFor"
+  for: "htmlFor",
+  datetime: "dateTime",
+  ismap: "isMap",
+  nomodule: "noModule",
+  playsinline: "playsInline",
+  dirname: "dirName",
+  accesskey: "accessKey",
+  enterkeyhint: "enterKeyHint",
+  referrerpolicy: "referrerPolicy",
+  fetchpriority: "fetchPriority",
+  imagesrcset: "imageSrcset",
+  imagesizes: "imageSizes",
+  popovertargetaction: "popoverTargetAction",
+  allowfullscreen: "allowFullscreen"
 };
 var CLASS_VALUE_DECL = "type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];";
 var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n" + "type __RipChildren = Node | string | number | boolean | null;";
@@ -8632,6 +8653,9 @@ var instanceTypeLines = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
 var containerType = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
+var restContainerType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
 var MINTED = "";
@@ -10270,7 +10294,7 @@ class Emitter {
     if (info.extendsTag !== null) {
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true;
-      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), "", MINTED)};`));
+      line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     }
     for (const text of runtimeApiDeclares("this"))
       line(() => this.b.emit(text));
@@ -15590,7 +15614,6 @@ ${pad ?? ""}`);
       stmts: [],
       forceNonStatic: false,
       root: null,
-      params: null,
       originNode: renderNode,
       renameHazardNames: new Set
     };
@@ -16045,8 +16068,7 @@ ${pad ?? ""}`);
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
     this.renderLine(node, () => this.b.emit("this._applyRestToInheritedEl()"));
   }
-  renderTag(node, tag, classes, args, id) {
-    this.noteShorthandClasses(classes, node);
+  renderElementPrologue(node, tag) {
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -16067,17 +16089,29 @@ ${pad ?? ""}`);
       }
       this.b.emit(")");
     });
+    return { el, isSvg };
+  }
+  renderElementBasics(node, tag, el, id) {
+    const R = this.rstate;
     if (id)
       this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
     if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === "class") {
       this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
     }
+  }
+  renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
+    const R = this.rstate;
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     if (classes.length > 0) {
       R.pendingClassArgs = [`'${classes.join(" ")}'`];
       R.pendingClassEl = el;
+      R.pendingClassKeys = null;
     }
     if (isSvg)
       R.svgDepth++;
@@ -16115,7 +16149,7 @@ ${pad ?? ""}`);
           this.b.emit(isSvg ? "));" : ");");
         });
       }
-      R.pendingClassKeys = null;
+      R.pendingClassKeys = prevKeys;
       R.pendingClassArgs = prevArgs;
       R.pendingClassEl = prevEl;
     }
@@ -16124,50 +16158,35 @@ ${pad ?? ""}`);
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
     this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
-    const el = this.newRenderVar();
-    R.tags.set(el, tag);
-    if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
-      R.transitionSlot.el = el;
-    }
-    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
-    if (isSvg)
-      R.svgEls.add(el);
-    this.renderLine(node, () => {
-      if (isSvg)
-        this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
-      else
-        this.b.emit(`${el} = document.createElement(`);
-      const span = this.emitQuotedPrimitive(tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: "tag", tag, svg: isSvg });
-      }
-      this.b.emit(")");
-    });
-    if (id)
-      this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
-    this.bindInheritedTarget(node, tag, el);
-    if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === "class") {
-      this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
-    }
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     for (const expr of classExprs)
       this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     R.pendingClassArgs = [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e))
     ];
     R.pendingClassEl = el;
+    R.pendingClassKeys = null;
     if (isSvg)
       R.svgDepth++;
     this.renderChildren(el, children);
     if (isSvg)
       R.svgDepth--;
     const parts = R.pendingClassArgs;
+    const keys = R.pendingClassKeys ?? [];
     if (parts.length > 0) {
       this.renderEffect(node, () => {
         const clsx = this.runtimeName("__clsx");
-        this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
+        this.b.emit(`${el}`);
+        const gen = this.b.offset + 1;
+        this.b.emit(isSvg ? `.setAttribute('class', ${clsx}(` : `.className = ${clsx}(`);
+        for (const k of keys) {
+          this.intrinsics.push(isSvg ? { start: k[0], end: k[1], kind: "attr", name: "class", gen } : { start: k[0], end: k[1], kind: "classkey", gen });
+        }
         parts.forEach((p, i) => {
           if (i > 0)
             this.b.emit(", ");
@@ -16179,6 +16198,7 @@ ${pad ?? ""}`);
         this.b.emit(isSvg ? "));" : ");");
       });
     }
+    R.pendingClassKeys = prevKeys;
     R.pendingClassArgs = prevArgs;
     R.pendingClassEl = prevEl;
     return el;
@@ -16273,10 +16293,7 @@ ${pad ?? ""}`);
             recv.emit();
             this.b.emit(".setAttribute(");
             this.emitQuotedPrimitive(arg);
-            this.b.emit(", true");
-            if (this.ts)
-              this.b.tsOnly(() => this.b.emit(" as any"));
-            this.b.emit(")");
+            this.b.emit(", '')");
           });
           continue;
         }
@@ -16742,10 +16759,11 @@ ${this.replayPad}}` : " }");
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
+        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
         if (!this.ts) {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }
@@ -17248,7 +17266,8 @@ ${this.replayPad}}` : " }");
     const R = this.rstate;
     if (!R)
       return;
-    const visible = (n) => R.sink.locals.has(n) || this.loopVarNames().has(n);
+    const loopVars = this.loopVarNames();
+    const visible = (n) => R.sink.locals.has(n) || loopVars.has(n);
     for (let r = R.sink.parent;r !== null; r = r.parent) {
       if (r.locals.size === 0)
         continue;
@@ -24499,21 +24518,32 @@ function __transition(el, name, dir, done) {
   const active = name + "-" + dir + "-active";
   const to = name + "-" + dir + "-to";
   let completed = false;
+  let timer = null;
   cl.add(from, active);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
       const end = (event) => {
-        if (completed || event.target !== el)
+        if (completed || event && event.target !== el)
           return;
         completed = true;
+        clearTimeout(timer);
         el.removeEventListener("transitionend", end);
+        el.removeEventListener("transitioncancel", end);
         cl.remove(active, to);
         if (done)
           done();
       };
       el.addEventListener("transitionend", end);
+      el.addEventListener("transitioncancel", end);
+      let ms = 0;
+      try {
+        const cs = getComputedStyle(el);
+        const longest = (v) => Math.max(0, ...String(v).split(",").map((s) => (parseFloat(s) || 0) * (/ms\s*$/.test(s.trim()) ? 1 : 1000)));
+        ms = longest(cs.transitionDuration) + longest(cs.transitionDelay);
+      } catch {}
+      timer = setTimeout(() => end(), ms + 50);
     });
   });
 }
@@ -24601,6 +24631,7 @@ var __styleKeys = new WeakMap;
 class __Component {
   constructor(props = {}) {
     this._state = "new";
+    __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
     const mount = __pendingGateConstruction;
     const rendererAuthorized = mount?.brand === __GATE_CONSTRUCTION_BRAND && mount.component === this.constructor && mount.used !== true;
@@ -24631,7 +24662,6 @@ class __Component {
       this.app = globalThis.__ripApp;
     if (this.router == null && globalThis.__ripRouter != null)
       this.router = globalThis.__ripRouter;
-    __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
     let rest = null;
@@ -24881,32 +24911,11 @@ class __Component {
     this._teardown({ state: "failed", hooks: false, removeDOM: true });
     __handleComponentError(error, this);
   }
-  _teardown({ state, hooks, removeDOM }) {
-    if (this._state === "failed" || this._state === "unmounted")
-      return;
-    if (this.constructor.__hmrId)
-      __hmrUnregisterInstance(this);
-    this._state = state;
-    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
-    if (hooks) {
-      try {
-        if (this.beforeUnmount)
-          this.beforeUnmount();
-      } catch (e) {
-        report("beforeUnmount", e);
-      }
-    }
+  _dispose(report, unmountChild) {
     if (this._children) {
       for (const child of this._children) {
         try {
-          if (hooks)
-            child.unmount({ removeDOM });
-          else
-            child._teardown({
-              state: child._state === "mounted" ? "unmounted" : "failed",
-              hooks: false,
-              removeDOM: true
-            });
+          unmountChild(child);
         } catch (e) {
           report("child teardown", e);
         }
@@ -24957,14 +24966,12 @@ class __Component {
         report("ref cleanup batch flush", e);
       }
     }
-    if (hooks) {
-      try {
-        if (this.unmounted)
-          this.unmounted();
-      } catch (e) {
-        report("unmounted", e);
-      }
-    }
+    this._children = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+  }
+  _detachDOM(report, removeDOM) {
     if (removeDOM) {
       if (this._nodes) {
         for (const n of this._nodes) {
@@ -24982,14 +24989,45 @@ class __Component {
         }
       }
     }
-    this._target = null;
     this._root = null;
     this._nodes = null;
-    this._children = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
     this._inheritedEl = null;
+  }
+  _teardown({ state, hooks, removeDOM }) {
+    if (this._state === "failed" || this._state === "unmounted")
+      return;
+    if (this.constructor.__hmrId)
+      __hmrUnregisterInstance(this);
+    this._state = state;
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    if (hooks) {
+      try {
+        if (this.beforeUnmount)
+          this.beforeUnmount();
+      } catch (e) {
+        report("beforeUnmount", e);
+      }
+    }
+    this._dispose(report, (child) => {
+      if (hooks)
+        child.unmount({ removeDOM });
+      else
+        child._teardown({
+          state: child._state === "mounted" ? "unmounted" : "failed",
+          hooks: false,
+          removeDOM: true
+        });
+    });
+    if (hooks) {
+      try {
+        if (this.unmounted)
+          this.unmounted();
+      } catch (e) {
+        report("unmounted", e);
+      }
+    }
+    this._detachDOM(report, removeDOM);
+    this._target = null;
   }
   _hmrRerender() {
     const name = this.constructor.name || "component";
@@ -25008,81 +25046,8 @@ class __Component {
     } catch (e) {
       report("beforeUnmount", e);
     }
-    if (this._children) {
-      for (const child of this._children) {
-        try {
-          child.unmount({ removeDOM: true });
-        } catch (e) {
-          report("child teardown", e);
-        }
-      }
-      this._children = null;
-    }
-    try {
-      this._frame?.dispose();
-    } catch (e) {
-      report("owner disposal", e);
-    }
-    if (this._restWriters) {
-      for (const writer of Object.values(this._restWriters)) {
-        try {
-          writer();
-        } catch (e) {
-          report("rest writer cleanup", e);
-        }
-      }
-      this._restWriters = null;
-    }
-    if (this._restHandlers) {
-      if (this._inheritedEl) {
-        for (const [key, handler] of Object.entries(this._restHandlers)) {
-          try {
-            this._inheritedEl.removeEventListener(key.slice(1).split(".")[0], handler);
-          } catch (e) {
-            report("rest handler cleanup", e);
-          }
-        }
-      }
-      this._restHandlers = null;
-    }
-    if (this._refCleanups) {
-      const cleanups = this._refCleanups;
-      this._refCleanups = null;
-      try {
-        __batch(() => {
-          for (const c of cleanups) {
-            try {
-              c();
-            } catch (e) {
-              report("ref cleanup", e);
-            }
-          }
-        });
-      } catch (e) {
-        report("ref cleanup batch flush", e);
-      }
-    }
-    if (nodes) {
-      for (const n of nodes) {
-        try {
-          __detach(n);
-        } catch (e) {
-          report("DOM detach", e);
-        }
-      }
-    } else {
-      try {
-        __detach(this._root);
-      } catch (e) {
-        report("DOM detach", e);
-      }
-    }
-    this._root = null;
-    this._nodes = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
-    this._inheritedEl = null;
+    this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    this._detachDOM(report, true);
     this._frame = __ownerFrame({ nested: false });
     this._state = "new";
     {
@@ -25165,7 +25130,7 @@ class __Component {
     if (this._state !== "mounted" || !this._root) {
       throw new Error(`${this.constructor.name || "component"}: emit('${name}') outside the mounted window — ` + "emit dispatches on the live root; call after mount and before unmount");
     }
-    this._root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
+    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
   }
   static mount(target = "body") {
     return new this().mount(target);

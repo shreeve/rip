@@ -48,10 +48,16 @@ export const CAMEL = {
   formenctype: 'formEnctype', formmethod: 'formMethod',
   formnovalidate: 'formNoValidate', formtarget: 'formTarget',
   novalidate: 'noValidate', crossorigin: 'crossOrigin',
-  usemap: 'useMap', srclang: 'srcLang', autocomplete: 'autocomplete',
+  usemap: 'useMap', srclang: 'srcLang',
   inputmode: 'inputMode', cellpadding: 'cellPadding',
   cellspacing: 'cellSpacing', bgcolor: 'bgColor', valign: 'vAlign',
-  nowrap: 'noWrap', for: 'htmlFor',
+  nowrap: 'noWrap', for: 'htmlFor', datetime: 'dateTime',
+  ismap: 'isMap', nomodule: 'noModule', playsinline: 'playsInline',
+  dirname: 'dirName', accesskey: 'accessKey',
+  enterkeyhint: 'enterKeyHint', referrerpolicy: 'referrerPolicy',
+  fetchpriority: 'fetchPriority', imagesrcset: 'imageSrcset',
+  imagesizes: 'imageSizes', popovertargetaction: 'popoverTargetAction',
+  allowfullscreen: 'allowFullscreen',
 };
 
 // The class-value vocabulary (v3's spelling, verbatim): everything the

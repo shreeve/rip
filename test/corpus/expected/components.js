@@ -72,7 +72,7 @@ let Panel = class extends __Component {
     this._el5.setAttribute('data-lucide', "search");
     this._el0.appendChild(this._el5);
     this._el6 = document.createElement('form');
-    this._el6.setAttribute('noValidate', true);
+    this._el6.setAttribute('noValidate', '');
     this._el0.appendChild(this._el6);
     this._el7 = document.createElement('div');
     this._el7.setAttribute('role', "note");
@@ -529,7 +529,7 @@ let Deck = class extends __Component {
       this._el4 = document.createComment('rip:child-error: Chip');
     }
     } finally { __popComponent(__prev); } }
-    if (this._inst3) this._el4.addEventListener('pick', (e) => __batch(() => (this.onPick)(e)));
+    if (this._inst3) (this._inst3._nodes?.[0] ?? this._el4).addEventListener('pick', (e) => __batch(() => (this.onPick)(e)));
     this._el0.appendChild(this._el4);
     { const __prev = __pushComponent(this); try {
     try {

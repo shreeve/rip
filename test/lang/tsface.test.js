@@ -1352,7 +1352,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   test('extends: the tag attribute surface + string index in the props type, the rest declare', () => {
     const code = ts('Deck = component extends section\n  name := "n"\n  render\n    section.deck\n      = name\n').code;
     // The rest view names the per-tag passthrough alias the module declares once.
-    expect(code).toContain('declare rest: { value: __RipRest_section; read(): __RipRest_section; touch(): void };');
+    expect(code).toContain('declare rest: { readonly value: __RipRest_section; read(): __RipRest_section; touch(): void };');
     expect(code).toContain('type __RipRest_section = { ');
     // Intrinsic attrs type through the tag's DOM interface with an
     // extends-Record guard; camelCased DOM twins get
@@ -1518,6 +1518,34 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(faced.code).toContain('({ __key: String(item.id) }).__key');
     expect(faced.code).toContain('({ __key: it.ids[0] }).__key');
     expect(faced.code).toContain('({ __bind: this.nums.value[0] }).__bind;');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
+  test('nested class merges: each classkey row lands on its own element\'s className write', () => {
+    const src = [
+      'C = component',
+      '  lit := true',
+      '  render',
+      "    div.a class: {x: lit}",
+      "      span.b class: {y: lit}",
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    const keys = faced.intrinsics.filter((r) => r.kind === 'classkey');
+    // One row per merging pair — a flat slot attributed the inner
+    // pair's span to the outer write and recorded nothing for the
+    // outer's own pair.
+    expect(keys.map((r) => src.slice(r.start, r.end))).toEqual(['class', 'class']);
+    const gens = keys.map((r) => r.gen);
+    expect(new Set(gens).size).toBe(2);
+    for (const r of keys) {
+      expect(faced.code.slice(r.gen, r.gen + 'className'.length)).toBe('className');
+    }
+    // The inner element's effect emits during the outer's children
+    // walk, so its write comes first; the outer pair's key must point
+    // at the LATER write, its own.
+    const [outerKey, innerKey] = keys[0].start < keys[1].start ? [keys[0], keys[1]] : [keys[1], keys[0]];
+    expect(outerKey.gen).toBeGreaterThan(innerKey.gen);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 

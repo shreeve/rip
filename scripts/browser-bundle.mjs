@@ -86,6 +86,7 @@ const IDE_STUBS = new Map([
     `export const propsParamOptional = () => true;`,
     `export const instanceTypeLines = ${unavailable('component type story')};`,
     `export const containerType = ${unavailable('component type story')};`,
+    `export const restContainerType = ${unavailable('component type story')};`,
     `export const MINTED = '';`,
     `export const syntacticLiteralType = () => null;`,
     `export const selfArgsOf = () => '';`,

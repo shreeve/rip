@@ -7,8 +7,8 @@
 // compiler's BOOLEAN_ATTRS — so this suite is the lockstep:
 //
 //   1. the grammar's alternation equals BOOLEAN_ATTRS minus `loop`
-//      (the keyword claims that line at parse, exactly as the
-//      compiler does), and
+//      and `default` (those keywords claim the line at parse,
+//      exactly as the compiler does), and
 //   2. every painted name COMPILES as a flag of its enclosing element
 //      through the real render DSL, in both faces, while an unlisted
 //      word keeps its element reading and stays unpainted.
@@ -40,9 +40,9 @@ const vimSyntax = readFileSync(
   path.resolve(import.meta.dir, '..', '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
-  test('the grammar alternation is BOOLEAN_ATTRS minus `loop`', () => {
+  test('the grammar alternation is BOOLEAN_ATTRS minus the parse-reserved words', () => {
     const painted = flagRule.match.match(/\((\w+(?:\|\w+)+)\)/)[1].split('|');
-    const expected = [...BOOLEAN_ATTRS].filter((n) => n !== 'loop');
+    const expected = [...BOOLEAN_ATTRS].filter((n) => n !== 'loop' && n !== 'default');
     expect(painted.toSorted()).toEqual(expected.toSorted());
   });
 

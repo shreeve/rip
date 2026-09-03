@@ -18,7 +18,9 @@
 //                               key REJECTS loudly (hasContext is the
 //                               optional-use probe)
 //   hasContext(key)           - is a provider in reach?
-//   __gateBind(c, path, key?) - computed last-good app-data binding
+//   __gateBind(self, index)   - computed last-good app-data binding
+//                               (resolves the renderer's captured
+//                               source through __gateMetadata)
 //   __hmrRegistry             - id → { definition, instances }
 //   __hmrLookup(id)           - registry entry or undefined
 //   __hmrRegisterDefinition(c)- record/replace a component definition
@@ -673,19 +675,37 @@ function __transition(el, name, dir, done) {
   const active = name + '-' + dir + '-active';
   const to = name + '-' + dir + '-to';
   let completed = false;
+  let timer = null;
   cl.add(from, active);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
       const end = (event) => {
-        if (completed || event.target !== el) return;
+        if (completed || (event && event.target !== el)) return;
         completed = true;
+        clearTimeout(timer);
         el.removeEventListener('transitionend', end);
+        el.removeEventListener('transitioncancel', end);
         cl.remove(active, to);
         if (done) done();
       };
       el.addEventListener('transitionend', end);
+      // An interrupted transition fires transitioncancel, never
+      // transitionend — without this, the leaving node strands in the
+      // DOM and the listener leaks.
+      el.addEventListener('transitioncancel', end);
+      // And a name with no matching CSS fires neither: complete on a
+      // computed-duration fallback (50ms grace past the longest
+      // duration+delay; zero when styles are unreadable or absent).
+      let ms = 0;
+      try {
+        const cs = getComputedStyle(el);
+        const longest = (v) => Math.max(0, ...String(v).split(',')
+          .map((s) => (parseFloat(s) || 0) * (/ms\s*$/.test(s.trim()) ? 1 : 1000)));
+        ms = longest(cs.transitionDuration) + longest(cs.transitionDelay);
+      } catch {}
+      timer = setTimeout(() => end(), ms + 50);
     });
   });
 }
@@ -809,6 +829,13 @@ const __styleKeys = new WeakMap();
 class __Component {
   constructor(props = {}) {
     this._state = 'new';
+    // Validate BEFORE any injection: the ambient assignments below put
+    // `app`/`router`/`params`/`query` on the instance, and a declared
+    // prop of the same name is supported shadowing (the emitter and
+    // the type face both spell it) — checked after injection, the
+    // verdict depended on whether the first-constructed instance
+    // happened to carry the ambients.
+    __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
     const mount = __pendingGateConstruction;
     const rendererAuthorized =
@@ -847,7 +874,6 @@ class __Component {
     // are navigation state, not app state.
     if (this.app == null && globalThis.__ripApp != null) this.app = globalThis.__ripApp;
     if (this.router == null && globalThis.__ripRouter != null) this.router = globalThis.__ripRouter;
-    __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
     let rest = null;
@@ -998,9 +1024,9 @@ class __Component {
     // every path — _create runs under the child protocol's push,
     // _setRestProp pushes it around this call — so the writer dies on
     // the CHILD's unmount, never the caller's; its disposer joins the
-    // per-key writer map above — assigning the raw signal object to
-    // the DOM property would drop every later update (the
-    // #164).
+    // per-key writer map above. Assigning the raw signal object to
+    // the DOM property would drop every later update — a reactive
+    // value forwards through an effect, never by reference.
     if (value != null && typeof value === 'object' && typeof value.read === 'function') {
       (this._restWriters ??= {})[key] = __effect(() => { this._applyPlainInheritedProp(el, key, value.value); });
       return;
@@ -1132,26 +1158,16 @@ class __Component {
     this._teardown({ state: 'failed', hooks: false, removeDOM: true });
     __handleComponentError(error, this);
   }
-  _teardown({ state, hooks, removeDOM }) {
-    if (this._state === 'failed' || this._state === 'unmounted') return;
-    if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
-    this._state = state;
-    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
-    if (hooks) {
-      try {
-        if (this.beforeUnmount) this.beforeUnmount();
-      } catch (e) { report('beforeUnmount', e); }
-    }
+  // The shared release body — owned children, the owner frame, rest
+  // writers/handlers, ref cleanups — used by full teardown and the
+  // HMR rebuild alike, so a cleanup step added here reaches both.
+  // The differences (state, hooks, HMR unregistration, _target) stay
+  // at the call sites; the DOM half is _detachDOM's, because
+  // _teardown runs the unmounted hook between the two.
+  _dispose(report, unmountChild) {
     if (this._children) {
       for (const child of this._children) {
-        try {
-          if (hooks) child.unmount({ removeDOM });
-          else child._teardown({
-            state: child._state === 'mounted' ? 'unmounted' : 'failed',
-            hooks: false,
-            removeDOM: true,
-          });
-        } catch (e) { report('child teardown', e); }
+        try { unmountChild(child); } catch (e) { report('child teardown', e); }
       }
       this._children = null;
     }
@@ -1182,11 +1198,14 @@ class __Component {
         });
       } catch (e) { report('ref cleanup batch flush', e); }
     }
-    if (hooks) {
-      try {
-        if (this.unmounted) this.unmounted();
-      } catch (e) { report('unmounted', e); }
-    }
+    // Unconditional: a slot the branches above never entered (e.g. a
+    // component that minted no cleanups) still reads null afterwards.
+    this._children = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+  }
+  _detachDOM(report, removeDOM) {
     if (removeDOM) {
       if (this._nodes) {
         for (const n of this._nodes) {
@@ -1196,14 +1215,35 @@ class __Component {
         try { __detach(this._root); } catch (e) { report('DOM detach', e); }
       }
     }
-    this._target = null;
     this._root = null;
     this._nodes = null;
-    this._children = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
     this._inheritedEl = null;
+  }
+  _teardown({ state, hooks, removeDOM }) {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
+    this._state = state;
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    if (hooks) {
+      try {
+        if (this.beforeUnmount) this.beforeUnmount();
+      } catch (e) { report('beforeUnmount', e); }
+    }
+    this._dispose(report, (child) => {
+      if (hooks) child.unmount({ removeDOM });
+      else child._teardown({
+        state: child._state === 'mounted' ? 'unmounted' : 'failed',
+        hooks: false,
+        removeDOM: true,
+      });
+    });
+    if (hooks) {
+      try {
+        if (this.unmounted) this.unmounted();
+      } catch (e) { report('unmounted', e); }
+    }
+    this._detachDOM(report, removeDOM);
+    this._target = null;
   }
   // Patch refresh: dispose owned children and frame effects, keep
   // instance identity and `_init` state, then rebuild DOM via
@@ -1229,57 +1269,8 @@ class __Component {
       if (this.beforeUnmount) this.beforeUnmount();
     } catch (e) { report('beforeUnmount', e); }
 
-    if (this._children) {
-      for (const child of this._children) {
-        try { child.unmount({ removeDOM: true }); }
-        catch (e) { report('child teardown', e); }
-      }
-      this._children = null;
-    }
-
-    try { this._frame?.dispose(); } catch (e) { report('owner disposal', e); }
-
-    if (this._restWriters) {
-      for (const writer of Object.values(this._restWriters)) {
-        try { writer(); } catch (e) { report('rest writer cleanup', e); }
-      }
-      this._restWriters = null;
-    }
-    if (this._restHandlers) {
-      if (this._inheritedEl) {
-        for (const [key, handler] of Object.entries(this._restHandlers)) {
-          try { this._inheritedEl.removeEventListener(key.slice(1).split('.')[0], handler); }
-          catch (e) { report('rest handler cleanup', e); }
-        }
-      }
-      this._restHandlers = null;
-    }
-    if (this._refCleanups) {
-      const cleanups = this._refCleanups;
-      this._refCleanups = null;
-      try {
-        __batch(() => {
-          for (const c of cleanups) {
-            try { c(); } catch (e) { report('ref cleanup', e); }
-          }
-        });
-      } catch (e) { report('ref cleanup batch flush', e); }
-    }
-
-    if (nodes) {
-      for (const n of nodes) {
-        try { __detach(n); } catch (e) { report('DOM detach', e); }
-      }
-    } else {
-      try { __detach(this._root); } catch (e) { report('DOM detach', e); }
-    }
-
-    this._root = null;
-    this._nodes = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
-    this._inheritedEl = null;
+    this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    this._detachDOM(report, true);
     this._frame = __ownerFrame({ nested: false });
     this._state = 'new';
 
@@ -1369,6 +1360,11 @@ class __Component {
   // loudly instead. The window is _root's
   // lifetime, so the child protocol (a parent's create phase sets the
   // child's _root) opens it exactly like a direct mount() does.
+  // A multi-root component's _root is the DocumentFragment, emptied
+  // the moment it was inserted — dispatching there, bubbles: true
+  // reaches nothing. The first tracked node is in the live tree, so
+  // both the direct listener (attached there by the parent's create
+  // phase) and every ancestor observe the event.
   emit(name, detail) {
     if (this._state !== 'mounted' || !this._root) {
       throw new Error(
@@ -1376,7 +1372,7 @@ class __Component {
         'emit dispatches on the live root; call after mount and before unmount',
       );
     }
-    this._root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
+    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
   }
   static mount(target = 'body') {
     return new this().mount(target);

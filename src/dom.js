@@ -88,7 +88,9 @@ export const BOOLEAN_ATTRS = new Set([
   'disabled', 'hidden', 'readonly', 'required', 'checked', 'selected',
   'autofocus', 'autoplay', 'controls', 'loop', 'muted', 'multiple',
   'novalidate', 'open', 'reversed', 'defer', 'async', 'formnovalidate',
-  'allowfullscreen', 'inert',
+  'allowfullscreen', 'inert', 'ismap', 'nomodule', 'playsinline',
+  'default', 'itemscope', 'alpha', 'shadowrootdelegatesfocus',
+  'shadowrootclonable', 'shadowrootserializable',
 ]);
 
 // The HTML GLOBAL attributes (the WHATWG "Global attributes" list,
