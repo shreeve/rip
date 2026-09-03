@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 # ==============================================================================
-# Solar - SLR(1) Parser Generator for Rip
+# Solar - LALR(1) Parser Generator for Rip
 #
 # Grammar rules are declared as:
 #
@@ -42,7 +42,7 @@
 # label records a side-band RoleStore row on the rule's node
 # (grammarRef = the labeled position, childSlot null — the value lands
 # at NO index in the produced s-expression). Labels strip before any
-# grammar construction, so the SLR automaton never sees them. A label
+# grammar construction, so the LR automaton never sees them. A label
 # on a template-CARRIED symbol, a label on a rule with no annotation,
 # a duplicate role name, '$self', an empty name, and malformed label
 # syntax all fail generation with rule-identifying errors; annotation
@@ -62,7 +62,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 
 # Terminal: a symbol that cannot be broken down further ("NUMBER" or "+")
 class Terminal
@@ -78,7 +78,6 @@ class NonTerminal
     @rules    = []      # rules that define this nonterminal
     @nullable = false   # true if one of the rules can produce no tokens (ε)
     @firsts   = Set.new() # FIRST set: terminals that can start this nonterminal
-    @follows  = Set.new() # FOLLOW set: terminals that can follow this nonterminal
 
 # Rule: one possible match for a nonterminal (Expr → Expr + Term)
 class Rule
@@ -110,7 +109,7 @@ class State
     @hasConflicts = false          # has shift/reduce or reduce/reduce conflicts
 
 # ==============================================================================
-# SLR(1) Parser Generator
+# LALR(1) Parser Generator
 # ==============================================================================
 
 class Generator
@@ -668,7 +667,6 @@ class Generator
 
     @nonterminals.$accept = @symbolTable.get "$accept"
     @nonterminals.$accept.rules.push acceptRule
-    @nonterminals[@start].follows.add "$end"
 
   # ============================================================================
   # LR Automaton Construction
@@ -780,15 +778,14 @@ class Generator
     states.push gotoSet
 
   # ============================================================================
-  # Lookahead Computation - SLR(1) Algorithm
+  # Lookahead Computation - LALR(1) Algorithm (DeRemer & Pennello)
   # ============================================================================
 
   computeLookaheads!: ->
     @computeLookaheads = => {} # Computes once; no-op on subsequent calls
     @_computeNullableSets()    # ε-derivable symbols
     @_computeFirstSets()       # First tokens
-    @_computeFollowSets()      # Following tokens
-    @_assignItemLookaheads()   # FOLLOW(A) → item lookaheads
+    @_assignItemLookaheads()   # Per-transition Follow → item lookaheads
 
   # Determine nullable symbols (can derive ε)
   _computeNullableSets!: ->
@@ -847,43 +844,135 @@ class Generator
       break unless @_isNullable symbol
     firsts
 
-  # Compute FOLLOW sets (terminals that can follow nonterminals)
-  _computeFollowSets!: ->
-    changed = true
-    while changed
-      changed = false
-
-      for rule in @rules
-        for symbol, i in rule.symbols when @nonterminals[symbol]
-          oldSize = @nonterminals[symbol].follows.size
-
-          if i is rule.symbols.length - 1
-            # Symbol at end: add FOLLOW(LHS)
-            @nonterminals[rule.lhs].follows.forEach (item) =>
-              @nonterminals[symbol].follows.add item
-          else
-            # Add FIRST(β) where β follows symbol
-            beta = rule.symbols[i + 1..]
-            firstSet = @_computeFirst beta
-
-            firstSet.forEach (item) => @nonterminals[symbol].follows.add item
-
-            # If β is nullable, also add FOLLOW(LHS)
-            if @_isNullable beta
-              @nonterminals[rule.lhs].follows.forEach (item) =>
-                @nonterminals[symbol].follows.add item
-
-          changed = true if @nonterminals[symbol].follows.size > oldSize
-
-  # Assign FOLLOW sets to reduction items
+  # Assign LALR(1) lookaheads to reduction items — DeRemer & Pennello's
+  # relational method over the LR(0) automaton. Each nonterminal
+  # transition (p, A) carries a Follow set built from three relations:
+  #
+  #   directly-reads:  terminals shiftable immediately after the transition
+  #   reads:           nullable nonterminal transitions chained after it
+  #   includes:        (p, A) absorbs Follow(p', B) when a rule B → β A γ
+  #                    has nullable γ and β walks p' to p
+  #
+  # A reduction by A → ω in state q then takes the union of Follow(p, A)
+  # over every transition on A that reaches q along ω (lookback). Same
+  # automaton and state count as SLR; only reductions whose context
+  # actually permits a terminal keep it as a lookahead.
   _assignItemLookaheads!: ->
     return unless @states
+
+    # Nonterminal transitions; ntIdx[stateId] maps symbol → index in trans
+    trans = []
+    ntIdx = (Map.new() for _ in @states)
     for state in @states
+      for [symbol, to] as state.transitions when @nonterminals[symbol]
+        ntIdx[state.id].set symbol, trans.length
+        trans.push { p: state.id, symbol, to }
+
+    # Follow sets are terminal bitsets: unions along digraph edges and
+    # into reductions are word ORs, not per-token set inserts.
+    bits  = Map.new() # terminal name → bit
+    names = []        # bit → terminal name
+    bitFor = (name) ->
+      b = bits.get name
+      unless b?
+        b = names.length
+        bits.set name, b
+        names.push name
+      b
+    words = (@symbolTable.size >> 5) + 1
+    follow = (Uint32Array.new(words) for _ in trans)
+
+    # Directly-reads: terminals shiftable right after each transition.
+    # The automaton records no '$end' transition, so the accept state's
+    # incoming transition seeds '$end' explicitly.
+    for t, i in trans
+      target = @states[t.to]
+      for [symbol] as target.transitions when not @nonterminals[symbol]
+        b = bitFor symbol
+        follow[i][b >> 5] |= 1 << (b & 31)
+      if t.p is 0 and t.symbol is @start
+        b = bitFor '$end'
+        follow[i][b >> 5] |= 1 << (b & 31)
+
+    # edges[i] lists transitions whose Follow flows into transition i.
+    edges = ([] for _ in trans)
+
+    # reads: goto(p, A) can continue through a nullable nonterminal C,
+    # so Follow(p, A) absorbs Follow(goto(p, A), C).
+    for t, i in trans
+      for [symbol] as @states[t.to].transitions when @nonterminals[symbol]?.nullable
+        j = ntIdx[t.to].get symbol
+        edges[i].push j if j?
+
+    # includes and lookback share one walk down each rule of each
+    # transition's nonterminal. Walking B → ω from p': an inner
+    # nonterminal at a nullable-tail position contributes an includes
+    # edge; the state the whole walk lands in is where ω reduces, so
+    # that reduction looks back to (p', B).
+    suffixNullable = Map.new() # rule → per-position "symbols after here are all nullable"
+    for rule in @rules
+      tail = Array.new rule.symbols.length
+      nullable = true
+      for pos in [rule.symbols.length - 1 .. 0] by -1
+        tail[pos] = nullable
+        nullable = nullable and @_isNullable rule.symbols[pos]
+      suffixNullable.set rule, tail
+
+    lookback = (Map.new() for _ in @states) # ruleId → [transition indexes]
+    for t, i in trans
+      for rule in @nonterminals[t.symbol].rules
+        tail = suffixNullable.get rule
+        cur = t.p
+        for symbol, pos in rule.symbols
+          continue if symbol is ''
+          if @nonterminals[symbol] and tail[pos]
+            j = ntIdx[cur].get symbol
+            edges[j].push i if j?
+          cur = @states[cur].transitions.get symbol
+          break unless cur?
+        continue unless cur?
+        list = lookback[cur].get rule.id
+        unless list
+          list = []
+          lookback[cur].set rule.id, list
+        list.push i
+
+    # Digraph traversal: each transition's Follow absorbs its edge
+    # sources exactly once, depth-first; a cycle (nullable recursion is
+    # legal) collapses to one shared set for the whole component.
+    mark = (0 for _ in trans)
+    stack = []
+    traverse = (x) ->
+      stack.push x
+      depth = stack.length
+      mark[x] = depth
+      fx = follow[x]
+      for y in edges[x]
+        traverse y if mark[y] is 0
+        mark[x] = Math.min mark[x], mark[y]
+        fy = follow[y]
+        fx[w] |= fy[w] for w in [0...words]
+      if mark[x] is depth
+        loop
+          top = stack.pop()
+          mark[top] = Infinity
+          break if top is x
+          follow[top] = fx
+    for _, i in trans
+      traverse i if mark[i] is 0
+
+    # LA(q, A → ω) = ∪ Follow(p, A) over lookback
+    acc = Uint32Array.new words
+    for state in @states
+      byRule = lookback[state.id]
       for item as state.reductions
-        follows = @nonterminals[item.rule.lhs]?.follows
-        if follows
-          item.lookaheads.clear()
-          item.lookaheads.add token for token as follows
+        item.lookaheads.clear()
+        acc.fill 0
+        for i in byRule.get(item.rule.id) or []
+          f = follow[i]
+          acc[w] |= f[w] for w in [0...words]
+        for name, b in names
+          item.lookaheads.add name if acc[b >> 5] & (1 << (b & 31))
 
   # ============================================================================
   # Parse Table Generation
@@ -1557,7 +1646,7 @@ if isRunAsScript
   do ->
     showVersion = ->
       console.log """
-      Solar #{VERSION} - SLR(1) Parser Generator
+      Solar #{VERSION} - LALR(1) Parser Generator
       """
 
     showHelp = ->
