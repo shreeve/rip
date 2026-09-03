@@ -1156,26 +1156,16 @@ class __Component {
     this._teardown({ state: 'failed', hooks: false, removeDOM: true });
     __handleComponentError(error, this);
   }
-  _teardown({ state, hooks, removeDOM }) {
-    if (this._state === 'failed' || this._state === 'unmounted') return;
-    if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
-    this._state = state;
-    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
-    if (hooks) {
-      try {
-        if (this.beforeUnmount) this.beforeUnmount();
-      } catch (e) { report('beforeUnmount', e); }
-    }
+  // The shared release body — owned children, the owner frame, rest
+  // writers/handlers, ref cleanups — used by full teardown and the
+  // HMR rebuild alike, so a cleanup step added here reaches both.
+  // The differences (state, hooks, HMR unregistration, _target) stay
+  // at the call sites; the DOM half is _detachDOM's, because
+  // _teardown runs the unmounted hook between the two.
+  _dispose(report, unmountChild) {
     if (this._children) {
       for (const child of this._children) {
-        try {
-          if (hooks) child.unmount({ removeDOM });
-          else child._teardown({
-            state: child._state === 'mounted' ? 'unmounted' : 'failed',
-            hooks: false,
-            removeDOM: true,
-          });
-        } catch (e) { report('child teardown', e); }
+        try { unmountChild(child); } catch (e) { report('child teardown', e); }
       }
       this._children = null;
     }
@@ -1206,11 +1196,14 @@ class __Component {
         });
       } catch (e) { report('ref cleanup batch flush', e); }
     }
-    if (hooks) {
-      try {
-        if (this.unmounted) this.unmounted();
-      } catch (e) { report('unmounted', e); }
-    }
+    // Unconditional: a slot the branches above never entered (e.g. a
+    // component that minted no cleanups) still reads null afterwards.
+    this._children = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+  }
+  _detachDOM(report, removeDOM) {
     if (removeDOM) {
       if (this._nodes) {
         for (const n of this._nodes) {
@@ -1220,14 +1213,35 @@ class __Component {
         try { __detach(this._root); } catch (e) { report('DOM detach', e); }
       }
     }
-    this._target = null;
     this._root = null;
     this._nodes = null;
-    this._children = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
     this._inheritedEl = null;
+  }
+  _teardown({ state, hooks, removeDOM }) {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
+    this._state = state;
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    if (hooks) {
+      try {
+        if (this.beforeUnmount) this.beforeUnmount();
+      } catch (e) { report('beforeUnmount', e); }
+    }
+    this._dispose(report, (child) => {
+      if (hooks) child.unmount({ removeDOM });
+      else child._teardown({
+        state: child._state === 'mounted' ? 'unmounted' : 'failed',
+        hooks: false,
+        removeDOM: true,
+      });
+    });
+    if (hooks) {
+      try {
+        if (this.unmounted) this.unmounted();
+      } catch (e) { report('unmounted', e); }
+    }
+    this._detachDOM(report, removeDOM);
+    this._target = null;
   }
   // Patch refresh: dispose owned children and frame effects, keep
   // instance identity and `_init` state, then rebuild DOM via
@@ -1253,57 +1267,8 @@ class __Component {
       if (this.beforeUnmount) this.beforeUnmount();
     } catch (e) { report('beforeUnmount', e); }
 
-    if (this._children) {
-      for (const child of this._children) {
-        try { child.unmount({ removeDOM: true }); }
-        catch (e) { report('child teardown', e); }
-      }
-      this._children = null;
-    }
-
-    try { this._frame?.dispose(); } catch (e) { report('owner disposal', e); }
-
-    if (this._restWriters) {
-      for (const writer of Object.values(this._restWriters)) {
-        try { writer(); } catch (e) { report('rest writer cleanup', e); }
-      }
-      this._restWriters = null;
-    }
-    if (this._restHandlers) {
-      if (this._inheritedEl) {
-        for (const [key, handler] of Object.entries(this._restHandlers)) {
-          try { this._inheritedEl.removeEventListener(key.slice(1).split('.')[0], handler); }
-          catch (e) { report('rest handler cleanup', e); }
-        }
-      }
-      this._restHandlers = null;
-    }
-    if (this._refCleanups) {
-      const cleanups = this._refCleanups;
-      this._refCleanups = null;
-      try {
-        __batch(() => {
-          for (const c of cleanups) {
-            try { c(); } catch (e) { report('ref cleanup', e); }
-          }
-        });
-      } catch (e) { report('ref cleanup batch flush', e); }
-    }
-
-    if (nodes) {
-      for (const n of nodes) {
-        try { __detach(n); } catch (e) { report('DOM detach', e); }
-      }
-    } else {
-      try { __detach(this._root); } catch (e) { report('DOM detach', e); }
-    }
-
-    this._root = null;
-    this._nodes = null;
-    this._refCleanups = null;
-    this._restWriters = null;
-    this._restHandlers = null;
-    this._inheritedEl = null;
+    this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    this._detachDOM(report, true);
     this._frame = __ownerFrame({ nested: false });
     this._state = 'new';
 
