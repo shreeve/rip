@@ -1947,7 +1947,7 @@ describe('child components: events — `emit` reaches the parent\'s `@event:` bi
     Kid @save: @onSave
 `);
     expect(code).toContain(
-      "if (this._inst0) this._el1.addEventListener('save', (e) => __batch(() => (this.onSave)(e)));");
+      "if (this._inst0) (this._inst0._nodes?.[0] ?? this._el1).addEventListener('save', (e) => __batch(() => (this.onSave)(e)));");
     // Bare `@save` is not a DOM event — compile parity with the old runtime (p5).
     emitFails(`${KID}App = component
   onSave = (e) ->

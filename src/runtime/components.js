@@ -1375,6 +1375,11 @@ class __Component {
   // loudly instead. The window is _root's
   // lifetime, so the child protocol (a parent's create phase sets the
   // child's _root) opens it exactly like a direct mount() does.
+  // A multi-root component's _root is the DocumentFragment, emptied
+  // the moment it was inserted — dispatching there, bubbles: true
+  // reaches nothing. The first tracked node is in the live tree, so
+  // both the direct listener (attached there by the parent's create
+  // phase) and every ancestor observe the event.
   emit(name, detail) {
     if (this._state !== 'mounted' || !this._root) {
       throw new Error(
@@ -1382,7 +1387,7 @@ class __Component {
         'emit dispatches on the live root; call after mount and before unmount',
       );
     }
-    this._root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
+    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
   }
   static mount(target = 'body') {
     return new this().mount(target);

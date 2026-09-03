@@ -11132,10 +11132,15 @@ class Emitter {
             this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
         // `any` (the handler EXPRESSION is where typing lands).
+        // The listener rides the child's first tracked node, not its
+        // _root: a multi-root child's _root is the fragment, emptied
+        // at insertion, and emit() dispatches on that same first node
+        // — the two sides of the seam name one target.
+        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
         if (!this.ts) {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }

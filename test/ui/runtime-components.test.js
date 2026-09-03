@@ -1000,6 +1000,32 @@ describe('render helpers', () => {
     ])).toEqual([[0, 1, 2], [1, 2], [1, 3], [], [3]]);
   });
 
+  test("a multi-root component's emit dispatches on its first live node — bubbling reaches ancestors", () => {
+    expect(both((api) => {
+      const log = [];
+      const C = defineComponent(api, {
+        name: 'Multi', props: [],
+        create() {
+          const root = document.createDocumentFragment();
+          const firstNode = document.createElement('i');
+          const secondNode = document.createElement('b');
+          root.appendChild(firstNode);
+          root.appendChild(secondNode);
+          this._nodes = [firstNode, secondNode];
+          return root;
+        },
+      });
+      const target = document.createElement('main');
+      // Dispatched on the fragment, the event bubbles nowhere: the
+      // fragment was emptied at insertion and sits outside the tree.
+      target.addEventListener('save', (e) => log.push(['target', e.detail]));
+      const inst = new C({});
+      inst.mount(target);
+      inst.emit('save', { x: 1 });
+      return log;
+    })).toEqual([[ 'target', { x: 1 } ]]);
+  });
+
   test('emit dispatches a bubbling CustomEvent on the mounted root; detail carried; listeners up the tree fire', () => {
     expect(both((api) => {
       const log = [];

@@ -4105,7 +4105,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
         this._el1 = document.createComment('rip:child-error: Btn');
       }
       } finally { __popComponent(__prev); } }
-      if (this._inst0) this._el1.addEventListener('click', (e) => __batch(() => (handler)(e)));
+      if (this._inst0) (this._inst0._nodes?.[0] ?? this._el1).addEventListener('click', (e) => __batch(() => (handler)(e)));
       return this._el1;
     }
     _setup() {
