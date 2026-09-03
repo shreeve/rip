@@ -1521,6 +1521,34 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
+  test('nested class merges: each classkey row lands on its own element\'s className write', () => {
+    const src = [
+      'C = component',
+      '  lit := true',
+      '  render',
+      "    div.a class: {x: lit}",
+      "      span.b class: {y: lit}",
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    const keys = faced.intrinsics.filter((r) => r.kind === 'classkey');
+    // One row per merging pair — a flat slot attributed the inner
+    // pair's span to the outer write and recorded nothing for the
+    // outer's own pair.
+    expect(keys.map((r) => src.slice(r.start, r.end))).toEqual(['class', 'class']);
+    const gens = keys.map((r) => r.gen);
+    expect(new Set(gens).size).toBe(2);
+    for (const r of keys) {
+      expect(faced.code.slice(r.gen, r.gen + 'className'.length)).toBe('className');
+    }
+    // The inner element's effect emits during the outer's children
+    // walk, so its write comes first; the outer pair's key must point
+    // at the LATER write, its own.
+    const [outerKey, innerKey] = keys[0].start < keys[1].start ? [keys[0], keys[1]] : [keys[1], keys[0]];
+    expect(outerKey.gen).toBeGreaterThan(innerKey.gen);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
   test('strip identity holds for the component fixture under both runtime deliveries', () => {
     for (const runtimeDelivery of ['none', 'inline']) {
       const faced = compile(FIXTURE, { runtimeDelivery, face: 'ts' });

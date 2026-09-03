@@ -10259,9 +10259,15 @@ class Emitter {
     }
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     if (classes.length > 0) {
       R.pendingClassArgs = [`'${classes.join(' ')}'`];
       R.pendingClassEl = el;
+      // Keys scope WITH the merge: a nested element's merging pairs
+      // must not deposit their spans into this element's key list (a
+      // flat slot attributed inner keys to the outer write and left
+      // the outer's own keys unrecorded).
+      R.pendingClassKeys = null;
     }
     if (isSvg) R.svgDepth++;
     this.renderChildren(el, args);
@@ -10299,7 +10305,7 @@ class Emitter {
           this.b.emit(isSvg ? '));' : ');');
         });
       }
-      R.pendingClassKeys = null;
+      R.pendingClassKeys = prevKeys;
       R.pendingClassArgs = prevArgs;
       R.pendingClassEl = prevEl;
     }
@@ -10338,19 +10344,33 @@ class Emitter {
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
+    const prevKeys = R.pendingClassKeys;
     R.pendingClassArgs = [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e)),
     ];
     R.pendingClassEl = el;
+    R.pendingClassKeys = null;
     if (isSvg) R.svgDepth++;
     this.renderChildren(el, children);
     if (isSvg) R.svgDepth--;
     const parts = R.pendingClassArgs;
+    // This element's merging pairs recorded their key spans here —
+    // claim them against this write (the static walk's merge does the
+    // same), or a pair under a dynamic-class element leaks its keys
+    // into the next enclosing merge.
+    const keys = R.pendingClassKeys ?? [];
     if (parts.length > 0) {
       this.renderEffect(node, () => {
         const clsx = this.runtimeName('__clsx');
-        this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
+        this.b.emit(`${el}`);
+        const gen = this.b.offset + 1;
+        this.b.emit(isSvg ? `.setAttribute('class', ${clsx}(` : `.className = ${clsx}(`);
+        for (const k of keys) {
+          this.intrinsics.push(isSvg
+            ? { start: k[0], end: k[1], kind: 'attr', name: 'class', gen }
+            : { start: k[0], end: k[1], kind: 'classkey', gen });
+        }
         parts.forEach((p, i) => {
           if (i > 0) this.b.emit(', ');
           if (typeof p === 'string') this.b.emit(p);
@@ -10359,6 +10379,7 @@ class Emitter {
         this.b.emit(isSvg ? '));' : ');');
       });
     }
+    R.pendingClassKeys = prevKeys;
     R.pendingClassArgs = prevArgs;
     R.pendingClassEl = prevEl;
     return el;
