@@ -3898,6 +3898,12 @@ function renderCreate(spec) {
   // renderCreate is what rebuilds a table from its deployed shape.
   for (const c of spec.columns) if (c.unique && !c.primary) inlineUnique.add(c.name);
   const lines = spec.columns.map((c) => renderColumn(spec, c, inlineUnique.has(c.name)));
+  // A deployed composite UNIQUE constraint (hand-written DDL; the spec
+  // cannot declare one) rides the spec in compositeUniques — a rebuild
+  // or dump that dropped it would silently stop enforcing it.
+  for (const cols of spec.compositeUniques ?? []) {
+    lines.push('  UNIQUE (' + cols.map((c) => quoteIdent(c, null, 'unique column')).join(', ') + ')');
+  }
   blocks.push('CREATE TABLE ' + quoteIdent(spec.name, null, 'table') +
     ' (\n' + lines.join(',\n') + '\n);');
   const ix = indexes.map((i) => renderIndex(spec, i));

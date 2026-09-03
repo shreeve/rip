@@ -1227,7 +1227,21 @@ function diffTable(d, p, steps, deps) {
   // a plan that says what it does beats one that repeats itself.
   // Adds sort first so the SQL always rides the strongest class: an
   // add can fail on existing duplicates (lossy), a drop cannot (safe).
-  if (uniqueChanges.length) {
+  if (uniqueChanges.length && (p.foreignKeys ?? []).length) {
+    // The rebuild renders the replacement from the deployed spec, and
+    // the spec's FOREIGN KEY shape is lossy (a multi-column FK folds
+    // to a joined column string and its FIRST referenced column) — a
+    // re-render from it would ship wrong DDL, and skipping it would
+    // silently stop enforcing the constraint. Neither is a plan.
+    const fks = p.foreignKeys.map((fk) => fk.column + ' -> ' + fk.refTable).join(', ');
+    steps.splice(mark, 0, {
+      table: t, kind: 'note-unique', class: 'blocked',
+      sql: ['-- BLOCKED: ' + t + ' uniqueness change requires a rebuild, and the table carries FOREIGN KEY constraint(s)'],
+      notes: ['changing uniqueness on ' + t + ' rebuilds the table (create, copy, drop, rename), and ' +
+        t + ' carries FOREIGN KEY constraint(s) (' + fks + ') the rebuild cannot faithfully recreate. ' +
+        'Hand-write the rebuild with the constraints spelled out, or drop the constraints first.'],
+    });
+  } else if (uniqueChanges.length) {
     uniqueChanges.sort((a, b) => (a.adding === b.adding ? 0 : a.adding ? -1 : 1));
     // uniqueChanges carries declared names (the diff matched through
     // the rename remap), but the rebuild runs before any rename step —

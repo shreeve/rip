@@ -872,6 +872,36 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
   // which column it covers; ADD COLUMN, SET/DROP DEFAULT, and index
   // DDL stay permitted.
 
+  test('the uniqueness rebuild carries a deployed composite UNIQUE constraint into the new table', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', field('tag', 'string', { unique: true }), field('a'), field('b')));
+      deployedRef.value = { tables: [table('users', [
+        col('tag', 'VARCHAR', { notNull: true }),
+        col('a', 'VARCHAR', { notNull: true }), col('b', 'VARCHAR', { notNull: true }),
+      ], { uniqueConstraints: [{ columns: ['a', 'b'] }] })] };
+      return mig.plan();
+    });
+    const rebuild = r.find((s) => s.kind === 'add-unique');
+    // The copy-drop-rename replaced the table; the hand-written
+    // UNIQUE (a, b) must survive it or the database silently stops
+    // enforcing a constraint the plan never mentioned.
+    expect(rebuild.sql[0]).toContain('UNIQUE ("a", "b")');
+  });
+
+  test('a uniqueness change on an FK-bearing table blocks — the rebuild cannot recreate the constraint', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('Order', field('code', 'string', { unique: true }), field('total', 'integer')));
+      deployedRef.value = { tables: [table('orders', [
+        col('code', 'VARCHAR', { notNull: true }), col('total', 'INTEGER', { notNull: true }),
+        col('user_id', 'INTEGER', { notNull: true }),
+      ], { foreignKeys: [{ column: 'user_id', refTable: 'users', refColumn: 'id' }] })] };
+      return mig.plan();
+    });
+    const blocked = r.find((s) => s.kind === 'note-unique' && s.class === 'blocked');
+    expect(blocked.notes.join(' ')).toContain('user_id -> users');
+    expect(r.map((s) => s.kind)).not.toContain('add-unique');
+  });
+
   test('a column renamed and made unique in one change rebuilds under the DEPLOYED name', async () => {
     const r = await run4(async (deployedRef) => {
       K4.__schema(model('User', field('email', 'string', { unique: true, attrs: { was: 'mail' } })));
