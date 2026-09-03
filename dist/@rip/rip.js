@@ -16763,10 +16763,11 @@ ${this.replayPad}}` : " }");
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
+        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
         if (!this.ts) {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }
@@ -25186,7 +25187,7 @@ class __Component {
     if (this._state !== "mounted" || !this._root) {
       throw new Error(`${this.constructor.name || "component"}: emit('${name}') outside the mounted window — ` + "emit dispatches on the live root; call after mount and before unmount");
     }
-    this._root.dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
+    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
   }
   static mount(target = "body") {
     return new this().mount(target);
