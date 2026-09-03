@@ -353,6 +353,13 @@ export const selfArgsOf = (typeParams) => {
 export const containerType = (t, ro = '', notify = TAKEN) =>
   `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
 
+// The rest view's container: readonly value WITH touch(). The runtime
+// holds this._rest by reference and _setRestProp mutates-then-touches
+// that same object — a write to `value` would orphan it (every later
+// parent update lands on an object nobody reads), so the face refuses
+// the write while keeping the notify the runtime really performs.
+export const restContainerType = (t) => `{ readonly value: ${t}; read(): ${t}${MINTED} }`;
+
 // The member's INSTANCE type as segments (`declare name: …` bodies,
 // interface member lines). The annotated piece marks as `: T` — the
 // recorded span's own shape (a TYPE run spans colon→end), so the
@@ -1068,7 +1075,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   if (!hasChildren) lines.push({ segs: [{ text: `children?: ${childrenType(road)};` }] });
   // The rest view: the passthrough object, named on the face and inline
   // in the declarations (a .d.ts owes its reader a self-contained type).
-  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${containerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag), '', MINTED)};` }] });
+  if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag))};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }

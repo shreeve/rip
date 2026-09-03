@@ -34,7 +34,7 @@ import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls,
 import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
-  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, MINTED,
+  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType,
@@ -2572,7 +2572,7 @@ class Emitter {
       // per-tag alias the module declares once (restAliasName).
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true; // the alias types the view's `class`
-      line(() => this.b.emit(`declare rest: ${containerType(restAliasName(info.extendsTag), '', MINTED)};`));
+      line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     }
     // The runtime base's API, declared because the inlined base types as
     // `any` and carries nothing into the class. `this` rather than the

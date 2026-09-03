@@ -1352,7 +1352,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   test('extends: the tag attribute surface + string index in the props type, the rest declare', () => {
     const code = ts('Deck = component extends section\n  name := "n"\n  render\n    section.deck\n      = name\n').code;
     // The rest view names the per-tag passthrough alias the module declares once.
-    expect(code).toContain('declare rest: { value: __RipRest_section; read(): __RipRest_section; touch(): void };');
+    expect(code).toContain('declare rest: { readonly value: __RipRest_section; read(): __RipRest_section; touch(): void };');
     expect(code).toContain('type __RipRest_section = { ');
     // Intrinsic attrs type through the tag's DOM interface with an
     // extends-Record guard; camelCased DOM twins get
