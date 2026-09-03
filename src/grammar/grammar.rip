@@ -1433,7 +1433,61 @@ displays =
   IMPORT_TYPE: 'type'
 
 # ==============================================================================
+# Expected Conflicts
+# ==============================================================================
+# The grammar's declared ambiguities: every reduce-reduce and ambiguous
+# shift-reduce default the parse table may contain, rule by rule, with
+# its resolution count. Solar fails generation on any drift — a new
+# conflicted rule, a vanished one, or a changed count — so a grammar
+# edit that introduces a genuine ambiguity cannot resolve silently.
+#
+# Each entry is a decision, not an accident:
+#
+# • Try/Finalizer family — the dangling-catch/finally decision: after
+#   `try E`, a following CATCH/FINALLY (or an expression continuation)
+#   could attach to this try or end it. Shift attaches greedily to the
+#   nearest try, matching every brace language; canonical LR(1) would
+#   keep these conflicts too.
+# • Statement → Return — after the guard-return idiom (`E && return V`,
+#   `||`, `??`), the four postfix modifiers (POST_IF POST_UNLESS WHILE
+#   UNTIL) sit in the lookaheads of both the completed Operation and
+#   the bare Return-as-Statement; rule order keeps the statement
+#   reading, and the pinned behavior is modifier-binds-widest
+#   (`c && return 3 if flag` compiles to `if (flag) if (c) return 3`).
+# • Arguments — after `target ~= path(...)`, the trailing call
+#   completes the gate's keyed-source form (Gate → … CALL_END, which
+#   owns the arguments as key spans) or a plain call expression as the
+#   gate's value; rule order picks the keyed-gate reading.
+# • SimpleObjAssignable → Identifier — an LALR-merged state serves both
+#   `export { name }` and object-literal shorthand; on the four shared
+#   boundary tokens (`,` `}` TERMINATOR INDENT) rule order picks
+#   ExportSpecifier, and only export context reaches those cells.
+# • ObjSpreadExpr — after `{ ...x`, a boundary token ends the rest
+#   value (ObjRestValue → ... SimpleObjAssignable) or the inner name
+#   keeps growing into a spread expression; rule order closes the
+#   plain rest reading.
+# • TypeDecl — after `def f(...) T`, INDENT opens the declaration's
+#   annotated body rather than reducing the bare signature; shift
+#   keeps the body with the declaration.
+
+expectedConflicts = [
+  ['reduce-reduce', 'Statement → Return',                               12]
+  ['reduce-reduce', 'Arguments → CALL_START CALL_END',                  84]
+  ['reduce-reduce', 'Arguments → CALL_START ArgList OptComma CALL_END', 84]
+  ['reduce-reduce', 'SimpleObjAssignable → Identifier',                  4]
+  ['reduce-reduce', 'ObjSpreadExpr → SimpleObjAssignable',               5]
+  ['ambiguous',     'Try → TRY Block',                                   2]
+  ['ambiguous',     'Try → TRY Expression',                             23]
+  ['ambiguous',     'Try → TRY Statement',                               6]
+  ['ambiguous',     'Try → TRY Block Catch',                             1]
+  ['ambiguous',     'Try → TRY Expression Catch',                        1]
+  ['ambiguous',     'Try → TRY Statement Catch',                         1]
+  ['ambiguous',     'Finalizer → FINALLY Expression',                   21]
+  ['ambiguous',     'TypeDecl → DEF Identifier OptParams TYPE',          1]
+]
+
+# ==============================================================================
 # Export
 # ==============================================================================
 
-export default {grammar, operators, displays, start: 'Root'}
+export default {grammar, operators, displays, expectedConflicts, start: 'Root'}

@@ -162,6 +162,7 @@ class Generator
       @timing 'buildLRAutomaton' , => @buildLRAutomaton()     # Build LR(0) automaton
       @timing 'computeLookaheads', => @computeLookaheads()    # Compute FIRST/FOLLOW and assign lookaheads
       @timing 'buildParseTable'  , => @buildParseTable()      # Build parse table with default actions
+      @_checkExpectedConflicts grammar.expectedConflicts      # Declared-ambiguity gate
       @timing 'buildRepairTable' , => @buildRepairTable()     # Compute per-state tolerant-repair candidates
 
   # ============================================================================
@@ -1058,6 +1059,46 @@ class Generator
             state[@symbolIds[stackSymbol]] = undefined
 
     @parseTable = states
+
+  # The declared-ambiguity gate: a grammar that ships an
+  # expectedConflicts manifest states every reduce-reduce and
+  # ambiguous default the parse table may contain — rule by rule,
+  # with its resolution count. Any drift (a new conflicted rule, a
+  # vanished one, a changed count) fails generation, so a grammar
+  # edit that introduces a genuine ambiguity cannot resolve
+  # silently. The failure prints the actual manifest so an
+  # intentional change is a review-and-paste.
+  _checkExpectedConflicts!: (expected) ->
+    return unless expected?
+
+    actual = Map.new()
+    for c in @conflictDetails
+      key = "#{c.category}|#{c.lhs} → #{c.ruleSymbols}"
+      actual.set key, (actual.get(key) or 0) + 1
+
+    declared = Map.new()
+    for [category, rule, count] in expected
+      key = "#{category}|#{rule}"
+      throw Error.new "expectedConflicts: duplicate entry for [#{category}] #{rule}" if declared.has key
+      declared.set key, count
+
+    problems = []
+    for [key, count] as actual
+      [category, rule] = key.split '|'
+      want = declared.get key
+      if not want?
+        problems.push "  • undeclared: [#{category}] #{rule} — #{count} resolution(s)"
+      else if want isnt count
+        problems.push "  • count drift: [#{category}] #{rule} — declared #{want}, actual #{count}"
+    for [key, want] as declared when not actual.has key
+      [category, rule] = key.split '|'
+      problems.push "  • declared but absent: [#{category}] #{rule} — declared #{want}"
+
+    if problems.length
+      manifest = [...actual].sort().map ([key, count]) ->
+        [category, rule] = key.split '|'
+        "  ['#{category}', '#{rule}', #{count}]"
+      throw Error.new "expectedConflicts: parse-table conflicts drifted from the declared manifest:\n#{problems.join '\n'}\n\nActual manifest:\n#{manifest.join '\n'}"
 
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (rule, op, reduce, shift) ->
