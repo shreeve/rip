@@ -42,7 +42,7 @@
 import { SchemaRegistry } from '../runtime/schema.js';
 import {
   runSQL as rawSQL, adapterFor, adapterConfigured,
-  transaction, quoteIdent, renderCreate, renderIndex, sqlEnumType, sqlEnumMembers,
+  transaction, quoteIdent, renderCreate, renderIndex, isAutoUniqueIndex, sqlEnumType, sqlEnumMembers,
 } from '../runtime/orm.js';
 
 // ONE table holds everything the runner knows, and it is called what it
@@ -366,8 +366,7 @@ function foldSpec(spec) {
   const columnsByName = new Map(columns.map((c) => [c.name, c]));
   const indexes = [];
   for (const ix of spec.indexes) {
-    const autoName = ix.columns.length === 1 && ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
-    if (ix.unique && autoName) {
+    if (isAutoUniqueIndex(spec, ix)) {
       const col = columnsByName.get(ix.columns[0]);
       if (col) { col.unique = true; continue; }
     }

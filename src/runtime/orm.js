@@ -3874,6 +3874,16 @@ function renderIndex(spec, ix) {
 // CREATE UNIQUE INDEX (see the add-unique step in the migration
 // planner): DuckDB has no working ALTER TABLE ADD CONSTRAINT, so the
 // index is the only instrument available after creation.
+// The ORM's own uniqueness index: single-column, auto-named. One
+// predicate, two consumers — renderCreate folds it into the column's
+// inline UNIQUE, and the differ's foldSpec folds it into the column
+// flag — and the two MUST agree or the differ would plan an index
+// that already exists.
+export function isAutoUniqueIndex(spec, ix) {
+  return ix.unique === true && ix.columns.length === 1 &&
+    ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
+}
+
 function renderCreate(spec) {
   const blocks = [];
   // A per-table sequence is part of the table's own DDL. A SHARED one
@@ -3887,9 +3897,7 @@ function renderCreate(spec) {
   const inlineUnique = new Set();
   const indexes = [];
   for (const ix of spec.indexes) {
-    const auto = ix.unique && ix.columns.length === 1 &&
-      ix.name === 'idx_' + spec.name + '_' + ix.columns[0];
-    const col = auto ? spec.columns.find((c) => c.name === ix.columns[0]) : null;
+    const col = isAutoUniqueIndex(spec, ix) ? spec.columns.find((c) => c.name === ix.columns[0]) : null;
     if (col && !col.primary) { inlineUnique.add(col.name); continue; }
     indexes.push(ix);
   }
