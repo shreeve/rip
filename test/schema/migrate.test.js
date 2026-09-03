@@ -872,6 +872,24 @@ describe('migrate: the differ — engine freezes and pk drift (DuckDB 1.5.5)', (
   // which column it covers; ADD COLUMN, SET/DROP DEFAULT, and index
   // DDL stay permitted.
 
+  test('a primary-key column rename via {was:} plans the rename — it is not a moved pk', async () => {
+    const r = await run4(async (deployedRef) => {
+      K4.__schema(model('User', dir('primary', { name: 'emailAddr' }),
+        field('emailAddr', 'string', { attrs: { was: 'email' } }), field('name')));
+      const t = table('users', [col('name', 'VARCHAR', { notNull: true })]);
+      t.primaryKey = 'email';
+      t.columns.unshift({ name: 'email', type: 'VARCHAR', notNull: true, unique: false, primary: true, default: null });
+      deployedRef.value = { tables: [t] };
+      return mig.plan();
+    });
+    // The constraint never moves between columns — {was:} says the
+    // declared pk IS the deployed pk under a new name, and RENAME
+    // COLUMN on a primary key is an ALTER DuckDB executes.
+    expect(r.map((s) => s.kind)).not.toContain('note-primary-key');
+    const rename = r.find((s) => s.kind === 'rename-column');
+    expect(rename.sql[0]).toContain('RENAME COLUMN "email" TO "email_addr"');
+  });
+
   test("an indexed table's column rename blocks with the index named; an index-free table's rename stays safe", async () => {
     const indexed = await run4(async (deployedRef) => {
       K4.__schema(model('Person', field('email', 'string', { unique: true }),

@@ -840,7 +840,14 @@ function diffTable(d, p, steps, deps) {
   // pointing at the old ones. There is no ALTER that moves a primary
   // key, so say so and stop — a blocked step an operator reads beats
   // a plan that rewrites identities and calls the rewriting half safe.
-  if (d.primaryKey && p.primaryKey && d.primaryKey !== p.primaryKey) {
+  //
+  // A RENAMED primary key is a different animal: {was:} says the
+  // declared pk IS the deployed pk under a new name, the constraint
+  // never moves between columns, and RENAME COLUMN on a primary key
+  // is an ALTER DuckDB executes — so the rename path below handles it
+  // and this gate lets it through.
+  if (d.primaryKey && p.primaryKey && d.primaryKey !== p.primaryKey &&
+      dCols.get(d.primaryKey)?.was !== p.primaryKey) {
     steps.push({
       table: t, kind: 'note-primary-key', class: 'blocked',
       sql: ['-- BLOCKED: ' + t + ' primary key ' + p.primaryKey + ' -> ' + d.primaryKey],
