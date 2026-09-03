@@ -860,7 +860,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // chunk's own text is whitespace.
   const stripHeredocChunks = (ctx) => {
     const closer = tokens[tokens.length - 1];
-    const closerLine = /([^\n]*)$/.exec(text.slice(0, closer.start).replace(/\r\n?/g, '\n'))[1];
+    // The closer's own line, read backwards from the closer: any of LF,
+    // CRLF or a lone CR opens a line, so the nearer of the two searches
+    // is the boundary. Reading the line directly keeps this proportional
+    // to that line — a heredoc late in a file does not re-walk every
+    // byte before it.
+    const lineFrom = closer.start - 1;
+    const lineBreak = lineFrom < 0 ? -1
+      : Math.max(text.lastIndexOf('\n', lineFrom), text.lastIndexOf('\r', lineFrom));
+    const closerLine = text.slice(lineBreak + 1, closer.start);
     const closerIndent = /^[^\S\n]*$/.test(closerLine) ? closerLine : null;
     const values = ctx.chunkIdx.map((idx) => tokens[idx].value.slice(1, -1).replace(/\r\n?/g, '\n'));
     const baseline = heredocBaseline(heredocMinIndent(values.join('')), closerIndent);
