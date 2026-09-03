@@ -22,6 +22,11 @@ TIMEOUT_MS    =! 10000
 
 type Awaitable<T> = T | Promise<T>
 
+export type BeforeRequestHook = (request: Request, options: Options) => Awaitable<Request | Response | void>
+export type AfterResponseHook = (request: Request, options: Options, response: Response) => Awaitable<Response | void>
+export type BeforeRetryHook   = (state: { request: Request, options: Options, error: unknown, retryCount: number }) => Awaitable<void>
+export type BeforeErrorHook   = (error: HTTPError) => Awaitable<HTTPError | undefined>
+
 type Options =
   method?: string
   prefixUrl?: string
@@ -39,10 +44,10 @@ type Options =
   }
   throwHttpErrors?: boolean
   hooks?:
-    beforeRequest?: ((request: Request, options: Options) => Awaitable<Request | Response | void>)[]
-    afterResponse?: ((request: Request, options: Options, response: Response) => Awaitable<Response | void>)[]
-    beforeRetry?: ((state: { request: Request, options: Options, error: unknown, retryCount: number }) => Awaitable<void>)[]
-    beforeError?: ((error: HTTPError) => Awaitable<HTTPError | undefined>)[]
+    beforeRequest?: BeforeRequestHook[]
+    afterResponse?: AfterResponseHook[]
+    beforeRetry?: BeforeRetryHook[]
+    beforeError?: BeforeErrorHook[]
   signal?: AbortSignal | null
   mode?: RequestMode
   credentials?: RequestCredentials
