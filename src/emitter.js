@@ -9654,7 +9654,7 @@ class Emitter {
       creates: [], setups: [], vars: null,
       locals: new Set(), localDecls: new Map(), bindings: new Set(),
       refs: [], loopStack: [], stmts: [],
-      forceNonStatic: false, root: null, params: null, originNode: renderNode,
+      forceNonStatic: false, root: null, originNode: renderNode,
       renameHazardNames: new Set(),
     };
     this.rstate = {
@@ -10225,8 +10225,11 @@ class Emitter {
 
   // A static element: create, id, data-part (the component's first
   // element), children/attributes, classes.
-  renderTag(node, tag, classes, args, id) {
-    this.noteShorthandClasses(classes, node);
+  // The element prologue both walks share: mint the var, record the
+  // tag, claim the branch-root transition slot, create the (NS-forked)
+  // element with its tag-word intrinsics row, id, inherited-target
+  // binding, and the data-part stamp. Returns { el, isSvg }.
+  renderElementPrologue(node, tag) {
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -10252,11 +10255,23 @@ class Emitter {
       }
       this.b.emit(')');
     });
+    return { el, isSvg };
+  }
+
+  renderElementBasics(node, tag, el, id) {
+    const R = this.rstate;
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
     if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === 'class') {
       this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
     }
+  }
+
+  renderTag(node, tag, classes, args, id) {
+    this.noteShorthandClasses(classes, node);
+    const R = this.rstate;
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
     const prevKeys = R.pendingClassKeys;
@@ -10318,29 +10333,8 @@ class Emitter {
   renderDynamicTag(node, tag, classExprs, children, staticClasses, id) {
     this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
-    const el = this.newRenderVar();
-    R.tags.set(el, tag);
-    if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
-      R.transitionSlot.el = el;
-    }
-    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
-    if (isSvg) R.svgEls.add(el);
-    this.renderLine(node, () => {
-      if (isSvg) this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
-      else this.b.emit(`${el} = document.createElement(`);
-      // Same intrinsics-channel record as renderTag: the tag word's
-      // ruled hover is served from here.
-      const span = this.emitQuotedPrimitive(tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: 'tag', tag, svg: isSvg });
-      }
-      this.b.emit(')');
-    });
-    if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
-    this.bindInheritedTarget(node, tag, el);
-    if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === 'class') {
-      this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
-    }
+    const { el, isSvg } = this.renderElementPrologue(node, tag);
+    this.renderElementBasics(node, tag, el, id);
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
@@ -11927,7 +11921,8 @@ class Emitter {
   checkCrossScopeLocals(expr, node) {
     const R = this.rstate;
     if (!R) return;
-    const visible = (n) => R.sink.locals.has(n) || this.loopVarNames().has(n);
+    const loopVars = this.loopVarNames();
+    const visible = (n) => R.sink.locals.has(n) || loopVars.has(n);
     for (let r = R.sink.parent; r !== null; r = r.parent) {
       if (r.locals.size === 0) continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
