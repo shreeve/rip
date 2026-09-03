@@ -743,11 +743,10 @@ function finishModelNorm(def, norm) {
 
   // ── the property ↔ column mapping ───────────────────────────────────
   //
-  // ONE map each way, built once, consulted everywhere. Before
-  // `{column:}` a column was always `snakeCase(property)` and the
-  // derivation could be inlined at each site; now it is a lookup, and
-  // the derivation survives only as the DEFAULT when a field declares
-  // no column of its own.
+  // ONE map each way, built once, consulted everywhere. `{column:}`
+  // makes the mapping a lookup; snakeCase(property) is only the
+  // DEFAULT when a field declares no column of its own, so inlining
+  // the derivation at a use site would be wrong.
   //
   // `columnOf` doubles as the column-OWNERSHIP guard: every table
   // column has exactly one owner. A field whose column equals a
@@ -755,9 +754,9 @@ function finishModelNorm(def, norm) {
   // column (a mixin-included `createdAt` + `@times`), or another
   // field's `{column:}` would otherwise emit duplicate-column DDL and
   // duplicate-column INSERTs that fail only at the database. Fields
-  // could not collide among themselves while name → snake_case was
-  // injective; `{column:}` is exactly what ends that, which is why
-  // fields now claim through the same gate as everything else.
+  // can only collide because `{column:}` ends the injectivity of
+  // name → snake_case, which is why fields claim through the same
+  // gate as everything else.
   const columnOf = new Map();
   const fieldOf = new Map();
   const ownerOf = new Map();
@@ -983,11 +982,9 @@ function jsonSchemaModelColumns(def, properties) {
 // one duckdb-harbor client, configured from RIP_DB_URL / RIP_DB_TOKEN.
 // `src/cli/schema.js` advertises exactly this path.
 //
-// This used to be eighty lines of hand-rolled fetch living beside the
-// real client in packages/db — a copy that drifted until it dialled the
-// wrong port, discarded DuckDB's error text, could not read harbor's
-// NDJSON, and knew nothing of timeouts or cancellation. There is one
-// client now, and this is a call into it.
+// ONE client, and this is a call into it — a hand-rolled fetch copy
+// beside the real client is a copy that drifts (wrong port, discarded
+// error text, unread NDJSON, no timeouts or cancellation).
 //
 // timeoutMs: 0 means "no client clock; inherit harbor's deployment
 // default" — not "no deadline". An app wants exactly that: the operator
@@ -1234,9 +1231,9 @@ async function transaction(optsOrFn, maybeFn = undefined) {
 // instead of running autocommit on another connection.
 //
 // This exists because a transaction opened by the other tier (rip/db's
-// `transaction`) is invisible here: `runSQL` routes on this
-// store alone, so a model write inside someone else's transaction used
-// to commit itself and survive that transaction's rollback.
+// `transaction`) is invisible here: `runSQL` routes on this store
+// alone, so without it a model write inside someone else's transaction
+// commits itself and survives that transaction's rollback.
 //
 // The caller owns begin/commit/rollback; this owns only the ambience
 // and the hooks that depend on the outcome. `fn` is handed a `settle`
@@ -1249,8 +1246,8 @@ async function transaction(optsOrFn, maybeFn = undefined) {
 // DuckDB answers a bulk UPDATE/DELETE with a one-row result set whose
 // single `Count` column carries the affected rows — so the envelope's
 // own `rowCount` is 1 for every such statement, including one that
-// matched nothing at all. Reading it reported "1 row changed" whatever
-// happened. The Count shape is the one AFFIRMATIVE affected-rows
+// matched nothing at all: read directly it says "1 row changed"
+// whatever happened. The Count shape is the one AFFIRMATIVE affected-rows
 // answer in the contract: `rowCount` counts RESULT rows (harbor
 // derives it from data.length), and a mutation without RETURNING
 // legitimately answers an empty result set whatever it matched — so a
@@ -3210,9 +3207,10 @@ SchemaDef.prototype._hydrate = function (columns, row) {
   // text or epoch numbers hydrates the same instant.
   const norm = this._normalize();
   // The same adapter-row validation reload() runs: two spellings for
-  // one canonical key (a legacy table carrying both `MRN_NBR` and
-  // `mrn`) would otherwise hydrate whichever value came last — and a
-  // later save would write it back through the mapped column.
+  // one canonical key (an externally-managed table carrying both
+  // `MRN_NBR` and `mrn`) would otherwise hydrate whichever value came
+  // last — and a later save would write it back through the mapped
+  // column.
   validateAdapterRow(columns, row, 'row hydration', norm);
   const data = {};
   for (let i = 0; i < columns.length; i++) {
@@ -3497,10 +3495,10 @@ function sqlEnumMembers(type) {
 }
 
 // A field's declared type → its column type. Every answer is
-// DELIBERATE: there is no catch-all, because the catch-all was
-// `VARCHAR` and it turned a typo'd type name into a shipped column
-// that nothing complained about — `amt! stirng` used to render
-// `"amt" VARCHAR` and validate every value it was handed.
+// DELIBERATE: no catch-all, because a VARCHAR catch-all turns a
+// typo'd type name into a shipped column nothing complains about —
+// `amt! stirng` renders `"amt" VARCHAR` and validates every value it
+// is handed.
 //
 // Resolved at DDL time, which is the moment a column type is committed
 // and the last moment the registry can be asked. `def` is the model
@@ -3536,16 +3534,16 @@ function columnType(field, def) {
     // An enum materializes to its member VALUE, which is what the
     // column holds — not the member name. A closed set of strings is
     // a DuckDB ENUM. A set holding a number or a boolean has no ENUM
-    // form (DuckDB enum members are strings), so it stays the VARCHAR
-    // it has always been rather than being silently restated as
-    // something the values are not.
+    // form (DuckDB enum members are strings), so it stays VARCHAR
+    // rather than being silently restated as something the values are
+    // not.
     case 'enum': {
       const values = [...new Set(nested._normalize().enumMembers.values())];
       if (!values.length || !values.every((v) => typeof v === 'string')) return 'VARCHAR';
       return sqlEnumType(values);
     }
     // A nested schema is an object, so it is a JSON document — the
-    // same answer the array form has always given.
+    // array form's answer, for the same reason.
     case 'shape': case 'input': case 'union': return 'JSON';
     case 'model':
       throw new Error("schema: field type '" + field.typeName + "'" + where +
@@ -3866,13 +3864,13 @@ function renderIndex(spec, ix) {
 // no such gap: foldSpec folds an auto-named single-column unique index
 // into the column's `unique` flag, and the contract folds a deployed
 // single-column UNIQUE constraint into that SAME flag, so both shapes
-// compare equal. The predicate below is foldSpec's, exactly — the two
-// must agree or the differ would plan an index that already exists.
+// compare equal.
 //
-// Uniqueness ADDED to a table that already exists still renders as
-// CREATE UNIQUE INDEX (see the add-unique step in the migration
-// planner): DuckDB has no working ALTER TABLE ADD CONSTRAINT, so the
-// index is the only instrument available after creation.
+// Uniqueness ADDED to a table that already exists is a table REBUILD
+// (the add-unique step in the migration planner): DuckDB has no
+// working ALTER TABLE ADD CONSTRAINT, so the planner recreates the
+// table around the changed flag and renderCreate renders it inline.
+
 // The ORM's own uniqueness index: single-column, auto-named. One
 // predicate, two consumers — renderCreate folds it into the column's
 // inline UNIQUE, and the differ's foldSpec folds it into the column
