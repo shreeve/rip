@@ -9,7 +9,7 @@ Chip = component
     div 'chip'
 
 Gated = component
-  stats <~ @app.data.stats
+  stats <~ @stash.stats
 
   render
     div 'gated'

@@ -25,7 +25,7 @@ const MODULES = {
   ].join('\n'),
   'routes/profile.rip': [
     'export Profile = component',
-    '  user <~ @app.data.user',
+    '  user <~ @stash.user',
     '  render',
     '    h1#title user.name',
   ].join('\n'),

@@ -4,7 +4,7 @@ import { title, formatPrice } from '../config.rip'
 import { createMutation } from 'rip/app'
 
 export Cart = component
-  cart ~= @app.data.cart
+  cart ~= @stash.cart
   errors: ApiErrors := {}
 
   mounted: -> document.title = title('Cart')
@@ -16,7 +16,7 @@ export Cart = component
     onSuccess: =>
       cart.clear()
       errors = {}
-      @app.data.orders = null
+      @stash.orders = null
     onError: (err) => errors = parseApiError!(err)
 
   render

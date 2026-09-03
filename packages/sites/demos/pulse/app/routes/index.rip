@@ -1,7 +1,7 @@
 import { MoodBadge } from '../mood.rip'
 
 export Home = component
-  statuses <~ @app.data.statuses
+  statuses <~ @stash.statuses
   text := ""
   mood := "up"
   hub := null
@@ -25,7 +25,7 @@ export Home = component
 
   refresh: ->
     # The source cell refetches; the render gate re-reads and the list updates.
-    globalThis.__ripApp.data.source('statuses').refetch()
+    globalThis.__ripStash.source('statuses').refetch()
 
   post: ->
     return if text is ""

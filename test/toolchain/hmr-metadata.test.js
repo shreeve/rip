@@ -69,7 +69,7 @@ describe('HMR metadata emission', () => {
 
   test('extends and gates appear in the signature', () => {
     const src = `export Button = component extends button
-  items <~ @app.data.catalog
+  items <~ @stash.catalog
   @disabled?: boolean
   render
     button

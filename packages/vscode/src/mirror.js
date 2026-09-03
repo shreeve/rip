@@ -194,7 +194,7 @@ const HOST_FLOORS = [
 export const HOST_FLOOR_NAME = 'host-floor.d.ts';
 
 // The app's stash module for a source file — the discovery half of the
-// typed `@app.data` splice (the compiler takes the answer as
+// typed `@stash` splice (the compiler takes the answer as
 // `appStashSpec` and stays pure). The anchor is the project root: the
 // nearest directory holding both an `index.rip` and a `package.json`,
 // walking up from the file and stopping at the workspace root

@@ -2,7 +2,7 @@
 # migrate must carry; adding a second slot migrates, adding an `@prop`
 # remounts, and editing only the markup patches.
 export Home = component
-  counter ~= @app.data.counter
+  counter ~= @stash.counter
   count := 0
 
   render

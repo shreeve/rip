@@ -1,4 +1,4 @@
-# stash.rip — the app's data stash: what `@app.data` carries into every route.
+# stash.rip — the app's data stash: what `@stash` carries into every route.
 
 export type Todo =
   id: number

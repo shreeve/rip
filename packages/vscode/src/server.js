@@ -3947,11 +3947,11 @@ connection.onCompletion(presented('textDocument/completion', async (params) => {
   // face (the trailing dot failed to compile, and the fresh `.` sits
   // exactly at the alignment boundary, so the cursor "survives"
   // translation onto the END of the previous segment) and a DANGLING
-  // dot the tolerant emit passed through (`this.app.data.` verbatim —
+  // dot the tolerant emit passed through (`this.stash.` verbatim —
   // syntactically invalid TS whose cursor mapping also lands on the
   // previous word). Both make tsgo complete that word among ITS
   // receiver's members: non-empty, plausible, one segment wrong
-  // (`@app.data.` offered `data`). A prefix mismatch hands the ask to
+  // (`@stash.` offered `stash`). A prefix mismatch hands the ask to
   // the probe; a faithful landing pays nothing.
   const cursor = positionToOffset(ctx.curLineStarts, ctx.currentText.length, params.position);
   const askStart = memberAskStart(ctx.currentText, cursor);

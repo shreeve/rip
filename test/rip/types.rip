@@ -651,7 +651,7 @@ type 'void slot: optionality reaches inside the container only where absence can
     label: { value: string | undefined; read(): string | undefined; touch(): void };
     variant: { value: string; read(): string; touch(): void };
     title: { value: string | undefined; read(): string | undefined; touch?(): void };
-    app?: any;
+    stash?: any;
     router?: any;
     params?: any;
     query?: any;

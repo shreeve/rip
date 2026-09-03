@@ -259,7 +259,7 @@ describeTscExtended('component declarations: consumer programs check against the
   // fixture above and needs its own.
   const gatedGenericDts = () => compile([
     'export Card<TLabel extends string, TMeta extends number> = component',
-    '  user <~ @app.data.user',
+    '  user <~ @stash.user',
     '  @label: TLabel',
     '  @meta: TMeta',
     '  render',
@@ -478,7 +478,7 @@ describeTscExtended('component declarations: consumer programs check against the
   test('gated components expose neither direct construction nor static mount', () => {
     const dts = compile([
       'export Page = component',
-      '  user: { name: string } <~ @app.data.user',
+      '  user: { name: string } <~ @stash.user',
       '  render null',
     ].join('\n')).declarations;
     expect(dts).not.toContain('new (');

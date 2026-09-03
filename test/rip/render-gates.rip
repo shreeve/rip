@@ -2,7 +2,7 @@ import { test, code, fail, type } from '../support/testing.js'
 
 code 'gate: hoists static __gates and binds via __gateBind', '''
   export A = component
-    user <~ @app.data.user
+    user <~ @stash.user
     render
       div user.name
 ''', '''
@@ -26,7 +26,7 @@ code 'gate: hoists static __gates and binds via __gateBind', '''
 
 code 'gate: keyed source hoists (path, key fn) pair', '''
   export A = component
-    order <~ @app.data.order(params.id)
+    order <~ @stash.order(params.id)
     render null
 ''', '''
   export const A = class extends __Component {
@@ -42,7 +42,7 @@ code 'gate: keyed source hoists (path, key fn) pair', '''
 
 code 'gate: @params key form normalizes to bare params', '''
   export A = component
-    order <~ @app.data.order(@params.id)
+    order <~ @stash.order(@params.id)
     render null
 ''', '''
   export const A = class extends __Component {
@@ -58,7 +58,7 @@ code 'gate: @params key form normalizes to bare params', '''
 
 code 'gate: subpath binds the nested path string', '''
   export A = component
-    theme <~ @app.data.settings.theme
+    theme <~ @stash.settings.theme
     render null
 ''', '''
   export const A = class extends __Component {
@@ -74,7 +74,7 @@ code 'gate: subpath binds the nested path string', '''
 
 code 'gate: binds before state so initializers consume the value', '''
   export A = component
-    user <~ @app.data.user
+    user <~ @stash.user
     form := { ...user }
     render null
 ''', '''
@@ -92,7 +92,7 @@ code 'gate: binds before state so initializers consume the value', '''
 
 test 'gate: direct construction rejects without renderer metadata', '''
   A = component
-    user <~ @app.data.user
+    user <~ @stash.user
     render null
   try
     A.new()
@@ -101,9 +101,9 @@ test 'gate: direct construction rejects without renderer metadata', '''
 ''', true
 
 test 'gate: embedded child with gates throws at construction', '''
-  globalThis.__ripApp = { data: { user: { name: 'Ada' } } }
+  globalThis.__ripStash = { data: { user: { name: 'Ada' } } }
   Child = component
-    user <~ @app.data.user
+    user <~ @stash.user
     render null
   Parent = component
     render null
@@ -115,35 +115,35 @@ test 'gate: embedded child with gates throws at construction', '''
   catch e
     err = e.message
   __popComponent prev
-  globalThis.__ripApp = undefined
+  globalThis.__ripStash = undefined
   err?.includes('render gates') ?? false
 ''', true
 
 fail 'gate: <~ outside a component body is a compile error', '''
-  user <~ @app.data.user
+  user <~ @stash.user
 ''', "render gate ('<~') can only be used as a direct component body line"
 
 fail 'gate: non-literal path is a compile error', '''
   C = component
     user <~ someVar.user
     render null
-''', "'<~' requires a literal @app.data.<path>"
+''', "'<~' requires a literal @stash.<path>"
 
 fail 'gate: key referencing a local is a compile error', '''
   C = component
-    order <~ @app.data.order(someLocal)
+    order <~ @stash.order(someLocal)
     render null
 ''', 'key may only be a literal or a params/query path'
 
 type 'gate: annotated value is a non-null readonly computed container', '''
   export UserCard = component
-    user: { name: string } <~ @app.data.user
+    user: { name: string } <~ @stash.user
     render null
 ''', '''
   /// <reference lib="dom" />
   export interface UserCard {
     user: { readonly value: { name: string }; read(): { name: string } };
-    app?: any;
+    stash?: any;
     router?: any;
     params?: any;
     query?: any;

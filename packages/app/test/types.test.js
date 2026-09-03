@@ -86,7 +86,7 @@ test.skip('app package TypeScript faces and declarations are valid (deferred: pa
       'routesManifest.routes.push(routesManifest.routes[0]);',
       'const components = createComponents();',
       "components.write('app.rip', 'export App = component');",
-      "const renderer = createRenderer({ router: { current: null }, app: { data }, components, target: { appendChild: node => node }, onError: failure => { const status: number = failure.status; void status; } });",
+      "const renderer = createRenderer({ router: { current: null }, stash: data, components, target: { appendChild: node => node }, onError: failure => { const status: number = failure.status; void status; } });",
       "const mounted: Promise<unknown> = renderer.mount({ route: { file: 'app.rip' } });",
       "const linkHost = { listen: (type: string, fn: (event: unknown) => void) => () => {} };",
       'const stopClicks: () => void = interceptClicks(router, linkHost);',

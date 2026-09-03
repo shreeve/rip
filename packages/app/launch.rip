@@ -49,7 +49,7 @@ export type LaunchOpts =
   onError?: (failure: GateFailure | { status: number, path: string }) => void
 
 export type LaunchResult =
-  app: Record<string, any>
+  stash: Record<string, any>
   components: ComponentsStore
   router: Router
   renderer: Renderer
@@ -107,7 +107,7 @@ defaultTarget = ->
 
 export def launch(opts: LaunchOpts): LaunchResult
   fail 'launch requires an options object' unless opts? and typeof opts is 'object'
-  fail 'an application is already launched; destroy it first' if globalThis.__ripApp?
+  fail 'an application is already launched; destroy it first' if globalThis.__ripStash?
   prepared = validatePrepared opts.bundle, opts.stash
   bundle = prepared.bundle
   target = opts.target ?? defaultTarget()
@@ -121,13 +121,13 @@ export def launch(opts: LaunchOpts): LaunchResult
   # The seed clones on the way in (cells by reference): the declaration
   # object outlives this launch, and its next launch must start from
   # the declared baseline, not this session's writes.
-  app = createStash { data: _cloneSeed(seed ?? {}) }
+  stash = createStash _cloneSeed(seed ?? {})
 
   # Seed overlay: bundle data merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is
   # never touched by a JSON seed.
-  _mergePlain app.data, bundle.data ?? {}
-  _stampDefaults app.data
+  _mergePlain stash, bundle.data ?? {}
+  _stampDefaults stash
 
   components = if opts.components? then validComponents(opts.components) else createComponents()
   components.load bundle.modules if bundle.modules?
@@ -145,7 +145,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   renderer = createRenderer
     router: router
-    app: app
+    stash: stash
     components: components
     target: target
     onError: opts.onError
@@ -178,7 +178,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   disposePersist = null
   if opts.persist
-    disposePersist = persistStash app,
+    disposePersist = persistStash stash,
       local: opts.persist is 'local'
       key: '__rip_app'
       storage: opts.storage
@@ -188,7 +188,7 @@ export def launch(opts: LaunchOpts): LaunchResult
     return if destroyed
     destroyed = true
     # Every disposer runs; errors aggregate. Globals ALWAYS clear — a
-    # stuck __ripApp bricks every future launch. Destroy latches
+    # stuck __ripStash bricks every future launch. Destroy latches
     # `destroyed` before work so a mid-teardown throw cannot leave the
     # sentinel set with no recovery path.
     errors = []
@@ -204,7 +204,7 @@ export def launch(opts: LaunchOpts): LaunchResult
     run -> router.destroy()
     run -> unwatch()
     run -> disposePersist?()
-    delete globalThis.__ripApp if globalThis.__ripApp is app
+    delete globalThis.__ripStash if globalThis.__ripStash is stash
     delete globalThis.__ripRouter if globalThis.__ripRouter is router
     if errors.length is 1
       throw errors[0]
@@ -214,7 +214,7 @@ export def launch(opts: LaunchOpts): LaunchResult
 
   # A failing start must not wedge the process: destroy clears the
   # globals even when a disposer throws, then the failure propagates.
-  globalThis.__ripApp = app
+  globalThis.__ripStash = stash
   globalThis.__ripRouter = router
   try
     # #app may hold a static loader; from here the mount point is the
@@ -229,4 +229,4 @@ export def launch(opts: LaunchOpts): LaunchResult
     destroy()
     throw error
 
-  { app, components, router, renderer, destroy }
+  { stash, components, router, renderer, destroy }

@@ -38,7 +38,7 @@ export type Renderer =
 
 export type RendererOpts =
   router: Record<string, any>
-  app: Record<string, any>
+  stash: Record<string, any>
   components: Record<string, any>
   target: Record<string, any>
   onError?: (failure: GateFailure) => void
@@ -100,11 +100,11 @@ componentFrom = (components, file) ->
 export def createRenderer(opts: RendererOpts): Renderer
   unless opts? and typeof opts is 'object'
     throw TypeError.new 'Rip App: createRenderer expects an options object'
-  { router, app, components, target, onError } = opts
+  { router, stash, components, target, onError } = opts
   unless router? and typeof router is 'object'
     throw TypeError.new 'Rip App: createRenderer requires a router object'
-  unless app?.data?
-    throw TypeError.new 'Rip App: createRenderer requires app.data'
+  unless stash? and typeof stash is 'object'
+    throw TypeError.new 'Rip App: createRenderer requires a stash'
   unless components? and typeof components.getCompiled is 'function'
     throw TypeError.new 'Rip App: createRenderer requires a component registry'
   unless target? and typeof target.appendChild is 'function'
@@ -130,7 +130,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     a.length is b.length and a.every (file, index) -> b[index] is file
 
   resolveGateCell = (path) ->
-    value = unwrapStash app.data
+    value = unwrapStash stash
     segments = path.split '.'
     for segment, index in segments
       return null unless value? and (typeof value is 'object' or typeof value is 'function')
@@ -237,14 +237,14 @@ export def createRenderer(opts: RendererOpts): Renderer
     throw failing if failing?
     true
 
-  # Route/layout instances read `@app`, `@router`, `@params`, and
-  # `@query` as instance fields (the emitter lowers them to `this.app`
+  # Route/layout instances read `@stash`, `@router`, `@params`, and
+  # `@query` as instance fields (the emitter lowers them to `this.stash`
   # etc.). They are not props — the gate constructor injects them
   # before `_init` so member initializers can read them. Params and
   # query delegate to the router's reactive getters so `~=` / computed
   # members track navigations.
   construct = (entry, parent) ->
-    constructGateComponent entry.cls, { gates: entry.bindings, parent, app, router }
+    constructGateComponent entry.cls, { gates: entry.bindings, parent, stash, router }
 
   cleanup = (list) ->
     errors = []

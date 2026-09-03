@@ -142,13 +142,13 @@ describe('TS face: an inserted type token cannot steal a source occurrence', () 
   });
 });
 
-// A gate's route path erases its `@app.data` prefix and keeps only the LAST
+// A gate's route path erases its `@stash` prefix and keeps only the LAST
 // segment, as the CONTENT of a string literal — so the path is nowhere verbatim
 // in the face and its cover cannot place anything inside it. The route name and
 // the key's own segments each survive byte-identically, and take their own rows;
 // the prefix reaches no face entity at all and is ruled silent (RULINGS.md).
 describe('TS face: a gate route path places what survives into the face', () => {
-  const src = 'Routed = component\n  stats <~ @app.data.stats\n  entry <~ @app.data.entries(@query.tab)\n';
+  const src = 'Routed = component\n  stats <~ @stash.stats\n  entry <~ @stash.entries(@query.tab)\n';
   const r = parser.parse(src, { primitives: true });
   const { code, mappings } = emit(r, { source: src, face: 'ts' });
   const ownsRow = (name, occurrence = 0) => {
@@ -184,11 +184,10 @@ describe('TS face: consumed vocabulary is recorded where the compiler eats it', 
     return vocabulary.map((v) => ({ kind: v.kind, text: src.slice(v.start, v.end) }));
   };
 
-  test("a gate's `@app.data` marker is recorded, its route name is not", () => {
-    const v = vocabOf('R = component\n  stats <~ @app.data.stats\n');
+  test("a gate's `@stash` marker is recorded, its route name is not", () => {
+    const v = vocabOf('R = component\n  stats <~ @stash.stats\n');
     expect(v).toEqual([
-      { kind: 'gate-prefix', text: 'app' },
-      { kind: 'gate-prefix', text: 'data' },
+      { kind: 'gate-prefix', text: 'stash' },
     ]);
   });
 
@@ -213,7 +212,7 @@ describe('TS face: consumed vocabulary is recorded where the compiler eats it', 
   });
 
   test('the JS face records none — the census reads the editor face', () => {
-    const src = 'R = component\n  stats <~ @app.data.stats\n';
+    const src = 'R = component\n  stats <~ @stash.stats\n';
     const r = parser.parse(src, { primitives: true });
     expect(emit(r, { source: src, face: 'js' }).vocabulary).toEqual([]);
   });

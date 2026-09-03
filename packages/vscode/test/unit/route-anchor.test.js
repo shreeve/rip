@@ -101,15 +101,15 @@ test("an ordinary .push( never snaps — even with a route-membered parameter ty
 });
 
 // The OWN-MEMBER gates: a component declaring its own `router` (or
-// `app`) shadows the ambient one, so its calls are not route (or
+// `stash`) shadows the ambient one, so its calls are not route (or
 // stash) surfaces and record (or wrap) nothing.
 const shadowed = [
   'Page = component',
   '  router = null',
-  '  app = null',
+  '  stash = null',
   '  go: ->',
   "    @router.push '/cartz'",
-  "    u = @app.data.source 'userz'",
+  "    u = @stash.source 'userz'",
   '  render',
   "    div 'x'",
   '',
@@ -123,6 +123,6 @@ test('an own router member records no push span', () => {
   expect(shadowResult.routeWraps.length).toBe(0);
 });
 
-test('an own app member wraps no source key', () => {
+test('an own stash member wraps no source key', () => {
   expect(shadowResult.code).not.toContain('__ripSourceKey');
 });

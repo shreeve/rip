@@ -1,6 +1,6 @@
 export Layout = component
-  user <~ @app.data.user
-  cart ~= @app.data.cart
+  user <~ @stash.user
+  cart ~= @stash.cart
   gateError?: string := undefined
 
   mounted: ->

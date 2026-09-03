@@ -58,7 +58,7 @@ the path (a keyed family takes the key as the second argument); `value`,
 and a path that does not reach a source key throws. `peek`, `reset`, and
 `source` are reserved stash methods and shadow data keys of the same name.
 
-In checked projects the handle is typed. A path naming a top-level stash entry answers that entry's typed handle (`SourceHandleFor`: a keyed family's element type, anything else un-nulled, with the handle re-nulling as `value: T | null`), and a literal key passed to `@app.data.source(...)` is CHECKED: a typo errors at the key, naming the stash's keys, while a dotted path under a real key stays legal (untyped handle) and a dynamic key always passes (docs/TYPES.md § Typed source handles). Direct `createStash` consumers get the exported vocabulary — `StashMethods<D>`, `SourceHandle<T>`, `SourceHandleFor<V>` — with a permissive string overload: only the compiler's face can spell the dotted-vs-typo distinction.
+In checked projects the handle is typed. A path naming a top-level stash entry answers that entry's typed handle (`SourceHandleFor`: a keyed family's element type, anything else un-nulled, with the handle re-nulling as `value: T | null`), and a literal key passed to `@stash.source(...)` is CHECKED: a typo errors at the key, naming the stash's keys, while a dotted path under a real key stays legal (untyped handle) and a dynamic key always passes (docs/TYPES.md § Typed source handles). Direct `createStash` consumers get the exported vocabulary — `StashMethods<D>`, `SourceHandle<T>`, `SourceHandleFor<V>` — with a permissive string overload: only the compiler's face can spell the dotted-vs-typo distinction.
 
 `staleTime` takes milliseconds, a duration string (`'5 min'`, `'2h'`, `'1.5 days'` — seconds through years, case-insensitive), or `'forever'`; a spelling the duration grammar does not recognize rejects at declaration.
 
@@ -179,7 +179,7 @@ target:
 ```coffee
 renderer = createRenderer
   router: router
-  app: app
+  stash: stash
   components: components
   target: target
   onError: (failure) -> console.error failure.path, failure.status
@@ -193,7 +193,7 @@ or layout constructor runs, the renderer unions and deduplicates static
 `__gates`, resolves each gate against the raw stash, and awaits its source cell.
 Keyed gates evaluate their static key function with `params` and `query`
 exactly once. Renderer-resolved addressed cells and subpath tails cross into
-the component runtime through private metadata; `app`, `params`, and `query`
+the component runtime through private metadata; `stash`, `params`, and `query`
 are not component props.
 
 Layouts construct as a real outer-to-inner ancestry chain. Browser roots
@@ -246,9 +246,9 @@ Use one dialect so screens do not invent four different spinner stories:
 4. **Actions in flight** — `createMutation` exposes `pending` /
    `succeeded` / `error`. Disable the button on `pending`; use `hold` for
    a brief “saved” flash that outlives a quick success.
-5. **Ungated stash reads** — a direct `data.user` read may return `null`
+5. **Ungated stash reads** — a direct `@stash.user` read may return `null`
    while loading. Prefer a gate for route-critical data. When you must
-   read ungated, use `data.source('user').loading` (and `.error`)
+   read ungated, use `@stash.source('user').loading` (and `.error`)
    explicitly instead of treating `null` as empty.
 
 The Cart demo is the exemplar: gated route data, `[].length` empty
@@ -273,7 +273,7 @@ registry, derives the route manifest, and wires router and renderer
 together before starting. The application declares its stash in the
 bundle module `stash.rip` through its `stash` export — a stash
 module without the export rejects loudly — and the `stash` option
-overrides it for tests and embedding hosts. It installs `__ripApp` and `__ripRouter`; a
+overrides it for tests and embedding hosts. It installs `__ripStash` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and
 `destroy()` tears down in reverse and restores every global. Bundles
 arrive as objects — fetching, compiling, and watch transports belong
@@ -283,7 +283,7 @@ omitted, so launch tests under Node.
 
 Launch also wires the navigation chrome: the owned-link listeners (click interception and preloading) install whenever a `links` host is injected or a document exists, and the `ariaCurrent` walker installs whenever a usable document exists — `destroy()` disposes all of them. Under Node with no document and no injected host, none install.
 
-`persistStash(app, { local?, key?, debounce?, storage? })` projects the
+`persistStash(stash, { local?, key?, debounce?, storage? })` projects the
 stash into Web Storage: plain keys persist, source keys are skipped at
 every depth, restore merges around live cells, saving debounces on the
 stash write-version and flushes on dispose and page unload, and

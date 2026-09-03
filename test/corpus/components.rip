@@ -147,6 +147,6 @@ FancyBtn = component extends button
       = @label
 
 GatedOrder = component
-  order: { id: string } <~ @app.data.orders(params.id)
+  order: { id: string } <~ @stash.orders(params.id)
   snapshot := order
   render null

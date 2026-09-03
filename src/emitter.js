@@ -1599,13 +1599,13 @@ class Emitter {
   // Under `extends`, `rest` is provided, never declared: nothing above
   // a read says the name exists, and only the member rewrite makes a
   // bare `rest` reach the synthesized view. The sigil is its one
-  // spelling — `@rest` names what the runtime supplies, as `@app` and
+  // spelling — `@rest` names what the runtime supplies, as `@stash` and
   // `@router` do. A local the author binds as `rest` is their own name
   // and shadows the view (memberKindOf answers null there).
   checkBareRest(node, name) {
     if (name !== 'rest' || this.memberKindOf(name) !== 'rest') return;
     const err = this.positionedError(node,
-      'emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@app` and `@router`');
+      'emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@stash` and `@router`');
     if (typeof err.start !== 'number' && this.b.currentMark) {
       err.start = this.b.currentMark.sourceStart;
       err.end = this.b.currentMark.sourceEnd;
@@ -2602,7 +2602,7 @@ class Emitter {
     // surfaces) that the editor shows as `Children`.
     if (!hasChildren) line(() => this.b.emit('declare children?: __RipChildren;'));
     this._needsChildren = true;
-    // The ambience helper the `app` field infers through is declared
+    // The ambience helper the `stash` field infers through is declared
     // once at MODULE scope, from the emit() tail — keyed off the USE,
     // never off companion emission: expression-valued and function-
     // nested components emit the field too, and a declaration parked on
@@ -2610,7 +2610,7 @@ class Emitter {
     // at an illegal function-scope position). Declares hoist, so the
     // tail position serves every class in the module.
     const ambientLines = ambientClassDeclares(info);
-    if (ambientLines.some((t) => t.includes('__ripAmbientApp('))) this._needsAmbienceHelper = true;
+    if (ambientLines.some((t) => t.includes('__ripAmbientStash('))) this._needsAmbienceHelper = true;
     for (const text of ambientLines) line(() => this.b.emit(text));
     if (info.extendsTag !== null) {
       // The rest view holds the passthrough object, named through the
@@ -2631,7 +2631,7 @@ class Emitter {
   // The gate descriptor of a member that takes a face TWIN, or null.
   // A bare gate under a discovered stash emits the read the author
   // wrote instead of a projection formula; an annotated gate honors its
-  // annotation (the declare road), and without a stash `this.app` is
+  // annotation (the declare road), and without a stash `this.stash` is
   // undeclared on the class, so a twin would publish an error on every
   // gate.
   gateTwinSource(m, info) {
@@ -2642,7 +2642,7 @@ class Emitter {
 
   // The gate's face twin — v3's construction. The read the author wrote
   // emits as a REAL ts-only expression (`user = __computed(() =>
-  // this.app.data.user!)`): every path segment claims its source span,
+  // this.stash.user!)`): every path segment claims its source span,
   // so hover answers at each depth and a wrong path draws its error on
   // the segment the author wrote — and the `!` states the gate's own
   // contract (the body does not render until the value exists). The
@@ -2662,9 +2662,9 @@ class Emitter {
         if (i > 0) this.b.emit('.');
         this.emitPrimitive(seg);
       });
-      // The path's root is a PROVIDED name (`@app`, `@router`): its bytes
+      // The path's root is a PROVIDED name (`@stash`, `@router`): its bytes
       // take the provision's head, as a plain read's do (noteProvidedRead).
-      if (this.ts && (segs[0] === 'app' || segs[0] === 'router')) {
+      if (this.ts && (segs[0] === 'stash' || segs[0] === 'router')) {
         const id = this.stores.idOf(src.pathNode);
         const span = id !== null ? this.stores.selfSpan(id) : null;
         const hit = span !== null ? this.stores.primitiveSpans(segs[0], span[0], span[1])[0] ?? null : null;
@@ -8674,11 +8674,11 @@ class Emitter {
     if (keys.length > 1) return { error: 'arity', node };
     const key = keys[0] ?? null;
     const segments = Emitter.gateChain(pathNode);
-    if (segments === null || segments.length < 4 ||
-        segments[0] !== 'this' || segments[1] !== 'app' || segments[2] !== 'data') {
+    if (segments === null || segments.length < 3 ||
+        segments[0] !== 'this' || segments[1] !== 'stash') {
       return { error: 'path', node: pathNode };
     }
-    const path = segments.slice(3).join('.');
+    const path = segments.slice(2).join('.');
     if (key === null) return { path, pathNode, key: null, keyCode: null, keyParts: null };
 
     if (typeof key === 'string' &&
@@ -8914,11 +8914,11 @@ class Emitter {
         const source = Emitter.gateSource(stmt);
         if (source.error === 'arity') {
           gateError(stmt, 'key', source.node,
-            "emitter: a keyed render gate takes exactly one key argument — use @app.data.name(params.id)");
+            "emitter: a keyed render gate takes exactly one key argument — use @stash.name(params.id)");
         }
         if (source.error === 'path') {
           gateError(stmt, 'rhs', source.node,
-            "emitter: '<~' requires a literal @app.data.<path> on the right-hand side, optionally called with one key");
+            "emitter: '<~' requires a literal @stash.<path> on the right-hand side, optionally called with one key");
         }
         if (source.error === 'key') {
           gateError(stmt, 'key', source.node,
@@ -9188,7 +9188,7 @@ class Emitter {
         this.b.emit(`${pad}static __gates = [`);
         gateVars.forEach((gate, index) => {
           if (index > 0) this.b.emit(', ');
-          // `@app.data` is the marker that makes this a gate. With a face
+          // `@stash` is the marker that makes this a gate. With a face
           // TWIN (emitGateTwin — a discovered stash), the segments have a
           // real typed expression to answer from, so they stay in the
           // mapping population — the twin's claims, emitted above, own
@@ -9200,8 +9200,7 @@ class Emitter {
           const twinned = this.ts && tsInfo !== null &&
             tsInfo.members.some((m) => m.node === gate.node && this.gateTwinSource(m, tsInfo) !== null);
           if (!twinned) {
-            this.noteVocabulary('gate-prefix', 'app', gate.pathNode);
-            this.noteVocabulary('gate-prefix', 'data', gate.pathNode);
+            this.noteVocabulary('gate-prefix', 'stash', gate.pathNode);
             for (const seg of gate.keyParts ?? []) this.noteSilence(seg, gate.key);
           }
           this.mark(gate.node, '$self', () => {
@@ -13515,11 +13514,11 @@ class Emitter {
     this.chain(node);
   }
 
-  // The names the runtime PROVIDES to a component — `@app`, `@router` —
+  // The names the runtime PROVIDES to a component — `@stash`, `@router` —
   // are read like members but declared by no one in the file; the read's
   // own bytes take a head naming the provision (RULINGS.md, Components),
   // the way `(prop)` and `(rest)` name theirs. A provided name is always
-  // the root of a chain (`@app.data.cart`, `@router.onNavigate(fn)`), so
+  // the root of a chain (`@stash.cart`, `@router.onNavigate(fn)`), so
   // the chain that reads it notes the kind once, at the name's own span.
   // The descent follows the chain driver's head slots, so a call whose
   // callee reads the name reaches the root the way the driver does.
@@ -13531,7 +13530,7 @@ class Emitter {
       if (slot === null || !isNode(root[slot])) break;
       root = root[slot];
     }
-    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'app' && root[2] !== 'router')) return;
+    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'stash' && root[2] !== 'router')) return;
     if (this.cframes[this.cframes.length - 1].members?.has(root[2])) return;
     const id = this.stores.idOf(root);
     const span = id !== null ? this.stores.selfSpan(id) : null;
@@ -13626,11 +13625,11 @@ class Emitter {
 
   // One call argument: picks emit bare (the `bare` stripping above);
   // everything else is a plain expression.
-  // A literal key argument of `@app.data.source(...)`: the chain driver
+  // A literal key argument of `@stash.source(...)`: the chain driver
   // registered it (sourceKeyArgOf), and the TS-only `__ripSourceKey`
   // wrap checks it against the stash's key union — the strict overload
   // pair the ambience must not inline (an anonymous type literal echoes
-  // its import() splices in every `@app` hover) and the package cannot
+  // its import() splices in every `@stash` hover) and the package cannot
   // spell (Rip's structured types carry no template-literal types). A
   // module-scope declare renders in no hover, so this is where the
   // template lives. Dynamic keys are never registered and pass by
@@ -13660,13 +13659,13 @@ class Emitter {
   }
 
   // The one checked spelling of a stash-handle ask: a call whose callee
-  // chain is EXACTLY `this.app.data.source` (`@app.data.source(...)`)
+  // chain is EXACTLY `this.stash.source` (`@stash.source(...)`)
   // and whose first argument is a plain quoted string literal. A bound
-  // alias (`d = @app.data; d.source(...)`) or a computed key stays on
+  // alias (`d = @stash; d.source(...)`) or a computed key stays on
   // the package's permissive overload — the same syntactic-gate
-  // doctrine as the href wrap. A component declaring its OWN `app`
-  // member shadows the ambient app (the ambience splice skips the name
-  // too), so its `.data.source(...)` calls are not stash asks and stay
+  // doctrine as the href wrap. A component declaring its OWN `stash`
+  // member shadows the ambient stash (the ambience splice skips the
+  // name too), so its `.source(...)` calls are not stash asks and stay
   // unwrapped.
   sourceKeyArgOf(node) {
     if (!this.ts || this.appStashSpec === null) return null;
@@ -13674,11 +13673,9 @@ class Emitter {
     if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
     const callee = node[0];
     if (!isNode(callee) || callee[0] !== '.' || callee.length !== 3 || callee[2] !== 'source') return null;
-    const data = callee[1];
-    if (!isNode(data) || data[0] !== '.' || data.length !== 3 || data[2] !== 'data') return null;
-    const app = data[1];
-    if (!isNode(app) || app[0] !== '.' || app.length !== 3 || app[1] !== 'this' || app[2] !== 'app') return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('app')) return null;
+    const stash = callee[1];
+    if (!isNode(stash) || stash[0] !== '.' || stash.length !== 3 || stash[1] !== 'this' || stash[2] !== 'stash') return null;
+    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
     return arg;
   }
 
@@ -17462,13 +17459,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     }
   }
   // The ambience helper's ONE declaration per module, at module scope —
-  // where every class that emitted `app = __ripAmbientApp(...)` can
+  // where every class that emitted `stash = __ripAmbientStash(...)` can
   // reach it (declares hoist; nested and expression-valued components
-  // included). Named apart from the runtime's `globalThis.__ripApp` so
+  // included). Named apart from the runtime's `globalThis.__ripStash` so
   // the face never shadows the launch global's name. TS-only through
   // the recorded region.
   if (emitter._needsAmbienceHelper === true) {
-    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientApp<T>(v: T): { data: T; [key: string]: any };\n'));
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientStash<T>(v: T): T;\n'));
   }
   // The route helper's ONE declaration per module, at module scope —
   // where every `__ripRoute(...)` wrap can reach it (declares hoist).
@@ -17511,7 +17508,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // design. Plain `=` stays meaningless here on purpose (a test
   // overwriting `globalThis.fetch` must not redeclare the host's fetch),
   // and a non-top-level install is lifecycle state, not vocabulary (an
-  // app's guarded `__ripApp`, deleted on destroy, must not be declared
+  // app's guarded `__ripStash`, deleted on destroy, must not be declared
   // ever-present). An identifier initializer declares `typeof` it — the
   // module binding is lexically visible inside `declare global` — and
   // any other initializer declares `any`. The block is TS-only, so the

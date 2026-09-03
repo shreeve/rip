@@ -2,11 +2,11 @@ import { source, AppData as __AppData } from './source.rip'
 export { source }
 # The projection re-exported as a type alone: the import above erases
 # from the shipped JS (type-only use), so the runtime surface is
-# untouched while the face carries AppData for the `@app.data` splice.
+# untouched while the face carries AppData for the `@stash` splice.
 export type AppData<S> = __AppData<S>
 import { createStash, unwrapStash, StashMethods as __StashMethods, SourceHandle as __SourceHandle, SourceHandleFor as __SourceHandleFor } from './stash.rip'
 export { createStash, unwrapStash }
-# Erasure road again: `app.data` IS a Stash at runtime — the projected
+# Erasure road again: `@stash` IS a Stash at runtime — the projected
 # entries plus this method surface (`source()`, `inc`, `reset`, …) — so
 # the ambience splice intersects the AppData projection with it,
 # instantiated at the projected shape so `source()` answers typed

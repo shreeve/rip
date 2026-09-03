@@ -375,13 +375,13 @@ function __claimGateConstructor() {
       component: Component,
       gates: metadata.gates,
       parent: metadata.parent ?? null,
-      // Route fields the emitter lowers to `this.app` / `this.router` /
+      // Route fields the emitter lowers to `this.stash` / `this.router` /
       // `this.params` / `this.query` — assigned in the constructor
       // before `_init`, so member initializers can read them. This name
       // set is co-owned by AMBIENT_FIELDS in src/ts/components.js: the
       // face declares what is injected here, and a name added on one
       // side alone desyncs the type surface from the runtime.
-      app: metadata.app ?? null,
+      stash: metadata.stash ?? null,
       router: metadata.router ?? null,
       used: false,
     };
@@ -852,9 +852,9 @@ class __Component {
     if (rendererAuthorized) {
       __gateMetadata.set(this, mount);
       if (mount.parent) this._parent = mount.parent;
-      // Inject before `_init`: gated/route members read `@app`,
+      // Inject before `_init`: gated/route members read `@stash`,
       // `@router`, `@params`, and `@query` during construction.
-      if (mount.app != null) this.app = mount.app;
+      if (mount.stash != null) this.stash = mount.stash;
       if (mount.router != null) {
         this.router = mount.router;
         Object.defineProperty(this, 'params', {
@@ -867,12 +867,12 @@ class __Component {
         });
       }
     }
-    // Ambience: `@app` and `@router` are how everything works, so every
+    // Ambience: `@stash` and `@router` are how everything works, so every
     // component reaches them by default. Route-chain components got the
     // renderer's injection above; everything else falls back to the
     // live launch globals. `@params`/`@query` stay route-only — they
     // are navigation state, not app state.
-    if (this.app == null && globalThis.__ripApp != null) this.app = globalThis.__ripApp;
+    if (this.stash == null && globalThis.__ripStash != null) this.stash = globalThis.__ripStash;
     if (this.router == null && globalThis.__ripRouter != null) this.router = globalThis.__ripRouter;
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;

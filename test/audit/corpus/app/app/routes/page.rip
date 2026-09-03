@@ -1,8 +1,8 @@
-# page.rip — a route component over the stash: every gate form with a discovered stash, the `@app` and `@router` reads, and the typed router ambience.
+# page.rip — a route component over the stash: every gate form with a discovered stash, the `@stash` and `@router` reads, and the typed router ambience.
 
 export Page = component
-  todos <~ @app.data.todos
-  title: string <~ @app.data.title
+  todos <~ @stash.todos
+  title: string <~ @stash.title
   q ~= @router.query.q ?? ''
   shout ~= q.toUpperCase()
   remaining ~= todos.filter((t) -> not t.done).length

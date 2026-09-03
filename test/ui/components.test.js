@@ -516,7 +516,7 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes']) {
       emitFails(`C = component\n  ${name} := 1\n  render null`, /collides with component runtime state/);
     }
-    emitFails('C = component\n  _root <~ @app.data.root\n  render null', /collides with component runtime state/);
+    emitFails('C = component\n  _root <~ @stash.root\n  render null', /collides with component runtime state/);
     expect(compile('C = component\n  _style = -> "ok"\n  render null').code)
       .toContain('_style()');
   });

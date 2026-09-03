@@ -102,12 +102,12 @@ Picker = component
 # A gated component is route-mounted: the face declares `mount: never` and a private constructor, both asserted by the negatives.
 
 Routed = component
-  stats <~ @app.data.stats
-  flags <~ @app.data.flags()
-  row <~ @app.data.rows(params.id)
-  user: { name: string } <~ @app.data.user
-  mode: string <~ @app.data.mode()
-  entry: number <~ @app.data.entries(@query.tab)
+  stats <~ @stash.stats
+  flags <~ @stash.flags()
+  row <~ @stash.rows(params.id)
+  user: { name: string } <~ @stash.user
+  mode: string <~ @stash.mode()
+  entry: number <~ @stash.entries(@query.tab)
 
   render
     div

@@ -72,7 +72,7 @@ describe('layout patch reseats the route below it', () => {
     document.body.appendChild(target);
     const info = route('chain/page.rip', ['chain/layout.rip']);
     const router = { current: info, navigating: false };
-    const renderer = createRenderer({ router, app: { data: createStash({}) }, components, target });
+    const renderer = createRenderer({ router, stash: createStash({}), components, target });
 
     await renderer.mount(info);
     const page = renderer.current;
@@ -158,7 +158,7 @@ describe('layout patch reseats the route below it', () => {
     document.body.appendChild(target);
     const info = route('chain/list.rip', ['chain/layout.rip']);
     const router = { current: info, navigating: false };
-    const renderer = createRenderer({ router, app: { data: createStash({}) }, components, target });
+    const renderer = createRenderer({ router, stash: createStash({}), components, target });
 
     await renderer.mount(info);
     const oldSlot = target.childNodes[0].querySelector('#content');
@@ -197,7 +197,7 @@ describe('layout patch reseats the route below it', () => {
     document.body.appendChild(target);
     const info = route('chain/page.rip', ['chain/layout.rip']);
     const router = { current: info, navigating: false };
-    const renderer = createRenderer({ router, app: { data: createStash({}) }, components, target });
+    const renderer = createRenderer({ router, stash: createStash({}), components, target });
 
     await renderer.mount(info);
     const page = renderer.current;
@@ -253,7 +253,7 @@ describe('layout patch reseats the route below it', () => {
     document.body.appendChild(target);
     const info = route('chain/leaf.rip', ['chain/outer.rip', 'chain/inner.rip']);
     const router = { current: info, navigating: false };
-    const renderer = createRenderer({ router, app: { data: createStash({}) }, components, target });
+    const renderer = createRenderer({ router, stash: createStash({}), components, target });
 
     await renderer.mount(info);
     const outerRoot = target.childNodes[0];

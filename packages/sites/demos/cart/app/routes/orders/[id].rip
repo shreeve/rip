@@ -2,7 +2,7 @@ import { ButtonLink } from '../../components/button.rip'
 import { title, formatPrice } from '../../config.rip'
 
 export OrderDetails = component
-  order <~ @app.data.order(params.id)
+  order <~ @stash.order(params.id)
 
   mounted: -> document.title = title("Order ##{@params.id}")
 

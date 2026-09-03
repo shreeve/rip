@@ -102,7 +102,7 @@ describe('bootApp publication', () => {
       await settle();
       expect(result.workspace.hash()).toBe(H1);
       expect(result.router.current.route.file).toBe('routes/index.rip');
-      expect(result.app.data.title).toBe('probe');
+      expect(result.stash.title).toBe('probe');
       result.router.push('/about');
       await settle();
       expect(result.router.current.route.file).toBe('routes/about.rip');
@@ -348,7 +348,7 @@ describe('bootApp watch changes', () => {
 
   test('a failed live activation rolls back Workspace and keeps the live App', async () => {
     const { result, hub, reloads } = await open();
-    const liveApp = result.app;
+    const liveStash = result.stash;
     try {
       await subscribe(hub.sockets[0]);
       const invalidStash = 'export nope = 1';
@@ -356,7 +356,7 @@ describe('bootApp watch changes', () => {
       await settle();
       expect(result.workspace.hash()).toBe(H1);
       expect(result.workspace.read('stash.rip')).toBe(APP_MODULES['stash.rip']);
-      expect(globalThis.__ripApp).toBe(liveApp);
+      expect(globalThis.__ripStash).toBe(liveStash);
       expect(reloads).toEqual([]);
     } finally {
       result.destroy();
