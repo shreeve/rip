@@ -158,6 +158,9 @@ function requireCatalog(who) {
 // `nextval('id')` — the sequence a surrogate primary key draws from,
 // as DuckDB reports the column default.
 const NEXTVAL_RE = /nextval\(\s*'((?:[^']|'')*)'\s*\)/i;
+// The sequence a DEFAULT nextval('…') names, quote-unescaped — null
+// when the default is anything else.
+const seqNameOf = (dflt) => NEXTVAL_RE.exec(String(dflt ?? ''))?.[1]?.replace(/''/g, "'") ?? null;
 
 // Build the DeployedSchema — an array of canonical table specs in the
 // same shape `_tableSpec()` produces — from the adapter's `catalog()`:
@@ -265,7 +268,7 @@ export async function introspect() {
     // convention keeps a table matched to its own `<table>_seq` when
     // the pk carries no default to read — the sequence is in the
     // database either way, and saying it is missing would be false.
-    const named = NEXTVAL_RE.exec(String(pk?.default ?? ''))?.[1]?.replace(/''/g, "'");
+    const named = seqNameOf(pk?.default);
     const seqName = named ?? t.name + '_seq';
     const seq = sequences.get(seqName);
     // `shared` is what the drop-table path reads: a sequence named for
@@ -1025,7 +1028,7 @@ function diffTable(d, p, steps, deps) {
     // a primary key in place, and the column diff's answer (add +
     // drop) rewrites row identities; so it blocks and says so.
     const surrogate = (c) => c.primary === true && /nextval\(/i.test(String(c.default ?? ''));
-    const seqOf = (c) => NEXTVAL_RE.exec(String(c.default ?? ''))?.[1]?.replace(/''/g, "'") ?? null;
+    const seqOf = (c) => seqNameOf(c.default);
     const dPk = dc.primary === true;
     const pPk = pc.primary === true;
     if (dPk || pPk) {
