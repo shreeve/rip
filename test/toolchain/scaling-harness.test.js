@@ -10,7 +10,7 @@
 // by only 1.5x of endpoint noise. The timing layer below keeps only the
 // checks whose margins are fat.
 import { expect, test } from 'bun:test';
-import { expectLinearDoubling, scalingVerdict } from '../support/scaling.js';
+import { deterministicScalingRed, expectLinearDoubling, scalingVerdict } from '../support/scaling.js';
 import { describeExtended } from '../support/extended.js';
 
 const verdict = (sizes, costs) => scalingVerdict({ sizes, costs });
@@ -56,6 +56,34 @@ test('a blowup confined to the last doubling is red by the pair backstop, not th
 test('the bounds hold for any geometric size progression, not only doubling', () => {
   expect(verdict([1000, 3000, 9000], [10, 31, 92]).ok).toBe(true);    // linear at 3x steps
   expect(verdict([1000, 3000, 9000], [10, 90, 810]).ok).toBe(false);  // quadratic at 3x steps
+});
+
+// ── Arbitration across red attempts (fast tier — pure math) ───────────
+
+const attempts = (...pairTriples) => pairTriples.map((pairs) => ({ pairs }));
+
+test('three red attempts with moving spikes are the machine: measured flake shapes stay green', () => {
+  // Pair-ratio pairs measured live under a sustained full-suite load on
+  // a hot machine — each attempt red, each spiking a different pair
+  // (5.15 then 4.63 on opposite sides), neither elevating the whole
+  // curve. The shape does not reproduce, so the red does not stand.
+  expect(deterministicScalingRed(attempts([5.15, 2.09], [2.63, 4.63], [3.50, 2.20]))).toBe(false);
+});
+
+test('a quadratic reproduces every pair elevated in every attempt, and the red stands', () => {
+  expect(deterministicScalingRed(attempts([4.0, 4.1], [3.9, 4.0], [4.2, 3.8]))).toBe(true);
+});
+
+test('sustained just-under-backstop growth reproduces on every pair, and the red stands', () => {
+  expect(deterministicScalingRed(attempts([3.3, 3.3], [3.2, 3.4], [3.3, 3.2]))).toBe(true);
+});
+
+test('a capacity cliff breaches the same pair every attempt, and the red stands', () => {
+  expect(deterministicScalingRed(attempts([2.0, 4.25], [1.9, 4.4], [2.1, 4.1]))).toBe(true);
+});
+
+test('a backstop breach that moves between pairs is noise, not a cliff', () => {
+  expect(deterministicScalingRed(attempts([4.25, 2.0], [2.0, 4.25], [4.25, 2.0]))).toBe(false);
 });
 
 // ── The measurement path, end to end (extended tier — real clock) ─────

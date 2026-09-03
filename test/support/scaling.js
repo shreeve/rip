@@ -12,10 +12,10 @@
 // work), which is the whole reason these gates exist alongside that one.
 //
 // Per size the cost is min-of-5 (GC and JIT noise is one-sided — the
-// minimum approaches true cost). If the verdict is red, the WHOLE
-// measurement re-runs once, while genuinely superlinear growth fails
-// every round by structural margin — the discrimination is a standing
-// gate, test/toolchain/scaling-harness.test.js.
+// minimum approaches true cost). A red verdict re-measures up to three
+// times, and three reds fail only when the breach reproduces its shape
+// across attempts (deterministicScalingRed) — the discrimination is a
+// standing gate, test/toolchain/scaling-harness.test.js.
 //
 // The verdict is on the GROWTH EXPONENT — log(cost ratio)/log(size
 // ratio) across the endpoints — not on adjacent-pair ratios. A pair
@@ -82,11 +82,31 @@ export const scalingVerdict = ({ sizes, costs, bound = 3.4, exponentBound = 1.7 
     `sizes ${sizes.join('/')} cost ${costs.map((t) => t.toFixed(2)).join('/')} cpu-ms ` +
     `→ growth exponent ${exponent.toFixed(2)} (bound ${exponentBound}; linear ~1.2, quadratic 2.0), ` +
     `pair ratios ${pairs.map((r) => r.toFixed(2)).join('/')} (backstop ${bound})`;
-  return { ok, message };
+  return { ok, message, exponent, pairs };
+};
+
+// Arbitration across red attempts: a real regression reproduces its
+// SHAPE, load noise does not. Superlinear growth (quadratic, or
+// sustained just-under-backstop compounding) elevates EVERY pair ratio
+// in EVERY attempt — noise is spike-shaped, inflating one sample and
+// so one or two pairs, in positions that move between attempts. A
+// capacity cliff breaches the backstop at the SAME pair every attempt
+// (it lives at a size, not at a moment). Three red attempts that show
+// neither signature are the machine, not the code. The floor sits just
+// above the worst pair a loaded-but-healthy run has measured (2.58);
+// demanding it of every pair of every attempt is what keeps a noisy
+// pass from slipping through as a masked regression.
+const QUADRATIC_FLOOR = 2.6;
+export const deterministicScalingRed = (attempts, bound = 3.4) => {
+  const everyPair = attempts.every((a) => a.pairs.every((r) => r >= QUADRATIC_FLOOR));
+  const pairCount = attempts[0].pairs.length;
+  const fixedCliff = Array.from({ length: pairCount }, (_, i) => i)
+    .some((i) => attempts.every((a) => a.pairs[i] >= bound));
+  return everyPair || fixedCliff;
 };
 
 export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponentBound = 1.7, samples = 5 }) => {
-  let verdict;
+  const attempts = [];
   const measure = () => {
     run(prepare(1000)); // warmup
     const costs = sizes.map((n) => {
@@ -99,7 +119,8 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponen
       }
       return Math.max(m, 0.5);
     });
-    verdict = scalingVerdict({ sizes, costs, bound, exponentBound });
+    const verdict = scalingVerdict({ sizes, costs, bound, exponentBound });
+    attempts.push(verdict);
     return verdict.ok;
   };
   // Three attempts everywhere, not just CI: the condition that inflates
@@ -107,9 +128,12 @@ export const expectLinearDoubling = ({ prepare, run, sizes, bound = 3.4, exponen
   // runners with CPU-steal, but equally a local `test:all` running two
   // dozen lanes (seen live both ways: 6.95/13.01/53.19 on CI, and
   // 1.20/2.70/9.31 under test:all — exponent 1.48 healthy, backstop
-  // tripped 3.45-vs-3.4 by one spiked endpoint). A REAL regression is
-  // deterministic — quadratic ratios at every pair, every attempt — so
-  // retries cost the gate nothing; noise passing late costs only time.
-  const ok = measure() || measure() || measure();
-  expect(ok, verdict.message).toBe(true);
+  // tripped 3.45-vs-3.4 by one spiked endpoint). Any green attempt
+  // passes. Three red attempts fail only when the breach reproduces
+  // its shape (deterministicScalingRed): sustained machine load can
+  // keep the exponent over its bound for minutes at a time, but it
+  // spikes different pairs on different attempts — a regression lives
+  // in the code and breaches the same way every time.
+  const ok = measure() || measure() || measure() || !deterministicScalingRed(attempts, bound);
+  expect(ok, attempts.at(-1).message).toBe(true);
 };
