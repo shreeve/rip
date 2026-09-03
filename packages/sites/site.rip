@@ -896,7 +896,7 @@ type HttpError = Error & { status: number, code?: string, api?: boolean, field?:
 
 def error(message: string, status?: number, code?: string, field?: string): never
 def error(message: Record<string, string>, status?: number, code?: string, field?: string): void
-def error(message: string | Record<string, string> = 'Bad request', status = 400, code: string | null = null, field: string | null = null): any
+def error(message: string | Record<string, string> = 'Bad request', status = 400, code: string | null = null, field: string | null = null): void
   # Object form — a field→message map, for collected validation:
   #
   #   errs = {}
