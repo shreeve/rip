@@ -1863,6 +1863,13 @@ async function preload(def, instances, specs) {
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
     const targetNorm = validateRelationTarget(def, rel, target);
     const children = [];
+    // Identity-dedup for the recursion below. The belongsTo and
+    // through paths can hand many owners the same child instance —
+    // Array.includes made that a scan per row (O(owners x targets));
+    // the hasMany path pushes without checking because its grouping
+    // already guarantees each row appears once.
+    const seen = new Set();
+    const collect = (r) => { if (!seen.has(r)) { seen.add(r); children.push(r); } };
     // Capture the cache request before any await. Reload/absorption bumps
     // the generation, and mutable FKs can change identity independently;
     // either change makes this preload result ineligible for memoization.
@@ -1888,7 +1895,7 @@ async function preload(def, instances, specs) {
         if (!current(inst, request)) continue;
         const v = request.identity != null ? (byId.get(request.identity) ?? null) : null;
         relMemoSet(inst, spec.name, request.identity, v);
-        if (v && !children.includes(v)) children.push(v);
+        if (v) collect(v);
       }
     } else if (rel.through) {
       // Three steps, all set-based: the join rows for every owner at
@@ -1906,7 +1913,7 @@ async function preload(def, instances, specs) {
         if (!r) continue; // a dangling join row names no target
         if (!groups.has(ownerId)) groups.set(ownerId, []);
         groups.get(ownerId).push(r);
-        if (!children.includes(r)) children.push(r);
+        collect(r);
       }
       for (const inst of instances) {
         const request = requests.get(inst);
