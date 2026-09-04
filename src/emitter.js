@@ -461,15 +461,30 @@ class Emitter {
     // an ATTRIBUTE surface (intrinsic `a href:`, a child component's
     // `href:` prop) the key is the pair's key and the value is the
     // `__ripRoute`-wrapped literal; on a ROUTER surface
-    // (`this.router.push`/`.replace` with a literal argument) the key
-    // is the METHOD NAME and the value is the argument literal — no
-    // wrap is emitted there, the ambience's const conditional does the
-    // checking, but the spans still record so a mismatch re-anchors on
-    // its meaningful token and completions know the slot is
+    // (`this.router.push`/`.replace`, or the accessor's, with a literal
+    // argument) the key is NULL and the value is the argument literal —
+    // a mismatch stays on the literal, where tsgo anchors a call
+    // argument, and the span records so completions know the slot is
     // route-constrained. The diagnostics road moves a mismatch covering
-    // EXACTLY the value onto the key; an unrecorded call (an array's
-    // `.push`) can never match. Recorded at emission, TS face only.
+    // EXACTLY a keyed value onto its key; an unrecorded call (an
+    // array's `.push`) can never match. Recorded at emission, TS face
+    // only.
     this.routeWrapSpans = [];
+    // Per member initializer: the member NAME's source span and the
+    // lowered write's left-hand side (`this.name`) in generated
+    // coordinates — bytes the author never wrote, so a complaint
+    // standing on exactly that side is about the member and lands on
+    // its name, where tsgo anchors a declaration's own mismatch. TS
+    // face only.
+    this.memberInitSites = [];
+    // Generated spans of each `__ripSourceKey`-wrapped literal, and of
+    // the member NAME of each ambient `@stash.<name>` access: a
+    // mismatch covering exactly one is a stash-key miss, a member miss
+    // covering exactly one is on the stash, and the diagnostics road
+    // words each from these records — never from the checker's
+    // sentence. TS face only.
+    this.sourceKeySpans = [];
+    this.stashMemberSpans = [];
     // The intrinsic-element surfaces this module's render lowering cast
     // to (`__RipEl_<tag>` — src/ts/dom-types.js), keyed by surface name;
     // the emit() tail declares exactly these. `_needsClassValue` arms
@@ -9354,8 +9369,14 @@ class Emitter {
       // spells the bare name (a breakpoint on the declaration lands on
       // its init line); `@name` targets record covers.
       const memberName = (stmt, name, role = 'target') => {
+        const lhsStart = this.b.offset;
         this.b.emit('this.');
         this.mark(stmt, role, () => this.b.emit(name));
+        if (this.ts) {
+          const id = this.stores.idOf(stmt);
+          const row = id !== null ? this.stores.role(id, role) : null;
+          if (row && typeof row.sourceStart === 'number') this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
+        }
       };
       const readonlySet = new Set(readonlyVars);
       // Captured computed bodies, in declaration order — the face's
@@ -13480,8 +13501,13 @@ class Emitter {
             // property would inherit the statement's cover. Its name is still a
             // source read; it claims its occurrence in that enclosing span. A
             // real member already owns an exact row from its own frame.
+            const nameStart = this.b.offset;
             if (this.stores.idOf(n) === null) this.emitPrimitive(n[2]);
             else this.b.emit(n[2]);
+            if (this.ts && this.appStashSpec !== null && typeof n[2] === 'string' && Emitter.isThisMember(n[1], 'stash')
+                && !(this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash'))) {
+              this.stashMemberSpans.push([nameStart, this.b.offset]);
+            }
             // A `@member` read carries the kind its declaration minted. The
             // name is emitted raw here (a real member already owns an exact
             // row), so it claims no primitive and the kinds channel would
@@ -13539,11 +13565,9 @@ class Emitter {
           (this._sourceKeyArgs ??= new Set()).add(sourceKey);
           this._needsSourceKeyHelper = true;
         }
-        // A router call's method name was the last thing the callee
-        // frames emitted, so its generated span ends exactly here.
         const routerArg = this.routerArgOf(n);
         if (routerArg !== null) {
-          (this._routerArgs ??= new Map()).set(routerArg.arg, { key: [this.b.offset - routerArg.method.length, this.b.offset], wrap: routerArg.wrap });
+          (this._routerArgs ??= new Map()).set(routerArg.arg, routerArg.wrap);
           if (routerArg.wrap) this._needsRouteHelper = true;
         }
         this.mark(n, 'args', () => {
@@ -13690,25 +13714,26 @@ class Emitter {
     if (this._sourceKeyArgs?.has(arg)) {
       this._sourceKeyArgs.delete(arg);
       this.b.tsOnly(() => this.b.emit('__ripSourceKey('));
+      const valStart = this.b.offset;
       this.expr(arg);
+      this.sourceKeySpans.push([valStart, this.b.offset]);
       this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
-    // A registered router argument's generated span pairs with the
-    // method name recorded at registration, the same key/value shape
-    // the attribute wraps publish. On the ambient `@router` the
-    // argument emits UNCHANGED — the ambience's const conditional does
-    // the checking; on an accessor call the package's `Router` types
-    // `push`/`replace` on plain `string`, so the literal wraps in the
-    // TS-only `__ripRoute` like an href.
-    const router = this._routerArgs?.get(arg);
-    if (router !== undefined) {
+    // A registered router argument's generated span records with NO
+    // key: the mismatch stays on the literal. On the ambient `@router`
+    // the argument emits UNCHANGED — the ambience's const conditional
+    // does the checking; on an accessor call the package's `Router`
+    // types `push`/`replace` on plain `string`, so the literal wraps in
+    // the TS-only `__ripRoute` like an href.
+    const wrap = this._routerArgs?.get(arg);
+    if (wrap !== undefined) {
       this._routerArgs.delete(arg);
-      if (router.wrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
+      if (wrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
       const valStart = this.b.offset;
       this.expr(arg);
-      this.routeWrapSpans.push({ key: router.key, value: [valStart, this.b.offset] });
-      if (router.wrap) this.b.tsOnly(() => this.b.emit(')'));
+      this.routeWrapSpans.push({ key: null, value: [valStart, this.b.offset] });
+      if (wrap) this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
@@ -13744,17 +13769,42 @@ class Emitter {
     return isNode(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && x[2] === name;
   }
 
+  // The stash module's top-level keys, read off the binding's object
+  // literal (a single-argument call around one — `createStash {…}` —
+  // reads through). Plain, quoted, and shorthand keys are named; a
+  // computed key or a spread makes the set INCOMPLETE — the names found
+  // are still real, but a miss cannot list them as the whole stash.
+  // Null when the binding's value is not an object literal at all.
+  static stashKeysOf(sexpr, local) {
+    let value = null;
+    for (const s of sexpr.slice(1)) {
+      const decl = isNode(s) && s[0] === 'export' ? s[1] : s;
+      if (isNode(decl) && decl[0] === '=' && decl[1] === local) { value = decl[2]; break; }
+    }
+    if (isNode(value) && value.length === 2 && typeof value[0] === 'string' && isNode(value[1]) && value[1][0] === 'object') value = value[1];
+    if (!isNode(value) || value[0] !== 'object') return null;
+    const keys = [];
+    let complete = true;
+    for (const entry of value.slice(1)) {
+      if (!isNode(entry)) continue;
+      if (entry[0] === '...') { complete = false; continue; }
+      const key = entry[0] === ':' ? entry[1] : entry[0] === null ? entry[1] : null;
+      if (typeof key !== 'string') { complete = false; continue; }
+      keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
+    }
+    return { keys, complete };
+  }
+
   // The router surface's twin: a call whose callee chain is EXACTLY
   // `this.router.push` / `this.router.replace`, or the barrel
   // accessor's `currentRouter().push` / `currentRouter()?.push` (and
   // `replace`), with a quoted string literal first argument. The
-  // method-name and argument spans join routeWrapSpans so the mismatch
-  // re-anchors on the METHOD NAME and completions know the slot. On the
-  // ambient router nothing is emitted (its const conditional checks the
-  // literal); on the accessor `wrap` asks callArg for the `__ripRoute`
-  // wrap. A component declaring its own `router` member shadows the
-  // ambient router; its calls stay unrecorded, as does every
-  // non-router `.push`.
+  // argument span joins routeWrapSpans so completions know the slot.
+  // On the ambient router nothing is emitted (its const conditional
+  // checks the literal); on the accessor `wrap` asks callArg for the
+  // `__ripRoute` wrap. A component declaring its own `router` member
+  // shadows the ambient router; its calls stay unrecorded, as does
+  // every non-router `.push`.
   routerArgOf(node) {
     if (!this.ts || this.routesUnion === null) return null;
     const arg = node[1];
@@ -17499,6 +17549,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       return null;
     })();
     if (stashLocal !== null) {
+      emitter.stashKeys = Emitter.stashKeysOf(parseResult.sexpr, stashLocal);
       builder.tsOnly(() => {
         // `typeof stash` repeats the stash binding's name; the copy marks
         // the binding's own declaration bytes, so a rename reaches it.
@@ -17656,7 +17707,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

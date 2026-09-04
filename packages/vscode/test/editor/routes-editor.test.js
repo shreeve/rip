@@ -263,12 +263,12 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       expect(typo.message).toContain('`/orders/:id`');
       expect(typo.message).not.toContain('${string}');
 
-      // A push typo anchors on the METHOD NAME — the other half of the
-      // meaningful-token rule.
+      // A push typo stays on the LITERAL — a call argument's anchor,
+      // where the suggestion's fix goes.
       const pushTypo = diags.find((d) => d.message.includes('"/cartz"'));
       expect(pushTypo).toBeDefined();
-      expect(pushTypo.range.start).toEqual({ line: 1, character: 17 });
-      expect(pushTypo.range.end).toEqual({ line: 1, character: 21 });
+      expect(pushTypo.range.start).toEqual({ line: 1, character: 22 });
+      expect(pushTypo.range.end).toEqual({ line: 1, character: 30 });
     });
   }, 60_000);
 });

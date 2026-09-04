@@ -4517,15 +4517,18 @@ describeExtended('rip check: typed routes over the real server', () => {
       // positions (2345 — the six route surfaces and the source key).
       expect(diags.length).toBe(8);
       expect(new Set(diags.map((d) => d.code))).toEqual(new Set([2820, 2345]));
-      // Every route mismatch anchors on its surface's MEANINGFUL
-      // TOKEN: the four attribute typos on the pair's KEY — the anchor
-      // every other mistyped attribute in the DSL reports on — and the
-      // router calls on the METHOD NAME (v3 parity on both).
+      // Every mismatch anchors where tsgo anchors the construct the
+      // lowering mimics: the four attribute typos on the pair's KEY (a
+      // JSX attribute's anchor — the one every other mistyped attribute
+      // in the DSL reports on), a call argument on the literal, and a
+      // member declaration's own mismatch on the NAME — not the whole
+      // declaration the lowered `this.bogus = …` write would cover.
       const lines = BAD.split('\n');
       const spanText = (d) => lines[d.line - 1].slice(d.column - 1, d.endColumn - 1);
       expect(diags.filter((d) => spanText(d) === 'href').map((d) => d.line)).toEqual([10, 11, 12, 13]);
-      expect(diags.filter((d) => d.line === 6).map(spanText)).toEqual(['push']);
-      expect(diags.filter((d) => d.line === 7).map(spanText)).toEqual(['replace']);
+      expect(diags.filter((d) => d.line === 4).map(spanText)).toEqual(['bogus']);
+      expect(diags.filter((d) => d.line === 6).map(spanText)).toEqual(["'/cartz'"]);
+      expect(diags.filter((d) => d.line === 7).map(spanText)).toEqual(["'/ordersz'"]);
       // The source-key typo anchors at the literal (not a route
       // surface; v3 parity — v3 never snapped source()).
       expect(diags.filter((d) => d.line === 8).map(spanText)).toEqual(["'userz'"]);
@@ -4536,11 +4539,17 @@ describeExtended('rip check: typed routes over the real server', () => {
       const text = check(dir).stdout;
       expect(text).toContain('"/carts"');
       expect(text).toContain('"/" | "/cart" | "/docs" | `/docs/:page` | "/orders" | `/orders/:id` | "/settings"');
-      // No ROUTE member ever reads as its checked form. The source-key
-      // union's dotted arms (`user.${string}`) keep theirs — that is
-      // the honest spelling of "any dotted path under this key".
+      // No ROUTE member ever reads as its checked form.
       expect(text).not.toContain('/docs/${string}');
       expect(text).not.toContain('/orders/${string}');
+      // A static route one slip away is named, in tsgo's own annotation
+      // words (the RoutePath line's TS2820 reads the same way).
+      expect(text).toContain(`'"/cartz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/cart"'?`);
+      expect(text).toContain(`'"/ordersz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/orders"'?`);
+      // The source-key miss reads as one — the checker's union of keys
+      // and dotted arms never prints — with the nearest key named.
+      expect(text).toContain("'userz' is not a stash key — did you mean 'user'?");
+      expect(text).not.toContain('user.${string}');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
@@ -4577,9 +4586,44 @@ describeExtended('rip check: typed routes over the real server', () => {
       // name. The non-optional spellings add strict's own TS2532 on
       // the possibly-undefined receiver and nothing else.
       expect(diags.filter((d) => d.code === 2345).map((d) => [d.line, spanText(d)])).toEqual([
-        [14, "'userz'"], [15, 'push'], [16, 'replace'], [17, "'userz'"], [18, 'push'],
+        [14, "'userz'"], [15, "'/cartz'"], [16, "'/ordersz'"], [17, "'userz'"], [18, "'/cartz'"],
       ]);
       expect(diags.filter((d) => d.code !== 2345).map((d) => [d.code, d.line])).toEqual([[2532, 17], [2532, 18]]);
+      // The accessor's misses read in the same words as the ambient forms'.
+      expect(diags.filter((d) => d.code === 2345 && (d.line === 14 || d.line === 17)).map((d) => d.message)).toEqual([
+        "'userz' is not a stash key — did you mean 'user'?",
+        "'userz' is not a stash key — did you mean 'user'?",
+      ]);
+      expect(diags.find((d) => d.line === 15).message).toEndWith(`Did you mean '"/cart"'?`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
+  test('the stash reads as the stash: a member miss names it, a handle prints one arm', () => {
+    const dir = workspace({
+      ...ROUTE_FILES,
+      'app/routes/index.rip': [
+        'export Home = component',
+        '  bad: ->',
+        '    @stash.userz = 1',
+        "    s: string = @stash.source('user')",
+        "    @stash.source('user').valu",
+        '  render null',
+        '',
+      ].join('\n'),
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout)
+        .filter((d) => d.file.endsWith('app/routes/index.rip'));
+      expect(diags.map((d) => [d.line, d.code, d.message])).toEqual([
+        // The ambience's expansion (every entry's declaration shape and
+        // the method surface) never prints; the miss is worded from the
+        // stash module's own keys.
+        [3, 2551, "'userz' is not on the stash — did you mean 'user'?"],
+        // A singleton entry's handle is ONE handle: its `T | null` value
+        // does not distribute into a `SourceHandle<never>` arm.
+        [4, 2322, "Type 'SourceHandle<{ name: string; }>' is not assignable to type 'string'."],
+        [5, 2551, "Property 'valu' does not exist on type 'SourceHandle<{ name: string; }>'. Did you mean 'value'?"],
+      ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

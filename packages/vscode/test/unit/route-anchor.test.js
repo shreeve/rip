@@ -1,16 +1,18 @@
-// The route-mismatch anchor is the feature's MEANINGFUL TOKEN, by
-// surface, through ONE mechanism: the emitter records a key/value span
-// pair per checked surface (the pair's key for an attribute's
-// `__ripRoute` wrap, the METHOD NAME for a `push`/`replace` argument),
-// and a diagnostic covering EXACTLY a recorded value re-anchors on its
-// key — the anchor every other mistyped attribute in the render DSL
-// reports on, and v3's method anchor for the programmatic surfaces. A
-// diagnostic interior to a recorded value (an interpolated
-// expression's own defect) keeps its exact position, and an ordinary
-// `.push(` — an array's, even one whose element type IS the route
-// union — can never snap: no span was recorded for it, and the
-// message text is never consulted. Driven through the one honest
-// mapping road (mapTsDiagnostic) over real compile() output.
+// The route-mismatch anchor is where tsgo anchors the construct the
+// lowering mimics, through ONE mechanism: the emitter records a
+// key/value span pair per checked surface, and a diagnostic covering
+// EXACTLY a recorded value re-anchors on its key — the pair's key for
+// an attribute's `__ripRoute` wrap (a JSX attribute's anchor, the one
+// every other mistyped attribute in the render DSL reports on); a
+// `push`/`replace` argument records NO key and keeps the literal, a
+// call argument's anchor. A diagnostic interior to a recorded value
+// (an interpolated expression's own defect) keeps its exact position,
+// and an ordinary `.push(` — an array's, even one whose element type
+// IS the route union — can never snap: no span was recorded for it,
+// and the message text is never consulted. A member initializer's
+// lowered write re-anchors on the member's NAME the same way. Driven
+// through the one honest mapping road (mapTsDiagnostic) over real
+// compile() output.
 import { test, expect } from 'bun:test';
 import { compile } from '../../../../src/compile.js';
 import { mapTsDiagnostic } from '../../src/diagnostics.js';
@@ -18,6 +20,7 @@ import { lineStartsOf, offsetToPosition } from '../../src/translate.js';
 
 const source = [
   'Page = component',
+  "  nav: RoutePath = '/cartz'",
   '  go: ->',
   "    @router.push '/cartz'",
   "    @list.push '/cartz'",
@@ -34,6 +37,7 @@ const good = {
   genLineStarts: lineStartsOf(result.code),
   strict: true,
   routeWraps: result.routeWraps,
+  memberInits: result.memberInits,
   routeEntries: [
     { shape: '/', text: '"/"', display: '/' },
     { shape: '/cart', text: '"/cart"', display: '/cart' },
@@ -51,7 +55,8 @@ const sourceTextOf = (m) => {
   const off = (p) => good.srcLineStarts[p.line] + p.character;
   return source.slice(off(m.range.start), off(m.range.end));
 };
-const wrapKeyed = (bytes) => result.routeWraps.find((w) => result.code.slice(w.key[0], w.key[1]) === bytes);
+const wrapKeyed = (bytes) => result.routeWraps.find((w) => w.key !== null && result.code.slice(w.key[0], w.key[1]) === bytes);
+const routerWrap = () => result.routeWraps.find((w) => w.key === null);
 // The generated argument span of a `.receiver.method("...")` call.
 const argSpanOf = (receiver) => {
   const at = result.code.indexOf(`${receiver}.push("/cartz")`);
@@ -64,7 +69,7 @@ test('the compile records both surfaces: key and value spans hold their bytes', 
   expect(result.routeWraps.length).toBe(2);
   const href = wrapKeyed('href');
   expect(result.code.slice(href.value[0], href.value[1])).toBe('"/carts"');
-  const push = wrapKeyed('push');
+  const push = routerWrap();
   expect(result.code.slice(push.value[0], push.value[1])).toBe('"/cartz"');
   // The router entry's value IS the argument span — no wrap bytes
   // surround it (the ambience's const conditional does the checking).
@@ -84,11 +89,22 @@ test('a diagnostic interior to the value keeps its own position', () => {
   expect(sourceTextOf(mapped)).not.toBe('href');
 });
 
-test('a route mismatch in a router-method argument anchors on the method name', () => {
+test('a route mismatch in a router-method argument stays on the literal', () => {
   // A generic message: the span alone carries the decision.
   const mapped = mapTsDiagnostic(good, diagnosticAt(argSpanOf('this.router')));
   expect(mapped).not.toBeNull();
-  expect(sourceTextOf(mapped)).toBe('push');
+  expect(sourceTextOf(mapped)).toBe("'/cartz'");
+});
+
+test('a mismatch on a member initializer\'s lowered write anchors on the member name', () => {
+  const at = result.code.indexOf('this.nav = ');
+  expect(at).toBeGreaterThan(-1);
+  expect(result.memberInits.map((m) => [source.slice(...m.key), result.code.slice(...m.site)])).toContainEqual(['nav', 'this.nav']);
+  const mapped = mapTsDiagnostic(good, { ...diagnosticAt([at, at + 'this.nav'.length]), code: 2820 });
+  expect(sourceTextOf(mapped)).toBe('nav');
+  // A diagnostic on the literal alone keeps its own position.
+  const lit = at + 'this.nav = '.length;
+  expect(sourceTextOf(mapTsDiagnostic(good, diagnosticAt([lit, lit + '"/cartz"'.length])))).toBe("'/cartz'");
 });
 
 test("an ordinary .push( never snaps — even with a route-membered parameter type", () => {

@@ -785,6 +785,21 @@ const rawCompile = (fsPath, source, sourceHash) => rawCompileEntry(fsPath, sourc
 // An OPEN buffer answers over disk, matching every other cross-file answer:
 // the importer must be checked against the dependency the author is looking
 // at, not the one they last saved.
+// The stash module's keys for a dependent at `uri`, through the raw
+// compile cache (the open buffer's text when the stash is open, the
+// disk's otherwise). Null when the file has no stash, the stash cannot
+// be read, or its binding is not an object literal.
+function stashKeysFor(stashSpec, uri) {
+  if (stashSpec === null) return null;
+  let stashPath;
+  try { stashPath = path.resolve(path.dirname(fileURLToPath(uri)), stashSpec); } catch { return null; }
+  const open = documents.get('file://' + stashPath);
+  let source;
+  if (open) source = open.getText();
+  else { try { source = fs.readFileSync(stashPath, 'utf8'); } catch { return null; } }
+  try { return rawCompile(stashPath, source, hashText(source)).stashKeys ?? null; } catch { return null; }
+}
+
 const typedExportCache = new Map(); // fsPath → { sourceHash, names }
 function typedExportsFor(fsPath) {
   const open = documents.get('file://' + fsPath);
@@ -1779,6 +1794,7 @@ async function refresh(document) {
   // Hoisted past the try: the good object below carries the entries the
   // compile ran under.
   let routes = { union: null, params: null, entries: [] };
+  let stashSpec = null;
   try {
     // The TS FACE: the mirror carries Rip's type
     // information — annotations, structured type/interface
@@ -1804,7 +1820,7 @@ async function refresh(document) {
     // callable lines are recovery units. Other positioned rejections,
     // including incomplete token bodies and schema directives, reach the
     // catch below and ride the last good face.
-    const stashSpec = (() => { try { return appStashSpecFor(fileURLToPath(document.uri), workspaceRoot); } catch { return null; } })();
+    stashSpec = (() => { try { return appStashSpecFor(fileURLToPath(document.uri), workspaceRoot); } catch { return null; } })();
     // The same URI-vs-fsPath trap as the stash walk: discovery walks
     // the FILESYSTEM, so it takes the converted path, never the URI.
     try { routes = appRoutesFor(fileURLToPath(document.uri), workspaceRoot); } catch { /* non-file uri — stays unarmed */ }
@@ -1831,6 +1847,15 @@ async function refresh(document) {
     // Generated key/value spans of the `__ripRoute` attribute wraps —
     // the diagnostics road re-anchors a whole-value mismatch on the key.
     routeWraps: result.routeWraps ?? [],
+    // Generated spans of the `__ripSourceKey`-wrapped literals and the
+    // ambient `@stash.<name>` member names, and the stash module's own
+    // keys — a miss covering a recorded span is worded from these.
+    sourceKeys: result.sourceKeys ?? [],
+    stashMembers: result.stashMembers ?? [],
+    stashKeys: stashKeysFor(stashSpec, document.uri),
+    // Per member initializer, the lowered write's left-hand side and
+    // the name it lands on (diagnostics.js, recordedAnchor).
+    memberInits: result.memberInits ?? [],
     // Per render pair, the key's source span and the road's generated
     // relation sites — a diagnostic standing on a site re-anchors on the
     // key (diagnostics.js, recordedAnchor; RULINGS.md).

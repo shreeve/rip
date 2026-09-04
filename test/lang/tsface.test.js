@@ -288,9 +288,10 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
       expect(faced.code).toContain('currentStash().source("user")');
       expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
       expect(faced.code).toContain('declare function __ripSourceKey<const T extends');
-      const spanText = ([start, end]) => faced.code.slice(start, end);
-      expect(faced.routeWraps.map((w) => [spanText(w.key), spanText(w.value)])).toEqual([
-        ['push', '"/cart"'], ['push', '"/"'], ['replace', '"/cart"'], ['replace', '"/"'],
+      // A router argument records with no key: the mismatch stays on
+      // the literal, and the span still tells completions the slot.
+      expect(faced.routeWraps.map((w) => [w.key, faced.code.slice(...w.value)])).toEqual([
+        [null, '"/cart"'], [null, '"/"'], [null, '"/cart"'], [null, '"/"'],
       ]);
     }
   });
