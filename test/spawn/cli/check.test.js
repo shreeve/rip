@@ -4544,6 +4544,45 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
+  test('the app accessors check outside any component: currentStash()/currentRouter(), optional-chained or not', () => {
+    const NAV = [
+      "import { currentRouter as cr, currentStash } from 'rip/app'",
+      '',
+      'export leave = ->',
+      "  currentStash()?.source('user').reset()",
+      "  currentStash()?.source('user.name').reset()",
+      "  cr()?.push('/cart')",
+      "  cr()?.replace('/orders')",
+      "  key = 'user'",
+      '  currentStash()?.source(key).reset()',
+      '  r = cr()',
+      "  r?.push('/not-a-route')",
+      '',
+      'export leaveBadly = ->',
+      "  currentStash()?.source('userz').reset()",
+      "  cr()?.push('/cartz')",
+      "  cr()?.replace('/ordersz')",
+      "  currentStash().source('userz').reset()",
+      "  cr().push('/cartz')",
+      '',
+    ].join('\n');
+    const dir = workspace({ ...ROUTE_FILES, 'app/nav.rip': NAV }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout)
+        .filter((d) => d.file.endsWith('app/nav.rip'));
+      const lines = NAV.split('\n');
+      const spanText = (d) => lines[d.line - 1].slice(d.column - 1, d.endColumn - 1);
+      // The two gates report exactly as they do on `@stash` / `@router`:
+      // the key typo at the literal, the route typos on the method
+      // name. The non-optional spellings add strict's own TS2532 on
+      // the possibly-undefined receiver and nothing else.
+      expect(diags.filter((d) => d.code === 2345).map((d) => [d.line, spanText(d)])).toEqual([
+        [14, "'userz'"], [15, 'push'], [16, 'replace'], [17, "'userz'"], [18, 'push'],
+      ]);
+      expect(diags.filter((d) => d.code !== 2345).map((d) => [d.code, d.line])).toEqual([[2532, 17], [2532, 18]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 120_000);
+
   test('per-route params: dynamic, catch-all, and optional shapes; statics and layouts keep the baseline', () => {
     const dir = workspace({
       ...ROUTE_FILES,

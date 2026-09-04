@@ -235,6 +235,80 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     }
   });
 
+  test('the app accessors check like the ambient members, optional-chained or not; aliases, dynamics, and shadows stay bare', () => {
+    const accessed = [
+      "import { currentStash, currentRouter as cr } from 'rip/app'",
+      '',
+      'currentRouter = -> cr()',
+      '',
+      'go = ->',
+      "  currentStash().source('user').reset()",
+      "  currentStash()?.source('user.name').reset()",
+      "  cr().push('/cart')",
+      "  cr()?.push('/')",
+      "  cr().replace('/cart')",
+      "  cr()?.replace('/')",
+      "  key = 'user'",
+      '  currentStash()?.source(key).reset()',
+      '  d = currentStash()',
+      "  d?.source('user').reset()",
+      '  r = cr()',
+      "  r?.push('/cart')",
+      "  currentRouter().push('/cart')",
+      '',
+      "shadow = (currentStash) -> currentStash().source('user')",
+      '',
+    ].join('\n');
+    const ROUTES = '"/" | "/cart"';
+    for (const runtimeDelivery of ['none', 'inline', 'import']) {
+      const opts = { path: 'accessors-fixture.rip', runtimeDelivery, appStashSpec: './stash.rip', routesUnion: ROUTES };
+      const faced = compile(accessed, { ...opts, face: 'ts' });
+      const plain = compile(accessed, opts);
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+      for (const [start, end] of faced.tsRegions) {
+        const text = faced.code.slice(start, end).trim();
+        expect(
+          REGION_SHAPES.some((re) => re.test(text)),
+          `unrecognized TS-only region shape under the accessors: ${JSON.stringify(text)}`,
+        ).toBe(true);
+      }
+      expect(plain.code).toBe(compile(accessed, { path: 'accessors-fixture.rip', runtimeDelivery }).code);
+      expect(faced.code).toContain('currentStash().source(__ripSourceKey("user"))');
+      expect(faced.code).toContain('currentStash()?.source(__ripSourceKey("user.name"))');
+      expect(faced.code).toContain('cr().push(__ripRoute("/cart"))');
+      expect(faced.code).toContain('cr()?.push(__ripRoute("/"))');
+      expect(faced.code).toContain('cr().replace(__ripRoute("/cart"))');
+      expect(faced.code).toContain('cr()?.replace(__ripRoute("/"))');
+      expect(faced.code.match(/__ripSourceKey\(/g)).toHaveLength(2);
+      expect(faced.code.match(/__ripRoute\(/g)).toHaveLength(4);
+      expect(faced.code).toContain('source(key)');
+      expect(faced.code).toContain('d?.source("user")');
+      expect(faced.code).toContain('r?.push("/cart")');
+      expect(faced.code).toContain('currentRouter().push("/cart")');
+      expect(faced.code).toContain('currentStash().source("user")');
+      expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
+      expect(faced.code).toContain('declare function __ripSourceKey<const T extends');
+      const spanText = ([start, end]) => faced.code.slice(start, end);
+      expect(faced.routeWraps.map((w) => [spanText(w.key), spanText(w.value)])).toEqual([
+        ['push', '"/cart"'], ['push', '"/"'], ['replace', '"/cart"'], ['replace', '"/"'],
+      ]);
+    }
+  });
+
+  test('the accessors are the barrel\'s: the same names from elsewhere, or under a type-only import, never wrap', () => {
+    const ROUTES = '"/" | "/cart"';
+    for (const importLine of [
+      "import { currentStash, currentRouter } from './mine.rip'",
+      "import type { currentStash, currentRouter } from 'rip/app'",
+    ]) {
+      const src = [importLine, "go = ->", "  currentStash()?.source('user')", "  currentRouter()?.push('/cart')", ''].join('\n');
+      const faced = compile(src, { path: 'accessors-fixture.rip', runtimeDelivery: 'none', appStashSpec: './stash.rip', routesUnion: ROUTES, face: 'ts' });
+      expect(faced.code).not.toContain('__ripSourceKey');
+      expect(faced.code).not.toContain('__ripRoute');
+      expect(faced.routeWraps).toEqual([]);
+    }
+  });
+
   test('a user-declared RoutePath wins: the ambient alias stays out', () => {
     const declared = "type RoutePath = string\n" + src;
     const faced = compile(declared, routed({ runtimeDelivery: 'none', face: 'ts' }));

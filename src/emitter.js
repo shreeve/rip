@@ -452,6 +452,11 @@ class Emitter {
     // params — it tightens the component's `params` ambience.
     this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
     this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
+    // The local bindings of the app barrel's accessors (`currentStash`,
+    // `currentRouter` imported as values from 'rip/app'), null for one
+    // the module does not import. A call of either is a checked
+    // receiver alongside the ambient `@stash` / `@router`.
+    this.appAccessors = { stash: null, router: null };
     // Generated spans of each route-checked surface, KEY and VALUE: on
     // an ATTRIBUTE surface (intrinsic `a href:`, a child component's
     // `href:` prop) the key is the pair's key and the value is the
@@ -3213,6 +3218,38 @@ class Emitter {
       }
     }
     for (const name of bound) if (inTypes.has(name) && !used.has(name)) this.typeOnlyImports.add(name);
+  }
+
+  // The barrel's accessor bindings: top-level value imports from
+  // 'rip/app' only, under whatever local name the clause gives them.
+  // The same names from any other module are unrelated bindings, and
+  // a type-only import cannot be called.
+  collectAppAccessors(sexpr) {
+    this.appAccessors = { stash: null, router: null };
+    for (const x of sexpr.slice(1)) {
+      if (!isModuleImportNode(this.stores, x)) continue;
+      const from = x[x.length - 1];
+      if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
+      const id = this.stores.idOf(x);
+      if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
+      for (const spec of x.slice(1, -1)) {
+        if (!isNode(spec) || spec[0] === '*') continue;
+        for (const s of spec) {
+          const imported = isNode(s) ? s[0] : s;
+          const local = isNode(s) ? s[1] : s;
+          if (imported === 'currentStash') this.appAccessors.stash = local;
+          else if (imported === 'currentRouter') this.appAccessors.router = local;
+        }
+      }
+    }
+  }
+
+  // A zero-argument call of an accessor's local binding, reached
+  // through no inner scope that rebinds the name (a parameter of the
+  // same name is a different binding).
+  isAccessorCall(x, local) {
+    if (local === null || !isNode(x) || x.length !== 1 || x[0] !== local) return false;
+    return !this.scopes.slice(1).some((sc) => sc.has(local));
   }
 
   collectTsDirectives(sexpr, trivia, source) {
@@ -13506,7 +13543,8 @@ class Emitter {
         // frames emitted, so its generated span ends exactly here.
         const routerArg = this.routerArgOf(n);
         if (routerArg !== null) {
-          (this._routerArgs ??= new Map()).set(routerArg.arg, [this.b.offset - routerArg.method.length, this.b.offset]);
+          (this._routerArgs ??= new Map()).set(routerArg.arg, { key: [this.b.offset - routerArg.method.length, this.b.offset], wrap: routerArg.wrap });
+          if (routerArg.wrap) this._needsRouteHelper = true;
         }
         this.mark(n, 'args', () => {
           this.b.emit('(');
@@ -13656,24 +13694,30 @@ class Emitter {
       this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
-    // A registered router argument emits UNCHANGED — the ambience's
-    // const conditional does the checking — but its generated span
-    // pairs with the method name recorded at registration, the same
-    // key/value shape the attribute wraps publish.
-    const routerKey = this._routerArgs?.get(arg);
-    if (routerKey !== undefined) {
+    // A registered router argument's generated span pairs with the
+    // method name recorded at registration, the same key/value shape
+    // the attribute wraps publish. On the ambient `@router` the
+    // argument emits UNCHANGED — the ambience's const conditional does
+    // the checking; on an accessor call the package's `Router` types
+    // `push`/`replace` on plain `string`, so the literal wraps in the
+    // TS-only `__ripRoute` like an href.
+    const router = this._routerArgs?.get(arg);
+    if (router !== undefined) {
       this._routerArgs.delete(arg);
+      if (router.wrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
       const valStart = this.b.offset;
       this.expr(arg);
-      this.routeWrapSpans.push({ key: routerKey, value: [valStart, this.b.offset] });
+      this.routeWrapSpans.push({ key: router.key, value: [valStart, this.b.offset] });
+      if (router.wrap) this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
     this.expr(arg);
   }
 
-  // The one checked spelling of a stash-handle ask: a call whose callee
-  // chain is EXACTLY `this.stash.source` (`@stash.source(...)`)
+  // The checked spellings of a stash-handle ask: a call whose callee
+  // chain is EXACTLY `this.stash.source` (`@stash.source(...)`) or the
+  // barrel accessor's `currentStash().source` / `currentStash()?.source`,
   // and whose first argument is a plain quoted string literal. A bound
   // alias (`d = @stash; d.source(...)`) or a computed key stays on
   // the package's permissive overload — the same syntactic-gate
@@ -13686,31 +13730,44 @@ class Emitter {
     const arg = node[1];
     if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
     const callee = node[0];
-    if (!isNode(callee) || callee[0] !== '.' || callee.length !== 3 || callee[2] !== 'source') return null;
-    const stash = callee[1];
-    if (!isNode(stash) || stash[0] !== '.' || stash.length !== 3 || stash[1] !== 'this' || stash[2] !== 'stash') return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
-    return arg;
+    if (!isNode(callee) || callee.length !== 3 || callee[2] !== 'source') return null;
+    const recv = callee[1];
+    if (callee[0] === '.' && Emitter.isThisMember(recv, 'stash')) {
+      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
+      return arg;
+    }
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.stash)) return arg;
+    return null;
+  }
+
+  static isThisMember(x, name) {
+    return isNode(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && x[2] === name;
   }
 
   // The router surface's twin: a call whose callee chain is EXACTLY
-  // `this.router.push` / `this.router.replace` with a quoted string
-  // literal first argument. Nothing is emitted for it — the ambience's
-  // const conditional checks the literal — but the method-name and
-  // argument spans join routeWrapSpans so the mismatch re-anchors on
-  // the METHOD NAME and completions know the slot. A component
-  // declaring its own `router` member shadows the ambient router; its
-  // calls stay unrecorded, as does every non-router `.push`.
+  // `this.router.push` / `this.router.replace`, or the barrel
+  // accessor's `currentRouter().push` / `currentRouter()?.push` (and
+  // `replace`), with a quoted string literal first argument. The
+  // method-name and argument spans join routeWrapSpans so the mismatch
+  // re-anchors on the METHOD NAME and completions know the slot. On the
+  // ambient router nothing is emitted (its const conditional checks the
+  // literal); on the accessor `wrap` asks callArg for the `__ripRoute`
+  // wrap. A component declaring its own `router` member shadows the
+  // ambient router; its calls stay unrecorded, as does every
+  // non-router `.push`.
   routerArgOf(node) {
     if (!this.ts || this.routesUnion === null) return null;
     const arg = node[1];
     if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
     const callee = node[0];
-    if (!isNode(callee) || callee[0] !== '.' || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
-    const router = callee[1];
-    if (!isNode(router) || router[0] !== '.' || router.length !== 3 || router[1] !== 'this' || router[2] !== 'router') return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
-    return { arg, method: callee[2] };
+    if (!isNode(callee) || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
+    const recv = callee[1];
+    if (callee[0] === '.' && Emitter.isThisMember(recv, 'router')) {
+      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
+      return { arg, method: callee[2], wrap: false };
+    }
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, method: callee[2], wrap: true };
+    return null;
   }
 
   // Binary emission is ITERATIVE over the left spine: a flat
@@ -17106,6 +17163,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // before all code.
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
+  emitter.collectAppAccessors(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
