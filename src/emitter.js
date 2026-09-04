@@ -508,6 +508,12 @@ class Emitter {
     // `pinnables` for the emit() result, whatever face is running.
     this.pins = pins;
     this.pinnables = [];
+    // First-write nodes whose hoist line took a pin. The pin is the
+    // write's own inferred type, so the write never needs it as a
+    // contextual type — and under rip.strict it must not have it: a
+    // contextual `any` is not an implicit one, so the pin would silence
+    // TS7006 at exactly the parameters an unpinned definition reports.
+    this.pinnedWrites = new Set();
     // Generated `[start, end]` spans of `:=` state names. The face binds the
     // CELL with `const`, but rip lets you assign to the NAME (`clicks = 5` →
     // `clicks.value = 5`), so TypeScript's `readonly` classification describes
@@ -4376,6 +4382,7 @@ class Emitter {
             const pinKey = entries.pinnable?.get(name)?.key ?? null;
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined) this.b.tsOnly(() => {
+              this.pinnedWrites.add(entries.pinnable.get(name).node);
               const at = this.b.offset;
               this.b.emit(`${this.strict ? '' : '!'}: `);
               // The pin is a TYPE the checker inferred, and it spells the
@@ -8226,7 +8233,14 @@ class Emitter {
         const text = this.annotationText(node, 'typeParams');
         this._componentTypeParams = text === null ? null : { text, owner: node };
       }
+      // A pinned first write under rip.strict checks without the pin as
+      // its contextual type (pinnedWrites); the assignment still checks
+      // against the pin. TS-only grouping parens: an arrow value would
+      // otherwise swallow the clause into its body.
+      const severed = this.ts && this.strict && this.pinnedWrites.has(node);
+      if (severed) this.b.tsOnly(() => this.b.emit('('));
       this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
+      if (severed) this.b.tsOnly(() => this.b.emit(') satisfies unknown'));
       this._schemaName = prevSchemaName;
       this._componentName = prevComponentName;
       this._componentTypeParams = prevComponentTypeParams;

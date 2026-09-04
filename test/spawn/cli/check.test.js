@@ -3849,6 +3849,29 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // Under rip.strict a pinned first write reports its implicit-any
+  // parameters exactly as an unpinned one does. `later` is read across a
+  // closure above its definition, so it stays hoisted and the pin pass
+  // types its hoist line from the definition itself; `first` declares in
+  // place. Both definitions are the same unannotated function.
+  test('strict: a pinned forward definition reports TS7006 like a declare-in-place one', () => {
+    const dir = workspace({
+      'forward.rip': [
+        'export before = -> later(1, 2)',
+        'later = (a, b) -> a + b',
+        '',
+        'first = (a, b) -> a + b',
+        'export after = -> first(1, 2)',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      expect(diags.map((d) => [d.code, d.line, d.column])).toEqual([
+        [7006, 2, 10], [7006, 2, 13], [7006, 4, 10], [7006, 4, 13],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   // relatedInformation ("x is declared here") rides the diagnostic pull
   // (the checker advertises the capability at handshake), and the checker
   // maps each secondary location back onto .rip source.

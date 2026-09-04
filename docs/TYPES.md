@@ -370,7 +370,11 @@ controls editor presentation:
 ```
 
 `strict` surfaces implicit-any diagnostics and enables
-use-before-assignment checking for typed forwards. `noCheck` suppresses
+use-before-assignment checking for typed forwards. A pinned hoist line
+never stands in for the definition it was inferred from: the first write
+of a pinned binding checks without the pin as its contextual type, so an
+unannotated parameter reports there whether or not the binding is read
+before it is defined. `noCheck` suppresses
 diagnostics for matching paths while keeping those files in the
 TypeScript program so imports continue to resolve.
 
