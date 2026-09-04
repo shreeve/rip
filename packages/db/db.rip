@@ -41,7 +41,6 @@ import {
   harborAdapter
   resolveUrl
   resolveTarget
-  envToken
   DbError
   ConnectionError
   QueryError
@@ -51,9 +50,7 @@ import {
 
 # `encodeParams` is deliberately not among them: it is harbor's wire
 # encoder, internal to the transport, and not part of this package's
-# surface. ROOT_EXPORTS in test.rip pins that. `envToken` is imported
-# for the MCP entry's missing-credential warning and stays private for
-# the same reason.
+# surface. ROOT_EXPORTS in test.rip pins that.
 export {
   harborAdapter
   resolveUrl
@@ -305,7 +302,7 @@ export def createClient(adapter, defaults = {})
 # One process-wide default adapter+client. `connect(...)` installs (and
 # rewires) it; module-level `sql` / `findOne` / `findAll` /
 # `transaction` read it on every call. Omit `connect` and the first
-# module-level call lazy-installs from RIP_DB_URL / RIP_DB_TOKEN. Power
+# module-level call lazy-installs from RIP_DB_URL. Power
 # users still build `harborAdapter` + `createClient` by hand; schema
 # `:model` shares the default via the soft doorbell above.
 
@@ -323,7 +320,7 @@ defaultPair = ->
   _default
 
 # Install (or rewire) the process default. Accepts `connect()`,
-# `connect(url)`, or `connect({ url, token, fetch, timeoutMs, adapter,
+# `connect(url)`, or `connect({ url, fetch, timeoutMs, adapter,
 # camel })`. Pass `adapter` to skip harbor (tests / custom wires);
 # `camel: true` makes the camelCase key projection this client's
 # default (a per-call `camel:` still wins). Returns the client;
@@ -343,7 +340,6 @@ export def connect(urlOrOpts = null, opts = {})
   else
     harborAdapter
       url: o.url
-      token: o.token
       fetch: o.fetch
       timeoutMs: o.timeoutMs
   installDefault adapter, createClient(adapter, { camel: o.camel ?? false })
@@ -465,20 +461,14 @@ export def show(result, opts = {})
 
 PROBE_TIMEOUT_MS =! 5000
 
-# GET /ready, which harbor leaves unauthenticated on purpose, so a probe
-# needs no credential. It runs `SELECT 1` and answers `{"status":"ready"}`
-# — an answer worth having, unlike the `/health` it replaced, which was a
-# hardcoded 200 that stayed cheerful while the executor thread was gone.
+# GET /ready, which harbor authenticates not at all, so a probe needs no
+# credential. It runs `SELECT 1` and answers `{"status":"ready"}` — an
+# answer worth having, rather than a hardcoded 200 that would stay
+# cheerful while the executor thread was gone.
 #
-# `/health` is still tried, but only on a 404: harbors predating the swap
-# are still out there, and a boot probe that fails against a database
-# that is up and serving is worse than one extra round trip on the older
-# server. Both spellings of "yes" are accepted for the same reason.
-#
-# Anything else -- a 503, a body that says neither, a transport failure,
-# or a timeout -- reads as not reachable. The timeout keeps a half-open
-# TCP from hanging boot forever, and it covers both probes together, so
-# the fallback cannot double it.
+# Anything else -- a 503, a body that does not say ready, a transport
+# failure, or a timeout -- reads as not reachable. The timeout keeps a
+# half-open TCP from hanging boot forever.
 # Takes a resolved TARGET ({base, unix, shown} from resolveTarget), not
 # a bare url — the probe dials both transports, wrapping its fetch for
 # unix targets the same way harborAdapter does.
@@ -489,22 +479,17 @@ reachable = (target, fetchFn) ->
     fetchFn
   ctrl = AbortController.new()
   timer = setTimeout (-> ctrl.abort()), PROBE_TIMEOUT_MS
-  affirmative = (data) ->
-    data?.status is 'ready' or data?.status is 'ok' or data?.ok is true
   try
     res = f! "#{target.base}/ready", { signal: ctrl.signal }
-    if res?.status is 404
-      res = f! "#{target.base}/health", { signal: ctrl.signal }
     return false unless res?.ok
-    affirmative res.json!
+    res.json!?.status is 'ready'
   catch
     false
   finally
     clearTimeout timer
 
-# Boot probe: GET /ready, falling back to /health on an older harbor.
-# Returns 'running' or throws. Prefer this name; `ensureRunning` is the
-# same check (apps still import that spelling).
+# Boot probe: GET /ready. Returns 'running' or throws. Prefer this name;
+# `ensureRunning` is the same check (apps still import that spelling).
 export def assertReachable(url = null, opts = {})
   fetchFn = opts.fetch ?? fetch
   target = resolveTarget url
@@ -525,11 +510,9 @@ export def ping(opts = {})
   unless reachable!(target, fetchFn)
     throw ConnectionError.new "db: harbor not reachable at #{target.shown}"
   # The ORIGINAL spelling goes to makeSql, not the resolved base — the
-  # adapter re-resolves it, which is what carries a harbor:<name>'s
-  # registry token through (o.token still wins when given).
+  # adapter re-resolves it, so a harbor:<name> stays a name.
   sql = makeSql
     url: o.url
-    token: o.token
     fetch: fetchFn
     timeoutMs: o.timeoutMs
   database = currentDatabase! sql
@@ -577,7 +560,6 @@ export unsafeTarPath = (raw) ->
 export makeSql = (opts = {}) ->
   adapter = harborAdapter
     url: opts.url
-    token: opts.token
     fetch: opts.fetch
     timeoutMs: opts.timeoutMs
   (query, params = null) ->
@@ -870,10 +852,8 @@ export def startStdio(options = {})
   flagIdx = argv.indexOf '--url'
   fromArgv = if flagIdx >= 0 then argv[flagIdx + 1] else null
   url = resolveUrl(options.url ?? fromArgv)
-  token = options.token ?? envToken()
-  sql = options.sql ?? makeSql({ url, token, fetch: options.fetch, timeoutMs: options.timeoutMs })
+  sql = options.sql ?? makeSql({ url, fetch: options.fetch, timeoutMs: options.timeoutMs })
   log = (...args) -> console.warn '[rip-db]', ...args
-  log "harbor requests will be rejected with MISSING_CREDENTIAL — set RIP_DB_TOKEN" unless token
   { dispatch } = createMcpServer { sql }
   rl = createInterface input: process.stdin
   log "Starting (harbor at #{url})"
@@ -909,7 +889,6 @@ duckdb-harbor instance separately and point RIP_DB_URL at it.
 
 Environment:
   RIP_DB_URL    Harbor base URL (default http://127.0.0.1:9495)
-  RIP_DB_TOKEN  Harbor bearer token (only when harbor requires one)
 '''
 
 HELP =! {
@@ -982,7 +961,7 @@ if import.meta.main
     process.on 'SIGINT', -> cleanup(); process.exit 130
     process.on 'SIGTERM', -> cleanup(); process.exit 143
     {
-      sql: makeSql({ url: process.env.RIP_DB_URL, token: process.env.RIP_DB_TOKEN or null })
+      sql: makeSql({ url: process.env.RIP_DB_URL })
       fs:
         exists: (p) -> existsSync(p)
         isDir: (p) -> try statSync(p).isDirectory() catch then false

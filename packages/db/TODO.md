@@ -45,8 +45,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   as pure resolution sugar, never a third transport: it reads
   `$HARBOR_HOME/runtime/<name>.json` (default `~/.local/state/harbor/runtime`), desugars to
   whichever spelling the berth registered (socket preferred, port
-  otherwise), and resolves the bearer token from `<name>.token`.
-  Precedence: explicit option → registry → `RIP_DB_TOKEN`. One resolver
+  otherwise). One resolver
   (`resolveTarget`, exported) feeds `harborAdapter` and the boot probe;
   the unix wrap happens ONCE per constructor so all call sites stay
   transport-blind. Registry reads go through `process.getBuiltinModule`
@@ -54,8 +53,8 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   fs fails `harbor:` names with the reason while raw spellings keep
   working. Scheme named for the system dialed (like
   `postgres:`/`redis:`), not harbor's internal "berth" vocabulary.
-  medlabs runs on `RIP_DB_URL=harbor:medlabs` (socket-only berth, no
-  `RIP_DB_TOKEN`) as the live proof.
+  medlabs runs on `RIP_DB_URL=harbor:medlabs` (socket-only berth) as
+  the live proof.
 
 - **medlabs' schema dump is checked in and diffed on every run.**
   `api/schema.sql` is committed, and `test/api/schema.test.rip` runs
@@ -164,7 +163,7 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
   harbor's deployment default (sends no field); `null` sends an explicit
   `0`, which harbor documents as "no limit". Harbor's protocol is
   per-request, so `query(sql, params, {timeoutMs})` is the same knob
-  rather than a second one. `schema.connect({url, token, timeoutMs})`
+  rather than a second one. `schema.connect({url, timeoutMs})`
   now forwards it — before, `defaultAdapter` hardcoded `0` and
   an app could not set a deadline at all.
   The migration runner opts out through one wrapper (`migrate.js`

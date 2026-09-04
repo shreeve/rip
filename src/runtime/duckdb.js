@@ -5,8 +5,8 @@
 // (the database), not for how it reaches it (the harbor wire service).
 //
 // It owns everything from the socket up to `{ columns, data, rowCount }`
-// with temporals decoded and a typed error thrown: URL and token
-// resolution, headers, NDJSON reading, error classification, timeouts,
+// with temporals decoded and a typed error thrown: URL resolution,
+// headers, NDJSON reading, error classification, timeouts,
 // caller aborts, statement cancellation, and the session lifecycle. It
 // owns nothing above that line — how a statement's TEXT is built and
 // what a ROW becomes belong to whoever called it.
@@ -43,10 +43,6 @@ function displayUrl(url) {
   return String(url).replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1<redacted>@');
 }
 
-function envToken() {
-  return (typeof process !== 'undefined' && process.env) ? process.env.RIP_DB_TOKEN : null;
-}
-
 // ── Target resolution: two transports plus one resolver ─────────────
 //
 // `http(s)://host:port` dials TCP. `unix:///path/to.sock` dials a unix
@@ -59,13 +55,11 @@ function envToken() {
 //
 //   <state>/runtime/<basename ≤40>-<fnv1a32(canonical path)>.sock
 //
-// and carries no token: the 0700 runtime dir is the credential. A
-// `url` entry is a remote — the url verbatim, token from `token` /
-// `token-file` / RIP_DB_TOKEN (never `token-cmd`: the one sh -c path
-// belongs to interactive fleet consumers, not a server booting). A
-// berth entry with `port` may be serving TCP instead of the socket
-// (an explicit start honors the port; a summon never does), so a live
-// socket wins and the configured port is the fallback.
+// and carries no credential: the 0700 runtime dir is the whole of it. A
+// `url` entry is a remote — the url verbatim. A berth entry with `port`
+// may be serving TCP instead of the socket (an explicit start honors the
+// port; a summon never does), so a live socket wins and the configured
+// port is the fallback.
 //
 // Reading the config needs a filesystem, which this otherwise
 // runtime-portable module must not import unconditionally.
@@ -104,9 +98,9 @@ function harborConfigRoot(env) {
 // The slice of TOML this resolver needs: `[section]` headers and scalar
 // `key = value` pairs (quoted strings, bare integers). Everything else
 // — arrays, inline tables, continuation lines — is skipped, not parsed:
-// the keys read here (path, url, token, token-file, port, bind) are all
-// scalars in harbor's schema, and a full TOML parser is not a
-// dependency this runtime-portable module gets to have.
+// the keys read here (path, url, port) are all scalars in harbor's
+// schema, and a full TOML parser is not a dependency this
+// runtime-portable module gets to have.
 function tomlScalars(text) {
   const sections = {};
   let current = null;
@@ -197,12 +191,7 @@ function resolveHarborName(name, env) {
   }
   if (conn.url) {
     const base = String(conn.url).replace(/\/+$/, '');
-    let token = conn.token || null;
-    if (!token && conn['token-file']) {
-      try { token = fs.readFileSync(expandTilde(conn['token-file'], env), 'utf8').trim() || null; } catch { /* unreadable → fall through */ }
-    }
-    token ||= env.RIP_DB_TOKEN || null;
-    return { base, unix: null, token, shown: `harbor:${name} (${displayUrl(base)})` };
+    return { base, unix: null, shown: `harbor:${name} (${displayUrl(base)})` };
   }
   if (!conn.path) {
     throw new ConnectionError(
@@ -211,11 +200,12 @@ function resolveHarborName(name, env) {
   const runtime = `${harborRoot(env)}/runtime`;
   const unix = socketFor(fs, runtime, expandTilde(conn.path, env));
   if (conn.port && !fs.existsSync(unix)) {
-    const host = conn.bind || '127.0.0.1';
-    const base = `http://${host}:${conn.port}`;
-    return { base, unix: null, token: env.RIP_DB_TOKEN || null, shown: `harbor:${name} (${base})` };
+    // Always loopback: harbor's TCP door is 127.0.0.1 by construction,
+    // and there is no `bind` key to say otherwise.
+    const base = `http://127.0.0.1:${conn.port}`;
+    return { base, unix: null, shown: `harbor:${name} (${base})` };
   }
-  return { base: 'http://harbor', unix, token: null, shown: `harbor:${name} (unix://${unix})` };
+  return { base: 'http://harbor', unix, shown: `harbor:${name} (unix://${unix})` };
 }
 
 // The one resolver every dialer uses. For plain http(s) URLs this is
@@ -226,9 +216,9 @@ function resolveTarget(url, env) {
   const harbor = raw.match(/^harbor:(?:\/\/)?([\w.-]+)$/);
   if (harbor) return resolveHarborName(harbor[1], env);
   const unix = raw.match(/^unix:\/\/(\/.+)$/);
-  if (unix) return { base: 'http://harbor', unix: unix[1], token: null, shown: raw };
+  if (unix) return { base: 'http://harbor', unix: unix[1], shown: raw };
   const base = raw.replace(/\/+$/, '');
-  return { base, unix: null, token: null, shown: displayUrl(base) };
+  return { base, unix: null, shown: displayUrl(base) };
 }
 
 // ── The typed error hierarchy ────────────────────────────────────────
@@ -400,8 +390,8 @@ function parseNdjson(text) {
         // Two fields, because they answer different questions.
         // `errorCode` decides the error CLASS and is engine-only.
         // `harborCode` is whatever harbor said, and rides along so a
-        // caller can tell a busy pool from a bad token without parsing
-        // prose.
+        // caller can tell a busy pool from a bad statement without
+        // parsing prose.
         if (msg.code != null) env.harborCode = msg.code;
         if (ENGINE_ERROR_CODES.includes(msg.code)) env.errorCode = msg.code;
         break;
@@ -495,7 +485,6 @@ function toResult(env) {
  *
  * @param {object} [opts]
  * @param {string} [opts.url]        harbor base URL; else RIP_DB_URL, else the default
- * @param {string} [opts.token]      bearer token; else RIP_DB_TOKEN
  * @param {Function} [opts.fetch]    injected fetch (tests)
  * @param {number|null} [opts.timeoutMs] per-statement deadline, ours AND harbor's.
  *   Three states, and the difference between the last two matters:
@@ -515,7 +504,6 @@ function harborAdapter(opts = {}) {
   const base = target.base;
   // What error messages may say — never the credentials in the URL.
   const shown = target.shown;
-  const token = opts.token ?? target.token ?? envToken();
   const rawFetch = opts.fetch ?? ((...a) => globalThis.fetch(...a));
   // Unix targets ride Bun's `unix` fetch option. Wrapped once here so
   // the dispatch, cancel, and session call sites stay transport-blind.
@@ -533,11 +521,12 @@ function harborAdapter(opts = {}) {
   // has no ceiling. This adapter buffers the response anyway, so
   // one-shot would buy it nothing but a query that works until the day
   // the table gets big.
-  const headers = () => {
-    const h = { 'Content-Type': 'application/json', 'Accept': 'application/x-ndjson' };
-    if (token) h['Authorization'] = `Bearer ${token}`;
-    return h;
-  };
+  // No Authorization, ever. Harbor authenticates nobody: a unix socket's
+  // 0700 directory and a loopback-only TCP port are the access control,
+  // and its config schema has no credential to carry one.
+  const headers = () => (
+    { 'Content-Type': 'application/json', 'Accept': 'application/x-ndjson' }
+  );
 
   // Best effort, and deliberately not awaited by the caller's error
   // path: the caller is owed its failure now. Cancelling a statement
@@ -701,13 +690,12 @@ function harborAdapter(opts = {}) {
     toResult(await request('POST', '/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
       sql, opts?.signal, opts?.timeoutMs));
 
-  // The deployed schema in ONE authenticated call — `GET /catalog`
-  // (duckdb-harbor >= 0.9.0): tables with columns, primary keys,
-  // genuine CREATE INDEX indexes, STRUCTURAL foreign keys, and
-  // sequences, as a stable JSON contract that never varies with the
-  // DuckDB version harbor links. The read rides the same bearer
-  // headers, body machinery, and error taxonomy as every other
-  // request. A 404 gets its own words, because it means the
+  // The deployed schema in ONE call — `GET /catalog` (duckdb-harbor
+  // >= 0.9.0): tables with columns, primary keys, genuine CREATE INDEX
+  // indexes, STRUCTURAL foreign keys, and sequences, as a stable JSON
+  // contract that never varies with the DuckDB version harbor links.
+  // The read rides the same headers, body machinery, and error
+  // taxonomy as every other request. A 404 gets its own words, because it means the
   // deployment predates the endpoint — the fix is an upgrade, never
   // a retry.
   const catalog = async (opts = {}) => {
@@ -793,7 +781,7 @@ function harborAdapter(opts = {}) {
 }
 
 export {
-  harborAdapter, resolveUrl, resolveTarget, socketFor, envToken, toResult,
+  harborAdapter, resolveUrl, resolveTarget, socketFor, toResult,
   DbError, ConnectionError, QueryError, CancelledError, isDbError,
   temporalKind, decodeTemporal, decodeRows, encodeParam, encodeParams,
   parseNdjson, parseBody, isPlainObject, abortable,

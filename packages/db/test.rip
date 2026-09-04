@@ -240,14 +240,13 @@ p "\nconnect — app entry"
 
 test! "connect returns a client wired to harbor and exposes .adapter", ->
   fetch = fetchDouble { '/sql': { json: { columns: [{ name: 'n', duckdbType: 'INTEGER' }], data: [[1]], rowCount: 1 } } }
-  client = connect { url: 'http://h:9494/', token: 'secret', fetch }
+  client = connect { url: 'http://h:9494/', fetch }
   eq typeof client.sql, 'function'
   eq typeof client.one, 'function'
   eq typeof client.adapter.query, 'function'
   row = client.one! 'SELECT 1 AS n'
   eq row, { n: 1 }
   eq fetch.calls[0].url, 'http://h:9494/sql'
-  eq fetch.calls[0].headers.Authorization, 'Bearer secret'
 
 test! "connect(url) string form and connect() env form resolve the same way", ->
   fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
@@ -361,10 +360,12 @@ test! "omitted adapter url falls back to RIP_DB_URL then the local default", ->
   finally
     if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
 
-test! "a token becomes a bearer authorization header", ->
+# No Authorization header, ever — harbor authenticates nobody, so there
+# is no credential for this client to carry or to leak into a log.
+test! "requests carry no authorization header", ->
   fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
-  harborAdapter!({ url: 'http://h', token: 'secret', fetch }).query! 'SELECT 1'
-  eq fetch.calls[0].headers.Authorization, 'Bearer secret'
+  harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT 1'
+  eq fetch.calls[0].headers.Authorization, undefined
   eq fetch.calls[0].headers['Content-Type'], 'application/json'
   # Streaming, explicitly: harbor's one-shot JSON shape has a size ceiling
   # and this adapter has no use for it.
@@ -494,7 +495,7 @@ test! "a one-shot JSON document reads back the same as a stream", ->
     rowCount: 2
 
 test! "a non-engine error line is a ConnectionError, not a QueryError", ->
-  denied = '{"type":"error","code":"unauthorized","message":"missing or invalid bearer token"}'
+  denied = '{"type":"error","code":"unauthorized","message":"refused by the proxy in front"}'
   fetch = (url) ->
     Promise.resolve { ok: false, status: 401, statusText: 'Unauthorized', text: (-> Promise.resolve denied) }
   err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query 'SELECT 1')
@@ -1312,16 +1313,16 @@ test "resolveUrl: explicit wins, then env, then default", ->
   eq resolveUrl(null, { RIP_DB_URL: 'http://env:9494///' }), 'http://env:9494'
   eq resolveUrl(null, {}), 'http://127.0.0.1:9495'
 
-test "resolveTarget: http URLs resolve exactly as resolveUrl (no unix, no token)", ->
-  eq resolveTarget('http://h:9494/', {}), { base: 'http://h:9494', unix: null, token: null, shown: 'http://h:9494' }
+test "resolveTarget: http URLs resolve exactly as resolveUrl (no unix)", ->
+  eq resolveTarget('http://h:9494/', {}), { base: 'http://h:9494', unix: null, shown: 'http://h:9494' }
   eq resolveTarget(null, { RIP_DB_URL: 'http://env:9494' }).base, 'http://env:9494'
   eq resolveTarget(null, {}).base, 'http://127.0.0.1:9495'
 
 test "resolveTarget: unix:// spelling carries the socket path, dummy base", ->
   t = resolveTarget 'unix:///run/harbor/x.sock', {}
-  eq t, { base: 'http://harbor', unix: '/run/harbor/x.sock', token: null, shown: 'unix:///run/harbor/x.sock' }
+  eq t, { base: 'http://harbor', unix: '/run/harbor/x.sock', shown: 'unix:///run/harbor/x.sock' }
 
-test "resolveTarget: harbor:<name> derives the socket from the attached path — no token", ->
+test "resolveTarget: harbor:<name> derives the socket from the attached path", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
     dbFile = join home, 'data.duckdb'
@@ -1329,7 +1330,7 @@ test "resolveTarget: harbor:<name> derives the socket from the attached path —
     writeFileSync join(home, 'config.toml'), "[connection.demo]\npath = \"#{dbFile}\"\n"
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
     expected = socketFor fsMod, "#{home}/runtime", dbFile
-    eq t, { base: 'http://harbor', unix: expected, token: null, shown: "harbor:demo (unix://#{expected})" }
+    eq t, { base: 'http://harbor', unix: expected, shown: "harbor:demo (unix://#{expected})" }
     # The derivation itself: basename readable, fnv1a32 hash carrying identity.
     ok /\/runtime\/data\.duckdb-[0-9a-f]{8}\.sock$/.test t.unix
     # Same file, different spelling — same socket (identity is canonical).
@@ -1344,17 +1345,17 @@ test "resolveTarget: harbor:<name> with a configured port falls back to TCP when
     writeFileSync dbFile, ''
     writeFileSync join(home, 'config.toml'), "[connection.demo]\npath = \"#{dbFile}\"\nport = 9500\n"
     t = resolveTarget 'harbor:demo', { HARBOR_HOME: home }
-    eq t, { base: 'http://127.0.0.1:9500', unix: null, token: null, shown: 'harbor:demo (http://127.0.0.1:9500)' }
+    eq t, { base: 'http://127.0.0.1:9500', unix: null, shown: 'harbor:demo (http://127.0.0.1:9500)' }
   finally
     rmSync home, recursive: true, force: true
 
-test "resolveTarget: harbor:<name> resolves a remote url entry with its token", ->
+test "resolveTarget: harbor:<name> resolves a remote url entry", ->
   home = mkdtempSync join(tmpdir(), 'rip-harbor-')
   try
     writeFileSync join(home, 'config.toml'),
-      '[connection.prod]\nurl = "https://db.example.com/"\ntoken = "sekret"\n'
+      '[connection.prod]\nurl = "https://db.example.com/"\n'
     t = resolveTarget 'harbor:prod', { HARBOR_HOME: home }
-    eq t, { base: 'https://db.example.com', unix: null, token: 'sekret', shown: 'harbor:prod (https://db.example.com)' }
+    eq t, { base: 'https://db.example.com', unix: null, shown: 'harbor:prod (https://db.example.com)' }
   finally
     rmSync home, recursive: true, force: true
 
@@ -1379,7 +1380,7 @@ test! "harborAdapter: a unix target rides Bun's unix fetch option on every reque
     Promise.resolve
       ok: true, status: 200, statusText: ''
       text: -> Promise.resolve JSON.stringify { columns: [], data: [], rowCount: 0 }
-  adapter = harborAdapter { url: 'unix:///tmp/demo.sock', token: 't', fetch: fetchFn }
+  adapter = harborAdapter { url: 'unix:///tmp/demo.sock', fetch: fetchFn }
   adapter.query! 'SELECT 1'
   eq inits[0].url, 'http://harbor/sql'
   eq inits[0].init.unix, '/tmp/demo.sock'
@@ -1415,15 +1416,15 @@ test "unsafeTarPath: blocks absolute and traversal", ->
 
 p "\nCLI — /sql runner"
 
-test! "posts to /sql with bearer token and returns the envelope", ->
+test! "posts to /sql and returns the envelope", ->
   seen = null
   fetch = (url, init) ->
     seen = { url, headers: init.headers, body: JSON.parse init.body }
     Promise.resolve { ok: true, status: 200, json: (-> { ok: true, data: [[1]] }) }
-  sql = makeSql { url: 'http://h:9494/', token: 'secret', fetch }
+  sql = makeSql { url: 'http://h:9494/', fetch }
   r = sql! 'SELECT 1'
   eq seen.url, 'http://h:9494/sql'
-  eq seen.headers.Authorization, 'Bearer secret'
+  eq seen.headers.Authorization, undefined
   eq sent(seen.body), { sql: 'SELECT 1' }
   eq r.data, [[1]]
 
@@ -1548,31 +1549,23 @@ test! "a healthy /ready resolves to running", ->
   eq assertReachable!('http://harbor:9494', { fetch }), 'running'
   eq hit, 'http://harbor:9494/ready'
 
-# harbor answers `{"status":"ready"}`; the older `{"status":"ok"}` and a
-# plain `{ok:true}` are accepted too, so a stand-in may use any spelling.
-test! "the older spellings of yes are accepted too", ->
-  for body in [{ status: 'ok' }, { ok: true }]
-    eq assertReachable!('http://harbor:9494', { fetch: (-> Promise.resolve reply(200, body)) }), 'running'
+# `{"status":"ready"}` is the one affirmative answer. A 200 that says
+# anything else is not a yes — the probe exists to catch a server that is
+# listening but cannot serve, and accepting a bare 200 would defeat it.
+test! "a 200 that does not say ready is not reachable", ->
+  for body in [{ status: 'ok' }, { ok: true }, {}]
+    err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(200, body)) })
+    ok /not reachable/.test err.message
 
-# A harbor predating the swap 404s /ready and serves /health. One extra
-# round trip beats refusing to boot against a database that is up.
-test! "a 404 on /ready falls back to /health", ->
-  hits = []
-  fetch = (url) ->
-    hits.push url
-    Promise.resolve(if url.endsWith('/ready') then reply(404, { error: 'no such endpoint' }) else reply(200, { status: 'ok' }))
-  eq assertReachable!('http://harbor:9494', { fetch }), 'running'
-  eq hits, ['http://harbor:9494/ready', 'http://harbor:9494/health']
-
-# Only on a 404. A 503 from /ready is a real answer — the database is
-# not serving — and must not be retried against an endpoint that cannot
-# know that.
-test! "a 503 on /ready is final, with no fallback probe", ->
-  hits = []
-  fetch = (url) -> hits.push url; Promise.resolve reply(503, { status: 'down' })
-  err = trap! (-> assertReachable 'http://harbor:9494', { fetch })
-  ok /not reachable/.test err.message
-  eq hits, ['http://harbor:9494/ready']
+# One probe, one answer. A 503 means the database is not serving and a
+# 404 means nothing is there; neither gets a second request.
+test! "a non-ready status is final, with exactly one request", ->
+  for status in [404, 503]
+    hits = []
+    fetch = (url) -> hits.push url; Promise.resolve reply(status, { status: 'down' })
+    err = trap! (-> assertReachable 'http://harbor:9494', { fetch })
+    ok /not reachable/.test err.message
+    eq hits, ['http://harbor:9494/ready']
 
 test! "a 503 throws not-reachable", ->
   err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(503, { status: 'down' })) })
@@ -1609,7 +1602,7 @@ test! "an omitted url falls back to RIP_DB_URL then the local default", ->
 p "\nBoot probe — ensureRunning"
 
 test! "ensureRunning is a reachability alias", ->
-  fetch = (-> Promise.resolve reply(200, { ok: true }))
+  fetch = (-> Promise.resolve reply(200, { status: 'ready' }))
   eq ensureRunning!('http://harbor:9494', { fetch }), 'running'
 
 # ==[ 7. MCP protocol ]=========================================================

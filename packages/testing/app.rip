@@ -6,8 +6,8 @@
 # Three capabilities, none app-specific:
 #
 #   scratchDb   temp DuckDB file + the app's migration ledger replayed +
-#               `harbor serve` on an ephemeral port. Real database, real
-#               SQL, disposable — your dev database is never in play.
+#               `harbor <db> start` on an ephemeral port. Real database,
+#               real SQL, disposable — your dev database is never in play.
 #   bootApp     set env, import the app's entry in-process, hand back
 #               the framework's fetch handler (start() installs it as
 #               globalThis.__ripHandler under the worker-env guard).
@@ -24,10 +24,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 # Replay every .sql in migrationsDir (sorted, same order as rip schema)
-# into a fresh DuckDB file, then serve it with `harbor serve`. Returns
-# { url, token, file, dir, stop } — stop! kills harbor and removes the
+# into a fresh DuckDB file, then serve it with `harbor <db> start`.
+# Returns { url, file, dir, stop } — stop! kills harbor and removes the
 # scratch directory; the process-exit hook covers forgotten stops.
-export scratchDb = (migrationsDir, opts = {}) ->
+#
+# There is no credential anywhere in this: a harbor started with --port
+# listens on loopback only and authenticates nobody, which is the same
+# thing the unix socket says. Reaching it means already being on this
+# machine.
+export scratchDb = (migrationsDir) ->
   dir = mkdtempSync join(tmpdir(), 'rip-scratch-')
   file = join dir, 'scratch.duckdb'
   ledger = readdirSync(migrationsDir).filter((n) -> n.endsWith '.sql').sort()
@@ -40,7 +45,6 @@ export scratchDb = (migrationsDir, opts = {}) ->
     unless ran.exitCode is 0
       throw Error.new "scratchDb: migration #{name} failed: #{ran.stderr.toString()}"
 
-  token = opts.token ?? 'scratch-token'
   launcher = Bun.which('harbor') or throw Error.new 'scratchDb: no `harbor` binary on PATH'
   proc = null
   url = null
@@ -56,35 +60,29 @@ export scratchDb = (migrationsDir, opts = {}) ->
     # line synchronously, which is what closes the race; bootApp
     # repeats these values later for explicitness.
     process.env.RIP_DB_URL = url
-    process.env.RIP_DB_TOKEN = token
     process.env.DB_FILE = file
     # `<db> start` is the explicit-server verb; identity is derived from
-    # the file, so there is no name to pass. HARBOR_HOME below keeps the
-    # runtime litter in the scratch dir.
-    args = [launcher, file, 'start', '--bind', '127.0.0.1', '--port', String(port),
-            '--token', token]
+    # the file, so there is no name to pass. --port implies loopback.
+    args = [launcher, file, 'start', '--port', String(port)]
     if process.env.HARBOR_STATEMENT_TIMEOUT_MS
       args.push '--statement-timeout', "#{process.env.HARBOR_STATEMENT_TIMEOUT_MS}ms"
     proc = Bun.spawn args,
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'ignore'
-      # Registry litter (name.lock/name.token) lands in the scratch dir
-      # and is removed with it — never in the user's ~/.config/harbor.
+      # HARBOR_HOME collapses harbor's config and runtime roots into one
+      # directory, so the socket and its logs land in the scratch dir and
+      # are removed with it — never in the user's ~/.local/state/harbor.
       env: { ...process.env, HARBOR_HOME: dir }
     # A live child must not hold the test process's event loop open —
     # the tally prints at exit, and exit is what kills harbor.
     proc.unref()
     deadline = Date.now() + 15000
     healthy = false
-    # `/ready` on current harbors, `/health` on ones predating the swap —
-    # accept either rather than hang for fifteen seconds against a
-    # server that is up and answering the other name.
-    probe = (path) ->
-      try fetch!("#{url}#{path}", { signal: AbortSignal.timeout(500) }) catch then null
+    probe = ->
+      try fetch!("#{url}/ready", { signal: AbortSignal.timeout(500) }) catch then null
     while Date.now() < deadline
-      res = probe! '/ready'
-      res = probe! '/health' if res?.status is 404
+      res = probe!
       if res?.ok
         healthy = true
         break
@@ -100,7 +98,7 @@ export scratchDb = (migrationsDir, opts = {}) ->
     proc.kill()
     try rmSync(dir, { recursive: true, force: true }) catch then null
   process.on 'exit', -> try proc.kill() catch then null
-  { url, token, file, dir, stop }
+  { url, file, dir, stop }
 
 # Point the app at its (scratch) world and import it. `start()` throws
 # without APP_ARTIFACT/SOCKET_PATH — the worker-runtime guard — so the

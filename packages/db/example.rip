@@ -7,7 +7,6 @@
 #
 #   # Terminal B
 #   export RIP_DB_URL=http://127.0.0.1:9495
-#   export RIP_DB_TOKEN=rip-token   # match harbor_serve
 #   rip example.rip
 
 import { connect, ensureRunning, sql, findOne } from 'rip/db'

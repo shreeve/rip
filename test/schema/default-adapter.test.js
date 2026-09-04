@@ -216,7 +216,7 @@ describe('harbor client: what an error is allowed to say', () => {
       ok: status < 400, status, statusText: '', json: async () => json,
       headers: headers ? { get: (k) => headers[k] ?? null } : undefined,
     });
-    try { await hb.harborAdapter({ url: 'http://h', token: 't', fetch }).query('SELECT 1', []); }
+    try { await hb.harborAdapter({ url: 'http://h', fetch }).query('SELECT 1', []); }
     catch (e) { return e; }
     throw new Error('expected a rejection');
   };
@@ -240,7 +240,7 @@ describe('harbor client: what an error is allowed to say', () => {
   // plain text in a connection string.
   test('an unreachable harbor is named without the credentials in its URL', async () => {
     const fetch = async () => { throw new TypeError('fetch failed'); };
-    const a = hb.harborAdapter({ url: 'http://admin:s3cret@db:9495', token: 't', fetch });
+    const a = hb.harborAdapter({ url: 'http://admin:s3cret@db:9495', fetch });
     await expect(a.query('SELECT 1', [])).rejects.toThrow(/http:\/\/<redacted>@db:9495/);
     await expect(a.query('SELECT 1', [])).rejects.not.toThrow(/s3cret/);
   });
@@ -297,20 +297,20 @@ describe('harbor client: GET /catalog', () => {
     return fetch;
   };
 
-  test('catalog() GETs /catalog with the bearer token and returns the document verbatim', async () => {
+  test('catalog() GETs /catalog, unauthenticated, and returns the document verbatim', async () => {
     const fetch = catalogFetch({ json: doc });
-    const got = await hb.harborAdapter({ url: 'http://h', token: 'tok', fetch }).catalog();
+    const got = await hb.harborAdapter({ url: 'http://h', fetch }).catalog();
     expect(got).toEqual(doc);
     expect(fetch.calls.length).toBe(1);
     expect(fetch.calls[0].url).toBe('http://h/catalog');
     expect(fetch.calls[0].method).toBe('GET');
-    expect(fetch.calls[0].headers['Authorization']).toBe('Bearer tok');
+    expect(fetch.calls[0].headers['Authorization']).toBeUndefined();
     expect(fetch.calls[0].body).toBe(null);
   });
 
   test('a 404 names the fix — the deployment needs duckdb-harbor >= v0.9.0', async () => {
     const fetch = catalogFetch({ status: 404, json: { error: 'not found', code: 'not_found' } });
-    const err = await hb.harborAdapter({ url: 'http://h', token: 't', fetch }).catalog().catch((e) => e);
+    const err = await hb.harborAdapter({ url: 'http://h', fetch }).catalog().catch((e) => e);
     expect(err.name).toBe('ConnectionError');
     expect(err.message).toContain('/catalog');
     expect(err.message).toContain('duckdb-harbor >= v0.9.0');
@@ -319,7 +319,7 @@ describe('harbor client: GET /catalog', () => {
 
   test('a non-404 failure keeps the ordinary taxonomy: a 401 is a ConnectionError, not an upgrade story', async () => {
     const fetch = catalogFetch({ status: 401, json: { error: 'unauthorized', code: 'unauthorized' } });
-    const err = await hb.harborAdapter({ url: 'http://h', token: 'bad', fetch }).catalog().catch((e) => e);
+    const err = await hb.harborAdapter({ url: 'http://h', fetch }).catalog().catch((e) => e);
     expect(err.name).toBe('ConnectionError');
     expect(err.message).toContain('unauthorized');
     expect(err.message).not.toContain('0.9.0');
