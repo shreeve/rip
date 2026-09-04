@@ -478,12 +478,13 @@ Rip understands two transports and one convenience name:
 | --- | --- |
 | `http://host:port` or `https://host` | TCP HTTP(S) |
 | `unix:///path/to.sock` | HTTP over a Unix socket using Bun's `fetch` `unix` option |
-| `harbor:name` | Read Harbor's registry and resolve to the registered socket or TCP port plus token |
+| `harbor:name` | Read Harbor's `config.toml` and resolve to the derived socket or configured TCP port |
 
-`RIP_DB_URL=harbor:medlabs` reads `$HARBOR_HOME/medlabs.json` and
-`medlabs.token`, preferring the Unix socket. A dummy HTTP host is used for the
-UDS request; it is never resolved on the network. Explicit credentials win
-over registry credentials, which win over `RIP_DB_TOKEN`.
+`RIP_DB_URL=harbor:medlabs` reads `[connection.medlabs]` from Harbor's
+`config.toml`, preferring the Unix socket. A dummy HTTP host is used for the
+UDS request; it is never resolved on the network. No spelling carries a
+credential, because there is none: Harbor authenticates nobody, and this
+client sends no `Authorization` header at all.
 
 ### Shared adapter contract
 
@@ -563,8 +564,8 @@ Several adapter boundaries are intentional and worth remembering:
 ## DuckDB Harbor
 
 Current Harbor is a standalone Rust process, not a loadable DuckDB extension.
-One `harbor serve` process owns one DuckDB file, one listen address, and one
-token. A fleet is several isolated berth processes.
+One harbor process owns one DuckDB file and its listen addresses. A fleet is
+several isolated berth processes.
 
 Harbor dynamically links external `libduckdb` through the operating-system
 loader and DuckDB's compatible C interface. The binary does not manually
@@ -580,17 +581,15 @@ absolute `$HARBOR_HOME`, which collapses both roots into one directory):
 
 ```text
 ~/.local/state/harbor/runtime/
-├── medlabs.lock    process-lifetime ownership lock
 ├── medlabs.sock    default local data endpoint
-├── medlabs.json    identity and dial information
-├── medlabs.token   per-berth bearer token
 └── log/
 ```
 
-`harbor serve` runs in the foreground. `harbor start` starts a detached berth
-and waits for real readiness. `harbor show` discovers the fleet, `harbor stop`
-drains and checkpoints, and `harbor forget` clears registry state without deleting
-the database file. Harbor is not a central daemon or supervisor.
+`harbor <db> start` runs in the foreground and IS the server; bare
+`harbor <db>` summons one that lives while anyone is connected. Bare `harbor`
+lists what is running, `harbor <db> stop` drains and checkpoints, and
+`harbor <db> attach`/`detach` add and remove the config entry that lets a bare
+name mean this database. Harbor is not a central daemon or supervisor.
 
 UDS is the default local face. Loopback or trusted-network TCP is optional.
 Harbor speaks plain HTTP; remote TLS and edge authentication belong in Caddy.
@@ -630,11 +629,12 @@ deadline independently through the reaper, which remains available when
 request workers are all busy. Session leases enforce idle and maximum
 lifetimes, serialize statements, and roll back abandoned open transactions.
 
-Harbor requires one Bearer header on authenticated routes. `/ready` is the one
-unauthenticated exception. SQL itself is powerful enough to read host files or
+Harbor authenticates nobody. The unix socket's 0700 directory and a
+loopback-only TCP port are the access control; remote reach and access policy
+belong to an edge proxy. SQL itself is powerful enough to read host files or
 load extensions unless the berth is started with the appropriate sealed
-posture, so a token is not a substitute for deciding which SQL callers are
-trusted.
+posture, so reachability is not a substitute for deciding which SQL callers
+are trusted.
 
 ## Pilot
 
@@ -703,7 +703,7 @@ save → generation child → prepared artifact → Janus doorbell cut
 ### SQL from a developer terminal
 
 ```text
-pilot medlabs → ~/.local/state/harbor/runtime/medlabs.{json,sock,token}
+pilot medlabs → ~/.local/state/harbor/runtime/medlabs-<hash>.sock
               → Harbor protocol → DuckDB
 ```
 

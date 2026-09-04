@@ -20,7 +20,6 @@ const BIN = resolve(import.meta.dir, '../../../bin/rip');
 // else) — every spawn runs without it.
 const ENV = { ...process.env };
 delete ENV.RIP_DB_URL;
-delete ENV.RIP_DB_TOKEN;
 
 let dir;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'rip-schema-cli-')); });

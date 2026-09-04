@@ -17,8 +17,8 @@
 // (your models file — it may also call schema.setAdapter()/connect()
 // to point at the database). When omitted, conventional locations
 // are tried. Database connection comes from the entry's own adapter
-// installation, or from RIP_DB_URL / RIP_DB_TOKEN for the default
-// duckdb-harbor adapter — an unconfigured adapter fails HERE, named,
+// installation, or from RIP_DB_URL for the default duckdb-harbor
+// adapter — an unconfigured adapter fails HERE, named,
 // before any verb touches the network.
 //
 // Exit codes follow the rip CLI's convention: 2 for usage errors,
@@ -79,7 +79,7 @@ entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDID
                 unlock breaks only a lock nobody is renewing — and that case now resolves
                 itself, since migrate takes over an expired lease on its own
 
-Connection: the entry's schema.setAdapter()/connect() call, or RIP_DB_URL / RIP_DB_TOKEN.`;
+Connection: the entry's schema.setAdapter()/connect() call, or RIP_DB_URL.`;
 
 const die = (msg, code = 1) => {
   console.error(`rip schema: ${msg}`);
@@ -228,7 +228,7 @@ if (cmd !== 'dump' && !migration.adapterConfigured()) {
   die(
     'no database is configured — the entry installed no adapter and RIP_DB_URL is unset.\n' +
     `Call schema.setAdapter(adapter) or schema.connect({url}) + setAdapter in ${entry}, ` +
-    'or set RIP_DB_URL (and RIP_DB_TOKEN) for the default duckdb-harbor adapter.');
+    'or set RIP_DB_URL for the default duckdb-harbor adapter.');
 }
 
 function printSteps(steps) {

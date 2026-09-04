@@ -20,7 +20,7 @@
 // {columns, data, rowCount}` is the one required method; `begin()`
 // and a truthful `capabilities` object are optional and
 // feature-detected. The default adapter speaks HTTP (fetch) to a
-// duckdb-harbor-shaped endpoint (RIP_DB_URL / RIP_DB_TOKEN); tests
+// duckdb-harbor-shaped endpoint (RIP_DB_URL); tests
 // install in-memory recording adapters. SQL engines stay USER-side —
 // the dependency graph stays empty. There is no browser fork:
 // the adapter contract is the whole environment story, and
@@ -979,7 +979,7 @@ function jsonSchemaModelColumns(def, properties) {
 // installed adapter owns that, per the contract above.
 
 // The default adapter, for a schema-model app that installs none: the
-// one duckdb-harbor client, configured from RIP_DB_URL / RIP_DB_TOKEN.
+// one duckdb-harbor client, configured from RIP_DB_URL.
 // `src/cli/schema.js` advertises exactly this path.
 //
 // ONE client, and this is a call into it — a hand-rolled fetch copy
@@ -1137,7 +1137,7 @@ async function runSQL(def, sql, params, opts) {
       const err = new Error(
         'schema: no database is configured — nothing installed an adapter and RIP_DB_URL is unset, ' +
         'so this statement dialed the default duckdb-harbor endpoint. Call schema.setAdapter(adapter) ' +
-        'or schema.setAdapter(schema.connect({url, token})), or set RIP_DB_URL (and RIP_DB_TOKEN). ' +
+        'or schema.setAdapter(schema.connect({url})), or set RIP_DB_URL. ' +
         '(' + (e.message || String(e)) + ')');
       err.cause = e;
       throw err;

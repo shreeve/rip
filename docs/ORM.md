@@ -872,10 +872,10 @@ install one:
 
 ```rip
 # 1. Explicitly, in the models entry:
-schema.setAdapter schema.connect url: 'http://127.0.0.1:9495', token: process.env.RIP_DB_TOKEN
+schema.setAdapter schema.connect url: 'http://127.0.0.1:9495'
 
 # 2. Environment only — nothing installed, the default duckdb-harbor
-#    adapter reads RIP_DB_URL and RIP_DB_TOKEN.
+#    adapter reads RIP_DB_URL.
 
 # 3. Per model, for a second database:
 analytics = schema.connect url: 'http://analytics:9495'
@@ -883,7 +883,7 @@ Event = schema :model, on: analytics
   name! string
 ```
 
-`schema.connect {url, token, timeoutMs}` **builds** an adapter without
+`schema.connect {url, timeoutMs}` **builds** an adapter without
 installing it (a bare URL string also works); `schema.setAdapter`
 installs one process-wide. A model's `on:` adapter wins over the global
 one. A first ORM call with nothing configured anywhere fails naming the

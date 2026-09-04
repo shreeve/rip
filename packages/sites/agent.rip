@@ -196,8 +196,8 @@ readLog = (path, lines, after) ->
 # agent carries whatever Bun auto-loaded from the directory it happened
 # to boot in — including that project's .env — and `{ ...process.env }`
 # stamped those secrets into every app it spawned (observed in the field:
-# one demo's workers holding another project's RIP_DB_TOKEN, and stale
-# tokens outliving the .env that minted them). The manager runs with cwd
+# one demo's workers holding another project's database credentials, and
+# stale secrets outliving the .env that minted them). The manager runs with cwd
 # at its own app root, so Bun loads that project's .env into it; the
 # agent forwards process basics only.
 MANAGER_ENV_KEEP = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TERM', 'LANG', 'TZ']

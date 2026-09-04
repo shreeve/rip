@@ -42,14 +42,13 @@ this package (keep the DuckDB process up yourself).
 ```sql
 INSTALL harbor FROM community;
 LOAD harbor;
-CALL harbor_serve(bind := '127.0.0.1', port := 9495, token := 'rip-token');
+CALL harbor_serve(bind := '127.0.0.1', port := 9495);
 ```
 
 Keep that DuckDB process open — when it exits, harbor exits with it.
 
 ```bash
 export RIP_DB_URL=http://127.0.0.1:9495
-export RIP_DB_TOKEN=rip-token   # omit only if harbor_serve(..., token := NULL)
 ```
 
 ### 2. Query from Rip
@@ -116,7 +115,6 @@ rip packages/db/example.rip
 | Env / option | Meaning | Default |
 |---|---|---|
 | `RIP_DB_URL` | Harbor base URL | `http://127.0.0.1:9495` |
-| `RIP_DB_TOKEN` | Bearer token for `/sql` | unset (only when harbor is unauthenticated) |
 
 URL resolution is one rule everywhere (adapter, probe, CLI, MCP):
 explicit argument → `RIP_DB_URL` → default. Trailing slashes are
@@ -130,21 +128,25 @@ Three URL spellings dial two transports:
 | `unix:///path/to.sock` | unix domain socket (Bun's fetch `unix` option) |
 | `harbor:<name>` | resolution sugar — never a third transport |
 
-`harbor:<name>` reads the berth registry `harbor serve` maintains
-(`$HARBOR_HOME/runtime/<name>.json`, default `~/.local/state/harbor/runtime`) and desugars to
-whichever spelling the berth registered — socket preferred, TCP port
-otherwise. It also resolves the bearer token from `<name>.token`, the
-one thing a raw spelling cannot carry, so `RIP_DB_URL=harbor:medlabs`
-replaces both the URL and `RIP_DB_TOKEN` and the transport stays the
-berth's business. Token precedence: explicit option → registry →
-`RIP_DB_TOKEN`. The raw spellings remain for registry-less worlds
-(containers, CI, custom `--socket` paths); `resolveTarget(url)` is the
-resolver, exported for callers that need the same answer.
+`harbor:<name>` reads harbor's own `config.toml` (`[connection.<name>]`)
+and desugars to whichever transport that entry implies — the unix socket
+preferred, a configured TCP port otherwise. Identity is DERIVED from the
+database path, never registered, so `RIP_DB_URL=harbor:medlabs` names a
+database and lets the transport stay harbor's business.
+
+**No spelling carries a credential, because there is none to carry.**
+Harbor authenticates nobody: a unix socket's 0700 directory and a
+loopback-only TCP port are the access control, and remote reach belongs
+to an edge proxy. This client sends no `Authorization` header at all.
+
+The raw spellings remain for registry-less worlds (containers, CI,
+custom socket paths); `resolveTarget(url)` is the resolver, exported for
+callers that need the same answer.
 
 ```coffee
 connect!                                    # env / default
 connect! 'http://127.0.0.1:9495'            # string URL
-connect! url: '…', token: '…', timeoutMs: 60_000
+connect! url: '…', timeoutMs: 60_000
 connect! { adapter }                        # tests / custom wires
 ```
 
@@ -278,8 +280,8 @@ catch e
 
 ## CLI
 
-`rip-db` never starts or stops harbor — point `RIP_DB_URL` /
-`RIP_DB_TOKEN` at a running instance.
+`rip-db` never starts or stops harbor — point `RIP_DB_URL` at a
+running instance.
 
 | Command | Behavior |
 |---|---|
@@ -302,8 +304,7 @@ rip-db mcp --url http://127.0.0.1:9495
       "command": "rip-db",
       "args": ["mcp"],
       "env": {
-        "RIP_DB_URL": "http://127.0.0.1:9495",
-        "RIP_DB_TOKEN": "<token>"
+        "RIP_DB_URL": "http://127.0.0.1:9495"
       }
     }
   }
