@@ -706,18 +706,45 @@ class Generator
       code += " return __list; }"
       return code
 
-    # Replace token references with calculated $[n] references
+    # Replace token references with calculated $[n] references. A
+    # reference is a number OUTSIDE string literals: a quoted tag such
+    # as "es2015" is text, never a position.
     switch typeof action
       when 'string'
         regex = /(?<!\$)\$(-?\d+)/gm # Look for $n (capture just digits)
         regex = /(-?\d+)/g unless regex.test(action) # Or, all bare numbers
-        result = action.replace(regex, getToken).trim()
+        result = @_outsideQuotes(action, (text) -> text.replace regex, getToken).trim()
       when 'number', 'undefined'
         result = getToken('', action || 1) # No action or just a number
       else
         result = 'null'
 
     "return #{result};"
+
+  # Apply `fn` to the unquoted stretches of an action text; string
+  # literals (with backslash escapes) pass through untouched.
+  _outsideQuotes: (text, fn) ->
+    out = ''
+    plain = ''
+    quote = null
+    i = 0
+    while i < text.length
+      ch = text[i]
+      if quote
+        out += ch
+        if ch is '\\'
+          out += text[i + 1] ?? ''
+          i++
+        else if ch is quote
+          quote = null
+      else if ch is '"' or ch is "'"
+        out += fn(plain) + ch
+        plain = ''
+        quote = ch
+      else
+        plain += ch
+      i++
+    out + fn(plain)
 
   _assignPrecedence!: (rule, precedence) ->
     if precedence?.prec and @operators[precedence.prec]
@@ -1110,65 +1137,81 @@ class Generator
       for item as itemSet.items when item.nextSymbol is "$end" and @symbolIds["$end"]?
         state[@symbolIds["$end"]] = [ACCEPT]
 
-      # Reduce actions
+      # Reduce actions: every reduction a lookahead cell receives is
+      # gathered first, then the cell resolves ONCE — the shift against
+      # each reduction by precedence, then the FIRST of the reductions
+      # that survive (closure order, the order the state's items were
+      # built in). Folding reductions in one at a time compared a later
+      # reduction against whatever the cell held, so a reduction the
+      # shift had beaten could still win a reduce-reduce tie, and a
+      # nonassoc error cell could be overwritten. A reduce-reduce pair
+      # is recorded winner-and-loser and pinned by the manifest below.
+      cells = Map.new()
       for item as itemSet.reductions
         for stackSymbol as item.lookaheads when @symbolIds[stackSymbol]?
-          action = state[@symbolIds[stackSymbol]]
-          op = operators[stackSymbol]
-
-          if action
-            # Resolve conflict
-            which = if action[0] instanceof Array then action[0] else action
-            solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], which
-
+          list = cells.get stackSymbol
+          unless list
+            list = []
+            cells.set stackSymbol, list
+          list.push item
+      for [stackSymbol, items] as cells
+        id = @symbolIds[stackSymbol]
+        shift = state[id]
+        op = operators[stackSymbol]
+        record = (item, resolution, category, winner = null) =>
+          detail = {
+            state: k,
+            lookahead: stackSymbol,
+            lookaheadName: @tokenNames[id] or stackSymbol,
+            rule: item.rule.id,
+            lhs: item.rule.lhs,
+            ruleSymbols: item.rule.symbols.join(' '),
+            shift: if resolution is 'shift' then shift[1] else null,
+            reduce: item.rule.id,
+            resolution: resolution,
+            category: category
+          }
+          # A reduce-reduce record names the reduction the table KEPT
+          # beside the one it dropped: the manifest must be able to
+          # notice a reorder that flips the winner.
+          detail.winner = "#{winner.rule.lhs} → #{winner.rule.symbols.join ' '}" if winner?
+          # EVERY default resolution is recorded — a "Conflicts: 0"
+          # that silently accepted hundreds of default shifts is a
+          # weaker claim than it reads. The problematic two still
+          # gate the headline count.
+          @resolutionDetails.push detail
+          if category is 'reduce-reduce' or category is 'ambiguous'
+            @conflicts++
+            @conflictDetails.push detail
+        survivors = []
+        nonassoc = false
+        for item in items
+          unless shift?
+            survivors.push item
+            continue
+          solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], shift
+          if solution.action is NONASSOC
+            nonassoc = true
+          else if solution.action is shift
+            # Shape-based buckets excuse a default shift: an empty rule
+            # or a passthrough is the automaton choosing the longer
+            # reading, not an ambiguity anyone wrote.
             if solution.bydefault
-              # Categorize the default resolution. REDUCE-REDUCE is
-              # tested FIRST: an r/r conflict is the automaton picking
-              # between two completed rules by lowest id, and neither
-              # an empty rule, a passthrough shape, nor rule precedence
-              # makes that choice principled — shape-based buckets
-              # excuse only shift-over-reduce defaults.
               isEmpty = item.rule.symbols.length is 0 or (item.rule.symbols.length is 1 and item.rule.symbols[0] is '')
-              isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]  # Single nonterminal
-              hasPrecedence = op and item.rule.precedence > 0
-              isReduceReduce = which[0] is REDUCE
-
-              category =
-                if      isReduceReduce then 'reduce-reduce'
-                else if isEmpty        then 'empty-optional'
-                else if isPassthrough  then 'passthrough'
-                else if hasPrecedence  then 'precedence'
-                else                       'ambiguous'
-
-              detail = {
-                state: k,
-                lookahead: stackSymbol,
-                lookaheadName: @tokenNames[@symbolIds[stackSymbol]] or stackSymbol,
-                rule: item.rule.id,
-                lhs: item.rule.lhs,
-                ruleSymbols: item.rule.symbols.join(' '),
-                shift: if which[0] is SHIFT then which[1] else null,
-                reduce: item.rule.id,
-                resolution: if which[0] is SHIFT then 'shift' else 'reduce',
-                category: category
-              }
-              # EVERY default resolution is recorded — a "Conflicts: 0"
-              # that silently accepted hundreds of default shifts is a
-              # weaker claim than it reads. The problematic two still
-              # gate the headline count.
-              @resolutionDetails.push detail
-              if category is 'reduce-reduce' or category is 'ambiguous'
-                @conflicts++
-                @conflictDetails.push detail
-            else
-              action = solution.action
+              isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]
+              record item, 'shift', (if isEmpty then 'empty-optional' else if isPassthrough then 'passthrough' else 'ambiguous')
           else
-            action = [REDUCE, item.rule.id]
-
-          if action?.length
-            state[@symbolIds[stackSymbol]] = action
-          else if action is NONASSOC
-            state[@symbolIds[stackSymbol]] = undefined
+            survivors.push item
+        if nonassoc
+          # A nonassoc pair is an error cell by declaration; a reduction
+          # that also lands here is dropped and recorded, never installed.
+          state[id] = undefined
+          record item, 'error', 'nonassoc' for item in survivors
+          continue
+        continue unless survivors.length
+        winner = survivors[0]
+        record loser, 'reduce', 'reduce-reduce', winner for loser in survivors[1..]
+        state[id] = [REDUCE, winner.rule.id]
 
     @parseTable = states
 
@@ -1185,32 +1228,39 @@ class Generator
 
     actual = Map.new()
     for c in @conflictDetails
-      key = "#{c.category}|#{c.lhs} → #{c.ruleSymbols}"
+      key = "#{c.category}\t#{@_conflictName c}"
       actual.set key, (actual.get(key) or 0) + 1
 
     declared = Map.new()
     for [category, rule, count] in expected
-      key = "#{category}|#{rule}"
+      key = "#{category}\t#{rule}"
       throw Error.new "expectedConflicts: duplicate entry for [#{category}] #{rule}" if declared.has key
       declared.set key, count
 
     problems = []
     for [key, count] as actual
-      [category, rule] = key.split '|'
+      [category, rule] = key.split '\t'
       want = declared.get key
       if not want?
         problems.push "  • undeclared: [#{category}] #{rule} — #{count} resolution(s)"
       else if want isnt count
         problems.push "  • count drift: [#{category}] #{rule} — declared #{want}, actual #{count}"
     for [key, want] as declared when not actual.has key
-      [category, rule] = key.split '|'
+      [category, rule] = key.split '\t'
       problems.push "  • declared but absent: [#{category}] #{rule} — declared #{want}"
 
     if problems.length
       manifest = [...actual].sort().map ([key, count]) ->
-        [category, rule] = key.split '|'
+        [category, rule] = key.split '\t'
         "  ['#{category}', '#{rule}', #{count}]"
       throw Error.new "expectedConflicts: parse-table conflicts drifted from the declared manifest:\n#{problems.join '\n'}\n\nActual manifest:\n#{manifest.join '\n'}"
+
+  # A conflict's manifest name: the rule for an ambiguous shift; for a
+  # reduce-reduce pair, the reduction the table kept `over` the one it
+  # dropped, so the manifest pins the decision and not just the loser.
+  _conflictName: (c) ->
+    rule = "#{c.lhs} → #{c.ruleSymbols}"
+    if c.winner? then "#{c.winner} over #{rule}" else rule
 
   # The kind inventory derived from the semantics table: every kind
   # the annotated rules produce, with the union of role names each
@@ -1894,7 +1944,7 @@ if isRunAsScript
         for [, g] as groups
           c = g.first
           las = [...g.lookaheads].slice(0, 6).join(', ') + (if g.lookaheads.size > 6 then ", … #{g.lookaheads.size} total" else '')
-          console.log "\n  [#{c.category}] rule #{c.rule}: #{c.lhs} → #{c.ruleSymbols}"
+          console.log "\n  [#{c.category}] rule #{c.rule}: #{c.lhs} → #{c.ruleSymbols}#{if c.winner? then " (dropped for #{c.winner})" else ''}"
           console.log "     #{g.count} resolution(s) across state(s) #{[...g.states].join(', ')} — #{c.resolution} by default"
           console.log "     lookaheads: #{las}"
 
