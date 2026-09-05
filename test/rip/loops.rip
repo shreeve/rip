@@ -611,3 +611,5 @@ code 'a guarded plain loop braces too', 'f x for x in xs if c', '''
     };
   }
   '''
+
+fail 'a var-less ranged loop with a step rejects the same way', 'for [1..5] by 2\n  x = 1', 'binds no variable'

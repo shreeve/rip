@@ -8,4 +8,4 @@ wrongState: number := 'oops'
 wrongComputed: string ~= count * 2
 wrongReadonly: number =! 'nope'
 wrongEffect: number ~> console.log(count)
-limit = 7
+# (a write to the readonly `limit` now rejects at the emitter, before any type check — test/rip/redeclare.rip pins it)

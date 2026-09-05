@@ -496,6 +496,18 @@ function collectObjects(tokens, mintId) {
     return null;
   };
 
+  // Does a `...` at `j` continue the object frame `fr`? Only when the
+  // object is not an element of an explicit bracket list: inside `[…]`
+  // or `f(…)` the spread is the list's next ELEMENT (`[x: 1, ...opts]`
+  // is two elements, as CoffeeScript reads it); at statement level or
+  // under an implicit call it spreads into the object (`f a, x: 1,
+  // ...opts, y: 2` is one options object, as the braced form reads).
+  const spreadContinues = (fr, j) => {
+    if (tokens[j]?.kind !== '...') return false;
+    const below = stack[stack.indexOf(fr) - 1];
+    return !(below && below.kind !== 'INDENT' && PASS_OPENERS.has(below.kind));
+  };
+
   // Is an implicit CALL open between tape position `from` (exclusive)
   // and `i`? The call pass runs after this one, so its frames don't
   // exist yet — backward reconstruction answers the question:
@@ -711,7 +723,7 @@ function collectObjects(tokens, mintId) {
           continue;
         }
         if (k === 'TERMINATOR') {
-          if (prev?.kind !== ',' && !(fr.startsLine && (looksObjectish(i + 1) || tokens[i + 1]?.kind === '...'))) closeObject(i);
+          if (prev?.kind !== ',' && !(fr.startsLine && (looksObjectish(i + 1) || spreadContinues(fr, i + 1)))) closeObject(i);
           else break;
         } else {
           if (fr.sameLine && prev?.kind !== ':' &&
@@ -739,11 +751,11 @@ function collectObjects(tokens, mintId) {
     // pairs of the object below it.
     // A spread after the comma stays IN the property list (`f a, x: 1,
     // ...opts, y: 2` is one options object, as the braced form reads)
-    // — a statement never starts with `...`, so the continuation is
-    // never a new element.
+    // — unless the object is an element of an explicit bracket list,
+    // where the spread is the list's next element (spreadContinues).
     if (k === ',') {
       const list = listObjectFrame();
-      const continues = (j) => looksObjectish(j) || tokens[j]?.kind === '...';
+      const continues = (j) => looksObjectish(j) || (list !== null && spreadContinues(list, j));
       if (list && !openCallBetween(list.at, i) &&
           !continues(i + 1) &&
           (tokens[i + 1]?.kind !== 'TERMINATOR' || !continues(i + 2))) {

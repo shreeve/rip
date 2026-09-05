@@ -145,8 +145,9 @@ console.log('shipped:', new Shipped().version)
 # ── def methods: `def` in a class body, the static `def @`, the bang void form, and get/set accessors ──
 
 class Counter
+  history: number[] = []
   def constructor(@count: number = 0)
-    @history: number[] = []
+    @history.push(@count)
   def add(n: number): number
     @history.push(n)
     @count += n
@@ -154,6 +155,10 @@ class Counter
     new Counter(n)
   def @fresh()
     new Counter()
+  def @pair<T>(x: T)
+    [x, x]
+  def @only<T>(x: T): T[]
+    [x]
   def @zero!()
     console.log('zeroed')
   def @tick!(): void
@@ -166,4 +171,4 @@ Counter.tick()
 counted = Counter.of(3)
 counted.add(2)
 counted.doubled = 20
-console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count)
+console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count, Counter.pair(1).length, Counter.only(2).length)

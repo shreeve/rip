@@ -432,3 +432,25 @@ test 'parenless def forms in a class body', '''
     a = new A()
     [a.b(), A.c(), a.d(), a.x, a.e()]
   ''', ['hello', 'static', null, 1, 'typed']
+
+test 'generic defs in a class body, instance and static', '''
+    class Box
+      def id<T>(x: T): T
+        x
+      def @wrap<T>(x: T): T[]
+        [x]
+      def @pair<T>(x: T)
+        [x, x]
+    [new Box().id(3), Box.wrap(4), Box.pair(5)]
+  ''', [3, [4], [5, 5]]
+
+code 'a class def sees module bindings as a method does', 'x = 1\nclass A\n  def m()\n    x = 2', '''
+    let x = 1;
+    class A {
+      m() {
+        return (x = 2);
+      }
+    }
+  '''
+
+fail 'a setter cannot return a value', 'class A\n  set v: (n) ->\n    return 1', 'a setter discards its return value'

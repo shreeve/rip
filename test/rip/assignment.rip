@@ -269,6 +269,21 @@ test 'slice assignment from the start', 'a = [0,1,2,3]\na[..1] = []\na', [2,3]
 test 'slice assignment with a computed value', 'a = [0,1,2]\nv = [7,7]\na[0..0] = v\na', [7,7,1,2]
 test 'slice assignment with expression ends', 'a = [0,1,2,3,4]\ni = 1\na[i..i+1] = [9]\na', [0,9,3,4]
 code 'slice assignment lowers to splice', 'a[1..2] = [9]', 'a.splice(1, 2, 9);'
-code 'an open-ended slice assignment splices to the end', 'a[2..] = v', 'a.splice(2, Infinity, ...v);'
-code 'slice assignment with expression ends spells the count', 'a[i...j] = v', 'a.splice(i, j - i, ...v);'
+code 'an open-ended slice assignment splices to the end', 'a[2..] = v', 'a.splice(2, Infinity, ...[].concat(v));'
+code 'slice assignment with expression ends spells the count', 'a[i...j] = v', 'a.splice(i, j - i, ...[].concat(v));'
 fail 'a slice assignment has no value form', 'y = (a[1..2] = [9])', 'slice assignment'
+
+test 'a scalar value splices in as one element', '''
+    a = [0, 1, 2, 3]
+    a[1..2] = 9
+    a
+  ''', [0, 9, 3]
+test 'a reactive bound unwraps in a slice assignment', '''
+    i := 1
+    a = [0, 1, 2, 3]
+    a[i..2] = [7]
+    a
+  ''', [0, 7, 3]
+code 'an array with holes spreads through concat', 'a[0...1] = [1,,2]', 'a.splice(0, 1, ...[].concat([1, , 2]));'
+fail 'a negative slice bound rejects', 'a[1..-1] = v', 'cannot count from the end'
+fail 'a compound slice assignment rejects', 'a[1..2] += v', 'plain assignment only'

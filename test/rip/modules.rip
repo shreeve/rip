@@ -564,3 +564,7 @@ code 'side-effect import attributes', "import './data.json' with { type: 'json' 
 code 'namespace import attributes', "import * as d from './d.json' with { type: 'json' }", 'import * as d from \'./d.json\' with {type: "json"};'
 code 'named import attributes', "import { a } from './d.json' with { type: 'json' }", 'import { a } from \'./d.json\' with {type: "json"};'
 fail "'with' stays reserved outside an import", "with x\n  1", "'with' is reserved"
+
+code 'export all as default', "export * as default from './m'", "export * as default from './m';"
+code 'attributes on a default-plus-named import', "import d, { a } from './d.json' with { type: 'json' }", 'import d, { a } from \'./d.json\' with {type: "json"};'
+code 'attributes on a default-plus-namespace import', "import d, * as ns from './d.json' with { type: 'json' }", 'import d, * as ns from \'./d.json\' with {type: "json"};'

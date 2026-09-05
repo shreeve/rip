@@ -8,7 +8,11 @@
 #   - action is the s-expression construction template ('["=", 1, 3]')
 #   - annotation (string) names the semantic kind and one part per template
 #     element ('assign: operator, target, value'; '_' marks structural
-#     constants) — validated by Solar against the template
+#     constants) — validated by Solar against the template. A nested
+#     template array is '_' (opaque scaffold), '_(part, …)' (transparent:
+#     its parts are roles of this node), or 'role(kind: part, …)' (a
+#     node of its own, registered with its span; this node's `role`
+#     points at it)
 #   - options (object) carries operator precedence (prec: '...')
 #
 # Pattern sugar (expanded by Solar, one rule per variant): 'X?' makes a
@@ -126,10 +130,12 @@ grammar =
     # Import attributes (`import data from './d.json' with { type: 'json' }`):
     # the clause rides BEFORE the source so the source stays last (every
     # consumer reads the specifier there); the emitter prints it after.
-    o 'IMPORT String WITH Object'                                                   , '["import", ["with", 4], 2]'   , 'import: _, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier FROM String WITH Object'                       , '["import", 2, ["with", 6], 4]', 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportNamespaceSpecifier FROM String WITH Object'                     , '["import", 2, ["with", 6], 4]', 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String WITH Object'             , '["import", 3, ["with", 9], 7]', 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT String WITH Object'                                                   , '["import", [3, 4], 2]'          , 'import: _, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier FROM String WITH Object'                       , '["import", 2, [5, 6], 4]'       , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportNamespaceSpecifier FROM String WITH Object'                     , '["import", 2, [5, 6], 4]'       , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String WITH Object'             , '["import", 3, [8, 9], 7]'       , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String WITH Object'        , '["import", 2, 4, [7, 8], 6]'  , 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', '["import", 2, 5, [10, 11], 9]', 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
     # A TYPE-ONLY import (`import type … from …`): the keyword rides the
     # side-band typeOnly role and the node keeps the plain import's
     # shape, so everything that consumes an import statement consumes
@@ -187,7 +193,9 @@ grammar =
     o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]' , 'export: _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", 4]' , 'export: _, spec'
     o 'EXPORT EXPORT_ALL FROM String'                      , '["export-all", 4]'     , 'export: _, source'
-    o 'EXPORT EXPORT_ALL AS Identifier FROM String'        , '["export-all", 6, 4]'  , 'export: _, source, alias'
+    # `export * as ns from` / `export * as default from` (DEFAULT is
+    # contextual after AS on an export line).
+    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM String[source]', '["export-all", @source, @alias]', 'export: _, source, alias'
     o 'EXPORT { } FROM String'                             , '["export-from", "{}", 5]', 'export: _, spec, source'
     o 'EXPORT { ExportSpecifierList OptComma } FROM String', '["export-from", 3, 7]' , 'export: _, spec, source'
   ]
@@ -832,6 +840,7 @@ grammar =
     # a static class method; anywhere but a class body the shape
     # rejects at emission.
     o 'DEF ThisProperty[name] OptParams[params] (TYPE[returnType])? Block[body]', '["def", @name, @params, @body]', 'def: _, name, params, body'
+    o 'DEF ThisProperty[name] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]', '["def", @name, @params, @body]', 'def: _, name, params, body'
     o 'DEF ThisProperty[name] VOID_MARKER[voidMarker] OptParams[params] (TYPE[returnType])? Block[body]', '["void-def", @name, @params, @body]', 'def: _, name, params, body'
   ]
 
@@ -1214,7 +1223,9 @@ grammar =
 
     # A var-less ranged loop parses only so the emitter can reject it
     # with a precise message (the repeat idiom takes a binding).
-    o 'FOR Range Block', '["for-in", [], 2, null, null, 3]', 'forin: _, _, iterable, step, guard, body'
+    # Both reach the emitter's "the repeat idiom takes a binding"
+    # rejection (a var-less ranged loop has no coherent emission).
+    o 'FOR Range[iterable] (BY Expression[step])? Block[body]', '["for-in", [], @iterable, @step, null, @body]', 'forin: _, _, iterable, step, guard, body'
 
     o 'Expression FOR ForVariables FORIN Expression'                                , '["comprehension", 1, [["for-in", 3, 5, null]], []]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _'
     o 'Expression FOR ForVariables FORIN Expression WHEN Expression'                , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
@@ -1426,7 +1437,7 @@ displays =
   FORIN: 'in'
   FOROF: 'of'
   FORAS: 'as'
-  FORASAWAIT: 'as'
+  FORASAWAIT: 'as!'
   OWN: 'own'
   BY: 'by'
   WHEN: 'when'
@@ -1448,7 +1459,7 @@ displays =
   PARAM_END: ')'
   INDEX_START: '['
   INDEX_END: ']'
-  PICK_START: '{'
+  PICK_START: '.{'
   PICK_END: '}'
   OPTPICK_START: '?.{'
   ES6_OPTIONAL_INDEX: '?.['
@@ -1473,7 +1484,7 @@ displays =
   MATH: 'a math operator'
   SHIFT: 'a shift operator'
   COMPARE: 'a comparison'
-  RELATION: 'in/instanceof'
+  RELATION: 'in/of/instanceof'
   UNARY: 'not/typeof/delete'
   UNARY_MATH: '!/~'
 

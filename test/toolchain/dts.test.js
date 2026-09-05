@@ -556,3 +556,11 @@ describe('nested array types render in declarations', () => {
     expect(d).toContain('declare let w: number[][];');
   });
 });
+
+// An import's attributes clause reaches the declaration: a JSON import
+// without it does not resolve under NodeNext.
+test('import attributes ride the declaration', () => {
+  const src = "import data from './d.json' with { type: 'json' }\nx: typeof data = data\n";
+  expect(dts(src)).toBe(`import data from './d.json' with { type: "json" };\ndeclare let x: typeof data;\n`);
+  expect(dts("export * as ns from './m.js'")).toBe("export * as ns from './m.js';\n");
+});

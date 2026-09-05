@@ -1187,12 +1187,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         let end = pos;
         // A `###` line (three hashes then anything but a fourth) opens
         // a BLOCK comment that runs to the next `###`, however many
-        // lines away, and the rest of the closing line goes with it;
-        // an unclosed block runs to the end of the file. `####…` is a
-        // line comment like any other.
+        // lines away, and the rest of the closing line goes with it.
+        // An unclosed block rejects at its opener, like an unterminated
+        // heredoc: silently swallowing the rest of the file is the one
+        // thing a comment must never do (`__DATA__` is the spelling
+        // for "the rest is not code"). `####…` is a line comment like
+        // any other.
         if (text.startsWith('###', pos) && text[pos + 3] !== '#') {
           const close = text.indexOf('###', pos + 3);
-          end = close < 0 ? text.length : close + 3;
+          if (close < 0) failOpenAtEnd('unclosed `###` block comment — close it with `###`', pos, pos + 3);
+          end = close + 3;
         }
         while (end < text.length && text[end] !== '\n' && !(text[end] === '\r' && text[end + 1] === '\n')) end++;
         const withNl = end < text.length ? end + (text[end] === '\r' ? 2 : 1) : end;
@@ -1498,9 +1502,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // `x is not y` reads as `x === !y` — a comparison against a
         // negation, never what was meant. The negated comparison is
         // `isnt`; the rejection names it.
-        if (word === 'is' && /^[ \t]+not\b/.test(text.slice(pos))) {
-          const notEnd = pos + text.slice(pos).match(/^[ \t]+not/)[0].length;
-          fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, notEnd);
+        if (word === 'is' && (text[pos] === ' ' || text[pos] === '\t')) {
+          const not = /^[ \t]+not(?![\w$])/.exec(text.slice(pos));
+          if (not !== null) {
+            fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, pos + not[0].length);
+          }
         }
         // Word compound assignments: `and=` / `or=` are COMPOUND_ASSIGN
         // with the operator value, span covering word + '='.

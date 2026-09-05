@@ -560,3 +560,5 @@ test 'synth compound temps dodge user bindings', '''
 fail 'merge assignment is no longer an operator', '*>obj = {a: 1}', "Unexpected '*'"
 
 fail "'is not' is rejected with the isnt spelling", 'x is not null', 'x isnt y'
+
+test "an identifier starting with `not` after `is` is a plain comparison", 'not$y = 1\nx = 1\nx is not$y', true

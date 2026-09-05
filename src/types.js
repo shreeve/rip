@@ -730,11 +730,12 @@ const angleWeight = (t) =>
 // false (start of file — decisively no head), or null (transparent —
 // a colon inside the type run). Reads earlier tokens only, so the
 // answer is immutable once computed.
-// tokens[k] is a def's name: `def name` or the static `def @name`.
+// tokens[k] is a def's name: `def name` (IDENTIFIER, or PROPERTY when
+// a keys-colon follows — `def g: T`) or the static `def @name`.
 const isDefName = (tokens, k) => {
   const t = tokens[k];
-  if (!t) return false;
-  if (t.kind === 'IDENTIFIER') return tokens[k - 1]?.kind === 'DEF';
+  if (!t || (t.kind !== 'IDENTIFIER' && t.kind !== 'PROPERTY')) return false;
+  if (tokens[k - 1]?.kind === 'DEF') return true;
   return t.kind === 'PROPERTY' && tokens[k - 1]?.kind === '@' && tokens[k - 2]?.kind === 'DEF';
 };
 
@@ -1389,7 +1390,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // opaque text the grammar drops as the side-band typeParams role;
     // the TS face re-emits it after the name, type-level only.
     if (kd === 'COMPARE' && tok.value === '<' && !tok.spaced &&
-        prev && prev.kind === 'IDENTIFIER') {
+        prev && (prev.kind === 'IDENTIFIER' || isDefName(out, out.length - 1))) {
       const beforeName = out[out.length - 2] ?? null;
       // skipAngleGroup's -1 also covers a list left unclosed at end of
       // input, where no token past the tape has an `.end` to slice to.
@@ -1397,14 +1398,14 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       if (afterGroup > i) {
         const j = afterGroup - 1;
         const afterClose = tokens[j + 1]?.kind;
-        const isDefName = beforeName?.kind === 'DEF';
+        const defHead = beforeName?.kind === 'DEF' || isDefName(out, out.length - 1);
         const isComponentTarget = afterClose === '=' && tokens[j + 2]?.kind === 'COMPONENT';
-        if (isDefName || isComponentTarget) {
+        if (defHead || isComponentTarget) {
           // The def's param paren scanned PLAIN (the scanner mints
           // CALL_START only directly after a name) — retype it and
           // its mate so the defparam frame and the return-type claim
           // see the ordinary shapes.
-          if (isDefName && afterClose === '(') {
+          if (defHead && afterClose === '(') {
             let d = 0;
             for (let k = j + 1; k < tokens.length; k++) {
               const t = tokens[k];
@@ -1456,11 +1457,14 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         if (last >= 0) { i = last; continue; }
       }
 
-      // Return type on a parameterless def: `def f: T`.
-      if ((prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') && beforePrev?.kind === 'DEF') {
+      // Return type on a parameterless def: `def f: T` / `def @f: T`.
+      if (isDefName(out, out.length - 1)) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) {
-          if (prev.kind === 'PROPERTY') {
+          // The keys-colon read the name as a PROPERTY; a plain def
+          // name is an identifier (the static `@name` keeps PROPERTY —
+          // that is the ThisProperty shape).
+          if (prev.kind === 'PROPERTY' && beforePrev?.kind === 'DEF') {
             rejectValueWordBinding(prev);
             prev.kind = 'IDENTIFIER';
           }
@@ -1470,8 +1474,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       }
 
       // Return type on a parameterless VOID def: `def tick!: T`.
-      if (prev.kind === 'VOID_MARKER' && beforePrev?.kind === 'IDENTIFIER' &&
-          out[out.length - 3]?.kind === 'DEF') {
+      if (prev.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) { i = last; continue; }
       }

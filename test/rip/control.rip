@@ -1278,3 +1278,26 @@ code 'switch with only plain arms keeps case labels', 'switch s\n  when 1, 2 the
         break;
     }
   '''
+
+test 'range arms take variable bounds', '''
+    lo = 2
+    hi = 4
+    f = (n) ->
+      switch n
+        when [lo..hi] then 'in'
+        else 'out'
+    [f(2), f(4), f(5)]
+  ''', ['in', 'in', 'out']
+
+test 'a break bound by a loop inside a match arm stays', '''
+    out = []
+    switch 'ab'
+      when /a/
+        for i in [1..5]
+          break if i > 2
+          out.push i
+    out
+  ''', [1, 2]
+
+fail 'a break in a match arm has nothing to leave', 'for x in xs\n  switch x\n    when /a/\n      break', 'nothing to leave'
+fail 'a subjectless switch cannot carry match arms', 'switch\n  when /a/ then 1', 'has none'

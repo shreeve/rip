@@ -8,4 +8,4 @@ let wrongState: number = ((v: number) => v)('oops')
 const wrongComputed: string = ((): string => count * 2)()
 const wrongReadonly: number = 'nope'
 const wrongEffect: number = (() => () => {})()
-limit = 7
+// (the readonly write is a rip-level rejection now; no twin line)

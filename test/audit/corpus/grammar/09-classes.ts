@@ -198,6 +198,7 @@ class Counter {
   history: number[] = []
   constructor(count: number = 0) {
     this.count = count
+    this.history.push(this.count)
   }
   add(n: number): number {
     this.history.push(n)
@@ -208,6 +209,12 @@ class Counter {
   }
   static fresh() {
     return new Counter()
+  }
+  static pair<T>(x: T) {
+    return [x, x]
+  }
+  static only<T>(x: T): T[] {
+    return [x]
   }
   static zero() {
     console.log('zeroed')
@@ -228,4 +235,4 @@ Counter.tick()
 const counted = Counter.of(3)
 counted.add(2)
 counted.doubled = 20
-console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count)
+console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count, Counter.pair(1).length, Counter.only(2).length)

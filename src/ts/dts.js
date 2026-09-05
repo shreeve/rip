@@ -443,10 +443,21 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const specListText = (list) =>
     list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
 
-  // The attributes clause (`with { type: 'json' }`, the ["with", …]
-  // element before the source) is a runtime loading concern; the
-  // declaration keeps the bindings and drops it.
+  // The attributes clause (`with { type: 'json' }`) rides the node as a
+  // ["with", object] element before the source. The declaration keeps
+  // it after the source — a JSON import without it does not resolve
+  // under NodeNext — printed from the object's string-literal pairs.
   const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+  const importAttributesText = (node) => {
+    const clause = node.length > 2 ? node[node.length - 2] : null;
+    if (!isNode(clause) || clause[0] !== 'with') return '';
+    const pairs = clause[1].slice(1).map((pair) => {
+      const key = typeof pair[1] === 'string' ? pair[1] : '?';
+      const value = typeof pair[2] === 'string' ? pair[2].replace(/^'(.*)'$/, '"$1"') : '?';
+      return `${key}: ${value}`;
+    });
+    return ` with { ${pairs.join(', ')} }`;
+  };
 
   const importText = (node) => {
     const source = node[node.length - 1];
@@ -455,7 +466,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       if (spec[0] === '*') return `* as ${spec[1]}`;
       return `{ ${specListText(spec)} }`;
     });
-    return `import ${specs.join(', ')} from ${moduleSourceText(source)};`;
+    return `import ${specs.join(', ')} from ${moduleSourceText(source)}${importAttributesText(node)};`;
   };
 
   // The names an import binds locally: the default name, the

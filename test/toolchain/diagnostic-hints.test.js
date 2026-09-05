@@ -42,3 +42,11 @@ test('`with` is contextual: import attributes only', () => {
   expect(compile("import d from './d.json' with { type: 'json' }").code).toContain("with {type: \"json\"}");
   expect(rejection('with x\n  1')).toContain("'with' is reserved");
 });
+
+test('a token the implicit passes minted says so', () => {
+  expect(rejection('o = { get v: -> 1 }')).toMatch(/Unexpected implicit '\('/);
+});
+
+test('an identifier that merely starts with `not` after `is` is a plain comparison', () => {
+  expect(compile('x is not$y', { runtimeDelivery: 'none' }).code).toContain('x === not$y');
+});
