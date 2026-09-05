@@ -544,8 +544,8 @@ grammar =
     # The bang is labeled here too — same reason as Value DAMMIT's: the
     # awaited construction's `await` is synthetic, and the operator role
     # is where its diagnostics land.
-    o 'NEW NewSpine DAMMIT[operator]'          , '["await", ["new", 2]]', 'await: _, _', prec: 'NEW'
-    o 'NEW NewSpine DAMMIT[operator] Arguments', '["await", ["new", [2, ...4]]]', 'await: _, _'
+    o 'NEW NewSpine DAMMIT[operator]'          , '["await", ["new", 2]]', 'await: _, value(unary: operator, operand)', prec: 'NEW'
+    o 'NEW NewSpine DAMMIT[operator] Arguments', '["await", ["new", [2, ...4]]]', 'await: _, value(unary: operator, operand(call: callee, ...args))'
   ]
 
   NewCall: [
@@ -991,7 +991,7 @@ grammar =
     # token's own value; `import!(url)` is its awaited form (a real
     # await node — no hidden channels).
     o 'DYNAMIC_IMPORT Arguments'       , '[1, ...2]', 'dynimport: keyword, ...args'
-    o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["await", ["import", ...3]]', 'await: _, _'
+    o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["await", ["import", ...3]]', 'await: _, value(dynimport: keyword, ...args)'
   ]
 
   Arguments: [
@@ -1038,30 +1038,32 @@ grammar =
   # ============================================================================
   # Loops
   #
-  # UNTIL lowers to a negated while at parse time; its nested-array
-  # action is un-annotatable — the flat
-  # WHILE form carries the roles.
+  # UNTIL lowers to a negated while at parse time; the negation is a
+  # nested unary node of its own (`condition(unary: …)`), so the
+  # condition's span reaches RoleStore through it. Postfix forms wrap
+  # the body statement in a plain list — a transparent scaffold
+  # (`_(body)`): the statement is the body role.
   # ============================================================================
 
   While: [
     o 'WHILE Expression Block', '["while", 2, 3]'       , 'while: _, condition, body'
-    o 'UNTIL Expression Block', '["while", ["!", 2], 3]'
+    o 'UNTIL Expression Block', '["while", ["!", 2], 3]', 'while: _, condition(unary: operator, operand), body'
     # WHEN-guarded forms: the guard rides as a third slot —
     # ["while", condition, guard, body] (arity discriminates it from
     # the plain form). Statement emission nests the body in
     # `if (guard)`; value emission skips iterations with `continue`.
     o 'WHILE Expression WHEN Expression Block', '["while", 2, 4, 5]', 'while: _, condition, guard, body'
-    o 'UNTIL Expression WHEN Expression Block', '["while", ["!", 2], 4, 5]'
+    o 'UNTIL Expression WHEN Expression Block', '["while", ["!", 2], 4, 5]', 'while: _, condition(unary: operator, operand), guard, body'
     # Postfix forms: the body is a plain [statement] array (the
     # postfix-if convention).
-    o 'Expression WHILE Expression', '["while", 3, [1]]'
-    o 'Statement WHILE Expression' , '["while", 3, [1]]'
-    o 'Expression UNTIL Expression', '["while", ["!", 3], [1]]'
-    o 'Statement UNTIL Expression' , '["while", ["!", 3], [1]]'
-    o 'Expression WHILE Expression WHEN Expression', '["while", 3, 5, [1]]'
-    o 'Statement WHILE Expression WHEN Expression' , '["while", 3, 5, [1]]'
-    o 'Expression UNTIL Expression WHEN Expression', '["while", ["!", 3], 5, [1]]'
-    o 'Statement UNTIL Expression WHEN Expression' , '["while", ["!", 3], 5, [1]]'
+    o 'Expression WHILE Expression', '["while", 3, [1]]', 'while: _, condition, _(body)'
+    o 'Statement WHILE Expression' , '["while", 3, [1]]', 'while: _, condition, _(body)'
+    o 'Expression UNTIL Expression', '["while", ["!", 3], [1]]', 'while: _, condition(unary: operator, operand), _(body)'
+    o 'Statement UNTIL Expression' , '["while", ["!", 3], [1]]', 'while: _, condition(unary: operator, operand), _(body)'
+    o 'Expression WHILE Expression WHEN Expression', '["while", 3, 5, [1]]', 'while: _, condition, guard, _(body)'
+    o 'Statement WHILE Expression WHEN Expression' , '["while", 3, 5, [1]]', 'while: _, condition, guard, _(body)'
+    o 'Expression UNTIL Expression WHEN Expression', '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)'
+    o 'Statement UNTIL Expression WHEN Expression' , '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)'
     o 'Loop'
   ]
 
@@ -1084,17 +1086,17 @@ grammar =
     # prec IF (the ELSE precedence class, right-assoc): a dangling ELSE
     # shifts — it binds the nearest conditional (the dangling-else
     # convention).
-    o 'UNLESS Expression Block'           , '["if", ["!", 2], 3]', prec: 'IF'
-    o 'UNLESS Expression Block ELSE Block', '["if", ["!", 2], 3, 5]'
+    o 'UNLESS Expression Block'           , '["if", ["!", 2], 3]'   , 'if: _, condition(unary: operator, operand), then', prec: 'IF'
+    o 'UNLESS Expression Block ELSE Block', '["if", ["!", 2], 3, 5]', 'if: _, condition(unary: operator, operand), then, else'
   ]
 
   If: [
     o 'IfBlock'
     o 'UnlessBlock'
-    o 'Statement POST_IF Expression'     , '["if", 3, [1]]'
-    o 'Expression POST_IF Expression'    , '["if", 3, [1]]'
-    o 'Statement POST_UNLESS Expression' , '["if", ["!", 3], [1]]'
-    o 'Expression POST_UNLESS Expression', '["if", ["!", 3], [1]]'
+    o 'Statement POST_IF Expression'     , '["if", 3, [1]]'       , 'if: _, condition, _(then)'
+    o 'Expression POST_IF Expression'    , '["if", 3, [1]]'       , 'if: _, condition, _(then)'
+    o 'Statement POST_UNLESS Expression' , '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
+    o 'Expression POST_UNLESS Expression', '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
     # Postfix conditional WITH else — the Python-style ternary spelling
     # (`b if c else d`); POST_UNLESS has no ELSE form.
     o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", @condition, @then, @else]', 'ternary: operator, condition, then, else'
@@ -1197,23 +1199,23 @@ grammar =
 
     # A var-less ranged loop parses only so the emitter can reject it
     # with a precise message (the repeat idiom takes a binding).
-    o 'FOR Range Block', '["for-in", [], 2, null, null, 3]'
+    o 'FOR Range Block', '["for-in", [], 2, null, null, 3]', 'forin: _, _, iterable, step, guard, body'
 
-    o 'Expression FOR ForVariables FORIN Expression'                                , '["comprehension", 1, [["for-in", 3, 5, null]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'                , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression'                  , '["comprehension", 1, [["for-in", 3, 5, 7]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression'  , '["comprehension", 1, [["for-in", 3, 5, 9]], [7]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression'  , '["comprehension", 1, [["for-in", 3, 5, 7]], [9]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FOROF Expression'                                , '["comprehension", 1, [["for-of", 3, 5, false]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'                , '["comprehension", 1, [["for-of", 3, 5, false]], [7]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR OWN ForVariables FOROF Expression'                            , '["comprehension", 1, [["for-of", 4, 6, true]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'            , '["comprehension", 1, [["for-of", 4, 6, true]], [8]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORAS Expression'                                , '["comprehension", 1, [["for-as", 3, 5, false, null]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORAS Expression WHEN Expression'                , '["comprehension", 1, [["for-as", 3, 5, false, null]], [7]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR AWAIT ForVariables FORAS Expression'                          , '["comprehension", 1, [["for-as", 4, 6, true, null]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR AWAIT ForVariables FORAS Expression WHEN Expression'          , '["comprehension", 1, [["for-as", 4, 6, true, null]], [8]]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORASAWAIT Expression'                           , '["comprehension", 1, [["for-as", 3, 5, true, null]], []]', 'comprehension: _, value, _, _'
-    o 'Expression FOR ForVariables FORASAWAIT Expression WHEN Expression'           , '["comprehension", 1, [["for-as", 3, 5, true, null]], [7]]', 'comprehension: _, value, _, _'
+    o 'Expression FOR ForVariables FORIN Expression'                                , '["comprehension", 1, [["for-in", 3, 5, null]], []]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'                , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression'                  , '["comprehension", 1, [["for-in", 3, 5, 7]], []]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression'  , '["comprehension", 1, [["for-in", 3, 5, 9]], [7]]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression'  , '["comprehension", 1, [["for-in", 3, 5, 7]], [9]]', 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
+    o 'Expression FOR ForVariables FOROF Expression'                                , '["comprehension", 1, [["for-of", 3, 5, false]], []]', 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _'
+    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'                , '["comprehension", 1, [["for-of", 3, 5, false]], [7]]', 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _(guard)'
+    o 'Expression FOR OWN ForVariables FOROF Expression'                            , '["comprehension", 1, [["for-of", 4, 6, true]], []]', 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _'
+    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'            , '["comprehension", 1, [["for-of", 4, 6, true]], [8]]', 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _(guard)'
+    o 'Expression FOR ForVariables FORAS Expression'                                , '["comprehension", 1, [["for-as", 3, 5, false, null]], []]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
+    o 'Expression FOR ForVariables FORAS Expression WHEN Expression'                , '["comprehension", 1, [["for-as", 3, 5, false, null]], [7]]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
+    o 'Expression FOR AWAIT ForVariables FORAS Expression'                          , '["comprehension", 1, [["for-as", 4, 6, true, null]], []]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
+    o 'Expression FOR AWAIT ForVariables FORAS Expression WHEN Expression'          , '["comprehension", 1, [["for-as", 4, 6, true, null]], [8]]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
+    o 'Expression FOR ForVariables FORASAWAIT Expression'                           , '["comprehension", 1, [["for-as", 3, 5, true, null]], []]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
+    o 'Expression FOR ForVariables FORASAWAIT Expression WHEN Expression'           , '["comprehension", 1, [["for-as", 3, 5, true, null]], [7]]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
   ]
 
   ForValue: [
@@ -1378,7 +1380,7 @@ kinds =
   'catch':         ['binding', 'body']
   'class':         ['body', 'name', 'parent']
   'component':     ['body', 'parent']
-  'comprehension': ['value']
+  'comprehension': ['guard', 'loop', 'value']
   'computed':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
   'dammit':        ['operator', 'target']
   'def':           ['body', 'name', 'params', 'returnType', 'typeParams', 'voidMarker']

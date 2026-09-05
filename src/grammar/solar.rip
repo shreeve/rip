@@ -305,7 +305,7 @@ class Generator
           @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels
         else
           throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
-          if typeof action is 'string' and @_templateElements(action)?
+          if typeof action is 'string' and @_templateElements(action, true)?
             @unannotatedConstructors.push "#{lhs} → #{pattern or 'ε'}"
 
         # Process semantic actions
@@ -707,6 +707,13 @@ class Generator
   # one part per template element in template order. Refs take real names;
   # literal elements take a real name when the constant carries meaning or
   # '_' when it is purely structural; '...' marks spread refs.
+  #
+  # A nested array element takes '_' (an opaque scaffold — no rows),
+  # '_(part, ...)' (a transparent scaffold: its parts are roles of THIS
+  # node, one per nested element), or 'role(kind: part, ...)' (a node of
+  # its own: the nested array registers with that kind and those roles,
+  # and this node's `role` points at it). Sub-annotations nest. A
+  # nested element after a spread cannot be located and rejects.
   _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = []) ->
     ruleDesc = "#{lhs} → #{pattern or 'ε'}"
     fail = (msg) ->
@@ -756,41 +763,100 @@ class Generator
       applyLabels roles, Set.new()
       return {kind, roles}
 
-    parts = annotation[colon + 1..].split(',').map (s) -> s.trim()
     fail "kind-only annotation takes no parts; template has no elements" if elements.length is 0
-    fail "template has #{elements.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless elements.length is parts.length
 
-    seen = Set.new()
-    roles = []
-    for el, i in elements
-      raw    = parts[i]
-      spread = raw.startsWith('...')
-      name   = if spread then raw[3..].trim() else raw
+    # Split at top-level commas: a sub-annotation's parentheses group
+    # its own parts.
+    splitParts = (text) ->
+      parts = []
+      cur   = ''
+      depth = 0
+      for ch in text
+        depth++ if ch is '('
+        depth-- if ch is ')'
+        fail "unbalanced parentheses in annotation '#{annotation}'" if depth < 0
+        if ch is ',' and depth is 0
+          parts.push cur.trim()
+          cur = ''
+        else
+          cur += ch
+      fail "unbalanced parentheses in annotation '#{annotation}'" unless depth is 0
+      parts.push cur.trim()
+      parts
 
-      if el.grammarRef?
-        fail "position ref #{el.grammarRef} requires a real role name, not '_'" if name is '_'
-        fail "spread ref ...#{el.grammarRef} requires spread role '...#{name}'" if el.spread and not spread
-        fail "role '...#{name}' is marked spread but ref #{el.grammarRef} is not a spread" if spread and not el.spread
-      else if el.structural?
-        fail "nested structural element cannot take a spread role '...#{name}'" if spread
-        fail "nested structural element must be named '_'" unless name is '_'
-        continue
-      else
-        fail "literal element #{el.literal} cannot take a spread role '...#{name}'" if spread
-        continue if name is '_'
-
+    checkName = (name, seen) ->
       fail "invalid role name '#{name}'" unless ident.test(name)
       fail "'$self' is a reserved role name" if name is '$self'
       fail "duplicate role '#{name}'" if seen.has(name)
       seen.add name
 
-      if el.grammarRef?
-        roles.push {name, grammarRef: el.grammarRef, childSlot: el.childSlot, spread: el.spread}
-      else
-        roles.push {name, grammarRef: null, childSlot: el.childSlot, literal: @_literalValue el.literal}
+    # One template level. `path` is the child-slot path from the node
+    # being described down to `els` (non-empty inside a transparent
+    # scaffold); a named nested node starts its own path. Returns the
+    # node's roles and its nested-node descriptors
+    # {role, path, kind, roles, nested}.
+    describe = (els, partsText, path, seen) =>
+      parts = if partsText.trim() is '' then [] else splitParts partsText
+      fail "template has #{els.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless els.length is parts.length
+      # (Names here are unique to this closure: a name the enclosing
+      # method also assigns would be shared with it, and the recursion
+      # would clobber its caller's loop and lists.)
+      found  = []
+      inner  = []
+      for element, index in els
+        raw    = parts[index]
+        spread = raw.startsWith('...')
+        name   = if spread then raw[3..].trim() else raw
+        sub    = null
+        if m = name.match /^([^(]*)\((.*)\)$/
+          name = m[1].trim()
+          sub  = m[2]
 
-    applyLabels roles, seen
-    {kind, roles}
+        if element.grammarRef?
+          fail "position ref #{element.grammarRef} requires a real role name, not '_'" if name is '_'
+          fail "position ref #{element.grammarRef} takes no sub-annotation ('#{raw}')" if sub?
+          fail "spread ref ...#{element.grammarRef} requires spread role '...#{name}'" if element.spread and not spread
+          fail "role '...#{name}' is marked spread but ref #{element.grammarRef} is not a spread" if spread and not element.spread
+        else if element.structural?
+          fail "nested structural element cannot take a spread role '...#{name}'" if spread
+          unless sub?
+            fail "nested structural element must be named '_' — or annotated: '_(part, ...)' names its elements as roles of this node, 'role(kind: part, ...)' makes it a node of its own" unless name is '_'
+            continue
+          slot = element.childSlot
+          fail "nested annotation '#{raw}' follows a spread — its element cannot be located" unless slot?
+          if name is '_'
+            below = describe element.elements, sub, [...path, slot], seen
+            found.push ...below.roles
+            inner.push ...below.nested
+            continue
+          checkName name, seen
+          c = sub.indexOf ':'
+          subKind = (if c >= 0 then sub[...c] else sub).trim()
+          fail "invalid semantic kind '#{subKind}' in nested annotation '#{raw}'" unless subKind and ident.test(subKind)
+          below = describe element.elements, (if c >= 0 then sub[c + 1..] else ''), [], Set.new()
+          inner.push {role: name, path: [...path, slot], kind: subKind, roles: below.roles, nested: below.nested}
+          continue
+        else
+          fail "literal element #{element.literal} cannot take a spread role '...#{name}'" if spread
+          fail "literal element #{element.literal} takes no sub-annotation ('#{raw}')" if sub?
+          continue if name is '_'
+
+        checkName name, seen
+        # An element reached through a scaffold is not a direct child:
+        # its slot is runtime-dependent, as after a spread.
+        childSlot = if path.length then null else element.childSlot
+        if element.grammarRef?
+          found.push {name, grammarRef: element.grammarRef, childSlot, spread: element.spread}
+        else
+          found.push {name, grammarRef: null, childSlot, literal: @_literalValue element.literal}
+      {roles: found, nested: inner}
+
+    seen = Set.new()
+    top = describe elements, annotation[colon + 1..], [], seen
+    applyLabels top.roles, seen
+    sem = {kind, roles: top.roles}
+    sem.nested = top.nested if top.nested.length
+    sem
 
   # The JS value of a scanner-classified template literal element. The
   # template is a JS array literal that the generated parser's action
@@ -1389,10 +1455,16 @@ class Generator
   # it; the generated module ships it as the parser's semantic surface.
   _kindInventory: ->
     inventory = Map.new()
-    for own ruleId, sem of @semantics
+    add = (sem) ->
       entry = inventory.get(sem.kind) or Set.new()
       entry.add role.name for role in sem.roles
       inventory.set sem.kind, entry
+      # A nested node is a use of ITS kind; the role naming it belongs
+      # to the enclosing node's vocabulary.
+      for d in sem.nested ?? []
+        entry.add d.role
+        add d
+    add sem for own ruleId, sem of @semantics
     inventory
 
   # Resolve conflicts using precedence and associativity
@@ -1913,32 +1985,62 @@ class Generator
           row.sourceStart = span.start
           row.sourceEnd = span.end
         if Array.isArray(node) and not nodeIds.has(node)
-          nodeId = nextNodeId++
-          nodeIds.set node, nodeId
           sem = @semantics[-action]
-          nodes.push {nodeId, fileId: 0, semanticKind: sem?.kind ?? null, ruleId: -action, sourceStart: span.start, sourceEnd: span.end}
-          if sem
-            base = vals.length - len
-            for part in sem.roles
+          base = vals.length - len
+          # Register one constructed array: its nested nodes first (ids
+          # stay bottom-up, as reductions are), then its own NodeStore
+          # row and RoleStore rows. The rule's own node takes the
+          # reduction span; a nested node spans the matched symbols it
+          # and its descendants carry (the reduction span when it
+          # carries none).
+          # (Names inside are unique to this closure: a name the parse
+          # method also assigns would be shared, and the recursion
+          # would clobber it.)
+          register = (arr, kind, parts, nestedParts, ownSpan) =>
+            kidIds  = []
+            lowest  = Infinity
+            highest = -Infinity
+            for entry in nestedParts
+              kid = arr
+              kid = kid[step] for step in entry.path
+              throw Error.new "parse: nested annotation '#{entry.role}' of rule #{-action} does not address a fresh array" unless Array.isArray(kid) and not nodeIds.has(kid)
+              kidId = register kid, entry.kind, entry.roles, entry.nested, null
+              kidIds.push kidId
+              lowest  = Math.min lowest, nodes[kidId - 1].sourceStart
+              highest = Math.max highest, nodes[kidId - 1].sourceEnd
+            for part in parts when part.grammarRef?
+              refLoc = locs[base + part.grammarRef - 1]
+              # Annotated refs address real matched symbols, whose locs
+              # the lexer protocol guarantees; a hole is a protocol
+              # violation, never a position to default.
+              throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless refLoc?
+              lowest  = Math.min lowest, refLoc.start
+              highest = Math.max highest, refLoc.end
+            nodeSpan = ownSpan ?? (if lowest is Infinity then span else {start: lowest, end: highest})
+            ownId = nextNodeId++
+            nodeIds.set arr, ownId
+            nodes.push {nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end}
+            for part in parts
               if part.grammarRef?
-                at  = base + part.grammarRef - 1
-                loc = locs[at]
-                # Annotated refs address real matched symbols, whose locs
-                # the lexer protocol guarantees; a hole is a protocol
-                # violation, never a position to default.
-                throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless loc?
-                row = {nodeId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: loc.start, sourceEnd: loc.end, childNodeId: null, fileId: 0}
+                pos    = base + part.grammarRef - 1
+                refLoc = locs[pos]
+                roleRow = {nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0}
                 if part.spread
                   # Spread span covers the spliced children's full extent
                   # (the ref'd symbol's span); per-element spans come from
                   # the children's own NodeStore rows.
-                  row.spread = true
+                  roleRow.spread = true
                 else
-                  row.childNodeId = nodeIds.get(vals[at]) ?? null
-                roles.push row
+                  roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null
+                roles.push roleRow
               else
                 # Literal-sourced role: statically-known value, no span.
-                roles.push {nodeId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+                roles.push {nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+            for entry, k in nestedParts
+              kidRow = nodes[kidIds[k] - 1]
+              roles.push {nodeId: ownId, role: entry.role, grammarRef: null, childSlot: (if entry.path.length is 1 then entry.path[0] else null), sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[k], fileId: 0}
+            ownId
+          register node, (sem?.kind ?? null), (sem?.roles ?? []), (sem?.nested ?? []), span
 
         # A primitive occurrence belongs to the FIRST constructed node that
         # carries it. Ancestors recover it by source containment, so the row is

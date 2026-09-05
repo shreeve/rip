@@ -16,6 +16,13 @@
 //                  spans come from the children's own NodeStore rows)
 //   literal role { nodeId, role, grammarRef: null, childSlot, literal,
 //                  fileId } — statically-known value, no span
+//   nested role  { nodeId, role, grammarRef: null, childSlot, sourceStart,
+//                  sourceEnd, childNodeId, fileId } — the child is a node
+//                  the same reduction built from a nested template
+//                  (`role(kind: …)` in the annotation), not a matched
+//                  symbol: no grammarRef, but a real span (the nested
+//                  node's own). The `literal` key, never a null
+//                  grammarRef, is what identifies a literal row.
 //
 // PrimitiveStore row: { nodeId, value, sourceStart, sourceEnd, fileId } —
 //   one source token occurrence, owned by the first constructed node that
