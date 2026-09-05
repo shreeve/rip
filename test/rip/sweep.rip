@@ -1,0 +1,1296 @@
+# Test: Grammar sweep
+# Pins every production the topical batteries never reach, so the language
+# suite covers the whole grammar (test/toolchain/grammar-coverage.test.js
+# is the gate). Each row names the construct; the expected output is the
+# engine's current emission, which a grammar or generator refactor must
+# reproduce byte for byte.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+
+# ==============================================================================
+# Modules
+# ==============================================================================
+
+code "side-effect import", 'import \'polyfill\'', 'import \'polyfill\';'
+code "empty named import", 'import {} from \'m\'', 'import {} from \'m\';'
+code "import type default", '''
+  import type D from 'm'
+  x = 1
+  ''', '''
+  let x = 1;
+  '''
+
+code "import type namespace", '''
+  import type * as N from 'm'
+  x = 1
+  ''', '''
+  let x = 1;
+  '''
+
+code "import type empty", '''
+  import type {} from 'm'
+  x = 1
+  ''', '''
+  let x = 1;
+  '''
+
+code "import type named", '''
+  import type { A, B } from 'm'
+  x = 1
+  ''', '''
+  let x = 1;
+  '''
+
+code "import list wrapped after a comma", '''
+  import { a,
+  b } from 'm'
+  ''', '''
+  import { a, b } from 'm';
+  '''
+
+code "import list fully indented", '''
+  import {
+    a
+    b
+  } from 'm'
+  ''', '''
+  import { a, b } from 'm';
+  '''
+
+code "import list continued on an indented line", '''
+  import { a,
+    b
+  } from 'm'
+  ''', '''
+  import { a, b } from 'm';
+  '''
+
+code "import default as alias", 'import { default as d } from \'m\'', 'import { default as d } from \'m\';'
+code "empty export", 'export {}', 'export {};'
+code "export enum", '''
+  export enum Color
+    red
+    green
+  ''', '''
+  export const Color = {red: 0, green: 1, 0: "red", 1: "green"};
+  '''
+
+code "export computed", '''
+  a := 1
+  export b ~= a * 2
+  ''', '''
+  const a = __state(1);
+  export const b = __computed(() => (a.value * 2));
+  '''
+
+code "export readonly", 'export MAX =! 100', 'export const MAX = 100;'
+code "export bound effect", '''
+  a := 1
+  export h ~> console.log a
+  ''', '''
+  const a = __state(1);
+  export const h = __effect(() => { console.log(a.value); });
+  '''
+
+code "export default indented object", '''
+  export default
+    a: 1
+    b: 2
+  ''', '''
+  export default {a: 1, b: 2};
+  '''
+
+code "empty export from", 'export {} from \'m\'', 'export {} from \'m\';'
+code "export assign wrapped", '''
+  export x =
+  1
+  ''', '''
+  export const x = 1;
+  '''
+
+code "export assign indented", '''
+  export x =
+    1
+  ''', '''
+  export const x = 1;
+  '''
+
+code "export typed assign", 'export x: number = 1', 'export const x = 1;'
+code "export typed assign wrapped", '''
+  export x: number =
+  1
+  ''', '''
+  export const x = 1;
+  '''
+
+code "export typed assign indented", '''
+  export x: number =
+    1
+  ''', '''
+  export const x = 1;
+  '''
+
+code "export generic component", '''
+  export Chip<TLabel extends string> = component
+    @label?: TLabel
+    render
+      span 'chip'
+  ''', '''
+  export const Chip = class extends __Component {
+    static __props = ['label'];
+    _init(props) {
+      this.label = __state(props.__bind_label__ ?? props.label);
+    }
+    _create() {
+      this._el0 = document.createElement('span');
+      this._el0.setAttribute('data-part', 'Chip');
+      this._t0 = document.createTextNode("chip");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code "export void assign wrapped", '''
+  export save! =
+  -> 1
+  ''', '''
+  export const save = function() {
+    1;
+    return;
+  };
+  '''
+
+code "export void assign indented", '''
+  export save! =
+    -> 1
+  ''', '''
+  export const save = function() {
+    1;
+    return;
+  };
+  '''
+
+code "export typed state wrapped", '''
+  export c: number :=
+  1
+  ''', '''
+  export const c = __state(1);
+  '''
+
+code "export typed state indented", '''
+  export c: number :=
+    1
+  ''', '''
+  export const c = __state(1);
+  '''
+
+code "export typed computed", '''
+  a := 1
+  export d: number ~= a * 2
+  ''', '''
+  const a = __state(1);
+  export const d = __computed(() => (a.value * 2));
+  '''
+
+code "export typed computed wrapped", '''
+  a := 1
+  export d: number ~=
+  a * 2
+  ''', '''
+  const a = __state(1);
+  export const d = __computed(() => (a.value * 2));
+  '''
+
+code "export typed computed block", '''
+  a := 1
+  export d: number ~=
+    b = a * 2
+    b + 1
+  ''', '''
+  const a = __state(1);
+  export const d = __computed(() => {
+    let b = a.value * 2;
+    return (b + 1);
+  });
+  '''
+
+code "export typed readonly", 'export r: number =! 1', 'export const r = 1;'
+code "export typed readonly wrapped", '''
+  export r: number =!
+  1
+  ''', '''
+  export const r = 1;
+  '''
+
+code "export typed readonly indented", '''
+  export r: number =!
+    1
+  ''', '''
+  export const r = 1;
+  '''
+
+code "export typed effect", '''
+  a := 1
+  export h: Handle ~> console.log a
+  ''', '''
+  const a = __state(1);
+  export const h = __effect(() => { console.log(a.value); });
+  '''
+
+code "export typed effect wrapped", '''
+  a := 1
+  export h: Handle ~>
+  console.log a
+  ''', '''
+  const a = __state(1);
+  export const h = __effect(() => { console.log(a.value); });
+  '''
+
+code "export typed effect block", '''
+  a := 1
+  export h: Handle ~>
+    b = a
+    console.log b
+  ''', '''
+  const a = __state(1);
+  export const h = __effect(() => {
+    let b = a.value;
+    return console.log(b);
+  });
+  '''
+
+code "export list continued on an indented line", '''
+  a = 1
+  b = 2
+  export { a,
+    b
+  }
+  ''', '''
+  let a = 1;
+  let b = 2;
+  export { a, b };
+  '''
+
+code "export as default", '''
+  a = 1
+  export { a as default }
+  ''', '''
+  let a = 1;
+  export { a as default };
+  '''
+
+code "re-export default", 'export { default } from \'m\'', 'export { default } from \'m\';'
+code "re-export default as name", 'export { default as a } from \'m\'', 'export { default as a } from \'m\';'
+
+# ==============================================================================
+# Strings
+# ==============================================================================
+
+code "interpolation with an indented body", '''
+  x = "a#{
+    1 + 1
+  }b"
+  ''', '''
+  let x = `a${(1 + 1)}b`;
+  '''
+
+code "empty interpolation", 'x = "a#{}b"', 'let x = `ab`;'
+
+# ==============================================================================
+# Assignment
+# ==============================================================================
+
+code "assign wrapped", '''
+  x =
+  1
+  ''', '''
+  let x = 1;
+  '''
+
+code "typed assign wrapped", '''
+  x: number =
+  1
+  ''', '''
+  let x = 1;
+  '''
+
+code "typed assign indented", '''
+  x: number =
+    1
+  ''', '''
+  let x = 1;
+  '''
+
+code "optional member", '''
+  class A
+    @n? = 1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "optional member wrapped", '''
+  class A
+    @n? =
+    1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "optional member indented", '''
+  class A
+    @n? =
+      1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "optional typed member", '''
+  class A
+    @n?: number = 1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "optional typed member wrapped", '''
+  class A
+    @n?: number =
+    1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "optional typed member indented", '''
+  class A
+    @n?: number =
+      1
+  ''', '''
+  class A {
+    static n = 1;
+  }
+  '''
+
+code "generic component", '''
+  Chip<TLabel extends string> = component
+    @label?: TLabel
+    render
+      span 'chip'
+  ''', '''
+  let Chip = class extends __Component {
+    static __props = ['label'];
+    _init(props) {
+      this.label = __state(props.__bind_label__ ?? props.label);
+    }
+    _create() {
+      this._el0 = document.createElement('span');
+      this._el0.setAttribute('data-part', 'Chip');
+      this._t0 = document.createTextNode("chip");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code "compound assign indented", '''
+  x = 1
+  x +=
+    2
+  x
+  ''', '''
+  let x = 1;
+  x += 2;
+  x;
+  '''
+
+code "compound assign wrapped", '''
+  x = 1
+  x +=
+  2
+  x
+  ''', '''
+  let x = 1;
+  x += 2;
+  x;
+  '''
+
+code "void assign wrapped", '''
+  save! =
+  -> 1
+  ''', '''
+  let save = function() {
+    1;
+    return;
+  };
+  '''
+
+code "void assign indented", '''
+  save! =
+    -> 1
+  ''', '''
+  let save = function() {
+    1;
+    return;
+  };
+  '''
+
+code "state wrapped", '''
+  c :=
+  1
+  ''', '''
+  const c = __state(1);
+  '''
+
+code "state indented", '''
+  c :=
+    1
+  ''', '''
+  const c = __state(1);
+  '''
+
+code "computed wrapped", '''
+  a := 1
+  d ~=
+  a * 2
+  ''', '''
+  const a = __state(1);
+  const d = __computed(() => (a.value * 2));
+  '''
+
+code "optional state member", '''
+  C = component
+    @n? := 1
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['n'];
+    _init(props) {
+      this.n = __state(props.__bind_n__ ?? props.n ?? 1);
+    }
+  };
+  '''
+
+code "optional computed member", '''
+  C = component
+    @a := 1
+    @n? ~= @a * 2
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['a'];
+    _init(props) {
+      this.a = __state(props.__bind_a__ ?? props.a ?? 1);
+      this.n = __computed(() => (this.a.value * 2));
+    }
+  };
+  '''
+
+code "optional typed computed member", '''
+  C = component
+    @a := 1
+    @n?: number ~= @a * 2
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['a'];
+    _init(props) {
+      this.a = __state(props.__bind_a__ ?? props.a ?? 1);
+      this.n = __computed(() => (this.a.value * 2));
+    }
+  };
+  '''
+
+code "optional readonly member", '''
+  C = component
+    @n? =! 1
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['n'];
+    _init(props) {
+      this.n = props.n ?? 1;
+    }
+  };
+  '''
+
+code "optional typed readonly member", '''
+  C = component
+    @n?: number =! 1
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['n'];
+    _init(props) {
+      this.n = props.n ?? 1;
+    }
+  };
+  '''
+
+code "gate with an empty call", '''
+  C = component
+    user <~ @stash.user()
+  ''', '''
+  let C = class extends __Component {
+    static __gates = ['user'];
+    _init(props) {
+      this.user = __gateBind(this, 0);
+    }
+  };
+  '''
+
+code "typed gate with an empty call", '''
+  C = component
+    user: User <~ @stash.user()
+  ''', '''
+  let C = class extends __Component {
+    static __gates = ['user'];
+    _init(props) {
+      this.user = __gateBind(this, 0);
+    }
+  };
+  '''
+
+code "typed keyed gate", '''
+  C = component
+    order: Order <~ @stash.order(@params.id)
+  ''', '''
+  let C = class extends __Component {
+    static __gates = [{ path: 'order', key: (params, query) => params.id }];
+    _init(props) {
+      this.order = __gateBind(this, 0);
+    }
+  };
+  '''
+
+
+# ==============================================================================
+# Members
+# ==============================================================================
+
+code "index with an indented key", '''
+  a = [1]
+  k = 0
+  a[
+    k
+  ]
+  ''', '''
+  let a = [1];
+  let k = 0;
+  a[k];
+  '''
+
+code "slice with an indented range", '''
+  a = [1, 2, 3]
+  a[
+    1..2
+  ]
+  ''', '''
+  let a = [1, 2, 3];
+  a.slice(1, 3);
+  '''
+
+code "optional index with an indented key", '''
+  a = null
+  k = 0
+  a?.[
+    k
+  ]
+  ''', '''
+  let a = null;
+  let k = 0;
+  a?.[k];
+  '''
+
+code "optional pick with an indented list", '''
+  o = null
+  o?.{
+    a
+  }
+  ''', '''
+  let o = null;
+  (o == null ? undefined : {a: o.a});
+  '''
+
+code "pick list continued on an indented line", '''
+  o = {a: 1, b: 2}
+  o.{a,
+    b
+  }
+  ''', '''
+  let o = {a: 1, b: 2};
+  ({a: o.a, b: o.b});
+  '''
+
+code "new on a this-property", '''
+  class A
+    make: -> new @Inner
+  ''', '''
+  class A {
+    make() {
+      return new this.Inner;
+    }
+  }
+  '''
+
+code "new on this", '''
+  class A
+    clone: -> new @
+  ''', '''
+  class A {
+    clone() {
+      return new this();
+    }
+  }
+  '''
+
+code "new on a super member", '''
+  class A extends B
+    make: -> new super.Inner
+  ''', '''
+  class A extends B {
+    make() {
+      return new super.Inner;
+    }
+  }
+  '''
+
+code "leading-dot chain on an arrow", '''
+  s = -> 1
+    .toString()
+  ''', '''
+  let s = (function() {
+    return 1;
+  }).toString();
+  '''
+
+code "super index", '''
+  class A extends B
+    m: -> super[k]
+  ''', '''
+  class A extends B {
+    m() {
+      return super[k];
+    }
+  }
+  '''
+
+code "super index with an indented key", '''
+  class A extends B
+    m: -> super[
+      k
+    ]
+  ''', '''
+  class A extends B {
+    m() {
+      return super[k];
+    }
+  }
+  '''
+
+code "class body this-index key", '''
+  class A
+    grab: -> *{ @['seed']: 1 }
+  ''', '''
+  class A {
+    grab() {
+      return new Map([[this["seed"], 1]]);
+    }
+  }
+  '''
+
+
+# ==============================================================================
+# Data
+# ==============================================================================
+
+code "all-elision array", '[,,]', '[, ,];'
+code "elision list continued on an indented line", '''
+  [1,,
+    2,,
+  ]
+  ''', '''
+  [1, , 2, ,];
+  '''
+
+code "elision before a newline", '''
+  [1,,
+  2]
+  ''', '''
+  [1, , 2];
+  '''
+
+code "pattern default indented", '''
+  o = {}
+  {a =
+    1} = o
+  a
+  ''', '''
+  let a;
+
+  let o = {};
+  ({a = 1} = o);
+  a;
+  '''
+
+code "void pair", '''
+  o = {f!: -> 1}
+  ''', '''
+  let o = {f() {
+    1;
+    return;
+  }};
+  '''
+
+code "void pair indented", '''
+  o = {f!:
+    -> 1}
+  ''', '''
+  let o = {f() {
+    1;
+    return;
+  }};
+  '''
+
+code "spread a call", '{...f()}', '({...f()});'
+code "spread an object literal", '{...{a: 1}}', '({...{a: 1}});'
+code "spread a parenthetical", '{...(o)}', '({...o});'
+code "spread super member", '''
+  class A extends B
+    m: -> {...super.o}
+  ''', '''
+  class A extends B {
+    m() {
+      return {...super.o};
+    }
+  }
+  '''
+
+code "spread this", '''
+  class A
+    m: -> {...@}
+  ''', '''
+  class A {
+    m() {
+      return {...this};
+    }
+  }
+  '''
+
+code "spread super call", '''
+  class A extends B
+    m: -> {...super()}
+  ''', '''
+  class A extends B {
+    m() {
+      return {...super.m()};
+    }
+  }
+  '''
+
+code "spread dynamic import", '{...import(\'m\')}', '({...import("m")});'
+code "spread a chained call", '{...f()()}', '({...f()()});'
+code "spread a call member", '{...f().p}', '({...f().p});'
+code "spread an optional call member", '{...f()?.p}', '({...f()?.p});'
+code "spread a call index", '{...f()[k]}', '({...f()[k]});'
+code "spread a call index with an indented key", '''
+  {...f()[
+    k
+  ]}
+  ''', '''
+  ({...f()[k]});
+  '''
+
+code "spread an awaited call", '{...f!}', '({...await f()});'
+code "spread a pick of a call", '{...f().{a}}', '({...((_) => ({a: _.a}))(f())});'
+code "spread an optional pick of a call", '{...f()?.{a}}', '({...((_) => _ == null ? undefined : ({a: _.a}))(f())});'
+code "spread an indented pick of a call", '''
+  {...f().{
+    a
+  }}
+  ''', '''
+  ({...((_) => ({a: _.a}))(f())});
+  '''
+
+code "spread an indented optional pick of a call", '''
+  {...f()?.{
+    a
+  }}
+  ''', '''
+  ({...((_) => _ == null ? undefined : ({a: _.a}))(f())});
+  '''
+
+
+# ==============================================================================
+# Functions
+# ==============================================================================
+
+code "generic def", '''
+  def wrap<T>(v: T)
+    [v]
+  ''', '''
+  function wrap(v) {
+    return [v];
+  }
+  '''
+
+code "void def with a return type", '''
+  def log!(m: string): void
+    console.log m
+  ''', '''
+  function log(m) {
+    console.log(m);
+    return;
+  }
+  '''
+
+code "params wrapped after a comma", '''
+  f = (a,
+  b) -> a + b
+  ''', '''
+  let f = function(a, b) {
+    return (a + b);
+  };
+  '''
+
+code "params continued on an indented line", '''
+  f = (a,
+    b
+  ) -> a + b
+  ''', '''
+  let f = function(a, b) {
+    return (a + b);
+  };
+  '''
+
+code "optional typed param", '''
+  f = (a?: number) -> a
+  ''', '''
+  let f = function(a) {
+    return a;
+  };
+  '''
+
+code "optional bare param", '''
+  f = (a?) -> a
+  ''', '''
+  let f = function(a) {
+    return a;
+  };
+  '''
+
+code "bodiless def overload", '''
+  def f(a: number): string
+  def f(a)
+    String a
+  ''', '''
+  function f(a) {
+    return String(a);
+  }
+  '''
+
+code "bare class", '''
+  A = class
+  ''', '''
+  let A = class {
+  };
+  '''
+
+code "anonymous class extends", '''
+  A = class extends B
+  ''', '''
+  let A = class extends B {
+  };
+  '''
+
+code "anonymous class extends with a body", '''
+  A = class extends B
+    m: -> 1
+  ''', '''
+  let A = class extends B {
+    m() {
+      return 1;
+    }
+  };
+  '''
+
+code "component body with a trailing blank line", '''
+  C = component
+    @n := 1;
+  ''', '''
+  let C = class extends __Component {
+    static __props = ['n'];
+    _init(props) {
+      this.n = __state(props.__bind_n__ ?? props.n ?? 1);
+    }
+  };
+  '''
+
+code "call arguments wrapped after a comma", '''
+  f(1,
+  2)
+  ''', '''
+  f(1, 2);
+  '''
+
+code "return an indented object", '''
+  f = ->
+    return
+      a: 1
+  ''', '''
+  let f = function() {
+    return {a: 1};
+  };
+  '''
+
+code "do on a plain expression", '''
+  f = -> 1
+  do f
+  ''', '''
+  let f = function() {
+    return 1;
+  };
+  (f)();
+  '''
+
+code "await an indented object", '''
+  f = ->
+    await
+      a: 1
+  ''', '''
+  let f = async function() {
+    return await {a: 1};
+  };
+  '''
+
+code "yield an indented object", '''
+  f = ->
+    yield
+      a: 1
+  ''', '''
+  let f = function*() {
+    return yield {a: 1};
+  };
+  '''
+
+code "unary plus", '+x', '+x;'
+code "shift operators", 'a << 1', 'a << 1;'
+
+# ==============================================================================
+# Control
+# ==============================================================================
+
+code "while with a guard", '''
+  i = 0
+  while i < 3 when i isnt 1
+    i += 1
+  ''', '''
+  let i = 0;
+  while (i < 3) {
+    if (i !== 1) {
+      i += 1;
+    }
+  }
+  '''
+
+code "until with a guard", '''
+  i = 0
+  until i is 3 when i isnt 1
+    i += 1
+  ''', '''
+  let i = 0;
+  while (!(i === 3)) {
+    if (i !== 1) {
+      i += 1;
+    }
+  }
+  '''
+
+code "postfix while on a statement", '''
+  f = -> return 1 while c
+  ''', '''
+  let f = function() {
+    while (c) {
+      return 1;
+    }
+  };
+  '''
+
+code "postfix until on a statement", '''
+  f = -> return 1 until c
+  ''', '''
+  let f = function() {
+    while (!c) {
+      return 1;
+    }
+  };
+  '''
+
+code "postfix while with a guard", '''
+  x() while c when g
+  ''', '''
+  while (c) {
+    if (g) {
+      x();
+    }
+  }
+  '''
+
+code "postfix while with a guard on a statement", '''
+  f = -> return 1 while c when g
+  ''', '''
+  let f = function() {
+    while (c) {
+      if (g) {
+        return 1;
+      }
+    }
+  };
+  '''
+
+code "postfix until with a guard", '''
+  x() until c when g
+  ''', '''
+  while (!c) {
+    if (g) {
+      x();
+    }
+  }
+  '''
+
+code "postfix until with a guard on a statement", '''
+  f = -> return 1 until c when g
+  ''', '''
+  let f = function() {
+    while (!c) {
+      if (g) {
+        return 1;
+      }
+    }
+  };
+  '''
+
+code "else if without a final else", '''
+  if a
+    1
+  else if b
+    2
+  ''', '''
+  if (a) {
+    1;
+  } else if (b) {
+    2;
+  }
+  '''
+
+code "postfix if with an indented else", '''
+  x = 1 if c else
+    2
+  ''', '''
+  let x;
+
+  x = (c ? 1 : 2);
+  '''
+
+code "inline try on a statement", '''
+  f = -> try return 1
+  ''', '''
+  let f = function() {
+    return (() => { try {
+      return 1;
+    } catch {} })();
+  };
+  '''
+
+code "inline try statement with catch and finally", '''
+  f = ->
+    try return 1
+    catch
+      return 2
+    finally
+      cleanup()
+  ''', '''
+  let f = function() {
+    return (() => { try {
+      return 1;
+    } catch {
+      return 2;
+    } finally {
+      cleanup();
+    } })();
+  };
+  '''
+
+code "catch with an array pattern", '''
+  try
+    f()
+  catch [a, b]
+    a
+  ''', '''
+  let a, b;
+
+  try {
+    f();
+  } catch (_err) {
+    ([a, b] = _err);
+    a;
+  }
+  '''
+
+code "throw an indented object", '''
+  throw
+    code: 1
+  ''', '''
+  throw {code: 1};
+  '''
+
+code "for-in with guard then step", '''
+  for x in a when x by 2
+    x
+  ''', '''
+  for (let _ref = a, _i = 0; _i < _ref.length; _i += 2) {
+  let x = _ref[_i];
+  if (x) {
+      x;
+    }
+  }
+  '''
+
+code "for-in with step then guard", '''
+  for x in a by 2 when x
+    x
+  ''', '''
+  for (let _ref = a, _i = 0; _i < _ref.length; _i += 2) {
+  let x = _ref[_i];
+  if (x) {
+      x;
+    }
+  }
+  '''
+
+code "for await with a guard", '''
+  f = ->
+    for await x as it when x
+      x
+  ''', '''
+  let f = async function(it) {
+    const _result = [];
+    for await (let x of it) {
+      if (x) {
+        _result.push(x);
+      }
+    }
+    return _result;
+  };
+  '''
+
+code "for as! with a guard", '''
+  f = ->
+    for x as! it when x
+      x
+  ''', '''
+  let f = async function(it) {
+    const _result = [];
+    for await (let x of it) {
+      if (x) {
+        _result.push(x);
+      }
+    }
+    return _result;
+  };
+  '''
+
+code "comprehension with guard then step", '''
+  (x for x in a when x by 2)
+  ''', '''
+  (() => {
+    const result = [];
+    for (let _ref = a, _i = 0; _i < _ref.length; _i += 2) {
+      let x = _ref[_i];
+      if (x) {
+        result.push(x);
+      }
+    }
+    return result;
+  })();
+  '''
+
+code "iterator comprehension with a guard", '''
+  (x for x as it when x)
+  ''', '''
+  (() => {
+    const result = [];
+    for (let x of it) {
+      if (x) {
+        result.push(x);
+      }
+    }
+    return result;
+  })();
+  '''
+
+code "for-await comprehension", '''
+  f = -> (x for await x as it)
+  ''', '''
+  let f = async function(it) {
+    return await (async () => {
+      const result = [];
+      for await (let x of it) {
+        result.push(x);
+      }
+      return result;
+    })();
+  };
+  '''
+
+code "for-await comprehension with a guard", '''
+  f = -> (x for await x as it when x)
+  ''', '''
+  let f = async function(it) {
+    return await (async () => {
+      const result = [];
+      for await (let x of it) {
+        if (x) {
+          result.push(x);
+        }
+      }
+      return result;
+    })();
+  };
+  '''
+
+code "as! comprehension", '''
+  f = -> (x for x as! it)
+  ''', '''
+  let f = async function(it) {
+    return await (async () => {
+      const result = [];
+      for await (let x of it) {
+        result.push(x);
+      }
+      return result;
+    })();
+  };
+  '''
+
+code "as! comprehension with a guard", '''
+  f = -> (x for x as! it when x)
+  ''', '''
+  let f = async function(it) {
+    return await (async () => {
+      const result = [];
+      for await (let x of it) {
+        if (x) {
+          result.push(x);
+        }
+      }
+      return result;
+    })();
+  };
+  '''
+
+code "trailing newline", 'x = 1;', 'let x = 1;'
