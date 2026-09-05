@@ -89,3 +89,21 @@ test 'tight ?. after symbol stays optional chain', ':a?.description', 'a'
 test 'tight key colon stays a pair', 'b = 7\no = {a:b}\no.a', 7
 test 'spaced pair colon stays a pair', 'o = {a : 5}\no.a', 5
 test 'ternary else-colon never mints', 'c = 1\nd = 2\ne = 3\nc ? d :e', 2
+
+# ==============================================================================
+# A symbol literal as a KEY is a computed key — in a class body
+# (`:sym: -> …` is a `[Symbol.for("sym")]` method) and in an object
+# literal alike. A bound (`=>`) method needs a name to bind by.
+# ==============================================================================
+
+code 'a symbol key in a class body is a computed method', 'class A\n  :sym: -> 1', '''
+  class A {
+    [Symbol.for("sym")]() {
+      return 1;
+    }
+  }
+  '''
+test 'a symbol-keyed method is callable', 'class A\n  :greet: -> "hi"\nnew A()[Symbol.for("greet")]()', 'hi'
+code 'a symbol key in an object literal', 'o = { :sym: 1 }', 'let o = {[Symbol.for("sym")]: 1};'
+test 'a symbol-keyed property reads back', 'o = { :k: 5 }\no[:k]', 5
+fail 'a bound symbol-keyed method rejects', 'class A\n  constructor: ->\n  :sym: => 1', 'symbol-keyed method cannot be bound'

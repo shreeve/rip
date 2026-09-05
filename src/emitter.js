@@ -5714,6 +5714,13 @@ class Emitter {
         this.b.emit(';');
         return;
       }
+      // Slice assignment (`a[1..2] = v`) replaces the range in place:
+      // a statement lowering to splice (value position rejects).
+      if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+        this.sliceAssignStatement(node);
+        this.b.emit(';');
+        return;
+      }
       if (node[0] === '*>' && node.length === 3) {
         this.mergeAssignStatement(node, ind);
         this.b.emit(';');
@@ -8157,6 +8164,11 @@ class Emitter {
   }
 
   assign(node) {
+    // A slice target reaches here only in VALUE position: the statement
+    // path lowers it to splice first, and a splice has no value form.
+    if (node[0] === '=' && Emitter.sliceTarget(node[1]) !== null) {
+      throw this.positionedError(node, 'emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line');
+    }
     // A string-literal target is the string-NAMED class field's shape
     // (`"data-src" = v`) — the class-member walk owns that form;
     // everywhere else a string is not an assignment target.
@@ -14229,6 +14241,13 @@ class Emitter {
   // emits as ES6 method shorthand (`->` has dynamic `this`,
   // matching method semantics; `=>` values stay arrows). String keys
   // never shorthand.
+  // A symbol literal as a property key: `[Symbol.for("name")]`.
+  symbolKey(node) {
+    this.b.emit('[');
+    this.expr(node);
+    this.b.emit(']');
+  }
+
   static isMethodPair(pair) {
     return isNode(pair) && (pair[0] === ':' || pair[0] === 'void-pair') && typeof pair[1] === 'string' &&
       /^[A-Za-z_$][\w$]*$/.test(pair[1]) && isNode(pair[2]) && pair[2][0] === '->';
@@ -14309,8 +14328,18 @@ class Emitter {
           // An INTERPOLATED string key is a computed key: the
           // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
           const strKey = isNode(pair[1]) && pair[1][0] === 'str';
-          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey) {
+          // A symbol key (`{ :sym: v }`) is a computed key too.
+          const symKey = pair[0] === ':' && isNode(pair[1]) && pair[1][0] === 'symbol';
+          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey && !symKey) {
             throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
+          }
+          if (symKey) {
+            this.mark(pair, '$self', () => {
+              this.mark(pair, 'key', () => this.symbolKey(pair[1]));
+              this.b.emit(': ');
+              this.mark(pair, 'value', () => this.expr(pair[2]));
+            });
+            return;
           }
           if (pair[0] === ':' && strKey) {
             this.mark(pair, '$self', () => {
@@ -14592,6 +14621,9 @@ class Emitter {
           methodBodies.push(pair[2][2]);
         }
         if (isFunc(pair[2]) && pair[2][0] === '=>' && !isStaticKey(pair[1]) && mName !== 'constructor') {
+          if (typeof mName !== 'string') {
+            throw this.positionedError(pair, "emitter: a symbol-keyed method cannot be bound ('=>') — the constructor binds members by name; use '->'", stmt);
+          }
           bound.push(mName);
           firstBound ??= pair;
         }
@@ -14743,7 +14775,9 @@ class Emitter {
             if (isStaticKey(key)) this.b.emit('static ');
             if (Emitter.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
-            this.mark(pair, 'key', () => this.emitPrimitive(mName));
+            // A symbol key (`:sym: ->`) is a computed member name.
+            if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
+            else this.mark(pair, 'key', () => this.emitPrimitive(mName));
             let [, params, block] = value;
             let atParams = [];
             if (mName === 'constructor') {
@@ -14798,7 +14832,7 @@ class Emitter {
               this.methodBlock(value, block, ind + 1, {
                 isConstructor: mName === 'constructor',
                 binds: mName === 'constructor' ? bound : [],
-                methodName: mName,
+                methodName: typeof mName === 'string' ? mName : 'symbol',
                 voidBody: isVoidPair,
                 atParams,
               });
@@ -16057,6 +16091,61 @@ class Emitter {
   // itself: `x .= trim()` → `x = x.trim()`; the right side's chain
   // HEAD call gains the target as its receiver, so a chained right
   // side works too (`s .= trim().toLowerCase()`).
+  // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
+  // (either end may be null — an open end).
+  static sliceTarget(t) {
+    return isNode(t) && t[0] === '[]' && t.length === 3 && isNode(t[2]) &&
+      (t[2][0] === '..' || t[2][0] === '...') && t[2].length === 3 ? t : null;
+  }
+
+  // `a[i..j] = v` → `a.splice(i, count, ...v)`: the range's elements are
+  // replaced in place by the value's. An open end splices to the end
+  // (`Infinity`); a missing start begins at 0. The count is `j - i + 1`
+  // for an inclusive range and `j - i` for an exclusive one, folded when
+  // both ends are integer literals. An array-literal value spreads
+  // inline; any other value spreads as an iterable.
+  sliceAssignStatement(node) {
+    const [, target, value] = node;
+    const [, obj, range] = target;
+    const [op, from, to] = range;
+    const int = (x) => Emitter.isIntegerLiteral(x) ? parseInt(x.replace(/_/g, ''), 10) : null;
+    const plain = (x) => typeof x === 'string';
+    const endExpr = (x) => {
+      if (plain(x)) this.b.emit(x);
+      else { this.b.emit('('); this.expr(x); this.b.emit(')'); }
+    };
+    this.mark(node, '$self', () => {
+      this.mark(node, 'target', () => this.mark(target, '$self', () => {
+        this.head(target, 'object', obj);
+        this.b.emit('.splice(');
+        this.mark(target, 'key', () => {
+          if (from === null) this.b.emit('0'); else endExpr(from);
+          this.b.emit(', ');
+          if (to === null) {
+            this.b.emit('Infinity');
+          } else if (int(to) !== null && (from === null || int(from) !== null)) {
+            this.b.emit(String(int(to) - (from === null ? 0 : int(from)) + (op === '..' ? 1 : 0)));
+          } else {
+            endExpr(to);
+            if (from !== null) { this.b.emit(' - '); endExpr(from); }
+            if (op === '..') this.b.emit(' + 1');
+          }
+        });
+      }));
+      this.mark(node, 'operator', () => {});
+      const inline = isNode(value) && value[0] === 'array' && value.slice(1).every((el) => !(isNode(el) && el[0] === '...') && el !== null);
+      this.mark(node, 'value', () => {
+        if (inline) {
+          value.slice(1).forEach((el) => { this.b.emit(', '); this.callArg(el); });
+        } else {
+          this.b.emit(', ...');
+          this.grouped(node, 'value', value, Emitter.needsGrouping(value, 'operand'));
+        }
+      });
+      this.b.emit(')');
+    });
+  }
+
   methodAssignStatement(node, ind) {
     const [, target, rhs] = node;
     let cur = rhs;
