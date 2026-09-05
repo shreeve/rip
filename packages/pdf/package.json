@@ -1,0 +1,21 @@
+{
+  "name": "@rip/pdf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny, zero-dependency PDF writer for one-to-few-page business documents — text, rules, boxes, tables, barcodes, images, embedded TrueType; browser-safe.",
+  "exports": {
+    ".": "./pdf.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip",
+    "demo": "rip demo.rip"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "pdf.rip",
+    "README.md"
+  ]
+}

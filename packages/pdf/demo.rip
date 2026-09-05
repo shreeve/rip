@@ -1,0 +1,233 @@
+# ==============================================================================
+# rip/pdf — a runnable tour: a one-page laboratory requisition
+#
+#   rip packages/pdf/demo.rip [out.pdf]     (from the repo root)
+#   bun run demo                            (from packages/pdf)
+#
+# Without a path the PDF lands in the OS temp directory.
+#
+# The same form medlabs renders through headless Chrome, drawn directly:
+# embedded Inter and JetBrains Mono, rounded cards, a Code 128 barcode, a
+# twelve-slot striped table, signature blocks. Letter, ~40 KB, a few ms.
+# ==============================================================================
+
+import { PDF } from 'rip/pdf'
+import { tmpdir } from 'os'
+
+export SAMPLE =!
+  brand:
+    name:     'Twenty Mile Medical'
+    tagline:  'Clinical Laboratory Services'
+    logoMark: 'T'
+    color:    '#24639a'
+    ink:      '#0f1e4c'
+    panel:    '#e8eef5'
+  lab:
+    name:     'Labcorp eReq'
+    pscLabel: 'PSC Requisition'
+  requisition:
+    number:         'L2606122706'
+    collectionDate: '__________'
+    collectionTime: '__________'
+    bill:           'Client'
+  clinic:
+    name:    'Promptlabs|Twenty Mile Medical'
+    account: '04466500'
+    address: '69 Skywood Trl, Ponte Vedra, FL 32081'
+    phone:   '(904) 787-6061'
+  provider:
+    name:       'Ries, James'
+    credential: 'DO'
+    npi:        '1073774840'
+  patient:
+    name:      'Public, Alice'
+    dob:       'Jan 1, 1980'
+    age:       46
+    sex:       'Female'
+    patientId: 'pat_kr1seedygrdy'
+    mrn:       '888777666'
+    phone:     '(510) 555-1212'
+    email:     'alice.public@example.com'
+    guarantor: 'Self'
+  tests: [
+    { code: '004259', name: 'Thyroid Stimulating Hormone' }
+    { code: '005009', name: 'Complete Blood Count' }
+    { code: '322000', name: 'Basic Metabolic Panel' }
+  ]
+  clinical:
+    initials: ''
+    comments: ''
+
+# The five faces the form uses; static, pre-subset TrueType (fonts/)
+export FONT_FILES =!
+  inter:  'Inter-Regular.ttf'
+  interM: 'Inter-Medium.ttf'
+  interB: 'Inter-SemiBold.ttf'
+  mono:   'JetBrainsMono-Regular.ttf'
+  monoM:  'JetBrainsMono-Medium.ttf'
+
+MAX =! 12       # test slots on the page
+GAP =! 11.25    # vertical gap between sections
+
+# Build the requisition; `fonts` maps the FONT_FILES keys to font bytes
+export def requisition(req, fonts)
+  brand = req.brand
+  BRAND = brand.color ?? '#0069a8'
+  INK   = brand.ink   ?? '#171717'
+  PANEL = brand.panel ?? '#fafafa'
+  MUTED = brand.muted ?? '#9d9d9c'
+  TEXT  = '#0a0a0a'
+  FAINT = '#a3a3a3'
+  EDGE  = '#d4d4d4'
+  ROW   = '#e5e5e5'
+  STRIPE = '#f2f6f9'
+  WHITE = '#fff'
+
+  doc = PDF.new 'letter', margins: 28.5, title: "Lab Order Requisition - #{req.requisition.number}"
+  doc.register key, bytes for key, bytes of fonts
+  doc.font 'inter', 8.25
+  doc.color TEXT
+  { left: L, top: T, right: R, width: W } = doc.box
+
+  # ---- recurring pieces --------------------------------------------------
+
+  label = (str, x, y, opts = {}) ->
+    doc.text str, { x, y, font: 'interB', size: 6.375, color: MUTED, upper: true, tracking: 0.32, ...opts }
+
+  heading = (str, x, y) ->
+    doc.circle x + 11.6, y + 12.8, 1.875, fill: BRAND
+    doc.text str, x: x + 18.3, y: y + 7.0, font: 'interB', size: 7.125, color: INK, upper: true, tracking: 0.356
+
+  # a bordered card with a heading and label/value rows; returns its height
+  card = (x, y, w, title, rows) ->
+    h = 29 + rows.length * 13.5
+    doc.rect x, y, w, h, fill: WHITE, stroke: EDGE, radius: 4.5
+    heading title, x, y
+    for [name, value, style], i in rows
+      ry = y + 23.6 + i * 13.5
+      doc.text name, x: x + 10.04, y: ry, size: 7.5, color: MUTED
+      opts = { x: x + 74.54, y: ry - 0.72, w: w - 84, overflow: 'ellipsis' }
+      switch style
+        when 'strong' then doc.text value or '—', { ...opts, font: 'interB', color: INK }
+        when 'mono'   then doc.text value or '—', { ...opts, font: 'mono', size: 7.875, y: ry - 0.76 }
+        else               doc.text value or '—', opts
+    h
+
+  signature = (x, y, w, title, fine) ->
+    doc.line x, y + 18.4, x + w, y + 18.4, stroke: INK, width: 0.75
+    label title,  x, y + 22.7
+    label 'Date', x, y + 22.7, w: w, align: 'right'
+    doc.paragraph fine, x: x, y: y + 34.7, w: w, size: 6.375, color: MUTED, leading: 1.294
+
+  # ---- header: logo mark + brand | lab name + badge ----------------------
+
+  doc.rect L, T, 28.5, 28.5, fill: BRAND, radius: 9
+  doc.text brand.logoMark, x: L, y: T + 4.9, w: 28.5, align: 'center', font: 'interB', size: 13.5, color: WHITE
+  doc.text brand.name,     x: L + 35.5, y: T + 1.85, font: 'interB', size: 11.25, color: INK
+  doc.text brand.tagline,  x: L + 35.5, y: T + 16.76, size: 8.25, color: MUTED
+  doc.text req.lab.name,   x: L, y: T - 1.17, w: W, align: 'right', font: 'interB', size: 10.5, color: INK
+  badge = req.lab.pscLabel.toUpperCase()
+  bw = doc.width(badge, font: 'interB', size: 6.375, tracking: 0.32) + 11.4
+  doc.rect R - bw, T + 16.5, bw, 12.75, fill: BRAND, radius: 4.5
+  doc.text badge, x: R - bw, y: T + 17.82, w: bw, align: 'center', font: 'interB', size: 6.375, color: WHITE, tracking: 0.32
+
+  # ---- requisition strip: four fields + Code 128 -------------------------
+
+  y = T + 28.5 + GAP
+  doc.rect L, y, W, 60, fill: PANEL, stroke: EDGE, radius: 4.5
+  fields = [
+    ['Requisition #',   req.requisition.number,         9.3]
+    ['Collection Date', req.requisition.collectionDate, 88.2]
+    ['Collection Time', req.requisition.collectionTime, 175.0]
+    ['Bill',            req.requisition.bill,           261.1]
+  ]
+  for [name, value, dx] in fields
+    label name, L + dx, y + 17.82
+    doc.text value, x: L + dx, y: y + 29.07, font: 'mono', size: 9, color: INK
+  bar = doc.barcode req.requisition.number, x: R - 9, y: y + 7.5, h: 34.5, module: 1.125, align: 'right'
+  doc.text req.requisition.number, x: bar.x, y: y + 43.36, w: bar.w, align: 'center', font: 'mono', size: 6.75, color: MUTED, tracking: 0.17
+  y += 60 + GAP
+
+  # ---- two columns of cards ----------------------------------------------
+
+  cw = (W - 9.75) / 2
+  p  = req.patient
+  age = if p.age? and p.age isnt '' then " · #{p.age} year#{if +p.age is 1 then '' else 's'}" else ''
+  provider = [req.provider.name, req.provider.credential].filter((v) -> v).join ', '
+  clinicH = card L, y, cw, 'Ordering Clinic', [
+    ['Name',      req.clinic.name,    'strong']
+    ['Account #', req.clinic.account, 'mono']
+    ['Address',   req.clinic.address]
+    ['Phone',     req.clinic.phone]
+  ]
+  providerH = card L, y + clinicH + 9.75, cw, 'Ordering Provider', [
+    ['Name', provider,         'strong']
+    ['NPI',  req.provider.npi, 'mono']
+  ]
+  patientRows = [
+    ['Name',       p.name,      'strong']
+    ['Patient ID', p.patientId, 'mono']
+    ['DOB / Age',  "#{p.dob}#{age}"]
+    ['Sex',        p.sex]
+  ]
+  patientRows.push ['Phone', p.phone] if p.phone
+  patientRows.push ['Email', p.email] if p.email
+  patientRows.push ['MRN', p.mrn, 'mono'] if p.mrn
+  patientRows.push ['Guarantor', p.guarantor]
+  patientH = card L + cw + 9.75, y, cw, 'Patient', patientRows
+  y += Math.max(clinicH + 9.75 + providerH, patientH) + GAP
+
+  # ---- tests: panel head, dark column header, twelve slots ---------------
+
+  shown = req.tests[...MAX]
+  rows  = ([t.code, t.name, t.cpt or '—', t.tat or '—'] for t in shown)
+  rows.push ['·', '—', '—', '—'] while rows.length < MAX
+  extra = req.tests.length - MAX
+  rowH  = 27.5
+  headH = 21
+  barH  = 16.5
+  warnH = if extra > 0 then 16.5 else 0
+  th    = headH + warnH + barH + MAX * rowH
+  doc.rect L, y, W, th, fill: WHITE, stroke: EDGE, radius: 4.5
+  doc.rect L + 0.375, y + 0.375, W - 0.75, headH + 4, fill: PANEL, radius: 4.5
+  heading 'Tests Ordered', L, y - 1.5
+  doc.text "#{shown.length} of #{MAX} slots used", x: L, y: y + 5.5, w: W - 10, align: 'right', font: 'interB', size: 7.125, color: MUTED
+  if extra > 0
+    doc.rect L + 0.375, y + headH, W - 0.75, warnH, fill: '#fde6e7'
+    doc.text "#{extra} additional test#{if extra is 1 then '' else 's'} not shown — exceeds the #{MAX}-test page limit",
+      x: L + 9.65, y: y + headH + 4.2, font: 'interB', size: 7.5, color: '#e7000b'
+  doc.table rows,
+    x: L + 0.75, y: y + headH + warnH, w: W - 1.5, rowH: rowH, pad: 9.3, size: 8.25
+    cols: [{ w: 69, font: 'mono', size: 7.875 }, { overflow: 'ellipsis' }, { w: 69, font: 'mono', size: 7.875 }, { w: 78 }]
+    header: ['Code', 'Name', 'CPT', 'Turnaround']
+    head: { h: barH, fill: INK, color: WHITE, font: 'interB', size: 6.375, upper: true, tracking: 0.32 }
+    stripe: STRIPE, rule: ROW
+    row: (r, i) -> { color: FAINT } if i >= shown.length
+  y += th + GAP
+
+  # ---- initials / comments strip -----------------------------------------
+
+  doc.rect L, y, W, 21, fill: PANEL, stroke: EDGE, radius: 4.5
+  label 'Initials', L + 10, y + 5.5
+  iw = doc.width 'INITIALS', font: 'interB', size: 6.375, tracking: 0.32
+  doc.text req.clinical.initials or '—', x: L + 10 + iw + 4.5, y: y + 4.7, font: 'interB', size: 7.125, color: INK
+  doc.text "Clinical comments: #{req.clinical.comments or 'None'}", x: L, y: y + 4.7, w: W - 10, align: 'right', size: 7.125, color: MUTED
+  y += 21 + GAP
+
+  # ---- signatures ---------------------------------------------------------
+
+  sw = (W - 15) / 2
+  signature L, y, sw, 'Physician / authorized signature',
+    'By signing, the ordering provider authorizes the lab to perform the tests listed above.'
+  signature L + sw + 15, y, sw, 'Patient signature',
+    'I authorize the release of medical information related to these services and assume responsibility for any charges not covered by my insurer.'
+  doc
+
+if import.meta.main
+  out = process.argv[2] ?? "#{tmpdir()}/requisition.pdf"
+  fonts = {}
+  fonts[key] = Bun.file("#{import.meta.dir}/fonts/#{file}").bytes! for key, file of FONT_FILES
+  started = performance.now()
+  bytes = requisition(SAMPLE, fonts).bytes!
+  Bun.write! out, bytes
+  console.log "wrote #{out} (#{bytes.length} bytes, #{(performance.now() - started).toFixed 1} ms)"

@@ -1,0 +1,1261 @@
+# ==============================================================================
+# rip/pdf — Tiny, zero-dependency PDF writer for Rip
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: September 4, 2026
+#
+# A direct-to-PDF writer for one-to-few-page business documents: forms,
+# requisitions, invoices, labels. Text in the core-14 fonts or an embedded
+# TrueType, rules, boxes with rounded corners, tables, Code 128 / Code 39
+# barcodes, PNG and JPEG images, header and footer hooks, automatic page
+# breaks. The object writer is append-only with byte-accurate offsets;
+# content streams are FlateDecode via CompressionStream, so `bytes` is async
+# and the whole file runs unchanged in Bun and in a browser. Descends from
+# Updraft (2010), the author's Ruby writer in the FPDF lineage.
+# ==============================================================================
+
+# ==[ Constants ]==
+
+PAPERS =!
+  letter: [612, 792]
+  legal:  [612, 1008]
+  a3:     [841.89, 1190.55]
+  a4:     [595.28, 841.89]
+  a5:     [420.94, 595.28]
+
+UNITS =! { pt: 1, in: 72, mm: 72 / 25.4, cm: 72 / 2.54 }
+
+KAPPA =! 0.5522847                    # Bézier quarter-circle control distance
+
+# core font key → [BaseFont name, width table]
+CORE =!
+  helvetica:   ['Helvetica',             'helvetica']
+  helveticaB:  ['Helvetica-Bold',        'helveticaB']
+  helveticaI:  ['Helvetica-Oblique',     'helvetica']
+  helveticaBI: ['Helvetica-BoldOblique', 'helveticaB']
+  times:       ['Times-Roman',           'times']
+  timesB:      ['Times-Bold',            'timesB']
+  timesI:      ['Times-Italic',          'timesI']
+  timesBI:     ['Times-BoldItalic',      'timesBI']
+  courier:     ['Courier',               'courier']
+  courierB:    ['Courier-Bold',          'courier']
+  courierI:    ['Courier-Oblique',       'courier']
+  courierBI:   ['Courier-BoldOblique',   'courier']
+
+# AFM vertical metrics per family (fraction of the em)
+CORE_METRICS =!
+  helvetica: { ascent: 0.718, descent: 0.207, capHeight: 0.718 }
+  times:     { ascent: 0.683, descent: 0.217, capHeight: 0.662 }
+  courier:   { ascent: 0.629, descent: 0.157, capHeight: 0.562 }
+
+# Unicode → cp1252 byte for the 0x80–0x9F half; everything else is Latin-1
+CP1252 =!
+  0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85, 0x2020: 0x86
+  0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89, 0x0160: 0x8A, 0x2039: 0x8B, 0x0152: 0x8C
+  0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92, 0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95
+  0x2013: 0x96, 0x2014: 0x97, 0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B
+  0x0153: 0x9C, 0x017E: 0x9E, 0x0178: 0x9F
+
+# WinAnsi code (32..255) → Unicode; undefined for the five unassigned slots
+WINANSI_UNICODE =! do ->
+  rev = {}
+  rev[b] = Number(u) for own u, b of CP1252
+  for code in [32...256]
+    if code < 0x80 or code >= 0xA0 then code else rev[code]
+
+# Code 128 bar/space patterns, values 0–106 (106 = Stop with its termination bar)
+CODE128 =! '212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 2331112'.split ' '
+
+# Code 39: nine elements per symbol, b/w narrow, B/W wide
+CODE39 =!
+  '0': 'bWBwbwBwb', '1': 'BwbWbwbwB', '2': 'bwBWbwbwB', '3': 'BwBWbwbwb', '4': 'bwbWBwbwB'
+  '5': 'BwbWBwbwb', '6': 'bwBWBwbwb', '7': 'bwbWbwBwB', '8': 'BwbWbwBwb', '9': 'bwBWbwBwb'
+  'A': 'BwbwbWbwB', 'B': 'bwBwbWbwB', 'C': 'BwBwbWbwb', 'D': 'bwbwBWbwB', 'E': 'BwbwBWbwb'
+  'F': 'bwBwBWbwb', 'G': 'bwbwbWBwB', 'H': 'BwbwbWBwb', 'I': 'bwBwbWBwb', 'J': 'bwbwBWBwb'
+  'K': 'BwbwbwbWB', 'L': 'bwBwbwbWB', 'M': 'BwBwbwbWb', 'N': 'bwbwBwbWB', 'O': 'BwbwBwbWb'
+  'P': 'bwBwBwbWb', 'Q': 'bwbwbwBWB', 'R': 'BwbwbwBWb', 'S': 'bwBwbwBWb', 'T': 'bwbwBwBWb'
+  'U': 'BWbwbwbwB', 'V': 'bWBwbwbwB', 'W': 'BWBwbwbwb', 'X': 'bWbwBwbwB', 'Y': 'BWbwBwbwb'
+  'Z': 'bWBwBwbwb', '-': 'bWbwbwBwB', '.': 'BWbwbwBwb', ' ': 'bWBwbwBwb', '$': 'bWbWbWbwb'
+  '/': 'bWbWbwbWb', '+': 'bWbwbWbWb', '%': 'bwbWbWbWb', '*': 'bWbwBwBwb'
+
+OPTION_KEYS =! ['paper', 'layout', 'unit', 'margins', 'font', 'size', 'leading', 'compress', 'breaks', 'header', 'footer', 'title', 'author', 'subject', 'keywords', 'creator', 'date']
+STYLE_KEYS  =! ['font', 'size', 'color', 'tracking', 'leading']
+TEXT_KEYS   =! ['x', 'y', 'w', 'align', 'overflow', 'move', 'upper', ...STYLE_KEYS]
+PARA_KEYS   =! ['x', 'y', 'w', 'align', 'upper', ...STYLE_KEYS]
+SHAPE_KEYS  =! ['fill', 'stroke', 'width', 'radius', 'dash']
+IMAGE_KEYS  =! ['x', 'y', 'w', 'h']
+BAR_KEYS    =! ['type', 'x', 'y', 'w', 'h', 'module', 'align', 'color']
+TABLE_KEYS  =! ['x', 'y', 'w', 'cols', 'header', 'head', 'rowH', 'pad', 'size', 'font', 'color', 'align', 'stripe', 'rule', 'frame', 'row', 'tracking']
+
+# ==[ Width tables ]==
+# codes 32–255 as base-36 pairs (224 entries); Helvetica obliques share the
+# uprights, Courier is a flat 600. Values checked against the Adobe AFMs.
+
+WIDTHS =!
+  helvetica: '7q7q9vfgfgopij5b9999atg87q997q7qfgfgfgfgfgfgfgfgfgfg7q7qg8g8g8fgs7ijijk2k2ijgzlmk27qdwijfgn5k2lmijlmk2ijgzk2ijq8ijijgz7q7q7qd1fg99fgfgdwfgfg7qfgfg6666dw66n5fgfgfgfg99dw7qfgdwk2dwdwdw9a789ag89qfg9q66fg99rsfgfg99rsij99rs9qgz9q9q666699999qfgrs99rsdw99q89qdwij7q99fgfgfgfg78fg99khaafgg899kh99b4g8999999fgex7q9999a5fgn6n6n6gzijijijijijijrsk2ijijijij7q7q7q7qk2k2lmlmlmlmlmg8lmk2k2k2k2ijijgzfgfgfgfgfgfgopdwfgfgfgfg7q7q7q7qfgfgfgfgfgfgfgg8gzfgfgfgfgdwfgdw'
+  helveticaB: '7q99d6fgfgopk26m9999atg87q997q7qfgfgfgfgfgfgfgfgfgfg9999g8g8g8gzr3k2k2k2k2ijgzlmk27qfgk2gzn5k2lmijlmk2ijgzk2ijq8ijijgz997q99g8fg99fggzfggzfg99gzgz7q7qfg7qopgzgzgzgzatfg99gzfglmfgfgdwat7satg89qfg9q7qfgdwrsfgfg99rsij99rs9qgz9q9q7q7qdwdw9qfgrs99rsfg99q89qdwij7q99fgfgfgfg7sfg99khaafgg899kh99b4g8999999gzfg7q9999a5fgn6n6n6gzk2k2k2k2k2k2rsk2ijijijij7q7q7q7qk2k2lmlmlmlmlmg8lmk2k2k2k2ijijgzfgfgfgfgfgfgopfgfgfgfgfg7q7q7q7qgzgzgzgzgzgzgzg8gzgzgzgzgzfggzfg'
+  times: '6y99bcdwdwn5lm509999dwfo6y996y7qdwdwdwdwdwdwdwdwdwdw7q7qfofofoccplk2ijijk2gzfgk2k299atk2gzopk2k2fgk2ijfggzk2k2q8k2k2gz997q99d1dw99ccdwccdwcc99dwdw7q7qdw7qlmdwdwdwdw99at7qdwdwk2dwdwccdc5kdcf19qdw9q99dwccrsdwdw99rsfg99op9qgz9q9q9999cccc9qdwrs99r8at99k29qcck26y99dwdwdwdw5kdw99l47odwfo99l499b4fo8c8c99dwcl6y998c8mdwkukukucck2k2k2k2k2k2opijgzgzgzgz99999999k2k2k2k2k2k2k2fok2k2k2k2k2k2fgdwccccccccccccijcccccccccc7q7q7q7qdwdwdwdwdwdwdwfodwdwdwdwdwdwdwdw'
+  timesB: '6y99ffdwdwrsn57q9999dwfu6y996y7qdwdwdwdwdwdwdwdwdwdw9999fufufudwpuk2ijk2k2ijgzlmlmatdwlmijq8k2lmgzlmk2fgijk2k2rsk2k2ij997q99g5dw99dwfgccfgcc99dwfg7q99fg7qn5fgdwfgfgccat99fgdwk2dwdwccay64ayeg9qdw9q99dwdwrsdwdw99rsfg99rs9qij9q9q9999dwdw9qdwrs99rsat99k29qcck26y99dwdwdwdw64dw99kr8cdwfu99kr99b4fu8c8c99fgf06y998c96dwkukukudwk2k2k2k2k2k2rsk2ijijijijatatatatk2k2lmlmlmlmlmfulmk2k2k2k2k2gzfgdwdwdwdwdwdwk2cccccccccc7q7q7q7qdwfgdwdwdwdwdwfudwfgfgfgfgdwfgdw'
+  timesI: '6y99bodwdwn5lm5y9999dwir6y996y7qdwdwdwdwdwdwdwdwdwdw9999iririrdwpkgzgzijk2gzgzk2k299ccijfgn5ijk2gzk2gzdwfgk2gzn5gzfgfgat7qatbqdw99dwdwccdwcc7qdwdw7q7qcc7qk2dwdwdwdwatat7qdwccijccccatb47nb4f19qdw9q99dwfgopdwdw99rsdw99q89qfg9q9q9999fgfg9qdwop99r8at99ij9qatfg6yatdwdwdwdw7ndw99l47odwir99l499b4ir8c8c99dwej6y998c8mdwkukukudwgzgzgzgzgzgzopijgzgzgzgz99999999k2ijk2k2k2k2k2irk2k2k2k2k2fggzdwdwdwdwdwdwdwijcccccccccc7q7q7q7qdwdwdwdwdwdwdwirdwdwdwdwdwccdwcc'
+  timesBI: '6yatffdwdwn5lm7q9999dwfu6y996y7qdwdwdwdwdwdwdwdwdwdw9999fufufudwn4ijijijk2ijijk2lmatdwijgzopk2k2gzk2ijfggzk2ijopijgzgz997q99fudw99dwdwccdwcc99dwfg7q7qdw7qlmfgdwdwdwatat7qfgccijdwccat9o649ofu9qdw9q99dwdwrsdwdw99rsfg99q89qgz9q9q9999dwdw9qdwrs99rsat99k29qatgz6yatdwdwdwdw64dw99kr7edwgu99kr99b4fu8c8c99g0dw6y998c8cdwkukukudwijijijijijijq8ijijijijijatatatatk2k2k2k2k2k2k2fuk2k2k2k2k2gzgzdwdwdwdwdwdwdwk2cccccccccc7q7q7q7qdwfgdwdwdwdwdwfudwfgfgfgfgccdwcc'
+
+decodedWidths = {}
+
+coreWidths = (table) ->
+  decodedWidths[table] ?= if table is 'courier'
+    Array(224).fill 600
+  else
+    s = WIDTHS[table]
+    (parseInt(s.substr(i * 2, 2), 36) for i in [0...224])
+
+# ==[ Errors and bytes ]==
+
+export class PDFError extends Error
+  constructor: (message) ->
+    super message
+    @name = @constructor.name
+
+fail = (message) -> throw PDFError.new "pdf: #{message}"
+
+# code unit → WinAnsi byte, or undefined when the character has no encoding
+winAnsiByte = (c) ->
+  if c < 0x80 or (c >= 0xA0 and c <= 0xFF) then c else CP1252[c]
+
+# JS string → Latin-1 string whose char codes ARE the WinAnsi bytes; loud on
+# anything WinAnsi cannot spell
+winAnsi = (str) ->
+  out = ''
+  for i in [0...str.length]
+    c = str.charCodeAt i
+    b = winAnsiByte c
+    fail "#{JSON.stringify str[i]} (U+#{c.toString(16).toUpperCase().padStart 4, '0'}) is not in WinAnsi" unless b?
+    out += String.fromCharCode b
+  out
+
+# Latin-1 string (every char code ≤ 0xFF) → bytes
+latin1 = (str) ->
+  out = Uint8Array.new str.length
+  out[i] = str.charCodeAt(i) for i in [0...str.length]
+  out
+
+escapeChar = (ch) ->
+  switch ch
+    when '\r' then '\\r'
+    when '\n' then '\\n'
+    else "\\#{ch}"
+
+escapeText = (str) -> str.replace /[\\()\r\n]/g, escapeChar
+
+# PDF text string for the Info dictionary: literal when ASCII, UTF-16BE hex otherwise
+infoString = (str) ->
+  if /^[\x20-\x7E]*$/.test str
+    "(#{escapeText str})"
+  else
+    hex = 'FEFF'
+    hex += str.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0') for i in [0...str.length]
+    "<#{hex}>"
+
+# numeric operand: up to three decimals, no trailing zeros, no negative zero
+n3 = (x) ->
+  s = String(Math.round(x * 1000) / 1000)
+  if s is '-0' then '0' else s
+
+concat = (chunks) ->
+  total = 0
+  total += c.length for c in chunks
+  out = Uint8Array.new total
+  pos = 0
+  for c in chunks
+    out.set c, pos
+    pos += c.length
+  out
+
+# zlib-wrapped deflate, which is what /FlateDecode reads (the runtime's sync deflate emits raw deflate)
+def deflate(bytes)
+  cs = CompressionStream.new 'deflate'
+  w  = cs.writable.getWriter()
+  w.write! bytes
+  w.close!
+  Uint8Array.new Response.new(cs.readable).arrayBuffer!
+
+pdfDate = (d) ->
+  pad = (n) -> String(n).padStart 2, '0'
+  tz = -d.getTimezoneOffset()
+  sign = if tz < 0 then '-' else '+'
+  tz = Math.abs tz
+  "D:#{d.getFullYear()}#{pad d.getMonth() + 1}#{pad d.getDate()}#{pad d.getHours()}#{pad d.getMinutes()}#{pad d.getSeconds()}#{sign}#{pad Math.floor(tz / 60)}'#{pad tz % 60}'"
+
+# ==[ Colors ]==
+# A color becomes its operand string: 'g' for gray, 'r g b' for RGB. The
+# operator (g/G/rg/RG) is chosen by whether the operand contains a space.
+
+hex1 = (h) -> parseInt(h, 16) / 255
+
+parseColor = (c) ->
+  switch
+    when typeof c is 'number'
+      fail "gray level #{c} is not in 0..1" unless c >= 0 and c <= 1
+      n3 c
+    when Array.isArray c
+      fail "color array needs three 0–255 values, got #{JSON.stringify c}" unless c.length is 3 and c.every((v) -> typeof v is 'number' and v >= 0 and v <= 255)
+      c.map((v) -> n3 v / 255).join ' '
+    when typeof c is 'string'
+      switch
+        when c is 'black' then '0'
+        when c is 'white' then '1'
+        when /^#[0-9a-f]{6}$/i.test c then [c[1..2], c[3..4], c[5..6]].map((h) -> n3 hex1 h).join ' '
+        when /^#[0-9a-f]{3}$/i.test c then [c[1], c[2], c[3]].map((h) -> n3 hex1 h + h).join ' '
+        else fail "bad color #{JSON.stringify c} (use '#rrggbb', '#rgb', [r, g, b], 0..1, 'black' or 'white')"
+    else fail "bad color #{JSON.stringify c}"
+
+fillOp   = (col) -> if col.includes(' ') then "#{col} rg" else "#{col} g"
+strokeOp = (col) -> if col.includes(' ') then "#{col} RG" else "#{col} G"
+
+# ==[ Fonts ]==
+
+coreFont = (key) ->
+  [base, table] = CORE[key]
+  family = key.replace /B?I?$/, ''
+  m = CORE_METRICS[family]
+  { key, kind: 'core', base, widths: coreWidths(table), ascent: m.ascent, descent: m.descent, capHeight: m.capHeight }
+
+# Static TrueType with glyf outlines → font record with WinAnsi widths
+parseTrueType = (key, input) ->
+  bytes = if input instanceof ArrayBuffer then Uint8Array.new input else input
+  fail "register expects a Uint8Array or ArrayBuffer for #{JSON.stringify key}" unless bytes instanceof Uint8Array
+  fail "font #{JSON.stringify key} is too small to be a TrueType file" if bytes.length < 12
+  dv  = DataView.new bytes.buffer, bytes.byteOffset, bytes.byteLength
+  tag = String.fromCharCode bytes[0], bytes[1], bytes[2], bytes[3]
+  switch
+    when tag is 'OTTO' then fail "font #{JSON.stringify key} is OpenType CFF (OTTO); only TrueType (.ttf, glyf outlines) can be embedded"
+    when tag is 'wOFF' or tag is 'wOF2' then fail "font #{JSON.stringify key} is #{tag}; decompress it to a static .ttf first"
+    when tag is 'ttcf' then fail "font #{JSON.stringify key} is a TrueType collection; extract one face"
+    when dv.getUint32(0) isnt 0x00010000 and tag isnt 'true' then fail "font #{JSON.stringify key} is not a TrueType file"
+
+  tables = {}
+  for i in [0...dv.getUint16(4)]
+    p = 12 + i * 16
+    tables[String.fromCharCode bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]] = { offset: dv.getUint32(p + 8), length: dv.getUint32(p + 12) }
+  for t in ['head', 'hhea', 'hmtx', 'maxp', 'cmap', 'glyf', 'loca']
+    fail "font #{JSON.stringify key} is missing its #{t} table" unless tables[t]?
+
+  head = tables.head.offset
+  upm  = dv.getUint16 head + 18
+  em   = (v) -> Math.round v * 1000 / upm
+  bbox = (em dv.getInt16(head + 36 + 2 * i) for i in [0...4])
+
+  hhea = tables.hhea.offset
+  ascender  = dv.getInt16 hhea + 4
+  descender = dv.getInt16 hhea + 6
+  numH      = dv.getUint16 hhea + 34
+  numGlyphs = dv.getUint16 tables.maxp.offset + 4
+  hmtx      = tables.hmtx.offset
+  advance   = (gid) -> dv.getUint16 hmtx + Math.min(gid, numH - 1) * 4
+
+  # cmap: prefer (3,1) format 4, then (3,10) format 12, then any Unicode platform
+  cmap = tables.cmap.offset
+  sub  = null
+  best = -1
+  for i in [0...dv.getUint16(cmap + 2)]
+    p = cmap + 4 + i * 8
+    plat = dv.getUint16 p
+    enc  = dv.getUint16 p + 2
+    at   = dv.getUint32 p + 4
+    rank = switch
+      when plat is 3 and enc is 1  then 3
+      when plat is 3 and enc is 10 then 2
+      when plat is 0               then 1
+      else 0
+    if rank > best
+      best = rank
+      sub  = cmap + at
+  fail "font #{JSON.stringify key} has no Unicode cmap" unless sub?
+
+  format = dv.getUint16 sub
+  glyphFor = switch format
+    when 4
+      segX2  = dv.getUint16 sub + 6
+      ends   = sub + 14
+      starts = ends + segX2 + 2
+      deltas = starts + segX2
+      ranges = deltas + segX2
+      (c) ->
+        for s in [0...segX2 / 2]
+          end = dv.getUint16 ends + s * 2
+          continue if c > end
+          start = dv.getUint16 starts + s * 2
+          return 0 if c < start
+          delta = dv.getInt16 deltas + s * 2
+          ro    = dv.getUint16 ranges + s * 2
+          return (c + delta) & 0xFFFF if ro is 0
+          g = dv.getUint16 ranges + s * 2 + ro + (c - start) * 2
+          return if g is 0 then 0 else (g + delta) & 0xFFFF
+        0
+    when 12
+      groups = dv.getUint32 sub + 12
+      (c) ->
+        for g in [0...groups]
+          p = sub + 16 + g * 12
+          lo = dv.getUint32 p
+          hi = dv.getUint32 p + 4
+          return dv.getUint32(p + 8) + (c - lo) if c >= lo and c <= hi
+        0
+    else fail "font #{JSON.stringify key} uses cmap format #{format}; only 4 and 12 are supported"
+
+  widths = for code in [32...256]
+    u = WINANSI_UNICODE[code - 32]
+    g = if u? then glyphFor(u) else 0
+    if g is 0 and code isnt 32 then null else em advance(g)
+  widths[0] ?= em advance(glyphFor 32)
+
+  os2 = tables['OS/2']
+  capHeight = if os2? and os2.length >= 90 and dv.getUint16(os2.offset) >= 2 then em dv.getInt16(os2.offset + 88) else Math.round(ascender * 700 / upm)
+  italic = os2? and (dv.getUint16(os2.offset + 62) & 1) is 1
+  post = tables.post
+  italicAngle = if post? then dv.getInt32(post.offset + 4) / 65536 else 0
+  fixed = post? and dv.getUint32(post.offset + 12) isnt 0
+  flags = 32
+  flags |= 1  if fixed
+  flags |= 64 if italic or italicAngle isnt 0
+
+  base = postScriptName(dv, bytes, tables.name) ?? key.replace(/[^A-Za-z0-9+-]/g, '')
+
+  { key, kind: 'ttf', base, bytes, widths, ascent: ascender / upm, descent: -descender / upm, capHeight: capHeight / 1000, bbox, italicAngle, flags, numGlyphs }
+
+# name table ID 6 (PostScript name), from a Windows or Macintosh record
+postScriptName = (dv, bytes, name) ->
+  return null unless name?
+  base = name.offset
+  count = dv.getUint16 base + 2
+  strings = base + dv.getUint16(base + 4)
+  for i in [0...count]
+    p = base + 6 + i * 12
+    plat = dv.getUint16 p
+    id   = dv.getUint16 p + 6
+    len  = dv.getUint16 p + 8
+    at   = strings + dv.getUint16(p + 10)
+    continue unless id is 6
+    s = if plat is 3
+      (String.fromCharCode dv.getUint16(at + j * 2) for j in [0...len / 2]).join ''
+    else
+      (String.fromCharCode bytes[at + j] for j in [0...len]).join ''
+    s = s.replace /[^A-Za-z0-9+-]/g, ''
+    return s if s.length
+  null
+
+# ==[ Measure and wrap ]==
+# `str` is already Latin-1 (via winAnsi); widths are indexed by byte - 32.
+# Tc applies after every glyph including the last, so tracking adds n·t.
+
+measure = (font, str, size, tracking) ->
+  n = 0
+  for i in [0...str.length]
+    b = str.charCodeAt i
+    fail "control character #{JSON.stringify str[i]} in text" if b < 32
+    w = font.widths[b - 32]
+    fail "font #{JSON.stringify font.key} has no glyph for #{JSON.stringify str[i]}" unless w?
+    n += w
+  n * size / 1000 + tracking * str.length
+
+# greedy word wrap on spaces; a word wider than `w` splits at the widest prefix that fits
+wrapLines = (font, str, w, size, tracking) ->
+  out = []
+  for line in str.split '\n'
+    words = line.split ' '
+    cur = ''
+    for word in words
+      candidate = if cur is '' then word else "#{cur} #{word}"
+      if measure(font, candidate, size, tracking) <= w
+        cur = candidate
+        continue
+      out.push cur unless cur is ''
+      cur = ''
+      while measure(font, word, size, tracking) > w and word.length > 1
+        n = word.length - 1
+        n-- while n > 1 and measure(font, word[...n], size, tracking) > w
+        out.push word[...n]
+        word = word[n..]
+      cur = word
+    out.push cur
+  out
+
+# ==[ Images ]==
+
+readU32 = (b, p) -> ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0
+readU16 = (b, p) -> (b[p] << 8) | b[p + 1]
+
+parsePNG = (b) ->
+  fail 'PNG is missing its IHDR chunk' unless readU16(b, 12) is 0x4948 and readU16(b, 14) is 0x4452
+  info = { type: 'png', w: readU32(b, 16), h: readU32(b, 20), bpc: b[24], data: [], palette: null, mask: null }
+  colorType = b[25]
+  fail "PNG uses #{info.bpc}-bit samples; only 1, 2, 4 and 8 are supported" if info.bpc > 8
+  fail 'PNG has an alpha channel; flatten it to RGB or use a JPEG' if colorType is 4 or colorType is 6
+  fail 'PNG is interlaced; save it non-interlaced' if b[28] isnt 0
+  info.colorSpace = switch colorType
+    when 0 then 'DeviceGray'
+    when 2 then 'DeviceRGB'
+    when 3 then 'Indexed'
+    else fail "PNG color type #{colorType} is not supported"
+  info.colors = if colorType is 2 then 3 else 1
+  p = 33
+  while p + 8 <= b.length
+    len  = readU32 b, p
+    type = String.fromCharCode b[p + 4], b[p + 5], b[p + 6], b[p + 7]
+    body = b.subarray p + 8, p + 8 + len
+    switch type
+      when 'PLTE' then info.palette = body
+      when 'IDAT' then info.data.push body
+      when 'tRNS'
+        if colorType is 3
+          for v, i in body when v is 0
+            info.mask = [i, i]
+            break
+    break if type is 'IEND'
+    p += 12 + len
+  fail 'PNG palette image has no PLTE chunk' if colorType is 3 and not info.palette?
+  fail 'PNG has no image data' unless info.data.length
+  info.data = concat info.data
+  info
+
+parseJPEG = (b) ->
+  info = { type: 'jpg', data: b, adobe: false }
+  p = 2
+  while p + 4 <= b.length
+    fail 'JPEG marker structure is corrupt' unless b[p] is 0xFF
+    m = b[p + 1]
+    if m is 0xFF
+      p++
+      continue
+    if m is 0xD8 or m is 0x01 or (m >= 0xD0 and m <= 0xD7)
+      p += 2
+      continue
+    len = readU16 b, p + 2
+    if m in [0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF]
+      info.bpc = b[p + 4]
+      info.h   = readU16 b, p + 5
+      info.w   = readU16 b, p + 7
+      comps    = b[p + 9]
+      info.colorSpace = switch comps
+        when 1 then 'DeviceGray'
+        when 3 then 'DeviceRGB'
+        when 4 then 'DeviceCMYK'
+        else fail "JPEG with #{comps} components is not supported"
+      break
+    info.adobe = true if m is 0xEE and String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7], b[p + 8]) is 'Adobe'
+    p += 2 + len
+  fail 'JPEG has no frame header' unless info.w?
+  info
+
+parseImage = (input) ->
+  b = if input instanceof ArrayBuffer then Uint8Array.new input else input
+  fail 'image expects a Uint8Array or ArrayBuffer' unless b instanceof Uint8Array
+  switch
+    when b.length > 8 and b[0] is 0x89 and b[1] is 0x50 and b[2] is 0x4E and b[3] is 0x47 then parsePNG b
+    when b.length > 4 and b[0] is 0xFF and b[1] is 0xD8 then parseJPEG b
+    else fail 'image is neither PNG nor JPEG'
+
+# ==[ Barcodes ]==
+# Both return [{w, bar}] in modules: bars alternate with spaces.
+
+code128 = (text) ->
+  fail 'barcode text is empty' unless text.length
+  codes = []
+  mode  = null
+  i = 0
+  digitsAt = (j) ->
+    n = 0
+    n++ while j + n < text.length and text.charCodeAt(j + n) >= 48 and text.charCodeAt(j + n) <= 57
+    n
+  while i < text.length
+    run = digitsAt i
+    if run >= 4 or (run >= 2 and (i + run is text.length or mode is 'C'))
+      unless mode is 'C'
+        codes.push(if mode? then 99 else 105)
+        mode = 'C'
+      run-- if run % 2 is 1
+      while run > 0
+        codes.push parseInt(text.substr(i, 2), 10)
+        i += 2
+        run -= 2
+    else
+      unless mode is 'B'
+        codes.push(if mode? then 100 else 104)
+        mode = 'B'
+      c = text.charCodeAt i
+      fail "Code 128 cannot encode #{JSON.stringify text[i]}" unless c >= 32 and c <= 126
+      codes.push c - 32
+      i++
+  sum = codes[0]
+  sum += v * k for v, k in codes when k > 0
+  codes.push sum % 103, 106
+  out = []
+  for c in codes
+    for d, k in CODE128[c]
+      out.push { w: parseInt(d, 10), bar: k % 2 is 0 }
+  { codes, bars: out }
+
+code39 = (text) ->
+  fail 'barcode text is empty' unless text.length
+  out = []
+  for ch, k in "*#{text}*"
+    pattern = CODE39[ch]
+    fail "Code 39 cannot encode #{JSON.stringify ch} (digits, A–Z, space, - . $ / + %)" unless pattern? and (ch isnt '*' or k is 0 or k is text.length + 1)
+    out.push { w: 1, bar: false } if k > 0
+    for e in pattern
+      out.push { w: (if e is 'B' or e is 'W' then 2.5 else 1), bar: e is 'b' or e is 'B' }
+  { bars: out }
+
+barsWidth = (bars) ->
+  n = 0
+  n += b.w for b in bars
+  n
+
+# ==[ Option handling ]==
+
+checkKeys = (opts, allowed, what) ->
+  for own k of opts
+    fail "unknown #{what} option #{JSON.stringify k} (known: #{allowed.join ', '})" unless k in allowed
+  opts
+
+parseArgs = (args) ->
+  opts = {}
+  for arg in args
+    switch
+      when typeof arg is 'string'
+        low = arg.toLowerCase()
+        switch
+          when PAPERS[low]? then opts.paper = low
+          when low in ['portrait', 'landscape'] then opts.layout = low
+          when low is 'p' then opts.layout = 'portrait'
+          when low is 'l' then opts.layout = 'landscape'
+          when UNITS[low]? then opts.unit = low
+          when CORE[arg]? then opts.font = arg
+          else fail "unrecognized argument #{JSON.stringify arg} (paper, orientation, unit or core font)"
+      when typeof arg is 'number'  then opts.size = arg
+      when typeof arg is 'boolean' then opts.compress = arg
+      when Array.isArray arg       then opts.paper = arg
+      when arg? and typeof arg is 'object' then Object.assign opts, checkKeys(arg, OPTION_KEYS, 'document')
+      else fail "unrecognized argument #{JSON.stringify arg}"
+  opts.paper    ?= 'letter'
+  opts.layout   ?= 'portrait'
+  opts.unit     ?= 'pt'
+  opts.margins  ?= 36 / UNITS[opts.unit ?? 'pt']
+  opts.font     ?= 'helvetica'
+  opts.size     ?= 12
+  opts.leading  ?= 1.2
+  opts.compress ?= true
+  opts.breaks   ?= true
+  fail "unknown paper #{JSON.stringify opts.paper}" unless PAPERS[opts.paper]? or (Array.isArray(opts.paper) and opts.paper.length is 2)
+  fail "unknown layout #{JSON.stringify opts.layout}" unless opts.layout in ['portrait', 'landscape']
+  fail "unknown unit #{JSON.stringify opts.unit}" unless UNITS[opts.unit]?
+  fail "font size must be a positive number" unless typeof opts.size is 'number' and opts.size > 0
+  for k in ['header', 'footer'] when opts[k]? and typeof opts[k] isnt 'function'
+    fail "#{k} must be a function"
+  fail "date must be a Date" if opts.date? and not (opts.date instanceof Date)
+  opts
+
+# ==[ File writer ]==
+
+class Writer
+  constructor: ->
+    @chunks  = []
+    @offsets = []
+    @pos     = 0
+
+  push!: (x) ->
+    x = latin1 x if typeof x is 'string'
+    @chunks.push x
+    @pos += x.length
+
+  obj!: (n, dict, stream = null) ->
+    @offsets[n] = @pos
+    @push "#{n} 0 obj\n#{dict}\n"
+    if stream?
+      @push 'stream\n'
+      @push stream
+      @push '\nendstream\n'
+    @push 'endobj\n'
+
+  finish: (root, info) ->
+    count = @offsets.length
+    xref  = @pos
+    @push "xref\n0 #{count}\n0000000000 65535 f \n"
+    @push "#{String(@offsets[i]).padStart 10, '0'} 00000 n \n" for i in [1...count]
+    @push "trailer\n<< /Size #{count} /Root #{root} 0 R /Info #{info} 0 R >>\nstartxref\n#{xref}\n%%EOF\n"
+    concat @chunks
+
+# ==[ Document ]==
+
+export class PDF
+  @version = '0.0.0'
+  @fonts   = Object.keys CORE
+  @papers  = Object.keys PAPERS
+
+  @winAnsi: (str) ->
+    for i in [0...str.length]
+      return false unless winAnsiByte(str.charCodeAt i)?
+    true
+
+  constructor: (...args) ->
+    o = parseArgs args
+    @unit = UNITS[o.unit]
+    [w, h] = if Array.isArray o.paper then [o.paper[0] * @unit, o.paper[1] * @unit] else PAPERS[o.paper]
+    [w, h] = [h, w] if o.layout is 'landscape'
+    @paperPt = { w, h }
+    @paper   = { w: w / @unit, h: h / @unit }
+    @fonts   = {}
+    @fontList = []
+    @images  = []
+    @pages   = []
+    @pageCount = 0
+    @pageNumber = 0
+    @compress = o.compress
+    @breaks   = o.breaks
+    @hooks    = { header: o.header, footer: o.footer }
+    @meta     = { title: o.title, author: o.author, subject: o.subject, keywords: o.keywords, creator: o.creator, date: o.date }
+    @finished = false
+    @out      = null
+    @state =
+      font:      o.font
+      size:      o.size
+      leading:   o.leading
+      color:     '0'
+      fill:      '0'
+      stroke:    '0'
+      lineWidth: 1
+      tracking:  0
+      dash:      null
+    @fontRecord o.font
+    @margins o.margins
+    @page()
+
+  # ==[ Pages and margins ]==
+
+  page!: ->
+    fail 'document is finished' if @finished
+    @pages.push { ops: [], used: {} }
+    @pageCount  = @pages.length
+    @pageNumber = @pageCount
+    @cur = @pages[@pageCount - 1]
+    @x = @box.left
+    @y = @box.top
+    @hooks.header? this, @pageNumber
+
+  margins: (m) ->
+    list = if Array.isArray m then m else [m]
+    fail 'margins must be numbers' unless list.every (v) -> typeof v is 'number' and v >= 0
+    [t, r, b, l] = switch list.length
+      when 1 then [list[0], list[0], list[0], list[0]]
+      when 2 then [list[0], list[1], list[0], list[1]]
+      when 4 then list
+      else fail "margins take 1, 2 or 4 numbers, got #{list.length}"
+    atLeft = @box? and @x is @box.left
+    @m = { top: t, right: r, bottom: b, left: l }
+    @setBox()
+    @x = @box.left if atLeft
+    this
+
+  setBox!: ->
+    @box =
+      left:   @m.left
+      top:    @m.top
+      right:  @paper.w - @m.right
+      bottom: @paper.h - @m.bottom
+      width:  @paper.w - @m.left - @m.right
+      height: @paper.h - @m.top - @m.bottom
+    fail 'margins leave no room on the page' unless @box.width > 0 and @box.height > 0
+
+  # ==[ Cursor ]==
+
+  goto: (x, y) ->
+    @x = x if x?
+    @y = y if y?
+    this
+
+  move: (dx, dy) ->
+    @x += dx if dx?
+    @y += dy if dy?
+    this
+
+  down: (n = 1) ->
+    h = @lineHeight() * n
+    @ensure h
+    @y += h
+    @x = @box.left
+    this
+
+  lineHeight: -> @state.size * @state.leading / @unit
+
+  # flow ops call this before drawing something `h` units tall
+  ensure!: (h) ->
+    return unless @breaks and @y + h > @box.bottom and @y > @box.top
+    @page()
+
+  # ==[ State ]==
+
+  fontRecord: (key) ->
+    fail 'font key must be a string' unless typeof key is 'string'
+    unless @fonts[key]?
+      fail "unknown font #{JSON.stringify key} (core: #{PDF.fonts.join ', '}; or register one)" unless CORE[key]?
+      @addFont coreFont(key)
+    @fonts[key]
+
+  # fonts join the file only when text uses them, so an unused registration costs nothing
+  addFont!: (rec) ->
+    rec.index = null
+    @fonts[rec.key] = rec
+
+  font: (key, size) ->
+    @fontRecord key
+    @state.font = key
+    @size size if size?
+    this
+
+  size: (pt) ->
+    fail 'font size must be a positive number' unless typeof pt is 'number' and pt > 0
+    @state.size = pt
+    this
+
+  leading: (mult) ->
+    fail 'leading must be a positive number' unless typeof mult is 'number' and mult > 0
+    @state.leading = mult
+    this
+
+  tracking: (pt) ->
+    fail 'tracking must be a number' unless typeof pt is 'number'
+    @state.tracking = pt
+    this
+
+  color:  (c) -> @state.color  = parseColor c; this
+  fill:   (c) -> @state.fill   = parseColor c; this
+  stroke: (c) -> @state.stroke = parseColor c; this
+
+  lineWidth: (w) ->
+    fail 'line width must be a non-negative number' unless typeof w is 'number' and w >= 0
+    @state.lineWidth = w
+    this
+
+  # run fn with temporary state, cursor and box; restore everything after
+  scope!: (state, fn) ->
+    if typeof state is 'function'
+      fn = state
+      state = {}
+    fail 'scope expects a function' unless typeof fn is 'function'
+    saved = { state: { ...@state }, x: @x, y: @y, m: { ...@m } }
+    try
+      @font  state.font          if state.font?
+      @size  state.size          if state.size?
+      @color state.color         if state.color?
+      @fill  state.fill          if state.fill?
+      @stroke state.stroke       if state.stroke?
+      @lineWidth state.lineWidth if state.lineWidth?
+      @leading state.leading     if state.leading?
+      @tracking state.tracking   if state.tracking?
+      @x = state.x if state.x?
+      @y = state.y if state.y?
+      fn this
+    finally
+      @state = saved.state
+      @x = saved.x
+      @y = saved.y
+      @m = saved.m
+      @setBox()
+
+  at!: (x, y, fn) -> @scope { x, y }, fn
+
+  indent!: (dx, fn) ->
+    fail 'indent expects a number' unless typeof dx is 'number'
+    @scope {}, =>
+      @m.left += dx
+      @setBox()
+      @x = @box.left
+      fn this
+
+  # ==[ Lazy content state ]==
+
+  op!: (s) -> @cur.ops.push s
+
+  useFont!: (key, size) ->
+    rec = @fontRecord key
+    unless rec.index?
+      @fontList.push rec
+      rec.index = @fontList.length
+    tag = "#{rec.index} #{n3 size}"
+    return if @cur.used.font is tag
+    @cur.used.font = tag
+    @op "BT /F#{rec.index} #{n3 size} Tf ET"
+
+  useFill!: (col) ->
+    return if @cur.used.fill is col
+    @cur.used.fill = col
+    @op fillOp col
+
+  useStroke!: (col) ->
+    return if @cur.used.stroke is col
+    @cur.used.stroke = col
+    @op strokeOp col
+
+  useLineWidth!: (w) ->
+    return if @cur.used.lineWidth is w
+    @cur.used.lineWidth = w
+    @op "#{n3 w} w"
+
+  useDash!: (dash) ->
+    tag = if dash? then dash.map(n3).join(' ') else ''
+    return if @cur.used.dash is tag
+    @cur.used.dash = tag
+    @op "[#{tag}] 0 d"
+
+  useTracking!: (t) ->
+    return if @cur.used.tracking is t
+    @cur.used.tracking = t
+    @op "BT #{n3 t} Tc ET"
+
+  # ==[ Text ]==
+
+  # resolve a style object (font/size/color/tracking/leading) against current state
+  style: (opts) ->
+    font = opts.font ?? @state.font
+    rec  = @fontRecord font
+    size = opts.size ?? @state.size
+    fail 'size must be a positive number' unless typeof size is 'number' and size > 0
+    tracking = opts.tracking ?? @state.tracking
+    fail 'tracking must be a number' unless typeof tracking is 'number'
+    color = if opts.color? then parseColor(opts.color) else @state.color
+    leading = opts.leading ?? @state.leading
+    { font, rec, size, tracking, color, leading }
+
+  # width of a string in the document unit
+  width: (str, opts = {}) ->
+    fail 'width expects a string' unless typeof str is 'string'
+    checkKeys opts, STYLE_KEYS, 'width'
+    s = @style opts
+    measure(s.rec, winAnsi(str), s.size, s.tracking) / @unit
+
+  # word-wrapped lines for a width, without drawing
+  lines: (str, w, opts = {}) ->
+    fail 'lines expects a string' unless typeof str is 'string'
+    fail 'lines expects a positive width' unless typeof w is 'number' and w > 0
+    checkKeys opts, STYLE_KEYS, 'lines'
+    s = @style opts
+    wrapLines s.rec, winAnsi(str), w * @unit, s.size, s.tracking
+
+  # one line of text; returns the drawn width in the document unit
+  text: (str, opts = {}) ->
+    fail 'text expects a string' unless typeof str is 'string'
+    checkKeys opts, TEXT_KEYS, 'text'
+    fail 'text does not take newlines (use paragraph)' if /[\r\n]/.test str
+    fail 'text does not take tabs' if /\t/.test str
+    str = str.toUpperCase() if opts.upper
+    s = @style opts
+    lat = winAnsi str
+    x = opts.x ?? @x
+    y = opts.y ?? @y
+    wPt = measure s.rec, lat, s.size, s.tracking
+    if opts.w?
+      fail 'w must be a positive number' unless typeof opts.w is 'number' and opts.w > 0
+      boxPt = opts.w * @unit
+      if wPt > boxPt
+        overflow = opts.overflow ?? 'error'
+        switch overflow
+          when 'error'
+            fail "#{JSON.stringify str} is #{n3 wPt / @unit} wide but the box is #{n3 opts.w} (pass overflow: 'ellipsis' to truncate)"
+          when 'ellipsis'
+            dots = winAnsi '…'
+            fail "font #{JSON.stringify s.font} has no ellipsis glyph" unless s.rec.widths[dots.charCodeAt(0) - 32]?
+            lat = lat[...-1] while lat.length and measure(s.rec, lat + dots, s.size, s.tracking) > boxPt
+            lat = lat.replace(/\s+$/, '') + dots
+            wPt = measure s.rec, lat, s.size, s.tracking
+          else fail "unknown overflow #{JSON.stringify overflow} ('error' or 'ellipsis')"
+    align = opts.align ?? 'left'
+    if align isnt 'left'
+      fail "align #{JSON.stringify align} needs a width (w:)" unless opts.w?
+      switch align
+        when 'right'  then x += opts.w - wPt / @unit
+        when 'center' then x += (opts.w - wPt / @unit) / 2
+        else fail "unknown align #{JSON.stringify align} ('left', 'center' or 'right')"
+    @drawText lat, x, y, s
+    unless opts.move is false
+      @x = x + wPt / @unit
+      @y = y
+    wPt / @unit
+
+  drawText!: (lat, x, y, s) ->
+    baseline = y * @unit + s.rec.ascent * s.size
+    @useFont s.font, s.size
+    @useFill s.color
+    @useTracking s.tracking
+    @op "BT #{n3 x * @unit} #{n3 @paperPt.h - baseline} Td (#{escapeText lat}) Tj ET"
+
+  # text at the cursor followed by a newline
+  puts: (str = '', opts = {}) ->
+    checkKeys opts, ['align', 'w', 'overflow', 'upper', ...STYLE_KEYS], 'puts'
+    s = @style opts
+    h = s.size * s.leading / @unit
+    @ensure h
+    @text str, { ...opts, x: @x, y: @y, move: false } if str isnt ''
+    @y += h
+    @x = @box.left
+    this
+
+  # wrapped text inside a width; returns the height used
+  paragraph: (str, opts = {}) ->
+    fail 'paragraph expects a string' unless typeof str is 'string'
+    checkKeys opts, PARA_KEYS, 'paragraph'
+    fail 'paragraph does not take tabs' if /\t/.test str
+    str = str.toUpperCase() if opts.upper
+    s = @style opts
+    x = opts.x ?? @x
+    y = opts.y ?? @y
+    w = opts.w ?? (@box.right - x)
+    fail 'paragraph needs a positive width' unless w > 0
+    rows = wrapLines s.rec, winAnsi(str), w * @unit, s.size, s.tracking
+    lh = s.size * s.leading / @unit
+    align = opts.align ?? 'left'
+    for lat in rows
+      if @breaks and y + lh > @box.bottom and y > @box.top
+        @page()
+        y = @y
+      wPt = measure s.rec, lat, s.size, s.tracking
+      lx = switch align
+        when 'left'   then x
+        when 'right'  then x + w - wPt / @unit
+        when 'center' then x + (w - wPt / @unit) / 2
+        else fail "unknown align #{JSON.stringify align}"
+      @drawText lat, lx, y, s if lat.length
+      y += lh
+    @x = x
+    @y = y
+    rows.length * lh
+
+  # ==[ Shapes ]==
+
+  # resolve fill/stroke/width/dash for a shape; returns the paint operator
+  paint: (opts) ->
+    fillCol   = if opts.fill is true then @state.fill else if opts.fill? then parseColor(opts.fill) else null
+    strokeCol = if opts.stroke is true then @state.stroke else if opts.stroke? then parseColor(opts.stroke) else null
+    strokeCol = @state.stroke unless fillCol? or strokeCol?
+    width = opts.width ?? @state.lineWidth
+    fail 'width must be a non-negative number' unless typeof width is 'number' and width >= 0
+    if opts.dash?
+      fail 'dash must be an array of positive numbers' unless Array.isArray(opts.dash) and opts.dash.length and opts.dash.every((v) -> typeof v is 'number' and v > 0)
+    @useFill fillCol if fillCol?
+    if strokeCol?
+      @useStroke strokeCol
+      @useLineWidth width * @unit
+      @useDash (if opts.dash? then opts.dash.map((v) => v * @unit) else null)
+    if fillCol? and strokeCol? then 'B' else if fillCol? then 'f' else 'S'
+
+  rect!: (x, y, w, h, opts = {}) ->
+    checkKeys opts, SHAPE_KEYS, 'rect'
+    for v in [x, y, w, h] when typeof v isnt 'number'
+      fail 'rect expects four numbers'
+    fail 'rect needs positive width and height' unless w > 0 and h > 0
+    op = @paint opts
+    X = x * @unit
+    W = w * @unit
+    H = h * @unit
+    Y = @paperPt.h - y * @unit - H          # PDF bottom edge
+    r = opts.radius ?? 0
+    if r is 0
+      @op "#{n3 X} #{n3 Y} #{n3 W} #{n3 H} re #{op}"
+    else
+      fail 'radius must be a non-negative number' unless typeof r is 'number' and r >= 0
+      R = r * @unit
+      fail "radius #{r} exceeds half the shorter side" if R > Math.min(W, H) / 2
+      k = R * KAPPA
+      x0 = X; x1 = X + W; y0 = Y; y1 = Y + H
+      @op [
+        "#{n3 x0 + R} #{n3 y0} m"
+        "#{n3 x1 - R} #{n3 y0} l"
+        "#{n3 x1 - R + k} #{n3 y0} #{n3 x1} #{n3 y0 + R - k} #{n3 x1} #{n3 y0 + R} c"
+        "#{n3 x1} #{n3 y1 - R} l"
+        "#{n3 x1} #{n3 y1 - R + k} #{n3 x1 - R + k} #{n3 y1} #{n3 x1 - R} #{n3 y1} c"
+        "#{n3 x0 + R} #{n3 y1} l"
+        "#{n3 x0 + R - k} #{n3 y1} #{n3 x0} #{n3 y1 - R + k} #{n3 x0} #{n3 y1 - R} c"
+        "#{n3 x0} #{n3 y0 + R} l"
+        "#{n3 x0} #{n3 y0 + R - k} #{n3 x0 + R - k} #{n3 y0} #{n3 x0 + R} #{n3 y0} c"
+        "h #{op}"
+      ].join ' '
+
+  line!: (x1, y1, x2, y2, opts = {}) ->
+    checkKeys opts, ['stroke', 'width', 'dash'], 'line'
+    for v in [x1, y1, x2, y2] when typeof v isnt 'number'
+      fail 'line expects four numbers'
+    @paint { stroke: opts.stroke ?? true, width: opts.width, dash: opts.dash }
+    @op "#{n3 x1 * @unit} #{n3 @paperPt.h - y1 * @unit} m #{n3 x2 * @unit} #{n3 @paperPt.h - y2 * @unit} l S"
+
+  # horizontal rule across the content box (or between x1 and x2)
+  rule!: (opts = {}) ->
+    checkKeys opts, ['y', 'x1', 'x2', 'stroke', 'width', 'dash'], 'rule'
+    y  = opts.y ?? @y
+    x1 = opts.x1 ?? @box.left
+    x2 = opts.x2 ?? @box.right
+    @line x1, y, x2, y, { stroke: opts.stroke, width: opts.width, dash: opts.dash }
+
+  circle!: (cx, cy, r, opts = {}) ->
+    checkKeys opts, ['fill', 'stroke', 'width'], 'circle'
+    for v in [cx, cy, r] when typeof v isnt 'number'
+      fail 'circle expects three numbers'
+    fail 'circle needs a positive radius' unless r > 0
+    op = @paint opts
+    X = cx * @unit
+    Y = @paperPt.h - cy * @unit
+    R = r * @unit
+    k = R * KAPPA
+    @op [
+      "#{n3 X + R} #{n3 Y} m"
+      "#{n3 X + R} #{n3 Y + k} #{n3 X + k} #{n3 Y + R} #{n3 X} #{n3 Y + R} c"
+      "#{n3 X - k} #{n3 Y + R} #{n3 X - R} #{n3 Y + k} #{n3 X - R} #{n3 Y} c"
+      "#{n3 X - R} #{n3 Y - k} #{n3 X - k} #{n3 Y - R} #{n3 X} #{n3 Y - R} c"
+      "#{n3 X + k} #{n3 Y - R} #{n3 X + R} #{n3 Y - k} #{n3 X + R} #{n3 Y} c"
+      "h #{op}"
+    ].join ' '
+
+  # ==[ Fonts, images, barcodes ]==
+
+  register!: (key, bytes) ->
+    fail 'register expects a font key' unless typeof key is 'string' and key.length
+    fail "#{JSON.stringify key} is a core font name" if CORE[key]?
+    fail "font #{JSON.stringify key} is already registered" if @fonts[key]?
+    @addFont parseTrueType(key, bytes)
+
+  image: (bytes, opts = {}) ->
+    checkKeys opts, IMAGE_KEYS, 'image'
+    entry = null
+    for img in @images when img.bytes is bytes
+      entry = img
+    unless entry?
+      entry = { bytes, info: parseImage(bytes), index: @images.length + 1 }
+      @images.push entry
+    { w: iw, h: ih } = entry.info
+    w = opts.w
+    h = opts.h
+    fail 'image needs w or h (or both)' unless w? or h?
+    w ?= h * iw / ih
+    h ?= w * ih / iw
+    fail 'image size must be positive' unless w > 0 and h > 0
+    x = opts.x ?? @x
+    y = opts.y ?? @y
+    @op "q #{n3 w * @unit} 0 0 #{n3 h * @unit} #{n3 x * @unit} #{n3 @paperPt.h - (y + h) * @unit} cm /I#{entry.index} Do Q"
+    { w, h }
+
+  barcode: (str, opts = {}) ->
+    fail 'barcode expects a string' unless typeof str is 'string'
+    checkKeys opts, BAR_KEYS, 'barcode'
+    type = opts.type ?? 'code128'
+    { bars } = switch type
+      when 'code128' then code128 str
+      when 'code39'  then code39 str.toUpperCase()
+      else fail "unknown barcode type #{JSON.stringify type} ('code128' or 'code39')"
+    modules = barsWidth bars
+    h = opts.h ?? 36 / @unit
+    fail 'barcode height must be positive' unless h > 0
+    fail 'barcode takes w or module, not both' if opts.w? and opts.module?
+    w = opts.w ?? (opts.module ?? 1 / @unit) * modules
+    fail 'barcode width must be positive' unless w > 0
+    module = w * @unit / modules
+    x = opts.x ?? @x
+    y = opts.y ?? @y
+    switch opts.align ?? 'left'
+      when 'left'   then null
+      when 'right'  then x -= w
+      when 'center' then x -= w / 2
+      else fail "unknown align #{JSON.stringify opts.align} ('left', 'center' or 'right')"
+    left = x
+    @useFill(if opts.color? then parseColor(opts.color) else @state.fill)
+    X  = x * @unit
+    Y  = @paperPt.h - (y + h) * @unit
+    H  = h * @unit
+    ops = []
+    for b in bars
+      ops.push "#{n3 X} #{n3 Y} #{n3 b.w * module} #{n3 H} re f" if b.bar
+      X += b.w * module
+    @op ops.join ' '
+    { x: left, y, w, h }
+
+  # ==[ Table ]==
+
+  table: (rows, opts = {}) ->
+    fail 'table expects an array of rows' unless Array.isArray rows
+    checkKeys opts, TABLE_KEYS, 'table'
+    cols = opts.cols ?? []
+    ncol = Math.max cols.length, opts.header?.length ?? 0, ...(r.length for r in rows)
+    fail 'table has no columns' unless ncol > 0
+    cols = ({ ...(cols[i] ?? {}) } for i in [0...ncol])
+    x = opts.x ?? @box.left
+    w = opts.w ?? (@box.right - x)
+    fail 'table needs a positive width' unless w > 0
+    fixed = 0
+    flex  = []
+    for c, i in cols
+      if c.w?
+        fail "column #{i} width must be positive" unless typeof c.w is 'number' and c.w > 0
+        fixed += c.w
+      else
+        flex.push i
+    fail "table needs exactly one flexible column (found #{flex.length})" if flex.length > 1
+    fail "column widths (#{n3 fixed}) exceed the table width (#{n3 w})" if fixed > w
+    cols[flex[0]].w = w - fixed if flex.length is 1
+    if flex.length is 0 and fixed isnt w
+      fail "column widths (#{n3 fixed}) do not add up to the table width (#{n3 w})"
+    xs = []
+    cx = x
+    for c in cols
+      xs.push cx
+      cx += c.w
+    pad  = opts.pad ?? 4 / @unit
+    base = { font: opts.font ?? @state.font, size: opts.size ?? @state.size, color: opts.color, tracking: opts.tracking ?? @state.tracking }
+    @fontRecord base.font
+    rowH = opts.rowH ?? (base.size * @state.leading + 2 * pad * @unit) / @unit
+    y = opts.y ?? @y
+    y0 = y
+
+    # a cell: text vertically centred in a row of height h, clipped to the column
+    cell = (str, col, cx, cy, h, st) =>
+      rec = @fontRecord st.font
+      box = (rec.ascent + rec.descent) * st.size / @unit
+      @text String(str ?? ''),
+        x: cx + pad, y: cy + (h - box) / 2
+        w: col.w - 2 * pad, align: col.align ?? opts.align ?? 'left'
+        overflow: col.overflow ?? 'error', move: false, upper: st.upper
+        font: st.font, size: st.size, color: st.color, tracking: st.tracking
+
+    header = =>
+      return unless opts.header?
+      hd = opts.head ?? {}
+      st = { font: hd.font ?? base.font, size: hd.size ?? base.size, color: hd.color, tracking: hd.tracking ?? base.tracking, upper: hd.upper }
+      hh = hd.h ?? rowH
+      @rect x, y, w, hh, { fill: hd.fill } if hd.fill?
+      for col, i in cols
+        cell opts.header[i], col, xs[i], y, hh, st
+      y += hh
+
+    header()
+    for row, i in rows
+      fail "row #{i} is not an array" unless Array.isArray row
+      if @breaks and y + rowH > @box.bottom and y > @box.top
+        @page()
+        y = @y
+        header()
+      over = opts.row?(row, i) ?? {}
+      stripe = over.stripe ?? (if i % 2 is 1 then opts.stripe else null)
+      @rect x, y, w, rowH, { fill: stripe } if stripe?
+      for col, j in cols
+        st =
+          font:     over.font ?? col.font ?? base.font
+          size:     over.size ?? col.size ?? base.size
+          color:    over.color ?? col.color ?? base.color
+          tracking: over.tracking ?? col.tracking ?? base.tracking
+        cell row[j], col, xs[j], y, rowH, st
+      y += rowH
+      @line x, y, x + w, y, { stroke: opts.rule, width: 0.75 / @unit } if opts.rule? and i < rows.length - 1
+    @rect x, y0, w, y - y0, { stroke: opts.frame } if opts.frame? and y > y0
+    @x = x
+    @y = y
+    y - y0
+
+  # ==[ Emit ]==
+
+  finalize!: ->
+    return if @finished
+    if @hooks.footer?
+      total = @pages.length
+      saved = { cur: @cur, x: @x, y: @y, pageNumber: @pageNumber, breaks: @breaks }
+      @breaks = false
+      for page, i in @pages
+        @cur = page
+        @pageNumber = i + 1
+        @x = @box.left
+        @y = @box.top
+        @hooks.footer this, i + 1, total
+      @cur = saved.cur
+      @x = saved.x
+      @y = saved.y
+      @pageNumber = saved.pageNumber
+      @breaks = saved.breaks
+    @finished = true
+
+  # the finished file; idempotent
+  bytes: ->
+    return @out if @out?
+    @finalize()
+    streams = []
+    for page in @pages
+      raw = latin1 page.ops.join('\n')
+      raw = deflate! raw if @compress
+      streams.push raw
+    fontFiles = {}
+    for rec in @fontList when rec.kind is 'ttf'
+      fontFiles[rec.key] = deflate! rec.bytes
+    palettes = {}
+    for img in @images when img.info.palette?
+      palettes[img.index] = deflate! img.info.palette
+
+    n = 0
+    alloc = -> ++n
+    catalogN = alloc()
+    pagesN   = alloc()
+    infoN    = alloc()
+    pageNs   = ([alloc(), alloc()] for page in @pages)
+    fontNs   = {}
+    for rec in @fontList
+      fontNs[rec.key] = if rec.kind is 'core' then [alloc()] else [alloc(), alloc(), alloc(), alloc()]
+    imageNs = {}
+    for img in @images
+      imageNs[img.index] = if img.info.palette? then [alloc(), alloc()] else [alloc()]
+    resN = alloc()
+
+    w = Writer.new()
+    w.push "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"
+    w.obj catalogN, "<< /Type /Catalog /Pages #{pagesN} 0 R >>"
+    kids = (pn[0] + ' 0 R' for pn in pageNs).join ' '
+    w.obj pagesN, "<< /Type /Pages /Kids [#{kids}] /Count #{@pages.length} >>"
+    info = ["/Producer (rip/pdf #{PDF.version})"]
+    for k in ['title', 'author', 'subject', 'keywords', 'creator'] when @meta[k]?
+      info.push "/#{k[0].toUpperCase()}#{k[1..]} #{infoString String(@meta[k])}"
+    info.push "/CreationDate (#{pdfDate @meta.date})" if @meta.date?
+    w.obj infoN, "<< #{info.join ' '} >>"
+    for page, i in @pages
+      [pn, cn] = pageNs[i]
+      # MediaBox and Resources on every page, never inherited: printer firmware
+      # that interprets PDF directly is the least forgiving reader in the chain
+      w.obj pn, "<< /Type /Page /Parent #{pagesN} 0 R /MediaBox [0 0 #{n3 @paperPt.w} #{n3 @paperPt.h}] /Resources #{resN} 0 R /Contents #{cn} 0 R >>"
+      filter = if @compress then ' /Filter /FlateDecode' else ''
+      w.obj cn, "<< /Length #{streams[i].length}#{filter} >>", streams[i]
+    for rec in @fontList
+      ns = fontNs[rec.key]
+      if rec.kind is 'core'
+        w.obj ns[0], "<< /Type /Font /Subtype /Type1 /BaseFont /#{rec.base} /Encoding /WinAnsiEncoding >>"
+      else
+        [fn, dn, wn, sn] = ns
+        w.obj fn, "<< /Type /Font /Subtype /TrueType /BaseFont /#{rec.base} /FirstChar 32 /LastChar 255 /Widths #{wn} 0 R /Encoding /WinAnsiEncoding /FontDescriptor #{dn} 0 R >>"
+        w.obj dn, "<< /Type /FontDescriptor /FontName /#{rec.base} /Flags #{rec.flags} /FontBBox [#{rec.bbox.join ' '}] /ItalicAngle #{n3 rec.italicAngle} /Ascent #{Math.round rec.ascent * 1000} /Descent #{-Math.round rec.descent * 1000} /CapHeight #{Math.round rec.capHeight * 1000} /StemV 80 /FontFile2 #{sn} 0 R >>"
+        w.obj wn, "[#{(rec.widths.map (v) -> v ?? 0).join ' '}]"
+        w.obj sn, "<< /Length #{fontFiles[rec.key].length} /Length1 #{rec.bytes.length} /Filter /FlateDecode >>", fontFiles[rec.key]
+    for img in @images
+      { info } = img
+      ns = imageNs[img.index]
+      dict = ["/Type /XObject /Subtype /Image /Width #{info.w} /Height #{info.h} /BitsPerComponent #{info.bpc}"]
+      if info.colorSpace is 'Indexed'
+        dict.push "/ColorSpace [/Indexed /DeviceRGB #{info.palette.length / 3 - 1} #{ns[1]} 0 R]"
+      else
+        dict.push "/ColorSpace /#{info.colorSpace}"
+      dict.push "/Decode [1 0 1 0 1 0 1 0]" if info.colorSpace is 'DeviceCMYK' and info.adobe
+      dict.push "/Mask [#{info.mask.join ' '}]" if info.mask?
+      if info.type is 'jpg'
+        dict.push '/Filter /DCTDecode'
+      else
+        dict.push "/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors #{info.colors} /BitsPerComponent #{info.bpc} /Columns #{info.w} >>"
+      dict.push "/Length #{info.data.length}"
+      w.obj ns[0], "<< #{dict.join ' '} >>", info.data
+      if info.palette?
+        pal = palettes[img.index]
+        w.obj ns[1], "<< /Length #{pal.length} /Filter /FlateDecode >>", pal
+    res = ['/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]']
+    if @fontList.length
+      res.push "/Font << #{("/F#{rec.index} #{fontNs[rec.key][0]} 0 R" for rec in @fontList).join ' '} >>"
+    if @images.length
+      res.push "/XObject << #{("/I#{img.index} #{imageNs[img.index][0]} 0 R" for img in @images).join ' '} >>"
+    w.obj resN, "<< #{res.join ' '} >>"
+    @out = w.finish catalogN, infoN
