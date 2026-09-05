@@ -12,11 +12,12 @@ Everything a form needs is a method on one document object, coordinates are
 top-left in the unit you choose, and anything the writer cannot draw
 faithfully — a character outside WinAnsi, a string wider than its box, an
 unknown option — throws with a message that names it. The requisition in
-`demo.rip` renders in about four milliseconds to a 42 KB searchable page.
+`demo.rip` is one 42 KB searchable page; `bun run demo` prints its size and
+build time.
 
-**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file. Fonts
-and images arrive as bytes; the finished document leaves as a
-`Uint8Array`. Compression rides `CompressionStream`, so `bytes` is async.
+**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file; fonts and
+images arrive as bytes, the document leaves as a `Uint8Array`, and `bytes`
+is async because compression rides `CompressionStream`.
 
 ## Quick Start
 
@@ -52,11 +53,14 @@ Bun.write! 'invoice.pdf', bytes
   style, stripes, rules, frame, per-row overrides, page breaks with the
   header redrawn
 - **Barcodes**: Code 128 (auto subsets B/C with checksum) and Code 39, drawn
-  as vector bars; `module` or `w` sets the width, `align` places them
+  as vector bars; `module` or `w` sets the width, `align` places them; leave
+  a quiet zone of ten modules on each side
 - **Images**: PNG (gray, RGB, palette; no alpha) and JPEG passed through
   untouched
 - **Pages**: `page()`, `header` and `footer` hooks (the footer knows the
-  total), automatic breaks for flow operations, mutable `margins`
+  total), automatic breaks for flow operations, mutable `margins`. A header
+  draws inside the top margin: after the hook runs, the cursor is back at
+  the top-left of the box
 - **Scoped state**: `scope`, `at`, `indent` run a block and restore font,
   colors, cursor and margins afterwards, even when the block throws
 - **Deterministic bytes**: no date or ID unless you pass `date:`; two builds
@@ -79,7 +83,8 @@ doc = PDF.new paper: 'a4', unit: 'mm', font: 'times', size: 11   # the same
 ```
 
 Options are validated: an unknown key, paper, unit, color or font key
-throws immediately, naming what it saw and what it accepts.
+throws immediately, naming what it saw and what it accepts; so does a
+coordinate or size that is not a finite number.
 
 ## Fonts
 
@@ -92,11 +97,16 @@ doc.register 'inter', Bun.file('fonts/Inter-Regular.ttf').bytes!
 doc.font 'inter', 9
 ```
 
+The header hook runs for page one inside the constructor, so a header that
+uses an embedded font needs it registered up front: pass `fonts: { inter:
+bytes }` as a document option.
+
 WOFF, WOFF2, OpenType CFF and collections are rejected by name — convert
 them to a static `.ttf` first. Only fonts that text actually uses are
 written into the file. Text is WinAnsi (cp1252): Latin-1 plus the usual
 typographic characters (`— – “ ” ‘ ’ … • € ™`). A character outside that
-set throws; `PDF.winAnsi str` lets you check user data at intake.
+set throws, and so does a WinAnsi character the embedded font has no glyph
+for; `PDF.winAnsi str` lets you check user data at intake.
 
 `fonts/` holds pre-subset Inter and JetBrains Mono (OFL) for the demo.
 
@@ -104,8 +114,9 @@ set throws; `PDF.winAnsi str` lets you check user data at intake.
 
 `'#rrggbb'`, `'#rgb'`, `[r, g, b]` (0–255), a number 0..1 for gray,
 `'black'` or `'white'`. `color` is for text, `fill` and `stroke` for
-shapes; each draw call also accepts them inline. Operators are written to
-the page only when a value changes.
+shapes; each draw call also accepts them inline, where `true` means the
+current color and `false` means none. Operators are written to the page
+only when a value changes.
 
 ## Table
 
@@ -120,7 +131,10 @@ doc.table rows,
 ```
 
 Exactly one column may omit `w` and takes the remaining width. A cell wider
-than its column throws unless that column sets `overflow: 'ellipsis'`.
+than its column throws, naming the row and column, unless that column sets
+`overflow: 'ellipsis'`. Across a page break the header is redrawn (never
+left alone at the foot of a page) and the frame closes and reopens; the
+return value is the total height drawn.
 
 ## Output
 
@@ -131,13 +145,13 @@ than its column throws unless that column sets `overflow: 'ellipsis'`.
 ## Demo
 
 ```bash
-bun run demo            # writes requisition.pdf
+bun run demo            # writes requisition.pdf to the OS temp dir (or pass a path)
 ```
 
 `demo.rip` builds a one-page laboratory requisition — embedded fonts, a
 Code 128 barcode, rounded cards, a twelve-slot striped table and signature
-blocks — from the same data the HTML version renders through headless
-Chrome.
+blocks — from the kind of data a form usually reaches paper from through
+an HTML template and headless Chrome.
 
 ## Test
 

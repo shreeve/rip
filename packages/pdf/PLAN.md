@@ -178,12 +178,13 @@ doc = PDF.new
   footer:   null          # (doc, n, total) ->   runs at finalize, so total is known
   title: null, author: null, subject: null, keywords: null, creator: null
   date:     null          # Date → /CreationDate; null → omitted
+  fonts:    null          # { key: bytes } registered before page 1, so the header hook can use them
 
 doc = PDF.new 'a4', 'landscape', 'mm', 'times', 11, margins: 20   # same thing, Updraft style
 # positional classification: paper name | 'portrait'/'landscape' | unit | core font key |
 # number = size | [w, h] = paper | true/false = compress | trailing object = options
 
-PDF.version                 # from package.json at build; '0.0.0' for now
+PDF.version                 # a literal kept in step with package.json (test.rip pins both)
 PDF.fonts                   # ['helvetica','helveticaB','helveticaI','helveticaBI','times',…,'courierBI']
 PDF.papers                  # ['letter','legal','a3','a4','a5']
 PDF.winAnsi str             # true when every char is encodable
@@ -250,8 +251,9 @@ doc.table rows, {x, y, w, cols, header, head, rowH, pad, size, font, color, alig
   # rows: string[][]; cols: [{w, align, font, color, size, overflow}], exactly one column may omit w (flex)
   # header: string[] styled by head {h, fill, color, font, size, upper, tracking}
   # stripe: odd-row fill; rule: separator color; frame: outer border color
-  # row: (i, cells) -> style | undefined     per-row override
-  # auto-breaks between rows and re-draws the header; a row taller than a page throws
+  # row: (cells, i) -> style | undefined     per-row override ({stripe, font, size, color, tracking})
+  # auto-breaks between rows and re-draws the header (never orphaned); a row taller than a page throws;
+  # the frame closes at each break and reopens on the next page; returns the summed height
 
 # ==[ Output ]==
 bytes = doc.bytes!          # Uint8Array; finalizes (footer hooks); idempotent; drawing after → throws

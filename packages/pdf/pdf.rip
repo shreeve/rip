@@ -10,8 +10,7 @@
 # barcodes, PNG and JPEG images, header and footer hooks, automatic page
 # breaks. The object writer is append-only with byte-accurate offsets;
 # content streams are FlateDecode via CompressionStream, so `bytes` is async
-# and the whole file runs unchanged in Bun and in a browser. Descends from
-# Updraft (2010), the author's Ruby writer in the FPDF lineage.
+# and the whole file runs unchanged in Bun and in a browser.
 # ==============================================================================
 
 # ==[ Constants ]==
@@ -68,7 +67,7 @@ CODE128 =! '212222 222122 222221 121223 121322 131222 122213 122312 132212 22121
 
 # Code 39: nine elements per symbol, b/w narrow, B/W wide
 CODE39 =!
-  '0': 'bWBwbwBwb', '1': 'BwbWbwbwB', '2': 'bwBWbwbwB', '3': 'BwBWbwbwb', '4': 'bwbWBwbwB'
+  '0': 'bwbWBwBwb', '1': 'BwbWbwbwB', '2': 'bwBWbwbwB', '3': 'BwBWbwbwb', '4': 'bwbWBwbwB'
   '5': 'BwbWBwbwb', '6': 'bwBWBwbwb', '7': 'bwbWbwBwB', '8': 'BwbWbwBwb', '9': 'bwBWbwBwb'
   'A': 'BwbwbWbwB', 'B': 'bwBwbWbwB', 'C': 'BwBwbWbwb', 'D': 'bwbwBWbwB', 'E': 'BwbwBWbwb'
   'F': 'bwBwBWbwb', 'G': 'bwbwbWBwB', 'H': 'BwbwbWBwb', 'I': 'bwBwbWBwb', 'J': 'bwbwBWBwb'
@@ -78,14 +77,22 @@ CODE39 =!
   'Z': 'bWBwBwbwb', '-': 'bWbwbwBwB', '.': 'BWbwbwBwb', ' ': 'bWBwbwBwb', '$': 'bWbWbWbwb'
   '/': 'bWbWbwbWb', '+': 'bWbwbWbWb', '%': 'bwbWbWbWb', '*': 'bWbwBwBwb'
 
-OPTION_KEYS =! ['paper', 'layout', 'unit', 'margins', 'font', 'size', 'leading', 'compress', 'breaks', 'header', 'footer', 'title', 'author', 'subject', 'keywords', 'creator', 'date']
+OPTION_KEYS =! ['paper', 'layout', 'unit', 'margins', 'font', 'fonts', 'size', 'leading', 'compress', 'breaks', 'header', 'footer', 'title', 'author', 'subject', 'keywords', 'creator', 'date']
 STYLE_KEYS  =! ['font', 'size', 'color', 'tracking', 'leading']
 TEXT_KEYS   =! ['x', 'y', 'w', 'align', 'overflow', 'move', 'upper', ...STYLE_KEYS]
+PUTS_KEYS   =! ['w', 'align', 'overflow', 'upper', ...STYLE_KEYS]
 PARA_KEYS   =! ['x', 'y', 'w', 'align', 'upper', ...STYLE_KEYS]
+SCOPE_KEYS  =! ['x', 'y', 'fill', 'stroke', 'lineWidth', ...STYLE_KEYS]
 SHAPE_KEYS  =! ['fill', 'stroke', 'width', 'radius', 'dash']
+LINE_KEYS   =! ['stroke', 'width', 'dash']
+RULE_KEYS   =! ['y', 'x1', 'x2', ...LINE_KEYS]
+CIRCLE_KEYS =! ['fill', 'stroke', 'width']
 IMAGE_KEYS  =! ['x', 'y', 'w', 'h']
 BAR_KEYS    =! ['type', 'x', 'y', 'w', 'h', 'module', 'align', 'color']
 TABLE_KEYS  =! ['x', 'y', 'w', 'cols', 'header', 'head', 'rowH', 'pad', 'size', 'font', 'color', 'align', 'stripe', 'rule', 'frame', 'row', 'tracking']
+COL_KEYS    =! ['w', 'align', 'overflow', 'font', 'size', 'color', 'tracking']
+HEAD_KEYS   =! ['h', 'fill', 'color', 'font', 'size', 'upper', 'tracking']
+ROW_KEYS    =! ['stripe', 'font', 'size', 'color', 'tracking']
 
 # ==[ Width tables ]==
 # codes 32–255 as base-36 pairs (224 entries); Helvetica obliques share the
@@ -117,18 +124,31 @@ export class PDFError extends Error
 
 fail = (message) -> throw PDFError.new "pdf: #{message}"
 
+show = (v) -> if typeof v is 'number' or v is undefined then String(v) else JSON.stringify v
+
+# numeric arguments: every value that reaches the page must be finite, and
+# NaN, Infinity and strings say which option they came in through
+finite = (v, what) ->
+  fail "#{what} must be a finite number, got #{show v}" unless typeof v is 'number' and Number.isFinite v
+  v
+
+positive = (v, what) ->
+  fail "#{what} must be a positive number, got #{show v}" unless typeof v is 'number' and Number.isFinite(v) and v > 0
+  v
+
 # code unit → WinAnsi byte, or undefined when the character has no encoding
 winAnsiByte = (c) ->
-  if c < 0x80 or (c >= 0xA0 and c <= 0xFF) then c else CP1252[c]
+  if c < 0x7F or (c >= 0xA0 and c <= 0xFF) then c else CP1252[c]
 
 # JS string → Latin-1 string whose char codes ARE the WinAnsi bytes; loud on
 # anything WinAnsi cannot spell
 winAnsi = (str) ->
   out = ''
   for i in [0...str.length]
-    c = str.charCodeAt i
-    b = winAnsiByte c
-    fail "#{JSON.stringify str[i]} (U+#{c.toString(16).toUpperCase().padStart 4, '0'}) is not in WinAnsi" unless b?
+    b = winAnsiByte str.charCodeAt(i)
+    unless b?
+      cp = str.codePointAt i
+      fail "#{JSON.stringify String.fromCodePoint(cp)} (U+#{cp.toString(16).toUpperCase().padStart 4, '0'}) is not in WinAnsi"
     out += String.fromCharCode b
   out
 
@@ -155,10 +175,10 @@ infoString = (str) ->
     hex += str.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0') for i in [0...str.length]
     "<#{hex}>"
 
-# numeric operand: up to three decimals, no trailing zeros, no negative zero
+# numeric operand: up to three decimals, no trailing zeros, never exponent form
 n3 = (x) ->
-  s = String(Math.round(x * 1000) / 1000)
-  if s is '-0' then '0' else s
+  fail "#{x} cannot be written to the page" unless Number.isFinite(x) and Math.abs(x) < 1e12
+  String(Math.round(x * 1000) / 1000)
 
 concat = (chunks) ->
   total = 0
@@ -171,7 +191,7 @@ concat = (chunks) ->
   out
 
 # zlib-wrapped deflate, which is what /FlateDecode reads (the runtime's sync deflate emits raw deflate)
-def deflate(bytes)
+deflate = (bytes) ->
   cs = CompressionStream.new 'deflate'
   w  = cs.writable.getWriter()
   w.write! bytes
@@ -233,11 +253,15 @@ parseTrueType = (key, input) ->
     when dv.getUint32(0) isnt 0x00010000 and tag isnt 'true' then fail "font #{JSON.stringify key} is not a TrueType file"
 
   tables = {}
-  for i in [0...dv.getUint16(4)]
+  count  = dv.getUint16 4
+  fail "font #{JSON.stringify key} is truncated" if 12 + count * 16 > bytes.length
+  for i in [0...count]
     p = 12 + i * 16
     tables[String.fromCharCode bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]] = { offset: dv.getUint32(p + 8), length: dv.getUint32(p + 12) }
   for t in ['head', 'hhea', 'hmtx', 'maxp', 'cmap', 'glyf', 'loca']
     fail "font #{JSON.stringify key} is missing its #{t} table" unless tables[t]?
+  for own t, { offset, length } of tables when offset + length > bytes.length
+    fail "font #{JSON.stringify key} is truncated (#{t} table runs past the end)"
 
   head = tables.head.offset
   upm  = dv.getUint16 head + 18
@@ -306,7 +330,6 @@ parseTrueType = (key, input) ->
     u = WINANSI_UNICODE[code - 32]
     g = if u? then glyphFor(u) else 0
     if g is 0 and code isnt 32 then null else em advance(g)
-  widths[0] ?= em advance(glyphFor 32)
 
   os2 = tables['OS/2']
   capHeight = if os2? and os2.length >= 90 and dv.getUint16(os2.offset) >= 2 then em dv.getInt16(os2.offset + 88) else Math.round(ascender * 700 / upm)
@@ -318,7 +341,7 @@ parseTrueType = (key, input) ->
   flags |= 1  if fixed
   flags |= 64 if italic or italicAngle isnt 0
 
-  base = postScriptName(dv, bytes, tables.name) ?? key.replace(/[^A-Za-z0-9+-]/g, '')
+  base = postScriptName(dv, bytes, tables.name) ?? (key.replace(/[^A-Za-z0-9+-]/g, '') or 'Font')
 
   { key, kind: 'ttf', base, bytes, widths, ascent: ascender / upm, descent: -descender / upm, capHeight: capHeight / 1000, bbox, italicAngle, flags, numGlyphs }
 
@@ -512,7 +535,10 @@ barsWidth = (bars) ->
 
 # ==[ Option handling ]==
 
+# the options object of a call: absent is fine, anything but a plain object is not
 checkKeys = (opts, allowed, what) ->
+  opts ?= {}
+  fail "#{what} options must be an object, got #{show opts}" unless typeof opts is 'object' and not Array.isArray(opts)
   for own k of opts
     fail "unknown #{what} option #{JSON.stringify k} (known: #{allowed.join ', '})" unless k in allowed
   opts
@@ -539,7 +565,7 @@ parseArgs = (args) ->
   opts.paper    ?= 'letter'
   opts.layout   ?= 'portrait'
   opts.unit     ?= 'pt'
-  opts.margins  ?= 36 / UNITS[opts.unit ?? 'pt']
+  opts.margins  ?= 36 / UNITS[opts.unit]
   opts.font     ?= 'helvetica'
   opts.size     ?= 12
   opts.leading  ?= 1.2
@@ -548,9 +574,11 @@ parseArgs = (args) ->
   fail "unknown paper #{JSON.stringify opts.paper}" unless PAPERS[opts.paper]? or (Array.isArray(opts.paper) and opts.paper.length is 2)
   fail "unknown layout #{JSON.stringify opts.layout}" unless opts.layout in ['portrait', 'landscape']
   fail "unknown unit #{JSON.stringify opts.unit}" unless UNITS[opts.unit]?
-  fail "font size must be a positive number" unless typeof opts.size is 'number' and opts.size > 0
+  positive opts.size, 'font size'
+  positive opts.leading, 'leading'
   for k in ['header', 'footer'] when opts[k]? and typeof opts[k] isnt 'function'
     fail "#{k} must be a function"
+  fail "fonts must be an object of key: bytes, got #{show opts.fonts}" if opts.fonts? and (typeof opts.fonts isnt 'object' or Array.isArray opts.fonts)
   fail "date must be a Date" if opts.date? and not (opts.date instanceof Date)
   opts
 
@@ -592,6 +620,7 @@ export class PDF
   @papers  = Object.keys PAPERS
 
   @winAnsi: (str) ->
+    fail "winAnsi expects a string, got #{show str}" unless typeof str is 'string'
     for i in [0...str.length]
       return false unless winAnsiByte(str.charCodeAt i)?
     true
@@ -622,63 +651,83 @@ export class PDF
       color:     '0'
       fill:      '0'
       stroke:    '0'
-      lineWidth: 1
+      lineWidth: 1 / @unit
       tracking:  0
       dash:      null
+    @inHeader   = false
+    @finalizing = false
     @fontRecord o.font
+    if o.fonts?
+      @register key, bytes for own key, bytes of o.fonts
     @margins o.margins
     @page()
 
   # ==[ Pages and margins ]==
 
+  # a new page runs the header hook, then leaves the cursor at the top-left
+  # of the box (reserve room for a header with the top margin)
   page!: ->
     fail 'document is finished' if @finished
-    @pages.push { ops: [], used: {} }
+    fail 'page() cannot be called from a footer hook' if @finalizing
+    fail 'the header hook overflowed its page' if @inHeader
+    # `used` starts at the initial graphics state, so defaults cost no operators
+    @pages.push { ops: [], used: { fill: '0', stroke: '0', lineWidth: 1, dash: '', tracking: 0 } }
     @pageCount  = @pages.length
     @pageNumber = @pageCount
     @cur = @pages[@pageCount - 1]
     @x = @box.left
     @y = @box.top
-    @hooks.header? this, @pageNumber
+    if @hooks.header?
+      @inHeader = true
+      try
+        @hooks.header this, @pageNumber
+      finally
+        @inHeader = false
+      @x = @box.left
+      @y = @box.top
 
   margins: (m) ->
     list = if Array.isArray m then m else [m]
-    fail 'margins must be numbers' unless list.every (v) -> typeof v is 'number' and v >= 0
+    fail "margins must be non-negative numbers, got #{show m}" unless list.every (v) -> typeof v is 'number' and Number.isFinite(v) and v >= 0
     [t, r, b, l] = switch list.length
       when 1 then [list[0], list[0], list[0], list[0]]
       when 2 then [list[0], list[1], list[0], list[1]]
       when 4 then list
       else fail "margins take 1, 2 or 4 numbers, got #{list.length}"
     atLeft = @box? and @x is @box.left
-    @m = { top: t, right: r, bottom: b, left: l }
-    @setBox()
+    next = { top: t, right: r, bottom: b, left: l }
+    @box = @boxFor next
+    @m = next
     @x = @box.left if atLeft
     this
 
-  setBox!: ->
-    @box =
-      left:   @m.left
-      top:    @m.top
-      right:  @paper.w - @m.right
-      bottom: @paper.h - @m.bottom
-      width:  @paper.w - @m.left - @m.right
-      height: @paper.h - @m.top - @m.bottom
-    fail 'margins leave no room on the page' unless @box.width > 0 and @box.height > 0
+  boxFor: (m) ->
+    box =
+      left:   m.left
+      top:    m.top
+      right:  @paper.w - m.right
+      bottom: @paper.h - m.bottom
+      width:  @paper.w - m.left - m.right
+      height: @paper.h - m.top - m.bottom
+    fail 'margins leave no room on the page' unless box.width > 0 and box.height > 0
+    box
+
+  setBox!: -> @box = @boxFor @m
 
   # ==[ Cursor ]==
 
   goto: (x, y) ->
-    @x = x if x?
-    @y = y if y?
+    @x = finite x, 'x' if x?
+    @y = finite y, 'y' if y?
     this
 
   move: (dx, dy) ->
-    @x += dx if dx?
-    @y += dy if dy?
+    @x += finite dx, 'dx' if dx?
+    @y += finite dy, 'dy' if dy?
     this
 
   down: (n = 1) ->
-    h = @lineHeight() * n
+    h = @lineHeight() * finite(n, 'down')
     @ensure h
     @y += h
     @x = @box.left
@@ -712,18 +761,15 @@ export class PDF
     this
 
   size: (pt) ->
-    fail 'font size must be a positive number' unless typeof pt is 'number' and pt > 0
-    @state.size = pt
+    @state.size = positive pt, 'font size'
     this
 
   leading: (mult) ->
-    fail 'leading must be a positive number' unless typeof mult is 'number' and mult > 0
-    @state.leading = mult
+    @state.leading = positive mult, 'leading'
     this
 
   tracking: (pt) ->
-    fail 'tracking must be a number' unless typeof pt is 'number'
-    @state.tracking = pt
+    @state.tracking = finite pt, 'tracking'
     this
 
   color:  (c) -> @state.color  = parseColor c; this
@@ -731,7 +777,7 @@ export class PDF
   stroke: (c) -> @state.stroke = parseColor c; this
 
   lineWidth: (w) ->
-    fail 'line width must be a non-negative number' unless typeof w is 'number' and w >= 0
+    fail "line width must be a non-negative number, got #{show w}" unless typeof w is 'number' and Number.isFinite(w) and w >= 0
     @state.lineWidth = w
     this
 
@@ -740,7 +786,8 @@ export class PDF
     if typeof state is 'function'
       fn = state
       state = {}
-    fail 'scope expects a function' unless typeof fn is 'function'
+    fail "scope expects a function, got #{show fn}" unless typeof fn is 'function'
+    state = checkKeys state, SCOPE_KEYS, 'scope'
     saved = { state: { ...@state }, x: @x, y: @y, m: { ...@m } }
     try
       @font  state.font          if state.font?
@@ -751,8 +798,8 @@ export class PDF
       @lineWidth state.lineWidth if state.lineWidth?
       @leading state.leading     if state.leading?
       @tracking state.tracking   if state.tracking?
-      @x = state.x if state.x?
-      @y = state.y if state.y?
+      @x = finite state.x, 'x' if state.x?
+      @y = finite state.y, 'y' if state.y?
       fn this
     finally
       @state = saved.state
@@ -764,7 +811,7 @@ export class PDF
   at!: (x, y, fn) -> @scope { x, y }, fn
 
   indent!: (dx, fn) ->
-    fail 'indent expects a number' unless typeof dx is 'number'
+    finite dx, 'indent'
     @scope {}, =>
       @m.left += dx
       @setBox()
@@ -773,7 +820,9 @@ export class PDF
 
   # ==[ Lazy content state ]==
 
-  op!: (s) -> @cur.ops.push s
+  op!: (s) ->
+    fail 'document is finished' if @finished
+    @cur.ops.push s
 
   useFont!: (key, size) ->
     rec = @fontRecord key
@@ -817,44 +866,41 @@ export class PDF
   style: (opts) ->
     font = opts.font ?? @state.font
     rec  = @fontRecord font
-    size = opts.size ?? @state.size
-    fail 'size must be a positive number' unless typeof size is 'number' and size > 0
-    tracking = opts.tracking ?? @state.tracking
-    fail 'tracking must be a number' unless typeof tracking is 'number'
+    size     = positive opts.size ?? @state.size, 'size'
+    tracking = finite opts.tracking ?? @state.tracking, 'tracking'
+    leading  = positive opts.leading ?? @state.leading, 'leading'
     color = if opts.color? then parseColor(opts.color) else @state.color
-    leading = opts.leading ?? @state.leading
     { font, rec, size, tracking, color, leading }
 
   # width of a string in the document unit
-  width: (str, opts = {}) ->
-    fail 'width expects a string' unless typeof str is 'string'
-    checkKeys opts, STYLE_KEYS, 'width'
+  width: (str, opts) ->
+    fail "width expects a string, got #{show str}" unless typeof str is 'string'
+    opts = checkKeys opts, STYLE_KEYS, 'width'
     s = @style opts
     measure(s.rec, winAnsi(str), s.size, s.tracking) / @unit
 
   # word-wrapped lines for a width, without drawing
-  lines: (str, w, opts = {}) ->
-    fail 'lines expects a string' unless typeof str is 'string'
-    fail 'lines expects a positive width' unless typeof w is 'number' and w > 0
-    checkKeys opts, STYLE_KEYS, 'lines'
+  lines: (str, w, opts) ->
+    fail "lines expects a string, got #{show str}" unless typeof str is 'string'
+    positive w, 'width'
+    opts = checkKeys opts, STYLE_KEYS, 'lines'
     s = @style opts
     wrapLines s.rec, winAnsi(str), w * @unit, s.size, s.tracking
 
   # one line of text; returns the drawn width in the document unit
-  text: (str, opts = {}) ->
-    fail 'text expects a string' unless typeof str is 'string'
-    checkKeys opts, TEXT_KEYS, 'text'
+  text: (str, opts) ->
+    fail "text expects a string, got #{show str}" unless typeof str is 'string'
+    opts = checkKeys opts, TEXT_KEYS, 'text'
     fail 'text does not take newlines (use paragraph)' if /[\r\n]/.test str
     fail 'text does not take tabs' if /\t/.test str
     str = str.toUpperCase() if opts.upper
     s = @style opts
     lat = winAnsi str
-    x = opts.x ?? @x
-    y = opts.y ?? @y
+    x = finite opts.x ?? @x, 'x'
+    y = finite opts.y ?? @y, 'y'
     wPt = measure s.rec, lat, s.size, s.tracking
     if opts.w?
-      fail 'w must be a positive number' unless typeof opts.w is 'number' and opts.w > 0
-      boxPt = opts.w * @unit
+      boxPt = positive(opts.w, 'w') * @unit
       if wPt > boxPt
         overflow = opts.overflow ?? 'error'
         switch overflow
@@ -866,6 +912,7 @@ export class PDF
             lat = lat[...-1] while lat.length and measure(s.rec, lat + dots, s.size, s.tracking) > boxPt
             lat = lat.replace(/\s+$/, '') + dots
             wPt = measure s.rec, lat, s.size, s.tracking
+            fail "the box (#{n3 opts.w}) is too narrow even for an ellipsis" if wPt > boxPt
           else fail "unknown overflow #{JSON.stringify overflow} ('error' or 'ellipsis')"
     align = opts.align ?? 'left'
     if align isnt 'left'
@@ -888,29 +935,30 @@ export class PDF
     @op "BT #{n3 x * @unit} #{n3 @paperPt.h - baseline} Td (#{escapeText lat}) Tj ET"
 
   # text at the cursor followed by a newline
-  puts: (str = '', opts = {}) ->
-    checkKeys opts, ['align', 'w', 'overflow', 'upper', ...STYLE_KEYS], 'puts'
+  puts: (str = '', opts) ->
+    opts = checkKeys opts, PUTS_KEYS, 'puts'
     s = @style opts
     h = s.size * s.leading / @unit
     @ensure h
+    opts.w ?= @box.right - @x if opts.align?
     @text str, { ...opts, x: @x, y: @y, move: false } if str isnt ''
     @y += h
     @x = @box.left
     this
 
   # wrapped text inside a width; returns the height used
-  paragraph: (str, opts = {}) ->
-    fail 'paragraph expects a string' unless typeof str is 'string'
-    checkKeys opts, PARA_KEYS, 'paragraph'
+  paragraph: (str, opts) ->
+    fail "paragraph expects a string, got #{show str}" unless typeof str is 'string'
+    opts = checkKeys opts, PARA_KEYS, 'paragraph'
     fail 'paragraph does not take tabs' if /\t/.test str
     str = str.toUpperCase() if opts.upper
     s = @style opts
-    x = opts.x ?? @x
-    y = opts.y ?? @y
-    w = opts.w ?? (@box.right - x)
-    fail 'paragraph needs a positive width' unless w > 0
+    x = finite opts.x ?? @x, 'x'
+    y = finite opts.y ?? @y, 'y'
+    w = positive opts.w ?? (@box.right - x), 'w'
     rows = wrapLines s.rec, winAnsi(str), w * @unit, s.size, s.tracking
     lh = s.size * s.leading / @unit
+    fail "a line (#{n3 lh}) is taller than the page box (#{n3 @box.height})" if @breaks and lh > @box.height
     align = opts.align ?? 'left'
     for lat in rows
       if @breaks and y + lh > @box.bottom and y > @box.top
@@ -931,14 +979,15 @@ export class PDF
   # ==[ Shapes ]==
 
   # resolve fill/stroke/width/dash for a shape; returns the paint operator
+  # `true` means the current fill/stroke color, `false` means none
   paint: (opts) ->
-    fillCol   = if opts.fill is true then @state.fill else if opts.fill? then parseColor(opts.fill) else null
-    strokeCol = if opts.stroke is true then @state.stroke else if opts.stroke? then parseColor(opts.stroke) else null
+    fillCol   = if opts.fill is true then @state.fill else if opts.fill? and opts.fill isnt false then parseColor(opts.fill) else null
+    strokeCol = if opts.stroke is true then @state.stroke else if opts.stroke? and opts.stroke isnt false then parseColor(opts.stroke) else null
     strokeCol = @state.stroke unless fillCol? or strokeCol?
     width = opts.width ?? @state.lineWidth
-    fail 'width must be a non-negative number' unless typeof width is 'number' and width >= 0
+    fail "width must be a non-negative number, got #{show width}" unless typeof width is 'number' and Number.isFinite(width) and width >= 0
     if opts.dash?
-      fail 'dash must be an array of positive numbers' unless Array.isArray(opts.dash) and opts.dash.length and opts.dash.every((v) -> typeof v is 'number' and v > 0)
+      fail "dash must be an array of positive numbers, got #{show opts.dash}" unless Array.isArray(opts.dash) and opts.dash.length and opts.dash.every((v) -> typeof v is 'number' and Number.isFinite(v) and v > 0)
     @useFill fillCol if fillCol?
     if strokeCol?
       @useStroke strokeCol
@@ -946,11 +995,12 @@ export class PDF
       @useDash (if opts.dash? then opts.dash.map((v) => v * @unit) else null)
     if fillCol? and strokeCol? then 'B' else if fillCol? then 'f' else 'S'
 
-  rect!: (x, y, w, h, opts = {}) ->
-    checkKeys opts, SHAPE_KEYS, 'rect'
-    for v in [x, y, w, h] when typeof v isnt 'number'
-      fail 'rect expects four numbers'
-    fail 'rect needs positive width and height' unless w > 0 and h > 0
+  rect!: (x, y, w, h, opts) ->
+    opts = checkKeys opts, SHAPE_KEYS, 'rect'
+    finite x, 'rect x'
+    finite y, 'rect y'
+    positive w, 'rect width'
+    positive h, 'rect height'
     op = @paint opts
     X = x * @unit
     W = w * @unit
@@ -960,7 +1010,7 @@ export class PDF
     if r is 0
       @op "#{n3 X} #{n3 Y} #{n3 W} #{n3 H} re #{op}"
     else
-      fail 'radius must be a non-negative number' unless typeof r is 'number' and r >= 0
+      fail "radius must be a non-negative number, got #{show r}" unless typeof r is 'number' and Number.isFinite(r) and r >= 0
       R = r * @unit
       fail "radius #{r} exceeds half the shorter side" if R > Math.min(W, H) / 2
       k = R * KAPPA
@@ -978,26 +1028,25 @@ export class PDF
         "h #{op}"
       ].join ' '
 
-  line!: (x1, y1, x2, y2, opts = {}) ->
-    checkKeys opts, ['stroke', 'width', 'dash'], 'line'
-    for v in [x1, y1, x2, y2] when typeof v isnt 'number'
-      fail 'line expects four numbers'
+  line!: (x1, y1, x2, y2, opts) ->
+    opts = checkKeys opts, LINE_KEYS, 'line'
+    finite v, "line #{name}" for [v, name] in [[x1, 'x1'], [y1, 'y1'], [x2, 'x2'], [y2, 'y2']]
     @paint { stroke: opts.stroke ?? true, width: opts.width, dash: opts.dash }
     @op "#{n3 x1 * @unit} #{n3 @paperPt.h - y1 * @unit} m #{n3 x2 * @unit} #{n3 @paperPt.h - y2 * @unit} l S"
 
   # horizontal rule across the content box (or between x1 and x2)
-  rule!: (opts = {}) ->
-    checkKeys opts, ['y', 'x1', 'x2', 'stroke', 'width', 'dash'], 'rule'
+  rule!: (opts) ->
+    opts = checkKeys opts, RULE_KEYS, 'rule'
     y  = opts.y ?? @y
     x1 = opts.x1 ?? @box.left
     x2 = opts.x2 ?? @box.right
     @line x1, y, x2, y, { stroke: opts.stroke, width: opts.width, dash: opts.dash }
 
-  circle!: (cx, cy, r, opts = {}) ->
-    checkKeys opts, ['fill', 'stroke', 'width'], 'circle'
-    for v in [cx, cy, r] when typeof v isnt 'number'
-      fail 'circle expects three numbers'
-    fail 'circle needs a positive radius' unless r > 0
+  circle!: (cx, cy, r, opts) ->
+    opts = checkKeys opts, CIRCLE_KEYS, 'circle'
+    finite cx, 'circle x'
+    finite cy, 'circle y'
+    positive r, 'circle radius'
     op = @paint opts
     X = cx * @unit
     Y = @paperPt.h - cy * @unit
@@ -1015,48 +1064,46 @@ export class PDF
   # ==[ Fonts, images, barcodes ]==
 
   register!: (key, bytes) ->
-    fail 'register expects a font key' unless typeof key is 'string' and key.length
+    fail "register expects a font key, got #{show key}" unless typeof key is 'string' and key.length
     fail "#{JSON.stringify key} is a core font name" if CORE[key]?
     fail "font #{JSON.stringify key} is already registered" if @fonts[key]?
-    @addFont parseTrueType(key, bytes)
+    try
+      rec = parseTrueType key, bytes
+    catch e
+      throw e if e instanceof PDFError
+      fail "font #{JSON.stringify key} is truncated or malformed (#{e.message})"
+    @addFont rec
 
-  image: (bytes, opts = {}) ->
-    checkKeys opts, IMAGE_KEYS, 'image'
-    entry = null
-    for img in @images when img.bytes is bytes
-      entry = img
+  image: (bytes, opts) ->
+    opts = checkKeys opts, IMAGE_KEYS, 'image'
+    entry = @images.find (img) -> img.bytes is bytes
     unless entry?
       entry = { bytes, info: parseImage(bytes), index: @images.length + 1 }
       @images.push entry
     { w: iw, h: ih } = entry.info
-    w = opts.w
-    h = opts.h
-    fail 'image needs w or h (or both)' unless w? or h?
-    w ?= h * iw / ih
-    h ?= w * ih / iw
-    fail 'image size must be positive' unless w > 0 and h > 0
-    x = opts.x ?? @x
-    y = opts.y ?? @y
+    fail 'image needs w or h (or both)' unless opts.w? or opts.h?
+    w = if opts.w? then positive opts.w, 'image w' else opts.h * iw / ih
+    h = if opts.h? then positive opts.h, 'image h' else w * ih / iw
+    x = finite opts.x ?? @x, 'x'
+    y = finite opts.y ?? @y, 'y'
     @op "q #{n3 w * @unit} 0 0 #{n3 h * @unit} #{n3 x * @unit} #{n3 @paperPt.h - (y + h) * @unit} cm /I#{entry.index} Do Q"
     { w, h }
 
-  barcode: (str, opts = {}) ->
-    fail 'barcode expects a string' unless typeof str is 'string'
-    checkKeys opts, BAR_KEYS, 'barcode'
+  barcode: (str, opts) ->
+    fail "barcode expects a string, got #{show str}" unless typeof str is 'string'
+    opts = checkKeys opts, BAR_KEYS, 'barcode'
     type = opts.type ?? 'code128'
     { bars } = switch type
       when 'code128' then code128 str
       when 'code39'  then code39 str.toUpperCase()
       else fail "unknown barcode type #{JSON.stringify type} ('code128' or 'code39')"
     modules = barsWidth bars
-    h = opts.h ?? 36 / @unit
-    fail 'barcode height must be positive' unless h > 0
+    h = positive opts.h ?? 36 / @unit, 'barcode h'
     fail 'barcode takes w or module, not both' if opts.w? and opts.module?
-    w = opts.w ?? (opts.module ?? 1 / @unit) * modules
-    fail 'barcode width must be positive' unless w > 0
+    w = if opts.w? then positive opts.w, 'barcode w' else positive(opts.module ?? 1 / @unit, 'barcode module') * modules
     module = w * @unit / modules
-    x = opts.x ?? @x
-    y = opts.y ?? @y
+    x = finite opts.x ?? @x, 'x'
+    y = finite opts.y ?? @y, 'y'
     switch opts.align ?? 'left'
       when 'left'   then null
       when 'right'  then x -= w
@@ -1076,22 +1123,26 @@ export class PDF
 
   # ==[ Table ]==
 
-  table: (rows, opts = {}) ->
-    fail 'table expects an array of rows' unless Array.isArray rows
-    checkKeys opts, TABLE_KEYS, 'table'
+  table: (rows, opts) ->
+    fail "table expects an array of rows, got #{show rows}" unless Array.isArray rows
+    opts = checkKeys opts, TABLE_KEYS, 'table'
+    for row, i in rows when not Array.isArray row
+      fail "row #{i} is not an array, got #{show row}"
+    fail "header must be an array, got #{show opts.header}" if opts.header? and not Array.isArray opts.header
+    fail "cols must be an array, got #{show opts.cols}" if opts.cols? and not Array.isArray opts.cols
+    fail "row must be a function, got #{show opts.row}" if opts.row? and typeof opts.row isnt 'function'
     cols = opts.cols ?? []
     ncol = Math.max cols.length, opts.header?.length ?? 0, ...(r.length for r in rows)
     fail 'table has no columns' unless ncol > 0
-    cols = ({ ...(cols[i] ?? {}) } for i in [0...ncol])
-    x = opts.x ?? @box.left
-    w = opts.w ?? (@box.right - x)
-    fail 'table needs a positive width' unless w > 0
+    cols = ({ ...checkKeys(cols[i], COL_KEYS, "column #{i}") } for i in [0...ncol])
+    hd = checkKeys opts.head, HEAD_KEYS, 'head'
+    x = finite opts.x ?? @box.left, 'x'
+    w = positive opts.w ?? (@box.right - x), 'w'
     fixed = 0
     flex  = []
     for c, i in cols
       if c.w?
-        fail "column #{i} width must be positive" unless typeof c.w is 'number' and c.w > 0
-        fixed += c.w
+        fixed += positive c.w, "column #{i} width"
       else
         flex.push i
     fail "table needs exactly one flexible column (found #{flex.length})" if flex.length > 1
@@ -1104,41 +1155,54 @@ export class PDF
     for c in cols
       xs.push cx
       cx += c.w
-    pad  = opts.pad ?? 4 / @unit
+    pad  = finite opts.pad ?? 4 / @unit, 'pad'
     base = { font: opts.font ?? @state.font, size: opts.size ?? @state.size, color: opts.color, tracking: opts.tracking ?? @state.tracking }
     @fontRecord base.font
-    rowH = opts.rowH ?? (base.size * @state.leading + 2 * pad * @unit) / @unit
-    y = opts.y ?? @y
-    y0 = y
+    rowH  = positive opts.rowH ?? (base.size * @state.leading + 2 * pad * @unit) / @unit, 'rowH'
+    headH = if opts.header? then positive(hd.h ?? rowH, 'head.h') else 0
+    fail "a row (#{n3 rowH + headH}) is taller than the page box (#{n3 @box.height})" if @breaks and rowH + headH > @box.height
+    y = finite opts.y ?? @y, 'y'
 
     # a cell: text vertically centred in a row of height h, clipped to the column
-    cell = (str, col, cx, cy, h, st) =>
+    cell = (str, col, cx, cy, h, st, where) =>
       rec = @fontRecord st.font
       box = (rec.ascent + rec.descent) * st.size / @unit
-      @text String(str ?? ''),
-        x: cx + pad, y: cy + (h - box) / 2
-        w: col.w - 2 * pad, align: col.align ?? opts.align ?? 'left'
-        overflow: col.overflow ?? 'error', move: false, upper: st.upper
-        font: st.font, size: st.size, color: st.color, tracking: st.tracking
+      try
+        @text String(str ?? ''),
+          x: cx + pad, y: cy + (h - box) / 2
+          w: col.w - 2 * pad, align: col.align ?? opts.align ?? 'left'
+          overflow: col.overflow ?? 'error', move: false, upper: st.upper
+          font: st.font, size: st.size, color: st.color, tracking: st.tracking
+      catch e
+        throw e unless e instanceof PDFError
+        fail "table #{where}: #{e.message[5..]}"
 
     header = =>
       return unless opts.header?
-      hd = opts.head ?? {}
       st = { font: hd.font ?? base.font, size: hd.size ?? base.size, color: hd.color, tracking: hd.tracking ?? base.tracking, upper: hd.upper }
-      hh = hd.h ?? rowH
-      @rect x, y, w, hh, { fill: hd.fill } if hd.fill?
+      @rect x, y, w, headH, { fill: hd.fill } if hd.fill?
       for col, i in cols
-        cell opts.header[i], col, xs[i], y, hh, st
-      y += hh
+        cell opts.header[i], col, xs[i], y, headH, st, "header column #{i}"
+      y += headH
 
+    # each page gets its own frame segment; `used` sums them for the return value
+    top  = y
+    used = 0
+    fits = (h) => not @breaks or y + h <= @box.bottom or y <= @box.top
+    spill = =>
+      @rect x, top, w, y - top, { stroke: opts.frame } if opts.frame? and y > top
+      used += y - top
+      @page()
+      y = @y
+      top = y
+
+    spill() unless fits headH + rowH
     header()
     for row, i in rows
-      fail "row #{i} is not an array" unless Array.isArray row
-      if @breaks and y + rowH > @box.bottom and y > @box.top
-        @page()
-        y = @y
+      unless fits rowH
+        spill()
         header()
-      over = opts.row?(row, i) ?? {}
+      over = checkKeys opts.row?(row, i), ROW_KEYS, "row #{i} override"
       stripe = over.stripe ?? (if i % 2 is 1 then opts.stripe else null)
       @rect x, y, w, rowH, { fill: stripe } if stripe?
       for col, j in cols
@@ -1147,13 +1211,14 @@ export class PDF
           size:     over.size ?? col.size ?? base.size
           color:    over.color ?? col.color ?? base.color
           tracking: over.tracking ?? col.tracking ?? base.tracking
-        cell row[j], col, xs[j], y, rowH, st
+        cell row[j], col, xs[j], y, rowH, st, "row #{i} column #{j}"
       y += rowH
       @line x, y, x + w, y, { stroke: opts.rule, width: 0.75 / @unit } if opts.rule? and i < rows.length - 1
-    @rect x, y0, w, y - y0, { stroke: opts.frame } if opts.frame? and y > y0
+    @rect x, top, w, y - top, { stroke: opts.frame } if opts.frame? and y > top
+    used += y - top
     @x = x
     @y = y
-    y - y0
+    used
 
   # ==[ Emit ]==
 
@@ -1163,17 +1228,21 @@ export class PDF
       total = @pages.length
       saved = { cur: @cur, x: @x, y: @y, pageNumber: @pageNumber, breaks: @breaks }
       @breaks = false
-      for page, i in @pages
-        @cur = page
-        @pageNumber = i + 1
-        @x = @box.left
-        @y = @box.top
-        @hooks.footer this, i + 1, total
-      @cur = saved.cur
-      @x = saved.x
-      @y = saved.y
-      @pageNumber = saved.pageNumber
-      @breaks = saved.breaks
+      @finalizing = true
+      try
+        for page, i in @pages
+          @cur = page
+          @pageNumber = i + 1
+          @x = @box.left
+          @y = @box.top
+          @hooks.footer this, i + 1, total
+      finally
+        @finalizing = false
+        @cur = saved.cur
+        @x = saved.x
+        @y = saved.y
+        @pageNumber = saved.pageNumber
+        @breaks = saved.breaks
     @finished = true
 
   # the finished file; idempotent
@@ -1185,9 +1254,10 @@ export class PDF
       raw = latin1 page.ops.join('\n')
       raw = deflate! raw if @compress
       streams.push raw
-    fontFiles = {}
-    for rec in @fontList when rec.kind is 'ttf'
-      fontFiles[rec.key] = deflate! rec.bytes
+    # the same bytes registered under two keys embed one font program
+    fontFiles = Map.new()
+    for rec in @fontList when rec.kind is 'ttf' and not fontFiles.has(rec.bytes)
+      fontFiles.set rec.bytes, { n: null, bytes: rec.bytes, data: deflate!(rec.bytes) }
     palettes = {}
     for img in @images when img.info.palette?
       palettes[img.index] = deflate! img.info.palette
@@ -1200,7 +1270,8 @@ export class PDF
     pageNs   = ([alloc(), alloc()] for page in @pages)
     fontNs   = {}
     for rec in @fontList
-      fontNs[rec.key] = if rec.kind is 'core' then [alloc()] else [alloc(), alloc(), alloc(), alloc()]
+      fontNs[rec.key] = if rec.kind is 'core' then [alloc()] else [alloc(), alloc(), alloc()]
+    file.n = alloc() for file in Array.from(fontFiles.values())
     imageNs = {}
     for img in @images
       imageNs[img.index] = if img.info.palette? then [alloc(), alloc()] else [alloc()]
@@ -1228,11 +1299,13 @@ export class PDF
       if rec.kind is 'core'
         w.obj ns[0], "<< /Type /Font /Subtype /Type1 /BaseFont /#{rec.base} /Encoding /WinAnsiEncoding >>"
       else
-        [fn, dn, wn, sn] = ns
+        [fn, dn, wn] = ns
+        sn = fontFiles.get(rec.bytes).n
         w.obj fn, "<< /Type /Font /Subtype /TrueType /BaseFont /#{rec.base} /FirstChar 32 /LastChar 255 /Widths #{wn} 0 R /Encoding /WinAnsiEncoding /FontDescriptor #{dn} 0 R >>"
         w.obj dn, "<< /Type /FontDescriptor /FontName /#{rec.base} /Flags #{rec.flags} /FontBBox [#{rec.bbox.join ' '}] /ItalicAngle #{n3 rec.italicAngle} /Ascent #{Math.round rec.ascent * 1000} /Descent #{-Math.round rec.descent * 1000} /CapHeight #{Math.round rec.capHeight * 1000} /StemV 80 /FontFile2 #{sn} 0 R >>"
         w.obj wn, "[#{(rec.widths.map (v) -> v ?? 0).join ' '}]"
-        w.obj sn, "<< /Length #{fontFiles[rec.key].length} /Length1 #{rec.bytes.length} /Filter /FlateDecode >>", fontFiles[rec.key]
+    for file in Array.from(fontFiles.values())
+      w.obj file.n, "<< /Length #{file.data.length} /Length1 #{file.bytes.length} /Filter /FlateDecode >>", file.data
     for img in @images
       { info } = img
       ns = imageNs[img.index]

@@ -52,14 +52,17 @@ def pageContent(doc)
 
 font = (name) -> Uint8Array.new readFileSync(join FONTS, name)
 
-have = (bin) ->
-  try
-    Bun.spawnSync([bin, '-v']).exitCode? and Bun.which(bin)?
-  catch then false
+have = (bin) -> Bun.which(bin)?
 
-def tool(bin, args)
-  r = Bun.spawnSync [bin, ...args]
-  r.stdout.toString()
+# run a poppler tool over a document written to a temp file, then remove the file
+# run a poppler tool over a document written to a temp file ('%' in args), then remove the file
+def tool(bin, args, doc)
+  path = join tmpdir(), "rip-pdf-#{process.pid}-#{bin}.pdf"
+  Bun.write! path, doc.bytes!
+  try
+    Bun.spawnSync([bin, ...(args.map (a) -> if a is '%' then path else a)]).stdout.toString()
+  finally
+    Bun.file(path).delete!
 
 # ==[ Package surface ]==
 
@@ -115,8 +118,25 @@ test "custom paper and margins forms", ->
   doc.margins [1, 2, 3, 4]
   eq [doc.box.top, doc.box.right, doc.box.bottom, doc.box.left], [1, 198, 97, 4]
 
+test "positional compress flag and custom paper; the fonts option registers before page one", ->
+  doc = PDF.new false, [300, 200]
+  eq doc.compress, false
+  eq doc.paper, { w: 300, h: 200 }
+  seen = []
+  doc = PDF.new fonts: { inter: font('Inter-Regular.ttf') }, header: (d, n) -> seen.push d.width('ab', font: 'inter', size: 1000)
+  eq seen, [1174]
+  eq doc.fonts.inter.kind, 'ttf'
+
+test "the default line width is one point in every unit", ->
+  eq PDF.new().state.lineWidth, 1
+  eq PDF.new('in').state.lineWidth, 1 / 72
+  eq PDF.new('mm').state.lineWidth.toFixed(4), '0.3528'
+
 test "loud rejections at construction", ->
   throws (-> PDF.new nonsense: 1), PDFError, 'unknown document option "nonsense"'
+  throws (-> PDF.new size: Infinity), PDFError, 'font size must be a positive number, got Infinity'
+  throws (-> PDF.new fonts: [1]), PDFError, 'fonts must be an object'
+  throws (-> PDF.new margins: 'wide'), PDFError, 'margins must be non-negative numbers, got "wide"'
   throws (-> PDF.new 'tabloid'), PDFError, 'unrecognized argument "tabloid"'
   throws (-> PDF.new unit: 'px'), PDFError, 'unknown unit "px"'
   throws (-> PDF.new paper: 'b5'), PDFError, 'unknown paper "b5"'
@@ -168,12 +188,16 @@ test! "byte-identical builds, and bytes is idempotent", ->
   eq doc.bytes!, doc.bytes!
 
 test! "drawing after bytes throws; info strings and dates", ->
-  doc = PDF.new title: 'Plain', author: 'Café', date: Date.new(2026, 8, 4, 14, 25, 33)
+  doc = PDF.new title: 'Plain', author: 'Café', subject: 'S', keywords: 'k1 k2', creator: 'C', date: Date.new(2026, 8, 4, 14, 25, 33)
   doc.bytes!
   throws (-> doc.page()), PDFError, 'finished'
+  throws (-> doc.text 'late', x: 10, y: 10), PDFError, 'finished'
+  throws (-> doc.rect 0, 0, 10, 10), PDFError, 'finished'
+  throws (-> doc.puts 'late'), PDFError, 'finished'
   s = latin doc.bytes!
   ok s.includes('/Title (Plain)')
-  ok s.includes('/Author <FEFF0043006100660000E9>'.replace('0000E9', '00E9'))
+  ok s.includes('/Author <FEFF00430061006600E9>')
+  ok s.includes('/Subject (S) /Keywords (k1 k2) /Creator (C)')
   ok /\/CreationDate \(D:20260904142533[+-]\d\d'\d\d'\)/.test s
 
 test! "uncompressed content is readable and compressed content inflates to it", ->
@@ -213,6 +237,15 @@ test "tracking adds n·t and units scale widths", ->
 test "text rejects what it cannot draw", ->
   doc = PDF.new()
   throws (-> doc.text '⚠'), PDFError, '"⚠" (U+26A0) is not in WinAnsi'
+  throws (-> doc.text '😀'), PDFError, '"😀" (U+1F600) is not in WinAnsi'
+  throws (-> doc.text '\x7F'), PDFError, 'U+007F'
+  throws (-> doc.text 'x', x: 'abc'), PDFError, 'x must be a finite number, got "abc"'
+  throws (-> doc.text 'x', y: NaN), PDFError, 'y must be a finite number, got NaN'
+  throws (-> doc.text 'x', size: Infinity), PDFError, 'size must be a positive number, got Infinity'
+  throws (-> doc.text 'x', w: 1, overflow: 'ellipsis'), PDFError, 'too narrow even for an ellipsis'
+  throws (-> doc.text 'x', 'opts'), PDFError, 'text options must be an object'
+  throws (-> doc.text 42), PDFError, 'text expects a string, got 42'
+  eq PDF.winAnsi('\x7F'), false
   throws (-> doc.text 'a\nb'), PDFError, 'newlines'
   throws (-> doc.text 'a\tb'), PDFError, 'tabs'
   throws (-> doc.text 'x', align: 'center'), PDFError, 'needs a width'
@@ -230,15 +263,28 @@ test! "ellipsis truncation fits the box", ->
   ok /\(a rather[^)]*\x85\) Tj/.test s
 
 test! "alignment, cursor movement and move: false", ->
-  doc = PDF.new()
+  doc = PDF.new compress: false
   w = doc.text 'Hello', x: 100, y: 50, size: 10
   eq [doc.x, doc.y], [100 + w, 50]
   doc.text 'Hi', x: 10, y: 10, move: false
   eq [doc.x, doc.y], [100 + w, 50]
   doc.text 'Right', x: 0, y: 0, w: 200, align: 'right', size: 10
   eq doc.x.toFixed(3), '200.000'
+  doc.text 'Mid', x: 0, y: 0, w: 200, align: 'center', size: 10, move: false
+  eq doc.x.toFixed(3), '200.000'
+  doc.text 'null options', null
+  doc.text 'shout', x: 0, y: 100, upper: true
   s = latin doc.bytes!
-  ok s.length > 0
+  ok s.includes('(SHOUT) Tj')
+  mid = doc.width 'Mid', size: 10
+  ok s.includes("BT #{(100 - mid / 2).toFixed(3).replace(/0+$/, '')} ")
+
+test! "ellipsis with an embedded font uses its own glyph", ->
+  doc = PDF.new compress: false
+  doc.register 'inter', font('Inter-Regular.ttf')
+  drawn = doc.text 'a rather long string that will not fit', x: 10, y: 10, w: 40, font: 'inter', overflow: 'ellipsis'
+  ok drawn <= 40
+  ok /\(a rat[^)]*\x85\) Tj/.test latin(doc.bytes!)
 
 test "puts flows down by size × leading and returns to the left edge", ->
   doc = PDF.new size: 10, leading: 1.5
@@ -247,6 +293,19 @@ test "puts flows down by size × leading and returns to the left edge", ->
   eq [doc.x, doc.y], [36, 115]
   doc.down 2
   eq doc.y, 145
+  doc.puts 'flush', align: 'right'          # align without w spans to the right edge
+  eq doc.y, 160
+  throws (-> doc.puts 'x', x: 1), PDFError, 'unknown puts option "x"'
+
+test "goto and move validate their numbers", ->
+  doc = PDF.new()
+  doc.goto 10, 20
+  eq [doc.x, doc.y], [10, 20]
+  doc.move 5, null
+  eq [doc.x, doc.y], [15, 20]
+  throws (-> doc.goto '10', 20), PDFError, 'x must be a finite number, got "10"'
+  throws (-> doc.move 0, NaN), PDFError, 'dy must be a finite number'
+  throws (-> doc.down 'x'), PDFError, 'down must be a finite number'
 
 test "lines wraps at spaces, splits overlong words, keeps blank lines", ->
   doc = PDF.new size: 10
@@ -263,6 +322,16 @@ test! "paragraph returns its height and honours align", ->
   eq doc.y, 72
   content = latin doc.bytes!
   eq (content.match(/ Tj ET/g) ?? []).length, 3
+  throws (-> doc.paragraph 'x', leading: 'x'), PDFError, 'leading must be a positive number, got "x"'
+  throws (-> doc.paragraph 'x', size: 800), PDFError, 'taller than the page box'
+
+test "paragraph breaks pages mid-flow", ->
+  doc = PDF.new size: 12, leading: 1.2
+  doc.y = doc.box.bottom - 30
+  h = doc.paragraph ('word' for i in [0...60]).join(' '), w: 100
+  eq doc.pageCount, 2
+  ok h > 30
+  ok doc.y > doc.box.top and doc.y < doc.box.bottom
 
 # ==[ Pages, breaks, hooks, scoped state ]==
 
@@ -276,6 +345,21 @@ test "auto page-break runs the header hook with the page number", ->
   eq doc.pageCount, 2
   eq seen, [1, 2]
   eq doc.y, doc.box.top + doc.state.size * doc.state.leading
+
+test! "the header hook draws, then the cursor returns to the top of the box", ->
+  doc = PDF.new compress: false, header: (d, n) ->
+    d.text "Page #{n}", x: d.box.left, y: 10, size: 9
+    d.rule y: 24
+  doc.puts 'body'
+  s = latin doc.bytes!
+  ok /BT 36 [\d.]+ Td \(Page 1\)/.test s
+  ok /BT 36 747\.384 Td \(body\)/.test s          # 792 - 36 - 0.718 × 12
+
+test "hooks that misbehave are caught, not looped", ->
+  throws (-> PDF.new header: (d) -> d.puts "line #{i}" for i in [0...100]), PDFError, 'header hook overflowed'
+  doc = PDF.new footer: (d) -> d.page()
+  doc.puts 'x'
+  throws (-> doc.finalize()), PDFError, 'page() cannot be called from a footer hook'
 
 test! "footer sees the total and positioned text never breaks", ->
   seen = []
@@ -291,6 +375,14 @@ test "breaks: false never adds pages", ->
   doc.y = doc.box.bottom - 5
   doc.puts 'spill'
   eq doc.pageCount, 1
+
+test "scope validates its keys and restores every setting", ->
+  doc = PDF.new()
+  throws (-> doc.scope { colour: 'red' }, ->), PDFError, 'unknown scope option "colour"'
+  throws (-> doc.scope {}, 'fn'), PDFError, 'scope expects a function, got "fn"'
+  doc.scope { lineWidth: 3, tracking: 1, leading: 2, fill: 'white', stroke: '#abc' }, (d) ->
+    eq [d.state.lineWidth, d.state.tracking, d.state.leading, d.state.fill, d.state.stroke], [3, 1, 2, '1', '0.667 0.733 0.8']
+  eq [doc.state.lineWidth, doc.state.tracking, doc.state.leading, doc.state.fill, doc.state.stroke], [1, 0, 1.2, '0', '0']
 
 test "scope restores state, cursor and margins even after a throw", ->
   doc = PDF.new()
@@ -331,6 +423,22 @@ test! "margins mid-document change later placement only", ->
   ok /BT 36 \d[\d.]* Td \(before\)/.test s
   ok /BT 100 \d[\d.]* Td \(after\)/.test s
 
+test "a rejected margins call leaves the box untouched", ->
+  doc = PDF.new()
+  throws (-> doc.margins 400), PDFError, 'no room'
+  eq doc.box.width, 540
+  eq doc.m.left, 36
+
+test "indent survives a page break", ->
+  doc = PDF.new()
+  doc.y = doc.box.bottom - 5
+  doc.indent 50, (d) ->
+    d.puts 'spill'
+    eq d.pageCount, 2
+    eq d.box.left, 86
+    eq d.x, 86
+  eq doc.box.left, 36
+
 # ==[ Colors and shapes ]==
 
 console.log "\nColors and shapes"
@@ -353,16 +461,39 @@ test! "shapes emit the right operators, lazily", ->
   doc.rect 10, 130, 100, 50, radius: 8
   doc.line 0, 0, 100, 100, dash: [3, 2]
   doc.rule y: 300
+  doc.rule y: 310, x1: 100, x2: 200, width: 0.5
   doc.circle 50, 50, 10, fill: 'black'
+  doc.circle 50, 50, 20, stroke: '#abc', width: 3
+  doc.rect 10, 200, 20, 20, dash: [1], stroke: 'black'
+  doc.rect 10, 300, 20, 20, fill: '#eee', stroke: false
+  throws (-> doc.rect 0, 0, 10, 10, radius: 6), PDFError, 'exceeds half'
+  throws (-> doc.rect 0, 0, -1, 10), PDFError, 'rect width must be a positive number, got -1'
+  throws (-> doc.rect NaN, 0, 1, 1), PDFError, 'rect x must be a finite number, got NaN'
+  throws (-> doc.line 0, 0, '1', 1), PDFError, 'line x2 must be a finite number'
+  throws (-> doc.circle 0, 0, 0), PDFError, 'circle radius must be a positive number, got 0'
+  throws (-> doc.rect 0, 0, 1, 1, width: -1), PDFError, 'width must be a non-negative number, got -1'
+  throws (-> doc.rect 0, 0, 1, 1, dash: [0]), PDFError, 'dash must be an array of positive numbers'
   s = latin doc.bytes!
-  eq (s.match(/0\.933 0\.933 0\.933 rg/g) ?? []).length, 1     # fill colour written once
+  eq (s.match(/0\.933 0\.933 0\.933 rg/g) ?? []).length, 2     # once per change, not per shape
+  eq /stream\n([^\n]*)/.exec(s)[1], '0.933 0.933 0.933 rg'       # the initial state is never re-stated
+  eq (s.match(/^1 w$/mg) ?? []).length, 2                        # only after the width changed away from 1
   ok s.includes('10 732 100 50 re f')
   ok s.includes('10 672 100 50 re B')
   ok /c h S/.test s
   ok s.includes('[3 2] 0 d')
   ok s.includes('36 492 m 576 492 l S')
-  throws (-> doc.rect 0, 0, 10, 10, radius: 6), PDFError, 'exceeds half'
-  throws (-> doc.rect 0, 0, -1, 10), PDFError, 'positive'
+  ok s.includes('0.5 w\n100 482 m 200 482 l S')
+  ok s.includes('0.667 0.733 0.8 RG\n3 w')
+  ok s.includes('[1] 0 d\n10 572 20 20 re S')
+  ok s.includes('10 472 20 20 re f')
+
+test! "line width and dash scale with the unit", ->
+  doc = PDF.new 'in', compress: false
+  doc.line 1, 1, 2, 2
+  doc.line 1, 2, 2, 3, width: 0.5, dash: [0.1]
+  s = latin doc.bytes!
+  eq s.includes('72 w'), false
+  ok s.includes('36 w\n[7.2] 0 d')
 
 # ==[ Barcodes ]==
 
@@ -382,10 +513,17 @@ test! "Code 128 published vectors and geometry", ->
   s = latin doc.bytes!
   ok (s.match(/ re f/g).length) > 60
 
-test "Code 39", ->
-  doc = PDF.new()
+test! "Code 39", ->
+  doc = PDF.new compress: false
   r = doc.barcode 'A', type: 'code39', x: 0, y: 0
   eq r.w, 3 * (3 * 2.5 + 6) + 2      # three symbols, two inter-character gaps
+  doc.barcode '0', type: 'code39', x: 0, y: 0, h: 20
+  c = doc.barcode '12', x: 100, y: 100, w: 50, align: 'center'
+  eq c.x, 75
+  s = latin doc.bytes!
+  ok s.includes('14.5 772 1 20 re f 16.5 772 1 20 re f 20 772 2.5 20 re f 23.5 772 2.5 20 re f 27 772 1 20 re f')   # nnnwwnwnn
+  throws (-> doc.barcode '12', x: 'a'), PDFError, 'x must be a finite number'
+  throws (-> doc.barcode '12', h: 0), PDFError, 'barcode h must be a positive number, got 0'
   throws (-> doc.barcode 'a@', type: 'code39'), PDFError, 'Code 39 cannot encode'
   throws (-> doc.barcode 'x', type: 'qr'), PDFError, 'unknown barcode type'
 
@@ -417,6 +555,16 @@ tinyPNG = ->
   iend = chunk 'IEND', []
   Uint8Array.from [...sig, ...ihdr, ...idat, ...iend]
 
+# a 2×1 palette PNG with a transparent first entry
+palettePNG = ->
+  sig  = Uint8Array.from [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+  ihdr = chunk 'IHDR', [0, 0, 0, 2, 0, 0, 0, 1, 8, 3, 0, 0, 0]
+  plte = chunk 'PLTE', [255, 0, 0, 0, 0, 255]
+  trns = chunk 'tRNS', [0, 255]
+  raw  = [0, 0, 1]
+  idat = chunk 'IDAT', [0x78, 0x01, 0x01, 3, 0, 0xFC, 0xFF, ...raw, 0, 0, 0, 0]
+  Uint8Array.from [...sig, ...ihdr, ...plte, ...trns, ...idat, ...chunk('IEND', [])]
+
 tinyJPEG = ->
   Uint8Array.from [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0,
     0xFF, 0xC0, 0, 17, 8, 0, 3, 0, 5, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xFF, 0xD9]
@@ -435,6 +583,15 @@ test! "PNG and JPEG headers parse and embed once", ->
   ok s.includes('/Width 5 /Height 3 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /DCTDecode')
   ok s.includes('q 20 0 0 10 10 772 cm /I1 Do Q')
   ok s.includes('/XObject << /I1 ')
+
+test! "palette PNGs carry their palette and transparent index", ->
+  doc = PDF.new compress: false
+  eq doc.image(palettePNG(), x: 0, y: 0, w: 10, h: 40), { w: 10, h: 40 }
+  s = latin doc.bytes!
+  ok /\/ColorSpace \[\/Indexed \/DeviceRGB 1 \d+ 0 R\] \/Mask \[0 0\]/.test s
+  ok s.includes('/Colors 1 /BitsPerComponent 8 /Columns 2')
+  ok s.includes('q 10 0 0 40 0 752 cm /I1 Do Q')
+  throws (-> doc.image palettePNG(), w: 'a'), PDFError, 'image w must be a positive number, got "a"'
 
 test "images that cannot be passed through are rejected by name", ->
   doc = PDF.new()
@@ -475,6 +632,8 @@ test "register rejects what it cannot embed", ->
   throws (-> doc.register 'helvetica', font('Inter-Regular.ttf')), PDFError, 'core font name'
   doc.register 'inter', font('Inter-Regular.ttf')
   throws (-> doc.register 'inter', font('Inter-Regular.ttf')), PDFError, 'already registered'
+  throws (-> doc.register 'cut', font('Inter-Regular.ttf').subarray(0, 1000)), PDFError, 'truncated'
+  throws (-> doc.register 'half', font('Inter-Regular.ttf').subarray(0, 8000)), PDFError, 'truncated'
 
 test! "an embedded font is written with descriptor, widths and file; unused ones are not", ->
   doc = PDF.new()
@@ -491,6 +650,17 @@ test! "an embedded font is written with descriptor, widths and file; unused ones
   eq s.includes('Helvetica'), false
   checkXref bytes
 
+test! "the same bytes under two keys embed one font program", ->
+  doc = PDF.new()
+  inter = font 'Inter-Regular.ttf'
+  doc.register 'a', inter
+  doc.register 'b', inter
+  doc.text 'a', x: 0, y: 0, font: 'a'
+  doc.text 'b', x: 0, y: 20, font: 'b'
+  s = latin doc.bytes!
+  eq (s.match(/\/Subtype \/TrueType/g).length), 2
+  eq (s.match(/\/Length1 /g).length), 1
+
 # ==[ Table ]==
 
 console.log "\nTable"
@@ -501,12 +671,45 @@ test! "table layout, header redraw across a break, and loud column errors", ->
   h = doc.table rows, x: 36, y: 36, w: 300, cols: [{ w: 50 }, {}, { w: 40, align: 'right' }], header: ['A', 'B', 'C'], head: { fill: '#222', color: 'white' }, stripe: '#f4f4f4', rule: '#ddd', frame: '#999', rowH: 20
   eq doc.pageCount, 2
   ok h > 0
-  s = latin doc.bytes!
-  eq (s.match(/\(A\) Tj/g).length), 2
   throws (-> doc.table [['a']], cols: [{}, {}]), PDFError, 'exactly one flexible column'
   throws (-> doc.table [['a', 'b']], w: 100, cols: [{ w: 60 }, { w: 60 }]), PDFError, 'exceed the table width'
-  throws (-> doc.table [['a very long cell that will not fit']], w: 60, cols: [{ w: 60 }]), PDFError, "overflow: 'ellipsis'"
+  throws (-> doc.table [['a'], ['a very long cell that will not fit']], w: 60, cols: [{ w: 60 }]), PDFError, "table row 1 column 0: \"a very long cell that will not fit\" is"
   throws (-> doc.table 'rows'), PDFError, 'array of rows'
+  throws (-> doc.table ['abc']), PDFError, 'row 0 is not an array, got "abc"'
+  throws (-> doc.table [['a']], head: { colour: 'x' }), PDFError, 'unknown head option "colour"'
+  throws (-> doc.table [['a']], cols: [{ aling: 'right' }]), PDFError, 'unknown column 0 option "aling"'
+  throws (-> doc.table [['a']], row: -> { colour: 'x' }), PDFError, 'unknown row 0 override option "colour"'
+  throws (-> doc.table [['a']], rowH: 800), PDFError, 'taller than the page box'
+  throws (-> doc.table [['a']], rowH: '10'), PDFError, 'rowH must be a positive number, got "10"'
+  s = latin doc.bytes!
+  eq (s.match(/\(A\) Tj/g).length), 2
+
+test! "the frame follows the table across pages and the height sums the segments", ->
+  doc = PDF.new compress: false
+  rows = ([String(i)] for i in [0...60])
+  h = doc.table rows, x: 36, y: 36, w: 200, header: ['N'], frame: '#f00', rowH: 20
+  eq doc.pageCount, 2
+  eq h, 1240
+  s = latin doc.bytes!
+  ok s.includes('36 36 200 720 re S')
+  ok s.includes('36 236 200 520 re S')
+
+test! "a header that would be orphaned moves to the next page with its rows", ->
+  doc = PDF.new compress: false
+  doc.goto null, 745
+  doc.table [['only']], header: ['H'], rowH: 20
+  eq doc.pageCount, 2
+  s = latin doc.bytes!
+  eq (s.match(/\(H\) Tj/g).length), 1
+
+test! "per-row overrides and header styles", ->
+  doc = PDF.new compress: false
+  doc.table [['a'], ['b']], header: ['H'], head: { h: 30, fill: '#222', color: 'white', upper: true, font: 'helveticaB' }, rowH: 20,
+    row: (cells, i) -> { color: '#a3a3a3', font: 'courier' } if cells[0] is 'b'
+  s = latin doc.bytes!
+  ok s.includes('36 726 540 30 re f')
+  ok s.includes('0.639 0.639 0.639 rg')
+  ok s.includes('/Courier')
 
 # ==[ Oracle: poppler, when present ]==
 
@@ -518,9 +721,7 @@ if have 'pdfinfo'
     doc.puts 'one'
     doc.page()
     doc.puts 'two'
-    path = join tmpdir(), "rip-pdf-#{process.pid}-a.pdf"
-    Bun.write! path, doc.bytes!
-    out = tool! 'pdfinfo', [path]
+    out = tool! 'pdfinfo', ['%'], doc
     ok out.includes('Pages:           2')
     ok out.includes('Page size:       1008 x 612 pts')
     ok out.includes('Title:           Oracle')
@@ -533,9 +734,7 @@ if have 'pdftotext'
     doc.puts 'Hello, PDF — ·middot· (parens) \\ back'
     doc.page()
     doc.puts 'Page two'
-    path = join tmpdir(), "rip-pdf-#{process.pid}-b.pdf"
-    Bun.write! path, doc.bytes!
-    out = tool! 'pdftotext', ['-layout', path, '-']
+    out = tool! 'pdftotext', ['-layout', '%', '-'], doc
     ok out.includes('Hello, PDF — ·middot· (parens) \\ back')
     ok out.indexOf('Page two') > out.indexOf('\f')
 else
@@ -545,17 +744,36 @@ else
 
 console.log "\nDemo"
 
-test! "the requisition demo builds one searchable page", ->
+demoFonts = ->
   fonts = {}
-  fonts[k] = font(f) for k, f of FONT_FILES
-  doc = requisition SAMPLE, fonts
+  fonts[k] = font(f) for own k, f of FONT_FILES
+  fonts
+
+test! "the requisition demo builds one searchable page", ->
+  doc = requisition SAMPLE, demoFonts()
   bytes = doc.bytes!
   eq doc.pageCount, 1
   ok bytes.length < 60000
   checkXref bytes
   if have 'pdftotext'
-    path = join tmpdir(), "rip-pdf-#{process.pid}-demo.pdf"
-    Bun.write! path, bytes
-    out = tool! 'pdftotext', ['-layout', path, '-']
+    out = tool! 'pdftotext', ['-layout', '%', '-'], doc
     for needle in [SAMPLE.requisition.number, 'TESTS ORDERED', 'PHYSICIAN / AUTHORIZED SIGNATURE', 'PATIENT SIGNATURE', ...(t.name for t in SAMPLE.tests)]
       ok out.includes(needle), "missing #{needle}"
+
+test! "the demo stays on one page with an overflowing order and sparse data", ->
+  fonts = demoFonts()
+  full = structuredClone SAMPLE
+  full.tests = ({ code: "00#{i}", name: "Test #{i}" } for i in [0...14])
+  doc = requisition full, fonts
+  eq doc.pageCount, 1
+  sparse = structuredClone SAMPLE
+  delete sparse.clinical
+  delete sparse.patient.phone
+  delete sparse.patient.email
+  delete sparse.patient.mrn
+  sparse.clinic.name = 'A clinic with a very long name that runs well past the card'
+  sparse.requisition.number = 'L2606122706ABCDEFGHIJ'
+  eq requisition(sparse, fonts).pageCount, 1
+  if have 'pdftotext'
+    out = tool! 'pdftotext', ['-layout', '%', '-'], doc
+    ok out.includes('2 additional tests not shown')
