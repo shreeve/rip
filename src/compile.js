@@ -298,11 +298,26 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // plain prop and a two-way-bound prop read alike (the TextMate
     // attribute scope). TS face only.
     attrNames: emitted.attrNames,
-    // Generated key/value spans of the `__ripRoute` ATTRIBUTE wraps —
-    // the diagnostics road re-anchors a whole-value route mismatch on
-    // the pair's key, the anchor every other attribute reports on.
-    // TS face only; empty otherwise.
+    // Generated key/value spans of the route-checked surfaces — the
+    // diagnostics road re-anchors a whole-value mismatch on an
+    // ATTRIBUTE wrap's key, the anchor every other attribute reports
+    // on; a ROUTER argument records with a null key and keeps tsgo's
+    // anchor, the literal. TS face only; empty otherwise.
     routeWraps: emitted.routeWraps,
+    // Per member initializer, the name's source span and the lowered
+    // write's left-hand side — a complaint standing on exactly that
+    // side lands on the name. TS face only; empty otherwise.
+    memberInits: emitted.memberInits,
+    // Generated spans of the `__ripSourceKey`-wrapped literals and of
+    // the ambient `@stash.<name>` member names — the diagnostics road
+    // words a miss covering one from the record, never from the
+    // checker's sentence. TS face only; empty otherwise.
+    sourceKeys: emitted.sourceKeys,
+    stashMembers: emitted.stashMembers,
+    // A STASH MODULE's own top-level keys (`{ keys, complete }`), read
+    // off its binding's object literal; null for every other module.
+    // The diagnostics road of a DEPENDENT names these in a miss.
+    stashKeys: emitted.stashKeys,
     renderPairs: emitted.renderPairs,
     kinds: emitted.kinds,
     // SOURCE spans of intrinsic-element positions the editor answers

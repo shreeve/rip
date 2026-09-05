@@ -14,7 +14,7 @@ export type SourceHandle<T = unknown> =
 # surface every bare `StashMethods`/`createStash()` consumer sees)
 # answers the bare handle, whose `value` is `unknown`: the consumer
 # must narrow before using it, never receive a silent `any`.
-export type SourceHandleFor<V> = unknown extends V ? SourceHandle : V extends SourceFamily<infer T, any> ? SourceHandle<T> : SourceHandle<NonNullable<V>>
+export type SourceHandleFor<V> = unknown extends V ? SourceHandle : NonNullable<V> extends SourceFamily<infer T, any> ? SourceHandle<T> : SourceHandle<NonNullable<V>>
 
 # `D` is the data shape `source()` paths resolve against (the ambience
 # splices the StashData projection here). A path naming a top-level entry

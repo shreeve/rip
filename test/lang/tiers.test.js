@@ -118,6 +118,16 @@ describe('Tier 3: pinnables and pins', () => {
     expect(js(SRC, { pins })).toStartWith('let items;');
   });
 
+  test('under rip.strict a pinned first write is severed from the pin as a contextual type', () => {
+    const src = 'use = -> later(1, 2)\nlater = (a, b) -> a + b';
+    const { pinnables } = compile(src, { path: 't.rip', face: 'ts' });
+    const pins = new Map([[pinnables[0].key, '(a?: any, b?: any) => any']]);
+    expect(ts(src, { pins, strict: true })).toContain('later = (function(a?, b?) {\n  return (a + b);\n}) satisfies unknown;');
+    expect(ts(src, { pins })).toContain('later = function(a?, b?) {\n  return (a + b);\n};');
+    expect(ts(src, { strict: true })).toContain('later = function(a?, b?) {\n  return (a + b);\n};');
+    expect(js(src, { pins, strict: true })).toBe(js(src));
+  });
+
   test('branch-first names with no nested references are NOT pinnable (evolving reads win)', () => {
     const { pinnables } = compile('if y\n  x = 1\nconsole.log x', { path: 't.rip', face: 'ts' });
     expect(pinnables).toHaveLength(0);

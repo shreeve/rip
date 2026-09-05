@@ -12,7 +12,7 @@ import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isIm
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover,
+  SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover, nearestSpelling,
 } from '../../src/translate.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -379,6 +379,15 @@ describe('TS-face artifact filters', () => {
     // A schema behavior member reads back under the schema's own name.
     expect(scrubFaceArtifacts('(property) slip: (...args: any[]) => ReturnType<typeof __Parcel__behavior.slip>'))
       .toBe('(property) slip: (...args: any[]) => ReturnType<typeof Parcel.slip>');
+  });
+
+  test('nearestSpelling: one candidate within two edits, never itself, never a tie or a short name', () => {
+    expect(nearestSpelling('userz', ['cart', 'user'])).toBe('user');
+    expect(nearestSpelling('/cartz', ['/', '/cart', '/orders'])).toBe('/cart');
+    expect(nearestSpelling('user', ['cart', 'user'])).toBe(null);
+    expect(nearestSpelling('zzz', ['cart', 'user'])).toBe(null);
+    expect(nearestSpelling('ab', ['abc', 'abd'])).toBe(null);
+    expect(nearestSpelling('cat', ['car', 'cab'])).toBe(null);
   });
 
   test('ripImportText: inserted import lines drop the semicolon and the mirror extension, and single-quote the specifier', () => {

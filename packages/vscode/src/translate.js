@@ -392,6 +392,41 @@ export function prettifyRouteUnion(text, entries) {
   return out;
 }
 
+// Levenshtein, capped: anything past the suggestion threshold answers
+// 3 without measuring. The compiler's attribute suggester (src/dom.js)
+// carries the same measure; duplicated here so this module stays
+// importable in the staged extension.
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// The single candidate within two edits of `name`, or null. Never the
+// name itself (the answer is what to write instead); a tie, a more
+// distant best, or a name under three characters declines — a wrong
+// suggestion costs more than none.
+export function nearestSpelling(name, candidates) {
+  if (typeof name !== 'string' || name.length < 3) return null;
+  let best = null;
+  let bestD = 3;
+  let tied = false;
+  for (const c of candidates) {
+    if (c === name) continue;
+    const d = editDistance(name, c);
+    if (d < bestD) { best = c; bestD = d; tied = false; }
+    else if (d === bestD) tied = true;
+  }
+  return best !== null && !tied ? best : null;
+}
+
 // Line-start offsets of `text`: lineStarts[n] is the offset of line n
 // (0-based). Same construction as SourceFile.lineStarts; duplicated here
 // so this module stays importable in the staged extension, where the

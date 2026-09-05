@@ -809,6 +809,9 @@ while (queue.length) {
       echoSpans: result.echoSpans ?? [],
       pinSpans: result.pinSpans ?? [],
       routeWraps: result.routeWraps ?? [],
+      sourceKeys: result.sourceKeys ?? [],
+      stashMembers: result.stashMembers ?? [],
+      memberInits: result.memberInits ?? [],
       // The render-pair re-anchor (mapTsDiagnostic): a complaint standing
       // on a pair's recorded relation site lands on the KEY here exactly
       // as it does in the editor.
@@ -842,6 +845,10 @@ while (queue.length) {
 const typedExports = new Map();
 for (const [fsPath, entry] of compiled) {
   typedExports.set(fsPath, moduleTypedExports(entry.source, entry.result));
+  // The stash module is in every dependent's closure, so its keys are
+  // compiled by the time the loop ends — never before.
+  const spec = appStashSpecFor(fsPath, workspaceRoot, stashMemo);
+  entry.good.stashKeys = spec === null ? null : (compiled.get(path.resolve(path.dirname(fsPath), spec))?.result.stashKeys ?? null);
 }
 for (const [fsPath, entry] of compiled) {
   const tokens = entry.result.tokens;
@@ -1016,6 +1023,9 @@ if (compiled.size > 0) {
         entry.good.echoSpans = r.echoSpans ?? [];
         entry.good.pinSpans = r.pinSpans ?? [];
         entry.good.routeWraps = r.routeWraps ?? [];
+        entry.good.sourceKeys = r.sourceKeys ?? [];
+        entry.good.stashMembers = r.stashMembers ?? [];
+        entry.good.memberInits = r.memberInits ?? [];
         entry.good.renderPairs = r.renderPairs ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
