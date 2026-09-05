@@ -457,6 +457,10 @@ fail 'a setter cannot return a value', 'class A\n  set v: (n) ->\n    return 1',
 fail 'a void def nested in a setter keeps its own reason', 'class A\n  set v: (n) ->\n    def g!()\n      return 1', "the trailing '!'"
 fail 'a constructor cannot be a getter', 'class A\n  get constructor: -> 1', 'cannot be a get accessor'
 fail 'a constructor cannot be a setter', 'class A\n  set constructor: (v) -> 1', 'cannot be a set accessor'
+fail 'a field and an accessor cannot share a name', 'class A\n  x = 1\n  get x: -> 2', 'share a name'
+fail 'a typed field and a setter cannot share a name', 'class A\n  x: number\n  set x: (v) -> 1', 'share a name'
+fail 'a static field and a static accessor cannot share a name', 'class A\n  @x = 1\n  get @x: -> 2', 'share a name'
+code 'a static field and an instance accessor may share a name', 'class A\n  @x = 1\n  get x: -> 2', 'class A {\n  static x = 1;\n  get x() {\n    return 2;\n  }\n}'
 code 'a static member named constructor is an ordinary static method', 'class A\n  def @constructor()\n    1', 'class A {\n  static constructor() {\n    return 1;\n  }\n}'
 code 'a parameterless static def with a return type', 'class A\n  def @g: number\n    1', 'class A {\n  static g() {\n    return 1;\n  }\n}'
 code 'a parameterless static void def with a return type', 'class A\n  def @h!: void\n    log 1', 'class A {\n  static h() {\n    log(1);\n    return;\n  }\n}'

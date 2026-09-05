@@ -170,6 +170,9 @@ const ROWS = [
   ['class A\n  @x: number = 2', 'declare class A {\n  static x: number;\n}\nexport {};\n'],
   ['class A\n  @x: number', 'declare class A {\n  static x: number;\n}\nexport {};\n'],
   ['class A\n  m: (x: number): string -> "s"', 'declare class A {\n  m(x: number): string;\n}\nexport {};\n'],
+  // class defs and accessors declare like the pair forms they read as
+  ['class A\n  def m(x: number): string\n    "s"\n  def @g<T>(x: T): T[]\n    [x]\n  def h!()\n    log 1', 'declare class A {\n  m(x: number): string;\n  static g<T>(x: T): T[];\n  h(): void;\n}\nexport {};\n'],
+  ['class A\n  get x: (): number -> 1\n  set x: (v: number) -> 1\n  get @n: (): string -> "n"\n  get y: -> 1', 'declare class A {\n  get x(): number;\n  set x(v: number);\n  static get n(): string;\n}\nexport {};\n'],
   ['class A\n  save!: (x: number) ->\n    x', 'declare class A {\n  save(x: number): void;\n}\nexport {};\n'],
   // A constructor-body `@field = value` declares in the .d.ts exactly
   // as the TS face declares it (the emitter's own ctorAtFields walker,

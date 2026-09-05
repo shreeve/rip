@@ -14832,16 +14832,25 @@ class Emitter {
     let ctorBody = null;
     // Instance method bodies, for the `@field = …` pass below.
     const methodBodies = [];
+    // Every field key and every accessor, statics keyed apart: a field
+    // and an accessor of one name is a JS class where the field wins
+    // silently (the instance's own property shadows the prototype's
+    // accessor), so the pair rejects.
+    const memberKey = (key) => (isStaticKey(key) ? `static ${key[2]}` : key);
+    const fieldKeys = new Set();
+    const accessors = [];
     for (const stmt of stmts) {
       const form = forms.get(stmt) ?? null;
       const pairs = form !== null ? [form.pair] : isObject(stmt) ? stmt.slice(1) : null;
       if (pairs === null) {
-        const field = isStaticKey(stmt) ? null
-          : typeof stmt === 'string' ? stmt
-          : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === 'string' ? stmt[1]
-          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string' ? stmt[1]
+        const fieldKey = typeof stmt === 'string' || isStaticKey(stmt) ? stmt
+          : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
+          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
           : null;
-        if (field !== null) declared.add(field);
+        if (fieldKey !== null) {
+          fieldKeys.add(memberKey(fieldKey));
+          if (!isStaticKey(fieldKey)) declared.add(fieldKey);
+        }
         continue;
       }
       for (const pair of pairs) {
@@ -14867,8 +14876,11 @@ class Emitter {
           throw this.positionedError(pair, 'emitter: computed class members are not supported yet', stmt);
         }
         const mName = memberName(pair[1]);
-        if (form !== null && form.form !== 'def' && mName === 'constructor') {
-          throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+        if (form !== null && form.form !== 'def') {
+          if (mName === 'constructor') {
+            throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+          }
+          accessors.push({ pair, stmt, key: memberKey(pair[1]), form: form.form });
         }
         // A STATIC member named `constructor` is an ordinary static
         // method; only the instance one is the class constructor.
@@ -14894,6 +14906,11 @@ class Emitter {
     }
     if (bound.length > 0 && !hasConstructor) {
       throw this.positionedError(firstBound, "emitter: bound ('=>') class methods require an explicit constructor", body);
+    }
+    for (const a of accessors) {
+      if (fieldKeys.has(a.key)) {
+        throw this.positionedError(a.pair, `emitter: field and ${a.form} accessor '${memberName(a.pair[1])}' share a name — the field would shadow the accessor on every instance; drop one`, a.stmt);
+      }
     }
 
     // A promoted parameter (`constructor: (@owner: string) ->`) assigns

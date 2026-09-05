@@ -19599,13 +19599,19 @@ ${this.replayPad}}` : " }");
     let ctorParams = null;
     let ctorBody = null;
     const methodBodies = [];
+    const memberKey = (key) => isStaticKey(key) ? `static ${key[2]}` : key;
+    const fieldKeys = new Set;
+    const accessors = [];
     for (const stmt of stmts) {
       const form = forms.get(stmt) ?? null;
       const pairs = form !== null ? [form.pair] : isObject(stmt) ? stmt.slice(1) : null;
       if (pairs === null) {
-        const field = isStaticKey(stmt) ? null : typeof stmt === "string" ? stmt : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === "string" ? stmt[1] : isNode(stmt) && stmt[0] === "=" && stmt.length === 3 && typeof stmt[1] === "string" ? stmt[1] : null;
-        if (field !== null)
-          declared.add(field);
+        const fieldKey = typeof stmt === "string" || isStaticKey(stmt) ? stmt : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === "string" || isStaticKey(stmt[1])) ? stmt[1] : isNode(stmt) && stmt[0] === "=" && stmt.length === 3 && (typeof stmt[1] === "string" || isStaticKey(stmt[1])) ? stmt[1] : null;
+        if (fieldKey !== null) {
+          fieldKeys.add(memberKey(fieldKey));
+          if (!isStaticKey(fieldKey))
+            declared.add(fieldKey);
+        }
         continue;
       }
       for (const pair of pairs) {
@@ -19631,8 +19637,11 @@ ${this.replayPad}}` : " }");
           throw this.positionedError(pair, "emitter: computed class members are not supported yet", stmt);
         }
         const mName = memberName(pair[1]);
-        if (form !== null && form.form !== "def" && mName === "constructor") {
-          throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+        if (form !== null && form.form !== "def") {
+          if (mName === "constructor") {
+            throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+          }
+          accessors.push({ pair, stmt, key: memberKey(pair[1]), form: form.form });
         }
         if (mName === "constructor" && !isStaticKey(pair[1])) {
           hasConstructor = true;
@@ -19657,6 +19666,11 @@ ${this.replayPad}}` : " }");
     }
     if (bound.length > 0 && !hasConstructor) {
       throw this.positionedError(firstBound, "emitter: bound ('=>') class methods require an explicit constructor", body);
+    }
+    for (const a of accessors) {
+      if (fieldKeys.has(a.key)) {
+        throw this.positionedError(a.pair, `emitter: field and ${a.form} accessor '${memberName(a.pair[1])}' share a name — the field would shadow the accessor on every instance; drop one`, a.stmt);
+      }
     }
     if (this.ts && ctorParams !== null) {
       for (const p of ctorParams) {

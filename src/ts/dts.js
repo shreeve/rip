@@ -62,6 +62,24 @@ const isNode = (x) => Array.isArray(x);
 const isDefHead = (h) => h === 'def' || h === 'void-def';
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
 const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 3;
+// A class body statement's method pairs, every spelling read as the
+// pair form the emitter reads it as: a pair object's pairs, a `def`
+// (one pair, void when the def is), and a `get`/`set` accessor (a
+// call of that word on a one-pair object). Each comes with its form
+// and the node its type roles (return type, type parameters) hang on:
+// a def's own statement, otherwise the pair's function.
+const classMethodPairs = (stmt) => {
+  if (!isNode(stmt)) return [];
+  if (stmt[0] === 'object') return stmt.slice(1).map((pair) => ({ pair, form: null, typed: pair[2] }));
+  if (isDefHead(stmt[0]) && stmt.length === 4) {
+    return [{ pair: [stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], ['->', stmt[2], stmt[3]]], form: 'def', typed: stmt }];
+  }
+  if ((stmt[0] === 'get' || stmt[0] === 'set') && stmt.length === 2 && isNode(stmt[1]) && stmt[1][0] === 'object' && stmt[1].length === 2) {
+    const pair = stmt[1][1];
+    if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[0], typed: pair[2] }];
+  }
+  return [];
+};
 const isStaticKey = (k) => isNode(k) && k[0] === '.' && k[1] === 'this' && k.length === 3 && typeof k[2] === 'string';
 const memberName = (k) => (isStaticKey(k) ? k[2] : k);
 
@@ -215,8 +233,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
       if (isTypedWrapper(stmt) && typeof stmt[1] === 'string') bodyFields.add(stmt[1]);
       else if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string') {
         bodyFields.add(stmt[1]);
-      } else if (isNode(stmt) && stmt[0] === 'object') {
-        for (const pair of stmt.slice(1)) {
+      } else {
+        for (const { pair } of classMethodPairs(stmt)) {
           if (!isNode(pair) || pair.length < 2 || isStaticKey(pair[1])) continue;
           const k = memberName(pair[1]);
           if (typeof k === 'string') bodyFields.add(k);
@@ -230,8 +248,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     // Statics are excluded — their `this` is the class.
     const instanceMethodBodies = [];
     for (const stmt of stmts) {
-      if (!isNode(stmt) || stmt[0] !== 'object') continue;
-      for (const pair of stmt.slice(1)) {
+      for (const { pair } of classMethodPairs(stmt)) {
         if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
         if (isStaticKey(pair[1]) || !isFunc(pair[2])) continue;
         if (memberName(pair[1]) === 'constructor') continue;
@@ -239,8 +256,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
       }
     }
     for (const stmt of stmts) {
-      if (isNode(stmt) && stmt[0] === 'object') {
-        for (const pair of stmt.slice(1)) {
+      const methodPairs = classMethodPairs(stmt);
+      if (methodPairs.length > 0) {
+        for (const { pair, form, typed } of methodPairs) {
           if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
           const key = pair[1];
           const value = pair[2];
@@ -248,7 +266,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
           const mName = memberName(key);
           if (typeof mName !== 'string') continue;
           let params = value[1];
-          const returnType = returnTypeOf(value, value[2], pair[0] === 'void-pair');
+          const returnType = returnTypeOf(typed, value[2], pair[0] === 'void-pair');
           if (mName === 'constructor') {
             // The fields the constructor implies, exactly as the TS
             // face declares them (the emitter's own walkers, not a
@@ -297,7 +315,11 @@ export function emitDeclarations({ sexpr, stores, source }) {
           }
           if (returnType === null && !params.some(paramTyped)) continue;
           const staticPrefix = isStaticKey(key) ? 'static ' : '';
-          members.push(`${staticPrefix}${mName}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
+          // An accessor declares as one: `get x(): T;` / `set x(v: T);`
+          // (a setter has no return type to declare).
+          if (form === 'get') members.push(`${staticPrefix}get ${mName}(): ${returnType ?? 'any'};`);
+          else if (form === 'set') members.push(`${staticPrefix}set ${mName}${rendered(() => renderParams(params, isOptionalParam))};`);
+          else members.push(`${staticPrefix}${mName}${form === 'def' ? typeParamsOf(typed) : ''}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
         }
         continue;
       }
