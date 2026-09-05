@@ -1,6 +1,6 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { homedir, platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
@@ -420,9 +420,13 @@ validHost = (host) ->
 
 validName = (name) -> typeof name is 'string' and /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(name) and name.length <= 80
 
+# Roots arrive absolute: the client resolved against ITS cwd, and this
+# process has no idea where the caller stands. A path the project check
+# rejects is the client's error — `abort` would take the agent down.
 addApp = (body) ->
   rejectUnknown body, ['root', 'name', 'hosts', 'options'], 'app add body'
-  project = resolveProject body.root, 'rip-sites'
+  fail 'root must be an absolute path' unless typeof body.root is 'string' and isAbsolute(body.root)
+  project = resolveProject body.root, null, (message) -> fail message, 404
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name

@@ -6,10 +6,14 @@ import { tmpdir } from 'node:os'
 # `rip site` surface and the per-user appliance. One canonical root must
 # always select one manager socket, regardless of which client asks.
 
-export resolveProject = (input, label = 'rip-site') ->
+# `report` receives the failure: the CLI surfaces let it abort, a server
+# handing a client's path back as a client error passes a thrower. No
+# label, no prefix — the caller that owns the message owns its framing.
+export resolveProject = (input, label = 'rip-site', report = abort) ->
+  prefix = if label then "#{label}: " else ''
   if input?
     given = resolve input
-    abort "#{label}: project not found: #{input}" unless existsSync given
+    report "#{prefix}project not found: #{input}" unless existsSync given
     path = realpathSync given
     unless statSync(path).isDirectory()
       root = dirname path
@@ -34,8 +38,8 @@ export resolveProject = (input, label = 'rip-site') ->
     serve = join root, 'serve.rip'
     return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot) or existsSync(serve)
   if input?
-    abort "#{label}: #{input} has no API entry, app/ directory, or serve.rip"
-  abort "#{label}: no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
+    report "#{prefix}#{input} has no API entry, app/ directory, or serve.rip"
+  report "#{prefix}no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
 
 export managerRuntime = (root, label = 'rip-site') ->
   abort "#{label}: manager control requires a POSIX user identity" unless typeof process.getuid is 'function'

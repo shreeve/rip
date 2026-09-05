@@ -7,18 +7,19 @@ PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
 FAKE_CADDY = join(import.meta.dir, 'fake-caddy.rip')
 
-run = (file, args, env) ->
+run = (file, args, env, cwd = null) ->
   proc = Bun.spawn [process.execPath, PRELOAD, file, ...args],
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
     env: { ...process.env, ...env }
+    cwd: cwd or process.cwd()
   out = Response.new(proc.stdout).text()
   err = Response.new(proc.stderr).text()
   { proc, out, err }
 
-cli = (file, args, env) ->
-  result = run file, args, env
+cli = (file, args, env, cwd = null) ->
+  result = run file, args, env, cwd
   code = await result.proc.exited
   { code, out: await result.out, err: await result.err }
 
@@ -426,4 +427,77 @@ test! 'one control agent owns the socket; a superseded agent exits before acting
     try usurper?.stop true
     try process.kill(first, 'SIGKILL') if first? and alive(first)
     try process.kill parseInt(readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')), 'SIGKILL'
+    rmSync site.root, { recursive: true, force: true }
+
+# A client's mistake is the client's error, never the agent's death: an
+# add the agent cannot resolve answers 4xx and the agent keeps serving.
+# Roots reach the agent absolute — the CLI resolves against ITS cwd, the
+# agent has no idea where the caller stands.
+test! 'an unresolvable add is refused by a live agent that stays up; relative roots resolve at the client', ->
+  site = fixture 'rip-agent-bad-add-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  mkdirSync join(site.root, 'project', 'app'), { recursive: true }
+  writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
+  try
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    agent = ownerPid site.runtime
+    ok alive(agent)
+
+    missing = cli! APP, ['add', join(site.root, 'nowhere'), '--json'], env
+    eq missing.code, 1
+    ok missing.err.includes('project not found'), missing.err
+    ok alive(agent), 'the agent must survive a client error'
+    eq ownerPid(site.runtime), agent
+    empty = cli! APP, ['add', site.root, '--json'], env
+    eq empty.code, 1
+    ok empty.err.includes('has no API entry'), empty.err
+    ok alive(agent), 'the agent must survive a project with nothing to serve'
+
+    added = cli! APP, ['add', 'project', '--name', 'rel', '--json'], env, site.root
+    eq added.code, 0, added.err
+    eq JSON.parse(added.out).root, realpathSync(join(site.root, 'project'))
+    ok alive(agent)
+  finally
+    try cli! APP, ['stop', 'edge'], env
+    stopAgent! site.runtime
+    rmSync site.root, { recursive: true, force: true }
+
+# A follower is a reader: it rides out a control-plane outage and never
+# boots one — the boot it would spawn is the duplicate the socket guard
+# exists to refuse, and its 5 s wait is what killed followers under a
+# blocked agent.
+test! 'logs -f keeps polling through a control-plane outage without booting an agent', ->
+  site = fixture 'rip-agent-follow-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  mkdirSync join(site.root, 'project', 'app'), { recursive: true }
+  writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
+  follower = null
+  try
+    eq (cli!(APP, ['add', join(site.root, 'project'), '--name', 'fixture', '--json'], env)).code, 0
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    follower = run APP, ['logs', 'fixture', '-f'], env
+    sleep! 1500
+    ok not follower.proc.exitCode?, 'follower must be running after its first read'
+
+    stopAgent! site.runtime
+    sleep! 3000
+    ok not follower.proc.exitCode?, 'follower must ride out the outage'
+    ok not existsSync(join(site.runtime, 'agent.json')), 'follower must not boot a control plane'
+
+    revived = cli! APP, ['status', 'edge', '--json'], env
+    eq revived.code, 0
+    sleep! 1000
+    ok not follower.proc.exitCode?, 'follower must continue after the plane returns'
+  finally
+    try follower?.proc.kill 'SIGKILL'
+    try cli! APP, ['stop', 'edge'], env
+    stopAgent! site.runtime
     rmSync site.root, { recursive: true, force: true }

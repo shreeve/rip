@@ -108,14 +108,23 @@ export ensureAgent = (label) ->
   suffix = if diagnostic then "\n#{diagnostic}" else " — see #{paths.agentLog}"
   abort "#{label}: Sites control plane did not start#{suffix}"
 
-# start:true (default) boots the control plane; start:false requires it already up.
+# start:true (default) boots the control plane; start:false requires it
+# already up. soft:true answers null where the plane is down or the
+# request fails instead of aborting — for pollers that outlive an outage.
 export requestAgent = (label, method, path, body = null, options = {}) ->
   start = if options.start? then options.start else true
   paths = if start then ensureAgent!(label) else probeAgent!(label)
-  abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)" unless paths?
-  response = agentFetch! paths, method, path, body
-  text = response.text!
+  unless paths?
+    return null if options.soft
+    abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)"
+  try
+    response = agentFetch! paths, method, path, body
+    text = response.text!
+  catch error
+    return null if options.soft
+    throw error
   unless response.ok
+    return null if options.soft
     detail = try JSON.parse(text).error catch then text
     abort "#{label}: #{detail or "control request failed (#{response.status})"}"
   return null unless text
