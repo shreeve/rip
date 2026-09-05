@@ -8946,7 +8946,11 @@ class Emitter {
     this.appStashSpec = appStashSpec;
     this.routesUnion = typeof routesUnion === "string" && routesUnion.length > 0 ? routesUnion : null;
     this.routeParams = typeof routeParams === "string" && routeParams.length > 0 ? routeParams : null;
+    this.appAccessors = { stash: null, router: null };
     this.routeWrapSpans = [];
+    this.memberInitSites = [];
+    this.sourceKeySpans = [];
+    this.stashMemberSpans = [];
     this.domSurfaces = new Map;
     this._needsClassValue = false;
     this._needsChildren = false;
@@ -8961,6 +8965,7 @@ class Emitter {
     this.typeOnlyImports = new Set;
     this.pins = pins;
     this.pinnables = [];
+    this.pinnedWrites = new Set;
     this.mutables = [];
     this.enums = [];
     this.classDecls = [];
@@ -10688,6 +10693,36 @@ class Emitter {
       if (inTypes.has(name) && !used.has(name))
         this.typeOnlyImports.add(name);
   }
+  collectAppAccessors(sexpr) {
+    this.appAccessors = { stash: null, router: null };
+    for (const x of sexpr.slice(1)) {
+      if (!isModuleImportNode(this.stores, x))
+        continue;
+      const from = x[x.length - 1];
+      if (typeof from !== "string" || from.slice(1, -1) !== "rip/app")
+        continue;
+      const id = this.stores.idOf(x);
+      if (id !== null && this.stores.role(id, "typeOnly") !== null)
+        continue;
+      for (const spec of x.slice(1, -1)) {
+        if (!isNode(spec) || spec[0] === "*")
+          continue;
+        for (const s of spec) {
+          const imported = isNode(s) ? s[0] : s;
+          const local = isNode(s) ? s[1] : s;
+          if (imported === "currentStash")
+            this.appAccessors.stash = local;
+          else if (imported === "currentRouter")
+            this.appAccessors.router = local;
+        }
+      }
+    }
+  }
+  isAccessorCall(x, local) {
+    if (local === null || !isNode(x) || x.length !== 1 || x[0] !== local)
+      return false;
+    return !this.scopes.slice(1).some((sc) => sc.has(local));
+  }
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
@@ -11427,6 +11462,7 @@ class Emitter {
             const pinType = pinKey !== null ? this.pins?.get(pinKey) : undefined;
             if (pinType !== undefined)
               this.b.tsOnly(() => {
+                this.pinnedWrites.add(entries.pinnable.get(name).node);
                 const at = this.b.offset;
                 this.b.emit(`${this.strict ? "" : "!"}: `);
                 this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
@@ -14571,7 +14607,12 @@ ${pad ?? ""}`);
         const text = this.annotationText(node, "typeParams");
         this._componentTypeParams = text === null ? null : { text, owner: node };
       }
+      const severed = this.ts && this.strict && this.pinnedWrites.has(node);
+      if (severed)
+        this.b.tsOnly(() => this.b.emit("("));
       this.mark(node, "value", () => this.withExpression(() => this.expr(node[2])));
+      if (severed)
+        this.b.tsOnly(() => this.b.emit(") satisfies unknown"));
       this._schemaName = prevSchemaName;
       this._componentName = prevComponentName;
       this._componentTypeParams = prevComponentTypeParams;
@@ -15351,8 +15392,15 @@ ${pad ?? ""}`);
         }));
       };
       const memberName = (stmt, name, role = "target") => {
+        const lhsStart = this.b.offset;
         this.b.emit("this.");
         this.mark(stmt, role, () => this.b.emit(name));
+        if (this.ts) {
+          const id = this.stores.idOf(stmt);
+          const row = id !== null ? this.stores.role(id, role) : null;
+          if (row && typeof row.sourceStart === "number")
+            this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
+        }
       };
       const readonlySet = new Set(readonlyVars);
       const computedBodies = [];
@@ -18500,10 +18548,14 @@ ${this.replayPad}}` : " }");
         } else {
           this.mark(n, "operator", () => this.b.emit(op));
           this.mark(n, "property", () => {
+            const nameStart = this.b.offset;
             if (this.stores.idOf(n) === null)
               this.emitPrimitive(n[2]);
             else
               this.b.emit(n[2]);
+            if (this.ts && this.appStashSpec !== null && typeof n[2] === "string" && Emitter.isThisMember(n[1], "stash") && !(this.cframes.length && this.cframes[this.cframes.length - 1].members.has("stash"))) {
+              this.stashMemberSpans.push([nameStart, this.b.offset]);
+            }
             if (this.ts && n[1] === "this" && typeof n[2] === "string") {
               const cf = this.cframes[this.cframes.length - 1];
               const k = cf?.memberKinds?.get(n[2]) ?? null;
@@ -18547,7 +18599,9 @@ ${this.replayPad}}` : " }");
         }
         const routerArg = this.routerArgOf(n);
         if (routerArg !== null) {
-          (this._routerArgs ??= new Map).set(routerArg.arg, [this.b.offset - routerArg.method.length, this.b.offset]);
+          (this._routerArgs ??= new Map).set(routerArg.arg, routerArg.wrap);
+          if (routerArg.wrap)
+            this._needsRouteHelper = true;
         }
         this.mark(n, "args", () => {
           this.b.emit("(");
@@ -18653,16 +18707,22 @@ ${this.replayPad}}` : " }");
     if (this._sourceKeyArgs?.has(arg)) {
       this._sourceKeyArgs.delete(arg);
       this.b.tsOnly(() => this.b.emit("__ripSourceKey("));
+      const valStart = this.b.offset;
       this.expr(arg);
+      this.sourceKeySpans.push([valStart, this.b.offset]);
       this.b.tsOnly(() => this.b.emit(")"));
       return;
     }
-    const routerKey = this._routerArgs?.get(arg);
-    if (routerKey !== undefined) {
+    const wrap = this._routerArgs?.get(arg);
+    if (wrap !== undefined) {
       this._routerArgs.delete(arg);
+      if (wrap)
+        this.b.tsOnly(() => this.b.emit("__ripRoute("));
       const valStart = this.b.offset;
       this.expr(arg);
-      this.routeWrapSpans.push({ key: routerKey, value: [valStart, this.b.offset] });
+      this.routeWrapSpans.push({ key: null, value: [valStart, this.b.offset] });
+      if (wrap)
+        this.b.tsOnly(() => this.b.emit(")"));
       return;
     }
     if (isNode(arg) && (arg[0] === ".{}" || arg[0] === "?.{}") && arg.length >= 3)
@@ -18676,14 +18736,51 @@ ${this.replayPad}}` : " }");
     if (typeof arg !== "string" || !/^["']/.test(arg))
       return null;
     const callee = node[0];
-    if (!isNode(callee) || callee[0] !== "." || callee.length !== 3 || callee[2] !== "source")
+    if (!isNode(callee) || callee.length !== 3 || callee[2] !== "source")
       return null;
-    const stash = callee[1];
-    if (!isNode(stash) || stash[0] !== "." || stash.length !== 3 || stash[1] !== "this" || stash[2] !== "stash")
+    const recv = callee[1];
+    if (callee[0] === "." && Emitter.isThisMember(recv, "stash")) {
+      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("stash"))
+        return null;
+      return arg;
+    }
+    if ((callee[0] === "." || callee[0] === "?.") && this.isAccessorCall(recv, this.appAccessors.stash))
+      return arg;
+    return null;
+  }
+  static isThisMember(x, name) {
+    return isNode(x) && x[0] === "." && x.length === 3 && x[1] === "this" && x[2] === name;
+  }
+  static stashKeysOf(sexpr, local) {
+    let value = null;
+    for (const s of sexpr.slice(1)) {
+      const decl = isNode(s) && s[0] === "export" ? s[1] : s;
+      if (isNode(decl) && decl[0] === "=" && decl[1] === local) {
+        value = decl[2];
+        break;
+      }
+    }
+    if (isNode(value) && value.length === 2 && typeof value[0] === "string" && isNode(value[1]) && value[1][0] === "object")
+      value = value[1];
+    if (!isNode(value) || value[0] !== "object")
       return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("stash"))
-      return null;
-    return arg;
+    const keys = [];
+    let complete = true;
+    for (const entry of value.slice(1)) {
+      if (!isNode(entry))
+        continue;
+      if (entry[0] === "...") {
+        complete = false;
+        continue;
+      }
+      const key = entry[0] === ":" ? entry[1] : entry[0] === null ? entry[1] : null;
+      if (typeof key !== "string") {
+        complete = false;
+        continue;
+      }
+      keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
+    }
+    return { keys, complete };
   }
   routerArgOf(node) {
     if (!this.ts || this.routesUnion === null)
@@ -18692,14 +18789,17 @@ ${this.replayPad}}` : " }");
     if (typeof arg !== "string" || !/^["']/.test(arg))
       return null;
     const callee = node[0];
-    if (!isNode(callee) || callee[0] !== "." || callee.length !== 3 || callee[2] !== "push" && callee[2] !== "replace")
+    if (!isNode(callee) || callee.length !== 3 || callee[2] !== "push" && callee[2] !== "replace")
       return null;
-    const router = callee[1];
-    if (!isNode(router) || router[0] !== "." || router.length !== 3 || router[1] !== "this" || router[2] !== "router")
-      return null;
-    if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("router"))
-      return null;
-    return { arg, method: callee[2] };
+    const recv = callee[1];
+    if (callee[0] === "." && Emitter.isThisMember(recv, "router")) {
+      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has("router"))
+        return null;
+      return { arg, method: callee[2], wrap: false };
+    }
+    if ((callee[0] === "." || callee[0] === "?.") && this.isAccessorCall(recv, this.appAccessors.router))
+      return { arg, method: callee[2], wrap: true };
+    return null;
   }
   binary(node) {
     if (Emitter.returnGuard(node)) {
@@ -21204,6 +21304,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   }
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
+  emitter.collectAppAccessors(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -21475,6 +21576,7 @@ return { ${unit.names.join(", ")} };
       return null;
     })();
     if (stashLocal !== null) {
+      emitter.stashKeys = Emitter.stashKeysOf(parseResult.sexpr, stashLocal);
       builder.tsOnly(() => {
         const decl = /^(?:export\s+)?(stash)\s*=/m.exec(builder.source ?? "");
         const rootId = decl !== null ? stores.idOf(parseResult.sexpr) : null;
@@ -21584,7 +21686,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -21760,6 +21862,10 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     loopVars: emitted.loopVars,
     attrNames: emitted.attrNames,
     routeWraps: emitted.routeWraps,
+    memberInits: emitted.memberInits,
+    sourceKeys: emitted.sourceKeys,
+    stashMembers: emitted.stashMembers,
+    stashKeys: emitted.stashKeys,
     renderPairs: emitted.renderPairs,
     kinds: emitted.kinds,
     intrinsics: emitted.intrinsics ?? [],
