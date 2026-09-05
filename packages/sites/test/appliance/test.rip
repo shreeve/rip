@@ -1,5 +1,5 @@
 import { test, eq, ok } from 'rip/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -353,3 +353,77 @@ test! 'rip sites distinguishes an external edge from one owned by Rip', ->
     try cli! APP, ['stop', 'edge'], ownedEnv
     stopAgent! owned.runtime
     rmSync owned.root, { recursive: true, force: true }
+
+AGENT = join(import.meta.dir, '..', '..', 'agent.rip')
+
+alive = (pid) ->
+  try
+    process.kill pid, 0
+    true
+  catch then false
+
+ownerPid = (runtime) ->
+  try JSON.parse(readFileSync(join(runtime, 'agent.json'), 'utf8')).pid catch then null
+
+# The control socket path is the ownership token: a boot that finds it
+# held by a live agent must lose even with the owner record gone, and an
+# agent whose path was re-bound must stop before its next tick, leaving
+# the successor's files alone and the world (state file, edge) untouched.
+test! 'one control agent owns the socket; a superseded agent exits before acting', ->
+  site = fixture 'rip-agent-superseded-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  socket = join site.runtime, 'agent.sock'
+  usurper = null
+  first = null
+  try
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    eq JSON.parse(started.out).managed, true
+    first = ownerPid site.runtime
+    ok alive(first), 'the control agent is running'
+
+    # A second boot against a live agent loses, owner record or not.
+    unlinkSync join(site.runtime, 'agent.json')
+    second = run AGENT, [], env
+    exited = Promise.race! [second.proc.exited, sleep(5000).then(-> null)]
+    unless exited?
+      second.proc.kill 'SIGKILL'
+      throw Error.new 'second boot must exit instead of serving alongside a live agent'
+    eq exited, 1
+    err = await second.err
+    ok err.includes('another Rip Agent owns'), "second boot must be refused: #{err}"
+    ok alive(first), 'the live agent survives a rejected boot'
+    live = JSON.parse((cli!(APP, ['status', 'edge', '--json'], env)).out)
+    eq live.managed, true
+    waitFor! 'owner record restored by its holder', -> ownerPid(site.runtime) is first
+
+    # The path re-bound out from under the agent: it must go, and must not
+    # take the successor's socket with it.
+    unlinkSync socket
+    usurper = Bun.serve { unix: socket, fetch: -> Response.json { type: 'rip-agent', api_version: '1.0', pid: process.pid } }
+    waitFor! 'superseded agent exit', (-> not alive(first)), 6000
+    ok existsSync(socket), 'a superseded agent must not remove the successor socket'
+    answer = fetch!("http://agent/1.0", { unix: socket }).json!
+    eq answer.pid, process.pid
+
+    # The successor stops the edge; nothing revives it, nothing rewrites the state.
+    caddyPid = parseInt readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')
+    doc = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    doc.edge = { ...doc.edge, desired: 'stopped', managed: false, pid: null }
+    writeFileSync join(site.state, 'sites.json'), JSON.stringify(doc, null, 2) + '\n'
+    process.kill caddyPid, 'SIGTERM'
+    waitFor! 'fake edge shutdown', -> not alive(caddyPid)
+    # Recovery fires after DOWN_TICKS consecutive 2 s ticks plus its restart delay.
+    sleep! 7500
+    ok not existsSync(join(site.runtime, 'caddy.pid')), 'no agent may revive an edge stopped by the owner'
+    after = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    eq after.edge.desired, 'stopped'
+    eq after.edge.managed, false
+  finally
+    try usurper?.stop true
+    try process.kill(first, 'SIGKILL') if first? and alive(first)
+    try process.kill parseInt(readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')), 'SIGKILL'
+    rmSync site.root, { recursive: true, force: true }

@@ -16,10 +16,21 @@ export secureDirectory = (path, label) ->
   abort "#{label}: unsafe permissions at #{path}: expected 0700" unless mode is 0o700
   path
 
+# The runtime root must resolve to ONE place from every context that can
+# spawn a control agent. launchd hands its jobs no TMPDIR (the tray's is
+# one), and tmpdir() then falls back to /tmp: a second root, a second
+# control socket, a second agent over the same catalog. The per-user temp
+# directory is a confstr fact, not an environment one — ask for it.
+userTempDir = ->
+  return tmpdir() unless platform() is 'darwin' and not process.env.TMPDIR
+  result = Bun.spawnSync ['/usr/bin/getconf', 'DARWIN_USER_TEMP_DIR'], { stdout: 'pipe', stderr: 'pipe' }
+  value = result.stdout.toString().trim()
+  if result.exitCode is 0 and value then value else tmpdir()
+
 export agentPaths = (label = 'rip-agent') ->
   uid = if typeof process.getuid is 'function' then process.getuid() else 'user'
   stateRoot = process.env.RIP_AGENT_HOME or if platform() is 'darwin' then join(homedir(), 'Library', 'Application Support', 'Rip') else join(process.env.XDG_STATE_HOME or join(homedir(), '.local', 'state'), 'rip')
-  runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(tmpdir(), "rip-agent-#{uid}")
+  runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(userTempDir(), "rip-agent-#{uid}")
   secureDirectory stateRoot, label
   secureDirectory runtimeRoot, label
   catalog = join(stateRoot, 'sites.json')

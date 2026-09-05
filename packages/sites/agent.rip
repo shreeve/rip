@@ -173,10 +173,11 @@ writeSecure = (path, text) ->
   directory = openSync paths.stateRoot, 'r'
   try fsyncSync(directory) finally closeSync(directory)
 
-saveState = -> writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
+saveState = ->
+  assertOwner()
+  writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
 loaded = loadState()
 state = loaded.state
-saveState() if loaded.dirty
 
 tail = (path, lines = 100) ->
   return '' unless existsSync path
@@ -1182,7 +1183,10 @@ jsonBody = (request) ->
 mutationChain = Promise.resolve()
 
 mutate = (run) ->
-  task = mutationChain.then run, run
+  guarded = ->
+    assertOwner()
+    run()
+  task = mutationChain.then guarded, guarded
   mutationChain = task.catch -> null
   task
 
@@ -1251,41 +1255,93 @@ handle = (request) ->
     inFlight--
     lastActivity = Date.now()
 
-acquire = ->
-  try
-    fd = openSync paths.owner, 'wx', 0o600
-    try writeFileSync(fd, JSON.stringify({ pid: process.pid })) finally closeSync(fd)
-    return
-  catch error
-    throw error unless error?.code is 'EEXIST'
-  owner = try JSON.parse(readFileSync(paths.owner, 'utf8')) catch then null
-  fail "another Rip Agent owns #{paths.socket} (pid #{owner?.pid or 'unknown'})", 409 if processAlive(owner?.pid)
-  unlinkSync paths.owner
-  acquire()
+# Ownership is the control socket path. The kernel refuses a second bind
+# on a live path (EADDRINUSE), so the agent is whoever holds the inode
+# that clients resolve — not the process that got here first, and not a
+# pid in a file. The owner record is the pid hint clients and `stop
+# agent` read; it follows the bind and never arbitrates. A boot that
+# finds the path held asks it: a live agent answers /1.0 and wins, a
+# corpse's leftover file gets swept. Every tick, mutation, and state
+# write re-checks the inode first, and an agent that finds its path
+# re-bound exits without touching the successor's files: Bun's
+# server.stop unlinks the path by NAME, so a superseded agent must not
+# call it at all — process exit closes the listener and leaves the path.
+boundIno = null
 
-acquire()
-try unlinkSync paths.socket
-try unlinkSync paths.edgeStatus
+ownsSocket = ->
+  return false unless boundIno?
+  try statSync(paths.socket).ino is boundIno catch then false
+
+assertOwner = ->
+  return if ownsSocket()
+  setTimeout shutdown, 0
+  fail 'this control agent was superseded — retry', 503
+
+# A record between its create and its write reads as empty: one beat
+# separates a peer mid-boot from garbage.
+readOwner = ->
+  for attempt in [0, 1]
+    try
+      return JSON.parse readFileSync(paths.owner, 'utf8')
+    catch error
+      return null if error?.code is 'ENOENT'
+      Bun.sleepSync 20 if attempt is 0
+  null
+
+writeOwner = ->
+  temporary = "#{paths.owner}.tmp-#{process.pid}"
+  fd = openSync temporary, 'w', 0o600
+  try writeFileSync(fd, JSON.stringify({ pid: process.pid })) finally closeSync(fd)
+  renameSync temporary, paths.owner
+
+controlAnswers = ->
+  try
+    response = fetch! 'http://agent/1.0', { unix: paths.socket, signal: AbortSignal.timeout(PROBE_TIMEOUT) }
+    return null unless response.ok
+    body = response.json!
+    if body?.type is 'rip-agent' then body else null
+  catch then null
+
+acquire = ->
+  owner = readOwner()
+  fail "another Rip Agent owns #{paths.socket} (pid #{owner.pid})", 409 if owner? and processAlive(owner.pid)
+  try
+    server = Bun.serve { unix: paths.socket, fetch: handle }
+  catch error
+    throw error unless error?.code is 'EADDRINUSE'
+    live = controlAnswers!
+    fail "another Rip Agent owns #{paths.socket} (pid #{live.pid or 'unknown'})", 409 if live?
+    try unlinkSync paths.socket
+    server = Bun.serve { unix: paths.socket, fetch: handle }
+  boundIno = statSync(paths.socket).ino
+  writeOwner()
+
 server = null
 statusServer = null
 stopping = false
 
+release = ->
+  serveProbes.forEach (child) -> try child.kill 'SIGKILL'
+  if ownsSocket()
+    try server?.stop true
+    try statusServer?.stop true
+    try unlinkSync paths.socket
+    try unlinkSync paths.edgeStatus
+  try unlinkSync paths.owner if readOwner()?.pid is process.pid
+
 shutdown = ->
   return if stopping
   stopping = true
-  serveProbes.forEach (child) -> try child.kill 'SIGKILL'
-  try server?.stop true
-  try statusServer?.stop true
-  try unlinkSync paths.socket
-  try unlinkSync paths.edgeStatus
-  try unlinkSync paths.owner
+  release()
   exit 0
 
 process.on 'SIGINT', shutdown
 process.on 'SIGTERM', shutdown
 
+acquire!
 try
-  server = Bun.serve { unix: paths.socket, fetch: handle }
+  saveState() if loaded.dirty
+  try unlinkSync paths.edgeStatus
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
   # One missed probe is not an outage (see PROBE_TIMEOUT) — recovery
   # waits for DOWN_TICKS consecutive failed ticks, evidence spread
@@ -1293,6 +1349,8 @@ try
   appMisses = Map.new()
   edgeMisses = 0
   reconcile = ->
+    return shutdown() unless ownsSocket()
+    writeOwner() unless readOwner()?.pid is process.pid
     for app in state.apps when app.desired is 'running'
       if managerStatus!(app)?
         appMisses.delete app.id
@@ -1303,7 +1361,7 @@ try
       appMisses.delete app.id
       startApp(app, true).catch (error) ->
         app.lastError = error.message
-        saveState()
+        saveState() if ownsSocket()
     return unless state.edge.desired is 'running' and not edgeStarting?
     if edgeHealth! and edgeServing!
       edgeMisses = 0
@@ -1316,12 +1374,12 @@ try
     edgeRestartAt = Date.now() + delay
     startEdge({}, true).catch (error) ->
       state.edge.lastError = error.message
-      saveState()
+      saveState() if ownsSocket()
   setTimeout reconcile, 0
   setInterval (->
     reconcile()
     maybeExitIdle()
   ), 2000
 catch error
-  try unlinkSync paths.owner
+  release()
   throw error
