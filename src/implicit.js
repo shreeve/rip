@@ -499,13 +499,18 @@ function collectObjects(tokens, mintId) {
   // Does a `...` at `j` continue the object frame `fr`? Only when the
   // object is not an element of an explicit bracket list: inside `[…]`
   // or `f(…)` the spread is the list's next ELEMENT (`[x: 1, ...opts]`
-  // is two elements, as CoffeeScript reads it); at statement level or
-  // under an implicit call it spreads into the object (`f a, x: 1,
-  // ...opts, y: 2` is one options object, as the braced form reads).
+  // is two elements, as CoffeeScript reads it); at statement level,
+  // in plain parens, or under an implicit call — inside a bracket list
+  // too (`[1, g a, x: 1, ...opts]`) — it spreads into the object
+  // (`f a, x: 1, ...opts, y: 2` is one options object, as the braced
+  // form reads). A multi-line list (`[` then INDENT) keeps the
+  // continuation reading: its lines are pairs, and a spread among them
+  // belongs to the object they build.
   const spreadContinues = (fr, j) => {
     if (tokens[j]?.kind !== '...') return false;
     const below = stack[stack.indexOf(fr) - 1];
-    return !(below && below.kind !== 'INDENT' && PASS_OPENERS.has(below.kind));
+    if (!below || !(below.kind === '[' || below.kind === 'CALL_START')) return true;
+    return openCallBetween(below.at, fr.at);
   };
 
   // Is an implicit CALL open between tape position `from` (exclusive)
@@ -755,7 +760,7 @@ function collectObjects(tokens, mintId) {
     // where the spread is the list's next element (spreadContinues).
     if (k === ',') {
       const list = listObjectFrame();
-      const continues = (j) => looksObjectish(j) || (list !== null && spreadContinues(list, j));
+      const continues = (j) => looksObjectish(j) || spreadContinues(list, j);
       if (list && !openCallBetween(list.at, i) &&
           !continues(i + 1) &&
           (tokens[i + 1]?.kind !== 'TERMINATOR' || !continues(i + 2))) {

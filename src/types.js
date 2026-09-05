@@ -1473,6 +1473,12 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         }
       }
 
+      // Return type on a parameterless GENERIC def: `def g<T>: T`.
+      if (prev.kind === 'TYPE_PARAMS' && isDefName(out, out.length - 2)) {
+        const last = claim('TYPE', tok, i + 1, {});
+        if (last >= 0) { i = last; continue; }
+      }
+
       // Return type on a parameterless VOID def: `def tick!: T`.
       if (prev.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) {
         const last = claim('TYPE', tok, i + 1, {});

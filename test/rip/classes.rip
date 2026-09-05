@@ -454,3 +454,10 @@ code 'a class def sees module bindings as a method does', 'x = 1\nclass A\n  def
   '''
 
 fail 'a setter cannot return a value', 'class A\n  set v: (n) ->\n    return 1', 'a setter discards its return value'
+fail 'a void def nested in a setter keeps its own reason', 'class A\n  set v: (n) ->\n    def g!()\n      return 1', "the trailing '!'"
+fail 'a constructor cannot be a getter', 'class A\n  get constructor: -> 1', 'cannot be a get accessor'
+fail 'a constructor cannot be a setter', 'class A\n  set constructor: (v) -> 1', 'cannot be a set accessor'
+code 'a static member named constructor is an ordinary static method', 'class A\n  def @constructor()\n    1', 'class A {\n  static constructor() {\n    return 1;\n  }\n}'
+code 'a parameterless static def with a return type', 'class A\n  def @g: number\n    1', 'class A {\n  static g() {\n    return 1;\n  }\n}'
+code 'a parameterless static void def with a return type', 'class A\n  def @h!: void\n    log 1', 'class A {\n  static h() {\n    log(1);\n    return;\n  }\n}'
+code 'a parameterless generic def takes a return type', 'class A\n  def @g<T>: T\n    1', 'class A {\n  static g() {\n    return 1;\n  }\n}'

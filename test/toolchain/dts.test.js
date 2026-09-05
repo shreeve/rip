@@ -563,4 +563,10 @@ test('import attributes ride the declaration', () => {
   const src = "import data from './d.json' with { type: 'json' }\nx: typeof data = data\n";
   expect(dts(src)).toBe(`import data from './d.json' with { type: "json" };\ndeclare let x: typeof data;\n`);
   expect(dts("export * as ns from './m.js'")).toBe("export * as ns from './m.js';\n");
+  expect(dts("export * as default from './m.js'")).toBe("export * as default from './m.js';\n");
+});
+
+// The TS face keeps a setter's one parameter required (TS1051).
+test('a setter parameter is required in the TS face', () => {
+  expect(compile('class T\n  set v: (n) -> @_v = n', { face: 'ts' }).code).toContain('set v(n) {');
 });

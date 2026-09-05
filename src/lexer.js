@@ -1187,16 +1187,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         let end = pos;
         // A `###` line (three hashes then anything but a fourth) opens
         // a BLOCK comment that runs to the next `###`, however many
-        // lines away, and the rest of the closing line goes with it.
-        // An unclosed block rejects at its opener, like an unterminated
-        // heredoc: silently swallowing the rest of the file is the one
-        // thing a comment must never do (`__DATA__` is the spelling
-        // for "the rest is not code"). `####…` is a line comment like
-        // any other.
+        // lines away, and only whitespace or a line comment may follow
+        // the closer on its line — code there would be swallowed
+        // silently, and a comment must never swallow code. An unclosed
+        // block rejects at its opener, like an unterminated heredoc
+        // (`__DATA__` is the spelling for "the rest is not code").
+        // `####…` is a line comment like any other.
         if (text.startsWith('###', pos) && text[pos + 3] !== '#') {
           const close = text.indexOf('###', pos + 3);
           if (close < 0) failOpenAtEnd('unclosed `###` block comment — close it with `###`', pos, pos + 3);
           end = close + 3;
+          let after = end;
+          while (text[after] === ' ' || text[after] === '\t') after++;
+          if (after < text.length && text[after] !== '\n' && text[after] !== '\r' && text[after] !== '#') {
+            fail('code after a closing `###` — a block comment ends its line; put the code on the next line', close, end);
+          }
         }
         while (end < text.length && text[end] !== '\n' && !(text[end] === '\r' && text[end + 1] === '\n')) end++;
         const withNl = end < text.length ? end + (text[end] === '\r' ? 2 : 1) : end;

@@ -272,6 +272,17 @@ const ERRD = path.join(CORPUS, 'errors');
 const ripFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
   .filter((e) => e.isFile() && e.name.endsWith('.rip'))
   .map((e) => e.name);
+// The data fixtures a fixture's import attributes name (a JSON module)
+// ride along into every sandbox that runs the fixtures.
+const dataFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.json'))
+  .map((e) => e.name);
+const copyFixturesInto = (dir) => {
+  for (const d of [FIX, CLM]) {
+    if (!fs.existsSync(d)) continue;
+    for (const f of [...ripFilesIn(d), ...dataFilesIn(d)]) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  }
+};
 // The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
 // re-pin exists; the run prints paste-ready rows for divergences and
 // unpinned symbols). Two sections per fixture, one discipline — reviewed
@@ -841,9 +852,7 @@ function dimTwin(twinBase, byFile) {
 const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
-  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(dir, f));
-  // Data fixtures (a JSON module an import attribute names) ride along.
-  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.json')) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  copyFixturesInto(dir);
   const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
   tscfg.include = ['.'];   // the fixtures are flat here, not under corpus/
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
@@ -1126,8 +1135,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
-    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.endsWith('.json')) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
+    if (this.corpusMode) copyFixturesInto(this.dir);
     // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -2218,8 +2226,8 @@ if (RUN_GRAMMAR) {
   const EXCLUDED = new Map([
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
-    ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane; test/rip/modules.rip pins the form'],
-    ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane; test/rip/modules.rip pins the form'],
+    ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
+    ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);

@@ -33,6 +33,11 @@ test.each([
   expect(rejection(src)).toContain(hint);
 });
 
+test('a trailing-dots rest outside a parameter list carries no rest hint', () => {
+  expect(rejection('f(a, rest...)')).not.toContain('dots lead the name');
+  expect(rejection('[a, rest...]')).not.toContain('dots lead the name');
+});
+
 test('`is not` rejects with the isnt spelling', () => {
   expect(rejection('x is not null')).toContain('x isnt y');
   expect(rejection('x is not null')).toMatch(/:1:3:/);

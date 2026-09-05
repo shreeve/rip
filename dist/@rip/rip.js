@@ -3616,7 +3616,9 @@ function collectObjects(tokens, mintId) {
     if (tokens[j]?.kind !== "...")
       return false;
     const below = stack[stack.indexOf(fr) - 1];
-    return !(below && below.kind !== "INDENT" && PASS_OPENERS.has(below.kind));
+    if (!below || !(below.kind === "[" || below.kind === "CALL_START"))
+      return true;
+    return openCallBetween(below.at, fr.at);
   };
   const pendingIndentedObjectCallAt = (indentAt) => {
     const before = tokens[indentAt - 1];
@@ -3786,7 +3788,7 @@ function collectObjects(tokens, mintId) {
     }
     if (k === ",") {
       const list = listObjectFrame();
-      const continues = (j) => looksObjectish(j) || list !== null && spreadContinues(list, j);
+      const continues = (j) => looksObjectish(j) || spreadContinues(list, j);
       if (list && !openCallBetween(list.at, i) && !continues(i + 1) && (tokens[i + 1]?.kind !== "TERMINATOR" || !continues(i + 2))) {
         if (tokens[i + 1]?.kind === "INDENT" && continues(i + 2)) {
           continuationComma = i;
@@ -5099,6 +5101,13 @@ function rewriteTypes(tokens, mintId, text, fail) {
           continue;
         }
       }
+      if (prev.kind === "TYPE_PARAMS" && isDefName(out, out.length - 2)) {
+        const last = claim("TYPE", tok, i + 1, {});
+        if (last >= 0) {
+          i = last;
+          continue;
+        }
+      }
       if (prev.kind === "VOID_MARKER" && isDefName(out, out.length - 2)) {
         const last = claim("TYPE", tok, i + 1, {});
         if (last >= 0) {
@@ -6229,6 +6238,13 @@ ${baseline}`).join(`
           if (close < 0)
             failOpenAtEnd("unclosed `###` block comment — close it with `###`", pos, pos + 3);
           end = close + 3;
+          let after = end;
+          while (text[after] === " " || text[after] === "\t")
+            after++;
+          if (after < text.length && text[after] !== `
+` && text[after] !== "\r" && text[after] !== "#") {
+            fail("code after a closing `###` — a block comment ends its line; put the code on the next line", close, end);
+          }
         }
         while (end < text.length && text[end] !== `
 ` && !(text[end] === "\r" && text[end + 1] === `
@@ -8777,6 +8793,7 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
+var isAssignHead = (h) => ASSIGNS.has(h) || h === "//=" || h === "%%=";
 var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
@@ -8906,6 +8923,8 @@ var isIf = (x) => isNode(x) && x[0] === "if";
 var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 3;
 var isObject = (x) => isNode(x) && x[0] === "object";
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
+var CTRL_ALL = new Set(["break", "continue", "return"]);
+var CTRL_BREAK = new Set(["break"]);
 var isDefHead = (h) => h === "def" || h === "void-def";
 function containsAwait(sexpr) {
   if (!isNode(sexpr))
@@ -9077,6 +9096,7 @@ class Emitter {
     this.inTarget = false;
     this.voidFuncs = new WeakSet;
     this.sideEffectOnly = false;
+    this.voidReason = null;
     this.usesSchema = false;
     this.exprDepth = 0;
     this.postfixGuardDepth = 0;
@@ -11835,23 +11855,19 @@ class Emitter {
     specs.forEach((spec, i) => {
       if (i > 0)
         this.b.emit(", ");
-      const emitSpec = () => {
-        if (spec === "{}")
-          this.b.emit("{}");
-        else if (typeof spec === "string")
-          this.b.emit(spec);
-        else if (spec[0] === "*")
-          this.b.emit(`* as ${spec[1]}`);
-        else {
-          this.b.emit("{ ");
-          this.emitSpecifiers(spec);
-          this.b.emit(" }");
-        }
-      };
-      if (node !== null)
-        this.mark(node, i === 0 ? "spec" : "extra", emitSpec);
-      else
-        emitSpec();
+      const role = node === null ? null : i === 0 ? "spec" : "extra";
+      const emitSpec = (fn) => role === null ? fn() : this.mark(node, role, fn);
+      if (spec === "{}")
+        this.b.emit("{}");
+      else if (typeof spec === "string")
+        emitSpec(() => this.b.emit(spec));
+      else if (spec[0] === "*")
+        emitSpec(() => this.b.emit(`* as ${spec[1]}`));
+      else {
+        this.b.emit("{ ");
+        emitSpec(() => this.emitSpecifiers(spec));
+        this.b.emit(" }");
+      }
     });
     this.b.emit(" from ");
   }
@@ -11916,6 +11932,11 @@ class Emitter {
   emitImportAttributes(attrs) {
     if (attrs === null)
       return;
+    for (const pair of attrs[1].slice(1)) {
+      const literal = pair[0] === ":" && typeof pair[2] === "string" && (pair[2][0] === '"' || pair[2][0] === "'");
+      if (!literal)
+        throw this.positionedError(pair, 'emitter: an import attribute is a string-literal pair (`with { type: "json" }`) — the module loader reads it before any code runs');
+    }
     this.b.emit(" ");
     this.mark(attrs, "$self", () => {
       this.mark(attrs, "keyword", () => this.b.emit("with"));
@@ -12549,10 +12570,10 @@ class Emitter {
         this.b.emit(";");
         return;
       }
-      if (ASSIGNS.has(node[0]) && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
-        throw this.positionedError(node, `emitter: a slice takes plain assignment only (\`a[i..j] = v\`) — '${node[0]}' has no in-place reading`);
+      if (isAssignHead(node[0]) && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+        throw this.sliceAssignError(node);
       }
-      if ((ASSIGNS.has(node[0]) || node[0] === "//=" || node[0] === "%%=") && node.length === 3) {
+      if (isAssignHead(node[0]) && node.length === 3) {
         const guard = Emitter.optionalGuard(node[1]);
         if (guard !== null) {
           this.optionalAssign(node, guard, "statement");
@@ -12774,32 +12795,14 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
   static hasMatchArms(cases) {
     return cases.some((when) => when[1].some((c) => Emitter.isMatchArm(c)));
   }
-  static armBreak(body) {
-    let found = false;
-    const walk = (n, bound) => {
-      if (found)
-        return;
-      if (n === "break") {
-        found = !bound;
-        return;
-      }
-      if (!isNode(n) || isFunc(n) || isDefHead(n[0]) || n[0] === "class")
-        return;
-      const inner = bound || isLoopNode(n) || isComprehensionNode(n) || n[0] === "switch";
-      for (const el of n)
-        walk(el, inner);
-    };
-    walk(body, false);
-    return found;
-  }
   checkMatchSwitch(node) {
     const [, subject, cases, dflt] = node;
     if (subject === null) {
       throw this.positionedError(node, "emitter: a regex or range `when` tests the switch subject, and this switch has none — give it one (`switch x`) or spell the test out (`when /re/.test(x)`)");
     }
     for (const body of [...cases.map((when) => when[2]), dflt]) {
-      if (body !== null && Emitter.armBreak(body)) {
-        throw this.positionedError(node, "emitter: `break` inside a regex or range `when` arm has nothing to leave — the arm is an if-chain and ends on its own; drop the `break`");
+      if (body !== null && Emitter.findCapturedCtrl(body, CTRL_BREAK) !== null) {
+        throw this.positionedError(node, "emitter: `break` in an arm of a switch with a regex or range `when` has nothing to leave — the switch is an if-chain and each arm ends on its own; drop the `break`");
       }
     }
   }
@@ -13763,28 +13766,35 @@ ${pad ?? ""}`);
     }
     this.rejectCapturedCtrl(node);
   }
-  static findCapturedCtrl(stmt) {
+  static findCapturedCtrl(stmt, want = CTRL_ALL) {
     let found = null;
     const walk = (n, loops, switches) => {
-      if (found !== null)
+      if (found !== null || !isNode(n))
         return;
-      if (typeof n === "string") {
-        if (n === "break" && loops + switches === 0)
-          found = { kind: "break", node: null };
-        else if (n === "continue" && loops === 0)
-          found = { kind: "continue", node: null };
+      const head = n[0];
+      if (isFunc(n) || isDefHead(head) || head === "class")
         return;
-      }
-      if (!isNode(n) || n[0] === "->" || n[0] === "=>" || isDefHead(n[0]) || n[0] === "class")
-        return;
-      if (n[0] === "return") {
-        found = { kind: "return", node: n };
+      if (head === "return") {
+        if (want.has("return"))
+          found = { kind: "return", node: n };
         return;
       }
       const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
-      const s = n[0] === "switch" ? switches + 1 : switches;
-      for (const el of n)
+      const s = head === "switch" ? switches + 1 : switches;
+      const inBlock = head === "block" || head === "program" || head === "try";
+      for (let i = 1;i < n.length; i++) {
+        const el = n[i];
+        const ctrl = typeof el === "string" ? inBlock ? el : null : isNode(el) && el.length === 1 && typeof el[0] === "string" ? el[0] : null;
+        if (ctrl === "break" && want.has("break") && l + s === 0) {
+          found = { kind: "break", node: null };
+          return;
+        }
+        if (ctrl === "continue" && want.has("continue") && l === 0) {
+          found = { kind: "continue", node: null };
+          return;
+        }
         walk(el, l, s);
+      }
     };
     walk(stmt, 0, 0);
     return found;
@@ -14349,7 +14359,10 @@ ${pad ?? ""}`);
       return this.heregex(node);
     if (isNode(head))
       return this.call(node);
-    if ((ASSIGNS.has(head) || head === "//=" || head === "%%=") && node.length === 3 && !this.inPattern) {
+    if (isAssignHead(head) && node.length === 3 && !this.inPattern && Emitter.sliceTarget(node[1]) !== null) {
+      throw this.sliceAssignError(node);
+    }
+    if (isAssignHead(head) && node.length === 3 && !this.inPattern) {
       const guard = Emitter.optionalGuard(node[1]);
       if (guard !== null)
         return this.optionalAssign(node, guard, "value");
@@ -14785,10 +14798,13 @@ ${pad ?? ""}`);
       }
     });
   }
-  assign(node) {
-    if (node[0] === "=" && Emitter.sliceTarget(node[1]) !== null) {
-      throw this.positionedError(node, "emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line");
+  sliceAssignError(node) {
+    if (node[0] === "=") {
+      return this.positionedError(node, "emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line");
     }
+    return this.positionedError(node, `emitter: a slice takes plain assignment only (\`a[i..j] = v\`) — '${node[0]}' has no in-place reading`);
+  }
+  assign(node) {
     if (typeof node[1] === "string" && node[1][0] === '"') {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
@@ -16270,7 +16286,7 @@ ${pad ?? ""}`);
   renderNode(sexpr) {
     if (this.isRenderBinding(sexpr))
       return this.renderBinding(sexpr);
-    if (isNode(sexpr) && (ASSIGNS.has(sexpr[0]) || sexpr[0] === "//=" || sexpr[0] === "%%=") && sexpr.length === 3) {
+    if (isNode(sexpr) && isAssignHead(sexpr[0]) && sexpr.length === 3) {
       throw this.positionedError(sexpr, "emitter: an assignment at a render child position must declare a render local (`name = expr` / compound forms " + "on a plain name) — member and chain writes have no render reading here; put the write in a handler or method");
     }
     if (typeof sexpr === "string") {
@@ -19615,7 +19631,10 @@ ${this.replayPad}}` : " }");
           throw this.positionedError(pair, "emitter: computed class members are not supported yet", stmt);
         }
         const mName = memberName(pair[1]);
-        if (mName === "constructor") {
+        if (form !== null && form.form !== "def" && mName === "constructor") {
+          throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+        }
+        if (mName === "constructor" && !isStaticKey(pair[1])) {
           hasConstructor = true;
           if (isFunc(pair[2])) {
             ctorParams = pair[2][1];
@@ -19757,7 +19776,8 @@ ${this.replayPad}}` : " }");
               }
               let [, params, block] = value;
               let atParams = [];
-              if (mName === "constructor") {
+              const isCtor = mName === "constructor" && !isStaticKey(pair[1]);
+              if (isCtor) {
                 const strip = (p) => {
                   const n = atParamName(p);
                   if (n !== null) {
@@ -19790,14 +19810,14 @@ ${this.replayPad}}` : " }");
               this.b.emit("(");
               this.emitParams(params, null, accessor !== "set");
               this.b.emit(")");
-              if (mName !== "constructor") {
+              if (!isCtor) {
                 this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
               }
               this.b.emit(" ");
               this.mark(pair, "value", () => {
                 this.methodBlock(value, block, ind + 1, {
-                  isConstructor: mName === "constructor",
-                  binds: mName === "constructor" ? bound : [],
+                  isConstructor: isCtor,
+                  binds: isCtor ? bound : [],
                   methodName: typeof mName === "string" ? mName : "symbol",
                   voidBody: isVoidPair || accessor === "set",
                   tailReturn: accessor !== "set",
@@ -20241,7 +20261,9 @@ ${"  ".repeat(ind)}`);
     const params = isDefHead(node[0]) ? node[2] : node[1];
     const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
+    const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
+    this.voidReason = null;
     this.mark(node, "body", () => {
       this.mark(block, "$self", () => {
         this.b.emit(`{
@@ -20295,6 +20317,7 @@ ${"  ".repeat(ind)}`);
       });
     });
     this.sideEffectOnly = prevSEO;
+    this.voidReason = prevReason;
   }
   voidTailReturn(stmts, ind) {
     if (!this.sideEffectOnly || stmts.length === 0)
@@ -20347,6 +20370,8 @@ ${"  ".repeat(ind)}`);
         return this.statement(stmt, ind);
       }
       if (h === ".=" && stmt.length === 3)
+        return this.statement(stmt, ind);
+      if (h === "=" && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null)
         return this.statement(stmt, ind);
       if (h === "enum")
         return this.statement(stmt, ind);

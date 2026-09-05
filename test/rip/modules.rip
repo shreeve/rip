@@ -568,3 +568,5 @@ fail "'with' stays reserved outside an import", "with x\n  1", "'with' is reserv
 code 'export all as default', "export * as default from './m'", "export * as default from './m';"
 code 'attributes on a default-plus-named import', "import d, { a } from './d.json' with { type: 'json' }", 'import d, { a } from \'./d.json\' with {type: "json"};'
 code 'attributes on a default-plus-namespace import', "import d, * as ns from './d.json' with { type: 'json' }", 'import d, * as ns from \'./d.json\' with {type: "json"};'
+fail 'an import attribute is a string-literal pair', "import d from './d.json' with { type: t }", 'string-literal pair'
+fail 'attributes cannot ride a type-only import', "import type { T } from './d.json' with { type: 'json' }", "Unexpected 'with'"

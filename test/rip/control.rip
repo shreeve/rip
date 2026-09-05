@@ -1301,3 +1301,7 @@ test 'a break bound by a loop inside a match arm stays', '''
 
 fail 'a break in a match arm has nothing to leave', 'for x in xs\n  switch x\n    when /a/\n      break', 'nothing to leave'
 fail 'a subjectless switch cannot carry match arms', 'switch\n  when /a/ then 1', 'has none'
+fail 'a postfix break in a match arm has nothing to leave', 'for x in xs\n  switch x\n    when /a/\n      break if q', 'nothing to leave'
+code 'a member named break in a match arm is a name', 'switch x\n  when /a/\n    obj.break()', 'if (/a/.test(x)) {\n  obj.break();\n}'
+code 'a key named break in a match arm is a name', 'switch x\n  when /a/\n    o.x = {break: 1}', 'if (/a/.test(x)) {\n  o.x = {break: 1};\n}'
+code 'a member named break in a value if is a name', 'y = if q then obj.break() else 2', 'let y = q ? obj.break() : 2;'

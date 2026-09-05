@@ -459,3 +459,4 @@ test 'a parameterless def with a generic return type keeps its body', '''
       new Map([['a', 1]])
     g().get('a')
   ''', 1
+code 'a parameterless generic def takes a return type', 'def g<T>: T\n  1', 'function g() {\n  return 1;\n}'
