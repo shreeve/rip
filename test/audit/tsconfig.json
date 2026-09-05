@@ -6,7 +6,8 @@
     "jsx": "react-jsx",
     "noEmit": true,
     "skipLibCheck": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true
   },
   "include": [
     "corpus/grammar",

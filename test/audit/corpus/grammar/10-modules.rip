@@ -114,6 +114,15 @@ bangPort = import!('./10-modules-lib.rip').port
 
 console.log('dynamic:', lazyHost, bangPort)
 
+# ── Import attributes: `with { type: 'json' }` after the source — default, namespace, named, and side-effect forms ──
+
+import settings from './10-modules-data.json' with { type: 'json' }
+import * as dataModule from './10-modules-data.json' with { type: 'json' }
+import { port as dataPort } from './10-modules-data.json' with { type: 'json' }
+import './10-modules-data.json' with { type: 'json' }
+
+console.log('attributes:', settings.name, dataModule.default.port, dataPort, settings.tags.length)
+
 # ── import.meta: the module knows its own address ──
 
 console.log('meta:', import.meta.url.includes('10-modules'))

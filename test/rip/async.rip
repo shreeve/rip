@@ -553,7 +553,7 @@ fail 'render expression cannot await through a new-member dammit', '''
 # The index-member dammit spelling stays a positioned parse rejection —
 # `!` lexes as DAMMIT only after a name (uniform with `a[k]!` outside
 # new); the member spellings above are the working forms.
-fail 'dammit directly after an index link rejects', 'x = new X(a)[k]!', "Unexpected 'UNARY_MATH'"
+fail 'dammit directly after an index link rejects', 'x = new X(a)[k]!', "Unexpected '!'"
 
 # Dynamic import with dammit operator
 code 'import! dynamic', 'import!("./foo.rip")', "await import(\"./foo.rip\");"

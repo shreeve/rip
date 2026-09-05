@@ -1804,6 +1804,18 @@ class Generator
       for own p of parseTable[state] when @tokenNames[p] and +p > 2
         expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
       expected
+    # The offending token names itself by its own text when it has one
+    # (`Unexpected '*'`, never `Unexpected 'MATH'`); layout tokens and
+    # long lexemes fall back to the kind's display.
+    layoutIds = [@symbolIds.INDENT, @symbolIds.OUTDENT, @symbolIds.TERMINATOR]
+    describeGot = =>
+      return 'end of input' if symbol is EOF
+      name = @tokenNames[symbol] or symbol
+      text = lexer.text
+      if typeof text is 'string' and text.trim().length > 0 and text.length <= 24 and not layoutIds.includes(symbol)
+        "'#{text}'"
+      else
+        "'#{name}'"
 
     loop
       state = stk[stk.length - 1]
@@ -1847,7 +1859,7 @@ class Generator
           # at its own position.
           return if parserRecorded
           parserRecorded = true
-          got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+          got = describeGot()
           expected = if wanted? then [@tokenNames[wanted] or wanted] else expectedForState()
           message = "Unexpected #{got}"
           message += " — expected #{expected.join(', ')}" if expected.length
@@ -1913,7 +1925,7 @@ class Generator
         # a minted kind as a glyph another terminal already spells
         # (OPT_MARKER and the existence `?` both display as `?`).
         expected = expectedForState()
-        got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+        got = describeGot()
         start = tokenLoc?.start ?? 0
         end   = tokenLoc?.end ?? start
         message = "Unexpected #{got}"

@@ -557,4 +557,6 @@ test 'synth compound temps dodge user bindings', '''
 
 # `*>` merge assignment is gone: the spelling no longer lexes as one
 # token, so it reads as a bare `*` and rejects at the parser.
-fail 'merge assignment is no longer an operator', '*>obj = {a: 1}', "Unexpected 'MATH'"
+fail 'merge assignment is no longer an operator', '*>obj = {a: 1}', "Unexpected '*'"
+
+fail "'is not' is rejected with the isnt spelling", 'x is not null', 'x isnt y'

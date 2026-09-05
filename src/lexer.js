@@ -1464,6 +1464,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // Contextual: only inside a module line, after a specifier
         // — `as = 2` elsewhere stays an identifier.
         push('AS', word, start, pos);
+      } else if (word === 'with' && seenImport && (prev?.kind === 'STRING' || prev?.kind === 'STRING_END')) {
+        // Contextual: import attributes, after the module source
+        // (`import d from './d.json' with { type: 'json' }`) —
+        // reserved everywhere else.
+        push('WITH', word, start, pos);
       } else if (word === 'default' && (seenImport || seenExport) &&
                  (prev?.kind === 'EXPORT' || prev?.kind === 'AS' || prev?.kind === '{' || prev?.kind === ',')) {
         // Contextual: `export default …`, `{default as d}`, `a as
@@ -1490,6 +1495,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('STATEMENT', word, start, pos);
       } else if (ALIASES[word]) {
         const [kind, value] = ALIASES[word];
+        // `x is not y` reads as `x === !y` — a comparison against a
+        // negation, never what was meant. The negated comparison is
+        // `isnt`; the rejection names it.
+        if (word === 'is' && /^[ \t]+not\b/.test(text.slice(pos))) {
+          const notEnd = pos + text.slice(pos).match(/^[ \t]+not/)[0].length;
+          fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, notEnd);
+        }
         // Word compound assignments: `and=` / `or=` are COMPOUND_ASSIGN
         // with the operator value, span covering word + '='.
         if ((word === 'and' || word === 'or') && text[pos] === '=' && text[pos + 1] !== '=') {

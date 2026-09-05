@@ -65,7 +65,7 @@ describe('tolerant repair at the parser level', () => {
     const depth5 = 'class A\n  m: ->\n    if x\n      y = (z) ->\n        if w\n          z.';
     const r = tolerant(depth5);
     expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
-    expect(r.parseDiagnostics[0].expected).toContain('PROPERTY'); // the what-to-type hint survives nesting
+    expect(r.parseDiagnostics[0].expected).toContain('a property name'); // the what-to-type hint survives nesting
     expect(r.code).toContain('class A');
   });
 
@@ -96,7 +96,7 @@ describe('tolerant repair at the parser level', () => {
       const r = tolerant(src);
       expect(r.code).toContain('x = 1');
       expect(r.parseDiagnostics.some((d) =>
-        /Unexpected 'INDENT'/.test(d.message) && d.expected.includes('TERMINATOR'))).toBe(true);
+        /Unexpected 'indent'/.test(d.message) && d.expected.includes('newline'))).toBe(true);
     }
   });
 

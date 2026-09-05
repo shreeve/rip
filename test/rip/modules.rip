@@ -554,3 +554,13 @@ fail 'an export inside a block rejects', "if c\n  export x = 1", "'export' must 
 fail 'a bare default specifier rejects', "import {default} from 'm'", 'import { default }'
 
 code 'export all as a namespace', "export * as utils from './utils'", "export * as utils from './utils';"
+
+# ==============================================================================
+# Import attributes
+# ==============================================================================
+
+code 'import attributes ride after the source', "import data from './data.json' with { type: 'json' }", 'import data from \'./data.json\' with {type: "json"};'
+code 'side-effect import attributes', "import './data.json' with { type: 'json' }", 'import \'./data.json\' with {type: "json"};'
+code 'namespace import attributes', "import * as d from './d.json' with { type: 'json' }", 'import * as d from \'./d.json\' with {type: "json"};'
+code 'named import attributes', "import { a } from './d.json' with { type: 'json' }", 'import { a } from \'./d.json\' with {type: "json"};'
+fail "'with' stays reserved outside an import", "with x\n  1", "'with' is reserved"

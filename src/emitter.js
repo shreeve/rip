@@ -3255,7 +3255,7 @@ class Emitter {
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.stores.idOf(x);
       if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
-      for (const spec of x.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(x)) {
         if (!isNode(spec) || spec[0] === '*') continue;
         for (const s of spec) {
           const imported = isNode(s) ? s[0] : s;
@@ -4569,6 +4569,19 @@ class Emitter {
   // came from. The token corrections are computed from ONE file's compile,
   // so an imported name's KIND is unknowable here — what is knowable, and
   // all the editor needs, is which module and exported name to ask.
+  // An import's attributes clause (`with { type: 'json' }`), the
+  // ["with", object] element just before the source — or null.
+  static importAttributes(node) {
+    const a = node.length > 2 ? node[node.length - 2] : null;
+    return isNode(a) && a[0] === 'with' && a.length === 2 ? a : null;
+  }
+
+  // An import's specifiers: everything between the keyword and the
+  // source, the attributes clause excluded.
+  static importSpecs(node) {
+    return node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+  }
+
   static importedSpecs(stmts) {
     const specs = new Map();
     for (const node of stmts) {
@@ -4576,7 +4589,7 @@ class Emitter {
       const source = node[node.length - 1];
       if (typeof source !== 'string') continue;
       const specifier = source.replace(/^['"`]|['"`]$/g, '');
-      for (const spec of node.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(node)) {
         if (spec === '{}') continue;
         if (typeof spec === 'string') {
           specs.set(spec, { specifier, importedName: 'default' });
@@ -4604,7 +4617,7 @@ class Emitter {
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
-      for (const spec of node.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(node)) {
         if (spec === '{}') continue;
         if (typeof spec === 'string') names.push(spec);
         else if (spec[0] === '*') names.push(spec[1]);
@@ -4820,7 +4833,8 @@ class Emitter {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
     const source = node[node.length - 1];
-    const specs = node.slice(1, -1);
+    const specs = Emitter.importSpecs(node);
+    const attrs = Emitter.importAttributes(node);
     // A bare `default` inside braces names no binding — ES has no such
     // specifier. The default binding is the unbraced form, or the
     // aliased one inside braces.
@@ -4860,6 +4874,7 @@ class Emitter {
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
           this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+          this.emitImportAttributes(attrs);
         });
         this.b.emit(';\n');
       });
@@ -4893,8 +4908,20 @@ class Emitter {
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
+      this.emitImportAttributes(attrs);
     });
     this.b.emit(';\n');
+  }
+
+  // The attributes clause after the source: `with { type: "json" }`.
+  emitImportAttributes(attrs) {
+    if (attrs === null) return;
+    this.b.emit(' ');
+    this.mark(attrs, '$self', () => {
+      this.mark(attrs, 'keyword', () => this.b.emit('with'));
+      this.b.emit(' ');
+      this.mark(attrs, 'value', () => this.expr(attrs[1]));
+    });
   }
 
   // repl mode's import lowering: a static import cannot live in a
@@ -4911,7 +4938,8 @@ class Emitter {
   // in the program's own context.
   replImportStatement(node) {
     const source = node[node.length - 1];
-    const specs = node.slice(1, -1);
+    const specs = Emitter.importSpecs(node);
+    const attrs = Emitter.importAttributes(node);
     const parts = [];
     let nsName = null;
     for (const spec of specs) {
@@ -4929,7 +4957,14 @@ class Emitter {
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
-      this.b.emit('))');
+      this.b.emit(')');
+      // Attributes ride the dynamic form's options argument.
+      if (attrs !== null) {
+        this.b.emit(', { with: ');
+        this.mark(attrs, 'value', () => this.expr(attrs[1]));
+        this.b.emit(' }');
+      }
+      this.b.emit(')');
       if (nsName !== null && parts.length > 0) {
         this.b.emit(`, { ${parts.join(', ')} } = ${nsName}`);
       }

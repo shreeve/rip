@@ -64,14 +64,45 @@ const positioned = (file, path, reason, start, end) => {
   return new CompileError(message, { path, start, end, line: line + 1, col: col + 1 });
 };
 
-// A parse diagnostic as a CompileError. The one grammar state whose
-// FIRST expectation is the ternary's ':' is a two-operand `a ? b` —
-// almost always a reach for the nullish default; the hint names the
-// operator that means it.
+// A parse diagnostic as a CompileError, with a hint where the
+// rejection has a spelling the author was clearly reaching for. Each
+// hint keys on the SOURCE around the offending token — what was
+// written, never an internal token kind — so it names the fix:
+//   `a ? b`               the nullish default is `??`
+//   `(a...) ->`           the rest parameter's dots lead the name
+//   `return v for v in l` a comprehension returns parenthesized
+//   `import! 'm'`         the awaited dynamic import takes parens
+//   `fn()!`               the await bang goes on the callee
+//   `if c` / `then …`     `then` belongs on the `if` line
+const parseHint = (file, d) => {
+  const src = file.text;
+  const before = src.slice(0, d.start);
+  const at = src.slice(d.start);
+  const line = before.slice(before.lastIndexOf('\n') + 1);
+  if (d.expected?.[0] === ':' || /\?[ \t]*$/.test(before)) {
+    return "a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y";
+  }
+  if (/^\.\.\./.test(at) && /[(,]\s*[A-Za-z_$][\w$]*\s*$/.test(before)) {
+    return 'a rest parameter is spelled `...name` — the dots lead the name';
+  }
+  if (/^for\b/.test(at) && /^\s*return\b/.test(line)) {
+    return '`return` takes one expression — parenthesize the comprehension: `return (v for v in list)`';
+  }
+  if (/^!/.test(at) && /\bimport\s*$/.test(before)) {
+    return "an awaited dynamic import is spelled `import!('mod')` — the call parens are required";
+  }
+  if (/^!/.test(at) && /\)\s*$/.test(before)) {
+    return 'the await bang goes on the callee — `fn!()`, not `fn()!`';
+  }
+  if (/^if\b[^\n]*\n[ \t]*then\b/.test(at)) {
+    return '`then` belongs on the `if` line (`if c then …`) — or indent the body beneath the condition';
+  }
+  return null;
+};
+
 const diagnosticError = (file, path, d) => {
-  const message = d.expected?.[0] === ':'
-    ? `${d.message}\n  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)`
-    : d.message;
+  const hint = parseHint(file, d);
+  const message = hint !== null ? `${d.message}\n  (${hint})` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
 

@@ -443,9 +443,14 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const specListText = (list) =>
     list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
 
+  // The attributes clause (`with { type: 'json' }`, the ["with", …]
+  // element before the source) is a runtime loading concern; the
+  // declaration keeps the bindings and drops it.
+  const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+
   const importText = (node) => {
     const source = node[node.length - 1];
-    const specs = node.slice(1, -1).map((spec) => {
+    const specs = importSpecs(node).map((spec) => {
       if (typeof spec === 'string') return spec;
       if (spec[0] === '*') return `* as ${spec[1]}`;
       return `{ ${specListText(spec)} }`;
@@ -458,7 +463,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // renamed). A side-effect import binds nothing.
   const importBoundNames = (node) => {
     const names = [];
-    for (const spec of node.slice(1, -1)) {
+    for (const spec of importSpecs(node)) {
       if (spec === '{}') continue;
       if (typeof spec === 'string') names.push(spec);
       else if (spec[0] === '*') names.push(spec[1]);

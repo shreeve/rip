@@ -123,6 +123,13 @@ grammar =
     o 'IMPORT { ImportSpecifierList OptComma } FROM String'                         , '["import", 3, 7]'      , 'import: _, spec, source'
     o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String'        , '["import", 2, 4, 6]'   , 'import: _, spec, extra, source'
     o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String', '["import", 2, 5, 9]'   , 'import: _, spec, extra, source'
+    # Import attributes (`import data from './d.json' with { type: 'json' }`):
+    # the clause rides BEFORE the source so the source stays last (every
+    # consumer reads the specifier there); the emitter prints it after.
+    o 'IMPORT String WITH Object'                                                   , '["import", ["with", 4], 2]'   , 'import: _, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier FROM String WITH Object'                       , '["import", 2, ["with", 6], 4]', 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportNamespaceSpecifier FROM String WITH Object'                     , '["import", 2, ["with", 6], 4]', 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String WITH Object'             , '["import", 3, ["with", 9], 7]', 'import: _, spec, attributes(withattrs: keyword, value), source'
     # A TYPE-ONLY import (`import type … from …`): the keyword rides the
     # side-band typeOnly role and the node keeps the plain import's
     # shape, so everything that consumes an import statement consumes
@@ -1362,6 +1369,113 @@ displays =
   OPT_MARKER: '?'
   VOID_MARKER: '!'
   IMPORT_TYPE: 'type'
+  # Layout and lexer-classified kinds, in the words a reader knows.
+  TERMINATOR: 'newline'
+  INDENT: 'indent'
+  OUTDENT: 'dedent'
+  STATEMENT: 'break/continue/debugger'
+  TYPE_DECL: 'type/interface'
+  TYPE: 'a type annotation'
+  TYPE_PARAMS: '<…>'
+  SCHEMA_BODY: 'a schema body'
+  IDENTIFIER: 'a name'
+  PROPERTY: 'a property name'
+  NUMBER: 'a number'
+  STRING: 'a string'
+  STRING_START: 'a string'
+  STRING_END: 'the closing quote'
+  SYMBOL: 'a :symbol'
+  REGEX: 'a regex'
+  BOOL: 'true/false'
+  UNDEFINED: 'undefined'
+  NULL: 'null'
+  THIS: 'this'
+  SUPER: 'super'
+  NEW: 'new'
+  NEW_TARGET: 'new.target'
+  IMPORT_META: 'import.meta'
+  # Keywords whose token kind is not their spelling.
+  DEF: 'def'
+  IMPORT: 'import'
+  EXPORT: 'export'
+  FROM: 'from'
+  AS: 'as'
+  WITH: 'with'
+  DEFAULT: 'default'
+  IMPORT_ALL: '*'
+  EXPORT_ALL: '*'
+  DYNAMIC_IMPORT: 'import('
+  CLASS: 'class'
+  EXTENDS: 'extends'
+  ENUM: 'enum'
+  SCHEMA: 'schema'
+  COMPONENT: 'component'
+  OFFER: 'offer'
+  ACCEPT: 'accept'
+  RENDER: 'render'
+  RETURN: 'return'
+  IF: 'if'
+  POST_IF: 'if'
+  UNLESS: 'unless'
+  POST_UNLESS: 'unless'
+  ELSE: 'else'
+  WHILE: 'while'
+  UNTIL: 'until'
+  LOOP: 'loop'
+  FOR: 'for'
+  FORIN: 'in'
+  FOROF: 'of'
+  FORAS: 'as'
+  FORASAWAIT: 'as'
+  OWN: 'own'
+  BY: 'by'
+  WHEN: 'when'
+  LEADING_WHEN: 'when'
+  SWITCH: 'switch'
+  TRY: 'try'
+  CATCH: 'catch'
+  FINALLY: 'finally'
+  THROW: 'throw'
+  AWAIT: 'await'
+  YIELD: 'yield'
+  DO: 'do'
+  DO_IIFE: 'do'
+  CAST: 'as'
+  # Glyphs the lexer classifies.
+  CALL_START: '('
+  CALL_END: ')'
+  PARAM_START: '('
+  PARAM_END: ')'
+  INDEX_START: '['
+  INDEX_END: ']'
+  PICK_START: '{'
+  PICK_END: '}'
+  OPTPICK_START: '?.{'
+  ES6_OPTIONAL_INDEX: '?.['
+  ES6_OPTIONAL_CALL: '?.('
+  MAP_START: '*{'
+  INTERPOLATION_START: '#{'
+  INTERPOLATION_END: '}'
+  HEREGEX_START: '///'
+  HEREGEX_END: '///'
+  TEMPLATE_TAG: '$'
+  DAMMIT: '!'
+  PRESENCE: '?!'
+  TERNARY: '?'
+  GATE: '<~'
+  MATCH: '=~'
+  METHOD_ASSIGN: '.='
+  REACTIVE_ASSIGN: ':='
+  COMPUTED_ASSIGN: '~='
+  READONLY_ASSIGN: '=!'
+  EFFECT: '~>'
+  COMPOUND_ASSIGN: 'a compound assignment'
+  MATH: 'a math operator'
+  SHIFT: 'a shift operator'
+  COMPARE: 'a comparison'
+  RELATION: 'in/instanceof'
+  UNARY: 'not/typeof/delete'
+  UNARY_MATH: '!/~'
 
 # ==============================================================================
 # Kind Schema
@@ -1409,7 +1523,7 @@ kinds =
   'gate':          ['annotation', 'key', 'operator', 'rhs', 'target']
   'heregex':       ['flags', 'parts']
   'if':            ['condition', 'else', 'then']
-  'import':        ['extra', 'source', 'spec', 'typeOnly']
+  'import':        ['attributes', 'extra', 'source', 'spec', 'typeOnly']
   'index':         ['key', 'object', 'operator']
   'loop':          ['body', 'count']
   'map':           ['pairs']
@@ -1447,6 +1561,7 @@ kinds =
   'unary':         ['operand', 'operator']
   'update':        ['operator', 'prefix', 'target']
   'when':          ['body', 'conditions']
+  'withattrs':     ['keyword', 'value']
   'while':         ['body', 'condition', 'guard']
   'yield':         ['value']
   'yieldfrom':     ['value']

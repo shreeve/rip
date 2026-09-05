@@ -418,3 +418,17 @@ fail 'a getter takes no parameters', 'class A\n  get x: (a) -> a', 'getter takes
 fail 'a setter takes one parameter', 'class A\n  set x: -> 1', 'setter takes exactly one parameter'
 fail 'accessors are never bound', 'class A\n  get x: => 1', "accessor takes '->'"
 fail 'a static def outside a class rejects', 'def @m()\n  1', 'static class method'
+
+test 'parenless def forms in a class body', '''
+    class A
+      def b
+        'hello'
+      def @c
+        'static'
+      def d!
+        @x = 1
+      def e: string
+        'typed'
+    a = new A()
+    [a.b(), A.c(), a.d(), a.x, a.e()]
+  ''', ['hello', 'static', null, 1, 'typed']
