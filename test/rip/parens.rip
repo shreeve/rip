@@ -81,3 +81,15 @@ test "postfix if fails", "isEmpty = true; isValid = true; x = 5 if !isEmpty && i
 code "comparison with logical", "if (x > 5) && (y < 10) then z", "if ((x > 5) && (y < 10)) {\n  z;\n}"
 
 test "comparison with logical execution", "x = 6; y = 8; result = 'yes' if (x > 5) && (y < 10); result", "yes"
+
+# ==============================================================================
+# An INTEGER literal receiver keeps its parens: `2.toFixed` would read
+# the dot as a decimal point. Floats, hex, and bigints need none.
+# ==============================================================================
+
+code 'a parenthesized integer receiver', '(2).toFixed 1', '(2).toFixed(1);'
+code 'a spaced integer receiver groups', '2 .toFixed 1', '(2).toFixed(1);'
+code 'an integer receiver on a continued line groups', 'x = 1\n  .toString()', 'let x = (1).toString();'
+code 'a float receiver needs no parens', '2.5.toFixed 1', '2.5.toFixed(1);'
+code 'a hex receiver needs no parens', '0x10.toString()', '0x10.toString();'
+test 'an integer receiver method call runs', '(2).toFixed 1', '2.0'

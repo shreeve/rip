@@ -1197,3 +1197,25 @@ test 'standalone ?? throw with undefined', '''
         e.message
     fn(undefined)
   ''', "was nullish"
+
+# ==============================================================================
+# A chain of postfix-else ternaries reads the Python way — right-nested:
+# `1 if a else 2 if b else 3` is `a ? 1 : (b ? 2 : 3)`, and an assigned
+# chain hoists its target out of the whole chain. Parenthesizing an
+# inner ternary keeps the grouping the author wrote.
+# ==============================================================================
+
+test 'a ternary chain takes the first true condition', 'a = true\nb = false\nx = 1 if a else 2 if b else 3\nx', 1
+test 'a ternary chain falls through to the last else', 'a = false\nb = false\nx = 1 if a else 2 if b else 3\nx', 3
+test 'a ternary chain takes a later condition', 'a = false\nb = true\nx = 1 if a else 2 if b else 3\nx', 2
+code 'an assigned ternary chain hoists its target', 'x = 1 if a else 2 if b else 3', '''
+  let x;
+
+  x = (a ? 1 : (b ? 2 : 3));
+  '''
+code 'a ternary chain in value position', 'f(1 if a else 2 if b else 3)', 'f(a ? 1 : (b ? 2 : 3));'
+code 'a parenthesized inner ternary keeps its grouping', 'x = (1 if a else 2) if b else 3', '''
+  let x;
+
+  x = (b ? (a ? 1 : 2) : 3);
+  '''

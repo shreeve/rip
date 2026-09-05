@@ -7562,6 +7562,10 @@ class Emitter {
     this.grouped(node, role, child, Emitter.needsGrouping(child, 'head'));
   }
 
+  static isIntegerLiteral(x) {
+    return typeof x === 'string' && /^[0-9][0-9_]*$/.test(x);
+  }
+
   grouped(node, role, child, wrap) {
     if (wrap) this.b.emit('(');
     this.mark(node, role, () => this.expr(child));
@@ -13493,7 +13497,11 @@ class Emitter {
         // `a.at(-1)`).
         f.savedTarget = this.inTarget;
         this.inTarget = false;
-        if (isInner) this.head(n, 'object', n[1]);
+        // An INTEGER literal receiver groups: `2.toFixed` reads the
+        // dot as a decimal point, so the member needs `(2).toFixed`
+        // (a float, exponent, hex, or bigint literal has no such
+        // ambiguity).
+        if (isInner) this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1]));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -15068,6 +15076,13 @@ class Emitter {
               this.b.emit(')');
             });
           });
+        } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2) {
+          // `new new X()` — the inner construction is the constructor:
+          // `new (new X())`. Bare, the outer `new` would read the inner
+          // as a call of a function named `new`.
+          this.b.emit('(');
+          this.newExpr(operand);
+          this.b.emit(')');
         } else if (isNode(operand) && operand[0] === 'dammit!') {
           // `new (f!)` → `new (await f())()`. Source parens selected
           // the program (sealed Value-dammit as the constructor).
@@ -15657,43 +15672,59 @@ class Emitter {
   // `x = (c ? b : d)`. The explicit `(x = b) if c else d` keeps its
   // assign-only-when-true semantics (the Parenthetical flag guards it).
   static ternaryHoists(node) {
-    const then = node[2];
+    // The hoist belongs to the INNERMOST level of a left-nested chain
+    // (`x = 1 if a else 2 if b else 3` — see ternary()).
+    let inner = node;
+    while (isNode(inner[2]) && inner[2][0] === '?:' && inner[2].length === 4 && !inner[2].parenthesized) inner = inner[2];
+    const then = inner[2];
     return isNode(then) && then[0] === '=' && then.length === 3 &&
       typeof then[1] === 'string' && !then.parenthesized;
   }
 
+  //
+  // The chain: `x if a else y if b else z` parses LEFT-nested —
+  // ((x if a else y) if b else z), the then branch of each level being
+  // the level inside it — and reads the Python way, `a ? x : (b ? y :
+  // z)`. The chain re-associates at emission: each enclosing level's
+  // condition pairs with the inner level's else, and the outermost
+  // else closes it. Every mark stays on its own node. A parenthesized
+  // inner ternary is a value the author grouped and keeps its nesting.
   ternary(node) {
-    if (Emitter.ternaryHoists(node)) {
-      const then = node[2];
-      this.mark(node, '$self', () => {
+    const chain = [node];
+    while (true) {
+      const then = chain[chain.length - 1][2];
+      if (isNode(then) && then[0] === '?:' && then.length === 4 && !then.parenthesized) chain.push(then);
+      else break;
+    }
+    const inner = chain[chain.length - 1];
+    const hoists = Emitter.ternaryHoists(inner);
+    const branch = (owner, role, child) => {
+      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
+    };
+    // A ternary CONDITION keeps its parens — bare, JS
+    // right-associativity re-associates and changes the value.
+    const condition = (owner) => this.grouped(owner, 'condition', owner[1], isNode(owner[1]) && owner[1][0] === '?:');
+    this.mark(node, '$self', () => {
+      if (hoists) {
         // The hoisted target is a WRITE — it routes through expr so a
         // reactive name unwraps (`count.value = (c ? … : …)`);
         // plain names emit verbatim as before.
-        this.expr(then[1]);
+        this.expr(inner[2][1]);
         this.b.emit(' = (');
-        // A condition that is itself a ternary keeps its parens —
-        // bare, JS right-associativity hands the TAIL of this ternary
-        // to the condition and changes the value.
-        this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
-        this.b.emit(' ? ');
-        this.grouped(node, 'then', then[2], Emitter.needsGrouping(then[2], 'operand') || isUpdate(then[2]));
-        this.b.emit(' : ');
-        this.grouped(node, 'else', node[3], Emitter.needsGrouping(node[3], 'operand') || isUpdate(node[3]));
-        this.b.emit(')');
-      });
-      return;
-    }
-    const branch = (role, child) => {
-      this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
-    };
-    this.mark(node, '$self', () => {
-      // A ternary CONDITION keeps its parens — bare, JS
-      // right-associativity re-associates and changes the value.
-      this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
+      }
+      condition(inner);
       this.b.emit(' ? ');
-      branch('then', node[2]);
+      branch(inner, 'then', hoists ? inner[2][2] : inner[2]);
+      for (let i = chain.length - 2; i >= 0; i--) {
+        this.b.emit(' : (');
+        condition(chain[i]);
+        this.b.emit(' ? ');
+        branch(chain[i + 1], 'else', chain[i + 1][3]);
+      }
       this.b.emit(' : ');
-      branch('else', node[3]);
+      branch(chain[0], 'else', chain[0][3]);
+      this.b.emit(')'.repeat(chain.length - 1));
+      if (hoists) this.b.emit(')');
     });
   }
 
