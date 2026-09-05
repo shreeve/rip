@@ -334,36 +334,157 @@ class Generator
 
     @ruleActions = "(#{parameters}) => {\n#{actionsCode}\n#{@indent}}"
 
-  # 'SYMBOL?' pattern sugar — a pattern token with a trailing '?'
-  # (labels ride along: 'TYPE[annotation]?') is optional: the rule
-  # expands into every present/absent combination, absent-first in
-  # binary-counting order, so the barest form takes the lowest rule
-  # id. Named bindings make one shared action legal across variants;
-  # a '@name' bound to an optional symbol fails generation in the
-  # absent variants (a template's arity is constant). The '?' and
-  # '??' terminals never read as sugar: only a token whose stripped
-  # symbol is itself '?'-free expands.
+  # Pattern sugar — optional symbols and alternatives expand one rule
+  # line into a family of rules:
+  #
+  #   SYMBOL?         the symbol is optional (labels ride along:
+  #                   'TYPE[annotation]?')
+  #   (A B)?          the whole group is optional
+  #   (A | B | C)     exactly one of the alternatives
+  #   (A | B)?        one of the alternatives, or nothing
+  #
+  # A group opens on a token beginning with '(' and closes on the token
+  # ending with ')' or ')?'; inside a group '|' separates alternatives,
+  # and groups nest with stacked closers: '(A (B C)?)?'. Outside a group
+  # the '(' and ')' and '|' terminals keep their meaning (the paren
+  # terminals are not spellable inside one), and the '?' and '??'
+  # terminals never read as sugar: only a token whose stripped symbol
+  # is itself '?'-free expands. Variants are listed absent-first,
+  # alternatives in order, later groups varying fastest, so the barest
+  # form takes the lowest rule id.
+  #
+  # Named bindings let one action serve the whole family. In a variant
+  # where a binding's label is absent, '@name' becomes the literal
+  # null and a spread '...@name' drops out of the template together
+  # with its annotation part. '@name?' is a presence flag — the
+  # literal true or false — and consumes the label, so the symbol
+  # carries no side-band role of its own.
   _expandOptionals: (handle) ->
     pattern = if Array.isArray handle
       if typeof handle[0] is 'string' then handle[0] else handle[0].join ' '
     else if typeof handle is 'string'
       handle
-    return [handle] unless pattern and /\S\?(?:\s|$)/.test pattern
+    return [handle] unless pattern and /(?:^|\s)\(\S|\S\?(?:\s|$)/.test pattern
 
+    tokens = pattern.trim().split /\s+/
+    pos = 0
     changed = false
-    variants = [[]]
-    for token in pattern.trim().split /\s+/
-      bare = token[...-1]
-      if token.length > 1 and token.endsWith('?') and not bare.endsWith('?')
+    closerRe = /^([^()|]*)(\)\??)(.*)$/
+    # One alternative: the tokens up to a '|' or a group closer. Returns
+    # the symbol lists it expands to and the token that ended it.
+    sequence = (inGroup) ->
+      variants = [[]]
+      choose = (choices) ->
         changed = true
-        variants = variants.flatMap (v) -> [v, [...v, bare]]
-      else
-        v.push token for v in variants
+        variants = variants.flatMap (v) -> choices.map (c) -> [...v, ...c]
+      place = (symbol) ->
+        return unless symbol
+        bare = symbol[...-1]
+        if symbol.length > 1 and symbol.endsWith('?') and not bare.endsWith('?')
+          choose [[], [bare]]
+        else
+          v.push symbol for v in variants
+      while pos < tokens.length
+        token = tokens[pos++]
+        if token.length > 1 and token[0] is '('
+          tokens.splice pos, 0, token[1..]
+          choices = []
+          loop
+            inner = sequence true
+            choices.push ...inner.variants
+            break unless inner.closer is '|'
+          choices.unshift [] if inner.closer is ')?'
+          choose choices
+        else if inGroup and token is '|'
+          return {variants, closer: '|'}
+        else if inGroup and (m = token.match closerRe)
+          place m[1]
+          tokens.splice pos, 0, m[3] if m[3]
+          return {variants, closer: m[2]}
+        else if token.length > 1 and token isnt ')?' and /\)\??$/.test token
+          throw Error.new "Grammar error: unbalanced ')' in pattern '#{pattern}'"
+        else
+          place token
+      throw Error.new "Grammar error: unclosed '(' group in pattern '#{pattern}'" if inGroup
+      {variants, closer: null}
+
+    # (`expanded`, not `variants`: an inner function assigning a name the
+    # enclosing scope also assigns shares it, and every group would then
+    # clobber its caller's list.)
+    expanded = sequence(false).variants
     return [handle] unless changed
 
+    action = if Array.isArray handle then handle[1] else undefined
+    extras = if Array.isArray handle then handle[2..] else []
+    for symbols in expanded
+      [symbols, text, rest] = @_bindVariant symbols, action, extras, expanded
+      p = symbols.join ' '
+      if Array.isArray handle then [p, text, ...rest] else p
+
+  # Rewrite one expanded variant's action for the bindings its pattern
+  # lacks: '@name' → null, '...@name' dropped (and its annotation part
+  # with it), '@name?' → true/false with the label consumed. Bindings
+  # to symbols the variant carries pass through to _resolveNamedRefs.
+  _bindVariant: (symbols, action, extras, variants) ->
+    return [symbols, action, extras] unless typeof action is 'string' and action.includes '@'
+    labelOf = (symbol) ->
+      return null if symbol is '[' or symbol is ']' or not /[\[\]]/.test symbol
+      symbol.match(/^(.+?)\[([^\[\]]*)\]$/)?[2] ?? null
+    known = Set.new()
     for v in variants
-      p = v.join ' '
-      if Array.isArray handle then [p, ...handle[1..]] else p
+      for s in v when (name = labelOf s)?
+        known.add name
+    present = Set.new()
+    for s in symbols when (name = labelOf s)?
+      present.add name
+
+    DROP = '\u0000'
+    presence = Set.new()
+    bound = Set.new()
+    text = @_outsideQuotes action, (plain) ->
+      plain.replace /(\.\.\.)?@([A-Za-z$][\w$-]*|_[\w$-]+)(\?)?/g, (m, spread, name, flag) ->
+        return m unless known.has name
+        if flag
+          presence.add name
+          return if present.has name then 'true' else 'false'
+        bound.add name
+        return m if present.has name
+        if spread then DROP else 'null'
+
+    # A presence label is consumed: the symbol carries no side-band role
+    # unless the action also binds its value.
+    symbols = symbols.map (s) ->
+      name = labelOf s
+      if name? and presence.has(name) and not bound.has(name) then s.replace(/\[[^\[\]]*\]$/, '') else s
+
+    if text.includes DROP
+      # Which top-level template elements dropped: their annotation
+      # parts go too. Nested drops leave the annotation alone (a nested
+      # scaffold is one '_' part).
+      dropped = []
+      depth = 0
+      quote = null
+      index = 0
+      i = 0
+      while i < text.length
+        ch = text[i]
+        if quote
+          if ch is '\\' then i++ else if ch is quote then quote = null
+        else if ch is '"' or ch is "'" then quote = ch
+        else if ch is '[' or ch is '(' then depth++
+        else if ch is ']' or ch is ')' then depth--
+        else if ch is ',' and depth is 1 then index++
+        else if ch is DROP and depth is 1 then dropped.push index
+        i++
+      text = text.replace(/\s*,\s*\u0000/g, '').replace(/\u0000\s*,\s*/g, '').replace(/\u0000/g, '')
+      extras = extras.map (extra) ->
+        return extra unless typeof extra is 'string' and extra.includes(':') and not extra.trim().startsWith('~')
+        colon = extra.indexOf ':'
+        kind = extra[...colon].trim()
+        parts = extra[colon + 1..].split(',').map((p) -> p.trim()).filter (p, j) -> j not in dropped
+        if parts.length then "#{kind}: #{parts.join ', '}" else kind
+
+    [symbols, text, extras]
 
   _parseHandle: (handle, lhs) ->
     if Array.isArray handle
