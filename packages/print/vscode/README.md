@@ -4,8 +4,8 @@
 
 Syntax-highlighted source code printing for VS Code and Cursor.
 
-Right-click a file, folder, or editor and choose **Rip Print** — your
-browser opens with a print-ready, syntax-highlighted view. Rip sources
+Right-click a file, folder, or editor and choose **Rip Print** — a
+print-ready, syntax-highlighted page opens in your browser. Rip sources
 highlight through the repository's shared grammar, generated into this
 extension by `rip sync.rip` (never hand-edited).
 

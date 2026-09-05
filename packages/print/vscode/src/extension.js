@@ -9,7 +9,10 @@ const vscode = require('vscode');
 const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
+const { execFile } = require('child_process');
 const { generatePrintHtml, generateMarkdownHtml, walkDir } = require('./printer');
+
+const PRINT_FILE = path.join(os.tmpdir(), 'rip-print.html');
 
 // ============================================================================
 // Activation
@@ -52,7 +55,7 @@ async function handlePrintFile(uri) {
   }
 
   const files = [{ file: path.basename(filePath), code, mtime }];
-  openInBrowser(files);
+  await openInBrowser(files);
 }
 
 async function handlePrintFolder(uri) {
@@ -95,14 +98,14 @@ async function handlePrintFolder(uri) {
     return;
   }
 
-  openInBrowser(files);
+  await openInBrowser(files);
 }
 
 // ============================================================================
 // Open in browser
 // ============================================================================
 
-function openInBrowser(files) {
+async function openInBrowser(files) {
   // Auto-detect dark mode from VS Code theme
   const themeKind = vscode.window.activeColorTheme.kind;
   const dark = themeKind === vscode.ColorThemeKind.Dark
@@ -111,17 +114,44 @@ function openInBrowser(files) {
   // Single markdown file: render as a document via Bun, not as highlighted source.
   // Falls through to generatePrintHtml if Bun isn't available or the spawn fails.
   let html = null;
-  if (files.length === 1 && files[0].file.toLowerCase().endsWith('.md')) {
-    html = generateMarkdownHtml(files[0].file, files[0].code, { dark });
-  }
-  if (html === null) {
-    html = generatePrintHtml(files, { dark });
+  try {
+    if (files.length === 1 && files[0].file.toLowerCase().endsWith('.md')) {
+      html = generateMarkdownHtml(files[0].file, files[0].code, { dark });
+    }
+    if (html === null) {
+      html = generatePrintHtml(files, { dark });
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`Rip Print: ${err.message}`);
+    return;
   }
 
-  // Write to temp file and open in default browser
-  const tmpFile = path.join(os.tmpdir(), `rip-print-${Date.now()}.html`);
-  fs.writeFileSync(tmpFile, html, 'utf-8');
-  vscode.env.openExternal(vscode.Uri.file(tmpFile));
+  try {
+    fs.writeFileSync(PRINT_FILE, html, 'utf-8');
+  } catch (err) {
+    vscode.window.showErrorMessage(`Rip Print: could not write ${PRINT_FILE} (${err.message})`);
+    return;
+  }
+
+  const opened = await openPrintedPath(PRINT_FILE);
+  if (!opened) {
+    vscode.window.showErrorMessage(`Rip Print could not open a browser. Open ${PRINT_FILE}`);
+  }
+}
+
+// Platform opener on the file path. The VS Code external-URI API does
+// not hand a local HTML document to the system browser from this host.
+function openPrintedPath(filePath) {
+  return new Promise((resolve) => {
+    const { cmd, args } = platformOpen(filePath);
+    execFile(cmd, args, (err) => resolve(!err));
+  });
+}
+
+function platformOpen(filePath) {
+  if (process.platform === 'darwin') return { cmd: '/usr/bin/open', args: [filePath] };
+  if (process.platform === 'linux') return { cmd: 'xdg-open', args: [filePath] };
+  return { cmd: 'cmd', args: ['/c', 'start', '', filePath] };
 }
 
 // ============================================================================

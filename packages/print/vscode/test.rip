@@ -66,6 +66,14 @@ test "extension.js registers exactly the contributed commands", ->
   ok source.includes("registerCommand('rip-print.printFile'")
   ok source.includes("registerCommand('rip-print.printFolder'")
 
+test "extension.js writes a stable temp file and opens it with the platform opener", ->
+  source = readFileSync join(import.meta.dir, 'src', 'extension.js'), 'utf8'
+  ok source.includes("path.join(os.tmpdir(), 'rip-print.html')")
+  ok source.includes('/usr/bin/open')
+  ok not source.includes('servePrintHtml')
+  ok not source.includes('openExternal')
+  ok not source.includes('Uri.file')
+
 # ==[ Language detection ]==
 
 console.log "\nLanguage detection"
