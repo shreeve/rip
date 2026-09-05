@@ -357,3 +357,64 @@ fail 'class @Name rejects at the top level', 'class @Top\n  x: -> 1', 'STATIC me
 # the constructor, so it groups — bare, the outer `new` would read the
 # inner as a call of a function named `new`.
 code 'new of a construction groups the inner construction', 'new new X()', 'new (new X());'
+
+# ==============================================================================
+# `def` methods and get/set accessors in class bodies
+# ==============================================================================
+
+test 'def declares a class method, def @ a static one', '''
+    class A
+      def double(x)
+        x * 2
+      def @make()
+        new A()
+      def @typed(): number
+        7
+    [A.make().double(4), A.typed()]
+  ''', [8, 7]
+
+test 'a void def method returns undefined', '''
+    class A
+      def run!()
+        @ran = true
+      def @reset!(): void
+        @count = 0
+      def @bump!()
+        @count++
+    a = new A()
+    A.reset()
+    A.bump()
+    [a.run(), a.ran, A.count]
+  ''', [null, true, 1]
+
+test 'def constructor promotes parameters', '''
+    class P
+      def constructor(@name)
+        @ok = true
+    p = new P('x')
+    [p.name, p.ok]
+  ''', ['x', true]
+
+test 'get and set accessors', '''
+    class T
+      constructor: -> @_v = 1
+      get v: -> @_v * 10
+      set v: (n) -> @_v = n
+      get @kind: -> 'T'
+    t = new T()
+    t.v = 3
+    [t.v, T.kind]
+  ''', [30, 'T']
+
+code 'a setter body emits void', 'class T\n  set v: (n) -> @_v = n', '''
+    class T {
+      set v(n) {
+        this._v = n;
+      }
+    }
+  '''
+
+fail 'a getter takes no parameters', 'class A\n  get x: (a) -> a', 'getter takes no parameters'
+fail 'a setter takes one parameter', 'class A\n  set x: -> 1', 'setter takes exactly one parameter'
+fail 'accessors are never bound', 'class A\n  get x: => 1', "accessor takes '->'"
+fail 'a static def outside a class rejects', 'def @m()\n  1', 'static class method'

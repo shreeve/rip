@@ -76,3 +76,19 @@ band = switch
   when score > 0 then 'on the chart'
 
 console.log('tier:', tier, 'band:', band)
+
+# ── Match arms: a regex or range `when` tests the subject instead of comparing to it ──
+
+wordKind = (w: string) ->
+  switch w
+    when /^p/ then 'p-word'
+    when 'x', /z$/ then 'x-or-z'
+    else 'other'
+
+numKind = (n: number) ->
+  switch n
+    when [1..9] then 'digit'
+    when [10...100], 100 then 'tens'
+    else 'big'
+
+console.log('match:', wordKind('perfect'), wordKind('buzz'), wordKind('q'), numKind(7), numKind(100), numKind(101))

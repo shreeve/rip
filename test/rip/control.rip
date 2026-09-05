@@ -1219,3 +1219,62 @@ code 'a parenthesized inner ternary keeps its grouping', 'x = (1 if a else 2) if
 
   x = (b ? (a ? 1 : 2) : 3);
   '''
+
+# ==============================================================================
+# Switch match arms — a regex or range `when` is a match test, not a
+# value: the switch lowers to an if/else chain over the subject.
+# ==============================================================================
+
+test 'switch regex arms match by test', '''
+    f = (s) ->
+      switch s
+        when /^a/i then 'a'
+        when /b$/ then 'b'
+        else 'other'
+    [f('Apple'), f('cab'), f('x')]
+  ''', ['a', 'b', 'other']
+
+test 'switch range arms match by bounds', '''
+    f = (n) ->
+      switch n
+        when [1..3] then 'low'
+        when [4...10], 12 then 'mid'
+        else 'high'
+    [f(3), f(9), f(10), f(12)]
+  ''', ['low', 'mid', 'high', 'mid']
+
+test 'switch match arms bind an impure subject once', '''
+    calls = 0
+    g = -> calls++; 'abc'
+    r = switch g()
+      when /z/ then 1
+      when /b/ then 2
+    [r, calls]
+  ''', [2, 1]
+
+test 'switch heregex arm', '''
+    d = 'b'
+    switch 'abc'
+      when ///a #{d}/// then 'hit'
+      else 'miss'
+  ''', 'hit'
+
+test 'switch mixed literal and match arms in one when', '''
+    f = (v) ->
+      switch v
+        when 'x', /^y/, [10..20] then 'yes'
+        else 'no'
+    [f('x'), f('yo'), f(15), f(5)]
+  ''', ['yes', 'yes', 'yes', 'no']
+
+code 'switch with only plain arms keeps case labels', 'switch s\n  when 1, 2 then a()\n  else b()', '''
+    switch (s) {
+      case 1:
+      case 2:
+        a();
+        break;
+      default:
+        b();
+        break;
+    }
+  '''

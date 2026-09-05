@@ -730,21 +730,28 @@ const angleWeight = (t) =>
 // false (start of file — decisively no head), or null (transparent —
 // a colon inside the type run). Reads earlier tokens only, so the
 // answer is immutable once computed.
+// tokens[k] is a def's name: `def name` or the static `def @name`.
+const isDefName = (tokens, k) => {
+  const t = tokens[k];
+  if (!t) return false;
+  if (t.kind === 'IDENTIFIER') return tokens[k - 1]?.kind === 'DEF';
+  return t.kind === 'PROPERTY' && tokens[k - 1]?.kind === '@' && tokens[k - 2]?.kind === 'DEF';
+};
+
 const classifyTypeColon = (tokens, j) => {
   const before = tokens[j - 1];
   if (!before) return false;
   if (before.kind === ')' || before.kind === 'CALL_END' || before.kind === 'PARAM_END') return true;
   if (before.kind === 'IDENTIFIER' || before.kind === 'PROPERTY') {
-    // Parameterless def return type: `def g: Map<K, V>`.
-    if (tokens[j - 2]?.kind === 'DEF') return true;
+    // Parameterless def return type: `def g: Map<K, V>` / `def @g: T`.
+    if (isDefName(tokens, j - 1)) return true;
     // Typed declaration / class field: the name sits at a
     // statement boundary (`@`-static names look one further back).
     const nameAt = tokens[j - 2]?.kind === '@' ? j - 3 : j - 2;
     if (atStatementBoundary(tokens, nameAt)) return true;
   }
   // Parameterless VOID def return type: `def tick!: Map<K, V>`.
-  if (before.kind === 'VOID_MARKER' && tokens[j - 2]?.kind === 'IDENTIFIER' &&
-      tokens[j - 3]?.kind === 'DEF') return true;
+  if (before.kind === 'VOID_MARKER' && isDefName(tokens, j - 2)) return true;
   return null;
 };
 
@@ -1715,15 +1722,13 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (RUN_OPENERS.has(kd)) {
       let fk = 'other';
       if (kd === 'PARAM_START') fk = 'param';
-      else if (kd === 'CALL_START' && prev?.kind === 'IDENTIFIER' && out[out.length - 2]?.kind === 'DEF') fk = 'defparam';
+      else if (kd === 'CALL_START' && isDefName(out, out.length - 1)) fk = 'defparam';
       // Generic def: the minted TYPE_PARAMS sits between the name and
       // its param list.
-      else if (kd === 'CALL_START' && prev?.kind === 'TYPE_PARAMS' &&
-               out[out.length - 2]?.kind === 'IDENTIFIER' && out[out.length - 3]?.kind === 'DEF') fk = 'defparam';
+      else if (kd === 'CALL_START' && prev?.kind === 'TYPE_PARAMS' && isDefName(out, out.length - 2)) fk = 'defparam';
       // Void def (`def save!(x)`): the VOID_MARKER sits between the
       // def name and its param list.
-      else if (kd === 'CALL_START' && prev?.kind === 'VOID_MARKER' &&
-               out[out.length - 2]?.kind === 'IDENTIFIER' && out[out.length - 3]?.kind === 'DEF') fk = 'defparam';
+      else if (kd === 'CALL_START' && prev?.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) fk = 'defparam';
       frames.push({
         kind: fk, sawEq: false, sawType: false, bodyDepth: 0,
         pendingImmediate: false, pendingCond: false, inlineBody: false,

@@ -100,3 +100,27 @@ let band = (() => {
 })()
 
 console.log('tier:', tier, 'band:', band)
+
+// ── Match arms: a regex or range `when` tests the subject instead of comparing to it ──
+
+const wordKind = (w: string) => {
+  if (/^p/.test(w)) {
+    return 'p-word'
+  } else if (w === 'x' || /z$/.test(w)) {
+    return 'x-or-z'
+  } else {
+    return 'other'
+  }
+}
+
+const numKind = (n: number) => {
+  if (n >= 1 && n <= 9) {
+    return 'digit'
+  } else if ((n >= 10 && n < 100) || n === 100) {
+    return 'tens'
+  } else {
+    return 'big'
+  }
+}
+
+console.log('match:', wordKind('perfect'), wordKind('buzz'), wordKind('q'), numKind(7), numKind(100), numKind(101))

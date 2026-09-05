@@ -141,3 +141,29 @@ export class Shipped
   version: number = 4
 
 console.log('shipped:', new Shipped().version)
+
+# ── def methods: `def` in a class body, the static `def @`, the bang void form, and get/set accessors ──
+
+class Counter
+  def constructor(@count: number = 0)
+    @history: number[] = []
+  def add(n: number): number
+    @history.push(n)
+    @count += n
+  def @of(n: number): Counter
+    new Counter(n)
+  def @fresh()
+    new Counter()
+  def @zero!()
+    console.log('zeroed')
+  def @tick!(): void
+    console.log('tick')
+  get doubled: -> @count * 2
+  set doubled: (v) -> @count = v / 2
+
+Counter.zero()
+Counter.tick()
+counted = Counter.of(3)
+counted.add(2)
+counted.doubled = 20
+console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count)

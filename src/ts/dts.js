@@ -502,7 +502,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       return;
     }
     if (head === 'export-all') {
-      lines.push(`export * from ${moduleSourceText(stmt[1])};`);
+      lines.push(`export * ${stmt.length === 3 ? `as ${stmt[2]} ` : ''}from ${moduleSourceText(stmt[1])};`);
       return;
     }
     if (head === 'export-from') {

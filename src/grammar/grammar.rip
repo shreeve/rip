@@ -180,6 +180,7 @@ grammar =
     o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]' , 'export: _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", 4]' , 'export: _, spec'
     o 'EXPORT EXPORT_ALL FROM String'                      , '["export-all", 4]'     , 'export: _, source'
+    o 'EXPORT EXPORT_ALL AS Identifier FROM String'        , '["export-all", 6, 4]'  , 'export: _, source, alias'
     o 'EXPORT { } FROM String'                             , '["export-from", "{}", 5]', 'export: _, spec, source'
     o 'EXPORT { ExportSpecifierList OptComma } FROM String', '["export-from", 3, 7]' , 'export: _, spec, source'
   ]
@@ -820,6 +821,11 @@ grammar =
     # side-band voidMarker role.
     o 'DEF Identifier VOID_MARKER[voidMarker] OptParams Block', '["void-def", 2, 4, 5]', 'def: _, name, params, body'
     o 'DEF Identifier VOID_MARKER[voidMarker] OptParams TYPE[returnType] Block', '["void-def", 2, 4, 6]', 'def: _, name, params, body'
+    # Static def (`def @m(a)`, `def @m!(a)`): the ThisProperty name marks
+    # a static class method; anywhere but a class body the shape
+    # rejects at emission.
+    o 'DEF ThisProperty[name] OptParams[params] (TYPE[returnType])? Block[body]', '["def", @name, @params, @body]', 'def: _, name, params, body'
+    o 'DEF ThisProperty[name] VOID_MARKER[voidMarker] OptParams[params] (TYPE[returnType])? Block[body]', '["void-def", @name, @params, @body]', 'def: _, name, params, body'
   ]
 
   OptParams: [
@@ -1395,7 +1401,7 @@ kinds =
   'enum':          ['body', 'name']
   'existence':     ['operator', 'value']
   'expansion':     []
-  'export':        ['source', 'spec']
+  'export':        ['alias', 'source', 'spec']
   'foras':         ['await', 'body', 'guard', 'iterable', 'vars']
   'forin':         ['body', 'guard', 'iterable', 'step', 'vars']
   'forof':         ['body', 'guard', 'object', 'own', 'vars']
