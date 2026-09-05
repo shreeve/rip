@@ -423,7 +423,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -432,6 +432,10 @@ class Emitter {
     // the slot name mints lazily, so the used-name registry and the
     // temp allocator are untouched when off.
     this.repl = repl;
+    // The editor's face compile: a shape the tolerant parse invented
+    // (an unclosed literal that swallowed the next statement) must
+    // still emit, so the dead-code rejections stand down here.
+    this.tolerant = tolerant;
     this.replResultName = null;
     this.replImportResolver = null;
     // Script-target emission: <script type="text/rip"> sources share one
@@ -1352,7 +1356,7 @@ class Emitter {
         walk(n[1], true);
         return;
       }
-      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
+      if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') plainForm(n[1], n);
         else if (n[0] === '=' && Emitter.isPattern(n[1])) {
           for (const name of dupIn(this.patternNames(n[1]), n, 'destructuring pattern')) {
@@ -3673,7 +3677,7 @@ class Emitter {
       // The update forms already behave this way: they were never hoist
       // candidates.
       //
-      // The head list matches `hoistTargets`' own walk, `*>` included:
+      // The head list matches `hoistTargets`' own walk:
       // merge-into reads its target to merge into it, so a shadow there
       // silently drops the export's value rather than reading undefined.
       //
@@ -3683,7 +3687,7 @@ class Emitter {
       // nested shadow; narrowing it needs the scope's read/write
       // ORDERING, which the hoist collector does not carry. What this
       // clause buys is the spelling users actually write.
-      if (isNode(node) && (ASSIGNS.has(node[0]) || node[0] === '*>') &&
+      if (isNode(node) && ASSIGNS.has(node[0]) &&
           !DECLARING_ASSIGNS.has(node[0]) &&
           typeof node[1] === 'string' && this.isExportedConst(node[1])) return false;
       return !this.inScope(n) || (n === '_' && collected.matchWrite);
@@ -3863,9 +3867,7 @@ class Emitter {
         add('_', n);
         matchWrite = true;
       }
-      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
-        // Merge assignment DECLARES a plain-name target: its `??= {}`
-        // initializes a nullish binding, so first use is legal.
+      if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
           add(n[1], n);
           noteAnnotation(n[1], n);
@@ -4048,7 +4050,7 @@ class Emitter {
         occur('_', inFn, true);
         return;
       }
-      if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
+      if (ASSIGNS.has(head) && n.length === 3) {
         walk(n[2], inFn); // value before target: execution order
         if (typeof n[1] === 'string') {
           const declaring = DECLARING_ASSIGNS.has(head);
@@ -5706,9 +5708,9 @@ class Emitter {
         this.b.emit(';');
         return;
       }
-      // Method and merge assignment are statement lowerings: the
-      // target is spelled twice (write + read), and an impure member
-      // target pre-binds its base on its own line.
+      // Method assignment is a statement lowering: the target is
+      // spelled twice (write + read), and an impure member target
+      // pre-binds its base on its own line.
       if (node[0] === '.=' && node.length === 3) {
         this.methodAssignStatement(node, ind);
         this.b.emit(';');
@@ -5718,11 +5720,6 @@ class Emitter {
       // a statement lowering to splice (value position rejects).
       if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
         this.sliceAssignStatement(node);
-        this.b.emit(';');
-        return;
-      }
-      if (node[0] === '*>' && node.length === 3) {
-        this.mergeAssignStatement(node, ind);
         this.b.emit(';');
         return;
       }
@@ -5836,7 +5833,7 @@ class Emitter {
   // syntax outside all role marks (the declare-in-place `let `
   // precedent), so every role row keeps its exact source↔generated
   // slice. Assignment forms that lower to multi-statement rewrites
-  // (`.=`, `*>`, optional-chain targets, middle-rest patterns) return
+  // (`.=`, optional-chain targets, middle-rest patterns) return
   // from statementCore before this point and stay echo-free.
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt) return false;
@@ -7711,7 +7708,7 @@ class Emitter {
         } else this.b.emit(`Symbol.for(${quoted})`);
       });
     }
-    if ((head === '.=' || head === '*>') && node.length === 3) {
+    if (head === '.=' && node.length === 3) {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
@@ -14262,7 +14259,7 @@ class Emitter {
       }
       // `a = 1` is a destructuring DEFAULT: legal in a pattern, and
       // in a literal it emits `({a = 1})`, which no engine parses.
-      if (!this.inPattern && isNode(pair) && pair[0] === '=' && pair.length === 3) {
+      if (!this.inPattern && !this.tolerant && isNode(pair) && pair[0] === '=' && pair.length === 3) {
         throw this.positionedError(pair, 'emitter: `a = 1` inside an object literal is a destructuring default, which only a pattern can carry — spell the pair `a: 1`', node);
       }
     }
@@ -15580,10 +15577,10 @@ class Emitter {
           (h === '=' && stmt.length === 3 && Emitter.returnGuard(stmt[2]))) {
         return this.statement(stmt, ind);
       }
-      // Tail-position method/merge assignment stays a statement (the
+      // Tail-position method assignment stays a statement (the
       // double-spelled target has no single-expression form); the
       // function returns undefined.
-      if ((h === '.=' || h === '*>') && stmt.length === 3) return this.statement(stmt, ind);
+      if (h === '.=' && stmt.length === 3) return this.statement(stmt, ind);
       // A tail-position enum stays a statement — its lowering is a
       // `const` declaration, which has no value form
       if (h === 'enum') return this.statement(stmt, ind);
@@ -16179,23 +16176,6 @@ class Emitter {
       if (tspan !== null) this.primitiveReuse = { name: read, span: tspan.span };
       this.mark(node, 'value', () => this.expr(substHead(rhs)));
       this.primitiveReuse = null;
-    });
-  }
-
-  // ['*>', target, value] — the value merges into the target,
-  // initializing it when nullish:
-  // `*>obj = v` → `obj = Object.assign(obj ??= {}, v)`.
-  mergeAssignStatement(node, ind) {
-    const [, target, value] = node;
-    this.mark(node, '$self', () => {
-      const read = this.compoundTarget(node, target, ind);
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' Object.assign(');
-      this.mark(node, 'target', () => this.expr(read));
-      this.b.emit(' ??= {}, ');
-      this.mark(node, 'value', () => this.expr(value));
-      this.b.emit(')');
     });
   }
 
@@ -17352,7 +17332,7 @@ function recordSchemaFields(emitter, block, text, at) {
   }
 }
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -17362,7 +17342,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec, routesUnion, routeParams });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {

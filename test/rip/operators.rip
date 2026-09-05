@@ -359,18 +359,6 @@ code "method assign impure base binds once", 'g().name .= trim()', "const _ref =
 fail "method assign needs a call chain", 's .= 5', "must be a call chain"
 fail "method assign rejects in value position", 'y = (s .= trim())', "is a statement"
 
-# ==============================================================================
-# Merge Assignment — *>obj = { ... } (merge in place, init when nullish)
-# ==============================================================================
-
-code "merge assign compiles to Object.assign", 'obj = {a: 1}\n*>obj = {b: 2}', 'let obj = {a: 1};\n\nobj = Object.assign(obj ??= {}, {b: 2});'
-
-test "merge assign basic", 'obj = {a: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
-test "merge assign preserves existing", 'obj = {a: 1, b: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
-test "merge assign auto-init", '*>cfg = {x: 1}\ncfg', {x: 1}
-test "merge assign member target", 'o = {inner: {a: 1}}\n*>o.inner = {b: 2}\no.inner', {a: 1, b: 2}
-
-fail "merge assign rejects in value position", 'y = (*>obj = {a: 1})', "is a statement"
 
 # ==============================================================================
 # Unary bases of ** must be parenthesized (bare form is a JS SyntaxError)
@@ -448,12 +436,6 @@ test 'method assign map', '''
     items .= map -> it * 10
     items
   ''', [10, 20, 30]
-
-test 'merge assign inline', '''
-    opts = {}
-    *>opts = {a: 1, b: 2}
-    opts.a + opts.b
-  ''', 3
 
 test 'not base of power', '''
   not false ** 2
@@ -572,3 +554,7 @@ test 'synth compound temps dodge user bindings', '''
   obj.x //= 2
   [_o, _k, _t, obj.x]
   ''', ['mine', 'mine too', 'and mine', 4]
+
+# `*>` merge assignment is gone: the spelling no longer lexes as one
+# token, so it reads as a bare `*` and rejects at the parser.
+fail 'merge assignment is no longer an operator', '*>obj = {a: 1}', "Unexpected 'MATH'"

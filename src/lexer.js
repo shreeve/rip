@@ -452,11 +452,6 @@ const OPS2 = {
   // program carries a tight `.` `=` pair (a property name must
   // follow `.`), so the claim can never change a program's meaning.
   '.=': 'METHOD_ASSIGN',
-  // Merge assignment: ADJACENT `*>` is one token (`*>obj = {…}` —
-  // the value merges into the target). No legal program carries a
-  // tight `*` `>` pair (a comparison cannot follow a bare `*`), so
-  // the claim can never change a program's meaning.
-  '*>': 'MERGE_ASSIGN',
   // Map literals: ADJACENT `*{` marks the brace as a MAP (`*{a: 1}` →
   // new Map([["a", 1]])). The star claims; the `{` itself follows as
   // a normal brace so every brace pass (implicit structure, matching)

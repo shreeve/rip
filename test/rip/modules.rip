@@ -217,7 +217,6 @@ fail "exported plain merge write rejects", "export n = 1\nn ||= 2", "cannot assi
 fail "exported plain floor-div write rejects", "export n = 4\nn //= 2", "cannot assign to exported 'n'"
 fail "exported plain modulo write rejects", "export n = 4\nn %%= 3", "cannot assign to exported 'n'"
 fail "exported plain method-assign rejects", "export s = ' a '\ns .= trim()", "cannot assign to exported 's'"
-fail "exported plain merge-into rejects", "export o = { a: 1 }\n*>o = { b: 2 }", "cannot assign to exported 'o'"
 fail "exported plain postfix update rejects", "export n = 1\nn++", "cannot assign to exported 'n'"
 fail "exported plain prefix update rejects", "export n = 1\n--n", "cannot assign to exported 'n'"
 fail "exported void binding reassignment rejects", "export announce! = -> 1\nannounce! = -> 2", "cannot assign to exported 'announce'"
@@ -366,7 +365,6 @@ code "a bare write in a nested function shadows rather than rejecting", '''
 fail "an update expression in a nested function still rejects", "export flag = 1\ndef bump()\n  flag++", "cannot assign to exported 'flag'"
 fail "a compound write in a nested function rejects", "export flag = 1\ndef bump()\n  flag += 2", "cannot assign to exported 'flag'"
 fail "a merge write in a nested function rejects", "export flag = 1\ndef bump()\n  flag ||= 2", "cannot assign to exported 'flag'"
-fail "a merge-into write in a nested function rejects", "export o = { a: 1 }\ndef bump()\n  *>o = { b: 2 }", "cannot assign to exported 'o'"
 # The residue this split leaves, pinned as the limit it is: the head is
 # plain, so the shadow is minted and the read inside the VALUE sees it
 # undefined. Recorded rather than blessed — if a later change makes this

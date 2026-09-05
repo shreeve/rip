@@ -115,3 +115,16 @@ test 'the second parameter really is left unbound', '''
 # of emitting `({a = 1})`.
 fail 'a default inside an object literal rejects', '{a = 1}', 'destructuring default'
 fail 'a default inside a value-position object literal rejects', 'o = {a = 1}', 'destructuring default'
+
+# ==============================================================================
+# A spread after a comma stays IN an implicit object (`f a, x: 1,
+# ...opts, y: 2` is one options object, as the braced form reads) —
+# on the same line, after a newline, and under a continuation indent.
+# ==============================================================================
+
+code 'a spread continues an implicit object argument', 'f a, x: 1, ...opts, y: 2', 'f(a, {x: 1, ...opts, y: 2});'
+code 'a spread continues an implicit object at the end', 'f x: 1, ...opts', 'f({x: 1, ...opts});'
+code 'a spread continues a multi-line implicit object', 'f a,\n  x: 1\n  ...opts\n  y: 2', 'f(a, {x: 1, ...opts, y: 2});'
+code 'a spread continues a trailing-comma continuation', 'f x: 1,\n  ...opts', 'f({x: 1, ...opts});'
+code 'a plain element after the spread ends the object', 'f x: 1, ...opts, 3', 'f({x: 1, ...opts}, 3);'
+test 'an implicit object with a spread merges at run time', 'opts = {b: 2}\nf = (o) -> o\nf a: 1, ...opts, c: 3', {a: 1, b: 2, c: 3}

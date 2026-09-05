@@ -182,21 +182,6 @@ describe('assignment and class-field capture mappings', () => {
     noMintedNames(r);
   });
 
-  test('merge assignment maps both target manifestations and the RHS exactly', () => {
-    const source = '*>get().inner = rhs()';
-    const r = compile(source);
-    const [assign] = r.stores.nodesByKind('assign');
-    exactOperand(r, 'get()');
-    exactOperand(r, 'rhs()');
-    expect(slices(r, assign, 'target')).toEqual([
-      ['cover', 'get().inner', '_ref.inner'],
-      ['cover', 'get().inner', '_ref.inner'],
-    ]);
-    expect(slices(r, assign, 'value')).toEqual([['exact', 'rhs()', 'rhs()']]);
-    expect(slices(r, assign, 'operator')).toEqual([['synthetic', '', '=']]);
-    coveredAt(r, '_ref', source);
-    noMintedNames(r);
-  });
 
   test('class-field captures are covered by the field value and exact inside each activation', () => {
     const source = 'class Box\n  value = get().x //= 2';

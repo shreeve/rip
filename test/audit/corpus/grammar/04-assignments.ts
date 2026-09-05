@@ -62,13 +62,7 @@ label = label.trim()
 
 console.log('label:', label)
 
-// ── Merge assignment: initialize-when-nullish, then merge into the target ──
 
-let options: { host?: string, port?: number } | null = null
-options = Object.assign(options ??= {}, { host: 'local' })
-options = Object.assign(options ??= {}, { port: 8080 })
-
-console.log('options:', options?.host, options?.port)
 
 // ── Destructured patterns: renames, nesting, defaults (inline and indented), rests ──
 

@@ -62,14 +62,6 @@ label .= trim()
 
 console.log('label:', label)
 
-# ── Merge assignment: initialize-when-nullish, then merge into the target ──
-
-options: { host?: string, port?: number } | null = null
-*>options = { host: 'local' }
-*>options = { port: 8080 }
-
-console.log('options:', options?.host, options?.port)
-
 # ── Destructured patterns: renames, nesting, defaults (inline and indented), rests ──
 
 config = { host: 'localhost', port: 3000, meta: { retries: 2, mode: 'auto' } }

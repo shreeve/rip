@@ -133,13 +133,12 @@ test "comments", ->
 console.log "\nOperators"
 
 test "reactive and assignment operators", ->
-  for op in [':=', '~=', '.=', '=!', '*>', '::']
+  for op in [':=', '~=', '.=', '=!', '::']
     src = switch op
       when ':=' then 'count := 0'
       when '~=' then 'doubled ~= count * 2'
       when '.=' then 'x .= trim()'
       when '=!' then 'MAX =! 100'
-      when '*>' then '*>obj = {a: 1}'
       when '::' then 'String::trim'
     ok hl(src).includes(span('operator', op.replace('>', '&gt;').replace('<', '&lt;'))), "operator #{op}"
 

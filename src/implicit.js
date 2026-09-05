@@ -711,7 +711,7 @@ function collectObjects(tokens, mintId) {
           continue;
         }
         if (k === 'TERMINATOR') {
-          if (prev?.kind !== ',' && !(fr.startsLine && looksObjectish(i + 1))) closeObject(i);
+          if (prev?.kind !== ',' && !(fr.startsLine && (looksObjectish(i + 1) || tokens[i + 1]?.kind === '...'))) closeObject(i);
           else break;
         } else {
           if (fr.sameLine && prev?.kind !== ':' &&
@@ -737,12 +737,17 @@ function collectObjects(tokens, mintId) {
     // a block-argument carrier, so the frame already survives — and to
     // the `:` rule, which reads keys under a continuation INDENT as
     // pairs of the object below it.
+    // A spread after the comma stays IN the property list (`f a, x: 1,
+    // ...opts, y: 2` is one options object, as the braced form reads)
+    // — a statement never starts with `...`, so the continuation is
+    // never a new element.
     if (k === ',') {
       const list = listObjectFrame();
+      const continues = (j) => looksObjectish(j) || tokens[j]?.kind === '...';
       if (list && !openCallBetween(list.at, i) &&
-          !looksObjectish(i + 1) &&
-          (tokens[i + 1]?.kind !== 'TERMINATOR' || !looksObjectish(i + 2))) {
-        if (tokens[i + 1]?.kind === 'INDENT' && looksObjectish(i + 2)) {
+          !continues(i + 1) &&
+          (tokens[i + 1]?.kind !== 'TERMINATOR' || !continues(i + 2))) {
+        if (tokens[i + 1]?.kind === 'INDENT' && continues(i + 2)) {
           continuationComma = i;
         } else if (top()?.kind === 'object') {
           const offset = tokens[i + 1]?.kind === 'OUTDENT' ? 1 : 0;
