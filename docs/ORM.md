@@ -242,14 +242,14 @@ differ reads it, plans `ALTER TABLE RENAME`, and you delete the
 directive once the migration lands. It composes with `@table` —
 `@tableWas` names the deployed table, `@table` the desired one.
 
-### `@primaryKey` — surrogate or natural
+### `@primary` — surrogate or natural
 
 Every model has a primary key; the default is an INTEGER surrogate named
-`id`, fed by a sequence. `@primaryKey` renames it:
+`id`, fed by a sequence. `@primary` renames it:
 
 ```rip
-@primaryKey patientId                          # still a surrogate — just renamed
-@primaryKey patientId, {column: "PATIENT_ID"}  # …reading a legacy column
+@primary patientId                          # still a surrogate — just renamed
+@primary patientId, {column: "PATIENT_ID"}  # …reading a legacy column
 ```
 
 **Declaring the primary key as a field is what makes it a natural key**
@@ -257,7 +257,7 @@ Every model has a primary key; the default is an INTEGER surrogate named
 
 ```rip
 Country = schema :model
-  @primaryKey iso
+  @primary iso
   iso!  string, 2..2
   name! string
 ```
@@ -272,7 +272,7 @@ Country = schema :model
   gets a foreign-key column as wide as the key it copies (`VARCHAR`
   referencing `countries(iso)`, not `INTEGER`).
 
-A bare `id! integer` with no `@primaryKey` does not flip the posture —
+A bare `id! integer` with no `@primary` does not flip the posture —
 it is rejected as a collision with the runtime-managed key, and the
 error names the natural-key form.
 
@@ -477,7 +477,7 @@ One rule governs every name a model writes:
 |---|---|
 | `@table UserProfile` / `@table "USER_MASTER"` | the table |
 | `@tableWas "legacy_orders"` | a one-time rename signal the differ consumes |
-| `@primaryKey patientId, {column: "PATIENT_ID"}` | the pk property and its column |
+| `@primary patientId, {column: "PATIENT_ID"}` | the pk property and its column |
 | `{column: "MRN_NBR"}` on a field | the column that field reads |
 | `{was: "given_name"}` on a field | a column-rename signal |
 | `{as: author}` on a relation | the accessor name |
@@ -496,7 +496,7 @@ columns you touch:
 ```rip
 Patient = schema :model
   @table "MDM_PATIENT"
-  @primaryKey patientId, {column: "PATIENT_ID"}
+  @primary patientId, {column: "PATIENT_ID"}
   mrn!       string, {column: "MRN_NBR"}, @unique
   firstName! string
 ```

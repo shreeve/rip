@@ -120,9 +120,12 @@ describe('semantic side table', () => {
     const { diagnostics } = parser.parse('x = = 1');
     expect(diagnostics[0].expected).toContain('#');
     expect(diagnostics[0].expected).not.toContain('NUMBER');
-    // The `got` side renders through the same table.
+    // The `got` side names the offending token by its own TEXT — the
+    // author typed `5`, so the rejection says `5`; the display table
+    // serves only when a token has no printable text (layout tokens).
     const bad = parser.parse('x 5');
-    expect(bad.diagnostics[0].message).toMatch(/Unexpected '#'/);
+    expect(bad.diagnostics[0].message).toMatch(/Unexpected '5'/);
+    expect(bad.diagnostics[0].got).toBe("'5'");
 
     // A display colliding with a REAL terminal's name dedups the list.
     const colliding = structuredClone(exprGrammar);
