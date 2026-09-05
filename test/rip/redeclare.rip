@@ -111,3 +111,9 @@ test "comprehension clause shadows plain", "x = 1\nys = (x * 2 for x in [2, 3])\
 # match writes as ordinary writes.
 test "match writes are not declarations", "def grab(s)\n  s =~ /b/\n  _[0]\nx = 'abc'\nx =~ /c/\ngrab('abc') + _[0]", "bc"
 test "match write into a user underscore", "_ = 'seed'\ns = 'ab'\ns =~ /a/\n_[0]", "a"
+
+# A `=!` binding never changes: every later write rejects, from the
+# same scope or a nested function, plain or compound.
+fail 'a write to a readonly binding rejects', "x =! 5\nx = 6", "cannot assign to readonly 'x'"
+fail 'a compound write to a readonly binding rejects', "x =! 5\nx += 1", "cannot assign to readonly 'x'"
+fail 'a write to an outer readonly from a function rejects', "x =! 5\nf = -> x = 6", "cannot assign to readonly 'x'"

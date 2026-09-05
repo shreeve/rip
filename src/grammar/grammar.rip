@@ -173,9 +173,11 @@ grammar =
     # (`export const h = __effect(…)`); the emitter rejects a bare
     # `export ~>` — nothing binds.
     o 'EXPORT Effect'                                      , '["export", 2]'         , 'export: _, spec'
-    # prec RETURN (below POST_IF/POST_UNLESS): a postfix guard after the
-    # default value shifts into the Expression.
-    o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]' , 'export: _, spec', prec: 'RETURN'
+    # prec REACTIVE_ASSIGN (below POST_IF/POST_UNLESS): a postfix guard
+    # after the default value shifts INTO the Expression — the value is
+    # conditional, the export is not (an export has no guardable
+    # statement form).
+    o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]' , 'export: _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", 4]' , 'export: _, spec'
     o 'EXPORT EXPORT_ALL FROM String'                      , '["export-all", 4]'     , 'export: _, source'
     o 'EXPORT { } FROM String'                             , '["export-from", "{}", 5]', 'export: _, spec, source'
@@ -187,18 +189,21 @@ grammar =
   # the assign node EXISTS to carry roles — the typed forms hang the
   # pattern label on it (a nested template cannot carry side-band
   # roles), and the untyped forms gain ordinary assign side-table rows.
+  # prec REACTIVE_ASSIGN on the `=` rows: a postfix guard shifts INTO
+  # the value (`export x = v if c` exports a conditional value), as
+  # the reactive tier already reads it — `if (c) export …` is not JS.
   ExportAssign: [
-    o "Identifier[target] (TYPE[annotation])? = #{RHS}", '["=", @target, @value]', 'assign: operator, target, value'
+    o "Identifier[target] (TYPE[annotation])? = #{RHS}", '["=", @target, @value]', 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
     # Exported generic component: the Assign row's TYPE_PARAMS twin —
     # `export Select<TOption extends TOptionShape> = component extends
     # select`. Inline only: the lexer mints TYPE_PARAMS solely for a
     # same-line `= component`.
-    o 'Identifier[target] TYPE_PARAMS[typeParams] = Expression[value]', '["=", @target, @value]', 'assign: operator, target, value'
+    o 'Identifier[target] TYPE_PARAMS[typeParams] = Expression[value]', '["=", @target, @value]', 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
     # Exported void definition (`export save! = ->`) — the Assign row's
     # void twin, flat for the same role-carrying reason. The `=` token
     # carries the operator label (the head is a structural tag, not a
     # glyph — word-form heads for the void family).
-    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}", '["void-assign", @target, @value]', 'assign: _, target, value'
+    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}", '["void-assign", @target, @value]', 'assign: _, target, value', prec: 'REACTIVE_ASSIGN'
     # Exported TYPED reactive declarations (`export count: number := 0`):
     # after `EXPORT Identifier` the parser shifts a TYPE into these flat
     # rows (the typed ExportAssign path), so the reactive twins must

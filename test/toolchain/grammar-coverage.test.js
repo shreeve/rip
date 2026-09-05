@@ -19,7 +19,7 @@ import { loadBattery, dedent } from '../support/battery.js';
 const EXCLUDED = new Map([
   ['Root → ε', 'the empty program has no row shape; that it compiles clean is guarded in check.test.js'],
   ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
-  ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name; the aliased spelling is `default as name`'],
+  ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
 ]);
 
 const names = Parser().ruleNames;

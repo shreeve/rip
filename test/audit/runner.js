@@ -2208,7 +2208,7 @@ if (RUN_GRAMMAR) {
   // a grammar change trims this table rather than being absorbed by it.
   const EXCLUDED = new Map([
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
-    ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
+    ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);
   const denom = [], excludedIdx = [];

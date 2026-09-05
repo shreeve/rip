@@ -754,6 +754,7 @@ class Emitter {
     // too-deep tree rejects as a positioned diagnostic instead of an
     // engine RangeError at a machine-dependent depth.
     this.exprDepth = 0;
+    this.postfixGuardDepth = 0;
     // The binding name a schema value takes (assignment threading).
     this._schemaName = null;
     // Schema callable bodies, sub-parsed ONCE per captured token slice
@@ -1572,6 +1573,9 @@ class Emitter {
       const f = this.rframes[i];
       if (f.reactive.has(name)) return false;
       if (f.ambientReadonly !== undefined && f.ambientReadonly.has(name)) return true;
+      // A frame's own `=!` declarations sit in `bound` too, so they
+      // must answer before the bound check does.
+      if (f.readonly !== undefined && f.readonly.has(name)) return true;
       if (f.bound.has(name)) return false;
       if (f.members !== undefined && f.members.has(name)) return false;
     }
@@ -4815,6 +4819,16 @@ class Emitter {
     }
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
+    // A bare `default` inside braces names no binding — ES has no such
+    // specifier. The default binding is the unbraced form, or the
+    // aliased one inside braces.
+    for (const spec of specs) {
+      if (!Array.isArray(spec) || spec[0] === '*') continue;
+      if (spec.includes('default')) {
+        throw this.positionedError(node,
+          "emitter: `import { default }` binds nothing — spell the default import `import name from '…'`, or alias it: `import { default as name } from '…'`");
+      }
+    }
     // A TYPE-ONLY import (`import type … from …`, the side-band
     // typeOnly role): the author's declaration that the module carries
     // no side effect they need, so the WHOLE statement erases from the
@@ -4930,6 +4944,15 @@ class Emitter {
     // HERE, positioned (the script-mode precedent).
     if (this.repl) {
       throw this.positionedError(node, "emitter: 'export' has no meaning in a REPL entry — every top-level binding already persists to later lines; drop the export keyword");
+    }
+    // A module's exports are static: an export inside a block or under
+    // a postfix guard has no JS form (`if (c) export …` is a syntax
+    // error). The guard belongs on the VALUE — `export x = v if c` —
+    // which the grammar already reads that way.
+    if (ind > 0 || this.postfixGuardDepth > 0) {
+      throw this.positionedError(node,
+        "emitter: 'export' must be a top-level statement — a module's exports are static, so a guarded or block-nested export has no form; " +
+        'move it to the top level, or guard the exported value instead (`export x = v if c`)');
     }
     const head = node[0];
     this.mark(node, '$self', () => {
@@ -5885,16 +5908,31 @@ class Emitter {
     // A reactive declaration can never be the guarded statement — every
     // block-nested declaration rejects at frame collection (#88).
     if (!isBlock(node[2]) && isNode(node[2])) {
+      const stmt = node[2][0];
+      // A guarded LOOP emits braced: a loop may open with a hoisted
+      // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
+      // braceless `if` would guard only that first statement.
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
         this.b.emit(') ');
-        this.statement(node[2][0], ind);
+        this.postfixGuardDepth++;
+        if (braced) {
+          this.b.emit('{\n' + '  '.repeat(ind + 1));
+          this.statement(stmt, ind + 1);
+          this.b.emit('\n' + '  '.repeat(ind) + '}');
+        } else {
+          this.statement(stmt, ind);
+        }
+        this.postfixGuardDepth--;
       });
       return;
     }
     this.mark(node, '$self', () => this.ifChain(node, ind));
   }
+
+  static LOOP_HEADS = new Set(['for-in', 'for-of', 'for-as', 'while', 'loop', 'comprehension']);
 
   loopStatement(node, ind) {
     this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
@@ -14194,6 +14232,11 @@ class Emitter {
     for (const pair of node.slice(1)) {
       if (isNode(pair) && pair[0] === ':' && typeof pair[1] === 'string' && pair[1][0] === '/') {
         throw this.positionedError(pair, 'emitter: a regex key needs a MAP literal (`*{ /re/: v }`) — object property names are strings');
+      }
+      // `a = 1` is a destructuring DEFAULT: legal in a pattern, and
+      // in a literal it emits `({a = 1})`, which no engine parses.
+      if (!this.inPattern && isNode(pair) && pair[0] === '=' && pair.length === 3) {
+        throw this.positionedError(pair, 'emitter: `a = 1` inside an object literal is a destructuring default, which only a pattern can carry — spell the pair `a: 1`', node);
       }
     }
     const comp = !this.inPattern && Emitter.objectComprehension(node);

@@ -541,3 +541,16 @@ code "an unreferenced value import survives", '''
   import { useState } from "react";
   console.log(1);
 '''
+
+# ==============================================================================
+# Exports are static: a postfix guard after an exported value guards the
+# VALUE (the export rows sit below POST_IF), and an export under a
+# statement guard or inside a block rejects — `if (c) export …` is not
+# JS. A bare `default` inside import braces binds nothing and rejects.
+# ==============================================================================
+
+code 'a guard after an exported value guards the value', 'export x = 1 if c', 'export const x = c ? 1 : undefined;'
+code 'a guard after the default export guards the value', 'export default x if c', 'export default c ? x : undefined;'
+fail 'a guarded export statement rejects', 'export { a } if c', "'export' must be a top-level statement"
+fail 'an export inside a block rejects', "if c\n  export x = 1", "'export' must be a top-level statement"
+fail 'a bare default specifier rejects', "import {default} from 'm'", 'import { default }'

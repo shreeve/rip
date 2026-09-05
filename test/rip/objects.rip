@@ -109,3 +109,9 @@ test 'the second parameter really is left unbound', '''
   f a: 1,
     b: 2
 ''', [{ a: 1, b: 2 }, false]
+
+# `a = 1` inside an object LITERAL is a destructuring default; only a
+# pattern can carry one (`{a = 1} = o`), so the literal rejects instead
+# of emitting `({a = 1})`.
+fail 'a default inside an object literal rejects', '{a = 1}', 'destructuring default'
+fail 'a default inside a value-position object literal rejects', 'o = {a = 1}', 'destructuring default'
