@@ -394,7 +394,7 @@ switch verb
     abort 'rip-sites: add takes at most one project path' if positionals.length > 1
     reservedAsApp name if name?
     body =
-      root: positionals[0] or process.cwd()
+      root: resolve(positionals[0] or process.cwd())
       name: name
       hosts: hosts
       options: { workers, concurrency, watchApp, watchApi, eager: eager is true }
@@ -533,7 +533,8 @@ switch verb
           sleep! 250
           for app in apps
             id = encodeURIComponent app.id
-            next = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?after=#{offsets[app.id]}", null, { start: false }
+            next = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?after=#{offsets[app.id]}", null, { start: false, soft: true }
+            continue unless next?
             if next.text
               unless current is app.id
                 console.log "—— #{app.name} ——"
@@ -543,8 +544,10 @@ switch verb
     else
       requireApp!
       id = encodeURIComponent noun
-      read = (after = null) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}", null, { start: true }
-      log = read!
+      # A follower is a reader: a lost plane is waited out, never
+      # rebooted — its boot is the duplicate the socket guard refuses.
+      read = (after = null, options) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}", null, options
+      log = read! null, { start: wantsControl! }
       if json
         printJson log
       else
@@ -553,7 +556,8 @@ switch verb
           offset = log.next
           loop
             sleep! 250
-            next = read! offset
+            next = read! offset, { start: false, soft: true }
+            continue unless next?
             process.stdout.write next.text if next.text
             offset = next.next
 

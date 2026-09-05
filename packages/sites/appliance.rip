@@ -16,10 +16,21 @@ export secureDirectory = (path, label) ->
   abort "#{label}: unsafe permissions at #{path}: expected 0700" unless mode is 0o700
   path
 
+# The runtime root must resolve to ONE place from every context that can
+# spawn a control agent. launchd hands its jobs no TMPDIR (the tray's is
+# one), and tmpdir() then falls back to /tmp: a second root, a second
+# control socket, a second agent over the same catalog. The per-user temp
+# directory is a confstr fact, not an environment one — ask for it.
+userTempDir = ->
+  return tmpdir() unless platform() is 'darwin' and not process.env.TMPDIR
+  result = Bun.spawnSync ['/usr/bin/getconf', 'DARWIN_USER_TEMP_DIR'], { stdout: 'pipe', stderr: 'pipe' }
+  value = result.stdout.toString().trim()
+  if result.exitCode is 0 and value then value else tmpdir()
+
 export agentPaths = (label = 'rip-agent') ->
   uid = if typeof process.getuid is 'function' then process.getuid() else 'user'
   stateRoot = process.env.RIP_AGENT_HOME or if platform() is 'darwin' then join(homedir(), 'Library', 'Application Support', 'Rip') else join(process.env.XDG_STATE_HOME or join(homedir(), '.local', 'state'), 'rip')
-  runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(tmpdir(), "rip-agent-#{uid}")
+  runtimeRoot = process.env.RIP_AGENT_RUNTIME or join(userTempDir(), "rip-agent-#{uid}")
   secureDirectory stateRoot, label
   secureDirectory runtimeRoot, label
   catalog = join(stateRoot, 'sites.json')
@@ -97,14 +108,23 @@ export ensureAgent = (label) ->
   suffix = if diagnostic then "\n#{diagnostic}" else " — see #{paths.agentLog}"
   abort "#{label}: Sites control plane did not start#{suffix}"
 
-# start:true (default) boots the control plane; start:false requires it already up.
+# start:true (default) boots the control plane; start:false requires it
+# already up. soft:true answers null where the plane is down or the
+# request fails instead of aborting — for pollers that outlive an outage.
 export requestAgent = (label, method, path, body = null, options = {}) ->
   start = if options.start? then options.start else true
   paths = if start then ensureAgent!(label) else probeAgent!(label)
-  abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)" unless paths?
-  response = agentFetch! paths, method, path, body
-  text = response.text!
+  unless paths?
+    return null if options.soft
+    abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)"
+  try
+    response = agentFetch! paths, method, path, body
+    text = response.text!
+  catch error
+    return null if options.soft
+    throw error
   unless response.ok
+    return null if options.soft
     detail = try JSON.parse(text).error catch then text
     abort "#{label}: #{detail or "control request failed (#{response.status})"}"
   return null unless text

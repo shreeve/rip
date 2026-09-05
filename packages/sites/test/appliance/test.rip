@@ -1,5 +1,5 @@
 import { test, eq, ok } from 'rip/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -7,18 +7,19 @@ PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
 FAKE_CADDY = join(import.meta.dir, 'fake-caddy.rip')
 
-run = (file, args, env) ->
+run = (file, args, env, cwd = null) ->
   proc = Bun.spawn [process.execPath, PRELOAD, file, ...args],
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
     env: { ...process.env, ...env }
+    cwd: cwd or process.cwd()
   out = Response.new(proc.stdout).text()
   err = Response.new(proc.stderr).text()
   { proc, out, err }
 
-cli = (file, args, env) ->
-  result = run file, args, env
+cli = (file, args, env, cwd = null) ->
+  result = run file, args, env, cwd
   code = await result.proc.exited
   { code, out: await result.out, err: await result.err }
 
@@ -353,3 +354,150 @@ test! 'rip sites distinguishes an external edge from one owned by Rip', ->
     try cli! APP, ['stop', 'edge'], ownedEnv
     stopAgent! owned.runtime
     rmSync owned.root, { recursive: true, force: true }
+
+AGENT = join(import.meta.dir, '..', '..', 'agent.rip')
+
+alive = (pid) ->
+  try
+    process.kill pid, 0
+    true
+  catch then false
+
+ownerPid = (runtime) ->
+  try JSON.parse(readFileSync(join(runtime, 'agent.json'), 'utf8')).pid catch then null
+
+# The control socket path is the ownership token: a boot that finds it
+# held by a live agent must lose even with the owner record gone, and an
+# agent whose path was re-bound must stop before its next tick, leaving
+# the successor's files alone and the world (state file, edge) untouched.
+test! 'one control agent owns the socket; a superseded agent exits before acting', ->
+  site = fixture 'rip-agent-superseded-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  socket = join site.runtime, 'agent.sock'
+  usurper = null
+  first = null
+  try
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    eq JSON.parse(started.out).managed, true
+    first = ownerPid site.runtime
+    ok alive(first), 'the control agent is running'
+
+    # A second boot against a live agent loses, owner record or not.
+    unlinkSync join(site.runtime, 'agent.json')
+    second = run AGENT, [], env
+    exited = Promise.race! [second.proc.exited, sleep(5000).then(-> null)]
+    unless exited?
+      second.proc.kill 'SIGKILL'
+      throw Error.new 'second boot must exit instead of serving alongside a live agent'
+    eq exited, 1
+    err = await second.err
+    ok err.includes('another Rip Agent owns'), "second boot must be refused: #{err}"
+    ok alive(first), 'the live agent survives a rejected boot'
+    live = JSON.parse((cli!(APP, ['status', 'edge', '--json'], env)).out)
+    eq live.managed, true
+    waitFor! 'owner record restored by its holder', -> ownerPid(site.runtime) is first
+
+    # The path re-bound out from under the agent: it must go, and must not
+    # take the successor's socket with it.
+    unlinkSync socket
+    usurper = Bun.serve { unix: socket, fetch: -> Response.json { type: 'rip-agent', api_version: '1.0', pid: process.pid } }
+    waitFor! 'superseded agent exit', (-> not alive(first)), 6000
+    ok existsSync(socket), 'a superseded agent must not remove the successor socket'
+    answer = fetch!("http://agent/1.0", { unix: socket }).json!
+    eq answer.pid, process.pid
+
+    # The successor stops the edge; nothing revives it, nothing rewrites the state.
+    caddyPid = parseInt readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')
+    doc = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    doc.edge = { ...doc.edge, desired: 'stopped', managed: false, pid: null }
+    writeFileSync join(site.state, 'sites.json'), JSON.stringify(doc, null, 2) + '\n'
+    process.kill caddyPid, 'SIGTERM'
+    waitFor! 'fake edge shutdown', -> not alive(caddyPid)
+    # Recovery fires after DOWN_TICKS consecutive 2 s ticks plus its restart delay.
+    sleep! 7500
+    ok not existsSync(join(site.runtime, 'caddy.pid')), 'no agent may revive an edge stopped by the owner'
+    after = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    eq after.edge.desired, 'stopped'
+    eq after.edge.managed, false
+  finally
+    try usurper?.stop true
+    try process.kill(first, 'SIGKILL') if first? and alive(first)
+    try process.kill parseInt(readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')), 'SIGKILL'
+    rmSync site.root, { recursive: true, force: true }
+
+# A client's mistake is the client's error, never the agent's death: an
+# add the agent cannot resolve answers 4xx and the agent keeps serving.
+# Roots reach the agent absolute — the CLI resolves against ITS cwd, the
+# agent has no idea where the caller stands.
+test! 'an unresolvable add is refused by a live agent that stays up; relative roots resolve at the client', ->
+  site = fixture 'rip-agent-bad-add-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  mkdirSync join(site.root, 'project', 'app'), { recursive: true }
+  writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
+  try
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    agent = ownerPid site.runtime
+    ok alive(agent)
+
+    missing = cli! APP, ['add', join(site.root, 'nowhere'), '--json'], env
+    eq missing.code, 1
+    ok missing.err.includes('project not found'), missing.err
+    ok alive(agent), 'the agent must survive a client error'
+    eq ownerPid(site.runtime), agent
+    empty = cli! APP, ['add', site.root, '--json'], env
+    eq empty.code, 1
+    ok empty.err.includes('has no API entry'), empty.err
+    ok alive(agent), 'the agent must survive a project with nothing to serve'
+
+    added = cli! APP, ['add', 'project', '--name', 'rel', '--json'], env, site.root
+    eq added.code, 0, added.err
+    eq JSON.parse(added.out).root, realpathSync(join(site.root, 'project'))
+    ok alive(agent)
+  finally
+    try cli! APP, ['stop', 'edge'], env
+    stopAgent! site.runtime
+    rmSync site.root, { recursive: true, force: true }
+
+# A follower is a reader: it rides out a control-plane outage and never
+# boots one — the boot it would spawn is the duplicate the socket guard
+# exists to refuse, and its 5 s wait is what killed followers under a
+# blocked agent.
+test! 'logs -f keeps polling through a control-plane outage without booting an agent', ->
+  site = fixture 'rip-agent-follow-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  config = join site.root, 'Caddyfile'
+  writeFileSync config, ''
+  chmodSync FAKE_CADDY, 0o755
+  mkdirSync join(site.root, 'project', 'app'), { recursive: true }
+  writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
+  follower = null
+  try
+    eq (cli!(APP, ['add', join(site.root, 'project'), '--name', 'fixture', '--json'], env)).code, 0
+    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
+    eq started.code, 0
+    follower = run APP, ['logs', 'fixture', '-f'], env
+    sleep! 1500
+    ok not follower.proc.exitCode?, 'follower must be running after its first read'
+
+    stopAgent! site.runtime
+    sleep! 3000
+    ok not follower.proc.exitCode?, 'follower must ride out the outage'
+    ok not existsSync(join(site.runtime, 'agent.json')), 'follower must not boot a control plane'
+
+    revived = cli! APP, ['status', 'edge', '--json'], env
+    eq revived.code, 0
+    sleep! 1000
+    ok not follower.proc.exitCode?, 'follower must continue after the plane returns'
+  finally
+    try follower?.proc.kill 'SIGKILL'
+    try cli! APP, ['stop', 'edge'], env
+    stopAgent! site.runtime
+    rmSync site.root, { recursive: true, force: true }
