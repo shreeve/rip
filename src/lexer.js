@@ -1188,6 +1188,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         prefix.length > (indents[renderDepth - 1] ?? '').length;
       if (text[pos] === '#' && !renderIdLine) {
         let end = pos;
+        // A `###` line (three hashes then anything but a fourth) opens
+        // a BLOCK comment that runs to the next `###`, however many
+        // lines away, and the rest of the closing line goes with it;
+        // an unclosed block runs to the end of the file. `####…` is a
+        // line comment like any other.
+        if (text.startsWith('###', pos) && text[pos + 3] !== '#') {
+          const close = text.indexOf('###', pos + 3);
+          end = close < 0 ? text.length : close + 3;
+        }
         while (end < text.length && text[end] !== '\n' && !(text[end] === '\r' && text[end + 1] === '\n')) end++;
         const withNl = end < text.length ? end + (text[end] === '\r' ? 2 : 1) : end;
         trivia.push({ kind: 'comment', start: pos, end, text: text.slice(pos, end) });

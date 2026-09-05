@@ -525,3 +525,30 @@ test 'a function named optindex is callable', '''
 fail 'a comment cannot interrupt a compound key', '''
   o = { foo-###x###bar: 7 }
   ''', "unclosed '{'"
+
+# ==============================================================================
+# Block comments: a `###` line opens a comment that runs to the next
+# `###` — its interior is prose, never code — and `####` stays a line
+# comment. An unclosed block runs to the end of the file.
+# ==============================================================================
+
+code 'a block comment is trivia', '''
+  ###
+  some words here
+  ###
+  x = 1
+  ''', 'let x = 1;'
+code 'a block comment between statements', '''
+  a = 1
+  ###
+    indented prose (words here)
+  more prose
+  ###
+  b = 2
+  ''', '''
+  let a = 1;
+  let b = 2;
+  '''
+code 'a one-line block comment', '### a note ### \nx = 1', 'let x = 1;'
+code 'a four-hash line is a line comment', '#### heading\nx = 1', 'let x = 1;'
+code 'an unclosed block comment runs to the end', 'x = 1\n###\nwords here', 'let x = 1;'
