@@ -18,12 +18,7 @@ import { loadBattery, dedent } from '../support/battery.js';
 // Productions no battery row can or should reduce.
 const EXCLUDED = new Map([
   ['Root → ε', 'the empty program has no row shape; that it compiles clean is guarded in check.test.js'],
-  ['Assign → Assignable TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-  ['Assign → Assignable TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-  ['ExportAssign → Identifier TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-  ['ExportAssign → Identifier TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
   ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
-  ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
   ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name; the aliased spelling is `default as name`'],
 ]);
 
