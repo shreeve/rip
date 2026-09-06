@@ -517,6 +517,7 @@ test! 'API-only watch swaps workers without App Hub publication', ->
       stderr: 'inherit'
     waitFor! -> registration?
     first = registration.upstreams[0].path
+    eq registration.upstreams[0].concurrency, 1 # the cap the worker's gate enforces, published with its socket
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
     writeFileSync join(project, 'app', 'routes', 'index.rip'), """
@@ -540,6 +541,78 @@ test! 'API-only watch swaps workers without App Hub publication', ->
     eq (await ring).status, 204
     eq ((unixFetch!('/version', fresh[0].path)).json!), { version: 'two' }
     eq messages.length, 0
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a Janus that predates upstream concurrency still gets plain sockets', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-compat-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  # An older Janus decodes with unknown fields disallowed, so a list that
+  # names a cap is refused whole. Refuse exactly that, and record every
+  # attempt so the retry is visible.
+  attempts = []
+  registration = null
+  updates = []
+  refuseCaps = (body) ->
+    return null unless JSON.stringify(body).includes 'concurrency'
+    Response.json { error: 'invalid upstreams: json: unknown field "concurrency"' }, { status: 400 }
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        body = request.json!
+        attempts.push body
+        refused = refuseCaps body
+        return refused if refused
+        registration = body
+        return Response.json({ id: 'compat-registration' }, { status: 201 })
+      if request.method is 'PUT' and url.pathname is '/1.0/apps/compat-registration/upstreams'
+        body = request.json!
+        attempts.push body
+        refused = refuseCaps body
+        return refused if refused
+        updates.push body.upstreams
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'compat.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+    diagnostic = readStderr proc
+    waitFor! -> registration?
+    # First attempt named the cap the worker enforces; the accepted one did not.
+    eq attempts[0].upstreams[0].concurrency, 1
+    eq attempts.length, 2
+    ok not ('concurrency' of registration.upstreams[0]), JSON.stringify registration.upstreams
+    ok diagnostic.text.includes('predates upstream concurrency'), diagnostic.text
+    first = registration.upstreams[0].path
+    eq ((unixFetch!('/version', first)).json!), { version: 'one' }
+
+    # Later publishes stay plain without another round trip.
+    writeFileSync join(project, 'index.rip'), """
+    import { get, start } from 'rip/sites'
+    get '/version' -> { version: 'two' }
+    start!
+    """
+    doorbell = waitFor! -> updates.find((list) -> list.length is 1 and list[0].doorbell is true)
+    ring = unixFetch '/ring', doorbell[0].path
+    fresh = waitFor! -> updates.find((list) -> list.length is 1 and not list[0].doorbell and list[0].path isnt first)
+    eq (await ring).status, 204
+    ok not ('concurrency' of fresh[0]), JSON.stringify fresh
+    ok not attempts.some((body, index) -> index > 0 and JSON.stringify(body).includes('concurrency')), JSON.stringify attempts
+    eq ((unixFetch!('/version', fresh[0].path)).json!), { version: 'two' }
 
     proc.kill 'SIGTERM'
     eq (await proc.exited), 143
