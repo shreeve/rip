@@ -12,8 +12,13 @@ import { makeParserLexer, tokenize } from '../../src/lexer.js';
 
 const ROOT = join(import.meta.dir, '../..');
 
+// Dot-directories are never authored sources: the sites suites build
+// and tear down `.rip-*` scratch trees under their fixtures while this
+// lane runs, and a walk that descended into one read a file that was
+// gone by the time it opened it.
 const ripFiles = (directory, files = []) => {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) ripFiles(path, files);
     else if (entry.name.endsWith('.rip')) files.push(path);
