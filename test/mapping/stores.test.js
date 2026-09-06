@@ -481,7 +481,12 @@ describeExtended('emission scaling', () => {
       sizes: [9000, 27000],
       bound: 5,
     });
-  });
+  // The gate retries three times (min-of-5 at 27k lines each) precisely
+  // when the machine is slow; the runner's 15 s default cut those
+  // retries off on a hosted CI box (2026-08-24, "timed out after
+  // 15000ms" with ~1 s locally). The verdict is still the CPU-time
+  // ratio — the clock must not veto it.
+  }, 60000);
 
   // S6: a flat chain's n nested marks each cover an O(n) region, so
   // any per-mark work proportional to the region (the old
