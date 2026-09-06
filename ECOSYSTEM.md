@@ -203,15 +203,15 @@ Rip Sites has a per-user layer and a per-project layer.
 ### Per-user layer
 
 The `rip sites` CLI owns a durable `sites.json` catalog and talks to a small
-control process. That process starts and observes the shared Janus-enabled
-Caddy edge, starts Managers for desired Apps, and exits when neither the edge
-nor an App needs supervision. It distinguishes a Rip-owned edge from an
-external one and will not silently take control of an external Caddy process.
+control process. That process starts Managers for desired Apps, observes
+them, and exits when no App needs supervision.
 
-On packaged macOS configurations, `launchd` owns loopback TCP listeners for
-ports 80 and 443 and passes them to a user-owned Caddy process. HTTP/1.1 and
-HTTP/2 use those inherited streams. HTTP/3 is not enabled on that path because
-QUIC requires a separately inherited UDP socket.
+The shared Janus edge is Janus's own process: `janus autostart` runs it as
+a service under launchd or systemd, and `janus start`, `stop`, `restart`,
+and `status` manage it. What it serves is Rip's: the control process
+renders the posture Caddyfile into Janus's service config and applies it
+with `janus reload`. An edge named by `JANUS_CONTROL` is used as found and
+never configured.
 
 ### Per-project Manager
 
@@ -717,7 +717,7 @@ site and let it outlive worker reloads:
 
 ```bash
 harbor start api/db/medlabs.duckdb --name medlabs --statement-timeout 30s
-rip sites start edge --config Caddyfile
+janus autostart
 rip sites add . --name medlabs
 rip sites start medlabs
 ```

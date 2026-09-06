@@ -1,8 +1,16 @@
 # Rip development edge — LOCAL posture (LAN / Bonjour).
+# RIP_EDGE placeholders are filled by rip sites when it renders this
+# posture into Janus's service config (edge.rip).
 # Shared mDNS front door stays on HTTP for Janus; product status URL is HTTPS.
 # Enter only after `rip edge trust` on this machine.
 {
 	admin unix/{$RIP_EDGE_ADMIN}
+	log {
+		output file {$RIP_EDGE_LOG} {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
 	persist_config off
 	auto_https disable_redirects
 	default_bind {$RIP_EDGE_BIND:0.0.0.0}
@@ -135,6 +143,6 @@ via.rip {
 }
 
 # Machine-local site blocks (domains + certs owned by this operator, e.g.
-# *.medlabs.health). One small .caddy snippet per project; the packaged
-# posture files stay canonical and platform updates flow without copy-drift.
-import {$HOME}/.config/janus/sites/*.caddy
+# *.medlabs.health): one small .caddy file per project in Janus's sites
+# directory; the posture files stay canonical.
+import {$RIP_EDGE_SITES}/*.caddy

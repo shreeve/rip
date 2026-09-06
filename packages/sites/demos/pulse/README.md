@@ -40,7 +40,7 @@ restart) boots fresh workers and clears the list.
 
 ## Run
 
-With the edge up (`rip sites start edge`), add and start from this
+With the edge up (`janus autostart`), add and start from this
 directory (or pass `--name` / `--host` explicitly):
 
 ```bash

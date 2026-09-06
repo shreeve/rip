@@ -60,34 +60,44 @@ apps and exits when nothing remains to supervise — Janus stays live-only.
 
 ### 1. Start the edge
 
-Install Janus once. The bootstrap installer verifies the release archive's
-checksum and puts `janus` in `~/.local/bin` (as root, `/usr/local/bin`),
-which is where the edge finds it — `janus` on `PATH`, nothing else:
+The edge is [Janus](https://github.com/shreeve/janus), and Janus runs
+itself. Install it once — the bootstrap installer verifies the release
+archive's checksum and puts `janus` in `~/.local/bin` (as root,
+`/usr/local/bin`) — then make it a service:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash
+janus autostart
 ```
 
-Then start the edge; the packaged Caddyfile is the default:
+From then on the edge is running: now, at every login, and again after a
+crash. `janus status` shows it; `janus stop`, `start`, and `restart` are
+its verbs, and `janus autostart off` removes the service. Rip never starts
+or stops that process.
+
+What the edge serves is Rip's. `rip sites` renders the posture Caddyfile
+beside this README into Janus's service config (`janus status` names it)
+and applies it with `janus reload`, so the first `rip sites start <app>`
+on a host leaves the edge serving Rip's sites:
 
 ```bash
-rip sites start edge
-rip sites status edge
-# ● Edge  running (Rip-owned)
-#   Control: …/rip-agent-…/janus.sock
-#   Caddy:   ~/.local/bin/janus
-#   Config:  …/packages/sites/Caddyfile
+rip sites status
+# ● Edge  running (janus 1.12.1, pid 4242, up 01:12, autostart on)
+#   Mode:    default
+#   Control: ~/.local/state/janus/run/janus.sock
+#   Config:  ~/.config/janus/Caddyfile
+#   Sites:   ~/.config/janus/sites
 ```
 
 That binds `via.rip` and `*.via.rip` on loopback **HTTP→HTTPS** (ports
-**80/443** by default) with exact-host certificates minted on demand by the
-local CA — run `rip sites trust edge` once and every `*.via.rip` and
-`*.local` name verifies. Those names resolve only to `127.0.0.1`. Browser
-status is at `https://via.rip/` (Rip-owned page — not Bonjour).
+**80/443**) with exact-host certificates minted on demand by the local CA
+— run `rip sites trust edge` once and every `*.via.rip` and `*.local` name
+verifies. Those names resolve only to `127.0.0.1`. Browser status is at
+`https://via.rip/` (Rip-owned page — not Bonjour).
 
 Three postures:
 
-| | **Default** (`rip sites start edge`) | **`local`** | **`public`** |
+| | **Default** | **`local`** | **`public`** |
 | --- | --- | --- | --- |
 | Bind | `127.0.0.1` | all interfaces | phase 2 |
 | Bonjour | off | shared `rip.local` (apps use `{name}.local` hosts) | — |
@@ -97,8 +107,7 @@ Three postures:
 
 ```bash
 rip sites trust edge                 # install the local CA (required before local)
-# stop running sites first — mode flips recreate the edge
-rip sites expose local               # LAN / Bonjour posture (stop+recreate)
+rip sites expose local               # LAN / Bonjour posture — a reload, sites stay up
 rip sites expose loopback            # back to default
 rip sites trust edge --export ca.crt # share the CA with a phone / peer
 # phone bootstrap without temporary HTTPS accept:
@@ -124,14 +133,9 @@ rip sites start hello
 # https://rip.local/      → Rip catalog (Start/Stop/Restart)
 ```
 
-Overrides when needed:
-
-```bash
-rip sites start edge --caddy /path/to/janus --config /path/to/Caddyfile
-```
-
-`rip sites status edge` also reports an **external** edge Rip did not start — Rip
-will not stop or reload a process it does not own.
+An edge Rip does not configure — a test's, or one with a hand-written
+Caddyfile — is named by `JANUS_CONTROL` (its control socket or URL). Apps
+register there, and Rip writes no Caddyfile and reloads nothing.
 
 ### 2. Remember and start a demo site
 
@@ -151,17 +155,13 @@ without it; the Agent stores hosts from `--host` / add options.
 
 ### 3. Stop cleanly
 
-Stop sites **before** the edge — the edge refuses to die under a live manager:
-
 ```bash
 rip sites stop hello
-rip sites stop edge
 ```
 
-```text
-rip sites stop edge
-# rip-sites: stop hello before stopping the edge   ← intentional
-```
+The edge stays up: it is Janus's, and it costs nothing idle. `janus stop`
+takes it down when you mean to; the managers keep their registrations
+across a `janus restart` and re-register on their next heartbeat.
 
 ### Install into an app
 
@@ -197,8 +197,10 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 - App selectors: catalog **id**, unique **name**, or canonical **root**.
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
-- Durable catalog: `sites.json` (Rip-owned). Control starts with the edge /
-  desired apps and exits when nothing remains to supervise.
+- Durable catalog: `sites.json` (Rip-owned). Control starts with the first
+  desired-running app and exits when nothing remains to supervise.
+- The edge process is Janus's: `janus autostart`, `start`, `stop`,
+  `restart`, `status`. `rip sites` renders what it serves.
 
 ### Catalog — remember projects
 
@@ -212,41 +214,38 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 
 | Command | What it does |
 | --- | --- |
-| `rip sites start <app\|all\|edge\|agent>` | Start a supervised app, every app, the shared edge, or the control agent. Apps need a reachable Janus control plane (normally: start the edge first). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
-| `rip sites stop [noun]` | Stop a supervised app, `all`, `edge`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
-| `rip sites restart <app\|all\|edge\|agent>` | Restart. For `edge` / `agent` this is a full recreate (stop then start), not a config reload. |
-| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). |
+| `rip sites start <app\|all\|agent>` | Start a supervised app, every app, or the control agent. Apps register with Janus, so the edge must be running (`janus autostart`). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
+| `rip sites stop [noun]` | Stop a supervised app, `all`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
+| `rip sites restart <app\|all\|agent>` | Restart. For `agent` this is a recycle (stop then start). |
+| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). The edge line is Janus's status plus Rip's posture. |
 | `rip sites status all` | Apps only. |
-| `rip sites status <app\|edge\|agent>` | One target. |
+| `rip sites status <app\|agent>` | One target. |
 | `rip sites status <path>` | Manager JSON for a project path (`.` or an existing directory not in the catalog). |
 
-### Edge — TLS, Janus, reachability
+### Edge — TLS, reachability
+
+The process is Janus's — `janus autostart`, `start`, `stop`, `restart`,
+`status`, `reload` — and `rip sites` says so if asked to run it. Rip's edge
+verbs are about what the edge serves and who trusts it:
 
 | Command | What it does |
 | --- | --- |
-| `rip sites start edge` | Bring up Rip-owned Caddy+Janus (default loopback posture). Options: `--caddy`, `--config`, `--control`, `--base-url`, `--http-port`, `--https-port`. |
-| `rip sites stop edge` | Stop a Rip-owned edge (refuses if sites are still running; never stops an external edge). |
-| `rip sites restart edge` | Stop the running sites, stop and start the edge, start those sites again. This is how an upgraded `janus` takes effect. |
-| `rip sites reload edge` | Reload the Rip-owned Caddyfile without tearing down sockets. |
 | `rip sites trust edge` | Install the local CA (required before LAN posture). |
 | `rip sites trust edge --export [PATH]` | Write the CA PEM (default: `rip-edge-local-ca.crt`). |
-| `rip sites expose local` | LAN / Bonjour posture (all interfaces, `rip.local` / `{app}.local`, `tls internal`). Recreates the edge — stop sites first. |
-| `rip sites expose loopback` | Back to default loopback `*.via.rip` posture (same recreate rule). |
+| `rip sites expose local` | LAN / Bonjour posture (all interfaces, `rip.local` / `{app}.local`, `tls internal`). A reload; sites stay up. |
+| `rip sites expose loopback` | Back to the default loopback `*.via.rip` posture. |
 | `rip sites expose public` | Public internet posture — **refuses until phase 2**. |
 
-External Janus (something else already listening on the control socket) shows as
-`status edge` → running, unmanaged; Rip will not stop or reload it.
-
 **Upgrading Janus.** Install the new release, then restart the edge. The
-running edge keeps its binary until it is restarted, and `restart edge` puts
-the sites down and back up around it:
+managers keep their registrations and re-register on their next heartbeat:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash && rip sites restart edge
+curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash && janus restart
 ```
 
-Pin a version with `... | bash -s v1.11.1`. `janus version` shows what is
-installed; `rip sites status edge` shows what is running.
+Pin a version with `... | bash -s v1.12.1`. `janus status` shows what is
+installed and what is running, and says when they differ; so does
+`rip sites status`.
 
 ### Daily — open and logs
 
@@ -256,7 +255,6 @@ installed; `rip sites status edge` shows what is running.
 | `rip sites open edge` | Open the status dashboard (`via.rip` or `rip.local`). |
 | `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
 | `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
-| `rip sites logs edge` | Print paths to the edge and control log files. |
 
 ### Manager — foreground, publish, deploy barriers
 
@@ -265,7 +263,7 @@ work and explicit deploy ops (the manager module is internal — not a second CL
 
 | Command | What it does |
 | --- | --- |
-| `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Needs `--control` / `JANUS_CONTROL` (or an edge already up so control can be seeded). Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
+| `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Registers with Janus's control socket, or `--control` / `JANUS_CONTROL`. Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
 | `rip sites publish [dir] …` | Publish one directory through Janus (default: cwd). Options include `--host`, `--control`, `--until-restart`. |
 | `rip sites hold <app>` | Hold a remembered app’s manager (freeze App/API activation). |
 | `rip sites release <app>` | Release hold — one coherent snapshot, then clear hold. |
@@ -274,9 +272,7 @@ work and explicit deploy ops (the manager module is internal — not a second CL
 
 ```bash
 cd packages/sites/demos/hello
-rip sites start edge
-rip sites run --control "$(rip sites status edge --json | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).control)')"
-# …or with the edge already up and JANUS_CONTROL set:
+rip sites run               # registers with the edge Janus runs
 rip sites stop              # drain manager for cwd
 rip sites status .          # manager JSON for cwd
 ```
@@ -288,11 +284,11 @@ drives the same `rip sites` spells. There is **no** Sites-specific native
 binary and no LaunchAgent — see [`tray-sites.rip`](tray-sites.rip) and
 [packages/tray/README.md](../tray/README.md).
 
-**Tray covers:** edge start/stop/reload, Open Dashboard, Trust CA, Use Local /
+**Tray covers:** edge status (Janus's), Open Dashboard, Trust CA, Use Local /
 Use Default (`expose`), site start/stop/restart/open/log, Add Site.
 
-**CLI-only for now:** `remove`, `trust edge --export`, `expose public`, port
-overrides, custom `--config` / `--caddy`.
+**CLI-only for now:** `remove`, `trust edge --export`, `expose public`. The
+edge process is `janus`'s to start and stop.
 
 **Run it** — build the host once, then from this package:
 
@@ -306,9 +302,9 @@ rip tray                  # discovers tray-sites.rip → launches rip-tray-host
 
 **Using the menu**
 
-1. **Edge → Start** if the shared edge is down
+1. **Edge** shows Janus's state; `janus autostart` in a terminal if it is down
 2. **Edge → Open Dashboard** for the Rip status page (`via.rip` or `rip.local`)
-3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour (stop sites first)
+3. **Edge → Trust CA…** then **Use Local (LAN)…** when you want Bonjour
 4. **Add Site…** and pick a project directory
 5. Site submenu → **Start** → **Open**
 6. **Open Log** / **Restart** / **Stop** as needed
@@ -326,34 +322,24 @@ Output: add `--json` on most verbs for machine-readable responses.
 **Happy path (catalog)**
 
 ```bash
-rip sites start edge
 rip sites add packages/sites/demos/pulse --name pulse --host pulse.via.rip
 rip sites start pulse
 rip sites open pulse
 # …develop…
 rip sites stop pulse
-rip sites stop edge
 ```
 
 **Several sites, one edge**
 
 ```bash
-rip sites start edge
 rip sites start hello
 rip sites start pulse
 rip sites start cart
 # https://hello.via.rip/  https://pulse.via.rip/  https://cart.via.rip/
-rip sites stop hello && rip sites stop pulse && rip sites stop cart
-rip sites stop edge
+rip sites stop all
 ```
 
-**Tear down order**
-
-```text
-sites (running)  →  stop each
-edge (Rip-owned) →  rip sites stop edge
-```
-
+The edge outlives all of it; `janus stop` when you mean to take it down.
 Control stays until idle/exit; you rarely need to kill it.
 Stale state after renames or moved checkouts lives in
 `~/Library/Application Support/Rip/` — remove obsolete sites with
@@ -1355,38 +1341,35 @@ Rip owns the durable catalog at `sites.json`
 (`~/Library/Application Support/Rip/sites.json` on macOS; a one-time rename
 from `agent.json` still applies). Catalog reads and writes (`list` / `add` /
 `remove`) do not require a live control plane. A small control process starts
-when the edge or a desired-running app needs supervision, adopts healthy
-managers after a restart, and exits when the edge is stopped and no app
-remains desired-running. Janus never writes the catalog.
+when a desired-running app needs supervision, adopts healthy managers after
+a restart, and exits when no app remains desired-running. Janus never writes
+the catalog, and the catalog keeps only Rip's own edge facts: the posture
+and whether this machine trusts the local CA.
 
-`rip sites start edge` runs `janus` from `PATH` (the bootstrap installer's
-`~/.local/bin`, or `/usr/local/bin` for a root install), or the binary named
-by `--caddy` for a dev build, and verifies that it contains Janus before
-starting it. Nothing else is consulted, so an upgraded install is what the
-next start runs. `--config` selects
-another Caddyfile; the packaged baseline beside this README is the default. An
-external reachable edge is observable but never silently adopted as a
-Rip-owned process.
+The edge process is Janus's. `janus autostart` installs it under launchd
+(macOS) or systemd (Linux), running now, at every login, and again after a
+crash; `janus status` reports it, and `janus start`, `stop`, and `restart`
+manage it. `rip sites` runs `janus` from `PATH` for what it needs of it —
+`status --json` for the service's paths, `validate` and `reload` for its
+config, `trust` for the CA — and nothing else, so an upgraded install is
+what the next `janus restart` runs.
 
-On macOS, the packaged baselines remain both unprivileged and (in default
-mode) loopback-only on standard HTTP and HTTPS. The control plane registers
-per-user `launchd` sockets for `127.0.0.1:80` and `127.0.0.1:443` (or the
-configured ports; `local` mode omits the loopback node name so launchd binds
-all interfaces). The launchd listener activates both sockets and passes them
-as `fd/3` (HTTP) and `fd/4` (HTTPS) to an ordinary user-owned Caddy process,
-which serves HTTP/1.1 and HTTP/2 directly from the inherited TCP sockets. The
-packaged Caddyfiles explicitly select `h1 h2` because HTTP/3 is QUIC over UDP
-and cannot use stream descriptors. Adding HTTP/3 to this launch path requires
-separately inherited loopback UDP sockets on the HTTPS port and Caddy
-integration that assigns them to QUIC; enabling the protocol without that
-datagram listener makes Caddy reject startup. Default posture has no Bonjour
-and no side-door status port. Stop removes the launchd job and releases the
-ports. A running edge survives a control-plane restart, and desired
-`running` edge state reconciles after login when the control plane comes
-back. Mode flips (`rip sites expose local` / `expose loopback`) stop and recreate
-rather than reload, because the socket bind and Caddyfile change. An
-explicitly selected Caddyfile runs directly as a Rip-owned child and retains
-its own listener choices.
+What the edge serves is rendered, not hand-edited. The posture files beside
+this README (`Caddyfile` for loopback, `Caddyfile.local` for LAN) carry
+`{$RIP_EDGE_*}` placeholders; the control plane fills them with the paths
+Janus reports — its control and admin sockets, its log, its drop-in sites
+directory — and the runtime path of Rip's own status socket, validates the
+result, writes it as Janus's service Caddyfile, and reloads a running edge.
+That happens when the control plane boots, before an app starts, and on
+`rip sites expose`, so the file Janus runs always matches the posture and a
+posture flip is a reload with every registration intact. Operator-owned
+domains go in one `*.caddy` file each under Janus's sites directory, which
+the rendered config imports. `JANUS_CONTROL` names an edge Rip does not
+configure: apps register there and nothing is written or reloaded.
+
+The postures bind loopback (default) or all interfaces (`local`, `public`)
+on standard HTTP and HTTPS, which an unprivileged user may do on macOS; on
+Linux, `janus autostart` says what a user's edge needs to bind them.
 
 Migration is explicit. It never runs because the server started, a file
 changed, or a worker booted. Coordinated migration enters Maintenance, drains
@@ -1472,10 +1455,11 @@ when set). The packaged edge Caddyfile must include `log { format janus }` on
 the site block — without that encoder Janus publishes nothing and the log stays
 URL-only.
 
-Caddy/Janus process diagnostics (TLS, Hub, dial failures) go to:
+Caddy/Janus process diagnostics (TLS, Hub, dial failures) go to Janus's
+process log; `janus status` names it:
 
 ```bash
-tail -f ~/Library/Application\ Support/Rip/edge.log
+tail -f ~/.local/state/janus/log/janus.log
 ```
 
 The foreground manager also subscribes to the registration's live access
@@ -1607,8 +1591,8 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` runs `janus` from `PATH` — the same rule the edge uses — skipping
-when none exists, and asserts a non-replaced released Janus module. `bun run
+`test:janus` runs `janus` from `PATH` — the same rule `rip sites` uses —
+skipping when none exists, and asserts a non-replaced released Janus module. `bun run
 test` discovers and runs every `test/*/test.rip` fixture.
 
 Repository-wide certification additionally runs:

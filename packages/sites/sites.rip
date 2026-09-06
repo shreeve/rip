@@ -4,8 +4,9 @@
 # Reserved nouns: edge, all, tray, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
-import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { printJson, probeAgent, requestAgent } from './appliance.rip'
 import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
+import { JANUS_MISSING, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -26,20 +27,19 @@ HELP = '''
     add [project] [options]              Remember a project (default: cwd)
     remove <app>                         Forget a stopped app
 
-  Lifecycle (noun: <app> | all | edge | agent | <path>):
-    start <app|all|edge|agent>           Start supervised app(s), edge, or agent
+  Lifecycle (noun: <app> | all | agent | <path>):
+    start <app|all|agent>                Start supervised app(s) or the agent
     stop [noun]                          Stop (default: manager at cwd)
-    restart <app|all|edge|agent>         Restart (edge = recreate incl. its apps; agent = recycle)
+    restart <app|all|agent>              Restart (agent = recycle)
     status [noun]                        Summary, or one target (default: edge+apps)
 
-  Edge:
-    reload edge                          Reload the Rip-owned Caddyfile
+  Edge (the process is Janus's: janus autostart | start | stop | restart | status):
     trust edge [--export [PATH]]         Install (or export) the local CA
     expose local|public|loopback         Edge reachability posture
 
   Daily:
     open <app|edge>                      Open the app URL or status dashboard
-    logs <app|edge|all> [--lines N] [-f] Manager or edge logs
+    logs <app|all> [--lines N] [-f]      Manager logs
 
   Manager (cwd default for path forms):
     run [project] …                      Foreground manager
@@ -47,10 +47,6 @@ HELP = '''
     hold|release <app> […]               Deploy barriers on a remembered app
     migrate <app> [entry] […]            Coordinated DB migrate
     recover <app> <op-id> […]            Fix-forward recovery
-
-  Start edge options:
-    --caddy PATH  --config PATH  --control TARGET
-    --base-url TEMPLATE  --http-port N  --https-port N
 
   Add options:
     --name NAME  --host HOST (repeatable)  --workers N  --concurrency N
@@ -79,26 +75,18 @@ eager = false
 positionals = []
 addFlags = []
 logFlags = []
-edgeBody = {}
-edgeFlags = []
 exportPath = null
 trustExport = false
 
 # Manager verbs invoke manager.rip as an internal module (not a user CLI).
 MANAGER = ['run', 'publish', 'browse', 'hold', 'release', 'migrate', 'recover']
 
+# A foreground manager registers where the supervised apps do: Janus's
+# control socket, unless JANUS_CONTROL already says otherwise.
 seedJanusControl = (env) ->
   return env if env.JANUS_CONTROL
-  try
-    doc = loadCatalog()
-    control = doc.edge?.control
-    want = doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
-    if want
-      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
-      env.JANUS_CONTROL = edge.control if edge?.control?
-    else if control?
-      env.JANUS_CONTROL = control
-  catch then null
+  control = try edgeControl() catch then null
+  env.JANUS_CONTROL = control if control?
   env
 
 runManager = (argv, options = {}) ->
@@ -149,11 +137,6 @@ take = (flag) ->
   abort "rip-sites: #{flag} requires a value" unless args.length
   args.shift()
 
-parsePort = (flag, text) ->
-  value = parseInt text, 10
-  abort "rip-sites: #{flag} must be an integer from 1 through 65535" unless Number.isInteger(value) and value >= 1 and value <= 65535 and String(value) is text
-  value
-
 while args.length
   value = args.shift()
   switch value
@@ -198,27 +181,7 @@ while args.length
       eager = true
     when '--export'
       trustExport = true
-      edgeFlags.push value
       exportPath = if args[0]? and not args[0].startsWith('-') then args.shift() else 'rip-edge-local-ca.crt'
-    when '--caddy'
-      edgeFlags.push value
-      edgeBody.caddy = take value
-    when '--config'
-      edgeFlags.push value
-      edgeBody.config = take value
-    when '--control'
-      edgeFlags.push value
-      edgeBody.control = take value
-    when '--base-url'
-      edgeFlags.push value
-      edgeBody.baseUrl = take value
-      abort 'rip-sites: --base-url must contain {host}' unless edgeBody.baseUrl.includes '{host}'
-    when '--http-port'
-      edgeFlags.push value
-      edgeBody.httpPort = parsePort value, take(value)
-    when '--https-port'
-      edgeFlags.push value
-      edgeBody.httpsPort = parsePort value, take(value)
     else
       abort "rip-sites: unknown option #{value}" if value.startsWith '-'
       positionals.push value
@@ -229,7 +192,6 @@ extra = positionals.slice 1
 abort "rip-sites: #{verb} does not accept add options: #{addFlags.join(', ')}" if verb isnt 'add' and addFlags.length
 abort "rip-sites: #{verb} does not accept log options: #{logFlags.join(', ')}" if verb isnt 'logs' and logFlags.length
 abort 'rip-sites: --follow conflicts with --json' if follow and json
-abort "rip-sites: #{verb} does not accept start options" if Object.keys(edgeBody).length and not (verb is 'start' and noun is 'edge')
 abort "rip-sites: --export is only valid on `trust edge`" if trustExport and verb isnt 'trust'
 abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length and verb isnt 'add'
 
@@ -263,15 +225,28 @@ renderApp = (app) ->
   error = if app.error then "\n  Error:   #{app.error.split('\n').join('\n           ')}" else ''
   "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}#{warning}#{error}"
 
+# The edge line: Janus's process facts, then Rip's posture. Janus is
+# what runs it, so what to do about a stopped edge is a janus verb.
 renderEdge = (edge) ->
   marker = if edge.state is 'running' then '●' else '○'
-  ownership = if edge.managed then 'Rip-owned' else if edge.state is 'running' then 'external' else 'not running'
-  lines = ["#{marker} Edge  #{edge.state} (#{ownership})"]
+  head = if edge.state is 'running'
+    detail = []
+    detail.push "janus #{edge.version}" if edge.version
+    detail.push "pid #{edge.pid}" if edge.pid?
+    detail.push "up #{edge.uptime}" if edge.uptime
+    detail.push(if edge.autostart then 'autostart on' else 'autostart off') unless edge.external
+    detail.push 'external' if edge.external
+    "#{marker} Edge  running#{if detail.length then " (#{detail.join(', ')})" else ''}"
+  else if edge.external
+    "#{marker} Edge  not reachable (JANUS_CONTROL=#{edge.control})"
+  else
+    "#{marker} Edge  stopped — janus autostart (once), or janus start"
+  lines = [head]
   lines.push "  Mode:    #{edge.mode}" if edge.mode?
-  lines.push "  Control: #{edge.control}"
-  lines.push "  Caddy:   #{edge.caddy}" if edge.caddy
+  lines.push "  Control: #{edge.control}" if edge.control?
   lines.push "  Config:  #{edge.config}" if edge.config
-  lines.push "  Ports:   HTTP #{edge.httpPort} / HTTPS #{edge.httpsPort}" if edge.httpPort? and edge.httpsPort?
+  lines.push "  Sites:   #{edge.sites}" if edge.sites
+  lines.push "  Upgrade: the installed janus is newer than the running edge — janus restart" if edge.binaryNewer
   lines.push "  Trusted: #{if edge.localCaTrusted then 'yes' else 'no (run rip sites trust edge)'}" if edge.mode is 'local' or verb is 'expose'
   lines.push "  Error:   #{edge.lastError}" if edge.lastError
   lines.join '\n'
@@ -297,8 +272,7 @@ eachApp = (action) ->
 
 dashboardUrl = (edge) ->
   host = if edge.mode is 'local' then 'rip.local' else 'via.rip'
-  port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
-  "https://#{host}#{port}/"
+  "https://#{host}/"
 
 edgePost = (path, body = {}, start = true) ->
   requestAgent! 'rip-sites', 'POST', path, body, { start }
@@ -315,8 +289,7 @@ stopAgentProcess = ->
   true
 
 wantsControl = ->
-  doc = loadCatalog()
-  doc.edge?.desired is 'running' or doc.apps.some((app) -> app.desired is 'running')
+  loadCatalog().apps.some (app) -> app.desired is 'running'
 
 # snapshotCatalogApp awaits a manager probe — map through Promise.all, never
 # leave bare Promises (JSON.stringify turns those into `{}`).
@@ -331,22 +304,26 @@ ensureLiveControl = ->
     probeAgent! 'rip-sites'
   catch then null
 
-offlineEdge = (edge, health = null) ->
-  control = process.env.JANUS_CONTROL or edge?.control or null
+# The edge without a control plane: Janus's status plus the catalog's
+# posture. The same shape the agent's snapshot has.
+offlineEdge = (edge, janus, health = null) ->
   {
     state: if health? then 'running' else 'stopped'
-    desired: edge?.desired or 'stopped'
-    managed: false
-    pid: null
-    caddy: edge?.caddy or null
-    config: edge?.config or null
-    control: control
-    baseUrl: edge?.baseUrl or 'https://{host}/'
+    external: externalEdge()
+    control: edgeControl(janus)
     mode: edge?.mode or 'default'
-    httpPort: edge?.httpPort or 80
-    httpsPort: edge?.httpsPort or 443
+    baseUrl: edge?.baseUrl or 'https://{host}/'
     localCaTrusted: edge?.localCaTrusted is true
-    launcher: null
+    pid: janus?.pid or null
+    uptime: janus?.uptime or null
+    supervisor: janus?.supervisor or null
+    autostart: janus?.autostart is true
+    version: janus?.janus or null
+    binaryNewer: janus?.binary_newer is true
+    config: janus?.config or null
+    sites: janus?.sites or null
+    log: janus?.log or null
+    admin: janus?.admin or null
     janus: health
     lastError: edge?.lastError or null
   }
@@ -366,8 +343,12 @@ probeJanus = (control) ->
 
 readOfflineEdge = ->
   doc = loadCatalog()
-  control = process.env.JANUS_CONTROL or doc.edge?.control
-  offlineEdge doc.edge, probeJanus!(control)
+  janus = if externalEdge() then null else janusStatus()
+  offlineEdge doc.edge, janus, probeJanus!(edgeControl(janus))
+
+# The edge is Janus's process; its verbs are janus's.
+edgeIsJanus = (action) ->
+  abort "rip-sites: the edge is Janus — `janus #{action}` (and `janus autostart` to keep it running)"
 
 switch verb
   when 'list'
@@ -409,17 +390,9 @@ switch verb
     else if verb is 'stop' and noun? and noun not in RESERVED and noun isnt 'all' and not catalogHas!(noun) and (noun is '.' or existsSync(noun))
       runManager! ['stop', pathNoun!(noun)]
     else
-      requireNoun ['<app>', 'all', 'edge', 'agent']
-      if noun is 'edge'
-        abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
-        if verb is 'restart'
-          # One orchestrated call: the agent stops running apps, recreates
-          # the edge, and starts them again — no hand choreography.
-          edge = edgePost! '/1.0/edge/restart', {}, true
-        else
-          edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
-        printEdge edge
-      else if noun is 'agent'
+      edgeIsJanus verb if noun is 'edge'
+      requireNoun ['<app>', 'all', 'agent']
+      if noun is 'agent'
         stopped = if verb is 'start' then false else stopAgentProcess!
         if verb is 'stop'
           if json then printJson { stopped } else console.log(if stopped then 'Control agent stopped — the next control request boots a fresh one.' else 'Control agent is not running.')
@@ -459,10 +432,7 @@ switch verb
           console.log ''
           if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
       else if noun is 'edge'
-        if live or wantsControl!
-          printEdge requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: true })
-        else
-          printEdge readOfflineEdge!
+        edgeIsJanus 'status'
       else
         requireApp!
         if live or wantsControl!
@@ -473,7 +443,7 @@ switch verb
   when 'open'
     requireNoun ['<app>', 'edge']
     if noun is 'edge'
-      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: wantsControl! }
+      edge = if probeAgent!('rip-sites') then requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: false }) else readOfflineEdge!
       abort 'rip-sites: edge is not running' unless edge.state is 'running'
       url = dashboardUrl edge
     else
@@ -486,14 +456,9 @@ switch verb
     printJson({ url }) if json
 
   when 'logs'
-    requireNoun ['<app>', 'edge', 'all']
-    if noun is 'edge'
-      abort 'rip-sites: edge log follow is not implemented yet' if follow
-      paths = agentPaths 'rip-sites'
-      console.log "Edge logs: #{paths.edgeLog}"
-      console.log "Control log: #{paths.agentLog}"
-      printJson({ edgeLog: paths.edgeLog, agentLog: paths.agentLog }) if json
-    else if noun is 'all'
+    edgeIsJanus 'status (it names the log)' if noun is 'edge'
+    requireNoun ['<app>', 'all']
+    if noun is 'all'
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: wantsControl! }
       abort 'rip-sites: no apps in the catalog' unless apps.length
       offsets = {}
@@ -541,8 +506,7 @@ switch verb
             offset = next.next
 
   when 'reload'
-    requireNoun ['edge']
-    printEdge edgePost!('/1.0/edge/reload', {}, true)
+    edgeIsJanus 'reload'
 
   when 'trust'
     requireNoun ['edge']
@@ -556,9 +520,11 @@ switch verb
       # prompt — the agent daemon has neither a TTY nor a way to ask, so
       # the install runs here and only the outcome is recorded with the
       # agent.
+      janus = janusBinary()
+      abort "rip-sites: #{JANUS_MISSING}" unless janus?
       edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
-      abort 'rip-sites: edge must be running to trust the CA — run `rip sites start edge` first' unless edge.state is 'running' and edge.caddy and edge.admin
-      result = Bun.spawnSync [edge.caddy, 'trust', '--address', "unix/#{edge.admin}"], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
+      abort 'rip-sites: edge must be running to trust the CA — `janus autostart` (once) or `janus start` first' unless edge.state is 'running' and edge.admin
+      result = Bun.spawnSync [janus, 'trust', '--address', "unix/#{edge.admin}"], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
       unless result.exitCode is 0
         abort "rip-sites: certificate install failed (exit #{result.exitCode}) — manual fallback:\n  rip sites trust edge --export /tmp/rip-local-ca.crt\n  # then add that certificate to your system trust store (macOS:\n  # sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/rip-local-ca.crt)"
       edge = edgePost! '/1.0/edge/trusted', {}, true
