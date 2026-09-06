@@ -1439,10 +1439,12 @@ mutable bindings are shared by concurrent requests, so handlers running with
 `c > 1` keep request-specific state in local bindings or the request context.
 
 The manager publishes each worker's `concurrency` with its socket, so Janus
-skips a full worker instead of dialing it. Workers still bounce excess
-requests with marked `503` responses, so a Janus that predates the field, or a
-race for the last slot, tries another ready socket without poisoning health
-accounting.
+skips a full worker instead of dialing it. A Janus that predates the field
+refuses the list with a 400; the manager then drops the field for the rest of
+its run and republishes plain sockets, so the edge version only decides
+whether the optimization is on. Workers still bounce excess requests with
+marked `503` responses, so an older Janus, or a race for the last slot, tries
+another ready socket without poisoning health accounting.
 
 ## Logging
 

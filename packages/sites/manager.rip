@@ -1114,11 +1114,34 @@ export main = (argv) ->
   finished = Promise.new (done) -> finish = done
   updateChain = Promise.resolve()
 
+  # Each worker entry carries the cap the worker's own gate enforces, so
+  # Janus can skip a full socket instead of dialing it. A Janus that
+  # predates the field rejects the whole list (its decoder refuses unknown
+  # keys), so the first such 400 turns the field off for this process and
+  # the call is retried without it; nothing is lost but the optimization.
+  capsPublishable = true
+  upstreamEntry = (worker) ->
+    if capsPublishable then { path: worker.socket, concurrency: args.concurrency } else { path: worker.socket }
+  withoutCap = (entry) ->
+    plain = { path: entry.path }
+    plain.doorbell = true if entry.doorbell
+    plain
+  concurrencyRejected = (detail) ->
+    String(detail).includes('unknown field') and String(detail).includes('concurrency')
+  dropCaps = ->
+    return unless capsPublishable
+    capsPublishable = false
+    warn 'rip-site: this Janus predates upstream concurrency; publishing sockets without it'
+  rejectsConcurrency = (response) ->
+    rejected = concurrencyRejected response.text!
+    dropCaps() if rejected
+    rejected
+
   registration = ->
     upstreams =
       if operation is 'Maintenance' then []
       else if doorbellPublished then [{ path: doorbellPath, doorbell: true }]
-      else workers.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
+      else workers.map (worker) -> upstreamEntry worker
     body =
       name: args.name
       upstreams: upstreams
@@ -1265,6 +1288,9 @@ export main = (argv) ->
         body = JSON.parse detail
         throw Error.new('Janus registration returned no app id') unless body?.id?
         return body.id
+      if response.status is 400 and capsPublishable and concurrencyRejected(detail)
+        dropCaps()
+        continue
       unless response.status is 409
         throw Error.new("Janus registration failed (#{response.status}): #{detail}")
       conflictDeadline ?= Date.now() + REGISTER_409_MS
@@ -1278,6 +1304,10 @@ export main = (argv) ->
     throw Error.new('manager is stopping') if stopping
     return unless appId?
     response = controlFetch! args.control, 'PUT', "/1.0/apps/#{appId}/upstreams", { upstreams }
+    if response.status is 400 and capsPublishable and rejectsConcurrency!(response)
+      # This Janus predates the field (its decoder refuses unknown keys):
+      # publish plain sockets from here on and retry this list once.
+      return publishUpstreams! upstreams.map(withoutCap)
     throw Error.new("Janus upstream update failed (#{response.status})") unless response.ok
 
   publishWorkers = -> publishUpstreams! registration().upstreams
@@ -1999,7 +2029,7 @@ export main = (argv) ->
       apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
       operation = 'Activating'
       admissionAttempted = true
-      publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
+      publishUpstreams! candidateWorkers.map (worker) -> upstreamEntry worker
       workers = candidateWorkers
       bootingWorkers = []
       for worker in workers
@@ -2034,7 +2064,7 @@ export main = (argv) ->
       restored = bootArtifact! activeArtifact
       operation = 'Restoring'
       admissionAttempted = true
-      publishUpstreams! restored.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
+      publishUpstreams! restored.map (worker) -> upstreamEntry worker
       workers = restored
       bootingWorkers = []
       for worker in workers
