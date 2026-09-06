@@ -8,5 +8,4 @@ wrongState: number := 'oops'
 wrongComputed: string ~= count * 2
 wrongReadonly: number =! 'nope'
 wrongEffect: number ~> console.log(count)
-# (no readonly-write line: the emitter rejects it before any type check, and one CompileError would mask every other
-#  diagnostic this fixture expects — test/rip/redeclare.rip pins the rejection)
+# (no readonly-write line: the emitter's CompileError would mask every other diagnostic here; test/rip/redeclare.rip pins it)
