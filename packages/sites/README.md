@@ -212,7 +212,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 
 | Command | What it does |
 | --- | --- |
-| `rip sites start <app\|all\|edge\|agent>` | Start a supervised app, every app, the shared edge, or the control agent. Apps need a reachable Janus control plane (normally: start the edge first). |
+| `rip sites start <app\|all\|edge\|agent>` | Start a supervised app, every app, the shared edge, or the control agent. Apps need a reachable Janus control plane (normally: start the edge first). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
 | `rip sites stop [noun]` | Stop a supervised app, `all`, `edge`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
 | `rip sites restart <app\|all\|edge\|agent>` | Restart. For `edge` / `agent` this is a full recreate (stop then start), not a config reload. |
 | `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). |

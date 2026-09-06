@@ -126,7 +126,11 @@ export requestAgent = (label, method, path, body = null, options = {}) ->
   unless response.ok
     return null if options.soft
     detail = try JSON.parse(text).error catch then text
-    abort "#{label}: #{detail or "control request failed (#{response.status})"}"
+    message = detail or "control request failed (#{response.status})"
+    # A fan-out caller keeps going: it takes the failure back to render
+    # in place instead of ending the process on the first bad reply.
+    return { error: message, status: response.status } if options.tolerate
+    abort "#{label}: #{message}"
   return null unless text
   try JSON.parse(text) catch then text
 
