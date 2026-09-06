@@ -22,5 +22,4 @@ tmp-*
 /test/browser/test-results
 
 # Janus binary: downloaded from github.com/shreeve/janus releases, never committed
-/packages/sites/bin/janus
 notes.txt

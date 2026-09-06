@@ -3,7 +3,7 @@
 # Closing this shell (or Cursor) does not stop the tray, edge, or sites.
 #
 # Expected:
-#   bin/rip, packages/sites/bin/janus, packages/sites/tray-sites.rip
+#   bin/rip, packages/sites/tray-sites.rip, janus on PATH
 #   packages/tray/macos/.build/release/rip-tray-host  (swift build -c release)
 #
 # Ordinary CLI: from packages/sites, `rip tray` discovers tray-sites.rip.
@@ -15,7 +15,6 @@ SITES="$(cd "$SITES_BIN/.." && pwd)"
 ROOT="$(cd "$SITES/../.." && pwd)"
 HOST="${RIP_TRAY_HOST:-$ROOT/packages/tray/macos/.build/release/rip-tray-host}"
 RIP="$ROOT/bin/rip"
-CADDY="$SITES_BIN/janus"
 PROVIDER="$SITES/tray-sites.rip"
 LABEL="rip.via.apps.tray"
 # Pre-via.rip label — booted out (and its plist removed) on start so exactly
@@ -32,10 +31,12 @@ xml() {
   printf '%s' "$1" | /usr/bin/sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
 
-# launchd jobs get a tiny PATH; bin/rip is `#!/usr/bin/env bun`.
+# launchd jobs get a tiny PATH; bin/rip is `#!/usr/bin/env bun`, and the
+# edge is whatever `janus` the PATH resolves (~/.local/bin for a user
+# install, /usr/local/bin for a root one).
 tray_path() {
   local parts=()
-  for dir in "$HOME_DIR/.bun/bin" /opt/homebrew/bin /usr/local/bin /usr/bin /bin; do
+  for dir in "$HOME_DIR/.local/bin" "$HOME_DIR/.bun/bin" /opt/homebrew/bin /usr/local/bin /usr/bin /bin; do
     [[ -d "$dir" ]] && parts+=("$dir")
   done
   local IFS=:
@@ -68,7 +69,6 @@ write_plist() {
     <key>HOME</key><string>$(xml "$home_value")</string>
     <key>PATH</key><string>$(xml "$path_value")</string>
     <key>RIP_TRAY_RIP</key><string>$(xml "$RIP")</string>
-    <key>JANUS_CADDY</key><string>$(xml "$CADDY")</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>

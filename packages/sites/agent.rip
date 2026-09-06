@@ -648,11 +648,14 @@ resolveFile = (value, description) ->
   path
 
 resolveCaddy = (explicit = null) ->
-  packagedCaddy = join(import.meta.dir, 'bin', 'janus')
-  # `janus` on PATH is the normal install (alongside harbor and pilot in
-  # /usr/local/bin); JANUS_CADDY only overrides that for a dev build.
-  caddyInput = explicit or state.edge.caddy or process.env.JANUS_CADDY or (existsSync(packagedCaddy) and packagedCaddy) or Bun.which('janus') or Bun.which('caddy')
-  fail 'no Janus-enabled Caddy binary — pass --caddy PATH or set JANUS_CADDY', 503 unless caddyInput?
+  # `janus` on PATH is the install (the bootstrap installer puts it in
+  # ~/.local/bin, or /usr/local/bin as root). Nothing else is consulted:
+  # not a remembered path, not an environment variable, not a binary
+  # inside this checkout — so an upgraded install is what the next start
+  # runs, and one host never quietly runs two different edges. --caddy
+  # names a specific binary for a dev build.
+  caddyInput = explicit or Bun.which('janus')
+  fail 'no janus on PATH — install Janus (https://github.com/shreeve/janus#prebuilt-releases) or pass --caddy PATH', 503 unless caddyInput?
   caddy = resolveFile caddyInput, 'Caddy binary'
   modules = Bun.spawnSync [caddy, 'list-modules'], { stdout: 'pipe', stderr: 'pipe' }
   fail "Caddy binary does not contain Janus: #{caddy}", 503 unless modules.exitCode is 0 and modules.stdout.toString().split('\n').includes('janus')
@@ -763,7 +766,12 @@ startEdge = (body = {}, automatic = false) ->
     # with dead ports would turn every rescue into this early return.
     return current if current.state is 'running' and edgeServing!
     fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
-    caddy = resolveCaddy! body.caddy
+    # A start the operator asked for resolves the binary afresh (PATH, or
+    # the --caddy they named); a supervision restart of an edge that died
+    # keeps the binary that edge was started with, so a dev build pinned
+    # by --caddy survives its own crash and an upgrade lands on the next
+    # start the operator performs, never underneath a running pin.
+    caddy = resolveCaddy! (body.caddy or (if automatic then state.edge.caddy else null))
     configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
     config = resolveFile configInput, 'Caddyfile'
     control = body.control or paths.edgeControl

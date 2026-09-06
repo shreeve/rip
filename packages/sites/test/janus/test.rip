@@ -8,18 +8,13 @@ PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 
-# Same order agent.rip's resolveCaddy uses, minus the runtime-only
-# sources: env, then the packaged binary, then PATH. Test and production
-# should not disagree about where a Janus binary comes from — and an env
-# var alone made this lane depend on which shell you happened to be in.
-PACKAGED_CADDY = join(import.meta.dir, '..', '..', 'bin', 'janus')
-
+# The same rule agent.rip's resolveCaddy uses: `janus` on PATH, nothing
+# else. Test and production must not disagree about where the edge comes
+# from, and neither an environment variable nor a binary inside this
+# checkout can make this lane run something the host would not.
 MISSING = """
-  test:janus found no Janus-enabled Caddy. Looked, in order, at:
-    JANUS_CADDY                     (unset)
-    #{PACKAGED_CADDY}
-    caddy on PATH
-  Drop a built binary at either path, or export JANUS_CADDY.
+  test:janus found no janus on PATH. Install Janus
+  (https://github.com/shreeve/janus#prebuilt-releases) or put a build on PATH.
 """
 
 # Absent is a valid answer here, so this LOCATES rather than demands; the
@@ -27,10 +22,7 @@ MISSING = """
 # path that is set but is not a file stays an error — that is a broken
 # configuration, not a missing tool.
 releasedCaddy = ->
-  binary = process.env.JANUS_CADDY or
-    (existsSync(PACKAGED_CADDY) and PACKAGED_CADDY) or
-    Bun.which('janus') or
-    Bun.which('caddy')
+  binary = Bun.which('janus')
   return null unless binary
   throw Error.new("Janus binary is not an existing file: #{binary}") unless existsSync binary
   binary
@@ -259,4 +251,4 @@ if CADDY?
 else if process.env.CI
   test! TITLE, -> throw Error.new(MISSING)
 else
-  console.log "  \u2298 #{TITLE} SKIPPED: no Janus-enabled Caddy; set JANUS_CADDY to run"
+  console.log "  \u2298 #{TITLE} SKIPPED: no janus on PATH"

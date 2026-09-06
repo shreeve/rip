@@ -68,7 +68,7 @@ rip sites start edge
 rip sites status edge
 # ● Edge  running (Rip-owned)
 #   Control: …/rip-agent-…/janus.sock
-#   Caddy:   …/packages/sites/bin/janus
+#   Caddy:   ~/.local/bin/janus
 #   Config:  …/packages/sites/Caddyfile
 ```
 
@@ -121,7 +121,6 @@ Overrides when needed:
 
 ```bash
 rip sites start edge --caddy /path/to/janus --config /path/to/Caddyfile
-# or: JANUS_CADDY=/path/to/janus rip sites start edge
 ```
 
 `rip sites status edge` also reports an **external** edge Rip did not start — Rip
@@ -1349,9 +1348,11 @@ when the edge or a desired-running app needs supervision, adopts healthy
 managers after a restart, and exits when the edge is stopped and no app
 remains desired-running. Janus never writes the catalog.
 
-`rip sites start edge` finds Caddy through `--caddy`, the remembered configuration,
-`JANUS_CADDY`, the packaged `bin/janus`, or `PATH`, in that order, and
-verifies that the binary contains Janus before starting it. `--config` selects
+`rip sites start edge` runs `janus` from `PATH` (the bootstrap installer's
+`~/.local/bin`, or `/usr/local/bin` for a root install), or the binary named
+by `--caddy` for a dev build, and verifies that it contains Janus before
+starting it. Nothing else is consulted, so an upgraded install is what the
+next start runs. `--config` selects
 another Caddyfile; the packaged baseline beside this README is the default. An
 external reachable edge is observable but never silently adopted as a
 Rip-owned process.
@@ -1595,9 +1596,8 @@ bun run test:appliance
 bun run test:janus
 ```
 
-`test:janus` resolves an already-built Janus Caddy binary — `JANUS_CADDY`
-first, then the packaged `bin/janus`, then `caddy` on `PATH`, erroring
-if none exists — and asserts a non-replaced released Janus module. `bun run
+`test:janus` runs `janus` from `PATH` — the same rule the edge uses — skipping
+when none exists, and asserts a non-replaced released Janus module. `bun run
 test` discovers and runs every `test/*/test.rip` fixture.
 
 Repository-wide certification additionally runs:
