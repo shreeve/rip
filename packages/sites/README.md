@@ -243,9 +243,86 @@ managers keep their registrations and re-register on their next heartbeat:
 curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash && janus restart
 ```
 
-Pin a version with `... | bash -s v1.12.1`. `janus status` shows what is
+Pin a version with `... | bash -s v1.12.2`. `janus status` shows what is
 installed and what is running, and says when they differ; so does
 `rip sites status`.
+
+### Custom domains
+
+The postures serve the Rip-owned name families for free: `via.rip` and
+`*.via.rip` (default), and `rip.local` plus `*.local` (`local`). Certificates
+for those are minted on demand by the local CA after `rip sites trust edge`.
+
+Your own domains — `app.example.com`, `*.medlabs.health`, anything outside
+those families — are served by a **drop-in site file** in Janus's sites
+directory, `~/.config/janus/sites/*.caddy` (as root, `/etc/janus/sites/`).
+Janus's service Caddyfile ends with `import <sites>/*.caddy`, so a file you
+drop there joins the running edge on the next `janus reload`. One file per
+domain, site blocks only — never global options.
+
+`rip sites status <app>` prints the exact path to add when an app claims a
+host the edge does not cover:
+
+```text
+⚠ no edge site block covers local.medlabs.health — add
+  ~/.config/janus/sites/medlabs.caddy (or any *.caddy declaring these hosts)
+```
+
+A domain with a real certificate you hold (a purchased wildcard, say):
+
+```caddy
+# ~/.config/janus/sites/medlabs.caddy
+http://*.medlabs.health {
+	redir https://{host}{uri} 308
+}
+
+*.medlabs.health {
+	tls /Users/you/ssl/medlabs.health.crt /Users/you/ssl/medlabs.health.key
+	janus
+	log {
+		output stderr
+		format janus
+	}
+}
+```
+
+A domain that resolves to this machine and should use the local CA instead
+of a real certificate:
+
+```caddy
+# ~/.config/janus/sites/example.caddy
+example.test {
+	tls {
+		issuer internal
+		on_demand
+	}
+	janus
+	log {
+		output stderr
+		format janus
+	}
+}
+```
+
+Then:
+
+```bash
+janus reload        # applies the new site file; sites already up stay up
+```
+
+The `janus` directive hands matching requests to Janus, which routes them
+to the app registered for that host (`rip sites add <project> --host
+app.example.com`, or a `serve.rip` that declares it). The file lives in the
+config directory, so it survives `janus reload`, `janus restart`, and
+reboots — this is the durable replacement for the old per-project custom
+edge Caddyfile.
+
+Two limits worth knowing. A drop-in holds **site** blocks only; edge-wide
+`janus { … }` options (an edge response `cache`, for instance) are global
+and belong in the posture templates beside this README, not in a drop-in.
+And the domain must resolve to this machine on its own — public DNS
+pointing at `127.0.0.1`, a `/etc/hosts` line, or mDNS for a `.local` name;
+the drop-in serves the name, it does not resolve it.
 
 ### Daily — open and logs
 
