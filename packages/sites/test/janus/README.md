@@ -16,10 +16,9 @@ Run it with:
 bun run test:janus
 ```
 
-The test resolves an already-built Janus Caddy binary: `JANUS_CADDY` first,
-then the packaged `bin/janus`, then `caddy` on `PATH`. It performs no
-build and errors when no binary exists. In every case the test rejects a
-local module replacement.
+The test runs `janus` from `PATH`, the same rule the agent uses for the
+edge; it performs no build and skips when no binary is on `PATH`. In every
+case the test rejects a local module replacement.
 
 Directory browsing is a Janus-owned process lease and access observation is a
 separate Rip Sites client; their tests belong to the capabilities
