@@ -340,7 +340,13 @@ async function evaluate(compiled) {
 
 // Load a battery file: compile it through the engine and execute it
 // with RECORDING verbs — the result is the row list, in file order.
+// A module runs once per process, so the rows are kept per path: a
+// second loader in the same process (the language suite and the
+// grammar-coverage test share one when `bun test` runs serially)
+// gets the recorded rows rather than an empty re-import.
+const loaded = new Map();
 export async function loadBattery(path) {
+  if (loaded.has(path)) return loaded.get(path).slice();
   const rows = [];
   collectInto(rows, basename(path));
   try {
@@ -348,7 +354,8 @@ export async function loadBattery(path) {
   } finally {
     collectInto(null, 'battery');
   }
-  return rows;
+  loaded.set(path, rows);
+  return rows.slice();
 }
 
 // Execute one row. Returns null on pass, or a loud failure message

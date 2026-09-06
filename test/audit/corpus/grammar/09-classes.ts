@@ -190,3 +190,49 @@ export class Shipped {
 }
 
 console.log('shipped:', new Shipped().version)
+
+// ── def methods: `def` in a class body, the static `def @`, the bang void form, and get/set accessors ──
+
+class Counter {
+  count: number
+  history: number[] = []
+  constructor(count: number = 0) {
+    this.count = count
+    this.history.push(this.count)
+  }
+  add(n: number): number {
+    this.history.push(n)
+    return (this.count += n)
+  }
+  static of(n: number): Counter {
+    return new Counter(n)
+  }
+  static fresh() {
+    return new Counter()
+  }
+  static pair<T>(x: T) {
+    return [x, x]
+  }
+  static only<T>(x: T): T[] {
+    return [x]
+  }
+  static zero() {
+    console.log('zeroed')
+  }
+  static tick(): void {
+    console.log('tick')
+  }
+  get doubled() {
+    return this.count * 2
+  }
+  set doubled(v) {
+    this.count = v / 2
+  }
+}
+
+Counter.zero()
+Counter.tick()
+const counted = Counter.of(3)
+counted.add(2)
+counted.doubled = 20
+console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count, Counter.pair(1).length, Counter.only(2).length)

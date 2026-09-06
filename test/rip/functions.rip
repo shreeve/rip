@@ -453,3 +453,10 @@ test 'implicit it property access', '''
 test 'implicit it with fat arrow', '''
     [10, 20, 30].map => it + 1
   ''', [11, 21, 31]
+
+test 'a parameterless def with a generic return type keeps its body', '''
+    def g: Map<string, number>
+      new Map([['a', 1]])
+    g().get('a')
+  ''', 1
+code 'a parameterless generic def takes a return type', 'def g<T>: T\n  1', 'function g() {\n  return 1;\n}'

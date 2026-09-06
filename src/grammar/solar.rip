@@ -458,33 +458,79 @@ class Generator
       if name? and presence.has(name) and not bound.has(name) then s.replace(/\[[^\[\]]*\]$/, '') else s
 
     if text.includes DROP
-      # Which top-level template elements dropped: their annotation
-      # parts go too. Nested drops leave the annotation alone (a nested
-      # scaffold is one '_' part).
+      # Which template elements dropped, as child-slot paths from the
+      # top level (`[1, 2]` is the third element of the second): their
+      # annotation parts go too, down through any transparent or named
+      # sub-annotation the path descends.
       dropped = []
-      depth = 0
+      counters = []
       quote = null
-      index = 0
       i = 0
       while i < text.length
         ch = text[i]
         if quote
           if ch is '\\' then i++ else if ch is quote then quote = null
         else if ch is '"' or ch is "'" then quote = ch
-        else if ch is '[' or ch is '(' then depth++
-        else if ch is ']' or ch is ')' then depth--
-        else if ch is ',' and depth is 1 then index++
-        else if ch is DROP and depth is 1 then dropped.push index
+        else if ch is '[' then counters.push 0
+        else if ch is ']' then counters.pop()
+        else if ch is ',' and counters.length > 0 then counters[counters.length - 1]++
+        else if ch is DROP and counters.length > 0 then dropped.push counters.slice()
         i++
       text = text.replace(/\s*,\s*\u0000/g, '').replace(/\u0000\s*,\s*/g, '').replace(/\u0000/g, '')
+      # Later slots prune first, so an earlier removal never shifts a
+      # path still to be applied.
+      ordered = dropped.sort (a, b) ->
+        for k in [0...Math.min(a.length, b.length)]
+          return b[k] - a[k] if a[k] isnt b[k]
+        b.length - a.length
+      # Remove the part at `path` from a parts list, recursing into the
+      # sub-annotation of the part a longer path passes through.
+      pruneParts = (partsText, path) =>
+        pieces = @_splitParts partsText, (msg) -> throw Error.new "Grammar error: #{msg}"
+        [slot, ...deeper] = path
+        return pieces.filter((p, j) -> j isnt slot).join(', ') if deeper.length is 0
+        piece = pieces[slot] ?? ''
+        open = piece.indexOf '('
+        if open >= 0 and piece.endsWith(')')
+          inner = piece[open + 1...-1]
+          innerColon = inner.indexOf ':'
+          # `role(kind: parts)` keeps its kind prefix; `_(parts)` has none.
+          named = innerColon >= 0 and not /[,(]/.test(inner[...innerColon])
+          prefix = if named then inner[..innerColon] + ' ' else ''
+          innerBody = if named then inner[innerColon + 1..] else inner
+          pieces[slot] = "#{piece[...open]}(#{prefix}#{pruneParts innerBody, deeper})"
+        pieces.join ', '
       extras = extras.map (extra) ->
         return extra unless typeof extra is 'string' and extra.includes(':') and not extra.trim().startsWith('~')
         colon = extra.indexOf ':'
         kind = extra[...colon].trim()
-        parts = extra[colon + 1..].split(',').map((p) -> p.trim()).filter (p, j) -> j not in dropped
-        if parts.length then "#{kind}: #{parts.join ', '}" else kind
+        body = extra[colon + 1..]
+        for path in ordered
+          body = pruneParts body, path
+        body = body.trim()
+        if body.length then "#{kind}: #{body}" else kind
 
     [symbols, text, extras]
+
+  # Split an annotation's part list at top-level commas (a
+  # sub-annotation's parentheses group its own parts); `fail` reports
+  # unbalanced parentheses.
+  _splitParts: (text, fail) ->
+    parts = []
+    cur   = ''
+    depth = 0
+    for ch in text
+      depth++ if ch is '('
+      depth-- if ch is ')'
+      fail 'unbalanced parentheses' if depth < 0
+      if ch is ',' and depth is 0
+        parts.push cur.trim()
+        cur = ''
+      else
+        cur += ch
+    fail 'unbalanced parentheses' unless depth is 0
+    parts.push cur.trim()
+    parts
 
   _parseHandle: (handle, lhs) ->
     if Array.isArray handle
@@ -767,22 +813,7 @@ class Generator
 
     # Split at top-level commas: a sub-annotation's parentheses group
     # its own parts.
-    splitParts = (text) ->
-      parts = []
-      cur   = ''
-      depth = 0
-      for ch in text
-        depth++ if ch is '('
-        depth-- if ch is ')'
-        fail "unbalanced parentheses in annotation '#{annotation}'" if depth < 0
-        if ch is ',' and depth is 0
-          parts.push cur.trim()
-          cur = ''
-        else
-          cur += ch
-      fail "unbalanced parentheses in annotation '#{annotation}'" unless depth is 0
-      parts.push cur.trim()
-      parts
+    splitParts = (text) => @_splitParts text, (msg) -> fail "#{msg} in annotation '#{annotation}'"
 
     checkName = (name, seen) ->
       fail "invalid role name '#{name}'" unless ident.test(name)
@@ -1472,11 +1503,6 @@ class Generator
     solution = {rule, operator: op, r: reduce, s: shift}
     [NONASSOC, SHIFT, REDUCE] = [0, 1, 2]
 
-    if shift[0] is REDUCE
-      solution.action = if shift[1] < reduce[1] then shift else reduce
-      solution.bydefault = true if shift[1] isnt reduce[1]
-      return solution
-
     if rule.precedence is 0 or not op
       solution.bydefault = true
       solution.action = shift
@@ -1804,6 +1830,20 @@ class Generator
       for own p of parseTable[state] when @tokenNames[p] and +p > 2
         expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
       expected
+    # The offending token names itself by its own text when it has one
+    # (`Unexpected '*'`, never `Unexpected 'MATH'`); layout tokens and
+    # long lexemes fall back to the kind's display.
+    layoutIds = [@symbolIds.INDENT, @symbolIds.OUTDENT, @symbolIds.TERMINATOR]
+    describeGot = =>
+      return 'end of input' if symbol is EOF
+      name = @tokenNames[symbol] or symbol
+      text = lexer.text
+      spellable = typeof text is 'string' and text.trim().length > 0 and text.length <= 24 and
+        not layoutIds.includes(symbol) and not /^["'`]/.test(text)
+      # A token the implicit passes minted (an implicit call's paren, an
+      # implicit object's brace) was never typed: say so.
+      return "implicit '#{text}'" if spellable and lexer.token?.generated
+      if spellable then "'#{text}'" else "'#{name}'"
 
     loop
       state = stk[stk.length - 1]
@@ -1847,7 +1887,7 @@ class Generator
           # at its own position.
           return if parserRecorded
           parserRecorded = true
-          got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+          got = describeGot()
           expected = if wanted? then [@tokenNames[wanted] or wanted] else expectedForState()
           message = "Unexpected #{got}"
           message += " — expected #{expected.join(', ')}" if expected.length
@@ -1913,7 +1953,7 @@ class Generator
         # a minted kind as a glyph another terminal already spells
         # (OPT_MARKER and the existence `?` both display as `?`).
         expected = expectedForState()
-        got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+        got = describeGot()
         start = tokenLoc?.start ?? 0
         end   = tokenLoc?.end ?? start
         message = "Unexpected #{got}"

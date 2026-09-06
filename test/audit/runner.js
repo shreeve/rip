@@ -272,6 +272,17 @@ const ERRD = path.join(CORPUS, 'errors');
 const ripFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
   .filter((e) => e.isFile() && e.name.endsWith('.rip'))
   .map((e) => e.name);
+// The data fixtures a fixture's import attributes name (a JSON module)
+// ride along into every sandbox that runs the fixtures.
+const dataFilesIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.json'))
+  .map((e) => e.name);
+const copyFixturesInto = (dir) => {
+  for (const d of [FIX, CLM]) {
+    if (!fs.existsSync(d)) continue;
+    for (const f of [...ripFilesIn(d), ...dataFilesIn(d)]) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  }
+};
 // The Hover Audit's pin file, HAND-MAINTAINED per row (no mechanical
 // re-pin exists; the run prints paste-ready rows for divergences and
 // unpinned symbols). Two sections per fixture, one discipline — reviewed
@@ -841,7 +852,7 @@ function dimTwin(twinBase, byFile) {
 const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
-  for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(dir, f));
+  copyFixturesInto(dir);
   const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
   tscfg.include = ['.'];   // the fixtures are flat here, not under corpus/
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
@@ -1124,7 +1135,7 @@ class EditorServer {
   }
   release(uri) { if (this.open === uri) this.open = null; }
   async start() {
-    if (this.corpusMode) for (const d of [FIX, CLM]) if (fs.existsSync(d)) for (const f of ripFilesIn(d)) fs.copyFileSync(path.join(d, f), path.join(this.dir, f));
+    if (this.corpusMode) copyFixturesInto(this.dir);
     // No errors/ copy: the Diagnostics Audit opens its fixtures with in-memory
     // text under `errors/…` URIs (distinct from every flat fixture by path
     // alone), and the server compiles the didOpen text — it never reads an
@@ -1966,6 +1977,7 @@ function mappingScan(src, code, mappings, vocabulary = []) {
   const missingRows = [];  // flagged reads with NO row at all — counted apart
   const excluded = [];     // reads the compiler consumed as vocabulary
   let total = 0, census = 0, byLuck = 0;
+  const luckRows = [];
   const drifted = [];    // resolved and byte-equal, but maps back somewhere else
   const consumed = (offset, len) => vocabulary.find((v) => v.start === offset && v.end === offset + len) ?? null;
   for (const { name, offset } of identReads(src)) {
@@ -2005,7 +2017,12 @@ function mappingScan(src, code, mappings, vocabulary = []) {
     // census ≥ flagged and byLuck = census − flagged. The audit checks that
     // identity after the run rather than trusting it (see the census guard).
     const noExact = !at.some((r) => r.mappingKind === 'exact');
-    if (noExact) { census++; if (!flagged) byLuck++; }
+    if (noExact) {
+      census++;
+      // The by-luck reads are named under -v: a census that only counts
+      // cannot be drained, since nothing says which read to give a row.
+      if (!flagged) { byLuck++; luckRows.push({ name, offset, role: at[0]?.role ?? '?' }); }
+    }
     if (!flagged) continue;
     // The innermost containing row — and for a flagged read this IS bestAtSource,
     // since no direct row applies here (an exact one would have resolved the read,
@@ -2017,7 +2034,7 @@ function mappingScan(src, code, mappings, vocabulary = []) {
     // a mistext, the wrong text a hover at this read would answer about.
     rows.push({ name, offset, placed, text, role: row.role, root, gen: g, hit: g === null ? null : code.slice(g, g + name.length) });
   }
-  return { total, rows, missingRows, census, byLuck, drifted, excluded };
+  return { total, rows, missingRows, census, byLuck, luckRows, drifted, excluded };
 }
 
 // ── run
@@ -2208,7 +2225,10 @@ if (RUN_GRAMMAR) {
   // a grammar change trims this table rather than being absorbed by it.
   const EXCLUDED = new Map([
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
-    ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
+    ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
+    ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
+    ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
+    ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);
   const denom = [], excludedIdx = [];
@@ -3274,6 +3294,14 @@ if (RUN_MAP) {
     + dim(census === 0
       ? `of ${totReads} — every read owns its own span`
       : `of ${totReads} — ${totFlag} broken today, ${byLuck} resolving by luck: one change to the emitted TS from breaking`));
+  if (VERBOSE && byLuck > 0) {
+    for (const pf of perFile) {
+      for (const r of pf.luckRows ?? []) {
+        const p = offsetToPosition(pf.starts, r.offset);
+        out(`      ${pf.f}:${p.line + 1}:${p.character}  ${r.name}  ${dim(`cover row: ${r.role}`)}`);
+      }
+    }
+  }
   // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
   // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
   // not assumed: it rests on the compiler keeping synthetic rows zero-width on

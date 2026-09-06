@@ -312,7 +312,8 @@ describe('generated-scope inventory', () => {
     expect(unknown).toEqual([]);
     // semantic 21: ctorAtFields' arrow-boundary propagation compares a
     // node head against '=>' — whose `this` an assignment describes,
-    // not an emission of one.
-    expect(categories).toEqual({ diagnostic: 36, semantic: 21, type: 25 });
+    // not an emission of one; classMethodForm spells '->' as the kind
+    // of the method pair a class-body `def` reads as.
+    expect(categories).toEqual({ diagnostic: 37, semantic: 21, type: 25 });
   });
 });

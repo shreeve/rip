@@ -507,7 +507,7 @@ describe('cli: diagnostics', () => {
     const r = rip(['parsebad.rip']);
     expect(r.status).toBe(1);
     expect(r.stdout).toBe('');
-    expect(r.stderr).toContain("parsebad.rip:1:5: Unexpected 'MATH'");
+    expect(r.stderr).toContain("parsebad.rip:1:5: Unexpected '*'");
     expect(r.stderr).toContain('1 | a + * b');
     expect(r.stderr).toContain('^');
   });
@@ -531,7 +531,7 @@ describe('cli: diagnostics', () => {
     write('parsebad.rip', 'a + * b\n');
     const r = rip(['-c', 'parsebad.rip']);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("parsebad.rip:1:5: Unexpected 'MATH'");
+    expect(r.stderr).toContain("parsebad.rip:1:5: Unexpected '*'");
   });
 
   test('a compile error in an IMPORTED module fails the run with its position', () => {
@@ -585,7 +585,7 @@ describe('compile(): the library boundary', () => {
     expect(err.col).toBe(5);
     expect(err.start).toBe(4);
     expect(err.end).toBe(5);
-    expect(err.message).toStartWith("unit.rip:1:5: Unexpected 'MATH'");
+    expect(err.message).toStartWith("unit.rip:1:5: Unexpected '*'");
   });
 
   test('lexer rejections carry offsets through to CompileError', () => {

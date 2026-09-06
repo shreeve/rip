@@ -56,6 +56,9 @@ const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==
 // own emission validates the function value and suppresses the
 // implicit return. It emits as plain '='.
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
+// Every assignment head, the two synthesized compounds included
+// (`//=` and `%%=` lower through a helper call and sit outside ASSIGNS).
+const isAssignHead = (h) => ASSIGNS.has(h) || h === '//=' || h === '%%=';
 // The assignment heads that INTRODUCE their plain-name target rather
 // than reading it first: plain `=` and the void definition, whose bang
 // rides the head and changes nothing about the binding it creates.
@@ -263,6 +266,9 @@ const isIf = (x) => isNode(x) && x[0] === 'if';
 const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
 const isObject = (x) => isNode(x) && x[0] === 'object';
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+// What findCapturedCtrl looks for.
+const CTRL_ALL = new Set(['break', 'continue', 'return']);
+const CTRL_BREAK = new Set(['break']);
 // The def heads — plain and void — are ONE family everywhere a
 // predicate asks "is this a def?": every def-shaped decision reads
 // this helper, never a hand-maintained head pair (a site that listed
@@ -423,7 +429,7 @@ export function isModuleImportNode(stores, x) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -432,6 +438,10 @@ class Emitter {
     // the slot name mints lazily, so the used-name registry and the
     // temp allocator are untouched when off.
     this.repl = repl;
+    // The editor's face compile: a shape the tolerant parse invented
+    // (an unclosed literal that swallowed the next statement) must
+    // still emit, so the dead-code rejections stand down here.
+    this.tolerant = tolerant;
     this.replResultName = null;
     this.replImportResolver = null;
     // Script-target emission: <script type="text/rip"> sources share one
@@ -745,6 +755,9 @@ class Emitter {
     // a value-carrying `return` there is an error (the function is
     // declared to return undefined). Saved/restored per function.
     this.sideEffectOnly = false;
+    // Why the current void body is void, when the reason is not the
+    // trailing `!` (a setter, say) — the return-value error names it.
+    this.voidReason = null;
     // Set by schemaExpr — the emit() entry reports it as the 'schema'
     // feature runtime so delivery can inject exactly when used.
     this.usesSchema = false;
@@ -754,6 +767,7 @@ class Emitter {
     // too-deep tree rejects as a positioned diagnostic instead of an
     // engine RangeError at a machine-dependent depth.
     this.exprDepth = 0;
+    this.postfixGuardDepth = 0;
     // The binding name a schema value takes (assignment threading).
     this._schemaName = null;
     // Schema callable bodies, sub-parsed ONCE per captured token slice
@@ -1260,7 +1274,7 @@ class Emitter {
       }
       if (isFunc(n)) return;
       if (isDefHead(n[0])) {
-        if (!nested && n.length === 4) auth(n[1], 'def', n);
+        if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
         return;
       }
       if (n[0] === 'enum') {
@@ -1351,7 +1365,7 @@ class Emitter {
         walk(n[1], true);
         return;
       }
-      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
+      if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') plainForm(n[1], n);
         else if (n[0] === '=' && Emitter.isPattern(n[1])) {
           for (const name of dupIn(this.patternNames(n[1]), n, 'destructuring pattern')) {
@@ -1572,6 +1586,9 @@ class Emitter {
       const f = this.rframes[i];
       if (f.reactive.has(name)) return false;
       if (f.ambientReadonly !== undefined && f.ambientReadonly.has(name)) return true;
+      // A frame's own `=!` declarations sit in `bound` too, so they
+      // must answer before the bound check does.
+      if (f.readonly !== undefined && f.readonly.has(name)) return true;
       if (f.bound.has(name)) return false;
       if (f.members !== undefined && f.members.has(name)) return false;
     }
@@ -3247,7 +3264,7 @@ class Emitter {
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.stores.idOf(x);
       if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
-      for (const spec of x.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(x)) {
         if (!isNode(spec) || spec[0] === '*') continue;
         for (const s of spec) {
           const imported = isNode(s) ? s[0] : s;
@@ -3669,9 +3686,10 @@ class Emitter {
       // The update forms already behave this way: they were never hoist
       // candidates.
       //
-      // The head list matches `hoistTargets`' own walk, `*>` included:
-      // merge-into reads its target to merge into it, so a shadow there
-      // silently drops the export's value rather than reading undefined.
+      // The head list matches `hoistTargets`' own walk: a compound or
+      // method assignment reads its target to write it, so a shadow
+      // there silently drops the export's value rather than reading
+      // undefined.
       //
       // The test is the HEAD, not the value: `flag = flag + 1` reads the
       // name just as surely and still shadows, still yielding NaN. That
@@ -3679,7 +3697,7 @@ class Emitter {
       // nested shadow; narrowing it needs the scope's read/write
       // ORDERING, which the hoist collector does not carry. What this
       // clause buys is the spelling users actually write.
-      if (isNode(node) && (ASSIGNS.has(node[0]) || node[0] === '*>') &&
+      if (isNode(node) && ASSIGNS.has(node[0]) &&
           !DECLARING_ASSIGNS.has(node[0]) &&
           typeof node[1] === 'string' && this.isExportedConst(node[1])) return false;
       return !this.inScope(n) || (n === '_' && collected.matchWrite);
@@ -3859,9 +3877,7 @@ class Emitter {
         add('_', n);
         matchWrite = true;
       }
-      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
-        // Merge assignment DECLARES a plain-name target: its `??= {}`
-        // initializes a nullish binding, so first use is legal.
+      if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
           add(n[1], n);
           noteAnnotation(n[1], n);
@@ -4032,6 +4048,19 @@ class Emitter {
       if (isFunc(n)) { for (const el of n.slice(1)) walk(el, Math.max(inFn, 1)); return; }
       if (isDefHead(head) || head === 'class' || head === 'component' || head === 'enum') {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
+        if (head === 'class') {
+          // A class-body `def` is a method: it runs no earlier than a
+          // `name: ->` pair does, so it takes the class's own level,
+          // not the anywhere-def pin.
+          for (const el of n.slice(2)) {
+            const stmts = isNode(el) && el[0] === 'block' ? el.slice(1) : [el];
+            for (const st of stmts) {
+              if (isNode(st) && isDefHead(st[0]) && st.length === 4) for (const part of st.slice(2)) walk(part, level);
+              else walk(st, level);
+            }
+          }
+          return;
+        }
         for (const el of n.slice(typeof n[1] === 'string' ? 2 : 1)) walk(el, level);
         return;
       }
@@ -4044,7 +4073,7 @@ class Emitter {
         occur('_', inFn, true);
         return;
       }
-      if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
+      if (ASSIGNS.has(head) && n.length === 3) {
         walk(n[2], inFn); // value before target: execution order
         if (typeof n[1] === 'string') {
           const declaring = DECLARING_ASSIGNS.has(head);
@@ -4563,6 +4592,19 @@ class Emitter {
   // came from. The token corrections are computed from ONE file's compile,
   // so an imported name's KIND is unknowable here — what is knowable, and
   // all the editor needs, is which module and exported name to ask.
+  // An import's attributes clause (`with { type: 'json' }`), the
+  // ["with", object] element just before the source — or null.
+  static importAttributes(node) {
+    const a = node.length > 2 ? node[node.length - 2] : null;
+    return isNode(a) && a[0] === 'with' && a.length === 2 ? a : null;
+  }
+
+  // An import's specifiers: everything between the keyword and the
+  // source, the attributes clause excluded.
+  static importSpecs(node) {
+    return node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+  }
+
   static importedSpecs(stmts) {
     const specs = new Map();
     for (const node of stmts) {
@@ -4570,7 +4612,7 @@ class Emitter {
       const source = node[node.length - 1];
       if (typeof source !== 'string') continue;
       const specifier = source.replace(/^['"`]|['"`]$/g, '');
-      for (const spec of node.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(node)) {
         if (spec === '{}') continue;
         if (typeof spec === 'string') {
           specs.set(spec, { specifier, importedName: 'default' });
@@ -4598,7 +4640,7 @@ class Emitter {
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
-      for (const spec of node.slice(1, -1)) {
+      for (const spec of Emitter.importSpecs(node)) {
         if (spec === '{}') continue;
         if (typeof spec === 'string') names.push(spec);
         else if (spec[0] === '*') names.push(spec[1]);
@@ -4790,15 +4832,22 @@ class Emitter {
   // import emission shares. A type-only statement's clause prints the
   // same bytes through it: its names never enter the elision set, so
   // emitSpecifiers takes only its plain path.
-  emitImportClause(specs) {
+  // Each specifier emits under its role (`spec`, then `extra`), so a
+  // bound name owns an exact row of its own even when the statement's
+  // own row is a cover (an attributes clause re-renders its object).
+  emitImportClause(specs, node = null) {
     specs.forEach((spec, i) => {
       if (i > 0) this.b.emit(', ');
+      // The braces of a named list sit outside the mark: the role's
+      // span is the names alone, and only then is the row exact.
+      const role = node === null ? null : i === 0 ? 'spec' : 'extra';
+      const emitSpec = (fn) => (role === null ? fn() : this.mark(node, role, fn));
       if (spec === '{}') this.b.emit('{}');
-      else if (typeof spec === 'string') this.b.emit(spec);
-      else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
+      else if (typeof spec === 'string') emitSpec(() => this.b.emit(spec));
+      else if (spec[0] === '*') emitSpec(() => this.b.emit(`* as ${spec[1]}`));
       else {
         this.b.emit('{ ');
-        this.emitSpecifiers(spec);
+        emitSpec(() => this.emitSpecifiers(spec));
         this.b.emit(' }');
       }
     });
@@ -4814,7 +4863,18 @@ class Emitter {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
     const source = node[node.length - 1];
-    const specs = node.slice(1, -1);
+    const specs = Emitter.importSpecs(node);
+    const attrs = Emitter.importAttributes(node);
+    // A bare `default` inside braces names no binding — ES has no such
+    // specifier. The default binding is the unbraced form, or the
+    // aliased one inside braces.
+    for (const spec of specs) {
+      if (!Array.isArray(spec) || spec[0] === '*') continue;
+      if (spec.includes('default')) {
+        throw this.positionedError(node,
+          "emitter: `import { default }` binds nothing — spell the default import `import name from '…'`, or alias it: `import { default as name } from '…'`");
+      }
+    }
     // A TYPE-ONLY import (`import type … from …`, the side-band
     // typeOnly role): the author's declaration that the module carries
     // no side effect they need, so the WHOLE statement erases from the
@@ -4840,10 +4900,11 @@ class Emitter {
           // keeps a type-only statement's bindings out of the elision set —
           // emitSpecifiers prints every name plainly, no separator
           // bookkeeping fires.
-          this.emitImportClause(specs);
+          this.emitImportClause(specs, node);
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
           this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+          this.emitImportAttributes(attrs);
         });
         this.b.emit(';\n');
       });
@@ -4869,16 +4930,34 @@ class Emitter {
           ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
           : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
       if (specs.length > 0) {
-        if (!allErased) this.emitImportClause(specs);
-        else if (this.ts) this.b.tsOnly(() => this.emitImportClause(specs));
+        if (!allErased) this.emitImportClause(specs, node);
+        else if (this.ts) this.b.tsOnly(() => this.emitImportClause(specs, node));
       }
       {
         const specStart = this.b.offset;
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
+      this.emitImportAttributes(attrs);
     });
     this.b.emit(';\n');
+  }
+
+  // The attributes clause after the source: `with { type: "json" }`.
+  emitImportAttributes(attrs) {
+    if (attrs === null) return;
+    // The loader reads the attributes before any code runs: each is a
+    // string-literal pair, or the import fails to parse.
+    for (const pair of attrs[1].slice(1)) {
+      const literal = pair[0] === ':' && typeof pair[2] === 'string' && (pair[2][0] === '"' || pair[2][0] === "'");
+      if (!literal) throw this.positionedError(pair, 'emitter: an import attribute is a string-literal pair (`with { type: "json" }`) — the module loader reads it before any code runs');
+    }
+    this.b.emit(' ');
+    this.mark(attrs, '$self', () => {
+      this.mark(attrs, 'keyword', () => this.b.emit('with'));
+      this.b.emit(' ');
+      this.mark(attrs, 'value', () => this.expr(attrs[1]));
+    });
   }
 
   // repl mode's import lowering: a static import cannot live in a
@@ -4895,7 +4974,8 @@ class Emitter {
   // in the program's own context.
   replImportStatement(node) {
     const source = node[node.length - 1];
-    const specs = node.slice(1, -1);
+    const specs = Emitter.importSpecs(node);
+    const attrs = Emitter.importAttributes(node);
     const parts = [];
     let nsName = null;
     for (const spec of specs) {
@@ -4913,7 +4993,14 @@ class Emitter {
         this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
-      this.b.emit('))');
+      this.b.emit(')');
+      // Attributes ride the dynamic form's options argument.
+      if (attrs !== null) {
+        this.b.emit(', { with: ');
+        this.mark(attrs, 'value', () => this.expr(attrs[1]));
+        this.b.emit(' }');
+      }
+      this.b.emit(')');
       if (nsName !== null && parts.length > 0) {
         this.b.emit(`, { ${parts.join(', ')} } = ${nsName}`);
       }
@@ -4931,10 +5018,25 @@ class Emitter {
     if (this.repl) {
       throw this.positionedError(node, "emitter: 'export' has no meaning in a REPL entry — every top-level binding already persists to later lines; drop the export keyword");
     }
+    // A module's exports are static: an export inside a block or under
+    // a postfix guard has no JS form (`if (c) export …` is a syntax
+    // error). The guard belongs on the VALUE — `export x = v if c` —
+    // which the grammar already reads that way.
+    if (ind > 0 || this.postfixGuardDepth > 0) {
+      throw this.positionedError(node,
+        "emitter: 'export' must be a top-level statement — a module's exports are static, so a guarded or block-nested export has no form; " +
+        'move it to the top level, or guard the exported value instead (`export x = v if c`)');
+    }
     const head = node[0];
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
-        this.b.emit('export * from ');
+        if (node.length === 3) {
+          this.b.emit('export * as ');
+          this.mark(node, 'alias', () => this.b.emit(node[2]));
+          this.b.emit(' from ');
+        } else {
+          this.b.emit('export * from ');
+        }
         {
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
@@ -5683,22 +5785,29 @@ class Emitter {
         this.b.emit(';');
         return;
       }
-      // Method and merge assignment are statement lowerings: the
-      // target is spelled twice (write + read), and an impure member
-      // target pre-binds its base on its own line.
+      // Method assignment is a statement lowering: the target is
+      // spelled twice (write + read), and an impure member target
+      // pre-binds its base on its own line.
       if (node[0] === '.=' && node.length === 3) {
         this.methodAssignStatement(node, ind);
         this.b.emit(';');
         return;
       }
-      if (node[0] === '*>' && node.length === 3) {
-        this.mergeAssignStatement(node, ind);
+      // Slice assignment (`a[1..2] = v`) replaces the range in place:
+      // a statement lowering to splice (value position rejects).
+      if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+        this.sliceAssignStatement(node);
         this.b.emit(';');
         return;
       }
+      // A compound operator has no splice reading (`a[1..2] += v` would
+      // assign to a slice call).
+      if (isAssignHead(node[0]) && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+        throw this.sliceAssignError(node);
+      }
       // Optional-chain assignment in statement position guards with a
       // plain `if` (no ternary value is needed).
-      if ((ASSIGNS.has(node[0]) || node[0] === '//=' || node[0] === '%%=') && node.length === 3) {
+      if (isAssignHead(node[0]) && node.length === 3) {
         const guard = Emitter.optionalGuard(node[1]);
         if (guard !== null) {
           this.optionalAssign(node, guard, 'statement');
@@ -5806,7 +5915,7 @@ class Emitter {
   // syntax outside all role marks (the declare-in-place `let `
   // precedent), so every role row keeps its exact source↔generated
   // slice. Assignment forms that lower to multi-statement rewrites
-  // (`.=`, `*>`, optional-chain targets, middle-rest patterns) return
+  // (`.=`, optional-chain targets, middle-rest patterns) return
   // from statementCore before this point and stay echo-free.
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt) return false;
@@ -5885,16 +5994,31 @@ class Emitter {
     // A reactive declaration can never be the guarded statement — every
     // block-nested declaration rejects at frame collection (#88).
     if (!isBlock(node[2]) && isNode(node[2])) {
+      const stmt = node[2][0];
+      // A guarded LOOP emits braced: a loop may open with a hoisted
+      // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
+      // braceless `if` would guard only that first statement.
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
         this.b.emit(') ');
-        this.statement(node[2][0], ind);
+        this.postfixGuardDepth++;
+        if (braced) {
+          this.b.emit('{\n' + '  '.repeat(ind + 1));
+          this.statement(stmt, ind + 1);
+          this.b.emit('\n' + '  '.repeat(ind) + '}');
+        } else {
+          this.statement(stmt, ind);
+        }
+        this.postfixGuardDepth--;
       });
       return;
     }
     this.mark(node, '$self', () => this.ifChain(node, ind));
   }
+
+  static LOOP_HEADS = new Set(['for-in', 'for-of', 'for-as', 'while', 'loop', 'comprehension']);
 
   loopStatement(node, ind) {
     this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
@@ -5976,9 +6100,124 @@ class Emitter {
     });
   }
 
+  // A `when` arm whose condition is a regex literal or a range is a
+  // MATCH test, not a value: `case /re/:` compares the subject to the
+  // RegExp object and `case [1..3]:` to a fresh array — neither ever
+  // matches. A switch carrying one lowers whole to an if/else chain
+  // over the subject (bound once when it is not a plain read), each
+  // arm testing `re.test(s)`, `s >= a && s <= b`, or `s === v`.
+  static isMatchArm(c) {
+    if (typeof c === 'string') return c.startsWith('/');
+    if (!isNode(c)) return false;
+    return c[0] === 'here-regex' || ((c[0] === '..' || c[0] === '...') && c.length === 3);
+  }
+
+  static hasMatchArms(cases) {
+    return cases.some((when) => when[1].some((c) => Emitter.isMatchArm(c)));
+  }
+
+  // The match lowering's preconditions: a subject to test, and arms
+  // whose `break` still means what it meant. A `break` in an arm's
+  // body that no loop or switch INSIDE the arm binds left the JS
+  // switch; in the if-chain lowering it would leave the enclosing
+  // loop (or be invalid).
+  checkMatchSwitch(node) {
+    const [, subject, cases, dflt] = node;
+    if (subject === null) {
+      throw this.positionedError(node, 'emitter: a regex or range `when` tests the switch subject, and this switch has none — give it one (`switch x`) or spell the test out (`when /re/.test(x)`)');
+    }
+    for (const body of [...cases.map((when) => when[2]), dflt]) {
+      if (body !== null && Emitter.findCapturedCtrl(body, CTRL_BREAK) !== null) {
+        throw this.positionedError(node, 'emitter: `break` in an arm of a switch with a regex or range `when` has nothing to leave — the switch is an if-chain and each arm ends on its own; drop the `break`');
+      }
+    }
+  }
+
+  // The sexpr form of one arm's test against the discriminant (the
+  // render path rewrites its switch into an if-chain sexpr).
+  static matchArmSexpr(disc, t) {
+    if (!Emitter.isMatchArm(t)) return ['==', disc, t];
+    if (isNode(t) && (t[0] === '..' || t[0] === '...')) {
+      return ['&&', ['>=', disc, t[1]], [t[0] === '..' ? '<=' : '<', disc, t[2]]];
+    }
+    return [['.', t, 'test'], disc];
+  }
+
+  // One arm's test, emitted; `subj` emits the subject read.
+  matchArmTest(c, subj) {
+    if (typeof c === 'string' && c.startsWith('/')) {
+      this.expr(c);
+      this.b.emit('.test(');
+      subj();
+      this.b.emit(')');
+    } else if (isNode(c) && c[0] === 'here-regex') {
+      this.b.emit('(');
+      this.expr(c);
+      this.b.emit(').test(');
+      subj();
+      this.b.emit(')');
+    } else if (isNode(c) && (c[0] === '..' || c[0] === '...') && c.length === 3) {
+      this.b.emit('(');
+      subj();
+      this.b.emit(' >= ');
+      this.expr(c[1]);
+      this.b.emit(' && ');
+      subj();
+      this.b.emit(c[0] === '..' ? ' <= ' : ' < ');
+      this.expr(c[2]);
+      this.b.emit(')');
+    } else {
+      subj();
+      this.b.emit(' === ');
+      this.expr(c);
+    }
+  }
+
+  // The if/else chain a match switch lowers to. The subject binds
+  // once unless it is a plain (non-reactive) name, which every test
+  // reads directly; `arm(body)` lays out one arm's body (a brace
+  // block in statement position, a returning block in value position).
+  matchChain(node, ind, arm) {
+    const [, subject, cases, dflt] = node;
+    const pad = '  '.repeat(ind);
+    const plainRead = typeof subject === 'string' && /^[A-Za-z_$][\w$]*$/.test(subject) && !this.isReactiveName(subject);
+    const ref = plainRead ? null : this.loopTempName('_switch');
+    const subj = () => (ref !== null ? this.b.emit(ref) : this.mark(node, 'subject', () => this.expr(subject)));
+    if (ref !== null) {
+      this.temps.used.add(ref);
+      this.b.emit(`const ${ref} = `);
+      this.mark(node, 'subject', () => this.expr(subject));
+      this.b.emit(`;\n${pad}`);
+    }
+    this.mark(node, 'cases', () => {
+      cases.forEach((when, i) => {
+        this.mark(when, '$self', () => {
+          const [, conditions, body] = when;
+          if (i > 0) this.b.emit(' else ');
+          this.b.emit('if (');
+          conditions.forEach((c, k) => {
+            if (k > 0) this.b.emit(' || ');
+            this.matchArmTest(c, subj);
+          });
+          this.b.emit(') ');
+          arm(body);
+        });
+      });
+    });
+    if (dflt !== null) {
+      this.b.emit(' else ');
+      arm(dflt);
+    }
+  }
+
   switchStatement(node, ind) {
     const [, subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
+    if (Emitter.hasMatchArms(cases)) {
+      this.checkMatchSwitch(node);
+      this.mark(node, '$self', () => this.matchChain(node, ind, (body) => this.braceBlock(body, ind)));
+      return;
+    }
     this.mark(node, '$self', () => {
       if (subject !== null) {
         this.b.emit('switch (');
@@ -6922,20 +7161,29 @@ class Emitter {
   // enclosing one), and `break`/`continue` not bound by a loop (or,
   // for break, a switch) INSIDE the construct — bare, they emit
   // engine-invalid JavaScript.
-  static findCapturedCtrl(stmt) {
+  // `want` narrows the search (the match-arm check asks for break
+  // alone). A statement `break`/`continue` is a bare word directly in
+  // a block, or the one-element node a postfix conditional wraps; the
+  // same word anywhere else is a member or key name (`obj.break()`,
+  // `{break: 1}`) and never counts.
+  static findCapturedCtrl(stmt, want = CTRL_ALL) {
     let found = null;
     const walk = (n, loops, switches) => {
-      if (found !== null) return;
-      if (typeof n === 'string') {
-        if (n === 'break' && loops + switches === 0) found = { kind: 'break', node: null };
-        else if (n === 'continue' && loops === 0) found = { kind: 'continue', node: null };
-        return;
-      }
-      if (!isNode(n) || n[0] === '->' || n[0] === '=>' || isDefHead(n[0]) || n[0] === 'class') return;
-      if (n[0] === 'return') { found = { kind: 'return', node: n }; return; }
+      if (found !== null || !isNode(n)) return;
+      const head = n[0];
+      if (isFunc(n) || isDefHead(head) || head === 'class') return;
+      if (head === 'return') { if (want.has('return')) found = { kind: 'return', node: n }; return; }
       const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
-      const s = n[0] === 'switch' ? switches + 1 : switches;
-      for (const el of n) walk(el, l, s);
+      const s = head === 'switch' ? switches + 1 : switches;
+      const inBlock = head === 'block' || head === 'program' || head === 'try';
+      for (let i = 1; i < n.length; i++) {
+        const el = n[i];
+        const ctrl = typeof el === 'string' ? (inBlock ? el : null)
+          : isNode(el) && el.length === 1 && typeof el[0] === 'string' ? el[0] : null;
+        if (ctrl === 'break' && want.has('break') && l + s === 0) { found = { kind: 'break', node: null }; return; }
+        if (ctrl === 'continue' && want.has('continue') && l === 0) { found = { kind: 'continue', node: null }; return; }
+        walk(el, l, s);
+      }
     };
     walk(stmt, 0, 0);
     return found;
@@ -7028,7 +7276,10 @@ class Emitter {
     this.rejectYieldInIIFE(node);
     this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.mark(node, '$self', () => {
-      if (subject !== null) {
+      if (Emitter.hasMatchArms(cases)) {
+        this.checkMatchSwitch(node);
+        this.matchChain(node, ind, (body) => this.returnBlock(body, ind));
+      } else if (subject !== null) {
         this.b.emit('switch (');
         this.mark(node, 'subject', () => this.expr(subject));
         this.b.emit(') {\n');
@@ -7313,6 +7564,9 @@ class Emitter {
     // return-type role (side-band) covers it the same way;
     // mark() is a no-op for rows without the role.
     const isVoid = node[0] === 'void-def';
+    if (typeof node[1] !== 'string') {
+      throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
+    }
     const isAsync = Emitter.containsAwait(node[3]);
     const isGen = Emitter.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
@@ -7362,7 +7616,7 @@ class Emitter {
     // definition declares it returns undefined. Bare
     // `return` stays legal.
     if (node.length === 2 && this.sideEffectOnly) {
-      throw this.positionedError(node, "emitter: cannot return a value from a void function (the trailing '!' on its definition suppresses returns)");
+      throw this.positionedError(node, `emitter: cannot return a value from a void function (${this.voidReason ?? "the trailing '!' on its definition suppresses returns"})`);
     }
     this.mark(node, '$self', () => {
       this.b.emit('return');
@@ -7524,6 +7778,11 @@ class Emitter {
     this.grouped(node, role, child, Emitter.needsGrouping(child, 'head'));
   }
 
+  static isIntegerLiteral(x) {
+    // The first-char test keeps the common `a.b` receiver off the regex.
+    return typeof x === 'string' && x.charCodeAt(0) >= 48 && x.charCodeAt(0) <= 57 && /^[0-9][0-9_]*$/.test(x);
+  }
+
   grouped(node, role, child, wrap) {
     if (wrap) this.b.emit('(');
     this.mark(node, role, () => this.expr(child));
@@ -7608,9 +7867,15 @@ class Emitter {
     if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
     if (isNode(head)) return this.call(node);
+    // A slice target reaches here only in VALUE position, or under a
+    // compound head: the statement path lowers `a[i..j] = v` to splice
+    // before this dispatch, and a splice has no other form.
+    if (isAssignHead(head) && node.length === 3 && !this.inPattern && Emitter.sliceTarget(node[1]) !== null) {
+      throw this.sliceAssignError(node);
+    }
     // An assignment whose target spine holds an optional link lowers to
     // a guarded form (JS forbids optional chains in assignment targets).
-    if ((ASSIGNS.has(head) || head === '//=' || head === '%%=') && node.length === 3 && !this.inPattern) {
+    if (isAssignHead(head) && node.length === 3 && !this.inPattern) {
       const guard = Emitter.optionalGuard(node[1]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
@@ -7662,7 +7927,7 @@ class Emitter {
         } else this.b.emit(`Symbol.for(${quoted})`);
       });
     }
-    if ((head === '.=' || head === '*>') && node.length === 3) {
+    if (head === '.=' && node.length === 3) {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
@@ -8112,6 +8377,14 @@ class Emitter {
         this.b.emit(') : undefined');
       }
     });
+  }
+
+  // The one form a slice target takes is the statement `a[i..j] = v`.
+  sliceAssignError(node) {
+    if (node[0] === '=') {
+      return this.positionedError(node, 'emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line');
+    }
+    return this.positionedError(node, `emitter: a slice takes plain assignment only (\`a[i..j] = v\`) — '${node[0]}' has no in-place reading`);
   }
 
   assign(node) {
@@ -10113,7 +10386,7 @@ class Emitter {
     // Any OTHER assignment shape at a child position has no render
     // reading (a member write belongs in a handler
     // assignment's value as text or emits a bare write that dies).
-    if (isNode(sexpr) && (ASSIGNS.has(sexpr[0]) || sexpr[0] === '//=' || sexpr[0] === '%%=') && sexpr.length === 3) {
+    if (isNode(sexpr) && isAssignHead(sexpr[0]) && sexpr.length === 3) {
       throw this.positionedError(sexpr,
         'emitter: an assignment at a render child position must declare a render local (`name = expr` / compound forms ' +
         'on a plain name) — member and chain writes have no render reading here; put the write in a handler or method');
@@ -12362,6 +12635,7 @@ class Emitter {
   // no store rows — marks fall back to the switch node itself.
   renderSwitch(node) {
     const [, disc, whens, dflt] = node;
+    if (Emitter.hasMatchArms(whens)) this.checkMatchSwitch(node);
     let chain = dflt;
     for (let i = whens.length - 1; i >= 0; i--) {
       const [, tests, body] = whens[i];
@@ -12369,7 +12643,7 @@ class Emitter {
       if (disc === null) {
         cond = tests.reduce((a, t) => (a === null ? t : ['||', a, t]), null);
       } else {
-        cond = tests.map((t) => ['==', disc, t]).reduce((a, c) => (a === null ? c : ['||', a, c]), null);
+        cond = tests.map((t) => Emitter.matchArmSexpr(disc, t)).reduce((a, c) => (a === null ? c : ['||', a, c]), null);
       }
       chain = chain !== null ? ['if', cond, body, chain] : ['if', cond, body];
     }
@@ -13455,7 +13729,11 @@ class Emitter {
         // `a.at(-1)`).
         f.savedTarget = this.inTarget;
         this.inTarget = false;
-        if (isInner) this.head(n, 'object', n[1]);
+        // An INTEGER literal receiver groups: `2.toFixed` reads the
+        // dot as a decimal point, so the member needs `(2).toFixed`
+        // (a float, exponent, hex, or bigint literal has no such
+        // ambiguity).
+        if (isInner) this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1]));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -14183,6 +14461,13 @@ class Emitter {
   // emits as ES6 method shorthand (`->` has dynamic `this`,
   // matching method semantics; `=>` values stay arrows). String keys
   // never shorthand.
+  // A symbol literal as a property key: `[Symbol.for("name")]`.
+  symbolKey(node) {
+    this.b.emit('[');
+    this.expr(node);
+    this.b.emit(']');
+  }
+
   static isMethodPair(pair) {
     return isNode(pair) && (pair[0] === ':' || pair[0] === 'void-pair') && typeof pair[1] === 'string' &&
       /^[A-Za-z_$][\w$]*$/.test(pair[1]) && isNode(pair[2]) && pair[2][0] === '->';
@@ -14194,6 +14479,11 @@ class Emitter {
     for (const pair of node.slice(1)) {
       if (isNode(pair) && pair[0] === ':' && typeof pair[1] === 'string' && pair[1][0] === '/') {
         throw this.positionedError(pair, 'emitter: a regex key needs a MAP literal (`*{ /re/: v }`) — object property names are strings');
+      }
+      // `a = 1` is a destructuring DEFAULT: legal in a pattern, and
+      // in a literal it emits `({a = 1})`, which no engine parses.
+      if (!this.inPattern && !this.tolerant && isNode(pair) && pair[0] === '=' && pair.length === 3) {
+        throw this.positionedError(pair, 'emitter: `a = 1` inside an object literal is a destructuring default, which only a pattern can carry — spell the pair `a: 1`', node);
       }
     }
     const comp = !this.inPattern && Emitter.objectComprehension(node);
@@ -14258,8 +14548,18 @@ class Emitter {
           // An INTERPOLATED string key is a computed key: the
           // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
           const strKey = isNode(pair[1]) && pair[1][0] === 'str';
-          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey) {
+          // A symbol key (`{ :sym: v }`) is a computed key too.
+          const symKey = pair[0] === ':' && isNode(pair[1]) && pair[1][0] === 'symbol';
+          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey && !symKey) {
             throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
+          }
+          if (symKey) {
+            this.mark(pair, '$self', () => {
+              this.mark(pair, 'key', () => this.symbolKey(pair[1]));
+              this.b.emit(': ');
+              this.mark(pair, 'value', () => this.expr(pair[2]));
+            });
+            return;
           }
           if (pair[0] === ':' && strKey) {
             this.mark(pair, '$self', () => {
@@ -14490,8 +14790,29 @@ class Emitter {
   //   ["=", "x", v]        → x = v;         ["=", this-member, v]  → static x = v;
   // Fields and methods emit interleaved in source order
   //. Anything else rejects loudly.
+  // A class body's method forms beyond `name: -> …`: a `def` (its
+  // `def @m` spelling static, `def m!` void) and the `get`/`set`
+  // accessors (`get x: -> …`, which parse as a call of `get` on a
+  // one-pair object). Each reads as the equivalent pair — the pair
+  // and its function alias the original node, so their marks resolve
+  // to its rows (a def's `name` role stands in for the pair's `key`).
+  classMethodForm(stmt) {
+    if (!isNode(stmt)) return null;
+    if (isDefHead(stmt[0]) && stmt.length === 4) {
+      const fn = this.stores.alias(['->', stmt[2], stmt[3]], stmt);
+      const pair = this.stores.alias([stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], fn], stmt);
+      return { form: 'def', pair };
+    }
+    if ((stmt[0] === 'get' || stmt[0] === 'set') && stmt.length === 2 && isObject(stmt[1]) && stmt[1].length === 2) {
+      const pair = stmt[1][1];
+      if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return { form: stmt[0], pair };
+    }
+    return null;
+  }
+
   classMembers(body, ind) {
     const stmts = isNode(body) && body[0] === 'block' ? body.slice(1) : [body];
+    const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const memberName = (key) => (isNode(key) && key[0] === '.' && key[1] === 'this' ? key[2] : key);
     const isStaticKey = (key) => isNode(key) && key[0] === '.' && key[1] === 'this' && key.length === 3 && typeof key[2] === 'string';
     const pad = '  '.repeat(ind + 1);
@@ -14511,25 +14832,59 @@ class Emitter {
     let ctorBody = null;
     // Instance method bodies, for the `@field = …` pass below.
     const methodBodies = [];
+    // Every field key and every accessor, statics keyed apart: a field
+    // and an accessor of one name is a JS class where the field wins
+    // silently (the instance's own property shadows the prototype's
+    // accessor), so the pair rejects.
+    const memberKey = (key) => (isStaticKey(key) ? `static ${key[2]}` : key);
+    const fieldKeys = new Set();
+    const accessors = [];
     for (const stmt of stmts) {
-      if (!isObject(stmt)) {
-        const field = isStaticKey(stmt) ? null
-          : typeof stmt === 'string' ? stmt
-          : Emitter.isTypedWrapper(stmt) && typeof stmt[1] === 'string' ? stmt[1]
-          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string' ? stmt[1]
+      const form = forms.get(stmt) ?? null;
+      const pairs = form !== null ? [form.pair] : isObject(stmt) ? stmt.slice(1) : null;
+      if (pairs === null) {
+        const fieldKey = typeof stmt === 'string' || isStaticKey(stmt) ? stmt
+          : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
+          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
           : null;
-        if (field !== null) declared.add(field);
+        if (fieldKey !== null) {
+          fieldKeys.add(memberKey(fieldKey));
+          if (!isStaticKey(fieldKey)) declared.add(fieldKey);
+        }
         continue;
       }
-      for (const pair of stmt.slice(1)) {
+      for (const pair of pairs) {
         if (pair[0] !== ':' && pair[0] !== 'void-pair') {
           throw this.positionedError(pair, 'emitter: class bodies support methods and fields only', stmt);
+        }
+        if (form !== null && form.form !== 'def') {
+          const arity = pair[2][1].length;
+          if (pair[2][0] === '=>') {
+            throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
+          }
+          if (Emitter.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+            throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
+          }
+          if (form.form === 'get' && arity !== 0) {
+            throw this.positionedError(pair, 'emitter: a getter takes no parameters (`get x: -> …`)', stmt);
+          }
+          if (form.form === 'set' && arity !== 1) {
+            throw this.positionedError(pair, 'emitter: a setter takes exactly one parameter (`set x: (v) -> …`)', stmt);
+          }
         }
         if (isNode(pair[1]) && (pair[1][0] === 'dynamicKey' || pair[1][0] === '[]')) {
           throw this.positionedError(pair, 'emitter: computed class members are not supported yet', stmt);
         }
         const mName = memberName(pair[1]);
-        if (mName === 'constructor') {
+        if (form !== null && form.form !== 'def') {
+          if (mName === 'constructor') {
+            throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+          }
+          accessors.push({ pair, stmt, key: memberKey(pair[1]), form: form.form });
+        }
+        // A STATIC member named `constructor` is an ordinary static
+        // method; only the instance one is the class constructor.
+        if (mName === 'constructor' && !isStaticKey(pair[1])) {
           hasConstructor = true;
           if (isFunc(pair[2])) { ctorParams = pair[2][1]; ctorBody = pair[2][2]; }
         } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {
@@ -14541,6 +14896,9 @@ class Emitter {
           methodBodies.push(pair[2][2]);
         }
         if (isFunc(pair[2]) && pair[2][0] === '=>' && !isStaticKey(pair[1]) && mName !== 'constructor') {
+          if (typeof mName !== 'string') {
+            throw this.positionedError(pair, "emitter: a symbol-keyed method cannot be bound ('=>') — the constructor binds members by name; use '->'", stmt);
+          }
           bound.push(mName);
           firstBound ??= pair;
         }
@@ -14548,6 +14906,11 @@ class Emitter {
     }
     if (bound.length > 0 && !hasConstructor) {
       throw this.positionedError(firstBound, "emitter: bound ('=>') class methods require an explicit constructor", body);
+    }
+    for (const a of accessors) {
+      if (fieldKeys.has(a.key)) {
+        throw this.positionedError(a.pair, `emitter: field and ${a.form} accessor '${memberName(a.pair[1])}' share a name — the field would shadow the accessor on every instance; drop one`, a.stmt);
+      }
     }
 
     // A promoted parameter (`constructor: (@owner: string) ->`) assigns
@@ -14626,7 +14989,7 @@ class Emitter {
     // branch's emission, so the directive line takes pad-first layout.
     for (const stmt of stmts) {
       this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
-        memberName, isStaticKey, bound,
+        memberName, isStaticKey, bound, form: forms.get(stmt) ?? null,
       }), true);
     }
   }
@@ -14655,7 +15018,11 @@ class Emitter {
     this.b.emit('; })()');
   }
 
-  classMember(stmt, body, ind, pad, { memberName, isStaticKey, bound }) {
+  classMember(stmt, body, ind, pad, { memberName, isStaticKey, bound, form }) {
+    const accessor = form !== null && form.form !== 'def' ? form.form : null;
+    const keyRole = form !== null && form.form === 'def' ? 'name' : 'key';
+    const origin = stmt;
+    if (form !== null) stmt = this.stores.alias(['object', form.pair], stmt);
     {
       // A nested `class @Name` is a STATIC member class:
       // `static Name = class [extends P] { … }`.
@@ -14692,10 +15059,29 @@ class Emitter {
             if (isStaticKey(key)) this.b.emit('static ');
             if (Emitter.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
-            this.mark(pair, 'key', () => this.emitPrimitive(mName));
+            if (accessor !== null) {
+              // The word parsed as a call's callee; the emission is the
+              // keyword. Placed under that role (same bytes), and a ruled
+              // hover silence — a keyword names nothing to hover.
+              const originId = this.stores.idOf(origin);
+              const callee = originId !== null ? this.stores.role(originId, 'callee') : null;
+              if (callee !== null) this.silences.push([callee.sourceStart, callee.sourceEnd]);
+              this.mark(origin, 'callee', () => this.b.emit(accessor));
+              this.b.emit(' ');
+            }
+            // A symbol key (`:sym: ->`) is a computed member name.
+            if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
+            else this.mark(pair, keyRole, () => this.emitPrimitive(mName));
+            // A generic def read as a method (`def id<T>(x: T): T`): the
+            // TYPE_PARAMS side-band role re-emits after the name, TS-only.
+            if (this.ts) {
+              const tp = this.annotationText(pair, 'typeParams');
+              if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
+            }
             let [, params, block] = value;
             let atParams = [];
-            if (mName === 'constructor') {
+            const isCtor = mName === 'constructor' && !isStaticKey(pair[1]);
+            if (isCtor) {
               // Promoted parameters: `(@name)` binds the argument to
               // a same-named param and assigns `this.name = name`
               // after any leading super(). Inside that super call's
@@ -14736,19 +15122,25 @@ class Emitter {
               }
             }
             this.b.emit('(');
-            this.emitParams(params);
+            // A setter's one parameter is never optional in TS (TS1051).
+            this.emitParams(params, null, accessor !== 'set');
             this.b.emit(')');
             // Constructors take no return annotation in TS.
-            if (mName !== 'constructor') {
+            if (!isCtor) {
               this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
               this.methodBlock(value, block, ind + 1, {
-                isConstructor: mName === 'constructor',
-                binds: mName === 'constructor' ? bound : [],
-                methodName: mName,
-                voidBody: isVoidPair,
+                isConstructor: isCtor,
+                binds: isCtor ? bound : [],
+                methodName: typeof mName === 'string' ? mName : 'symbol',
+                // A setter's value is discarded by the language: its
+                // body emits void — no implicit return, and none of
+                // the bang method's explicit `return;` either.
+                voidBody: isVoidPair || accessor === 'set',
+                tailReturn: accessor !== 'set',
+                voidReason: accessor === 'set' ? 'a setter discards its return value' : null,
                 atParams,
               });
             });
@@ -14896,7 +15288,7 @@ class Emitter {
     });
   }
 
-  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
+  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
@@ -14904,7 +15296,9 @@ class Emitter {
     const outerMethod = this.methodName;
     this.methodName = methodName;
     const prevSEO = this.sideEffectOnly;
+    const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
+    this.voidReason = voidReason;
     this.mark(block, '$self', () => {
       this.b.emit('{\n');
       if (hoist.length) {
@@ -14932,10 +15326,11 @@ class Emitter {
           if (leadingSuper && i === 0) emitBinds();
         });
       });
-      this.voidTailReturn(stmts, ind);
+      if (tailReturn) this.voidTailReturn(stmts, ind);
       this.b.emit('  '.repeat(ind) + '}');
     });
     this.sideEffectOnly = prevSEO;
+    this.voidReason = prevReason;
     this.methodName = outerMethod;
     this.scopes.pop();
     this.rframes.pop();
@@ -15025,6 +15420,13 @@ class Emitter {
               this.b.emit(')');
             });
           });
+        } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2) {
+          // `new new X()` — the inner construction is the constructor:
+          // `new (new X())`. Bare, the outer `new` would read the inner
+          // as a call of a function named `new`.
+          this.b.emit('(');
+          this.newExpr(operand);
+          this.b.emit(')');
         } else if (isNode(operand) && operand[0] === 'dammit!') {
           // `new (f!)` → `new (await f())()`. Source parens selected
           // the program (sealed Value-dammit as the constructor).
@@ -15347,7 +15749,9 @@ class Emitter {
     const params = isDefHead(node[0]) ? node[2] : node[1];
     const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
+    const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
+    this.voidReason = null;
     this.mark(node, 'body', () => {
       this.mark(block, '$self', () => {
         this.b.emit('{\n');
@@ -15421,6 +15825,7 @@ class Emitter {
       });
     });
     this.sideEffectOnly = prevSEO;
+    this.voidReason = prevReason;
   }
 
   // A void body's tail: every statement emitted as a statement, then a
@@ -15488,10 +15893,13 @@ class Emitter {
           (h === '=' && stmt.length === 3 && Emitter.returnGuard(stmt[2]))) {
         return this.statement(stmt, ind);
       }
-      // Tail-position method/merge assignment stays a statement (the
+      // Tail-position method assignment stays a statement (the
       // double-spelled target has no single-expression form); the
       // function returns undefined.
-      if ((h === '.=' || h === '*>') && stmt.length === 3) return this.statement(stmt, ind);
+      if (h === '.=' && stmt.length === 3) return this.statement(stmt, ind);
+      // A slice assignment likewise: it splices in place, and the
+      // function returns undefined.
+      if (h === '=' && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null) return this.statement(stmt, ind);
       // A tail-position enum stays a statement — its lowering is a
       // `const` declaration, which has no value form
       if (h === 'enum') return this.statement(stmt, ind);
@@ -15614,43 +16022,59 @@ class Emitter {
   // `x = (c ? b : d)`. The explicit `(x = b) if c else d` keeps its
   // assign-only-when-true semantics (the Parenthetical flag guards it).
   static ternaryHoists(node) {
-    const then = node[2];
+    // The hoist belongs to the INNERMOST level of a left-nested chain
+    // (`x = 1 if a else 2 if b else 3` — see ternary()).
+    let inner = node;
+    while (isNode(inner[2]) && inner[2][0] === '?:' && inner[2].length === 4 && !inner[2].parenthesized) inner = inner[2];
+    const then = inner[2];
     return isNode(then) && then[0] === '=' && then.length === 3 &&
       typeof then[1] === 'string' && !then.parenthesized;
   }
 
+  //
+  // The chain: `x if a else y if b else z` parses LEFT-nested —
+  // ((x if a else y) if b else z), the then branch of each level being
+  // the level inside it — and reads the Python way, `a ? x : (b ? y :
+  // z)`. The chain re-associates at emission: each enclosing level's
+  // condition pairs with the inner level's else, and the outermost
+  // else closes it. Every mark stays on its own node. A parenthesized
+  // inner ternary is a value the author grouped and keeps its nesting.
   ternary(node) {
-    if (Emitter.ternaryHoists(node)) {
-      const then = node[2];
-      this.mark(node, '$self', () => {
+    const chain = [node];
+    while (true) {
+      const then = chain[chain.length - 1][2];
+      if (isNode(then) && then[0] === '?:' && then.length === 4 && !then.parenthesized) chain.push(then);
+      else break;
+    }
+    const inner = chain[chain.length - 1];
+    const hoists = Emitter.ternaryHoists(inner);
+    const branch = (owner, role, child) => {
+      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
+    };
+    // A ternary CONDITION keeps its parens — bare, JS
+    // right-associativity re-associates and changes the value.
+    const condition = (owner) => this.grouped(owner, 'condition', owner[1], isNode(owner[1]) && owner[1][0] === '?:');
+    this.mark(node, '$self', () => {
+      if (hoists) {
         // The hoisted target is a WRITE — it routes through expr so a
         // reactive name unwraps (`count.value = (c ? … : …)`);
         // plain names emit verbatim as before.
-        this.expr(then[1]);
+        this.expr(inner[2][1]);
         this.b.emit(' = (');
-        // A condition that is itself a ternary keeps its parens —
-        // bare, JS right-associativity hands the TAIL of this ternary
-        // to the condition and changes the value.
-        this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
-        this.b.emit(' ? ');
-        this.grouped(node, 'then', then[2], Emitter.needsGrouping(then[2], 'operand') || isUpdate(then[2]));
-        this.b.emit(' : ');
-        this.grouped(node, 'else', node[3], Emitter.needsGrouping(node[3], 'operand') || isUpdate(node[3]));
-        this.b.emit(')');
-      });
-      return;
-    }
-    const branch = (role, child) => {
-      this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
-    };
-    this.mark(node, '$self', () => {
-      // A ternary CONDITION keeps its parens — bare, JS
-      // right-associativity re-associates and changes the value.
-      this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
+      }
+      condition(inner);
       this.b.emit(' ? ');
-      branch('then', node[2]);
+      branch(inner, 'then', hoists ? inner[2][2] : inner[2]);
+      for (let i = chain.length - 2; i >= 0; i--) {
+        this.b.emit(' : (');
+        condition(chain[i]);
+        this.b.emit(' ? ');
+        branch(chain[i + 1], 'else', chain[i + 1][3]);
+      }
       this.b.emit(' : ');
-      branch('else', node[3]);
+      branch(chain[0], 'else', chain[0][3]);
+      this.b.emit(')'.repeat(chain.length - 1));
+      if (hoists) this.b.emit(')');
     });
   }
 
@@ -15983,6 +16407,72 @@ class Emitter {
   // itself: `x .= trim()` → `x = x.trim()`; the right side's chain
   // HEAD call gains the target as its receiver, so a chained right
   // side works too (`s .= trim().toLowerCase()`).
+  // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
+  // (either end may be null — an open end).
+  static sliceTarget(t) {
+    return isNode(t) && t[0] === '[]' && t.length === 3 && isNode(t[2]) &&
+      (t[2][0] === '..' || t[2][0] === '...') && t[2].length === 3 ? t : null;
+  }
+
+  // `a[i..j] = v` → `a.splice(i, count, ...[].concat(v))`: the range's
+  // elements are replaced in place by the value's — an array's items,
+  // a scalar as one item (CoffeeScript's concat reading). An open end
+  // splices to the end (`Infinity`); a missing start begins at 0. The
+  // count is `j - i + 1` for an inclusive range and `j - i` for an
+  // exclusive one, folded when both ends are integer literals. An
+  // array-literal value without holes spreads inline. A negative
+  // literal bound rejects: a count from the end needs the length,
+  // which the read form (`slice`) has and `splice` does not.
+  sliceAssignStatement(node) {
+    const [, target, value] = node;
+    const [, obj, range] = target;
+    const [op, from, to] = range;
+    const int = (x) => Emitter.isIntegerLiteral(x) ? parseInt(x.replace(/_/g, ''), 10) : null;
+    const plain = (x) => typeof x === 'string';
+    for (const bound of [from, to]) {
+      if (isNode(bound) && bound[0] === '-' && bound.length === 2 && Emitter.isIntegerLiteral(bound[1])) {
+        throw this.positionedError(node, 'emitter: a slice assignment cannot count from the end — `splice` takes a count, not a negative index; open the range instead (`a[i..] = v`) or compute the bound from `a.length`');
+      }
+    }
+    // A plain name goes through expr(): a reactive binding unwraps.
+    const endExpr = (x) => {
+      if (plain(x)) this.expr(x);
+      else { this.b.emit('('); this.expr(x); this.b.emit(')'); }
+    };
+    this.mark(node, '$self', () => {
+      this.mark(node, 'target', () => this.mark(target, '$self', () => {
+        this.head(target, 'object', obj);
+        this.b.emit('.splice(');
+        this.mark(target, 'key', () => {
+          if (from === null) this.b.emit('0'); else endExpr(from);
+          this.b.emit(', ');
+          if (to === null) {
+            this.b.emit('Infinity');
+          } else if (int(to) !== null && (from === null || int(from) !== null)) {
+            this.b.emit(String(int(to) - (from === null ? 0 : int(from)) + (op === '..' ? 1 : 0)));
+          } else {
+            endExpr(to);
+            if (from !== null) { this.b.emit(' - '); endExpr(from); }
+            if (op === '..') this.b.emit(' + 1');
+          }
+        });
+      }));
+      this.mark(node, 'operator', () => {});
+      // An elision is a bare ',' in the array sexpr (see array()).
+      const inline = isNode(value) && value[0] === 'array' && value.slice(1).every((el) => !(isNode(el) && el[0] === '...') && el !== ',');
+      this.mark(node, 'value', () => {
+        if (inline) {
+          value.slice(1).forEach((el) => { this.b.emit(', '); this.callArg(el); });
+        } else {
+          this.b.emit(', ...[].concat(');
+          this.expr(value);
+          this.b.emit(')');
+        }
+      });
+      this.b.emit(')');
+    });
+  }
+
   methodAssignStatement(node, ind) {
     const [, target, rhs] = node;
     let cur = rhs;
@@ -16016,23 +16506,6 @@ class Emitter {
       if (tspan !== null) this.primitiveReuse = { name: read, span: tspan.span };
       this.mark(node, 'value', () => this.expr(substHead(rhs)));
       this.primitiveReuse = null;
-    });
-  }
-
-  // ['*>', target, value] — the value merges into the target,
-  // initializing it when nullish:
-  // `*>obj = v` → `obj = Object.assign(obj ??= {}, v)`.
-  mergeAssignStatement(node, ind) {
-    const [, target, value] = node;
-    this.mark(node, '$self', () => {
-      const read = this.compoundTarget(node, target, ind);
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' Object.assign(');
-      this.mark(node, 'target', () => this.expr(read));
-      this.b.emit(' ??= {}, ');
-      this.mark(node, 'value', () => this.expr(value));
-      this.b.emit(')');
     });
   }
 
@@ -16876,7 +17349,19 @@ const runtimeAliasBindings = (emitter, trees) => {
     }
     if (head === 'class') {
       if (typeof x[1] === 'string') names.add(x[1]);
-      for (const part of x.slice(2)) walk(part, isDecl);
+      // A class-body `def` is a method: its name is a member, never a
+      // binding of the module (its parameters and body still walk).
+      for (const part of x.slice(2)) {
+        const stmts = isNode(part) && part[0] === 'block' ? part.slice(1) : [part];
+        for (const st of stmts) {
+          if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
+            if (isNode(st[2])) for (const param of st[2]) addPattern(param);
+            walk(st[3], isDecl);
+          } else {
+            walk(st, isDecl);
+          }
+        }
+      }
       return;
     }
     if (head === 'enum') {
@@ -17189,7 +17674,7 @@ function recordSchemaFields(emitter, block, text, at) {
   }
 }
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -17199,7 +17684,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, modulePath, appStashSpec, routesUnion, routeParams });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {

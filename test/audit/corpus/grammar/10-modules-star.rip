@@ -1,0 +1,5 @@
+# 10-modules-star.rip — the namespace resold as the default: `export * as default`.
+
+export * as default from './10-modules-lib.rip'
+
+console.log('star set')

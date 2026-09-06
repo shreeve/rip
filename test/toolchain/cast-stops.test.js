@@ -42,12 +42,15 @@ const LITERAL_ENDS = new Set(['INTERPOLATION_END', 'STRING_END', 'HEREGEX_END'])
 
 test('every terminal the parser allows after an Expression ends a cast type run or is a named continuation', () => {
   const { symbolIds, tokenNames, parseTable } = parser;
+  // tokenNames carries the user-facing displays; the kind names the
+  // type rewriter's tables spell come from the symbol table.
+  const kindOf = Object.fromEntries(Object.entries(symbolIds).map(([n, id]) => [id, n]));
   const follow = new Set();
   for (const state of parseTable) {
     const target = state?.[symbolIds.Expression];
     if (target === undefined || !parseTable[target]) continue;
     for (const id of Object.keys(parseTable[target])) {
-      const name = tokenNames[id];
+      const name = tokenNames[id] !== undefined ? kindOf[id] : undefined;
       if (name !== undefined) follow.add(PRE_REWRITE[name] ?? name);
     }
   }

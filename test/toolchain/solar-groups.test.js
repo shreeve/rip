@@ -80,3 +80,30 @@ test('a binding to a label no variant carries still fails', () => {
   expect(() => tiny([['(A[x])? B', '["one", @nope]', 'one: _, x']]))
     .toThrow(/binding '@nope' has no matching pattern label/);
 });
+
+// ---- review follow-ups: labels across alternatives, drops under sub-annotations ----
+const gen2 = (rule) => new Generator({ start: 'Root', grammar: { Root: [rule] } });
+
+test('a label bound at different positions across alternatives resolves per variant', () => {
+  const g = gen2(['(A[x] | B C[x])', '["k", @x]', 'k: _, x']);
+  const rules = g.rules.filter((r) => r.lhs === 'Root').map((r) => r.symbols.join(' '));
+  expect(rules).toEqual(['A', 'B C']);
+  expect(g.semantics[1].roles[0].grammarRef).toBe(1);
+  expect(g.semantics[2].roles[0].grammarRef).toBe(2);
+});
+
+test('an absent spread under a named sub-annotation prunes that part alone', () => {
+  const g = gen2(['A[x] (B[y])?', '["w", ["!", @x, ...@y], @x]', 'w: _, inner(unary: op, x, ...y), x']);
+  const absent = g.semantics[1];
+  expect(absent.nested[0].roles.map((r) => r.name)).toEqual(['op', 'x']);
+  expect(absent.roles.map((r) => r.name)).toEqual(['x']);
+  const present = g.semantics[2];
+  expect(present.nested[0].roles.map((r) => r.name)).toEqual(['op', 'x', 'y']);
+});
+
+test('a top-level absent spread beside a sub-annotated part splits the annotation paren-aware', () => {
+  const g = gen2(['A[x] (B[y])?', '["w", ["!", @x], ...@y]', 'w: _, inner(unary: op, x), ...y']);
+  expect(g.semantics[1].roles).toEqual([]);
+  expect(g.semantics[1].nested[0].roles.map((r) => r.name)).toEqual(['op', 'x']);
+  expect(g.semantics[2].roles.map((r) => r.name)).toEqual(['y']);
+});

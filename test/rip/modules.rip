@@ -217,7 +217,6 @@ fail "exported plain merge write rejects", "export n = 1\nn ||= 2", "cannot assi
 fail "exported plain floor-div write rejects", "export n = 4\nn //= 2", "cannot assign to exported 'n'"
 fail "exported plain modulo write rejects", "export n = 4\nn %%= 3", "cannot assign to exported 'n'"
 fail "exported plain method-assign rejects", "export s = ' a '\ns .= trim()", "cannot assign to exported 's'"
-fail "exported plain merge-into rejects", "export o = { a: 1 }\n*>o = { b: 2 }", "cannot assign to exported 'o'"
 fail "exported plain postfix update rejects", "export n = 1\nn++", "cannot assign to exported 'n'"
 fail "exported plain prefix update rejects", "export n = 1\n--n", "cannot assign to exported 'n'"
 fail "exported void binding reassignment rejects", "export announce! = -> 1\nannounce! = -> 2", "cannot assign to exported 'announce'"
@@ -366,7 +365,6 @@ code "a bare write in a nested function shadows rather than rejecting", '''
 fail "an update expression in a nested function still rejects", "export flag = 1\ndef bump()\n  flag++", "cannot assign to exported 'flag'"
 fail "a compound write in a nested function rejects", "export flag = 1\ndef bump()\n  flag += 2", "cannot assign to exported 'flag'"
 fail "a merge write in a nested function rejects", "export flag = 1\ndef bump()\n  flag ||= 2", "cannot assign to exported 'flag'"
-fail "a merge-into write in a nested function rejects", "export o = { a: 1 }\ndef bump()\n  *>o = { b: 2 }", "cannot assign to exported 'o'"
 # The residue this split leaves, pinned as the limit it is: the head is
 # plain, so the shadow is minted and the read inside the VALUE sees it
 # undefined. Recorded rather than blessed — if a later change makes this
@@ -541,3 +539,34 @@ code "an unreferenced value import survives", '''
   import { useState } from "react";
   console.log(1);
 '''
+
+# ==============================================================================
+# Exports are static: a postfix guard after an exported value guards the
+# VALUE (the export rows sit below POST_IF), and an export under a
+# statement guard or inside a block rejects — `if (c) export …` is not
+# JS. A bare `default` inside import braces binds nothing and rejects.
+# ==============================================================================
+
+code 'a guard after an exported value guards the value', 'export x = 1 if c', 'export const x = c ? 1 : undefined;'
+code 'a guard after the default export guards the value', 'export default x if c', 'export default c ? x : undefined;'
+fail 'a guarded export statement rejects', 'export { a } if c', "'export' must be a top-level statement"
+fail 'an export inside a block rejects', "if c\n  export x = 1", "'export' must be a top-level statement"
+fail 'a bare default specifier rejects', "import {default} from 'm'", 'import { default }'
+
+code 'export all as a namespace', "export * as utils from './utils'", "export * as utils from './utils';"
+
+# ==============================================================================
+# Import attributes
+# ==============================================================================
+
+code 'import attributes ride after the source', "import data from './data.json' with { type: 'json' }", 'import data from \'./data.json\' with {type: "json"};'
+code 'side-effect import attributes', "import './data.json' with { type: 'json' }", 'import \'./data.json\' with {type: "json"};'
+code 'namespace import attributes', "import * as d from './d.json' with { type: 'json' }", 'import * as d from \'./d.json\' with {type: "json"};'
+code 'named import attributes', "import { a } from './d.json' with { type: 'json' }", 'import { a } from \'./d.json\' with {type: "json"};'
+fail "'with' stays reserved outside an import", "with x\n  1", "'with' is reserved"
+
+code 'export all as default', "export * as default from './m'", "export * as default from './m';"
+code 'attributes on a default-plus-named import', "import d, { a } from './d.json' with { type: 'json' }", 'import d, { a } from \'./d.json\' with {type: "json"};'
+code 'attributes on a default-plus-namespace import', "import d, * as ns from './d.json' with { type: 'json' }", 'import d, * as ns from \'./d.json\' with {type: "json"};'
+fail 'an import attribute is a string-literal pair', "import d from './d.json' with { type: t }", 'string-literal pair'
+fail 'attributes cannot ride a type-only import', "import type { T } from './d.json' with { type: 'json' }", "Unexpected 'with'"

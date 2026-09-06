@@ -8,7 +8,6 @@ let box = { size: 1 }
 text -= 1
 port = 'high'
 text = text.missing()
-Object.assign(box ??= {}, { size: 'big' })
 
 let wrongMaybe: number = 'nine'
 let { absent } = point

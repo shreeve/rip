@@ -65,7 +65,7 @@ describe('tolerant repair at the parser level', () => {
     const depth5 = 'class A\n  m: ->\n    if x\n      y = (z) ->\n        if w\n          z.';
     const r = tolerant(depth5);
     expect(r.parseDiagnostics.length).toBeGreaterThan(0);   // tolerance is never acceptance
-    expect(r.parseDiagnostics[0].expected).toContain('PROPERTY'); // the what-to-type hint survives nesting
+    expect(r.parseDiagnostics[0].expected).toContain('a property name'); // the what-to-type hint survives nesting
     expect(r.code).toContain('class A');
   });
 
@@ -96,7 +96,7 @@ describe('tolerant repair at the parser level', () => {
       const r = tolerant(src);
       expect(r.code).toContain('x = 1');
       expect(r.parseDiagnostics.some((d) =>
-        /Unexpected 'INDENT'/.test(d.message) && d.expected.includes('TERMINATOR'))).toBe(true);
+        /Unexpected 'indent'/.test(d.message) && d.expected.includes('newline'))).toBe(true);
     }
   });
 
@@ -133,14 +133,14 @@ describe('tolerant repair at the parser level', () => {
     }
   });
 
-  test('a class-body `def` rejects exactly as its complete program does', () => {
-    // `def` is not a class-member form in rip, complete or not — the
+  test('a class-body loop rejects exactly as its complete program does', () => {
+    // A loop is not a class-member form in rip, complete or not — the
     // tolerant compile must not invent a face for a program no
     // completion makes valid, and the strict twin fixes the message.
     let strict = null;
     let tol = null;
-    try { compile('class A\n  def m()\n    1\n', { runtimeDelivery: 'none' }); } catch (e) { strict = e.message; }
-    try { tolerant('class A\n  def m(\n'); } catch (e) { tol = e.message; }
+    try { compile('class A\n  for x in m()\n    1\n', { runtimeDelivery: 'none' }); } catch (e) { strict = e.message; }
+    try { tolerant('class A\n  for x in m(\n'); } catch (e) { tol = e.message; }
     expect(strict).toContain('unsupported class member');
     expect(tol).toContain('unsupported class member');
   });

@@ -17,7 +17,7 @@ import {
   RecallTracker, isHistoryNavKey, Osc11Matcher, preloadRepl,
 } from '../../src/cli/repl.js';
 import { identifierRuns } from '../../src/ident.js';
-import { CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compile.js';
 
 describe('wrapper generation', () => {
   test('strict prologue, block-nested user code, restore and save from reported names', () => {
@@ -93,6 +93,11 @@ describe('wrapper generation', () => {
     expect(body).toContain('const __resolveImport = __rip.resolveImport;');
     const without = buildWrapper({ code: '1;', source: '1' });
     expect(without.body).not.toContain('resolveImport');
+  });
+
+  test('an import with attributes lowers to a dynamic import carrying them', () => {
+    const { code } = compile("import d from './d.json' with { type: 'json' }", { repl: true, runtimeDelivery: 'none' });
+    expect(code).toContain(`await import(__resolveImport('./d.json'), { with: {type: "json"} })`);
   });
 
   test('mintFresh walks underscore suffixes', () => {

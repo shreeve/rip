@@ -588,3 +588,28 @@ test 'indexed for-in source getter reads once', '''
     total += x + i
   [total, n]
   ''', [31, 1]
+
+# ==============================================================================
+# A guarded loop emits braced: a loop that hoists a temp (`const _ref`
+# ahead of `for (… in _ref)`) would otherwise leave the loop itself
+# outside the guard.
+# ==============================================================================
+
+code 'a guarded own-loop braces its hoisted temp', 'f k for own k of g() if c', '''
+  if (c) {
+    const _ref = g();
+    for (let k in _ref) {
+      if (!Object.hasOwn(_ref, k)) continue;
+      f(k);
+    };
+  }
+  '''
+code 'a guarded plain loop braces too', 'f x for x in xs if c', '''
+  if (c) {
+    for (let x of xs) {
+      f(x);
+    };
+  }
+  '''
+
+fail 'a var-less ranged loop with a step rejects the same way', 'for [1..5] by 2\n  x = 1', 'binds no variable'

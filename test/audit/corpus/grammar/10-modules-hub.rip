@@ -1,6 +1,7 @@
 # 10-modules-hub.rip — the re-export hub: the lib resold whole.
 
 export * from './10-modules-lib.rip'
+export * as lib from './10-modules-lib.rip'
 export { default } from './10-modules-lib.rip'
 
 console.log('hub open')

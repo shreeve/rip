@@ -1197,3 +1197,111 @@ test 'standalone ?? throw with undefined', '''
         e.message
     fn(undefined)
   ''', "was nullish"
+
+# ==============================================================================
+# A chain of postfix-else ternaries reads the Python way — right-nested:
+# `1 if a else 2 if b else 3` is `a ? 1 : (b ? 2 : 3)`, and an assigned
+# chain hoists its target out of the whole chain. Parenthesizing an
+# inner ternary keeps the grouping the author wrote.
+# ==============================================================================
+
+test 'a ternary chain takes the first true condition', 'a = true\nb = false\nx = 1 if a else 2 if b else 3\nx', 1
+test 'a ternary chain falls through to the last else', 'a = false\nb = false\nx = 1 if a else 2 if b else 3\nx', 3
+test 'a ternary chain takes a later condition', 'a = false\nb = true\nx = 1 if a else 2 if b else 3\nx', 2
+code 'an assigned ternary chain hoists its target', 'x = 1 if a else 2 if b else 3', '''
+  let x;
+
+  x = (a ? 1 : (b ? 2 : 3));
+  '''
+code 'a ternary chain in value position', 'f(1 if a else 2 if b else 3)', 'f(a ? 1 : (b ? 2 : 3));'
+code 'a parenthesized inner ternary keeps its grouping', 'x = (1 if a else 2) if b else 3', '''
+  let x;
+
+  x = (b ? (a ? 1 : 2) : 3);
+  '''
+
+# ==============================================================================
+# Switch match arms — a regex or range `when` is a match test, not a
+# value: the switch lowers to an if/else chain over the subject.
+# ==============================================================================
+
+test 'switch regex arms match by test', '''
+    f = (s) ->
+      switch s
+        when /^a/i then 'a'
+        when /b$/ then 'b'
+        else 'other'
+    [f('Apple'), f('cab'), f('x')]
+  ''', ['a', 'b', 'other']
+
+test 'switch range arms match by bounds', '''
+    f = (n) ->
+      switch n
+        when [1..3] then 'low'
+        when [4...10], 12 then 'mid'
+        else 'high'
+    [f(3), f(9), f(10), f(12)]
+  ''', ['low', 'mid', 'high', 'mid']
+
+test 'switch match arms bind an impure subject once', '''
+    calls = 0
+    g = -> calls++; 'abc'
+    r = switch g()
+      when /z/ then 1
+      when /b/ then 2
+    [r, calls]
+  ''', [2, 1]
+
+test 'switch heregex arm', '''
+    d = 'b'
+    switch 'abc'
+      when ///a #{d}/// then 'hit'
+      else 'miss'
+  ''', 'hit'
+
+test 'switch mixed literal and match arms in one when', '''
+    f = (v) ->
+      switch v
+        when 'x', /^y/, [10..20] then 'yes'
+        else 'no'
+    [f('x'), f('yo'), f(15), f(5)]
+  ''', ['yes', 'yes', 'yes', 'no']
+
+code 'switch with only plain arms keeps case labels', 'switch s\n  when 1, 2 then a()\n  else b()', '''
+    switch (s) {
+      case 1:
+      case 2:
+        a();
+        break;
+      default:
+        b();
+        break;
+    }
+  '''
+
+test 'range arms take variable bounds', '''
+    lo = 2
+    hi = 4
+    f = (n) ->
+      switch n
+        when [lo..hi] then 'in'
+        else 'out'
+    [f(2), f(4), f(5)]
+  ''', ['in', 'in', 'out']
+
+test 'a break bound by a loop inside a match arm stays', '''
+    out = []
+    switch 'ab'
+      when /a/
+        for i in [1..5]
+          break if i > 2
+          out.push i
+    out
+  ''', [1, 2]
+
+fail 'a break in a match arm has nothing to leave', 'for x in xs\n  switch x\n    when /a/\n      break', 'nothing to leave'
+fail 'a subjectless switch cannot carry match arms', 'switch\n  when /a/ then 1', 'has none'
+fail 'a postfix break in a match arm has nothing to leave', 'for x in xs\n  switch x\n    when /a/\n      break if q', 'nothing to leave'
+code 'a member named break in a match arm is a name', 'switch x\n  when /a/\n    obj.break()', 'if (/a/.test(x)) {\n  obj.break();\n}'
+code 'a key named break in a match arm is a name', 'switch x\n  when /a/\n    o.x = {break: 1}', 'if (/a/.test(x)) {\n  o.x = {break: 1};\n}'
+code 'a member named break in a value if is a name', 'y = if q then obj.break() else 2', 'let y = q ? obj.break() : 2;'

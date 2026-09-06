@@ -286,7 +286,8 @@ export function tagCompoundKeys(tokens) {
 //   - assign definition: DAMMIT directly before a `=` token
 //     (`save! = ->`; a spaced `!` never lexes DAMMIT, `!=` after a
 //     name is a scan-time rejection, `==` lexes COMPARE whole)
-//   - def definition: DEF Identifier DAMMIT (`def save!(x)`)
+//   - def definition: DEF Identifier DAMMIT (`def save!(x)`), or the
+//     static DEF @ Property DAMMIT (`def @save!(x)`)
 // The third context — an object/class METHOD KEY (`fn!: ->`) — resolves
 // inside implicitObjects, the pass that knows whether a `:` is a
 // ternary's (`c ? f!: g` keeps the dammit) or a pair's.
@@ -295,7 +296,8 @@ export function tagVoidMarkers(tokens) {
     if (counter.on) counter.n++;
     if (tokens[i].kind !== 'DAMMIT') continue;
     if (tokens[i + 1]?.kind === '=' ||
-        (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF')) {
+        (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF') ||
+        (tokens[i - 1]?.kind === 'PROPERTY' && tokens[i - 2]?.kind === '@' && tokens[i - 3]?.kind === 'DEF')) {
       tokens[i].kind = 'VOID_MARKER';
     }
   }
@@ -452,11 +454,6 @@ const OPS2 = {
   // program carries a tight `.` `=` pair (a property name must
   // follow `.`), so the claim can never change a program's meaning.
   '.=': 'METHOD_ASSIGN',
-  // Merge assignment: ADJACENT `*>` is one token (`*>obj = {…}` —
-  // the value merges into the target). No legal program carries a
-  // tight `*` `>` pair (a comparison cannot follow a bare `*`), so
-  // the claim can never change a program's meaning.
-  '*>': 'MERGE_ASSIGN',
   // Map literals: ADJACENT `*{` marks the brace as a MAP (`*{a: 1}` →
   // new Map([["a", 1]])). The star claims; the `{` itself follows as
   // a normal brace so every brace pass (implicit structure, matching)
@@ -1188,6 +1185,24 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         prefix.length > (indents[renderDepth - 1] ?? '').length;
       if (text[pos] === '#' && !renderIdLine) {
         let end = pos;
+        // A `###` line (three hashes then anything but a fourth) opens
+        // a BLOCK comment that runs to the next `###`, however many
+        // lines away, and only whitespace or a line comment may follow
+        // the closer on its line — code there would be swallowed
+        // silently, and a comment must never swallow code. An unclosed
+        // block rejects at its opener, like an unterminated heredoc
+        // (`__DATA__` is the spelling for "the rest is not code").
+        // `####…` is a line comment like any other.
+        if (text.startsWith('###', pos) && text[pos + 3] !== '#') {
+          const close = text.indexOf('###', pos + 3);
+          if (close < 0) failOpenAtEnd('unclosed `###` block comment — close it with `###`', pos, pos + 3);
+          end = close + 3;
+          let after = end;
+          while (text[after] === ' ' || text[after] === '\t') after++;
+          if (after < text.length && text[after] !== '\n' && text[after] !== '\r' && text[after] !== '#') {
+            fail('code after a closing `###` — a block comment ends its line; put the code on the next line', close, end);
+          }
+        }
         while (end < text.length && text[end] !== '\n' && !(text[end] === '\r' && text[end + 1] === '\n')) end++;
         const withNl = end < text.length ? end + (text[end] === '\r' ? 2 : 1) : end;
         trivia.push({ kind: 'comment', start: pos, end, text: text.slice(pos, end) });
@@ -1454,10 +1469,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         seenFor = null;
       } else if (word === 'as' && (seenImport || seenExport) &&
-                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'IDENTIFIER')) {
+                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' || prev?.kind === 'IDENTIFIER')) {
         // Contextual: only inside a module line, after a specifier
         // — `as = 2` elsewhere stays an identifier.
         push('AS', word, start, pos);
+      } else if (word === 'with' && seenImport && (prev?.kind === 'STRING' || prev?.kind === 'STRING_END')) {
+        // Contextual: import attributes, after the module source
+        // (`import d from './d.json' with { type: 'json' }`) —
+        // reserved everywhere else.
+        push('WITH', word, start, pos);
       } else if (word === 'default' && (seenImport || seenExport) &&
                  (prev?.kind === 'EXPORT' || prev?.kind === 'AS' || prev?.kind === '{' || prev?.kind === ',')) {
         // Contextual: `export default …`, `{default as d}`, `a as
@@ -1484,6 +1504,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('STATEMENT', word, start, pos);
       } else if (ALIASES[word]) {
         const [kind, value] = ALIASES[word];
+        // `x is not y` reads as `x === !y` — a comparison against a
+        // negation, never what was meant. The negated comparison is
+        // `isnt`; the rejection names it.
+        if (word === 'is' && (text[pos] === ' ' || text[pos] === '\t')) {
+          const not = /^[ \t]+not(?![\w$])/.exec(text.slice(pos));
+          if (not !== null) {
+            fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, pos + not[0].length);
+          }
+        }
         // Word compound assignments: `and=` / `or=` are COMPOUND_ASSIGN
         // with the operator value, span covering word + '='.
         if ((word === 'and' || word === 'or') && text[pos] === '=' && text[pos + 1] !== '=') {

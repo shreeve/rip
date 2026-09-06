@@ -311,6 +311,7 @@ const closerFor = (err, text) => {
     return null;
   }
   if (reason.startsWith('missing ///')) return '///';
+  if (reason.startsWith('unclosed `###`')) return '###';
   const m = /unclosed '(.+?)'/.exec(reason);
   if (m) return { '(': ')', '[': ']', '{': '}', '#{': '}' }[m[1]] ?? null;
   const w = /never closed by '(.)'/.exec(reason);

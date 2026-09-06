@@ -22,7 +22,7 @@
   "04-assignments.rip": {
     "positions": [
       {
-        "line": 163,
+        "line": 155,
         "character": 19,
         "token": "target",
         "expect": null,

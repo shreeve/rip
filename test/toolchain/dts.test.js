@@ -170,6 +170,9 @@ const ROWS = [
   ['class A\n  @x: number = 2', 'declare class A {\n  static x: number;\n}\nexport {};\n'],
   ['class A\n  @x: number', 'declare class A {\n  static x: number;\n}\nexport {};\n'],
   ['class A\n  m: (x: number): string -> "s"', 'declare class A {\n  m(x: number): string;\n}\nexport {};\n'],
+  // class defs and accessors declare like the pair forms they read as
+  ['class A\n  def m(x: number): string\n    "s"\n  def @g<T>(x: T): T[]\n    [x]\n  def h!()\n    log 1', 'declare class A {\n  m(x: number): string;\n  static g<T>(x: T): T[];\n  h(): void;\n}\nexport {};\n'],
+  ['class A\n  get x: (): number -> 1\n  set x: (v: number) -> 1\n  get @n: (): string -> "n"\n  get y: -> 1', 'declare class A {\n  get x(): number;\n  set x(v: number);\n  static get n(): string;\n}\nexport {};\n'],
   ['class A\n  save!: (x: number) ->\n    x', 'declare class A {\n  save(x: number): void;\n}\nexport {};\n'],
   // A constructor-body `@field = value` declares in the .d.ts exactly
   // as the TS face declares it (the emitter's own ctorAtFields walker,
@@ -555,4 +558,18 @@ describe('nested array types render in declarations', () => {
     expect(d).toContain('declare let g: Grid;');
     expect(d).toContain('declare let w: number[][];');
   });
+});
+
+// An import's attributes clause reaches the declaration: a JSON import
+// without it does not resolve under NodeNext.
+test('import attributes ride the declaration', () => {
+  const src = "import data from './d.json' with { type: 'json' }\nx: typeof data = data\n";
+  expect(dts(src)).toBe(`import data from './d.json' with { type: "json" };\ndeclare let x: typeof data;\n`);
+  expect(dts("export * as ns from './m.js'")).toBe("export * as ns from './m.js';\n");
+  expect(dts("export * as default from './m.js'")).toBe("export * as default from './m.js';\n");
+});
+
+// The TS face keeps a setter's one parameter required (TS1051).
+test('a setter parameter is required in the TS face', () => {
+  expect(compile('class T\n  set v: (n) -> @_v = n', { face: 'ts' }).code).toContain('set v(n) {');
 });

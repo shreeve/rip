@@ -109,3 +109,29 @@ test 'the second parameter really is left unbound', '''
   f a: 1,
     b: 2
 ''', [{ a: 1, b: 2 }, false]
+
+# `a = 1` inside an object LITERAL is a destructuring default; only a
+# pattern can carry one (`{a = 1} = o`), so the literal rejects instead
+# of emitting `({a = 1})`.
+fail 'a default inside an object literal rejects', '{a = 1}', 'destructuring default'
+fail 'a default inside a value-position object literal rejects', 'o = {a = 1}', 'destructuring default'
+
+# ==============================================================================
+# A spread after a comma stays IN an implicit object (`f a, x: 1,
+# ...opts, y: 2` is one options object, as the braced form reads) —
+# on the same line, after a newline, and under a continuation indent.
+# ==============================================================================
+
+code 'a spread continues an implicit object argument', 'f a, x: 1, ...opts, y: 2', 'f(a, {x: 1, ...opts, y: 2});'
+code 'a spread continues an implicit object at the end', 'f x: 1, ...opts', 'f({x: 1, ...opts});'
+code 'a spread continues a multi-line implicit object', 'f a,\n  x: 1\n  ...opts\n  y: 2', 'f(a, {x: 1, ...opts, y: 2});'
+code 'a spread continues a trailing-comma continuation', 'f x: 1,\n  ...opts', 'f({x: 1, ...opts});'
+code 'a plain element after the spread ends the object', 'f x: 1, ...opts, 3', 'f({x: 1, ...opts}, 3);'
+test 'an implicit object with a spread merges at run time', 'opts = {b: 2}\nf = (o) -> o\nf a: 1, ...opts, c: 3', {a: 1, b: 2, c: 3}
+code 'a spread in an array nested in a call is an element', 'f([a: 1, ...rest])', 'f([{a: 1}, ...rest]);'
+code 'plain parens keep the spread in the object', 'z = (a: 1, ...b)', 'let z = {a: 1, ...b};'
+code 'an implicit call inside a bracket list keeps its spread', '[1, g a, x: 1, ...opts]', '[1, g(a, {x: 1, ...opts})];'
+
+code 'a spread inside an array is the next element, not an object continuation', '[x: 1, ...opts, y: 2]', '[{x: 1}, ...opts, {y: 2}];'
+code 'a spread inside call parens is the next argument', 'f(a: 1, ...rest)', 'f({a: 1}, ...rest);'
+code 'a spread after an implicit-call object continues it', 'f a, x: 1, ...opts, y: 2', 'f(a, {x: 1, ...opts, y: 2});'

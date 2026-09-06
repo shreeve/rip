@@ -88,7 +88,11 @@ own index = out.length
 - alpha-renaming where two declarations land in one JS scope.
 
 Revisit when another real fresh-intent defect appears or a static
-analysis experiment finds a meaningful population.
+analysis experiment finds a meaningful population. Revisited during
+the 2026-09 grammar overhaul and deferred again on the same grounds:
+the four design points above are still open, and shipping the
+keyword without the alpha-renaming story would trade one silent
+capture for a silent TDZ.
 
 ### Continue-safe cursor loop
 
