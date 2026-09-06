@@ -1118,7 +1118,7 @@ export main = (argv) ->
     upstreams =
       if operation is 'Maintenance' then []
       else if doorbellPublished then [{ path: doorbellPath, doorbell: true }]
-      else workers.map (worker) -> { path: worker.socket }
+      else workers.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
     body =
       name: args.name
       upstreams: upstreams
@@ -1999,7 +1999,7 @@ export main = (argv) ->
       apiChanged = JSON.stringify(sourceHashes(record.inputs)) isnt JSON.stringify(record.inputHashes)
       operation = 'Activating'
       admissionAttempted = true
-      publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket }
+      publishUpstreams! candidateWorkers.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
       workers = candidateWorkers
       bootingWorkers = []
       for worker in workers
@@ -2034,7 +2034,7 @@ export main = (argv) ->
       restored = bootArtifact! activeArtifact
       operation = 'Restoring'
       admissionAttempted = true
-      publishUpstreams! restored.map (worker) -> { path: worker.socket }
+      publishUpstreams! restored.map (worker) -> { path: worker.socket, concurrency: args.concurrency }
       workers = restored
       bootingWorkers = []
       for worker in workers
