@@ -20,10 +20,14 @@ jobs:
       - name: Install workspace
         run: bun install --frozen-lockfile
 
-      - name: Install xcaddy for released Janus certification
+      # Janus is a separate program that Rip consumes as a released binary:
+      # the Sites lane finds `janus` on PATH, nothing else. Pinned so a
+      # certification run is reproducible; bump alongside the README's pin.
+      - name: Install Janus release for Sites certification
         run: |
-          go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash -s v1.11.1
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/janus" version
 
       - name: Full suite, every lane
         run: bun run test:all
