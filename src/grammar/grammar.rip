@@ -21,6 +21,24 @@
 # is the labeled symbol's value (null where its group is absent),
 # '...@name' a spread that drops out when absent, '@name?' a
 # true/false presence flag.
+#
+# Three conventions the rows below lean on, stated once:
+#   - ERASURE: a labeled symbol the template drops (TYPE[annotation],
+#     OPT_MARKER[optionalMarker], TYPE_PARAMS[typeParams],
+#     VOID_MARKER[voidMarker], REACTIVE_ASSIGN[operator], …) records
+#     its span as a side-band role of the node while the s-expression
+#     stays byte-identical to the unlabeled form. The type story lives
+#     in RoleStore and the TS face; the JS never sees it. A row that
+#     says a token "erases as <role>" means exactly this.
+#   - HEADS: a head a user could spell (`["state", …]` is what `state a, 0`
+#     builds) is discriminated by the declaration node's semanticKind —
+#     the locked-head convention. Invented heads are hyphenated or
+#     glyph-shaped (`typed-var`, `dammit!`, `.{}`) so no call can forge
+#     them. The void family (`void-assign`, `void-def`, `void-pair`)
+#     takes a word-form head, so its `=`/`:` token carries the operator
+#     label instead.
+#   - "THE EMITTER REJECTS": the shape parses on purpose so the emitter
+#     can position a precise diagnostic; src/emitter.js owns the rule.
 # ==============================================================================
 
 o = (pattern, action, ...extras) ->
@@ -114,12 +132,9 @@ grammar =
   # ============================================================================
 
   Import: [
-    # A SIDE-EFFECT import carries no clause, and none is minted for it: the
-    # node has a source and nothing else. Spelling it `["import", "{}", …]`
-    # made it indistinguishable from `import {} from …` two rows down, and
-    # the emitter wrote the empty-clause form for both — so TypeScript saw a
-    # named list waiting to be filled and offered to add to it, where it
-    # leaves a real side-effect import alone.
+    # A SIDE-EFFECT import carries no clause and none is minted for it:
+    # `["import", source]` stays distinct from `import {} from …`, whose
+    # empty named list reads to TypeScript as a clause waiting to be filled.
     o 'IMPORT String'                                                                           , '["import", 2]'                , 'import: _, source'
     o 'IMPORT ImportDefaultSpecifier FROM String'                                               , '["import", 2, 4]'             , 'import: _, spec, source'
     o 'IMPORT ImportNamespaceSpecifier FROM String'                                             , '["import", 2, 4]'             , 'import: _, spec, source'
@@ -210,15 +225,11 @@ grammar =
   # the reactive tier already reads it — `if (c) export …` is not JS.
   ExportAssign: [
     o "Identifier[target] (TYPE[annotation])? = #{RHS}"                                                                                , '["=", @target, @value]'          , 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
-    # Exported generic component: the Assign row's TYPE_PARAMS twin —
-    # `export Select<TOption extends TOptionShape> = component extends
-    # select`. Inline only: the lexer mints TYPE_PARAMS solely for a
-    # same-line `= component`.
+    # Exported generic component: the Assign row's TYPE_PARAMS twin
+    # (inline only, as there).
     o 'Identifier[target] TYPE_PARAMS[typeParams] = Expression[value]'                                                                 , '["=", @target, @value]'          , 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
-    # Exported void definition (`export save! = ->`) — the Assign row's
-    # void twin, flat for the same role-carrying reason. The `=` token
-    # carries the operator label (the head is a structural tag, not a
-    # glyph — word-form heads for the void family).
+    # Exported void definition (`export save! = ->`): the Assign row's
+    # void twin, flat for the same role-carrying reason.
     o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                                                                  , '["void-assign", @target, @value]', 'assign: _, target, value'       , prec: 'REACTIVE_ASSIGN'
     # Exported TYPED reactive declarations (`export count: number := 0`):
     # after `EXPORT Identifier` the parser shifts a TYPE into these flat
@@ -279,9 +290,7 @@ grammar =
     o 'This'
     o 'Super'
     # The dammit operator: `f!` is call-plus-await sugar — a real
-    # token and a real node. The head is non-spellable: a user call
-    # `dammit f` must never share its shape.
-    # The DAMMIT token is labeled so the `!` keeps its own source span:
+    # token and a real node. DAMMIT is labeled so the `!` keeps its span:
     # the lowering's `await` is synthetic, and a diagnostic on that
     # keyword (TS80007) must land on the one character that means await.
     o 'Value DAMMIT[operator]'   , '["dammit!", 1]'           , 'dammit: _, target'
@@ -331,8 +340,7 @@ grammar =
     o 'REGEX'
     # Interpolated heregex: stripped chunks + expressions, lowered by
     # the emitter to a RegExp(...) call. HEREGEX_END's value is the
-    # flags text ('' when none). The head is non-spellable: a user call
-    # `heregex a, b` must never share its shape.
+    # flags text ('' when none).
     o 'HEREGEX_START Interpolations HEREGEX_END', '["here-regex", 3, ...2]', 'heregex: _, flags, ...parts'
   ]
 
@@ -349,26 +357,20 @@ grammar =
   # ============================================================================
 
   Assign: [
-    # Plain, optional-marked, and typed declarations in one row.
-    # Typed (`x: T = v`): the TYPE token (the collapsed `: T` run) is a
-    # matched symbol the template DROPS — the s-expression is
-    # byte-identical to the untyped form (erasure by construction)
-    # while the pattern label records the annotation's span into
-    # RoleStore. Optional-marked (`@name? = v`): the lexer-minted
-    # OPT_MARKER drops the same way as the side-band optionalMarker
-    # role; the typed pair (`@name?: string = v`) carries BOTH roles —
-    # the TS face renders `name?: string` from them.
+    # Plain, optional-marked (`@name? = v`), and typed (`x: T = v`)
+    # declarations in one row: TYPE (the collapsed `: T` run) erases as
+    # annotation and OPT_MARKER as optionalMarker; the typed optional
+    # pair carries both, and the TS face renders `name?: string` from them.
     o "Assignable[target] (OPT_MARKER[optionalMarker])? (TYPE[annotation])? = #{RHS}", '["=", @target, @value]'          , 'assign: operator, target, value'
     # String-NAMED members: `"data-src" = v` — legal only as a class
     # field (the TS spelling for names identifiers cannot carry); the
     # emitter rejects the shape everywhere else.
     o 'STRING[target] (TYPE[annotation])? = Expression[value]'                       , '["=", @target, @value]'          , 'assign: operator, target, value'
-    # Generic component declaration:
-    # `Select<TOption extends TOptionShape> = component extends select`.
-    # The lexer mints TYPE_PARAMS only when `= component` follows on
-    # the same line, so this production cannot claim ordinary
-    # assignments and has no wrapped forms; the side-band typeParams
-    # role re-emits on the lowered class, TS face only.
+    # Generic component declaration (`Select<T extends Shape> = component
+    # extends select`): the lexer mints TYPE_PARAMS only when `= component`
+    # follows on the same line, so the row cannot claim ordinary
+    # assignments and has no wrapped forms. TYPE_PARAMS erases as
+    # typeParams; the TS face re-emits it on the lowered class.
     o 'Assignable[target] TYPE_PARAMS[typeParams] = Expression[value]'               , '["=", @target, @value]'          , 'assign: operator, target, value'
     o 'SimpleAssignable[target] COMPOUND_ASSIGN[operator] (Expression[value] | INDENT Expression[value] OUTDENT | TERMINATOR Expression[value])', '[@operator, @target, @value]'    , 'assign: operator, target, value'
 
@@ -376,15 +378,11 @@ grammar =
     # itself (`x .= trim()` → `x = x.trim()`) — a STATEMENT lowering;
     # the emitter rejects value-position use.
     o 'SimpleAssignable METHOD_ASSIGN Expression'                                    , '[".=", 1, 3]'                    , 'assign: operator, target, value'
-    # Void definition (`save! = ->`): the trailing bang on the target
-    # NAME marks the assigned function void — implicit return
-    # suppressed, the function returns undefined. The head is
-    # non-spellable (word-form: the `=!` GLYPH is the readonly
-    # operator, so the head is a tag and the `=` token carries the
-    # operator label); the marker's span records as the side-band
-    # voidMarker role. Plain-name targets only — the lexer mints
-    # VOID_MARKER solely before `=`, and the emitter requires a
-    # function value.
+    # Void definition (`save! = ->`): the bang on the target name marks
+    # the assigned function void (no implicit return). Word-form head
+    # (`=!` is the readonly glyph); VOID_MARKER erases as voidMarker.
+    # Plain-name targets only — the lexer mints VOID_MARKER solely before
+    # `=` — and the emitter requires a function value.
     o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                , '["void-assign", @target, @value]', 'assign: _, target, value'
   ]
 
@@ -395,20 +393,13 @@ grammar =
   ]
 
   # ============================================================================
-  # Reactive declarations. The heads are plain sexpr shapes —
-  # ["state", target, value] / ["computed", target, value] — which a
-  # user call (`state a, 0`) can impersonate byte-for-byte; the
-  # semanticKind on the DECLARATION node is the discriminator (the
-  # locked-head convention covers the pair). The REACTIVE_ASSIGN /
-  # COMPUTED_ASSIGN token is a matched symbol every template DROPS —
-  # its pattern label records the operator's span as a side-band role.
-  # Typed twins (`count: number := 0`) drop the TYPE token the
-  # same way: the s-expression is byte-identical to the untyped form
-  # (erasure by construction) while the annotation's span reaches
-  # RoleStore. The rows sit BELOW POST_IF/POST_UNLESS in precedence, so
-  # a postfix guard shifts INTO the value (`count := 0 if c` declares
-  # count with a conditional initializer; a const
-  # declaration has no guardable statement form).
+  # Reactive declarations. Locked heads — ["state", target, value] /
+  # ["computed", target, value] are what `state a, 0` builds. The
+  # operator token erases as operator; typed twins (`count: number := 0`)
+  # erase TYPE as annotation. The rows sit BELOW POST_IF/POST_UNLESS in
+  # precedence, so a postfix guard shifts INTO the value (`count := 0 if c`
+  # declares count with a conditional initializer; a const declaration
+  # has no guardable statement form).
   # ============================================================================
 
   # The reactive-declaration value forms: inline, wrapped onto the
@@ -432,18 +423,14 @@ grammar =
     o 'Block'
   ]
 
-  # Optional-marked declarations: `@name? := default` — an optional
-  # PROP with a default. OPT_MARKER is the lexer-minted marker token
-  # (a tight `?` on a name whose line continues with `:=` — a
-  # distinct kind, so the postfix existence check's grammar is
-  # untouched). The template DROPS it: the sexpr is byte-identical to
-  # the unmarked form and the marker's span records as the side-band
-  # optionalMarker role for the face/type story. The lowering is the
-  # unmarked one (optionality changes nothing at runtime). Typed
-  # twins drop the TYPE token the same way, as the side-band
-  # annotation role (erasure by construction).
+  # Optional-marked declarations (`@name? := default`, an optional prop
+  # with a default): OPT_MARKER is a distinct lexer-minted kind — a tight
+  # `?` on a name whose line continues with `:=` — so the postfix
+  # existence check's grammar is untouched. It erases as optionalMarker;
+  # the lowering is the unmarked one (optionality changes nothing at
+  # runtime).
   ReactiveAssign: [
-    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]', '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]'     , '["state", @target, @value]', 'state: _, target, value'
   ]
 
   ComputedAssign: [
@@ -464,36 +451,24 @@ grammar =
     o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START ArgList[key] OptComma CALL_END', '["gate", @target, @rhs, ...@key]', 'gate: _, target, rhs, ...key'
   ]
 
-  # Readonly declarations. The head is a plain sexpr
-  # shape — ["readonly", target, value] — which a user call
-  # (`readonly x, 5`) forges byte-for-byte; the semanticKind on the
-  # DECLARATION node discriminates (the locked-head class).
-  # The lowering is a plain `const` (no runtime
-  # call; `__readonly` stays surface-unreachable). Form
-  # set and precedence follow the state rows exactly: the INDENT body
-  # takes ONE expression, and a postfix guard shifts INTO the value
-  # (`x =! 5 if c` declares unconditionally with a conditional
-  # initializer). Typed twins drop the TYPE token with the annotation
-  # label (erasure by construction).
+  # Readonly declarations (locked head; lowers to a plain `const`, no
+  # runtime call — `__readonly` stays surface-unreachable). Form set and
+  # precedence follow the state rows exactly: the INDENT body takes ONE
+  # expression, and a postfix guard shifts INTO the value (`x =! 5 if c`
+  # declares unconditionally with a conditional initializer).
 
   Readonly: [
     o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? READONLY_ASSIGN[operator] Rhs[value]', '["readonly", @target, @value]', 'readonly: _, target, value'
   ]
 
   # ============================================================================
-  # Reactive effects. The head is a spellable sexpr shape —
-  # ["effect", target|null, body], which a user call (`effect h, 5`)
-  # forges byte-for-byte (the corpus tests own the shape); the
-  # semanticKind on the DECLARATION node discriminates (the
-  # locked-head class). The BOUND form (`h ~> body`)
-  # binds the dispose handle as a plain const; the BARE form runs for
-  # its subscriptions. The dropped EFFECT token's span records as the
-  # side-band operator role; the bound typed twin
-  # (`h: T ~> body`) rides the same TYPE mechanism as the reactive
-  # declarations. Precedence sits with REACTIVE_ASSIGN, below
-  # POST_IF/POST_UNLESS: a postfix guard shifts INTO the body
-  # (`~> f() if c` runs the effect unconditionally with a conditional
-  # body).
+  # Reactive effects (locked head: ["effect", target|null, body]). The
+  # BOUND form (`h ~> body`) binds the dispose handle as a plain const;
+  # the BARE form runs for its subscriptions. EFFECT erases as operator
+  # and the bound typed twin (`h: T ~> body`) erases TYPE as annotation.
+  # Precedence sits with REACTIVE_ASSIGN, below POST_IF/POST_UNLESS: a
+  # postfix guard shifts INTO the body (`~> f() if c` runs the effect
+  # unconditionally with a conditional body).
   # ============================================================================
 
   Effect: [
@@ -515,10 +490,9 @@ grammar =
     # Optional index (`a?.[k]`); Expression keys only — slices have no
     # optional form.
     o 'Subjectable[object] ES6_OPTIONAL_INDEX INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["optindex", @object, @key]', 'optindex: _, object, key'
-    # Pick (`obj.{a, b: c, d = e}` → `{a: obj.a, c: obj.b, d: obj.d ?? e}`).
-    # Heads `.{}`/`?.{}` are syntax-shape strings — no identifier can
-    # collide with them; one kind covers both, the head discriminating
-    # optionality exactly as member's '.'/'?.' does.
+    # Pick (`obj.{a, b: c, d = e}` → `{a: obj.a, c: obj.b, d: obj.d ?? e}`):
+    # one kind covers both heads, `.{}`/`?.{}` discriminating optionality
+    # exactly as member's '.'/'?.' does.
     o 'Subjectable PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]'          , 'pick: _, source, ...items'
     o 'Subjectable OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", 1, ...3]'          , 'pick: _, source, ...items'
     o 'Subjectable PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}",  1, ...4]'          , 'pick: _, source, ...items'
@@ -543,25 +517,19 @@ grammar =
   # ============================================================================
 
   NewValue: [
-    # Bare construction (`new X`, `new a.B`): the token value IS the
-    # head, so the node and its roles are byte-identical to the old
-    # `UNARY Expression` reading.
+    # Bare construction (`new X`, `new a.B`): the token value is the head.
     o 'NEW NewSpine'                           , '[1, 2]'                       , 'unary: operator, operand'
-    # Nested construction (`new new X()` — the JS NewExpression
-    # recursion); rare but the old UNARY reading accepted it.
+    # Nested construction (`new new X()`, the JS NewExpression recursion).
     o 'NEW NewValue'                           , '[1, 2]'                       , 'unary: operator, operand'
     # Completed construction (`new X(a)`): the ctor call is a real
     # annotated call node — the construction closes here, so accessors
     # and DAMMIT bind OUTSIDE on the Value tier.
     o 'NEW NewCall'                            , '[1, 2]'                       , 'unary: operator, operand'
-    # Construction dammit (`new X!`, `new X!(a)`): the dammit's call
-    # IS the construction, awaited (the DYNAMIC_IMPORT DAMMIT
-    # precedent — a real await node, no hidden channels).
-    # prec NEW (below CALL_START): a following argument list shifts
-    # INTO the construction (`new X!(a)` supplies the ctor args).
-    # The bang is labeled here too — same reason as Value DAMMIT's: the
-    # awaited construction's `await` is synthetic, and the operator role
-    # is where its diagnostics land.
+    # Construction dammit (`new X!`, `new X!(a)`): the dammit's call IS
+    # the construction, awaited — a real await node. prec NEW (below
+    # CALL_START): a following argument list shifts INTO the construction
+    # (`new X!(a)` supplies the ctor args). The bang is labeled for the
+    # same reason as Value DAMMIT's.
     o 'NEW NewSpine DAMMIT[operator]'          , '["await", ["new", 2]]'        , 'await: _, value(unary: operator, operand)', prec: 'NEW'
     o 'NEW NewSpine DAMMIT[operator] Arguments', '["await", ["new", [2, ...4]]]', 'await: _, value(unary: operator, operand(call: callee, ...args))'
   ]
@@ -572,9 +540,7 @@ grammar =
 
   # The new-CALLEE's member spine — deliberately call-free (JS's
   # NewExpression/MemberExpression split): the first argument list
-  # completes the construction. A Parenthetical link seals (`new (f!)`
-  # constructs the awaited callee — the DAMMIT inside is an ordinary
-  # Value dammit).
+  # completes the construction.
   NewSpine: [
     o 'Identifier'
     o 'ThisProperty'
@@ -606,8 +572,7 @@ grammar =
 
   Code: [
     o 'PARAM_START ParamList PARAM_END ArrowKind Block', '[4, 2, 5]' , 'func: kind, params, body'
-    # Arrow return type (`(a): T -> body`): TYPE is dropped from the
-    # template; its pattern label records the span (erasure).
+    # Arrow return type (`(a): T -> body`): TYPE erases as returnType.
     o 'PARAM_START ParamList PARAM_END TYPE[returnType] ArrowKind Block', '[5, 2, 6]' , 'func: kind, params, body'
     o 'ArrowKind Block'                                , '[1, [], 2]', 'func: kind, _, body'
   ]
@@ -714,8 +679,7 @@ grammar =
     # Void-method pair (`fn!: ->` in class bodies and object literals):
     # the bang on the KEY marks the method void. Name-shaped keys only
     # (identifier/property/@-static — the positions a trailing bang can
-    # lex after); the emitter requires a function value. Word-form head
-    # (the void family): the `:` token carries the operator label.
+    # lex after); the emitter requires a function value. Word-form head.
     o 'SimpleObjAssignable[key] VOID_MARKER[voidMarker] :[operator] (Expression[value] | INDENT Expression[value] OUTDENT)', '["void-pair", @key, @value]', 'pair: _, key, value'
   ]
 
@@ -821,19 +785,16 @@ grammar =
 
   Def: [
     o 'DEF Identifier OptParams Block'                                          , '["def", 2, 3, 4]'                   , 'def: _, name, params, body'
-    # Def return type (`def f(a): T` / parameterless `def f: T`): TYPE
-    # is dropped from the template; its pattern label records the span.
+    # Return type (`def f(a): T`, parameterless `def f: T`): TYPE erases
+    # as returnType.
     o 'DEF Identifier OptParams TYPE[returnType] Block'                         , '["def", 2, 3, 5]'                   , 'def: _, name, params, body'
     # Generic def (`def wrap<T extends string>(v: T): Promise<[T]>`):
-    # the lexer-minted TYPE_PARAMS drops as the
-    # side-band typeParams role; the TS face re-emits it after the
-    # name (type-level only, erased from JS).
+    # TYPE_PARAMS erases as typeParams; the TS face re-emits it after the name.
     o 'DEF Identifier TYPE_PARAMS[typeParams] OptParams Block'                  , '["def", 2, 4, 5]'                   , 'def: _, name, params, body'
     o 'DEF Identifier TYPE_PARAMS[typeParams] OptParams TYPE[returnType] Block' , '["def", 2, 4, 6]'                   , 'def: _, name, params, body'
     # Void def (`def save!(x)`): the bang on the def name marks the
-    # function void (no implicit return). Non-spellable word-form head
-    # (the void family); the marker's span records as the
-    # side-band voidMarker role.
+    # function void (no implicit return). Word-form head; VOID_MARKER
+    # erases as voidMarker.
     o 'DEF Identifier VOID_MARKER[voidMarker] OptParams Block'                  , '["void-def", 2, 4, 5]'              , 'def: _, name, params, body'
     o 'DEF Identifier VOID_MARKER[voidMarker] OptParams TYPE[returnType] Block' , '["void-def", 2, 4, 6]'              , 'def: _, name, params, body'
     # Static def (`def @m(a)`, `def @m!(a)`): the ThisProperty name marks
@@ -862,20 +823,15 @@ grammar =
   # forms (Assign/Def/Code side-band roles), a bare param is a
   # pass-through STRING in the s-expression — there is no node to hang
   # a side-band role on — so the typed form constructs a wrapper node
-  # the emitter erases: ["typed-var", target, "T"]. The head is
-  # hyphenated (the naming standard for invented heads): no
-  # identifier spells it, so no user call can ever build the same
-  # shape — the head alone discriminates. The corpus tests
-  # canonicalize the wrapper away.
+  # the emitter erases: ["typed-var", target, "T"] (an invented head).
+  # The corpus tests canonicalize the wrapper away.
   TypedParamVar: [
     o 'ParamVar'
     o 'ParamVar TYPE'                           , '["typed-var", 1, 2]' , 'typedvar: _, target, annotation'
-    # Optional parameter: `title?: string`.
-    # The lexer retypes the param's `?` to OPT_MARKER when a type
-    # annotation follows; it drops as the side-band optionalMarker
-    # role (the component-prop precedent) and the TS face emits
-    # `?` after the param name — type-level only, the JS twin is the
-    # bare name (an omitted argument is undefined either way).
+    # Optional parameter (`title?: string`): the lexer retypes the param's
+    # `?` to OPT_MARKER when a type annotation follows; it erases as
+    # optionalMarker and the TS face emits `?` after the name (the JS
+    # twin is the bare name — an omitted argument is undefined either way).
     o 'ParamVar OPT_MARKER[optionalMarker] TYPE', '["typed-var", 1, 3]' , 'typedvar: _, target, annotation'
     # Bare optional (`title?` — no annotation): same wrapper, empty
     # annotation text; the face emits just the `?` (TS infers the
@@ -1013,7 +969,7 @@ grammar =
     o 'Value PRESENCE[operator] Arguments'       , '["dammit?", 1, ...3]'       , 'maybe-dammit: _, callee, ...args'
     # Dynamic import: `import(url)` is a call node whose callee is the
     # token's own value; `import!(url)` is its awaited form (a real
-    # await node — no hidden channels).
+    # await node).
     o 'DYNAMIC_IMPORT Arguments'                 , '[1, ...2]'                  , 'dynimport: keyword, ...args'
     o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["await", ["import", ...3]]', 'await: _, value(dynimport: keyword, ...args)'
   ]
@@ -1221,21 +1177,19 @@ grammar =
     o 'FOR (AWAIT[await])? ForVariables[vars] FORAS Expression[iterable] (WHEN Expression[guard])? Block[body]', '["for-as", @vars, @iterable, @await?, @guard, @body]'      , 'foras: _, vars, iterable, await, guard, body'
     o 'FOR ForVariables[vars] FORASAWAIT Expression[iterable] (WHEN Expression[guard])? Block[body]', '["for-as", @vars, @iterable, true, @guard, @body]'         , 'foras: _, vars, iterable, await, guard, body'
 
-    # A var-less ranged loop parses only so the emitter can reject it
-    # with a precise message (the repeat idiom takes a binding).
-    # Both reach the emitter's "the repeat idiom takes a binding"
-    # rejection (a var-less ranged loop has no coherent emission).
+    # A var-less ranged loop (either form) parses only so the emitter
+    # can reject it precisely: the repeat idiom takes a binding.
     o 'FOR Range[iterable] (BY Expression[step])? Block[body]'                    , '["for-in", [], @iterable, @step, null, @body]'             , 'forin: _, _, iterable, step, guard, body'
 
-    o 'Expression FOR ForVariables FORIN Expression'                              , '["comprehension", 1, [["for-in", 3, 5, null]], []]'        , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'              , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]'       , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression'                , '["comprehension", 1, [["for-in", 3, 5, 7]], []]'           , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression', '["comprehension", 1, [["for-in", 3, 5, 9]], [7]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression', '["comprehension", 1, [["for-in", 3, 5, 7]], [9]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step)), _(guard)'
-    o 'Expression FOR ForVariables FOROF Expression'                              , '["comprehension", 1, [["for-of", 3, 5, false]], []]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _'
-    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'              , '["comprehension", 1, [["for-of", 3, 5, false]], [7]]'      , 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _(guard)'
-    o 'Expression FOR OWN ForVariables FOROF Expression'                          , '["comprehension", 1, [["for-of", 4, 6, true]], []]'        , 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _'
-    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'          , '["comprehension", 1, [["for-of", 4, 6, true]], [8]]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own)), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression'                              , '["comprehension", 1, [["for-in", 3, 5, null]], []]'        , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'              , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]'       , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression'                , '["comprehension", 1, [["for-in", 3, 5, 7]], []]'           , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression', '["comprehension", 1, [["for-in", 3, 5, 9]], [7]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression', '["comprehension", 1, [["for-in", 3, 5, 7]], [9]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
+    o 'Expression FOR ForVariables FOROF Expression'                              , '["comprehension", 1, [["for-of", 3, 5, false]], []]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _'
+    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'              , '["comprehension", 1, [["for-of", 3, 5, false]], [7]]'      , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _(guard)'
+    o 'Expression FOR OWN ForVariables FOROF Expression'                          , '["comprehension", 1, [["for-of", 4, 6, true]], []]'        , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _'
+    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'          , '["comprehension", 1, [["for-of", 4, 6, true]], [8]]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _(guard)'
     o 'Expression FOR ForVariables FORAS Expression'                              , '["comprehension", 1, [["for-as", 3, 5, false, null]], []]' , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
     o 'Expression FOR ForVariables FORAS Expression WHEN Expression'              , '["comprehension", 1, [["for-as", 3, 5, false, null]], [7]]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
     o 'Expression FOR AWAIT ForVariables FORAS Expression'                        , '["comprehension", 1, [["for-as", 4, 6, true, null]], []]'  , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
@@ -1326,10 +1280,8 @@ grammar =
     # Return GUARDS: `x or return e` / `x and return e` / `x ?? return e`.
     # `throw` is an Expression alternative, so the throw guards need no
     # productions; `return` is a Statement, so the guard forms admit it
-    # as a logical right operand explicitly. The emitter lowers the
-    # guard as a STATEMENT rewrite (`if (!(y = x)) return e;`) — a
-    # return can never lower into a generated scope, so value-position
-    # uses reject there.
+    # as a logical right operand explicitly. The emitter lowers the guard
+    # as a statement rewrite; value-position uses reject there.
     o 'Expression && Return'                      , '["&&", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression || Return'                      , '["||", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression ?? Return'                      , '["??", 1, 3]'     , 'binary: operator, left, right'
@@ -1622,23 +1574,23 @@ kinds =
 #   keeps the body with the declaration.
 
 expectedConflicts = [
-  ['reduce-reduce', 'Operation → Expression && Return over Statement → Return',     4]
-  ['reduce-reduce', 'Operation → Expression || Return over Statement → Return',     4]
-  ['reduce-reduce', 'Operation → Expression ?? Return over Statement → Return',     4]
-  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END',                                     42]
-  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END',                                42]
-  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END',      42]
+  ['reduce-reduce', 'Operation → Expression && Return over Statement → Return'                                                                    ,  4]
+  ['reduce-reduce', 'Operation → Expression || Return over Statement → Return'                                                                    ,  4]
+  ['reduce-reduce', 'Operation → Expression ?? Return over Statement → Return'                                                                    ,  4]
+  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                       , 42]
+  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                  , 42]
+  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END'     , 42]
   ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END', 42]
-  ['reduce-reduce', 'ExportSpecifier → Identifier over SimpleObjAssignable → Identifier',                 4]
-  ['reduce-reduce', 'ObjRestValue → ... SimpleObjAssignable over ObjSpreadExpr → SimpleObjAssignable',    5]
-  ['ambiguous',     'Try → TRY Block',                                   2]
-  ['ambiguous',     'Try → TRY Expression',                             23]
-  ['ambiguous',     'Try → TRY Statement',                               6]
-  ['ambiguous',     'Try → TRY Block Catch',                             1]
-  ['ambiguous',     'Try → TRY Expression Catch',                        1]
-  ['ambiguous',     'Try → TRY Statement Catch',                         1]
-  ['ambiguous',     'Finalizer → FINALLY Expression',                   21]
-  ['ambiguous',     'TypeDecl → DEF Identifier OptParams TYPE',          1]
+  ['reduce-reduce', 'ExportSpecifier → Identifier over SimpleObjAssignable → Identifier'                                                          ,  4]
+  ['reduce-reduce', 'ObjRestValue → ... SimpleObjAssignable over ObjSpreadExpr → SimpleObjAssignable'                                             ,  5]
+  ['ambiguous',     'Try → TRY Block'                         ,  2]
+  ['ambiguous',     'Try → TRY Expression'                    , 23]
+  ['ambiguous',     'Try → TRY Statement'                     ,  6]
+  ['ambiguous',     'Try → TRY Block Catch'                   ,  1]
+  ['ambiguous',     'Try → TRY Expression Catch'              ,  1]
+  ['ambiguous',     'Try → TRY Statement Catch'               ,  1]
+  ['ambiguous',     'Finalizer → FINALLY Expression'          , 21]
+  ['ambiguous',     'TypeDecl → DEF Identifier OptParams TYPE',  1]
 ]
 
 # ==============================================================================
