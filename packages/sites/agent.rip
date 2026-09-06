@@ -863,6 +863,17 @@ startEdge = (body = {}, automatic = false) ->
   finally
     edgeStarting = null
 
+# The binary that talks to the running edge's admin socket for stop and
+# reload. The one the edge was started with is the natural choice, but it
+# can be gone by now — an upgrade replaced it, or a dev build was deleted —
+# and any janus can send those requests, so fall back to the PATH install
+# rather than leaving a running edge that cannot be stopped.
+edgeCommandBinary = ->
+  return state.edge.caddy if state.edge.caddy? and existsSync(state.edge.caddy)
+  fallback = Bun.which('janus')
+  fail "the edge's binary #{state.edge.caddy} is gone and no janus is on PATH to stop it", 503 unless fallback?
+  fallback
+
 stopEdge = ->
   fail 'edge is not owned by Rip; stop the external Caddy service with its own supervisor', 409 unless state.edge.managed
   pid = readEdgePid! or state.edge.pid
@@ -878,7 +889,7 @@ stopEdge = ->
   for app in state.apps
     running.push app if managerStatus!(app)?
   fail "stop #{running.map((app) -> app.name).join(', ')} before stopping the edge", 409 if running.length
-  result = Bun.spawnSync [state.edge.caddy, 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
+  result = Bun.spawnSync [edgeCommandBinary(), 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
   fail "Caddy stop failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   bootoutLaunchd true if launcher is 'launchd'
   state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
@@ -890,7 +901,7 @@ stopEdge = ->
 reloadEdge = ->
   fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
   launcher = if usesLaunchd(state.edge.config) then 'launchd' else 'direct'
-  result = Bun.spawnSync [state.edge.caddy, 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
+  result = Bun.spawnSync [edgeCommandBinary(), 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
   fail "Caddy reload failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
   snapshotEdge!
 

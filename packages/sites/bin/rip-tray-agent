@@ -120,7 +120,7 @@ case "$cmd" in
     exit 1
     ;;
   start)
-    for path in "$HOST" "$RIP" "$CADDY" "$PROVIDER"; do
+    for path in "$HOST" "$RIP" "$PROVIDER"; do
       if [[ ! -e "$path" ]]; then
         echo "missing: $path" >&2
         if [[ "$path" == "$HOST" ]]; then
@@ -140,7 +140,7 @@ case "$cmd" in
     echo "  host     $HOST"
     echo "  provider $PROVIDER"
     echo "  rip      $RIP"
-    echo "  caddy    $CADDY"
+    echo "  janus    $(command -v janus 2>/dev/null || echo 'not on PATH')"
     echo "  plist    $PLIST"
     echo "  log      $LOG"
     echo "  PATH     $(tray_path)"
