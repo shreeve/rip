@@ -11,8 +11,9 @@ import grammar from '../../src/grammar/grammar.rip';
 const withManifest = (expectedConflicts) => ({ ...grammar, expectedConflicts });
 
 test('an undeclared conflict fails generation and names the rule', () => {
-  const short = grammar.expectedConflicts.filter(([, rule]) => rule !== 'Statement → Return');
-  expect(() => new Generator(withManifest(short))).toThrow(/undeclared: \[reduce-reduce\] Statement → Return/);
+  const pair = 'Operation → Expression && Return over Statement → Return';
+  const short = grammar.expectedConflicts.filter(([, rule]) => rule !== pair);
+  expect(() => new Generator(withManifest(short))).toThrow(/undeclared: \[reduce-reduce\] Operation → Expression && Return over Statement → Return/);
 });
 
 test('a resolution-count drift fails generation with both counts', () => {

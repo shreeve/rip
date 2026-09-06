@@ -140,7 +140,9 @@ export class CodeBuilder {
       sourceEnd = n.sourceEnd;
     } else {
       const r = this.stores.role(nodeId, role);
-      if (r.grammarRef === null) {
+      if ('literal' in r) {
+        // Literal-sourced: no span of its own. (A nested-node role also
+        // has no grammarRef, but carries the nested node's span.)
         mappingKind = 'synthetic';
         sourceStart = sourceEnd = this.stores.node(nodeId).sourceStart;
       } else {

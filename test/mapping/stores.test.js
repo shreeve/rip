@@ -604,11 +604,15 @@ describe('store invariants over the corpus', () => {
         const owner = stores.node(r.nodeId);
         expect(owner).not.toBeNull();
         expect(r.fileId).toBe(0);
-        if (r.grammarRef === null) {
+        if ('literal' in r) {
           // Literal-sourced: value only, never a span.
+          expect(r.grammarRef).toBeNull();
           expect('sourceStart' in r).toBe(false);
           expect('childNodeId' in r).toBe(false);
         } else {
+          // A nested-node role has no grammarRef but a real span and a
+          // child; a ref role has both.
+          if (r.grammarRef === null) expect(stores.node(r.childNodeId)).not.toBeNull();
           // Containment: every role span sits inside its owner's span.
           expect(r.sourceStart).toBeGreaterThanOrEqual(owner.sourceStart);
           expect(r.sourceEnd).toBeLessThanOrEqual(owner.sourceEnd);

@@ -305,7 +305,7 @@ class Generator
           @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels
         else
           throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
-          if typeof action is 'string' and @_templateElements(action)?
+          if typeof action is 'string' and @_templateElements(action, true)?
             @unannotatedConstructors.push "#{lhs} → #{pattern or 'ε'}"
 
         # Process semantic actions
@@ -334,36 +334,157 @@ class Generator
 
     @ruleActions = "(#{parameters}) => {\n#{actionsCode}\n#{@indent}}"
 
-  # 'SYMBOL?' pattern sugar — a pattern token with a trailing '?'
-  # (labels ride along: 'TYPE[annotation]?') is optional: the rule
-  # expands into every present/absent combination, absent-first in
-  # binary-counting order, so the barest form takes the lowest rule
-  # id. Named bindings make one shared action legal across variants;
-  # a '@name' bound to an optional symbol fails generation in the
-  # absent variants (a template's arity is constant). The '?' and
-  # '??' terminals never read as sugar: only a token whose stripped
-  # symbol is itself '?'-free expands.
+  # Pattern sugar — optional symbols and alternatives expand one rule
+  # line into a family of rules:
+  #
+  #   SYMBOL?         the symbol is optional (labels ride along:
+  #                   'TYPE[annotation]?')
+  #   (A B)?          the whole group is optional
+  #   (A | B | C)     exactly one of the alternatives
+  #   (A | B)?        one of the alternatives, or nothing
+  #
+  # A group opens on a token beginning with '(' and closes on the token
+  # ending with ')' or ')?'; inside a group '|' separates alternatives,
+  # and groups nest with stacked closers: '(A (B C)?)?'. Outside a group
+  # the '(' and ')' and '|' terminals keep their meaning (the paren
+  # terminals are not spellable inside one), and the '?' and '??'
+  # terminals never read as sugar: only a token whose stripped symbol
+  # is itself '?'-free expands. Variants are listed absent-first,
+  # alternatives in order, later groups varying fastest, so the barest
+  # form takes the lowest rule id.
+  #
+  # Named bindings let one action serve the whole family. In a variant
+  # where a binding's label is absent, '@name' becomes the literal
+  # null and a spread '...@name' drops out of the template together
+  # with its annotation part. '@name?' is a presence flag — the
+  # literal true or false — and consumes the label, so the symbol
+  # carries no side-band role of its own.
   _expandOptionals: (handle) ->
     pattern = if Array.isArray handle
       if typeof handle[0] is 'string' then handle[0] else handle[0].join ' '
     else if typeof handle is 'string'
       handle
-    return [handle] unless pattern and /\S\?(?:\s|$)/.test pattern
+    return [handle] unless pattern and /(?:^|\s)\(\S|\S\?(?:\s|$)/.test pattern
 
+    tokens = pattern.trim().split /\s+/
+    pos = 0
     changed = false
-    variants = [[]]
-    for token in pattern.trim().split /\s+/
-      bare = token[...-1]
-      if token.length > 1 and token.endsWith('?') and not bare.endsWith('?')
+    closerRe = /^([^()|]*)(\)\??)(.*)$/
+    # One alternative: the tokens up to a '|' or a group closer. Returns
+    # the symbol lists it expands to and the token that ended it.
+    sequence = (inGroup) ->
+      variants = [[]]
+      choose = (choices) ->
         changed = true
-        variants = variants.flatMap (v) -> [v, [...v, bare]]
-      else
-        v.push token for v in variants
+        variants = variants.flatMap (v) -> choices.map (c) -> [...v, ...c]
+      place = (symbol) ->
+        return unless symbol
+        bare = symbol[...-1]
+        if symbol.length > 1 and symbol.endsWith('?') and not bare.endsWith('?')
+          choose [[], [bare]]
+        else
+          v.push symbol for v in variants
+      while pos < tokens.length
+        token = tokens[pos++]
+        if token.length > 1 and token[0] is '('
+          tokens.splice pos, 0, token[1..]
+          choices = []
+          loop
+            inner = sequence true
+            choices.push ...inner.variants
+            break unless inner.closer is '|'
+          choices.unshift [] if inner.closer is ')?'
+          choose choices
+        else if inGroup and token is '|'
+          return {variants, closer: '|'}
+        else if inGroup and (m = token.match closerRe)
+          place m[1]
+          tokens.splice pos, 0, m[3] if m[3]
+          return {variants, closer: m[2]}
+        else if token.length > 1 and token isnt ')?' and /\)\??$/.test token
+          throw Error.new "Grammar error: unbalanced ')' in pattern '#{pattern}'"
+        else
+          place token
+      throw Error.new "Grammar error: unclosed '(' group in pattern '#{pattern}'" if inGroup
+      {variants, closer: null}
+
+    # (`expanded`, not `variants`: an inner function assigning a name the
+    # enclosing scope also assigns shares it, and every group would then
+    # clobber its caller's list.)
+    expanded = sequence(false).variants
     return [handle] unless changed
 
+    action = if Array.isArray handle then handle[1] else undefined
+    extras = if Array.isArray handle then handle[2..] else []
+    for symbols in expanded
+      [symbols, text, rest] = @_bindVariant symbols, action, extras, expanded
+      p = symbols.join ' '
+      if Array.isArray handle then [p, text, ...rest] else p
+
+  # Rewrite one expanded variant's action for the bindings its pattern
+  # lacks: '@name' → null, '...@name' dropped (and its annotation part
+  # with it), '@name?' → true/false with the label consumed. Bindings
+  # to symbols the variant carries pass through to _resolveNamedRefs.
+  _bindVariant: (symbols, action, extras, variants) ->
+    return [symbols, action, extras] unless typeof action is 'string' and action.includes '@'
+    labelOf = (symbol) ->
+      return null if symbol is '[' or symbol is ']' or not /[\[\]]/.test symbol
+      symbol.match(/^(.+?)\[([^\[\]]*)\]$/)?[2] ?? null
+    known = Set.new()
     for v in variants
-      p = v.join ' '
-      if Array.isArray handle then [p, ...handle[1..]] else p
+      for s in v when (name = labelOf s)?
+        known.add name
+    present = Set.new()
+    for s in symbols when (name = labelOf s)?
+      present.add name
+
+    DROP = '\u0000'
+    presence = Set.new()
+    bound = Set.new()
+    text = @_outsideQuotes action, (plain) ->
+      plain.replace /(\.\.\.)?@([A-Za-z$][\w$-]*|_[\w$-]+)(\?)?/g, (m, spread, name, flag) ->
+        return m unless known.has name
+        if flag
+          presence.add name
+          return if present.has name then 'true' else 'false'
+        bound.add name
+        return m if present.has name
+        if spread then DROP else 'null'
+
+    # A presence label is consumed: the symbol carries no side-band role
+    # unless the action also binds its value.
+    symbols = symbols.map (s) ->
+      name = labelOf s
+      if name? and presence.has(name) and not bound.has(name) then s.replace(/\[[^\[\]]*\]$/, '') else s
+
+    if text.includes DROP
+      # Which top-level template elements dropped: their annotation
+      # parts go too. Nested drops leave the annotation alone (a nested
+      # scaffold is one '_' part).
+      dropped = []
+      depth = 0
+      quote = null
+      index = 0
+      i = 0
+      while i < text.length
+        ch = text[i]
+        if quote
+          if ch is '\\' then i++ else if ch is quote then quote = null
+        else if ch is '"' or ch is "'" then quote = ch
+        else if ch is '[' or ch is '(' then depth++
+        else if ch is ']' or ch is ')' then depth--
+        else if ch is ',' and depth is 1 then index++
+        else if ch is DROP and depth is 1 then dropped.push index
+        i++
+      text = text.replace(/\s*,\s*\u0000/g, '').replace(/\u0000\s*,\s*/g, '').replace(/\u0000/g, '')
+      extras = extras.map (extra) ->
+        return extra unless typeof extra is 'string' and extra.includes(':') and not extra.trim().startsWith('~')
+        colon = extra.indexOf ':'
+        kind = extra[...colon].trim()
+        parts = extra[colon + 1..].split(',').map((p) -> p.trim()).filter (p, j) -> j not in dropped
+        if parts.length then "#{kind}: #{parts.join ', '}" else kind
+
+    [symbols, text, extras]
 
   _parseHandle: (handle, lhs) ->
     if Array.isArray handle
@@ -586,6 +707,13 @@ class Generator
   # one part per template element in template order. Refs take real names;
   # literal elements take a real name when the constant carries meaning or
   # '_' when it is purely structural; '...' marks spread refs.
+  #
+  # A nested array element takes '_' (an opaque scaffold — no rows),
+  # '_(part, ...)' (a transparent scaffold: its parts are roles of THIS
+  # node, one per nested element), or 'role(kind: part, ...)' (a node of
+  # its own: the nested array registers with that kind and those roles,
+  # and this node's `role` points at it). Sub-annotations nest. A
+  # nested element after a spread cannot be located and rejects.
   _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = []) ->
     ruleDesc = "#{lhs} → #{pattern or 'ε'}"
     fail = (msg) ->
@@ -635,41 +763,100 @@ class Generator
       applyLabels roles, Set.new()
       return {kind, roles}
 
-    parts = annotation[colon + 1..].split(',').map (s) -> s.trim()
     fail "kind-only annotation takes no parts; template has no elements" if elements.length is 0
-    fail "template has #{elements.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless elements.length is parts.length
 
-    seen = Set.new()
-    roles = []
-    for el, i in elements
-      raw    = parts[i]
-      spread = raw.startsWith('...')
-      name   = if spread then raw[3..].trim() else raw
+    # Split at top-level commas: a sub-annotation's parentheses group
+    # its own parts.
+    splitParts = (text) ->
+      parts = []
+      cur   = ''
+      depth = 0
+      for ch in text
+        depth++ if ch is '('
+        depth-- if ch is ')'
+        fail "unbalanced parentheses in annotation '#{annotation}'" if depth < 0
+        if ch is ',' and depth is 0
+          parts.push cur.trim()
+          cur = ''
+        else
+          cur += ch
+      fail "unbalanced parentheses in annotation '#{annotation}'" unless depth is 0
+      parts.push cur.trim()
+      parts
 
-      if el.grammarRef?
-        fail "position ref #{el.grammarRef} requires a real role name, not '_'" if name is '_'
-        fail "spread ref ...#{el.grammarRef} requires spread role '...#{name}'" if el.spread and not spread
-        fail "role '...#{name}' is marked spread but ref #{el.grammarRef} is not a spread" if spread and not el.spread
-      else if el.structural?
-        fail "nested structural element cannot take a spread role '...#{name}'" if spread
-        fail "nested structural element must be named '_'" unless name is '_'
-        continue
-      else
-        fail "literal element #{el.literal} cannot take a spread role '...#{name}'" if spread
-        continue if name is '_'
-
+    checkName = (name, seen) ->
       fail "invalid role name '#{name}'" unless ident.test(name)
       fail "'$self' is a reserved role name" if name is '$self'
       fail "duplicate role '#{name}'" if seen.has(name)
       seen.add name
 
-      if el.grammarRef?
-        roles.push {name, grammarRef: el.grammarRef, childSlot: el.childSlot, spread: el.spread}
-      else
-        roles.push {name, grammarRef: null, childSlot: el.childSlot, literal: @_literalValue el.literal}
+    # One template level. `path` is the child-slot path from the node
+    # being described down to `els` (non-empty inside a transparent
+    # scaffold); a named nested node starts its own path. Returns the
+    # node's roles and its nested-node descriptors
+    # {role, path, kind, roles, nested}.
+    describe = (els, partsText, path, seen) =>
+      parts = if partsText.trim() is '' then [] else splitParts partsText
+      fail "template has #{els.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless els.length is parts.length
+      # (Names here are unique to this closure: a name the enclosing
+      # method also assigns would be shared with it, and the recursion
+      # would clobber its caller's loop and lists.)
+      found  = []
+      inner  = []
+      for element, index in els
+        raw    = parts[index]
+        spread = raw.startsWith('...')
+        name   = if spread then raw[3..].trim() else raw
+        sub    = null
+        if m = name.match /^([^(]*)\((.*)\)$/
+          name = m[1].trim()
+          sub  = m[2]
 
-    applyLabels roles, seen
-    {kind, roles}
+        if element.grammarRef?
+          fail "position ref #{element.grammarRef} requires a real role name, not '_'" if name is '_'
+          fail "position ref #{element.grammarRef} takes no sub-annotation ('#{raw}')" if sub?
+          fail "spread ref ...#{element.grammarRef} requires spread role '...#{name}'" if element.spread and not spread
+          fail "role '...#{name}' is marked spread but ref #{element.grammarRef} is not a spread" if spread and not element.spread
+        else if element.structural?
+          fail "nested structural element cannot take a spread role '...#{name}'" if spread
+          unless sub?
+            fail "nested structural element must be named '_' — or annotated: '_(part, ...)' names its elements as roles of this node, 'role(kind: part, ...)' makes it a node of its own" unless name is '_'
+            continue
+          slot = element.childSlot
+          fail "nested annotation '#{raw}' follows a spread — its element cannot be located" unless slot?
+          if name is '_'
+            below = describe element.elements, sub, [...path, slot], seen
+            found.push ...below.roles
+            inner.push ...below.nested
+            continue
+          checkName name, seen
+          c = sub.indexOf ':'
+          subKind = (if c >= 0 then sub[...c] else sub).trim()
+          fail "invalid semantic kind '#{subKind}' in nested annotation '#{raw}'" unless subKind and ident.test(subKind)
+          below = describe element.elements, (if c >= 0 then sub[c + 1..] else ''), [], Set.new()
+          inner.push {role: name, path: [...path, slot], kind: subKind, roles: below.roles, nested: below.nested}
+          continue
+        else
+          fail "literal element #{element.literal} cannot take a spread role '...#{name}'" if spread
+          fail "literal element #{element.literal} takes no sub-annotation ('#{raw}')" if sub?
+          continue if name is '_'
+
+        checkName name, seen
+        # An element reached through a scaffold is not a direct child:
+        # its slot is runtime-dependent, as after a spread.
+        childSlot = if path.length then null else element.childSlot
+        if element.grammarRef?
+          found.push {name, grammarRef: element.grammarRef, childSlot, spread: element.spread}
+        else
+          found.push {name, grammarRef: null, childSlot, literal: @_literalValue element.literal}
+      {roles: found, nested: inner}
+
+    seen = Set.new()
+    top = describe elements, annotation[colon + 1..], [], seen
+    applyLabels top.roles, seen
+    sem = {kind, roles: top.roles}
+    sem.nested = top.nested if top.nested.length
+    sem
 
   # The JS value of a scanner-classified template literal element. The
   # template is a JS array literal that the generated parser's action
@@ -706,18 +893,45 @@ class Generator
       code += " return __list; }"
       return code
 
-    # Replace token references with calculated $[n] references
+    # Replace token references with calculated $[n] references. A
+    # reference is a number OUTSIDE string literals: a quoted tag such
+    # as "es2015" is text, never a position.
     switch typeof action
       when 'string'
         regex = /(?<!\$)\$(-?\d+)/gm # Look for $n (capture just digits)
         regex = /(-?\d+)/g unless regex.test(action) # Or, all bare numbers
-        result = action.replace(regex, getToken).trim()
+        result = @_outsideQuotes(action, (text) -> text.replace regex, getToken).trim()
       when 'number', 'undefined'
         result = getToken('', action || 1) # No action or just a number
       else
         result = 'null'
 
     "return #{result};"
+
+  # Apply `fn` to the unquoted stretches of an action text; string
+  # literals (with backslash escapes) pass through untouched.
+  _outsideQuotes: (text, fn) ->
+    out = ''
+    plain = ''
+    quote = null
+    i = 0
+    while i < text.length
+      ch = text[i]
+      if quote
+        out += ch
+        if ch is '\\'
+          out += text[i + 1] ?? ''
+          i++
+        else if ch is quote
+          quote = null
+      else if ch is '"' or ch is "'"
+        out += fn(plain) + ch
+        plain = ''
+        quote = ch
+      else
+        plain += ch
+      i++
+    out + fn(plain)
 
   _assignPrecedence!: (rule, precedence) ->
     if precedence?.prec and @operators[precedence.prec]
@@ -1110,65 +1324,81 @@ class Generator
       for item as itemSet.items when item.nextSymbol is "$end" and @symbolIds["$end"]?
         state[@symbolIds["$end"]] = [ACCEPT]
 
-      # Reduce actions
+      # Reduce actions: every reduction a lookahead cell receives is
+      # gathered first, then the cell resolves ONCE — the shift against
+      # each reduction by precedence, then the FIRST of the reductions
+      # that survive (closure order, the order the state's items were
+      # built in). Folding reductions in one at a time compared a later
+      # reduction against whatever the cell held, so a reduction the
+      # shift had beaten could still win a reduce-reduce tie, and a
+      # nonassoc error cell could be overwritten. A reduce-reduce pair
+      # is recorded winner-and-loser and pinned by the manifest below.
+      cells = Map.new()
       for item as itemSet.reductions
         for stackSymbol as item.lookaheads when @symbolIds[stackSymbol]?
-          action = state[@symbolIds[stackSymbol]]
-          op = operators[stackSymbol]
-
-          if action
-            # Resolve conflict
-            which = if action[0] instanceof Array then action[0] else action
-            solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], which
-
+          list = cells.get stackSymbol
+          unless list
+            list = []
+            cells.set stackSymbol, list
+          list.push item
+      for [stackSymbol, items] as cells
+        id = @symbolIds[stackSymbol]
+        shift = state[id]
+        op = operators[stackSymbol]
+        record = (item, resolution, category, winner = null) =>
+          detail = {
+            state: k,
+            lookahead: stackSymbol,
+            lookaheadName: @tokenNames[id] or stackSymbol,
+            rule: item.rule.id,
+            lhs: item.rule.lhs,
+            ruleSymbols: item.rule.symbols.join(' '),
+            shift: if resolution is 'shift' then shift[1] else null,
+            reduce: item.rule.id,
+            resolution: resolution,
+            category: category
+          }
+          # A reduce-reduce record names the reduction the table KEPT
+          # beside the one it dropped: the manifest must be able to
+          # notice a reorder that flips the winner.
+          detail.winner = "#{winner.rule.lhs} → #{winner.rule.symbols.join ' '}" if winner?
+          # EVERY default resolution is recorded — a "Conflicts: 0"
+          # that silently accepted hundreds of default shifts is a
+          # weaker claim than it reads. The problematic two still
+          # gate the headline count.
+          @resolutionDetails.push detail
+          if category is 'reduce-reduce' or category is 'ambiguous'
+            @conflicts++
+            @conflictDetails.push detail
+        survivors = []
+        nonassoc = false
+        for item in items
+          unless shift?
+            survivors.push item
+            continue
+          solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], shift
+          if solution.action is NONASSOC
+            nonassoc = true
+          else if solution.action is shift
+            # Shape-based buckets excuse a default shift: an empty rule
+            # or a passthrough is the automaton choosing the longer
+            # reading, not an ambiguity anyone wrote.
             if solution.bydefault
-              # Categorize the default resolution. REDUCE-REDUCE is
-              # tested FIRST: an r/r conflict is the automaton picking
-              # between two completed rules by lowest id, and neither
-              # an empty rule, a passthrough shape, nor rule precedence
-              # makes that choice principled — shape-based buckets
-              # excuse only shift-over-reduce defaults.
               isEmpty = item.rule.symbols.length is 0 or (item.rule.symbols.length is 1 and item.rule.symbols[0] is '')
-              isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]  # Single nonterminal
-              hasPrecedence = op and item.rule.precedence > 0
-              isReduceReduce = which[0] is REDUCE
-
-              category =
-                if      isReduceReduce then 'reduce-reduce'
-                else if isEmpty        then 'empty-optional'
-                else if isPassthrough  then 'passthrough'
-                else if hasPrecedence  then 'precedence'
-                else                       'ambiguous'
-
-              detail = {
-                state: k,
-                lookahead: stackSymbol,
-                lookaheadName: @tokenNames[@symbolIds[stackSymbol]] or stackSymbol,
-                rule: item.rule.id,
-                lhs: item.rule.lhs,
-                ruleSymbols: item.rule.symbols.join(' '),
-                shift: if which[0] is SHIFT then which[1] else null,
-                reduce: item.rule.id,
-                resolution: if which[0] is SHIFT then 'shift' else 'reduce',
-                category: category
-              }
-              # EVERY default resolution is recorded — a "Conflicts: 0"
-              # that silently accepted hundreds of default shifts is a
-              # weaker claim than it reads. The problematic two still
-              # gate the headline count.
-              @resolutionDetails.push detail
-              if category is 'reduce-reduce' or category is 'ambiguous'
-                @conflicts++
-                @conflictDetails.push detail
-            else
-              action = solution.action
+              isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]
+              record item, 'shift', (if isEmpty then 'empty-optional' else if isPassthrough then 'passthrough' else 'ambiguous')
           else
-            action = [REDUCE, item.rule.id]
-
-          if action?.length
-            state[@symbolIds[stackSymbol]] = action
-          else if action is NONASSOC
-            state[@symbolIds[stackSymbol]] = undefined
+            survivors.push item
+        if nonassoc
+          # A nonassoc pair is an error cell by declaration; a reduction
+          # that also lands here is dropped and recorded, never installed.
+          state[id] = undefined
+          record item, 'error', 'nonassoc' for item in survivors
+          continue
+        continue unless survivors.length
+        winner = survivors[0]
+        record loser, 'reduce', 'reduce-reduce', winner for loser in survivors[1..]
+        state[id] = [REDUCE, winner.rule.id]
 
     @parseTable = states
 
@@ -1185,32 +1415,39 @@ class Generator
 
     actual = Map.new()
     for c in @conflictDetails
-      key = "#{c.category}|#{c.lhs} → #{c.ruleSymbols}"
+      key = "#{c.category}\t#{@_conflictName c}"
       actual.set key, (actual.get(key) or 0) + 1
 
     declared = Map.new()
     for [category, rule, count] in expected
-      key = "#{category}|#{rule}"
+      key = "#{category}\t#{rule}"
       throw Error.new "expectedConflicts: duplicate entry for [#{category}] #{rule}" if declared.has key
       declared.set key, count
 
     problems = []
     for [key, count] as actual
-      [category, rule] = key.split '|'
+      [category, rule] = key.split '\t'
       want = declared.get key
       if not want?
         problems.push "  • undeclared: [#{category}] #{rule} — #{count} resolution(s)"
       else if want isnt count
         problems.push "  • count drift: [#{category}] #{rule} — declared #{want}, actual #{count}"
     for [key, want] as declared when not actual.has key
-      [category, rule] = key.split '|'
+      [category, rule] = key.split '\t'
       problems.push "  • declared but absent: [#{category}] #{rule} — declared #{want}"
 
     if problems.length
       manifest = [...actual].sort().map ([key, count]) ->
-        [category, rule] = key.split '|'
+        [category, rule] = key.split '\t'
         "  ['#{category}', '#{rule}', #{count}]"
       throw Error.new "expectedConflicts: parse-table conflicts drifted from the declared manifest:\n#{problems.join '\n'}\n\nActual manifest:\n#{manifest.join '\n'}"
+
+  # A conflict's manifest name: the rule for an ambiguous shift; for a
+  # reduce-reduce pair, the reduction the table kept `over` the one it
+  # dropped, so the manifest pins the decision and not just the loser.
+  _conflictName: (c) ->
+    rule = "#{c.lhs} → #{c.ruleSymbols}"
+    if c.winner? then "#{c.winner} over #{rule}" else rule
 
   # The kind inventory derived from the semantics table: every kind
   # the annotated rules produce, with the union of role names each
@@ -1218,10 +1455,16 @@ class Generator
   # it; the generated module ships it as the parser's semantic surface.
   _kindInventory: ->
     inventory = Map.new()
-    for own ruleId, sem of @semantics
+    add = (sem) ->
       entry = inventory.get(sem.kind) or Set.new()
       entry.add role.name for role in sem.roles
       inventory.set sem.kind, entry
+      # A nested node is a use of ITS kind; the role naming it belongs
+      # to the enclosing node's vocabulary.
+      for d in sem.nested ?? []
+        entry.add d.role
+        add d
+    add sem for own ruleId, sem of @semantics
     inventory
 
   # Resolve conflicts using precedence and associativity
@@ -1742,32 +1985,62 @@ class Generator
           row.sourceStart = span.start
           row.sourceEnd = span.end
         if Array.isArray(node) and not nodeIds.has(node)
-          nodeId = nextNodeId++
-          nodeIds.set node, nodeId
           sem = @semantics[-action]
-          nodes.push {nodeId, fileId: 0, semanticKind: sem?.kind ?? null, ruleId: -action, sourceStart: span.start, sourceEnd: span.end}
-          if sem
-            base = vals.length - len
-            for part in sem.roles
+          base = vals.length - len
+          # Register one constructed array: its nested nodes first (ids
+          # stay bottom-up, as reductions are), then its own NodeStore
+          # row and RoleStore rows. The rule's own node takes the
+          # reduction span; a nested node spans the matched symbols it
+          # and its descendants carry (the reduction span when it
+          # carries none).
+          # (Names inside are unique to this closure: a name the parse
+          # method also assigns would be shared, and the recursion
+          # would clobber it.)
+          register = (arr, kind, parts, nestedParts, ownSpan) =>
+            kidIds  = []
+            lowest  = Infinity
+            highest = -Infinity
+            for entry in nestedParts
+              kid = arr
+              kid = kid[step] for step in entry.path
+              throw Error.new "parse: nested annotation '#{entry.role}' of rule #{-action} does not address a fresh array" unless Array.isArray(kid) and not nodeIds.has(kid)
+              kidId = register kid, entry.kind, entry.roles, entry.nested, null
+              kidIds.push kidId
+              lowest  = Math.min lowest, nodes[kidId - 1].sourceStart
+              highest = Math.max highest, nodes[kidId - 1].sourceEnd
+            for part in parts when part.grammarRef?
+              refLoc = locs[base + part.grammarRef - 1]
+              # Annotated refs address real matched symbols, whose locs
+              # the lexer protocol guarantees; a hole is a protocol
+              # violation, never a position to default.
+              throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless refLoc?
+              lowest  = Math.min lowest, refLoc.start
+              highest = Math.max highest, refLoc.end
+            nodeSpan = ownSpan ?? (if lowest is Infinity then span else {start: lowest, end: highest})
+            ownId = nextNodeId++
+            nodeIds.set arr, ownId
+            nodes.push {nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end}
+            for part in parts
               if part.grammarRef?
-                at  = base + part.grammarRef - 1
-                loc = locs[at]
-                # Annotated refs address real matched symbols, whose locs
-                # the lexer protocol guarantees; a hole is a protocol
-                # violation, never a position to default.
-                throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless loc?
-                row = {nodeId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: loc.start, sourceEnd: loc.end, childNodeId: null, fileId: 0}
+                pos    = base + part.grammarRef - 1
+                refLoc = locs[pos]
+                roleRow = {nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0}
                 if part.spread
                   # Spread span covers the spliced children's full extent
                   # (the ref'd symbol's span); per-element spans come from
                   # the children's own NodeStore rows.
-                  row.spread = true
+                  roleRow.spread = true
                 else
-                  row.childNodeId = nodeIds.get(vals[at]) ?? null
-                roles.push row
+                  roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null
+                roles.push roleRow
               else
                 # Literal-sourced role: statically-known value, no span.
-                roles.push {nodeId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+                roles.push {nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+            for entry, k in nestedParts
+              kidRow = nodes[kidIds[k] - 1]
+              roles.push {nodeId: ownId, role: entry.role, grammarRef: null, childSlot: (if entry.path.length is 1 then entry.path[0] else null), sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[k], fileId: 0}
+            ownId
+          register node, (sem?.kind ?? null), (sem?.roles ?? []), (sem?.nested ?? []), span
 
         # A primitive occurrence belongs to the FIRST constructed node that
         # carries it. Ancestors recover it by source containment, so the row is
@@ -1894,7 +2167,7 @@ if isRunAsScript
         for [, g] as groups
           c = g.first
           las = [...g.lookaheads].slice(0, 6).join(', ') + (if g.lookaheads.size > 6 then ", … #{g.lookaheads.size} total" else '')
-          console.log "\n  [#{c.category}] rule #{c.rule}: #{c.lhs} → #{c.ruleSymbols}"
+          console.log "\n  [#{c.category}] rule #{c.rule}: #{c.lhs} → #{c.ruleSymbols}#{if c.winner? then " (dropped for #{c.winner})" else ''}"
           console.log "     #{g.count} resolution(s) across state(s) #{[...g.states].join(', ')} — #{c.resolution} by default"
           console.log "     lookaheads: #{las}"
 

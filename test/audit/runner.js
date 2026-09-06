@@ -2207,12 +2207,7 @@ if (RUN_GRAMMAR) {
   // and a row naming no grammar production paints red (the row is stale), so
   // a grammar change trims this table rather than being absorbed by it.
   const EXCLUDED = new Map([
-    ['Assign → Assignable TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-    ['Assign → Assignable TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-    ['ExportAssign → Identifier TYPE_PARAMS = TERMINATOR Expression', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
-    ['ExportAssign → Identifier TYPE_PARAMS = INDENT Expression OUTDENT', 'lexically unreachable — TYPE_PARAMS is minted only for same-line `= component`'],
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
-    ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier has no binding name (the emitter currently passes it through verbatim); the aliased spelling is ImportSpecifier → DEFAULT AS Identifier'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
   ]);
