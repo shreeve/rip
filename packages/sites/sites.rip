@@ -13,7 +13,6 @@ import { join, resolve } from 'node:path'
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
 RESERVED = ['edge', 'all', 'tray', 'agent']
-TRAY_AGENT = join(import.meta.dir, 'bin', 'rip-tray-agent')
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
@@ -27,10 +26,10 @@ HELP = '''
     add [project] [options]              Remember a project (default: cwd)
     remove <app>                         Forget a stopped app
 
-  Lifecycle (noun: <app> | all | edge | tray | agent | <path>):
-    start <app|all|edge|tray|agent>      Start supervised app(s), edge, tray, or agent
+  Lifecycle (noun: <app> | all | edge | agent | <path>):
+    start <app|all|edge|agent>           Start supervised app(s), edge, or agent
     stop [noun]                          Stop (default: manager at cwd)
-    restart <app|all|edge|tray|agent>    Restart (edge = recreate incl. its apps; tray/agent = recycle)
+    restart <app|all|edge|agent>         Restart (edge = recreate incl. its apps; agent = recycle)
     status [noun]                        Summary, or one target (default: edge+apps)
 
   Edge:
@@ -295,22 +294,6 @@ dashboardUrl = (edge) ->
   port = if Number.isInteger(edge.httpsPort) and edge.httpsPort isnt 443 then ":#{edge.httpsPort}" else ''
   "https://#{host}#{port}/"
 
-runTray = (action) ->
-  result = Bun.spawnSync [TRAY_AGENT, action], { stdout: 'pipe', stderr: 'pipe' }
-  out = result.stdout.toString()
-  err = result.stderr.toString()
-  unless result.exitCode is 0
-    if action is 'status' and result.exitCode is 1 and out.trim() is 'stopped'
-      if json then printJson { state: 'stopped' } else console.log out.trim()
-      return
-    abort "rip-sites: tray #{action} failed: #{(err or out).trim() or "exit #{result.exitCode}"}"
-  text = (out or err).trim()
-  if json
-    state = if text.includes('running') then 'running' else if text.includes('stopped') then 'stopped' else text
-    printJson { state, detail: text }
-  else
-    console.log text or "tray #{action} ok"
-
 edgePost = (path, body = {}, start = true) ->
   requestAgent! 'rip-sites', 'POST', path, body, { start }
 
@@ -420,7 +403,7 @@ switch verb
     else if verb is 'stop' and noun? and noun not in RESERVED and noun isnt 'all' and not catalogHas!(noun) and (noun is '.' or existsSync(noun))
       runManager! ['stop', pathNoun!(noun)]
     else
-      requireNoun ['<app>', 'all', 'edge', 'tray', 'agent']
+      requireNoun ['<app>', 'all', 'edge', 'agent']
       if noun is 'edge'
         abort "rip-sites: start options only apply to `start edge`" if verb isnt 'start' and Object.keys(edgeBody).length
         if verb is 'restart'
@@ -430,15 +413,6 @@ switch verb
         else
           edge = if verb is 'start' then edgePost!('/1.0/edge/start', edgeBody, true) else edgePost!('/1.0/edge/stop', {}, true)
         printEdge edge
-      else if noun is 'tray'
-        if verb is 'restart'
-          runTray! 'stop'
-          # Full recreate includes the control agent — otherwise a code
-          # change rides the old process until someone kills it by hand.
-          stopAgentProcess!
-          runTray! 'start'
-        else
-          runTray! if verb is 'start' then 'start' else 'stop'
       else if noun is 'agent'
         stopped = if verb is 'start' then false else stopAgentProcess!
         if verb is 'stop'
@@ -482,8 +456,6 @@ switch verb
           printEdge requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: true })
         else
           printEdge readOfflineEdge!
-      else if noun is 'tray'
-        runTray! 'status'
       else
         requireApp!
         if live or wantsControl!

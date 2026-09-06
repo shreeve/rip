@@ -20,7 +20,7 @@ The system-wide ownership, reload, migration, and cache contract is
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│  rip sites             one CLI: apps · edge · tray          │
+│  rip sites             one CLI: apps · edge · agent         │
 │                    HTTPS *.via.rip → files / Hub / /api     │
 └────────────────────────────┬────────────────────────────────┘
                              │ Janus control socket
@@ -35,7 +35,7 @@ The system-wide ownership, reload, migration, and cache contract is
 │                        workers + published dist/            │
 └─────────────────────────────────────────────────────────────┘
 
-Optional UI:  rip sites start tray   →  menu over the same CLI
+Optional UI:  cd packages/sites && rip tray   →  menu over the same CLI
 ```
 
 Caddy and [Janus](https://github.com/shreeve/janus) own every client request
@@ -47,9 +47,9 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | Surface | What it is | When you use it |
 | --- | --- | --- |
 | `rip/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
-| `rip sites` | Unified CLI: catalog, apps, edge, tray, advanced | Day-to-day Sites |
+| `rip sites` | Unified CLI: catalog, apps, edge, agent, advanced | Day-to-day Sites |
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
-| Sites tray | Menu-bar UI over `rip sites` | Click instead of typing |
+| `rip tray` (from `packages/sites`) | Menu-bar UI over `rip sites` | Click instead of typing |
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**, **`agent`**.
 Durable catalog is
@@ -212,12 +212,12 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 
 | Command | What it does |
 | --- | --- |
-| `rip sites start <app\|all\|edge\|tray>` | Start a supervised app, every app, the shared edge, or the menubar tray. Apps need a reachable Janus control plane (normally: start the edge first). |
-| `rip sites stop [noun]` | Stop a supervised app, `all`, `edge`, or `tray`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
-| `rip sites restart <app\|all\|edge\|tray>` | Restart. For `edge` / `tray` this is a full recreate (stop then start), not a config reload. |
+| `rip sites start <app\|all\|edge\|agent>` | Start a supervised app, every app, the shared edge, or the control agent. Apps need a reachable Janus control plane (normally: start the edge first). |
+| `rip sites stop [noun]` | Stop a supervised app, `all`, `edge`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
+| `rip sites restart <app\|all\|edge\|agent>` | Restart. For `edge` / `agent` this is a full recreate (stop then start), not a config reload. |
 | `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). |
 | `rip sites status all` | Apps only. |
-| `rip sites status <app\|edge\|tray>` | One target. |
+| `rip sites status <app\|edge\|agent>` | One target. |
 | `rip sites status <path>` | Manager JSON for a project path (`.` or an existing directory not in the catalog). |
 
 ### Edge — TLS, Janus, reachability
@@ -283,14 +283,9 @@ rip sites status .          # manager JSON for cwd
 
 ### Tray — menubar host
 
-| Command | What it does |
-| --- | --- |
-| `rip sites start tray` | Install/start the LaunchAgent that keeps the Sites menu alive. |
-| `rip sites status tray` | Report whether the tray host is running. |
-| `rip sites stop tray` | Stop the tray LaunchAgent. |
-
-The menu drives the same `rip sites` spells. There is **no** Sites-specific
-native binary — see [`tray-sites.rip`](tray-sites.rip) and
+The Sites menu is the foreground `rip tray` host, run from this package. It
+drives the same `rip sites` spells. There is **no** Sites-specific native
+binary and no LaunchAgent — see [`tray-sites.rip`](tray-sites.rip) and
 [packages/tray/README.md](../tray/README.md).
 
 **Tray covers:** edge start/stop/reload, Open Dashboard, Trust CA, Use Local /
@@ -299,7 +294,7 @@ Use Default (`expose`), site start/stop/restart/open/log, Add Site.
 **CLI-only for now:** `remove`, `trust edge --export`, `expose public`, port
 overrides, custom `--config` / `--caddy`.
 
-**Foreground (dev)** — build the host once, then from this package:
+**Run it** — build the host once, then from this package:
 
 ```bash
 # from repo root
@@ -308,8 +303,6 @@ swift build -c release --package-path packages/tray/macos --product rip-tray-hos
 cd packages/sites
 rip tray                  # discovers tray-sites.rip → launches rip-tray-host
 ```
-
-Plist under `~/Library/LaunchAgents`; logs under `~/Library/Logs`.
 
 **Using the menu**
 
@@ -359,7 +352,6 @@ rip sites stop edge
 ```text
 sites (running)  →  stop each
 edge (Rip-owned) →  rip sites stop edge
-tray LaunchAgent →  rip sites stop tray   (optional; independent of edge)
 ```
 
 Control stays until idle/exit; you rarely need to kill it.

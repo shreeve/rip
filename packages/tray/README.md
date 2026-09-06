@@ -38,9 +38,9 @@ native app.
 | `macos/.build/` | Compiled host (gitignored) |
 | `dist/` | Optional `.app` output (gitignored) |
 
-**Not in this package:** Sites LaunchAgent
-([`packages/sites/bin/rip-tray-agent`](../sites/bin/rip-tray-agent)), Sites
-provider (`tray-sites.rip`). Repo `bin/` holds only the `rip` compiler CLI.
+**Not in this package:** the Sites provider
+([`packages/sites/tray-sites.rip`](../sites/tray-sites.rip)). Repo `bin/`
+holds only the `rip` compiler CLI.
 
 ### Swift pieces
 
@@ -96,14 +96,11 @@ use `bun run demo` instead. Build the host once if missing:
 | Demo counter tray | `bun run demo` |
 | Menubar for cwd provider | `rip tray` |
 | Sites menubar (dev) | `cd packages/sites && rip tray` |
-| Sites menubar (launchd) | `packages/sites/bin/rip-tray-agent start\|stop\|status` |
 | Any provider path | `rip-tray-host /abs/path/to/provider.rip` |
 
 Bins: `rip-tray` / `rip tray` launches the host; `rip-tray-build` is the optional
 `.app` wrapper. After pulling this rename, run `bun run global` once so
-`~/.bun/bin/rip-tray` points at the launcher (not the old builder). Restart a
-legacy LaunchAgent with `packages/sites/bin/rip-tray-agent start` if you still
-have an old `bin/rip-tray` job.
+`~/.bun/bin/rip-tray` points at the launcher (not the old builder).
 
 ### Environment
 
@@ -111,7 +108,7 @@ have an old `bin/rip-tray` job.
 | --- | --- |
 | `RIP_TRAY_RIP` | Path to `rip` (host looks here first; also `~/.bun/rip`, …) |
 | `RIP_TRAY_PROVIDER` | Provider path when not passed as the host’s first argument |
-| `RIP_TRAY_HOST` | Host binary override (`rip tray` and `rip-tray-agent`) |
+| `RIP_TRAY_HOST` | Host binary override (`rip tray`) |
 
 ## Optional: Finder `.app` (`rip-tray-build`)
 
@@ -191,12 +188,10 @@ Full instructions:
 | Piece | Location |
 | --- | --- |
 | Provider | [`packages/sites/tray-sites.rip`](../sites/tray-sites.rip) |
-| LaunchAgent | [`packages/sites/bin/rip-tray-agent`](../sites/bin/rip-tray-agent) |
 | CLIs used | `rip sites` only |
 
 ```bash
 cd packages/sites && rip tray
-# or: packages/sites/bin/rip-tray-agent start
 ```
 
 ## Test
