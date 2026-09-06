@@ -60,6 +60,10 @@
       "name": "@rip/http",
       "version": "4.0.0",
     },
+    "packages/pdf": {
+      "name": "@rip/pdf",
+      "version": "0.0.0",
+    },
     "packages/print": {
       "name": "@rip/print",
       "version": "4.0.0",
@@ -188,6 +192,8 @@
     "@rip/highlight": ["@rip/highlight@workspace:packages/highlight"],
 
     "@rip/http": ["@rip/http@workspace:packages/http"],
+
+    "@rip/pdf": ["@rip/pdf@workspace:packages/pdf"],
 
     "@rip/print": ["@rip/print@workspace:packages/print"],
 
