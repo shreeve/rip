@@ -260,7 +260,8 @@ renderApp = (app) ->
   marker = if app.state is 'running' then '●' else '○'
   url = if app.url then "  #{app.url}" else ''
   warning = if app.hostWarning then "\n  ⚠ #{app.hostWarning}" else ''
-  "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}#{warning}"
+  error = if app.error then "\n  Error:   #{app.error.split('\n').join('\n           ')}" else ''
+  "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}#{warning}#{error}"
 
 renderEdge = (edge) ->
   marker = if edge.state is 'running' then '●' else '○'
@@ -281,12 +282,17 @@ printEdge = (edge) ->
 printApp = (app) ->
   if json then printJson app else console.log renderApp(app)
 
+# Fan-out over the catalog, in catalog order. The agent answers per app,
+# so one app that cannot boot is that app's line — its error in place —
+# not a wall the apps after it never get past; the exit code (see the
+# `all` noun) says whether any failed.
 eachApp = (action) ->
   apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: true }
   abort 'rip-sites: no apps in the catalog' unless apps.length
   results = []
   for app in apps
-    results.push requestAgent!('rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(app.id)}/#{action}", {}, { start: true })
+    result = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(app.id)}/#{action}", {}, { start: true, tolerate: true }
+    results.push if result?.error? then { ...app, error: result.error } else result
   results
 
 dashboardUrl = (edge) ->
@@ -423,6 +429,7 @@ switch verb
       else if noun is 'all'
         results = eachApp! verb
         if json then printJson results else console.log results.map(renderApp).join('\n')
+        exit 1 if results.some (app) -> app.error?
       else
         app = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(noun)}/#{verb}", {}, { start: true }
         printApp app

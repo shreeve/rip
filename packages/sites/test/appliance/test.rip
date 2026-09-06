@@ -252,6 +252,50 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     janus.stop true
     rmSync site.root, { recursive: true, force: true }
 
+# `start all` fans out in catalog order. An app whose manager cannot boot
+# is that app's line — its error in place, and a nonzero exit — not a
+# wall the apps after it never get past. The agent already answers per
+# app; the CLI used to abort on the first non-2xx reply.
+test! 'start all reports a failed app in place and still starts the rest', ->
+  site = fixture 'rip-agent-all-'
+  broken = join site.root, 'broken'
+  healthy = join site.root, 'healthy'
+  for project in [broken, healthy]
+    mkdirSync join(project, 'app'), { recursive: true }
+    writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  janusSocket = join site.root, 'janus.sock'
+  calls = []
+  janus = startJanus janusSocket, calls
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: janusSocket }
+  try
+    eq (cli!(APP, ['add', broken, '--name', 'broken'], env)).code, 0
+    eq (cli!(APP, ['add', healthy, '--name', 'healthy'], env)).code, 0
+    # Registered clean; the manager rejects the declaration when it boots.
+    writeFileSync join(broken, 'serve.rip'), "export default { hosts: ['broken.via.rip'], extra: true }\n"
+
+    started = cli! APP, ['start', 'all', '--json'], env
+    eq started.code, 1
+    results = JSON.parse started.out
+    eq results.map((app) -> app.name), ['broken', 'healthy']
+    eq results[0].state, 'stopped'
+    ok results[0].error.includes('manager exited'), results[0].error
+    eq results[1].state, 'running'
+    ok not results[1].error?
+
+    text = cli! APP, ['start', 'all'], env
+    eq text.code, 1
+    ok text.out.includes('Error:   manager exited'), text.out
+    ok text.out.includes('● healthy  running'), text.out
+
+    stopped = cli! APP, ['stop', 'all', '--json'], env
+    eq stopped.code, 0
+    eq JSON.parse(stopped.out).map((app) -> app.state), ['stopped', 'stopped']
+  finally
+    try cli! APP, ['stop', 'all'], env
+    stopAgent! site.runtime
+    janus.stop true
+    rmSync site.root, { recursive: true, force: true }
+
 # serve.rip owns its app's hosts: the catalog stores [] and snapshots read
 # the declaration itself. The effective hosts must never be persisted back
 # into sites.json — stored hosts become manager --host flags, and a
