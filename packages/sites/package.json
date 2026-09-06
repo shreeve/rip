@@ -39,7 +39,6 @@
     "launchd-listener.js",
     "sites.rip",
     "tray-sites.rip",
-    "bin/rip-tray-agent",
     "Caddyfile",
     "Caddyfile.local",
     "serve-hosts.rip",
