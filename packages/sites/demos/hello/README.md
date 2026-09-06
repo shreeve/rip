@@ -6,7 +6,7 @@ CSS refresh, asset invalidate. `app/` plus a tiny Hub-admit API (`index.rip`)
 so live watch works on the packaged bridge-mode edge. Permanent details:
 [`docs/SERVER.md`](../../../../docs/SERVER.md), [`docs/WORKSPACE.md`](../../../../docs/WORKSPACE.md).
 
-Edge TLS/Janus is system-wide (`rip sites start edge`); this demo does not
+Edge TLS/Janus is system-wide (`janus autostart`); this demo does not
 ship a Caddyfile.
 
 ## Add and start

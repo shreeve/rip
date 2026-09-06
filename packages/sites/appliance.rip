@@ -46,13 +46,7 @@ export agentPaths = (label = 'rip-agent') ->
     agentLog: join(stateRoot, 'agent.log')
     socket: join(runtimeRoot, 'agent.sock')
     owner: join(runtimeRoot, 'agent.json')
-    edgeAdmin: join(runtimeRoot, 'caddy-admin.sock')
-    edgeControl: join(runtimeRoot, 'janus.sock')
     edgeStatus: join(runtimeRoot, 'edge-status.sock')
-    edgePid: join(runtimeRoot, 'caddy.pid')
-    edgeExit: join(runtimeRoot, 'caddy.exit.json')
-    edgeLog: join(stateRoot, 'edge.log')
-    edgePlist: join(stateRoot, 'edge.launchd.plist')
     appLogs: join(stateRoot, 'apps')
   }
 
@@ -116,7 +110,7 @@ export requestAgent = (label, method, path, body = null, options = {}) ->
   paths = if start then ensureAgent!(label) else probeAgent!(label)
   unless paths?
     return null if options.soft
-    abort "#{label}: Sites control plane is not running — start the edge first (`rip sites start edge`)"
+    abort "#{label}: Sites control plane is not running — it starts with the first `rip sites start <app>`"
   try
     response = agentFetch! paths, method, path, body
     text = response.text!

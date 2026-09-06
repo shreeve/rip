@@ -1,11 +1,11 @@
 import { test, eq, ok } from 'rip/testing'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { renderEdgeConfig } from '../../edge.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
-FAKE_CADDY = join(import.meta.dir, 'fake-caddy.rip')
 
 run = (file, args, env, cwd = null) ->
   proc = Bun.spawn [process.execPath, PRELOAD, file, ...args],
@@ -46,52 +46,60 @@ stopAgent = (runtime) ->
   try process.kill pid, 'SIGTERM'
   waitFor! 'agent shutdown', -> not existsSync(owner)
 
-# via.rip replaced the purchased ripdev.io wildcard: both postures mint
-# exact-host certs from the LOCAL CA on demand (dogfooding — we run exactly
-# what users run; no packaged public certificate, no renewal treadmill).
-test! 'the packaged macOS edge activates loopback HTTP+HTTPS sockets without Bonjour', ->
-  caddyfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile'), 'utf8'
-  localfile = readFileSync join(import.meta.dir, '..', '..', 'Caddyfile.local'), 'utf8'
-  launcher = readFileSync join(import.meta.dir, '..', '..', 'launchd-listener.js'), 'utf8'
-  agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
-  ok caddyfile.includes 'default_bind {$RIP_EDGE_BIND:127.0.0.1}'
-  ok caddyfile.includes 'protocols h1 h2'
-  ok caddyfile.includes 'bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}'
-  ok caddyfile.includes 'redir https://{host}{uri} 308'
-  ok caddyfile.includes 'http://via.rip, http://*.via.rip'
-  ok caddyfile.includes 'reverse_proxy unix/{$RIP_EDGE_STATUS}'
-  # Both postures mint from the local CA — no packaged certificate.
-  ok caddyfile.includes 'issuer internal'
-  ok caddyfile.includes 'ask http://127.0.0.1:{$RIP_EDGE_HTTP_PORT:80}/tls-ask'
-  ok not caddyfile.includes 'RIP_EDGE_CERT'
-  ok not localfile.includes 'RIP_EDGE_CERT'
-  ok not /\bmdns\b/.test(caddyfile)
-  ok not caddyfile.includes '7680'
-  ok localfile.includes 'mdns'
-  ok localfile.includes 'name rip.local'
-  ok localfile.includes 'apps on'
+# The edge is Janus's process; Rip renders what it serves. Both postures
+# mint exact-host certs from the LOCAL CA on demand (dogfooding — we run
+# exactly what users run; no packaged public certificate, no renewal
+# treadmill), and the rendered file carries Janus's own paths in place of
+# every placeholder, so it reads on its own and validates without an
+# environment.
+test! 'the posture files render into a self-contained Janus config', ->
+  janus =
+    admin: '/state/run/admin.sock'
+    socket: '/state/run/janus.sock'
+    log: '/state/log/janus.log'
+    sites: '/config/sites'
+  rendered = renderEdgeConfig 'default', janus, '/runtime/edge-status.sock'
+  ok not rendered.includes('{$'), 'every placeholder is filled'
+  ok rendered.includes 'admin unix//state/run/admin.sock'
+  ok rendered.includes 'control internal /state/run/janus.sock'
+  ok rendered.includes 'output file /state/log/janus.log'
+  ok rendered.includes 'import /config/sites/*.caddy'
+  ok rendered.includes 'reverse_proxy unix//runtime/edge-status.sock'
+  ok rendered.includes 'default_bind 0.0.0.0'
+  ok rendered.includes 'bind 0.0.0.0'
+  ok rendered.includes 'protocols h1 h2'
+  ok rendered.includes 'redir https://{host}{uri} 308'
+  ok rendered.includes 'http://via.rip, http://*.via.rip'
+  ok rendered.includes 'issuer internal'
+  ok rendered.includes 'ask http://127.0.0.1:80/tls-ask'
+  ok rendered.includes 'Rendered by rip sites'
+  ok not rendered.includes 'RIP_EDGE_CERT'
+  ok not /\bmdns\b/.test(rendered)
+  ok not rendered.includes '7680'
+
+  local = renderEdgeConfig 'local', janus, '/runtime/edge-status.sock'
+  ok not local.includes('{$')
+  ok local.includes 'default_bind 0.0.0.0'
+  ok local.includes 'mdns'
+  ok local.includes 'name rip.local'
+  ok local.includes 'apps on'
   # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards.
-  ok localfile.includes 'on_demand_tls'
-  ok localfile.includes 'ask http://127.0.0.1:{$RIP_EDGE_HTTP_PORT:80}/tls-ask'
-  ok localfile.includes 'issuer internal'
-  ok localfile.includes 'on_demand'
-  ok localfile.includes 'http://127.0.0.1'
-  ok agent.includes "/tls-ask"
+  ok local.includes 'on_demand_tls'
+  ok local.includes 'ask http://127.0.0.1:80/tls-ask'
+  ok local.includes 'issuer internal'
+  ok local.includes 'on_demand'
+  ok local.includes 'http://127.0.0.1'
   # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
-  ok /rip\.local \{[\s\S]*?reverse_proxy unix\/\{\$RIP_EDGE_STATUS\}/.test(localfile)
-  ok localfile.includes 'handle /trust*'
-  ok not localfile.includes 'RIP_EDGE_JANUS_HTTP'
-  ok launcher.includes "activate('HTTP')"
-  ok launcher.includes "activate('HTTPS')"
-  ok launcher.includes "RIP_EDGE_HTTP_BIND: 'fd/3'"
-  ok launcher.includes "RIP_EDGE_BIND: 'fd/4'"
-  ok launcher.includes "stdio: ['ignore', 'inherit', 'inherit', httpListener, httpsListener]"
-  ok agent.includes 'PACKAGED_CADDYFILES'
+  ok /rip\.local \{[\s\S]*?reverse_proxy unix\/\/runtime\/edge-status\.sock/.test(local)
+  ok local.includes 'handle /trust*'
+
+  agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
+  ok agent.includes "/tls-ask"
   ok agent.includes "mode: 'default'"
   ok agent.includes 'localCaTrusted'
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
-  # trust talks to the unix admin socket — never stock :2019
+  # trust talks to Janus's unix admin socket — never stock :2019
   ok agent.includes "'trust', '--address', edgeAddress(admin)"
   # status page: `.join` must follow a parenthesized map, not the row string
   ok agent.includes '(apps.map (app) ->'
@@ -131,9 +139,10 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     idleStatus = cli! APP, ['status', '--json'], env
     eq idleStatus.code, 0
     idle = JSON.parse idleStatus.out
-    # Fixture Janus is already listening — report external, never spawn control.
+    # Fixture Janus is already listening — report it, never spawn control.
     eq idle.edge.state, 'running'
-    eq idle.edge.managed, false
+    eq idle.edge.external, true
+    eq idle.edge.control, janusSocket
     ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
     added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.via.rip', '--json'], env
@@ -206,6 +215,14 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     reserved = cli! APP, ['add', project, '--name', 'edge'], env
     eq reserved.code, 1
     ok reserved.err.includes 'reserved'
+    # The edge's lifecycle is Janus's: the old edge verbs say so.
+    for verb in ['start', 'stop', 'restart']
+      refused = cli! APP, [verb, 'edge'], env
+      eq refused.code, 1
+      ok refused.err.includes("`janus #{verb}`"), refused.err
+    refused = cli! APP, ['status', 'edge'], env
+    eq refused.code, 1
+    ok refused.err.includes('`janus status`'), refused.err
 
     # The manager outlives the UI/control client. A replacement agent adopts
     # the same canonical manager socket and preserves the desired state.
@@ -326,79 +343,6 @@ test! 'offline snapshots derive hosts from serve.rip without persisting them', -
   eq (app.hosts.length for app in listed), [2, 1]
   ok not existsSync(join(site.runtime, 'agent.json')), 'offline serve.rip reads must not spawn the control plane'
 
-test! 'rip sites distinguishes an external edge from one owned by Rip', ->
-  external = fixture 'rip-agent-external-edge-'
-  externalSocket = join external.root, 'janus.sock'
-  janus = startJanus externalSocket, []
-  externalEnv = { RIP_AGENT_HOME: external.state, RIP_AGENT_RUNTIME: external.runtime, JANUS_CONTROL: externalSocket }
-  try
-    status = JSON.parse((cli!(APP, ['status', 'edge', '--json'], externalEnv)).out)
-    eq status.state, 'running'
-    eq status.managed, false
-    stopped = cli! APP, ['stop', 'edge'], externalEnv
-    eq stopped.code, 1
-    ok stopped.err.includes 'edge is not owned by Rip'
-    wrongSurface = cli! APP, ['status', 'edge', '--caddy', FAKE_CADDY], externalEnv
-    eq wrongSurface.code, 1
-    ok wrongSurface.err.includes 'does not accept start options'
-  finally
-    stopAgent! external.runtime
-    janus.stop true
-    rmSync external.root, { recursive: true, force: true }
-
-  owned = fixture 'rip-agent-owned-edge-'
-  ownedEnv = { RIP_AGENT_HOME: owned.state, RIP_AGENT_RUNTIME: owned.runtime, JANUS_CONTROL: join(owned.root, 'absent.sock') }
-  ownedConfig = join owned.root, 'Caddyfile'
-  writeFileSync ownedConfig, ''
-  chmodSync FAKE_CADDY, 0o755
-  try
-    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', ownedConfig, '--json'], ownedEnv
-    eq started.code, 0
-    edge = JSON.parse started.out
-    eq edge.state, 'running'
-    eq edge.managed, true
-    eq edge.launcher, 'direct'
-    ok Number.isInteger edge.pid
-
-    stopAgent! owned.runtime
-    adopted = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
-    eq adopted.state, 'running'
-    eq adopted.managed, true
-    eq adopted.pid, edge.pid
-
-    caddyPid = parseInt readFileSync(join(owned.runtime, 'caddy.pid'), 'utf8')
-    process.kill caddyPid, 'SIGKILL'
-    replacement = null
-    deadline = Date.now() + 8000
-    loop
-      probe = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
-      if probe.state is 'running' and probe.pid? and probe.pid isnt edge.pid
-        replacement = probe
-        break
-      if Date.now() >= deadline
-        diagnostic = readFileSync join(owned.state, 'sites.json'), 'utf8'
-        agentLog = readFileSync join(owned.state, 'agent.log'), 'utf8'
-        edgeLog = readFileSync join(owned.state, 'edge.log'), 'utf8'
-        throw Error.new("timed out waiting for owned edge restart: #{JSON.stringify(probe)}\n#{diagnostic}\nAGENT:\n#{agentLog}\nEDGE:\n#{edgeLog}")
-      sleep! 50
-    eq replacement.desired, 'running'
-    eq replacement.managed, true
-
-    reloaded = cli! APP, ['reload', 'edge', '--json'], ownedEnv
-    eq reloaded.code, 0
-    eq JSON.parse(reloaded.out).state, 'running'
-
-    stopped = cli! APP, ['stop', 'edge', '--json'], ownedEnv
-    eq stopped.code, 0
-    waitFor! 'fake edge shutdown', -> not existsSync(join(owned.runtime, 'janus.sock'))
-    final = JSON.parse((cli!(APP, ['status', 'edge', '--json'], ownedEnv)).out)
-    eq final.state, 'stopped'
-    eq final.managed, false
-  finally
-    try cli! APP, ['stop', 'edge'], ownedEnv
-    stopAgent! owned.runtime
-    rmSync owned.root, { recursive: true, force: true }
-
 AGENT = join(import.meta.dir, '..', '..', 'agent.rip')
 
 alive = (pid) ->
@@ -416,17 +360,20 @@ ownerPid = (runtime) ->
 # the successor's files alone and the world (state file, edge) untouched.
 test! 'one control agent owns the socket; a superseded agent exits before acting', ->
   site = fixture 'rip-agent-superseded-'
-  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
-  config = join site.root, 'Caddyfile'
-  writeFileSync config, ''
-  chmodSync FAKE_CADDY, 0o755
+  project = join site.root, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  janusSocket = join site.root, 'janus.sock'
+  janus = startJanus janusSocket, []
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: janusSocket }
   socket = join site.runtime, 'agent.sock'
   usurper = null
   first = null
   try
-    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
-    eq started.code, 0
-    eq JSON.parse(started.out).managed, true
+    eq (cli!(APP, ['add', project, '--name', 'fixture'], env)).code, 0
+    started = cli! APP, ['start', 'fixture', '--json'], env
+    eq started.code, 0, started.err
+    eq JSON.parse(started.out).state, 'running'
     first = ownerPid site.runtime
     ok alive(first), 'the control agent is running'
 
@@ -441,8 +388,8 @@ test! 'one control agent owns the socket; a superseded agent exits before acting
     err = await second.err
     ok err.includes('another Rip Agent owns'), "second boot must be refused: #{err}"
     ok alive(first), 'the live agent survives a rejected boot'
-    live = JSON.parse((cli!(APP, ['status', 'edge', '--json'], env)).out)
-    eq live.managed, true
+    live = JSON.parse((cli!(APP, ['status', 'fixture', '--json'], env)).out)
+    eq live.state, 'running'
     waitFor! 'owner record restored by its holder', -> ownerPid(site.runtime) is first
 
     # The path re-bound out from under the agent: it must go, and must not
@@ -454,23 +401,15 @@ test! 'one control agent owns the socket; a superseded agent exits before acting
     answer = fetch!("http://agent/1.0", { unix: socket }).json!
     eq answer.pid, process.pid
 
-    # The successor stops the edge; nothing revives it, nothing rewrites the state.
-    caddyPid = parseInt readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')
-    doc = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
-    doc.edge = { ...doc.edge, desired: 'stopped', managed: false, pid: null }
-    writeFileSync join(site.state, 'sites.json'), JSON.stringify(doc, null, 2) + '\n'
-    process.kill caddyPid, 'SIGTERM'
-    waitFor! 'fake edge shutdown', -> not alive(caddyPid)
-    # Recovery fires after DOWN_TICKS consecutive 2 s ticks plus its restart delay.
-    sleep! 7500
-    ok not existsSync(join(site.runtime, 'caddy.pid')), 'no agent may revive an edge stopped by the owner'
+    # The successor owns the world: the superseded agent rewrote nothing.
     after = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
-    eq after.edge.desired, 'stopped'
-    eq after.edge.managed, false
+    eq after.apps[0].desired, 'running'
   finally
     try usurper?.stop true
     try process.kill(first, 'SIGKILL') if first? and alive(first)
-    try process.kill parseInt(readFileSync(join(site.runtime, 'caddy.pid'), 'utf8')), 'SIGKILL'
+    try cli! APP, ['stop', 'fixture'], env
+    stopAgent! site.runtime
+    janus.stop true
     rmSync site.root, { recursive: true, force: true }
 
 # A client's mistake is the client's error, never the agent's death: an
@@ -480,14 +419,11 @@ test! 'one control agent owns the socket; a superseded agent exits before acting
 test! 'an unresolvable add is refused by a live agent that stays up; relative roots resolve at the client', ->
   site = fixture 'rip-agent-bad-add-'
   env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
-  config = join site.root, 'Caddyfile'
-  writeFileSync config, ''
-  chmodSync FAKE_CADDY, 0o755
   mkdirSync join(site.root, 'project', 'app'), { recursive: true }
   writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
   try
-    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
-    eq started.code, 0
+    booted = cli! APP, ['start', 'agent', '--json'], env
+    eq booted.code, 0, booted.err
     agent = ownerPid site.runtime
     ok alive(agent)
 
@@ -506,7 +442,6 @@ test! 'an unresolvable add is refused by a live agent that stays up; relative ro
     eq JSON.parse(added.out).root, realpathSync(join(site.root, 'project'))
     ok alive(agent)
   finally
-    try cli! APP, ['stop', 'edge'], env
     stopAgent! site.runtime
     rmSync site.root, { recursive: true, force: true }
 
@@ -517,16 +452,13 @@ test! 'an unresolvable add is refused by a live agent that stays up; relative ro
 test! 'logs -f keeps polling through a control-plane outage without booting an agent', ->
   site = fixture 'rip-agent-follow-'
   env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
-  config = join site.root, 'Caddyfile'
-  writeFileSync config, ''
-  chmodSync FAKE_CADDY, 0o755
   mkdirSync join(site.root, 'project', 'app'), { recursive: true }
   writeFileSync join(site.root, 'project', 'app', 'index.rip'), "export default -> 'ok'\n"
   follower = null
   try
     eq (cli!(APP, ['add', join(site.root, 'project'), '--name', 'fixture', '--json'], env)).code, 0
-    started = cli! APP, ['start', 'edge', '--caddy', FAKE_CADDY, '--config', config, '--json'], env
-    eq started.code, 0
+    booted = cli! APP, ['start', 'agent', '--json'], env
+    eq booted.code, 0, booted.err
     follower = run APP, ['logs', 'fixture', '-f'], env
     sleep! 1500
     ok not follower.proc.exitCode?, 'follower must be running after its first read'
@@ -536,12 +468,11 @@ test! 'logs -f keeps polling through a control-plane outage without booting an a
     ok not follower.proc.exitCode?, 'follower must ride out the outage'
     ok not existsSync(join(site.runtime, 'agent.json')), 'follower must not boot a control plane'
 
-    revived = cli! APP, ['status', 'edge', '--json'], env
+    revived = cli! APP, ['start', 'agent', '--json'], env
     eq revived.code, 0
     sleep! 1000
     ok not follower.proc.exitCode?, 'follower must continue after the plane returns'
   finally
     try follower?.proc.kill 'SIGKILL'
-    try cli! APP, ['stop', 'edge'], env
     stopAgent! site.runtime
     rmSync site.root, { recursive: true, force: true }

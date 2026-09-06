@@ -1,0 +1,102 @@
+# The seam between Rip Sites and Janus. Janus owns the edge process —
+# `janus autostart` installs it under launchd or systemd, `janus start`,
+# `stop`, `restart`, and `status` manage it — and Rip owns what it serves:
+# the posture Caddyfile beside this file, rendered with the paths Janus
+# reports and written to Janus's service config, then applied with
+# `janus reload`. Apps register over the control socket Janus names.
+#
+# JANUS_CONTROL names an edge Rip does not configure: apps register there
+# and nothing here writes a Caddyfile or reloads anything. Tests and custom
+# edges use it.
+
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+export JANUS_MISSING = 'no janus on PATH — install Janus: curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash'
+export JANUS_STOPPED = "Janus is not running — 'janus autostart' installs it as a service (once), 'janus start' starts it"
+
+export janusBinary = -> Bun.which('janus')
+
+# `janus status --json`: exit 0 running, 3 stopped. null when there is no
+# janus on PATH or it did not answer as expected.
+export janusStatus = ->
+  janus = janusBinary()
+  return null unless janus?
+  result = Bun.spawnSync [janus, 'status', '--json'], { stdout: 'pipe', stderr: 'pipe' }
+  return null unless result.exitCode in [0, 3]
+  try JSON.parse(result.stdout.toString()) catch then null
+
+# The control target apps register with: JANUS_CONTROL when set, else the
+# service's control socket.
+export edgeControl = (janus = null) ->
+  return process.env.JANUS_CONTROL if process.env.JANUS_CONTROL
+  (janus or janusStatus())?.socket or null
+
+export externalEdge = -> process.env.JANUS_CONTROL?
+
+POSTURES =
+  default: 'Caddyfile'
+  local: 'Caddyfile.local'
+  public: 'Caddyfile'
+
+export postureSource = (mode) -> join(import.meta.dir, POSTURES[mode] or POSTURES.default)
+
+# The posture files are Caddyfiles with {$RIP_EDGE_*} placeholders; the
+# rendered config carries the values in place, so the file Janus runs
+# reads on its own and validates without an environment.
+export renderEdgeConfig = (mode, janus, statusSocket) ->
+  source = postureSource mode
+  # The front-door listeners bind the wildcard address, never a specific
+  # one. That is what lets an ordinary user hold ports 80 and 443 on
+  # macOS (a non-root process may bind a low port on 0.0.0.0, but not on
+  # 127.0.0.1) and it is immaterial on Linux, where the privilege is the
+  # port, not the address (Janus autostart says how to grant it). The
+  # default posture stays loopback-reachable by name — via.rip and
+  # *.via.rip resolve only to 127.0.0.1 — while the socket itself listens
+  # broadly; a host that must refuse LAN callers by IP uses its firewall.
+  values =
+    RIP_EDGE_ADMIN: janus.admin
+    RIP_EDGE_BIND: '0.0.0.0'
+    RIP_EDGE_HTTP_BIND: '0.0.0.0'
+    RIP_EDGE_CONTROL: janus.socket
+    RIP_EDGE_HTTP_PORT: '80'
+    RIP_EDGE_STATUS: statusSocket
+    RIP_EDGE_LOG: janus.log
+    RIP_EDGE_SITES: janus.sites
+  body = readFileSync(source, 'utf8').replace /\{\$([A-Z_]+)(?::[^}]*)?\}/g, (match, key) -> if key of values then values[key] else match
+  """
+  # Rendered by rip sites — posture #{mode} — from
+  #   #{source}
+  # Edit that file, or drop site blocks into #{janus.sites}; this one is
+  # rewritten whenever the posture or a path changes.
+
+  #{body}
+  """
+
+lastLine = (result) ->
+  lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
+  (lines.at(-1) or '').replace /^Error: /, ''
+
+# Bring Janus's service config up to date with the posture: render,
+# validate, write, and reload a running edge. Returns Janus's status.
+# `report(message, status)` receives a failure.
+export configureEdge = (mode, statusSocket, report = abort) ->
+  return null if externalEdge()
+  janus = janusStatus()
+  return report(JANUS_MISSING, 503) unless janus?
+  desired = renderEdgeConfig mode, janus, statusSocket
+  current = try readFileSync(janus.config, 'utf8') catch then null
+  return janus if current is desired
+  mkdirSync dirname(janus.config), { recursive: true }
+  mkdirSync janus.sites, { recursive: true }
+  staged = "#{janus.config}.rip-#{process.pid}"
+  writeFileSync staged, desired
+  check = Bun.spawnSync [janusBinary(), 'validate', '--config', staged, '--adapter', 'caddyfile'], { stdout: 'pipe', stderr: 'pipe' }
+  unless check.exitCode is 0
+    try unlinkSync staged
+    return report("edge config does not validate: #{lastLine check}", 503)
+  renameSync staged, janus.config
+  if janus.running
+    reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
+    return report("janus reload failed: #{lastLine reload}", 503) unless reload.exitCode is 0
+  janus

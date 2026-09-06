@@ -1,29 +1,23 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { homedir, platform } from 'node:os'
+import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
+import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
 
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
-PACKAGED_DEFAULT = realpathSync join(import.meta.dir, 'Caddyfile')
-PACKAGED_LOCAL = realpathSync join(import.meta.dir, 'Caddyfile.local')
 STATUS_HTML = join(import.meta.dir, 'status.html')
 TRUST_HTML = join(import.meta.dir, 'trust.html')
 TRUST_SAFARI_HTML = join(import.meta.dir, 'trust-safari.html')
-PACKAGED_CADDYFILES = Set.new [PACKAGED_DEFAULT, PACKAGED_LOCAL]
 CADDY_PKI_ROOT = if platform() is 'darwin'
   join process.env.HOME, 'Library', 'Application Support', 'Caddy', 'pki', 'authorities', 'local', 'root.crt'
 else
   join process.env.XDG_DATA_HOME or join(process.env.HOME, '.local', 'share'), 'caddy', 'pki', 'authorities', 'local', 'root.crt'
-
-usesLaunchd = (config) -> platform() is 'darwin' and PACKAGED_CADDYFILES.has(config)
-
-packagedConfigForMode = (mode) -> if mode is 'local' then PACKAGED_LOCAL else PACKAGED_DEFAULT
 
 # Dual-claim so default (loopback) and local (LAN) stay reachable without remapping.
 defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
@@ -51,11 +45,6 @@ preferredHost = (hosts) ->
     return match if match?
   hosts[0]
 
-# default keeps the edge on loopback; local (LAN) and public (a real host
-# behind a firewall) open every interface — reachability scope is then the
-# network's business, not the bind's.
-bindHost = -> if state.edge.mode in ['local', 'public'] then '0.0.0.0' else '127.0.0.1'
-
 fail = (message, status = 400) ->
   error = Error.new message
   error.status = status
@@ -79,17 +68,8 @@ defaultState = ->
   version: 1
   apps: []
   edge:
-    desired: 'stopped'
-    managed: false
-    pid: null
-    caddy: null
-    config: null
-    control: process.env.JANUS_CONTROL or 'http://127.0.0.1:7600'
-    admin: null
-    baseUrl: 'https://{host}/'
     mode: 'default'
-    httpPort: 80
-    httpsPort: 443
+    baseUrl: 'https://{host}/'
     localCaTrusted: false
     lastError: null
 
@@ -107,7 +87,7 @@ validateState = (state) ->
     names.add app.name
     roots.add app.root
   edge = state.edge
-  valid = edge.desired in ['running', 'stopped'] and typeof edge.managed is 'boolean' and (edge.pid is null or Number.isInteger(edge.pid)) and (edge.caddy is null or typeof edge.caddy is 'string') and (edge.config is null or typeof edge.config is 'string') and typeof edge.control is 'string' and edge.control.length > 0 and (edge.admin is null or typeof edge.admin is 'string') and typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local', 'public'] and Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535 and Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535 and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
+  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local', 'public'] and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
@@ -140,14 +120,16 @@ migrateState = (raw) ->
     unless edge.mode in ['default', 'local', 'public']
       edge.mode = 'default'
       changed = true
-    unless Number.isInteger(edge.httpPort) and edge.httpPort >= 1 and edge.httpPort <= 65535
-      edge.httpPort = 80
-      changed = true
-    unless Number.isInteger(edge.httpsPort) and edge.httpsPort >= 1 and edge.httpsPort <= 65535
-      edge.httpsPort = 443
-      changed = true
     unless typeof edge.localCaTrusted is 'boolean'
       edge.localCaTrusted = false
+      changed = true
+    unless typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}')
+      edge.baseUrl = 'https://{host}/'
+      changed = true
+    # The edge record holds Rip's facts only; what the process was — its
+    # pid, binary, config, ports — is Janus's to know.
+    for key of edge when key not in ['mode', 'baseUrl', 'localCaTrusted', 'lastError']
+      delete edge[key]
       changed = true
   return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
   { state: raw, dirty: false }
@@ -245,27 +227,30 @@ edgeFetch = (target, path = '/1.0') ->
     options.unix = target
     fetch "http://janus#{path}", options
 
+# The control target apps register with. Janus's socket path does not
+# move, so one answer serves the agent's life; a missing janus is asked
+# again on the next call.
+controlTarget = null
+edgeTarget = ->
+  controlTarget ?= edgeControl()
+  controlTarget
+
 edgeHealth = ->
+  target = edgeTarget()
+  return null unless target?
   try
-    response = edgeFetch! state.edge.control
+    response = edgeFetch! target
     return null unless response.ok
     response.json!
   catch then null
 
-# Control answering is janus alive, NOT the edge serving: janus owns its
-# control listener, so a teardown caught mid-shutdown can leave a
-# half-dead caddy that answers control forever while 80/443 sit with
-# launchd, unclaimed (observed in the field: apps down for good,
-# `sites status` green throughout). For the packaged launchd posture,
-# assert the plain HTTP port end to end — any HTTP answer proves the
-# inherited listeners live; refusal or silence is down. Custom configs
-# keep control-only health: their port layout is their own business.
-edgeServing = ->
-  return true unless usesLaunchd state.edge.config
-  try
-    fetch! "http://127.0.0.1:#{state.edge.httpPort}/", { redirect: 'manual', signal: AbortSignal.timeout(PROBE_TIMEOUT) }
-    true
-  catch then false
+# Keep Janus's service config current with the posture. Rip's own edge
+# facts (posture, trust) live in the catalog; the file Janus runs is
+# rendered from them. An external edge (JANUS_CONTROL) is left alone.
+ensureEdgeConfig = ->
+  return if externalEdge()
+  configureEdge state.edge.mode, paths.edgeStatus, fail
+  state.edge.lastError = null
 
 # ── serve.rip host declarations ──────────────────────────────────────
 #
@@ -346,23 +331,16 @@ effectiveHosts = (app, manager) ->
   hosts = [app.name] unless hosts.length
   { hosts, site, error: null }
 
-# The default URL template carries the real HTTPS port: on a non-443 edge
-# a portless https://{host}/ refuses to connect while the app serves fine
-# one port over (observed in the field). An explicit baseUrl is honored
-# verbatim; the bare default self-corrects from the port the agent
-# already tracks and validates.
-defaultBaseUrl = ->
-  port = state.edge.httpsPort
-  if Number.isInteger(port) and port isnt 443 then "https://{host}:#{port}/" else 'https://{host}/'
-
 appUrl = (hosts) ->
   host = preferredHost hosts
   return null unless host?
-  template = state.edge.baseUrl or defaultBaseUrl()
-  template = defaultBaseUrl() if template is 'https://{host}/'
-  template.replace '{host}', host
+  (state.edge.baseUrl or 'https://{host}/').replace '{host}', host
 
-SITES_DIR = join homedir(), '.config', 'janus', 'sites'
+# Janus's drop-in sites directory, from its status; asked once.
+sitesDir = null
+edgeSitesDir = ->
+  sitesDir ?= janusStatus()?.sites or null
+  sitesDir
 
 # Hosts beyond the packaged postures (*.local, via.rip) answer only when
 # a sites snippet declares them — and Caddy's import glob is silent
@@ -371,12 +349,14 @@ SITES_DIR = join homedir(), '.config', 'janus', 'sites'
 # (observed in the field). The snapshot carries the warning instead.
 hostCovered = (host) ->
   return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
+  dir = edgeSitesDir()
+  return false unless dir?
   names = try
-    readdirSync(SITES_DIR).filter (name) -> name.endsWith '.caddy'
+    readdirSync(dir).filter (name) -> name.endsWith '.caddy'
   catch then []
   for name in names
     text = try
-      readFileSync join(SITES_DIR, name), 'utf8'
+      readFileSync join(dir, name), 'utf8'
     catch then ''
     return true if text.includes host
     for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
@@ -398,7 +378,7 @@ snapshotApp = (app) ->
     hosts: hosts
     sitePattern: site?.host or null
     serveError: error
-    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add ~/.config/janus/sites/#{app.name}.caddy (or any *.caddy declaring these hosts)" else null
+    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add #{join(edgeSitesDir() or '<janus sites dir>', app.name + '.caddy')} (or any *.caddy declaring these hosts)" else null
     manager
     lastError: app.lastError or null
     lastExit: app.lastExit or null
@@ -469,7 +449,7 @@ addApp = (body) ->
   snapshotApp! app
 
 serverArgv = (app) ->
-  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'manager.rip'), app.root, '--name', app.name, '--control', state.edge.control, '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
+  argv = [process.execPath, loaderArg('rip-agent'), join(import.meta.dir, 'manager.rip'), app.root, '--name', app.name, '--control', edgeTarget(), '--workers', String(app.options.workers), '--concurrency', String(app.options.concurrency)]
   argv.push '--host', host for host in app.hosts
   if app.options.watchApp and app.options.watchApi
     argv.push '--watch'
@@ -505,8 +485,13 @@ startApp = (app, automatic = false) ->
   pending = starting.get app.id
   return pending if pending?
   task = do ->
+    # The edge is Janus's process: make sure what it serves is current,
+    # then that it is there to register with.
+    ensureEdgeConfig!
     health = edgeHealth!
-    fail "edge is not reachable at #{state.edge.control}", 503 unless health?
+    unless health?
+      fail JANUS_MISSING, 503 unless externalEdge() or janusBinary()?
+      fail (if externalEdge() then "edge is not reachable at #{edgeTarget()}" else JANUS_STOPPED), 503
     logPath = join paths.appLogs, "#{app.id}.log"
     log = openSync logPath, 'a', 0o600
     child = null
@@ -520,7 +505,7 @@ startApp = (app, automatic = false) ->
           cwd: app.root
           detached: true
           stdio: ['ignore', log, log]
-          env: { ...managerEnv(), JANUS_CONTROL: state.edge.control }
+          env: { ...managerEnv(), JANUS_CONTROL: edgeTarget() }
         children.set app.id, child
         child.on 'exit', (code, signal) ->
           children.delete app.id
@@ -604,349 +589,48 @@ removeApp = (app) ->
   saveState()
   { removed: app.id, name: app.name, root: app.root }
 
-readEdgePid = ->
-  return null unless existsSync paths.edgePid
-  try
-    value = parseInt readFileSync(paths.edgePid, 'utf8')
-    if Number.isInteger(value) and value > 0 then value else null
-  catch then null
-
-readEdgeExit = ->
-  return null unless existsSync paths.edgeExit
-  try return JSON.parse(readFileSync(paths.edgeExit, 'utf8')) catch then return null
-
+# What `rip sites status` shows for the edge: Janus's own status (the
+# process, its supervisor, its paths) plus Rip's facts (posture, trust).
 snapshotEdge = ->
+  janus = if externalEdge() then null else janusStatus()
   health = edgeHealth!
-  pid = readEdgePid! or state.edge.pid
-  managed = state.edge.managed and processAlive(pid)
-  launcher = if managed and state.edge.config? then (if usesLaunchd(state.edge.config) then 'launchd' else 'direct') else null
   {
     state: if health? then 'running' else 'stopped'
-    desired: state.edge.desired
-    managed: managed
-    pid: if managed then pid else null
-    caddy: state.edge.caddy
-    config: state.edge.config
-    control: state.edge.control
-    admin: state.edge.admin
-    baseUrl: state.edge.baseUrl
+    external: externalEdge()
+    control: edgeTarget()
     mode: state.edge.mode
-    httpPort: state.edge.httpPort
-    httpsPort: state.edge.httpsPort
+    baseUrl: state.edge.baseUrl
     localCaTrusted: state.edge.localCaTrusted
-    launcher: launcher
+    pid: janus?.pid or null
+    uptime: janus?.uptime or null
+    supervisor: janus?.supervisor or null
+    autostart: janus?.autostart is true
+    version: janus?.janus or null
+    binaryNewer: janus?.binary_newer is true
+    config: janus?.config or null
+    sites: janus?.sites or null
+    log: janus?.log or null
+    admin: janus?.admin or null
     janus: health
     lastError: state.edge.lastError
   }
 
-resolveFile = (value, description) ->
-  fail "#{description} must be a non-empty path" unless typeof value is 'string' and value.length
-  path = resolve value
-  fail "#{description} not found: #{value}" unless existsSync path
-  path = realpathSync path
-  fail "#{description} is not a file: #{value}" unless statSync(path).isFile()
-  path
-
-resolveCaddy = (explicit = null) ->
-  # `janus` on PATH is the install (the bootstrap installer puts it in
-  # ~/.local/bin, or /usr/local/bin as root). Nothing else is consulted:
-  # not a remembered path, not an environment variable, not a binary
-  # inside this checkout — so an upgraded install is what the next start
-  # runs, and one host never quietly runs two different edges. --caddy
-  # names a specific binary for a dev build.
-  caddyInput = explicit or Bun.which('janus')
-  fail 'no janus on PATH — install Janus (https://github.com/shreeve/janus#prebuilt-releases) or pass --caddy PATH', 503 unless caddyInput?
-  caddy = resolveFile caddyInput, 'Caddy binary'
-  modules = Bun.spawnSync [caddy, 'list-modules'], { stdout: 'pipe', stderr: 'pipe' }
-  fail "Caddy binary does not contain Janus: #{caddy}", 503 unless modules.exitCode is 0 and modules.stdout.toString().split('\n').includes('janus')
-  caddy
-
 edgeAddress = (path) -> "unix/#{path}"
 
-edgeEnv = (launcher, control) ->
-  {
-    ...process.env
-    RIP_EDGE_ADMIN: paths.edgeAdmin
-    RIP_EDGE_HTTP_BIND: if launcher is 'launchd' then 'fd/3' else bindHost()
-    RIP_EDGE_BIND: if launcher is 'launchd' then 'fd/4' else bindHost()
-    RIP_EDGE_CONTROL: control
-    # The on_demand_tls ask URL must dial the real HTTP port — hardwiring
-    # :80 under --http-port would fail every mint (and so every handshake).
-    RIP_EDGE_HTTP_PORT: String(state.edge.httpPort or 80)
-    RIP_EDGE_STATUS: paths.edgeStatus
-  }
-
-LAUNCHD_LABEL = 'rip.via.edge'
-# Pre-via.rip label — boot it out on start so exactly one edge job exists.
-LAUNCHD_RETIRED = 'io.ripdev.edge'
-LAUNCHD_DOMAIN = if typeof process.getuid is 'function' then "gui/#{process.getuid!}" else null
-LAUNCHD_SERVICE = if LAUNCHD_DOMAIN? then "#{LAUNCHD_DOMAIN}/#{LAUNCHD_LABEL}" else null
-
-xml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
-xmlEntry = (key, value) -> "<key>#{xml key}</key><string>#{xml value}</string>"
-
-launchdSocket = (name, port) ->
-  node = if state.edge.mode in ['local', 'public'] then '' else '<key>SockNodeName</key><string>127.0.0.1</string>'
-  """
-        <key>#{xml name}</key><dict>
-          <key>SockFamily</key><string>IPv4</string>
-          #{node}
-          <key>SockServiceName</key><integer>#{port}</integer>
-          <key>SockType</key><string>stream</string>
-        </dict>
-  """
-
-launchdPlist = (caddy, config, control) ->
-  launcher = resolveFile join(import.meta.dir, 'launchd-listener.js'), 'launchd edge listener'
-  argv = [process.execPath, launcher, caddy, config, paths.edgePid, paths.edgeExit]
-  environment =
-    HOME: process.env.HOME
-    PATH: '/usr/bin:/bin:/usr/sbin:/sbin'
-    TMPDIR: process.env.TMPDIR
-    RIP_EDGE_ADMIN: paths.edgeAdmin
-    RIP_EDGE_CONTROL: control
-    RIP_EDGE_HTTP_PORT: String(state.edge.httpPort or 80)
-    RIP_EDGE_STATUS: paths.edgeStatus
-  argumentXml = argv.map((value) -> "<string>#{xml value}</string>").join('')
-  environmentXml = Object.keys(environment).sort().filter((key) -> environment[key]?).map((key) -> xmlEntry(key, environment[key])).join('')
-  """<?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0"><dict>
-      <key>Label</key><string>#{LAUNCHD_LABEL}</string>
-      <key>ProgramArguments</key><array>#{argumentXml}</array>
-      <key>EnvironmentVariables</key><dict>#{environmentXml}</dict>
-      <key>WorkingDirectory</key><string>#{xml paths.stateRoot}</string>
-      <key>RunAtLoad</key><true/>
-      <key>ProcessType</key><string>Background</string>
-      <key>Umask</key><integer>63</integer>
-      <key>StandardOutPath</key><string>#{xml paths.edgeLog}</string>
-      <key>StandardErrorPath</key><string>#{xml paths.edgeLog}</string>
-      <key>Sockets</key><dict>
-#{launchdSocket 'HTTP', state.edge.httpPort}
-#{launchdSocket 'HTTPS', state.edge.httpsPort}
-      </dict>
-    </dict></plist>
-    """
-
-launchctl = (args, missing = false) ->
-  result = Bun.spawnSync ['/bin/launchctl', ...args], { stdout: 'pipe', stderr: 'pipe' }
-  return true if result.exitCode is 0
-  detail = result.stderr.toString().trim() or result.stdout.toString().trim()
-  return false if missing and (detail.includes('Could not find service') or detail.includes('No such process') or detail.includes('service not found'))
-  fail "launchctl #{args[0]} failed#{if detail then ": #{detail}" else ''}", 503
-
-# Boot out the retired label too, on EVERY path: the edge is socket-
-# activated, so a lingering old-label job resurrects on the next stray
-# connection to 80/443 and wedges start (early-return "running") against
-# stop (409 not-owned) until someone boots it out by hand.
-bootoutLaunchd = (missing = false) ->
-  launchctl ['bootout', "#{LAUNCHD_DOMAIN}/#{LAUNCHD_RETIRED}"], true if LAUNCHD_DOMAIN?
-  launchctl ['bootout', LAUNCHD_SERVICE], missing
-
-startLaunchd = (caddy, config, control) ->
-  fail 'launchd user domain is unavailable', 503 unless LAUNCHD_SERVICE?
-  bootoutLaunchd true
-  writeSecure paths.edgePlist, launchdPlist(caddy, config, control)
-  launchctl ['bootstrap', LAUNCHD_DOMAIN, paths.edgePlist]
-
-edgeStarting = null
-edgeRestartCount = 0
-edgeRestartAt = 0
-
-startEdge = (body = {}, automatic = false) ->
-  return edgeStarting if edgeStarting?
-  task = do ->
-    rejectUnknown body, ['caddy', 'config', 'control', 'baseUrl', 'httpPort', 'httpsPort'], 'edge start body'
-    fail 'control must be a non-empty string' if body.control? and (typeof body.control isnt 'string' or not body.control)
-    fail 'baseUrl must be a string containing {host}' if body.baseUrl? and (typeof body.baseUrl isnt 'string' or not body.baseUrl.includes('{host}'))
-    fail 'httpPort must be an integer from 1 through 65535' if body.httpPort? and (not Number.isInteger(body.httpPort) or body.httpPort < 1 or body.httpPort > 65535)
-    fail 'httpsPort must be an integer from 1 through 65535' if body.httpsPort? and (not Number.isInteger(body.httpsPort) or body.httpsPort < 1 or body.httpsPort > 65535)
-    current = snapshotEdge!
-    # `and edgeServing!` or a zombie wins: an edge that answers control
-    # with dead ports would turn every rescue into this early return.
-    return current if current.state is 'running' and edgeServing!
-    fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if state.edge.mode is 'local' and not state.edge.localCaTrusted
-    # A start the operator asked for resolves the binary afresh (PATH, or
-    # the --caddy they named); a supervision restart of an edge that died
-    # keeps the binary that edge was started with, so a dev build pinned
-    # by --caddy survives its own crash and an upgrade lands on the next
-    # start the operator performs, never underneath a running pin.
-    caddy = resolveCaddy! (body.caddy or (if automatic then state.edge.caddy else null))
-    configInput = body.config or state.edge.config or packagedConfigForMode(state.edge.mode)
-    config = resolveFile configInput, 'Caddyfile'
-    control = body.control or paths.edgeControl
-    httpPort = if body.httpPort? then body.httpPort else state.edge.httpPort
-    httpsPort = if body.httpsPort? then body.httpsPort else state.edge.httpsPort
-    state.edge.httpPort = httpPort
-    state.edge.httpsPort = httpsPort
-    baseUrl = body.baseUrl or state.edge.baseUrl or defaultBaseUrl()
-    # Identity fields persist only on a start that SUCCEEDS: a rejected
-    # --config or a renamed binary must not poison later bare starts by
-    # being silently remembered and failing identically (observed in the
-    # field). The mid-boot write below is still needed — health checks
-    # and stop-during-boot read it — so failure restores these.
-    prior = { caddy: state.edge.caddy, config: state.edge.config, control: state.edge.control, admin: state.edge.admin, baseUrl: state.edge.baseUrl }
-    # Machine-local site snippets import from here; the directory existing
-    # from day one makes `ls` discovery and drop-in creation obvious.
-    try mkdirSync SITES_DIR, { recursive: true }
-    launcher = if usesLaunchd(config) then 'launchd' else 'direct'
-    environment = edgeEnv launcher, control
-    # A previous edge can survive its own job's bootout (orphaned when a
-    # teardown races its listener's death) and then squat on the control
-    # and front-door listeners — every rebuilt caddy exits on the
-    # conflict while the squatter keeps health green. The pidfile names
-    # it; put it down before handing launchd the ports.
-    stale = readEdgePid! or state.edge.pid
-    if state.edge.managed and processAlive(stale)
-      try process.kill stale, 'SIGTERM'
-      staleDeadline = Date.now() + 3000
-      while processAlive(stale) and Date.now() < staleDeadline
-        sleep! 50
-      try process.kill stale, 'SIGKILL' if processAlive(stale)
-    # These paths belong exclusively to a Rip-owned edge. An unclean exit can
-    # leave the filesystem entries behind after no listener remains.
-    try unlinkSync paths.edgeAdmin
-    try unlinkSync paths.edgePid
-    try unlinkSync paths.edgeExit
-    try unlinkSync control if control is paths.edgeControl
-    log = openSync paths.edgeLog, 'a', 0o600
-    child = null
-    try
-      if launcher is 'launchd'
-        startLaunchd caddy, config, control
-      else
-        child = spawn caddy, ['run', '--config', config, '--adapter', 'caddyfile', '--pidfile', paths.edgePid],
-          cwd: paths.stateRoot
-          detached: true
-          stdio: ['ignore', log, log]
-          env: environment
-    finally
-      closeSync log
-    state.edge = { ...state.edge, desired: 'running', managed: true, pid: child?.pid or null, caddy, config, control, admin: paths.edgeAdmin, baseUrl, lastError: null }
-    saveState()
-    # 30s, matching app readiness: this stopwatch runs on the agent's
-    # starved event loop too, and a boot judged by a 10s deadline under
-    # machine-wide load flunked healthy edges (observed in the field).
-    deadline = Date.now() + 30000
-    loop
-      health = edgeHealth!
-      if health?
-        caddyPid = readEdgePid!
-        fail 'Caddy wrote an invalid pidfile', 503 unless caddyPid?
-        state.edge.pid = caddyPid
-        saveState()
-        edgeRestartCount = 0
-        edgeRestartAt = 0
-        return snapshotEdge!
-      break if child?.exitCode? or existsSync(paths.edgeExit) or Date.now() >= deadline
-      sleep! 25
-    diagnostic = tail(paths.edgeLog, 30).trim()
-    outcome = readEdgeExit!
-    code = child?.exitCode ?? outcome?.code
-    message = if code? then "Caddy exited #{code}" else 'Caddy readiness deadline expired'
-    message += ":\n#{diagnostic}" if diagnostic
-    if code? or outcome?
-      bootoutLaunchd true if launcher is 'launchd'
-      state.edge = { ...state.edge, ...prior, desired: (if automatic then 'running' else 'stopped'), managed: false, pid: null, lastError: message }
-    else
-      # A deadline with no exit evidence is a boot still in flight, not a
-      # corpse. Tearing the job down here is what rebuilt healthy edges
-      # into the teardown race over and over under load — leave it
-      # standing; reconcile keeps watching, and the next recreate's
-      # bootout still sweeps a genuine wedge.
-      state.edge = { ...state.edge, desired: 'running', lastError: message }
-    saveState()
-    fail message, 503
-  edgeStarting = task
-  try
-    await task
-  finally
-    edgeStarting = null
-
-# The binary that talks to the running edge's admin socket for stop and
-# reload. The one the edge was started with is the natural choice, but it
-# can be gone by now — an upgrade replaced it, or a dev build was deleted —
-# and any janus can send those requests, so fall back to the PATH install
-# rather than leaving a running edge that cannot be stopped.
-edgeCommandBinary = ->
-  return state.edge.caddy if state.edge.caddy? and existsSync(state.edge.caddy)
-  fallback = Bun.which('janus')
-  fail "the edge's binary #{state.edge.caddy} is gone and no janus is on PATH to stop it", 503 unless fallback?
-  fallback
-
-stopEdge = ->
-  fail 'edge is not owned by Rip; stop the external Caddy service with its own supervisor', 409 unless state.edge.managed
-  pid = readEdgePid! or state.edge.pid
-  launcher = if usesLaunchd(state.edge.config) then 'launchd' else 'direct'
-  unless edgeHealth! or processAlive(pid)
-    bootoutLaunchd true if launcher is 'launchd'
-    state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
-    saveState()
-    snap = snapshotEdge!
-    maybeExitIdle()
-    return snap
-  running = []
-  for app in state.apps
-    running.push app if managerStatus!(app)?
-  fail "stop #{running.map((app) -> app.name).join(', ')} before stopping the edge", 409 if running.length
-  result = Bun.spawnSync [edgeCommandBinary(), 'stop', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
-  fail "Caddy stop failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
-  bootoutLaunchd true if launcher is 'launchd'
-  state.edge = { ...state.edge, desired: 'stopped', managed: false, pid: null, lastError: null }
-  saveState()
-  snap = snapshotEdge!
-  maybeExitIdle()
-  snap
-
-reloadEdge = ->
-  fail 'edge is not owned by Rip; reload the external Caddy service with its own supervisor', 409 unless state.edge.managed
-  launcher = if usesLaunchd(state.edge.config) then 'launchd' else 'direct'
-  result = Bun.spawnSync [edgeCommandBinary(), 'reload', '--config', state.edge.config, '--adapter', 'caddyfile', '--address', edgeAddress(state.edge.admin)], { stdout: 'pipe', stderr: 'pipe', env: edgeEnv(launcher, state.edge.control) }
-  fail "Caddy reload failed: #{result.stderr.toString().trim()}", 503 unless result.exitCode is 0
-  snapshotEdge!
-
-# Full recreate with the choreography built in: stop the running apps (the
-# ordering stopEdge's guard protects), recreate the edge, then start every
-# app this call stopped — even when the edge start fails, so a broken
-# posture never strands the apps.
-restartEdge = ->
-  # For-loop, not .filter — an async predicate returns a Promise, which is
-  # always truthy, and every cataloged app would restart.
-  wasRunning = []
-  for app in state.apps
-    wasRunning.push app if managerStatus!(app)?
-  for app in wasRunning
-    stopApp! app
-  stopEdge! if state.edge.managed
-  try
-    startEdge!
-  finally
-    for app in wasRunning
-      try
-        startApp! app
-      catch error
-        app.lastError = error.message
-        saveState()
-  snapshotEdge!
-
-# Mode flips recreate the edge (launchd sockets + Caddyfile) — reload is not enough.
+# Posture flips re-render Janus's config and reload it in place; the
+# registrations survive. Catalog-stored hosts gain a *.local twin so LAN
+# peers can open apps once their managers re-register.
 setEdgeMode = (mode) ->
   fail "edge mode must be default, local, or public, got #{JSON.stringify(mode)}" unless mode in ['default', 'local', 'public']
   fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
-  return snapshotEdge! if state.edge.mode is mode and (not state.edge.config? or state.edge.config is packagedConfigForMode(mode))
-  current = snapshotEdge!
-  wasRunning = current.state is 'running' and state.edge.managed
-  stopEdge! if wasRunning
   state.edge.mode = mode
-  state.edge.config = packagedConfigForMode mode
   state.edge.baseUrl = 'https://{host}/'
   state.edge.lastError = null
-  # Catalog-stored hosts get a *.local twin so LAN peers can open apps after restart.
   if mode is 'local'
     for app in state.apps when app.hosts.length
       app.hosts = ensureLanHosts app.hosts
   saveState()
-  return startEdge!({}) if wasRunning
+  ensureEdgeConfig!
   snapshotEdge!
 
 # Exit when nothing remains to supervise — no idle forever control plane.
@@ -966,18 +650,20 @@ inFlight = 0
 lastActivity = Date.now()
 
 maybeExitIdle = ->
-  return unless state.edge.desired is 'stopped' and not state.edge.managed
   return if state.apps.some (app) -> app.desired is 'running'
   return if inFlight > 0 or Date.now() - lastActivity < IDLE_GRACE
   setTimeout shutdown, 100
 
+# Janus's admin socket, for `janus trust`: the edge must be running.
+edgeAdmin = ->
+  janus = janusStatus()
+  fail JANUS_MISSING, 503 unless janus?
+  fail "edge must be running to trust the CA — #{JANUS_STOPPED}", 503 unless janus.running and existsSync(janus.admin)
+  janus.admin
+
 trustEdge = ->
-  caddy = resolveCaddy!
-  # Edge admin is a unix socket (Caddyfile `admin unix/{$RIP_EDGE_ADMIN}`),
-  # never the stock localhost:2019 — same address stop/reload already use.
-  admin = state.edge.admin or paths.edgeAdmin
-  fail 'edge must be running to trust the CA — run `rip sites start edge` first', 503 unless existsSync(admin)
-  result = Bun.spawnSync [caddy, 'trust', '--address', edgeAddress(admin)], { stdout: 'pipe', stderr: 'pipe' }
+  admin = edgeAdmin()
+  result = Bun.spawnSync [janusBinary(), 'trust', '--address', edgeAddress(admin)], { stdout: 'pipe', stderr: 'pipe' }
   detail = result.stderr.toString().trim() or result.stdout.toString().trim()
   unless result.exitCode is 0
     # The install escalates via sudo, and this daemon has no terminal to
@@ -991,8 +677,7 @@ trustEdge = ->
 # can prompt there) and then records the outcome here. Recording requires
 # a live edge so the flag can never precede a CA existing to trust.
 markEdgeTrusted = ->
-  admin = state.edge.admin or paths.edgeAdmin
-  fail 'edge must be running to trust the CA — run `rip sites start edge` first', 503 unless existsSync(admin)
+  edgeAdmin()
   state.edge.localCaTrusted = true
   saveState()
   { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
@@ -1090,7 +775,7 @@ statusPage = ->
   trustHint = if edge.mode is 'local'
     'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://rip.local/trust">http://rip.local/trust</a>'
   else
-    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status edge</code>'
+    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status</code>'
   """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rip Sites</title>
@@ -1118,8 +803,8 @@ statusPage = ->
 # Janus's redacted per-app view (workers, heartbeats, counters, launch
 # links) rides the mdns front door; Caddyfile.local pins `name rip.local`
 # and `listen :7680`. null when unavailable (default mode, edge down).
-janusStatus = ->
-  return null unless state.edge.mode is 'local' and state.edge.pid?
+mdnsStatus = ->
+  return null unless state.edge.mode is 'local' and edgeHealth!?
   try
     response = fetch! 'http://127.0.0.1:7680/status.json', { headers: { host: 'rip.local' }, signal: AbortSignal.timeout(1200) }
     return null unless response.ok
@@ -1136,7 +821,7 @@ handleStatus = (request) ->
       return Response.new statusPage!, { headers: { 'content-type': 'text/html; charset=utf-8' } }
     if request.method is 'GET' and url.pathname is '/status.json'
       apps = Promise.all! state.apps.map (app) -> snapshotApp! app
-      return Response.json { edge: snapshotEdge!, apps: apps, janus: janusStatus! }
+      return Response.json { edge: snapshotEdge!, apps: apps, janus: mdnsStatus! }
     # Caddy on_demand_tls ask — allow single-label *.local names, the
     # via.rip apex (the loopback dashboard), and single-label *.via.rip
     # app names. Both families are minted by the same local CA.
@@ -1247,10 +932,6 @@ route = (request) ->
     if parts[0] is '1.0' and parts[1] is 'edge'
       return Response.json(snapshotEdge!) if request.method is 'GET' and parts.length is 2
       if request.method is 'POST' and parts.length is 3
-        return Response.json(mutate!(-> startEdge! jsonBody! request)) if parts[2] is 'start'
-        return Response.json(mutate!(-> stopEdge!)) if parts[2] is 'stop'
-        return Response.json(mutate!(-> restartEdge!)) if parts[2] is 'restart'
-        return Response.json(mutate!(-> reloadEdge!)) if parts[2] is 'reload'
         return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
         return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
@@ -1258,7 +939,7 @@ route = (request) ->
         return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'public')) if parts[2] is 'public'
     if parts[0] is '1.0' and parts[1] is 'agent'
       if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
-        # Graceful recycle: answer first, then exit. Edge and apps are
+        # Graceful recycle: answer first, then exit. The apps are
         # detached and survive; the next control request boots a fresh
         # agent running current code.
         setTimeout shutdown, 100
@@ -1366,11 +1047,16 @@ try
   saveState() if loaded.dirty
   try unlinkSync paths.edgeStatus
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
+  # Janus's config names the status socket by path; a boot is the moment
+  # to make sure the file Janus runs matches the posture.
+  try
+    ensureEdgeConfig!
+  catch error
+    state.edge.lastError = error?.message or String(error)
   # One missed probe is not an outage (see PROBE_TIMEOUT) — recovery
   # waits for DOWN_TICKS consecutive failed ticks, evidence spread
   # across seconds rather than one starved instant.
   appMisses = Map.new()
-  edgeMisses = 0
   reconcile = ->
     return shutdown() unless ownsSocket()
     writeOwner() unless readOwner()?.pid is process.pid
@@ -1385,19 +1071,6 @@ try
       startApp(app, true).catch (error) ->
         app.lastError = error.message
         saveState() if ownsSocket()
-    return unless state.edge.desired is 'running' and not edgeStarting?
-    if edgeHealth! and edgeServing!
-      edgeMisses = 0
-      return
-    edgeMisses++
-    return if edgeMisses < DOWN_TICKS or Date.now() < edgeRestartAt
-    edgeMisses = 0
-    edgeRestartCount++
-    delay = Math.min 30000, 500 * 2 ** Math.min(edgeRestartCount - 1, 6)
-    edgeRestartAt = Date.now() + delay
-    startEdge({}, true).catch (error) ->
-      state.edge.lastError = error.message
-      saveState() if ownsSocket()
   setTimeout reconcile, 0
   setInterval (->
     reconcile()

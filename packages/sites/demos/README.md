@@ -28,4 +28,4 @@ rip sites open hello
 ```
 
 Same pattern for `pulse` and `cart`. Edge TLS and Janus are system-wide
-(`rip sites start edge`); demos do not ship their own Caddyfile.
+(`janus autostart`); demos do not ship their own Caddyfile.

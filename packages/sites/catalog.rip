@@ -32,18 +32,11 @@ validHost = (host) ->
 
 validName = (name) -> typeof name is 'string' and /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(name) and name.length <= 80
 
+# The edge is Janus's process; the catalog keeps only Rip's own edge
+# facts: the posture and whether this machine trusts the local CA.
 defaultEdge = ->
-  desired: 'stopped'
-  managed: false
-  pid: null
-  caddy: null
-  config: null
-  control: process.env.JANUS_CONTROL or 'http://127.0.0.1:7600'
-  admin: null
-  baseUrl: 'https://{host}/'
   mode: 'default'
-  httpPort: 80
-  httpsPort: 443
+  baseUrl: 'https://{host}/'
   localCaTrusted: false
   lastError: null
 

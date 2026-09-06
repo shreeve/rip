@@ -94,7 +94,7 @@ Two conveniences worth knowing by heart:
 ## Sites (local HTTPS)
 
 ```sh
-rip sites start edge
+janus autostart               # once: the edge, as a service
 rip sites add packages/sites/demos/hello
 rip sites start hello
 # https://hello.via.rip/
