@@ -355,6 +355,31 @@ test! "the header hook draws, then the cursor returns to the top of the box", ->
   ok /BT 36 [\d.]+ Td \(Page 1\)/.test s
   ok /BT 36 747\.384 Td \(body\)/.test s          # 792 - 36 - 0.718 × 12
 
+test! "middle: centres the cap height on a line, from the font's own metrics", ->
+  doc = PDF.new compress: false
+  doc.text 'mid', x: 36, middle: 100, size: 12
+  s = latin doc.bytes!
+  ok /BT 36 687\.692 Td \(mid\)/.test s            # 792 - (100 + 0.718 / 2 × 12): baseline is half a cap below the middle
+  for file in ['Inter-Regular.ttf', 'JetBrainsMono-Regular.ttf']
+    doc = PDF.new compress: false
+    doc.register 'face', font(file)
+    doc.text 'MID', x: 36, middle: 100, font: 'face', size: 10
+    rec = doc.fonts.face
+    want = 792 - (100 + rec.capHeight / 2 * 10)
+    got = +latin(doc.bytes!).match(/BT 36 ([\d.]+) Td \(MID\)/)[1]
+    ok Math.abs(got - want) < 0.002, "#{file}: #{got} vs #{want}"
+  throws (-> PDF.new().text 'x', y: 10, middle: 10), PDFError, 'text takes one of y:, middle: or baseline:, not y and middle'
+
+test! "baseline: sits glyphs of any face and size on one line", ->
+  doc = PDF.new compress: false
+  doc.register 'inter', font('Inter-Regular.ttf')
+  doc.text 'core', x: 36, baseline: 100, size: 12
+  doc.text 'ttf',  x: 80, baseline: 100, font: 'inter', size: 7.5
+  s = latin doc.bytes!
+  ok /BT 36 692 Td \(core\)/.test s
+  ok /BT 80 692 Td \(ttf\)/.test s
+  throws (-> doc.text 'x', middle: 10, baseline: 10), PDFError, 'text takes one of y:, middle: or baseline:, not middle and baseline'
+
 test "hooks that misbehave are caught, not looped", ->
   throws (-> PDF.new header: (d) -> d.puts "line #{i}" for i in [0...100]), PDFError, 'header hook overflowed'
   doc = PDF.new footer: (d) -> d.page()
