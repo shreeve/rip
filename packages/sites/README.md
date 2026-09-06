@@ -60,8 +60,15 @@ apps and exits when nothing remains to supervise — Janus stays live-only.
 
 ### 1. Start the edge
 
-From this repo the packaged Janus-enabled binary and Caddyfile are the
-defaults:
+Install Janus once. The bootstrap installer verifies the release archive's
+checksum and puts `janus` in `~/.local/bin` (as root, `/usr/local/bin`),
+which is where the edge finds it — `janus` on `PATH`, nothing else:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash
+```
+
+Then start the edge; the packaged Caddyfile is the default:
 
 ```bash
 rip sites start edge
@@ -219,6 +226,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 | --- | --- |
 | `rip sites start edge` | Bring up Rip-owned Caddy+Janus (default loopback posture). Options: `--caddy`, `--config`, `--control`, `--base-url`, `--http-port`, `--https-port`. |
 | `rip sites stop edge` | Stop a Rip-owned edge (refuses if sites are still running; never stops an external edge). |
+| `rip sites restart edge` | Stop the running sites, stop and start the edge, start those sites again. This is how an upgraded `janus` takes effect. |
 | `rip sites reload edge` | Reload the Rip-owned Caddyfile without tearing down sockets. |
 | `rip sites trust edge` | Install the local CA (required before LAN posture). |
 | `rip sites trust edge --export [PATH]` | Write the CA PEM (default: `rip-edge-local-ca.crt`). |
@@ -228,6 +236,17 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 
 External Janus (something else already listening on the control socket) shows as
 `status edge` → running, unmanaged; Rip will not stop or reload it.
+
+**Upgrading Janus.** Install the new release, then restart the edge. The
+running edge keeps its binary until it is restarted, and `restart edge` puts
+the sites down and back up around it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash && rip sites restart edge
+```
+
+Pin a version with `... | bash -s v1.11.1`. `janus version` shows what is
+installed; `rip sites status edge` shows what is running.
 
 ### Daily — open and logs
 
