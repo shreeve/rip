@@ -2,7 +2,8 @@ import { test, eq, ok } from 'rip/testing'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { renderEdgeConfig } from '../../edge.rip'
+import { renderEdgeConfig, requireExposureJanus } from '../../edge.rip'
+import { defaultCatalog } from '../../catalog.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
@@ -50,23 +51,23 @@ stopAgent = (runtime) ->
 # mint exact-host certs from the LOCAL CA on demand (dogfooding — we run
 # exactly what users run; no packaged public certificate, no renewal
 # treadmill), and the rendered file carries Janus's own paths in place of
-# every placeholder, so it reads on its own and validates without an
-# environment.
-test! 'the posture files render into a self-contained Janus config', ->
+# every placeholder but one: the bind stays {$JANUS_BIND}, which Janus
+# fills from its exposure mode whenever it loads the file.
+test! 'the posture files render around the bind Janus owns', ->
   janus =
     admin: '/state/run/admin.sock'
     socket: '/state/run/janus.sock'
     log: '/state/log/janus.log'
     sites: '/config/sites'
-  rendered = renderEdgeConfig 'default', janus, '/runtime/edge-status.sock'
-  ok not rendered.includes('{$'), 'every placeholder is filled'
+  rendered = renderEdgeConfig 'localhost', janus, '/runtime/edge-status.sock'
+  ok not rendered.replaceAll('{$JANUS_BIND}', '').includes('{$'), 'every placeholder but the bind is filled'
+  ok rendered.includes('default_bind {$JANUS_BIND}'), "the bind is Janus's to fill"
+  ok not rendered.includes('0.0.0.0'), 'rip renders no bind address'
   ok rendered.includes 'admin unix//state/run/admin.sock'
   ok rendered.includes 'control internal /state/run/janus.sock'
   ok rendered.includes 'output file /state/log/janus.log'
   ok rendered.includes 'import /config/sites/*.caddy'
   ok rendered.includes 'reverse_proxy unix//runtime/edge-status.sock'
-  ok rendered.includes 'default_bind 0.0.0.0'
-  ok rendered.includes 'bind 0.0.0.0'
   ok rendered.includes 'protocols h1 h2'
   ok rendered.includes 'redir https://{host}{uri} 308'
   ok rendered.includes 'http://via.rip, http://*.via.rip'
@@ -77,9 +78,11 @@ test! 'the posture files render into a self-contained Janus config', ->
   ok not /\bmdns\b/.test(rendered)
   ok not rendered.includes '7680'
 
-  local = renderEdgeConfig 'local', janus, '/runtime/edge-status.sock'
-  ok not local.includes('{$')
-  ok local.includes 'default_bind 0.0.0.0'
+  local = renderEdgeConfig 'lan', janus, '/runtime/edge-status.sock'
+  ok not local.replaceAll('{$JANUS_BIND}', '').includes('{$')
+  ok local.includes 'default_bind {$JANUS_BIND}'
+  ok not local.includes '0.0.0.0'
+  ok renderEdgeConfig('wan', janus, '/runtime/edge-status.sock') is rendered.replace('scope localhost', 'scope wan'), 'wan routes like localhost'
   ok local.includes 'mdns'
   ok local.includes 'name rip.local'
   ok local.includes 'apps on'
@@ -95,7 +98,22 @@ test! 'the posture files render into a self-contained Janus config', ->
 
   agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
   ok agent.includes "/tls-ask"
-  ok agent.includes "mode: 'default'"
+  ok not agent.includes("edge.mode"), "the scope is Janus's, not catalog state"
+  ok not defaultCatalog().edge.mode?, "a fresh catalog records no scope"
+
+  # The gate on Janus: a broken scope file is its own message, and an
+  # older Janus (no bind/scope fields) is refused, never bound wide.
+  reports = []
+  report = (message) -> reports.push message; null
+  requireExposureJanus null, report
+  ok reports.pop().includes 'janus'
+  requireExposureJanus { janus: '1.12.2' }, report
+  ok reports.pop().includes 'janus >= 1.13.0'
+  requireExposureJanus { scope: 'lan', bind: [], scope_error: 'scope.json does not parse' }, report
+  ok reports.pop().includes 'scope.json does not parse'
+  eq requireExposureJanus({ scope: 'lan', bind: ['0.0.0.0', '::'] }, report).scope, 'lan'
+  eq reports.length, 0
+  ok agent.includes "'sync'"
   ok agent.includes 'localCaTrusted'
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
@@ -185,7 +203,7 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     ok recoverShape.err.includes 'operation id'
     exposeHelp = cli! APP, ['expose'], env
     eq exposeHelp.code, 1
-    ok exposeHelp.err.includes 'local | public | loopback'
+    ok exposeHelp.err.includes 'localhost | lan | wan'
 
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1

@@ -5,7 +5,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
-import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
 
@@ -19,7 +19,7 @@ CADDY_PKI_ROOT = if platform() is 'darwin'
 else
   join process.env.XDG_DATA_HOME or join(process.env.HOME, '.local', 'share'), 'caddy', 'pki', 'authorities', 'local', 'root.crt'
 
-# Dual-claim so default (loopback) and local (LAN) stay reachable without remapping.
+# Dual-claim so localhost (via.rip) and lan (.local) stay reachable without remapping.
 defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
 
 # For every *.via.rip host, ensure the matching *.local twin is present.
@@ -35,9 +35,18 @@ ensureLanHosts = (hosts) ->
     seen.add twin
   out
 
+# The edge's exposure scope is Janus's; snapshots ask per app, so the
+# answer is kept for two seconds. syncEdge clears it.
+scopeCache = { at: 0, scope: 'localhost' }
+currentScope = ->
+  now = Date.now()
+  return scopeCache.scope if now - scopeCache.at < 2000
+  scopeCache = { at: now, scope: (if externalEdge() then 'localhost' else edgeScope()) }
+  scopeCache.scope
+
 preferredHost = (hosts) ->
   return null unless hosts?.length
-  if state.edge.mode is 'local'
+  if currentScope() is 'lan'
     match = hosts.find (host) -> host.endsWith '.local'
     return match if match?
   else
@@ -68,7 +77,6 @@ defaultState = ->
   version: 1
   apps: []
   edge:
-    mode: 'default'
     baseUrl: 'https://{host}/'
     localCaTrusted: false
     lastError: null
@@ -87,7 +95,7 @@ validateState = (state) ->
     names.add app.name
     roots.add app.root
   edge = state.edge
-  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and edge.mode in ['default', 'local', 'public'] and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
+  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
@@ -117,9 +125,6 @@ migrateState = (raw) ->
     { ...app, options }
   edge = if isRecord(raw.edge) then { ...raw.edge } else null
   if edge?
-    unless edge.mode in ['default', 'local', 'public']
-      edge.mode = 'default'
-      changed = true
     unless typeof edge.localCaTrusted is 'boolean'
       edge.localCaTrusted = false
       changed = true
@@ -127,8 +132,8 @@ migrateState = (raw) ->
       edge.baseUrl = 'https://{host}/'
       changed = true
     # The edge record holds Rip's facts only; what the process was — its
-    # pid, binary, config, ports — is Janus's to know.
-    for key of edge when key not in ['mode', 'baseUrl', 'localCaTrusted', 'lastError']
+    # pid, binary, config, ports, exposure scope — is Janus's to know.
+    for key of edge when key not in ['baseUrl', 'localCaTrusted', 'lastError']
       delete edge[key]
       changed = true
   return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
@@ -244,12 +249,12 @@ edgeHealth = ->
     response.json!
   catch then null
 
-# Keep Janus's service config current with the posture. Rip's own edge
-# facts (posture, trust) live in the catalog; the file Janus runs is
-# rendered from them. An external edge (JANUS_CONTROL) is left alone.
+# Keep Janus's service config current with the edge's scope: the routing
+# posture is rendered for the scope Janus reports. An external edge
+# (JANUS_CONTROL) is left alone.
 ensureEdgeConfig = ->
   return if externalEdge()
-  configureEdge state.edge.mode, paths.edgeStatus, fail
+  configureEdge paths.edgeStatus, fail
   state.edge.lastError = null
 
 # ── serve.rip host declarations ──────────────────────────────────────
@@ -590,7 +595,8 @@ removeApp = (app) ->
   { removed: app.id, name: app.name, root: app.root }
 
 # What `rip sites status` shows for the edge: Janus's own status (the
-# process, its supervisor, its paths) plus Rip's facts (posture, trust).
+# process, its supervisor, its paths, its exposure scope) plus Rip's facts
+# (trust).
 snapshotEdge = ->
   janus = if externalEdge() then null else janusStatus()
   health = edgeHealth!
@@ -598,7 +604,10 @@ snapshotEdge = ->
     state: if health? then 'running' else 'stopped'
     external: externalEdge()
     control: edgeTarget()
-    mode: state.edge.mode
+    scope: janus?.scope or null
+    interface: janus?.interface or null
+    bind: janus?.bind or null
+    firewall: janus?.firewall or null
     baseUrl: state.edge.baseUrl
     localCaTrusted: state.edge.localCaTrusted
     pid: janus?.pid or null
@@ -617,16 +626,19 @@ snapshotEdge = ->
 
 edgeAddress = (path) -> "unix/#{path}"
 
-# Posture flips re-render Janus's config and reload it in place; the
-# registrations survive. Catalog-stored hosts gain a *.local twin so LAN
-# peers can open apps once their managers re-register.
-setEdgeMode = (mode) ->
-  fail "edge mode must be default, local, or public, got #{JSON.stringify(mode)}" unless mode in ['default', 'local', 'public']
-  fail 'local mode requires `rip sites trust edge` first — install the edge CA, then retry', 403 if mode is 'local' and not state.edge.localCaTrusted
-  state.edge.mode = mode
+# Exposure is Janus's ('janus mode'); the routing posture follows it: lan
+# renders Caddyfile.local (Bonjour, rip.local) and catalog-stored hosts
+# gain a *.local twin so LAN peers can open apps once their managers
+# re-register; anything else renders the via.rip posture. A reload in
+# place; the registrations survive. A target scope renders ahead of the
+# mode change: widening to wan puts the wan routing in place before the
+# socket opens to it.
+syncEdge = (target = null) ->
+  scopeCache = { at: 0, scope: 'localhost' }
+  scope = target or currentScope()
   state.edge.baseUrl = 'https://{host}/'
   state.edge.lastError = null
-  if mode is 'local'
+  if scope is 'lan'
     for app in state.apps when app.hosts.length
       app.hosts = ensureLanHosts app.hosts
   saveState()
@@ -771,8 +783,8 @@ statusPage = ->
     </tr>
     """
   ).join ''
-  statusHost = if edge.mode is 'local' then 'https://rip.local/' else 'https://via.rip/'
-  trustHint = if edge.mode is 'local'
+  statusHost = if edge.scope is 'lan' then 'https://rip.local/' else 'https://via.rip/'
+  trustHint = if edge.scope is 'lan'
     'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://rip.local/trust">http://rip.local/trust</a>'
   else
     'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status</code>'
@@ -792,7 +804,7 @@ statusPage = ->
   a { color: inherit; }
 </style></head><body>
   <h1>Rip Sites</h1>
-  <p class="meta">Edge #{escapeHtml edge.state} · mode #{escapeHtml edge.mode} · #{escapeHtml statusHost}</p>
+  <p class="meta">Edge #{escapeHtml edge.state} · scope #{escapeHtml(edge.scope or 'unknown')} · #{escapeHtml statusHost}</p>
   <table><thead><tr><th>App</th><th>State</th><th>URL</th><th>Actions</th></tr></thead><tbody>
   #{rows or '<tr><td colspan="4">No apps registered.</td></tr>'}
   </tbody></table>
@@ -802,9 +814,9 @@ statusPage = ->
 
 # Janus's redacted per-app view (workers, heartbeats, counters, launch
 # links) rides the mdns front door; Caddyfile.local pins `name rip.local`
-# and `listen :7680`. null when unavailable (default mode, edge down).
+# and `listen :7680`. null when unavailable (not lan, or edge down).
 mdnsStatus = ->
-  return null unless state.edge.mode is 'local' and edgeHealth!?
+  return null unless currentScope() is 'lan' and edgeHealth!?
   try
     response = fetch! 'http://127.0.0.1:7680/status.json', { headers: { host: 'rip.local' }, signal: AbortSignal.timeout(1200) }
     return null unless response.ok
@@ -843,14 +855,14 @@ handleStatus = (request) ->
       return Response.new readFileSync(TRUST_SAFARI_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } } if existsSync TRUST_SAFARI_HTML
       return Response.new null, { status: 302, headers: { location: '/trust' } }
     if request.method is 'GET' and url.pathname is '/trust/ca.crt'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose local`', 404 unless existsSync CADDY_PKI_ROOT
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose lan`', 404 unless existsSync CADDY_PKI_ROOT
       return Response.new readFileSync(CADDY_PKI_ROOT), {
         headers:
           'content-type': 'application/x-x509-ca-cert'
           'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
       }
     if request.method is 'GET' and url.pathname is '/trust/ca.mobileconfig'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose local`', 404 unless existsSync CADDY_PKI_ROOT
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose lan`', 404 unless existsSync CADDY_PKI_ROOT
       return Response.new caMobileconfig!, {
         headers:
           'content-type': 'application/x-apple-aspen-config'
@@ -868,7 +880,7 @@ handleStatus = (request) ->
         }
       html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
         <h1>Trust this edge</h1>
-        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>, then <code>rip sites expose local</code>.</p>
+        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>, then <code>rip sites expose lan</code>.</p>
         </body></html>'''
       return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
     actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
@@ -935,8 +947,11 @@ route = (request) ->
         return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
         return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
-        return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'local')) if parts[2] is 'local'
-        return Response.json(mutate!(-> setEdgeMode! if (jsonBody! request).off then 'default' else 'public')) if parts[2] is 'public'
+        if parts[2] is 'sync'
+          body = try request.json! catch then {}
+          target = body?.scope
+          return Response.json({ error: "unknown scope #{JSON.stringify(target)}" }, { status: 400 }) if target? and target not in ['localhost', 'lan', 'wan']
+          return Response.json(mutate!(-> syncEdge!(target)))
     if parts[0] is '1.0' and parts[1] is 'agent'
       if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
         # Graceful recycle: answer first, then exit. The apps are
@@ -1048,7 +1063,7 @@ try
   try unlinkSync paths.edgeStatus
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
   # Janus's config names the status socket by path; a boot is the moment
-  # to make sure the file Janus runs matches the posture.
+  # to make sure the file Janus runs matches the scope Janus reports.
   try
     ensureEdgeConfig!
   catch error

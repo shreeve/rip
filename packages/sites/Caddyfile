@@ -1,6 +1,7 @@
-# Rip development edge — DEFAULT posture (loopback, no Bonjour).
-# RIP_EDGE placeholders are filled by rip sites when it renders this
-# posture into Janus's service config (edge.rip).
+# Rip development edge — routing for the localhost and wan scopes (no
+# Bonjour). RIP_EDGE placeholders are filled by rip sites when it renders
+# this posture into Janus's service config (edge.rip); JANUS_BIND is
+# Janus's, filled from its exposure mode whenever it loads the file.
 # Status at via.rip is Rip-owned (not Janus Bonjour). via.rip and *.via.rip
 # publicly resolve to 127.0.0.1 forever; certs come from the LOCAL CA — one
 # `rip sites trust edge` ceremony covers *.via.rip and *.local alike.
@@ -14,7 +15,7 @@
 	}
 	persist_config off
 	auto_https disable_redirects
-	default_bind {$RIP_EDGE_BIND:127.0.0.1}
+	default_bind {$JANUS_BIND}
 	skip_install_trust
 	servers {
 		protocols h1 h2
@@ -40,13 +41,11 @@
 }
 
 http://via.rip, http://*.via.rip {
-	bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}
 	redir https://{host}{uri} 308
 }
 
 # on_demand_tls ask target (loopback; plain-HTTP URL required by Caddy).
 http://127.0.0.1 {
-	bind {$RIP_EDGE_HTTP_BIND:127.0.0.1}
 	handle /tls-ask* {
 		reverse_proxy unix/{$RIP_EDGE_STATUS}
 	}

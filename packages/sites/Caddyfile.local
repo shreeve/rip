@@ -1,6 +1,7 @@
-# Rip development edge — LOCAL posture (LAN / Bonjour).
+# Rip development edge — routing for the lan scope (LAN / Bonjour).
 # RIP_EDGE placeholders are filled by rip sites when it renders this
-# posture into Janus's service config (edge.rip).
+# posture into Janus's service config (edge.rip); JANUS_BIND is Janus's,
+# filled from its exposure mode whenever it loads the file.
 # Shared mDNS front door stays on HTTP for Janus; product status URL is HTTPS.
 # Enter only after `rip edge trust` on this machine.
 {
@@ -13,7 +14,7 @@
 	}
 	persist_config off
 	auto_https disable_redirects
-	default_bind {$RIP_EDGE_BIND:0.0.0.0}
+	default_bind {$JANUS_BIND}
 	skip_install_trust
 	servers {
 		protocols h1 h2
@@ -56,7 +57,6 @@
 # and egg). A blind 308 here would shove untrusted phones into the browser
 # interstitial before any onboarding could happen; deep links still bounce.
 http://rip.local {
-	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	handle /trust* {
 		reverse_proxy unix/{$RIP_EDGE_STATUS}
 	}
@@ -71,13 +71,12 @@ http://rip.local {
 
 # on_demand_tls ask target (loopback; no Host / Bonjour dependency).
 # Caddy itself dials this from loopback; the remote_ip guard keeps LAN
-# peers (who can reach this 0.0.0.0 listener with a Host: 127.0.0.1
-# header) away from the agent. Known accepted exposure that a guard here
+# peers (who can reach a lan listener with a Host: 127.0.0.1 header) away
+# from the agent. Known accepted exposure that a guard here
 # CANNOT close: any LAN peer can still trigger on-demand minting via TLS
 # handshakes with fresh allowed SNI names — a dev-tool trade-off on a
 # trusted LAN.
 http://127.0.0.1 {
-	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	@ask {
 		path /tls-ask*
 		remote_ip 127.0.0.1
@@ -88,12 +87,10 @@ http://127.0.0.1 {
 }
 
 http://*.local {
-	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	redir https://{host}{uri} 308
 }
 
 http://via.rip, http://*.via.rip {
-	bind {$RIP_EDGE_HTTP_BIND:0.0.0.0}
 	redir https://{host}{uri} 308
 }
 

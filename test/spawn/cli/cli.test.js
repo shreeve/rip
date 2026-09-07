@@ -110,7 +110,7 @@ describe('cli: compile surface', () => {
     const sites = rip(['sites', '--help']);
     expect(sites.status).toBe(0);
     expect(sites.stdout).toContain('rip sites <verb>');
-    expect(sites.stdout).toContain('expose local|public|loopback');
+    expect(sites.stdout).toContain('expose localhost|lan|wan');
   });
 
   test('retired site and edge CLIs point at rip sites', () => {
