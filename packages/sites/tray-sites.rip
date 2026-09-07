@@ -36,7 +36,7 @@ dashboardUrl = (edge) ->
 
 # The edge is Janus's process (janus autostart | start | stop | restart)
 # and so is its exposure scope (`janus mode`, which may need sudo and so
-# a terminal); the menu shows both and drives trust.
+# a terminal); the menu shows both.
 edgeMenu = (edge) ->
   scope = edge.scope or 'localhost'
   status = if edge.state is 'running'
@@ -50,12 +50,6 @@ edgeMenu = (edge) ->
   if edge.state is 'running'
     items.push link 'Open Dashboard', dashboardUrl(edge), id: 'edge.dashboard', icon: 'safari'
   items.push label 'Newer janus installed · janus restart', icon: 'arrow.up.circle' if edge.binaryNewer
-  # After a successful trust the action becomes this confirmation row — silent
-  # success with an unchanged "Trust CA…" button reads as "nothing happened".
-  if edge.localCaTrusted
-    items.push label 'Local CA trusted', icon: 'checkmark.seal.fill'
-  else
-    items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'sites', 'trust', 'edge', '--json'
   submenu 'Edge', items, id: 'edge', icon: 'network'
 
 siteMenu = (site) ->

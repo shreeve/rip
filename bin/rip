@@ -169,7 +169,7 @@ if (args[0] === 'sites') {
 // Retired CLIs — point at the unified surface.
 if (args[0] === 'edge' || args[0] === 'site') {
   const hint = args[0] === 'edge'
-    ? 'use `rip sites <verb> edge` (e.g. `rip sites trust edge`, `rip sites status`)'
+    ? 'the edge is janus\'s (`janus status`, `janus mode`, `janus trust`); `rip sites status` shows it'
     : 'use `rip sites run` / `rip sites publish` / `rip sites stop` / …';
   console.error(`rip: \`rip ${args[0]}\` was removed — ${hint}`);
   process.exit(1);

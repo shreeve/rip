@@ -1,8 +1,8 @@
 import { test, eq, ok } from 'rip/testing'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { renderEdgeConfig, requireExposureJanus } from '../../edge.rip'
+import { SITE, SITE_NAME, ensureEdgeSite, requireExposureJanus } from '../../edge.rip'
 import { defaultCatalog } from '../../catalog.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
@@ -47,51 +47,41 @@ stopAgent = (runtime) ->
   try process.kill pid, 'SIGTERM'
   waitFor! 'agent shutdown', -> not existsSync(owner)
 
-# The edge is Janus's process; Rip renders what it serves. The one
-# posture mints exact-host certs from the LOCAL CA on demand (dogfooding —
-# we run exactly what users run; no packaged public certificate, no
-# renewal treadmill), routes both name families in every mode, and the
-# rendered file carries Janus's own paths in place of every placeholder
-# but one: the bind stays {$JANUS_BIND}, which Janus fills from its
-# exposure mode whenever it loads the file. Reach is the mode's alone.
-test! 'the posture renders around the bind Janus owns', ->
-  janus =
-    admin: '/state/run/admin.sock'
-    socket: '/state/run/janus.sock'
-    log: '/state/log/janus.log'
-    sites: '/config/sites'
-  rendered = renderEdgeConfig janus, '/runtime/edge-status.sock'
-  ok not rendered.replaceAll('{$JANUS_BIND}', '').includes('{$'), 'every placeholder but the bind is filled'
-  ok rendered.includes('default_bind {$JANUS_BIND}'), "the bind is Janus's to fill"
-  ok not rendered.includes('0.0.0.0'), 'rip renders no bind address'
-  ok rendered.includes 'admin unix//state/run/admin.sock'
-  ok rendered.includes 'control internal /state/run/janus.sock'
-  ok not /\bcontrol local\b/.test(rendered), 'the control API is the unix socket alone'
-  ok rendered.includes 'output file /state/log/janus.log'
-  ok rendered.includes 'import /config/sites/*.caddy'
-  ok rendered.includes 'reverse_proxy unix//runtime/edge-status.sock'
-  ok rendered.includes 'protocols h1 h2'
-  ok rendered.includes 'redir https://{host}{uri} 308'
-  ok rendered.includes 'http://via.rip, http://*.via.rip'
-  ok rendered.includes 'http://*.local'
-  ok rendered.includes 'Rendered by rip sites'
-  ok not rendered.includes 'RIP_EDGE_CERT'
-  # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards;
-  # Janus approves the names registered with it, the status page's too.
-  ok rendered.includes 'on_demand_tls'
-  ok rendered.includes('permission janus'), 'Janus approves names in-process'
-  ok rendered.includes 'issuer internal'
-  ok rendered.includes 'on_demand'
-  ok rendered.includes 'via.rip, rip.local, *.via.rip, *.local {'
-  # The LAN pieces are routed in every mode; 'janus mode' decides who
-  # reaches them.
-  ok rendered.includes 'mdns'
-  ok rendered.includes 'name rip.local'
-  ok rendered.includes 'apps on'
-  ok not /\blisten\b/.test(rendered), 'rip owns rip.local on :80; Janus opens no front door of its own'
-  # The trust bootstrap rides plain HTTP straight from the agent's socket.
-  ok /http:\/\/rip\.local \{[\s\S]*?handle \/trust\*[\s\S]*?reverse_proxy unix\/\/runtime\/edge-status\.sock/.test(rendered)
-  ok renderEdgeConfig({ ...janus, scope: 'lan' }, '/runtime/edge-status.sock') is renderEdgeConfig({ ...janus, scope: 'wan' }, '/runtime/edge-status.sock'), 'the render does not vary with the mode'
+# The edge is Janus's: its process, its reach, its *.local names, and
+# trust in its CA. Rip brings one site file for its own names, via.rip
+# and *.via.rip, kept in Janus's sites directory as shipped: exact-host
+# certs from the local CA on demand (dogfooding — we run exactly what
+# users run; no packaged public certificate, no renewal treadmill), the
+# janus handler, and the janus access log format. Nothing in it is
+# global, nothing is rendered, and nothing varies with the mode.
+test! "rip's site file joins Janus's edge as shipped", ->
+  site = readFileSync SITE, 'utf8'
+  eq basename(SITE), SITE_NAME
+  ok site.includes('via.rip, *.via.rip {'), 'the via.rip family, one block'
+  ok site.includes 'issuer internal'
+  ok site.includes 'on_demand'
+  ok site.includes 'format janus'
+  ok not site.includes('{$'), 'no placeholders: nothing to render'
+  for global in ['admin', 'default_bind', 'on_demand_tls', 'control', 'mdns', 'listen', 'import', 'skip_install_trust']
+    ok not RegExp.new("^\\s*#{global}\\b", 'm').test(site), "no #{global}: site blocks only, the edge's options are Janus's"
+  directives = site.split('\n').filter((line) -> not line.startsWith('#')).join '\n'
+  ok not directives.includes('.local'), "the LAN names are Janus's own site"
+  ok not directives.includes('trust'), 'trust is served by Janus'
+
+  # The file lands in the sites directory Janus reports, as shipped, and
+  # a second pass with nothing changed writes nothing.
+  sites = mkdtempSync join(tmpdir(), 'rip-sites-edge-')
+  try
+    janus = { sites: join(sites, 'sites'), running: false }
+    reports = []
+    eq ensureEdgeSite(janus, (message) -> reports.push message; null), janus
+    eq readFileSync(join(janus.sites, SITE_NAME), 'utf8'), site
+    eq reports.length, 0
+    written = statSync(join(janus.sites, SITE_NAME)).mtimeMs
+    ensureEdgeSite janus, (message) -> reports.push message; null
+    eq statSync(join(janus.sites, SITE_NAME)).mtimeMs, written
+  finally
+    rmSync sites, { recursive: true, force: true }
 
   agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
   ok agent.includes("'/1.0/mdns/status'"), "Janus's per-app view comes over the control socket"
@@ -99,6 +89,9 @@ test! 'the posture renders around the bind Janus owns', ->
   ok agent.includes("lease: 'heartbeat'"), 'and lapses with the agent'
   ok not agent.includes("edge.mode"), "the scope is Janus's, not catalog state"
   ok not defaultCatalog().edge.mode?, "a fresh catalog records no scope"
+  ok not agent.includes("'/trust"), 'the agent serves no trust route'
+  ok not agent.includes('localCaTrusted'), 'trust is not rip state'
+  ok not agent.includes('ca_trusted'), "trust facts are janus status's, not relayed"
 
   # The gate on Janus: a broken scope file is its own message, and an
   # older Janus (no bind/scope fields) is refused, never bound wide.
@@ -112,11 +105,8 @@ test! 'the posture renders around the bind Janus owns', ->
   ok reports.pop().includes 'scope.json does not parse'
   eq requireExposureJanus({ scope: 'lan', bind: ['0.0.0.0', '::'] }, report).scope, 'lan'
   eq reports.length, 0
-  ok agent.includes 'localCaTrusted'
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
-  # trust talks to Janus's unix admin socket — never stock :2019
-  ok agent.includes "'trust', '--address', edgeAddress(admin)"
   # status page: `.join` must follow a parenthesized map, not the row string
   ok agent.includes '(apps.map (app) ->'
   ok /\)\.join ''/.test(agent)

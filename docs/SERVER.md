@@ -293,16 +293,15 @@ rejects loudly before registration or activation.
 
 ## Edge ownership
 
-The packaged macOS edge uses two launchd-owned loopback TCP sockets —
-HTTP on `127.0.0.1:80` and HTTPS on `127.0.0.1:443` — inherited by
-user-owned Caddy as `fd/3` and `fd/4`. The inherited streams serve
-HTTP/1.1 and HTTP/2. HTTP/3 is disabled on those listeners because QUIC
-requires a separately inherited UDP socket.
-
-Caddy owns TLS and dispatches requests into Janus. Janus owns dynamic App
-registration, root search, API proxying, Hub transport, access streams, and
-weak file ETags. Rip Manager communicates with Janus through its private
-control socket.
+The edge is Janus's process (`janus autostart`, `start`, `stop`,
+`restart`, `status`), listening on ports 80 and 443 where its exposure
+mode says (`janus mode`), with HTTP/1.1 and HTTP/2. Caddy owns TLS and
+dispatches requests into Janus. Janus owns dynamic App registration, root
+search, API proxying, Hub transport, access streams, weak file ETags, the
+`*.local` and `*.localhost` names, the local CA, and trust in it. Rip
+contributes one site file for its via.rip names and registers apps over
+Janus's private control socket; everything Rip runs listens on Unix
+sockets.
 
 ## Open leftovers
 

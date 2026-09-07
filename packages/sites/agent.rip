@@ -2,7 +2,6 @@ import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, 
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute, join } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { platform } from 'node:os'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
@@ -12,12 +11,6 @@ throw Error.new('rip/sites/agent is private process machinery') unless import.me
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
 STATUS_HTML = join(import.meta.dir, 'status.html')
-TRUST_HTML = join(import.meta.dir, 'trust.html')
-TRUST_SAFARI_HTML = join(import.meta.dir, 'trust-safari.html')
-CADDY_PKI_ROOT = if platform() is 'darwin'
-  join process.env.HOME, 'Library', 'Application Support', 'Caddy', 'pki', 'authorities', 'local', 'root.crt'
-else
-  join process.env.XDG_DATA_HOME or join(process.env.HOME, '.local', 'share'), 'caddy', 'pki', 'authorities', 'local', 'root.crt'
 
 # Dual-claim so localhost (via.rip) and lan (.local) stay reachable without remapping.
 defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
@@ -78,7 +71,6 @@ defaultState = ->
   apps: []
   edge:
     baseUrl: 'https://{host}/'
-    localCaTrusted: false
     lastError: null
 
 validateState = (state) ->
@@ -95,7 +87,7 @@ validateState = (state) ->
     names.add app.name
     roots.add app.root
   edge = state.edge
-  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and typeof edge.localCaTrusted is 'boolean' and (edge.lastError is null or typeof edge.lastError is 'string')
+  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and (edge.lastError is null or typeof edge.lastError is 'string')
   fail("malformed edge record at #{paths.state}", 500) unless valid
   state
 
@@ -125,15 +117,12 @@ migrateState = (raw) ->
     { ...app, options }
   edge = if isRecord(raw.edge) then { ...raw.edge } else null
   if edge?
-    unless typeof edge.localCaTrusted is 'boolean'
-      edge.localCaTrusted = false
-      changed = true
     unless typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}')
       edge.baseUrl = 'https://{host}/'
       changed = true
-    # The edge record holds Rip's facts only; what the process was — its
-    # pid, binary, config, ports, exposure scope — is Janus's to know.
-    for key of edge when key not in ['baseUrl', 'localCaTrusted', 'lastError']
+    # The edge record holds Rip's facts only; the process, its ports, its
+    # exposure scope, and trust in its CA are Janus's to know.
+    for key of edge when key not in ['baseUrl', 'lastError']
       delete edge[key]
       changed = true
   return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
@@ -249,11 +238,11 @@ edgeHealth = ->
     response.json!
   catch then null
 
-# Keep Janus's service config current: the posture, rendered with the
-# paths Janus reports. An external edge (JANUS_CONTROL) is left alone.
-ensureEdgeConfig = ->
+# Keep rip's site file in Janus's sites directory. An external edge
+# (JANUS_CONTROL) is left alone.
+ensureEdgeSite = ->
   return if externalEdge()
-  configureEdge paths.edgeStatus, fail
+  configureEdge fail
   state.edge.lastError = null
 
 # The status page is an app like any other: registered with Janus under
@@ -389,8 +378,8 @@ edgeSitesDir = ->
   sitesDir ?= janusStatus()?.sites or null
   sitesDir
 
-# Hosts beyond the packaged posture (*.local, via.rip) answer only when
-# a sites snippet declares them — and Caddy's import glob is silent
+# Hosts beyond Janus's *.local site and rip's via.rip file answer only
+# when a sites snippet declares them — and Caddy's import glob is silent
 # when nothing matches, so an app advertising its own domain with no
 # snippet looks healthy everywhere while its URL answers nothing
 # (observed in the field). The snapshot carries the warning instead.
@@ -532,9 +521,9 @@ startApp = (app, automatic = false) ->
   pending = starting.get app.id
   return pending if pending?
   task = do ->
-    # The edge is Janus's process: make sure what it serves is current,
-    # then that it is there to register with.
-    ensureEdgeConfig!
+    # The edge is Janus's process: make sure rip's site file is there,
+    # then that the edge is there to register with.
+    ensureEdgeSite!
     health = edgeHealth!
     unless health?
       fail JANUS_MISSING, 503 unless externalEdge() or janusBinary()?
@@ -637,8 +626,8 @@ removeApp = (app) ->
   { removed: app.id, name: app.name, root: app.root }
 
 # What `rip sites status` shows for the edge: Janus's own status (the
-# process, its supervisor, its paths, its exposure scope) plus Rip's facts
-# (trust).
+# process, its supervisor, its paths, its exposure scope) plus Rip's
+# facts. Trust in the CA is Janus's to report (`janus status`).
 snapshotEdge = ->
   janus = if externalEdge() then null else janusStatus()
   health = edgeHealth!
@@ -651,7 +640,6 @@ snapshotEdge = ->
     bind: janus?.bind or null
     firewall: janus?.firewall or null
     baseUrl: state.edge.baseUrl
-    localCaTrusted: state.edge.localCaTrusted
     pid: janus?.pid or null
     uptime: janus?.uptime or null
     supervisor: janus?.supervisor or null
@@ -665,8 +653,6 @@ snapshotEdge = ->
     janus: health
     lastError: state.edge.lastError
   }
-
-edgeAddress = (path) -> "unix/#{path}"
 
 # Exit when nothing remains to supervise — no idle forever control plane.
 #
@@ -688,91 +674,6 @@ maybeExitIdle = ->
   return if state.apps.some (app) -> app.desired is 'running'
   return if inFlight > 0 or Date.now() - lastActivity < IDLE_GRACE
   setTimeout shutdown, 100
-
-# Janus's admin socket, for `janus trust`: the edge must be running.
-edgeAdmin = ->
-  janus = janusStatus()
-  fail JANUS_MISSING, 503 unless janus?
-  fail "edge must be running to trust the CA — #{JANUS_STOPPED}", 503 unless janus.running and existsSync(janus.admin)
-  janus.admin
-
-trustEdge = ->
-  admin = edgeAdmin()
-  result = Bun.spawnSync [janusBinary(), 'trust', '--address', edgeAddress(admin)], { stdout: 'pipe', stderr: 'pipe' }
-  detail = result.stderr.toString().trim() or result.stdout.toString().trim()
-  unless result.exitCode is 0
-    # The install escalates via sudo, and this daemon has no terminal to
-    # prompt with — the CLI runs the install itself for exactly that
-    # reason. Anyone landing here through the HTTP API gets the way out.
-    hint = 'the agent cannot prompt for sudo — run `rip sites trust edge` from a terminal, or export the CA (`rip sites trust edge --export ca.crt`) and add it to the system trust store yourself'
-    fail "Caddy trust failed#{if detail then ": #{detail}" else ''} (#{hint})", 503
-  markEdgeTrusted()
-
-# The CLI performs the certificate install in the user's terminal (sudo
-# can prompt there) and then records the outcome here. Recording requires
-# a live edge so the flag can never precede a CA existing to trust.
-markEdgeTrusted = ->
-  edgeAdmin()
-  state.edge.localCaTrusted = true
-  saveState()
-  { trusted: true, root: if existsSync(CADDY_PKI_ROOT) then CADDY_PKI_ROOT else null }
-
-exportEdgeCa = ->
-  fail "edge CA not found at #{CADDY_PKI_ROOT} — run `rip sites trust edge` (and start local once if needed)", 404 unless existsSync CADDY_PKI_ROOT
-  { path: CADDY_PKI_ROOT, pem: readFileSync(CADDY_PKI_ROOT, 'utf8') }
-
-# iOS installs CA trust only through a configuration profile — a bare .crt
-# saved from Chrome is a dead file in the Files app. Wrap the root in a
-# .mobileconfig (payload is base64 DER, which is exactly the PEM body).
-# UUIDs derive from the cert digest so reinstalling replaces the profile
-# instead of stacking duplicates.
-caMobileconfig = ->
-  pem = readFileSync CADDY_PKI_ROOT, 'utf8'
-  der = pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '')
-  hex = createHash('sha256').update(der).digest('hex')
-  uuidAt = (offset) ->
-    "#{hex.slice(offset, offset + 8)}-#{hex.slice(offset + 8, offset + 12)}-#{hex.slice(offset + 12, offset + 16)}-#{hex.slice(offset + 16, offset + 20)}-#{hex.slice(offset + 20, offset + 32)}".toUpperCase()
-  """
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-\t<key>PayloadContent</key>
-\t<array>
-\t\t<dict>
-\t\t\t<key>PayloadCertificateFileName</key>
-\t\t\t<string>rip-edge-local-ca.crt</string>
-\t\t\t<key>PayloadContent</key>
-\t\t\t<data>#{der}</data>
-\t\t\t<key>PayloadDescription</key>
-\t\t\t<string>Trusts the Rip local edge CA so https://*.local and https://*.via.rip sites verify on this device.</string>
-\t\t\t<key>PayloadDisplayName</key>
-\t\t\t<string>Rip Local Edge CA</string>
-\t\t\t<key>PayloadIdentifier</key>
-\t\t\t<string>rip.via.edge.ca</string>
-\t\t\t<key>PayloadType</key>
-\t\t\t<string>com.apple.security.root</string>
-\t\t\t<key>PayloadUUID</key>
-\t\t\t<string>#{uuidAt 0}</string>
-\t\t\t<key>PayloadVersion</key>
-\t\t\t<integer>1</integer>
-\t\t</dict>
-\t</array>
-\t<key>PayloadDisplayName</key>
-\t<string>Rip Local HTTPS (rip.local · via.rip)</string>
-\t<key>PayloadIdentifier</key>
-\t<string>rip.via.edge.trust</string>
-\t<key>PayloadRemovalDisallowed</key>
-\t<false/>
-\t<key>PayloadType</key>
-\t<string>Configuration</string>
-\t<key>PayloadUUID</key>
-\t<string>#{uuidAt 32}</string>
-\t<key>PayloadVersion</key>
-\t<integer>1</integer>
-</dict>
-</plist>
-"""
 
 escapeHtml = (value) -> String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 
@@ -807,10 +708,6 @@ statusPage = ->
     """
   ).join ''
   statusHost = if edge.scope is 'lan' then 'https://rip.local/' else 'https://via.rip/'
-  trustHint = if edge.scope is 'lan'
-    'Trust bootstrap: <a href="/trust">/trust</a> (HTTPS) · phone/peer without cert accept: <a href="http://rip.local/trust">http://rip.local/trust</a>'
-  else
-    'Trust bootstrap: <a href="/trust">/trust</a> · CLI: <code>rip sites status</code>'
   """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rip Sites</title>
@@ -831,7 +728,6 @@ statusPage = ->
   <table><thead><tr><th>App</th><th>State</th><th>URL</th><th>Actions</th></tr></thead><tbody>
   #{rows or '<tr><td colspan="4">No apps registered.</td></tr>'}
   </tbody></table>
-  <p class="meta" style="margin-top:1.5rem">#{trustHint}</p>
 </body></html>
 """
 
@@ -858,48 +754,6 @@ handleStatus = (request) ->
     if request.method is 'GET' and url.pathname is '/status.json'
       apps = Promise.all! state.apps.map (app) -> snapshotApp! app
       return Response.json { edge: snapshotEdge!, apps: apps, janus: mdnsStatus! }
-    # Trust onboarding. The page itself rides both plain HTTP (the CA
-    # bootstrap — an untrusted device cannot load anything over https) and
-    # HTTPS (informational once trusted). /trust/check is the probe target:
-    # an https fetch from the http-served page resolves only when this
-    # device already trusts the CA — surviving the handshake is the signal.
-    if request.method is 'GET' and url.pathname is '/trust/check'
-      return Response.new null, { status: 204, headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' } }
-    # Safari-side landing for the x-safari-https jump: auto-starts the
-    # profile download but keeps the remaining Settings steps on screen —
-    # a raw-file target strands the user on a blank page after the prompts.
-    if request.method is 'GET' and url.pathname is '/trust/safari'
-      return Response.new readFileSync(TRUST_SAFARI_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } } if existsSync TRUST_SAFARI_HTML
-      return Response.new null, { status: 302, headers: { location: '/trust' } }
-    if request.method is 'GET' and url.pathname is '/trust/ca.crt'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`', 404 unless existsSync CADDY_PKI_ROOT
-      return Response.new readFileSync(CADDY_PKI_ROOT), {
-        headers:
-          'content-type': 'application/x-x509-ca-cert'
-          'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
-      }
-    if request.method is 'GET' and url.pathname is '/trust/ca.mobileconfig'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`', 404 unless existsSync CADDY_PKI_ROOT
-      return Response.new caMobileconfig!, {
-        headers:
-          'content-type': 'application/x-apple-aspen-config'
-          'content-disposition': 'attachment; filename="rip-local-edge.mobileconfig"'
-      }
-    if request.method is 'GET' and (url.pathname is '/trust' or url.pathname is '/trust/')
-      if existsSync TRUST_HTML
-        return Response.new readFileSync(TRUST_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } }
-      # Fallback when the page file is missing: hand over the raw CA.
-      if existsSync CADDY_PKI_ROOT
-        return Response.new readFileSync(CADDY_PKI_ROOT), {
-          headers:
-            'content-type': 'application/x-x509-ca-cert'
-            'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
-        }
-      html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
-        <h1>Trust this edge</h1>
-        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>.</p>
-        </body></html>'''
-      return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
     actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
     if request.method is 'POST' and actionMatch?
       selector = decodeURIComponent actionMatch[1]
@@ -960,10 +814,6 @@ route = (request) ->
         return Response.json readLog(logPath, lines, after)
     if parts[0] is '1.0' and parts[1] is 'edge'
       return Response.json(snapshotEdge!) if request.method is 'GET' and parts.length is 2
-      if request.method is 'POST' and parts.length is 3
-        return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
-        return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
-        return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
     if parts[0] is '1.0' and parts[1] is 'agent'
       if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
         # Graceful recycle: answer first, then exit. The apps are
@@ -1075,10 +925,10 @@ try
   saveState() if loaded.dirty
   try unlinkSync paths.edgeStatus
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
-  # Janus's config names the status socket by path; a boot is the moment
-  # to make sure the file Janus runs carries the paths Janus reports.
+  # A boot is the moment to make sure rip's site file is in Janus's sites
+  # directory.
   try
-    ensureEdgeConfig!
+    ensureEdgeSite!
   catch error
     state.edge.lastError = error?.message or String(error)
   registerStatus!

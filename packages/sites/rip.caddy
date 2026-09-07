@@ -1,0 +1,25 @@
+# Rip's names on Janus's edge. rip sites keeps this file in Janus's sites
+# directory (rip.caddy), where the service Caddyfile imports it.
+#
+# via.rip and *.via.rip publicly resolve to 127.0.0.1: the apex carries the
+# Rip status page (the agent registers its status socket under it) and the
+# subdomains carry the apps. Every name is an app registered with Janus,
+# and every certificate is an exact-host cert the local CA mints on demand
+# for a registered name (browsers reject second-level wildcards). The LAN
+# family, rip.local and *.local, is Janus's own *.local site; apps claim a
+# .local twin for every .via.rip host and register both.
+#
+# Trust is Janus's: 'janus trust' on this machine, http://janus.local/trust
+# on a phone. Reach is Janus's too ('janus mode'); the routing is the same
+# in every mode.
+via.rip, *.via.rip {
+	tls {
+		issuer internal
+		on_demand
+	}
+	janus
+	log {
+		output stderr
+		format janus
+	}
+}

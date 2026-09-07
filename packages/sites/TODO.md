@@ -4,18 +4,15 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Edge
 
-- [ ] **wan routing:** ACME / real DNS for `janus mode wan`; the posture
-      routes the local-CA families only.
-- [ ] Behavioral appliance pins for the trust hint and `.local` host
-      registration (the pins are static strings).
-- [ ] After control-plane / Caddyfile changes, document or automate
-      restart so launchd dual-socket listeners cannot race a stale
-      in-memory process writing an old plist.
+- [ ] **wan routing:** ACME / real DNS for `janus mode wan`; `rip.caddy`
+      and Janus's local sites route the local-CA families only.
+- [ ] Behavioral appliance pins for `.local` host registration (the
+      pins are static strings).
 - [ ] Pin `GET /bundle.json` + `Accept-Encoding: br` → Manager
       `bundle.json.br` bytes (`Content-Encoding: br`, `Vary:
-      Accept-Encoding`) through released Janus. Packaged Caddyfiles
-      already have `files { precompressed }`; the janus test fixture
-      still uses bare `files`.
+      Accept-Encoding`) through released Janus. Janus's seed carries
+      `files { precompressed }`; the janus test fixture uses bare
+      `files`.
 - [ ] Pin one Caddy compression policy (encodings, min size, MIME
       exclusions, streaming, pre-encoded, `no-transform`) and certify
       through released Janus.
