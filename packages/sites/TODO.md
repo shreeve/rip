@@ -4,8 +4,8 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Edge
 
-- [ ] **`public` posture:** ACME / real DNS; keep `expose public` refusing
-      until Caddyfile + mode exist. Do not persist `public` in state first.
+- [ ] **wan routing:** ACME / real DNS for `expose wan`, which today renders
+      the localhost routing behind Janus's wildcard.
 - [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
       first), and `.local` host registration (today: static string pins).
 - [ ] After control-plane / Caddyfile changes, document or automate
