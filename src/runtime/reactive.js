@@ -33,7 +33,11 @@
 // recomputing computed subscribes it as a dependency; writing to a
 // state notifies subscribers (computeds mark dirty and propagate;
 // effects queue); queued effects flush synchronously after the write,
-// or once at the end of the enclosing __batch.
+// or once at the end of the enclosing __batch. The flush is owner-
+// ordered: an effect never runs before an effect whose owner frame
+// encloses its own, so a render swap disposes the block it owns
+// before any binding inside that block re-runs. Within one owner
+// depth the order is queue insertion.
 //
 // The equality cut: a computed's subscribers see a change only when
 // its output changes (===). Invalidation is push (a dirty mark, no
@@ -77,7 +81,36 @@ globalThis[__RIP_REACTIVE_SENTINEL] = true;
 
 let __currentEffect = null;        // the effect/computed currently evaluating
 const __computingStack = [];       // active computeds, outermost to innermost
-const __pendingEffects = new Set(); // effects queued to run
+// Effects queued to run, drained shallowest owner depth first; within
+// one depth, queue insertion order. `low` is the shallowest bucket
+// that may hold an entry — a cursor, never a promise that it does.
+const __pendingEffects = {
+  buckets: [], size: 0, low: 0,
+  add(e) {
+    const d = e.depth;
+    let b = this.buckets[d];
+    if (b === undefined) b = this.buckets[d] = new Set();
+    if (b.has(e)) return;
+    b.add(e); this.size++;
+    if (d < this.low) this.low = d;
+  },
+  delete(e) {
+    const b = this.buckets[e.depth];
+    if (b !== undefined && b.delete(e)) this.size--;
+  },
+  clear() { this.buckets = []; this.size = 0; this.low = 0; },
+  shift() {
+    for (let d = this.low; d < this.buckets.length; d++) {
+      const b = this.buckets[d];
+      if (b === undefined || b.size === 0) continue;
+      this.low = d;
+      const e = b.values().next().value;
+      b.delete(e); this.size--;
+      return e;
+    }
+    return null;
+  },
+};
 let __batching = false;            // inside __batch()?
 let __currentOwner = null;         // the owner frame effects register on
 
@@ -101,16 +134,22 @@ function __setEffectErrorReporter(reporter) {
 
 // Flush all pending effects (after a state write, or at the end of a
 // batch). Disposed effects are skipped here as well as in run() —
-// filtering avoids even calling run() on a known-dead effect. An
-// effect that throws aborts the flush: the exception propagates to
-// the writer, and effects still in this snapshot do not run (they are
-// no longer pending; a later write that re-notifies them re-queues
-// them).
+// filtering avoids even calling run() on a known-dead effect. A write
+// during the flush enqueues into the same queue and its nested flush
+// drains that queue shallowest-first, so an owner queued by the outer
+// write still runs before anything it owns. An effect that throws
+// aborts the flush: the exception propagates to the writer, and the
+// effects still queued do not run (they are no longer pending; a
+// later write that re-notifies them re-queues them).
 function __flushEffects() {
-  const effects = [...__pendingEffects];
-  __pendingEffects.clear();
-  for (const effect of effects) {
-    if (!effect._disposed) effect.run();
+  try {
+    while (__pendingEffects.size > 0) {
+      const next = __pendingEffects.shift();
+      if (!next._disposed) next.run();
+    }
+  } catch (e) {
+    __pendingEffects.clear();
+    throw e;
   }
 }
 
@@ -339,6 +378,7 @@ function __effect(fn) {
   // effects capture null.
   const owner = __currentOwner;
   const effect = {
+    depth: owner ? owner.depth + 1 : 0,
     dependencies: new Set(),
     computedDeps: new Map(),
     _hard: true, // the creation run always runs; a state write sets it again
@@ -490,7 +530,11 @@ function __batch(fn) {
 function __ownerFrame({ nested = true } = {}) {
   let disposers = [];
   let detach = null;
+  // How many frames enclose this one — the flush's ordering key for
+  // every effect the frame owns.
+  const depth = __currentOwner ? __currentOwner.depth + 1 : 0;
   const frame = {
+    depth,
     get disposed() { return disposers === null; },
     // The live disposer count — harness-facing (the accumulation
     // gate reads it); nothing emits or delivers it.

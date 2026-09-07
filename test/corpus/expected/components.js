@@ -184,7 +184,7 @@ let Roster = class extends __Component {
         if (want === showing) return;
         if (currentBlock) {
           const leaving = currentBlock;
-          if (leaving._t) { __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+          if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
           else { leaving.d(true); }
           currentBlock = null;
         }
@@ -230,6 +230,7 @@ let Roster = class extends __Component {
       },
       p(ctx) {
       },
+      f() { },
       d(detaching) {
         if (detaching) __detach(_el2);
       }
@@ -249,6 +250,7 @@ let Roster = class extends __Component {
       },
       p(ctx) {
       },
+      f() { },
       d(detaching) {
         if (detaching) __detach(_el3);
       }
@@ -309,7 +311,7 @@ let Chooser = class extends __Component {
         if (want === showing) return;
         if (currentBlock) {
           const leaving = currentBlock;
-          if (leaving._t) { __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+          if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
           else { leaving.d(true); }
           currentBlock = null;
         }
@@ -346,6 +348,7 @@ let Chooser = class extends __Component {
       },
       p(ctx) {
       },
+      f() { },
       d(detaching) {
         if (detaching) __detach(_el2);
       }
@@ -376,7 +379,7 @@ let Chooser = class extends __Component {
               if (want === showing) return;
               if (currentBlock) {
                 const leaving = currentBlock;
-                if (leaving._t) { __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+                if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
                 else { leaving.d(true); }
                 currentBlock = null;
               }
@@ -400,6 +403,7 @@ let Chooser = class extends __Component {
           }
         } finally { __popOwner(__o); }
       },
+      f() { if (__fr) { __fr.dispose(); __fr = null; } },
       d(detaching) {
         if (__fr) { __fr.dispose(); __fr = null; }
         if (detaching) __detach(_anchor3);
@@ -420,6 +424,7 @@ let Chooser = class extends __Component {
       },
       p(ctx) {
       },
+      f() { },
       d(detaching) {
         if (detaching) __detach(_el4);
       }
@@ -439,6 +444,7 @@ let Chooser = class extends __Component {
       },
       p(ctx) {
       },
+      f() { },
       d(detaching) {
         if (detaching) __detach(_el5);
       }
