@@ -35,6 +35,19 @@
 // effects queue); queued effects flush synchronously after the write,
 // or once at the end of the enclosing __batch.
 //
+// The equality cut: a computed's subscribers see a change only when
+// its output changes (===). Invalidation is push (a dirty mark, no
+// recomputation); evaluation is pull. A computed reached through
+// another computed is marked CHECK rather than DIRTY, and an effect
+// reached only through computeds pull-checks them before running:
+// each is recomputed on demand and its version compared with the one
+// the effect saw last run. No version moved — no run; the effect's
+// edges, cleanup, and AbortSignal stay as the previous run left them.
+// A state write reaching an effect or computed directly is always a
+// change (state already refuses same-value writes). Identity is the
+// rule: a computed that returns the same object after an in-place
+// mutation reports no change — return a new value to signal one.
+//
 // Delivery: this file is BOTH the shared module toolchain paths
 // import and the body standalone output inlines once (IIFE-wrapped;
 // the emitter strips the export line below). It is plain JavaScript —
@@ -138,8 +151,8 @@ function __state(initialValue) {
     notifying = true;
     try {
       for (const sub of subscribers) {
-        if (sub.markDirty) sub.markDirty();
-        else __pendingEffects.add(sub);
+        if (sub.markDirty) sub.markDirty(true);
+        else { sub._hard = true; __pendingEffects.add(sub); }
       }
       if (!__batching) __flushEffects();
     } finally {
@@ -189,9 +202,28 @@ function __state(initialValue) {
   return state;
 }
 
+const CLEAN = 0, CHECK = 1, DIRTY = 2;
+
+// Pull-check: did any computed this consumer read last run actually
+// change its output since? Recomputes those computeds on demand
+// (untracked — the consumer keeps its existing edges).
+function __computedDepsChanged(consumer) {
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try {
+    for (const [dep, seen] of consumer.computedDeps) {
+      dep.value;
+      if (dep.version !== seen) return true;
+    }
+    return false;
+  } finally {
+    __currentEffect = prev;
+  }
+}
+
 function __computed(fn) {
   let value;
-  let dirty = true;
+  let dirty = DIRTY;
   const subscribers = new Set();
   let locked = false;
   let dead = false;
@@ -199,19 +231,25 @@ function __computed(fn) {
 
   const computed = {
     dependencies: new Set(),
+    computedDeps: new Map(),
     writtenSignals: new Set(),
+    version: 0,
 
-    markDirty() {
+    // hard: a state dependency changed (must recompute). soft: an
+    // upstream computed was invalidated (recompute only if it turns
+    // out to have changed). Propagation happens once, on CLEAN → not.
+    markDirty(hard) {
       if (dead || locked) return;
       if (computing) {
         throw new Error(
           'reactive runtime: computed dependency changed during evaluation — ' +
           'computed functions must derive without writing or touching a dependency');
       }
-      if (dirty) return;
-      dirty = true;
+      const was = dirty;
+      if (hard) dirty = DIRTY; else if (dirty === CLEAN) dirty = CHECK;
+      if (was !== CLEAN) return;
       for (const sub of subscribers) {
-        if (sub.markDirty) sub.markDirty();
+        if (sub.markDirty) sub.markDirty(false);
         else __pendingEffects.add(sub);
       }
     },
@@ -224,29 +262,42 @@ function __computed(fn) {
       if (__currentEffect && __currentEffect !== computed) {
         subscribers.add(__currentEffect);
         __currentEffect.dependencies.add(subscribers);
+        // Placeholder until the read commits: a throw between here and
+        // the bottom leaves -1, which no version matches, so the next
+        // pull-check treats this computed as changed (conservative).
+        __currentEffect.computedDeps.set(computed, -1);
       }
       if (computing) {
         throw new Error(
           'reactive runtime: computed value read during its own evaluation — ' +
           'recursive computed reads are not supported');
       }
-      if (dirty && !locked) {
+      if (dirty === CHECK && !locked) {
+        dirty = __computedDepsChanged(computed) ? DIRTY : CLEAN;
+      }
+      if (dirty === DIRTY && !locked) {
         for (const dep of computed.dependencies) dep.delete(computed);
         computed.dependencies.clear();
+        computed.computedDeps.clear();
         const prev = __currentEffect;
         computed.writtenSignals.clear();
         __currentEffect = computed;
         __computingStack.push(computed);
         computing = true;
         try {
-          value = fn();
-          dirty = false;
+          const next = fn();
+          if (next !== value) computed.version++;
+          value = next;
+          dirty = CLEAN;
         } finally {
           computing = false;
           __computingStack.pop();
           computed.writtenSignals.clear();
           __currentEffect = prev;
         }
+      }
+      if (__currentEffect && __currentEffect !== computed) {
+        __currentEffect.computedDeps.set(computed, computed.version);
       }
       return value;
     },
@@ -260,6 +311,7 @@ function __computed(fn) {
     free() {
       for (const dep of computed.dependencies) dep.delete(computed);
       computed.dependencies.clear();
+      computed.computedDeps.clear();
       subscribers.clear();
       return computed;
     },
@@ -288,6 +340,8 @@ function __effect(fn) {
   const owner = __currentOwner;
   const effect = {
     dependencies: new Set(),
+    computedDeps: new Map(),
+    _hard: true, // the creation run always runs; a state write sets it again
     _disposed: false,
     signal: null, // AbortSignal for the current run; aborts on re-run / dispose
 
@@ -298,6 +352,12 @@ function __effect(fn) {
       // anyway would re-subscribe it to every signal its body reads,
       // leaking one subscriber per flush cycle that hits the race.
       if (effect._disposed) return;
+      // Reached only through computeds? Pull-check them; if none
+      // changed its output, this run is a no-op: edges, cleanup and
+      // the AbortSignal all stay as the previous run left them.
+      const hard = effect._hard;
+      effect._hard = false;
+      if (!hard && !__computedDepsChanged(effect)) return;
       // Abort the previous run's signal before allocating a new one:
       // async work still mid-flight from the previous run (a fetch
       // carrying the signal) sees the abort and can bail, and 'abort'
@@ -316,6 +376,7 @@ function __effect(fn) {
       if (effect._cleanup) { effect._cleanup(); effect._cleanup = null; }
       for (const dep of effect.dependencies) dep.delete(effect);
       effect.dependencies.clear();
+      effect.computedDeps.clear();
       const prev = __currentEffect;
       __currentEffect = effect;
       const prevOwner = __currentOwner;
