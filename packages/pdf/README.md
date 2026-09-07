@@ -44,7 +44,9 @@ Bun.write! 'invoice.pdf', bytes
   (`register key, bytes`) with WinAnsi encoding, so copy, paste and search
   work in every viewer
 - **Text** at a position or at the cursor; `align` left/center/right inside
-  a width; `overflow: 'ellipsis'`; `tracking` (letter-spacing); `upper`;
+  a width; `middle` centres the cap height on a line and `baseline` sits
+  the glyphs on one, in any font;
+  `overflow: 'ellipsis'`; `tracking` (letter-spacing); `upper`;
   `paragraph` word-wraps and reports its height; `width` and `lines` measure
   without drawing
 - **Shapes**: `rect` with `radius` and `dash`, `line`, `rule`, `circle`;
@@ -72,7 +74,11 @@ The page is a sheet with the origin at the top-left. Every number you pass
 or read is in the document's `unit` (`'pt'` by default; `'in'`, `'mm'`,
 `'cm'`), except font sizes and tracking, which are always points. A `text`
 call's `y` is the top of its line box; the baseline sits `ascent × size`
-below it. Positioned calls (`x:`/`y:`) draw where you say and move the
+below it. Pass `middle:` instead of `y:` to centre the cap height on a
+line, or `baseline:` to sit the glyphs on one — the writer reads ascent
+and cap height from the font, so a label sits in the middle of its pill,
+beside its bullet, or level with a value in another face, whichever
+fonts you register. Positioned calls (`x:`/`y:`) draw where you say and move the
 cursor to the end of the run unless you pass `move: false`; flow calls
 (`puts`, `paragraph`, `down`, `table` without a position) start at the
 cursor, advance it, and break pages when they run out of room.

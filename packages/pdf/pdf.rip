@@ -79,7 +79,7 @@ CODE39 =!
 
 OPTION_KEYS =! ['paper', 'layout', 'unit', 'margins', 'font', 'fonts', 'size', 'leading', 'compress', 'breaks', 'header', 'footer', 'title', 'author', 'subject', 'keywords', 'creator', 'date']
 STYLE_KEYS  =! ['font', 'size', 'color', 'tracking', 'leading']
-TEXT_KEYS   =! ['x', 'y', 'w', 'align', 'overflow', 'move', 'upper', ...STYLE_KEYS]
+TEXT_KEYS   =! ['x', 'y', 'middle', 'baseline', 'w', 'align', 'overflow', 'move', 'upper', ...STYLE_KEYS]
 PUTS_KEYS   =! ['w', 'align', 'overflow', 'upper', ...STYLE_KEYS]
 PARA_KEYS   =! ['x', 'y', 'w', 'align', 'upper', ...STYLE_KEYS]
 SCOPE_KEYS  =! ['x', 'y', 'fill', 'stroke', 'lineWidth', ...STYLE_KEYS]
@@ -898,6 +898,15 @@ export class PDF
     lat = winAnsi str
     x = finite opts.x ?? @x, 'x'
     y = finite opts.y ?? @y, 'y'
+    # middle: centre the cap height on this line; baseline: sit the glyphs on
+    # this line. Both read the font's own metrics, so text of any face or size
+    # lands where it was asked to, with no per-font offsets at the call site.
+    given = (k for k in ['y', 'middle', 'baseline'] when opts[k]?)
+    fail "text takes one of y:, middle: or baseline:, not #{given.join ' and '}" if given.length > 1
+    if opts.middle?
+      y = finite(opts.middle, 'middle') - (s.rec.ascent - s.rec.capHeight / 2) * s.size / @unit
+    if opts.baseline?
+      y = finite(opts.baseline, 'baseline') - s.rec.ascent * s.size / @unit
     wPt = measure s.rec, lat, s.size, s.tracking
     if opts.w?
       boxPt = positive(opts.w, 'w') * @unit
