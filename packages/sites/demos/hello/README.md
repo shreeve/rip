@@ -32,12 +32,10 @@ loopback, `hello.local` for LAN once `janus mode lan` opens it), conventional
 ## LAN / phone
 
 ```sh
-rip sites stop hello
-rip sites trust edge
 janus mode lan
 rip sites start hello
 # Mac:     https://hello.local/
-# Phone:   install CA from http://rip.local/trust (then Full Trust on iOS)
+# Phone:   trust the CA at http://janus.local/trust (it walks you through it)
 #          open https://hello.local/
 ```
 
