@@ -4,10 +4,10 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Edge
 
-- [ ] **wan routing:** ACME / real DNS for `expose wan`, which today renders
-      the localhost routing behind Janus's wildcard.
-- [ ] Behavioral appliance pins for trust gate, mode flip (stop sites
-      first), and `.local` host registration (today: static string pins).
+- [ ] **wan routing:** ACME / real DNS for `janus mode wan`; the posture
+      routes the local-CA families only.
+- [ ] Behavioral appliance pins for the trust hint and `.local` host
+      registration (the pins are static strings).
 - [ ] After control-plane / Caddyfile changes, document or automate
       restart so launchd dual-socket listeners cannot race a stale
       in-memory process writing an old plist.

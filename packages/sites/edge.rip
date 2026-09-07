@@ -34,20 +34,10 @@ export edgeControl = (janus = null) ->
 
 export externalEdge = -> process.env.JANUS_CONTROL?
 
-# Routing postures, keyed by Janus's exposure scope: localhost and wan
-# route the via.rip family alone; lan adds Bonjour, rip.local, and the
-# *.local family. Which addresses the edge listens on is the scope itself,
-# and that is Janus's (`janus mode`); rip renders what those listeners
-# serve.
-POSTURES =
-  localhost: 'Caddyfile'
-  lan: 'Caddyfile.local'
-  wan: 'Caddyfile'
-
-export postureSource = (scope) ->
-  file = POSTURES[scope]
-  abort "unknown edge scope #{JSON.stringify(scope)} — janus reports localhost, lan, or wan" unless file?
-  join(import.meta.dir, file)
+# The one routing posture. Which addresses the edge listens on, and so
+# who can reach these sites, is Janus's exposure mode (`janus mode`); the
+# routing is the same in every mode.
+export POSTURE = join(import.meta.dir, 'Caddyfile')
 
 # rip needs a Janus that owns exposure: `janus status --json` carries
 # `scope` and `bind` from 1.13.0 on. An older Janus is refused; nothing
@@ -62,14 +52,13 @@ export requireExposureJanus = (janus, report = abort) ->
 # to ask: nothing is rendered then, and loopback routing claims the least.
 export edgeScope = (janus = janusStatus()) -> janus?.scope or 'localhost'
 
-# The posture files are Caddyfiles with {$RIP_EDGE_*} placeholders; the
+# The posture is a Caddyfile with {$RIP_EDGE_*} placeholders; the
 # rendered config carries Janus's paths in place. The front-door bind is
-# not rendered: the templates say `default_bind {$JANUS_BIND}` and Janus
+# not rendered: the template says `default_bind {$JANUS_BIND}` and Janus
 # fills it in from its stored exposure mode whenever it runs, reloads,
 # validates, or adapts the file, so the bind is only ever what the mode
-# says.
-export renderEdgeConfig = (scope, janus, statusSocket) ->
-  source = postureSource scope
+# says, and a mode change never touches this file.
+export renderEdgeConfig = (janus, statusSocket) ->
   values =
     RIP_EDGE_ADMIN: janus.admin
     RIP_EDGE_CONTROL: janus.socket
@@ -77,13 +66,13 @@ export renderEdgeConfig = (scope, janus, statusSocket) ->
     RIP_EDGE_STATUS: statusSocket
     RIP_EDGE_LOG: janus.log
     RIP_EDGE_SITES: janus.sites
-  body = readFileSync(source, 'utf8').replace /\{\$([A-Z_]+)(?::[^}]*)?\}/g, (match, key) -> if key of values then values[key] else match
+  body = readFileSync(POSTURE, 'utf8').replace /\{\$([A-Z_]+)(?::[^}]*)?\}/g, (match, key) -> if key of values then values[key] else match
   """
-  # Rendered by rip sites — scope #{scope} — from
-  #   #{source}
+  # Rendered by rip sites from
+  #   #{POSTURE}
   # Edit that file, or drop site blocks into #{janus.sites}; this one is
-  # rewritten whenever the scope or a path changes. The bind comes from
-  # the scope ('janus mode'), through JANUS_BIND.
+  # rewritten whenever a path changes. Who can reach it is 'janus mode',
+  # through JANUS_BIND.
 
   #{body}
   """
@@ -92,13 +81,13 @@ lastLine = (result) ->
   lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
   (lines.at(-1) or '').replace /^Error: /, ''
 
-# Bring Janus's service config up to date with the edge's scope: render
-# the routing posture for it, validate, write, and reload a running edge.
+# Bring Janus's service config up to date: render the posture with the
+# paths Janus reports, validate, write, and reload a running edge.
 # Returns Janus's status. `report(message, status)` receives a failure.
 export configureEdge = (statusSocket, report = abort) ->
   return null if externalEdge()
   janus = requireExposureJanus janusStatus(), report
-  desired = renderEdgeConfig janus.scope, janus, statusSocket
+  desired = renderEdgeConfig janus, statusSocket
   current = try readFileSync(janus.config, 'utf8') catch then null
   return janus if current is desired
   mkdirSync dirname(janus.config), { recursive: true }

@@ -26,7 +26,7 @@ rip sites start hello
 ```
 
 `serve.rip` declares the `hello` name, dual hosts (`hello.via.rip` for
-loopback, `hello.local` for LAN after `rip sites expose lan`), conventional
+loopback, `hello.local` for LAN once `janus mode lan` opens it), conventional
 `app/` root, and explicit default change policy.
 
 ## LAN / phone
@@ -34,7 +34,7 @@ loopback, `hello.local` for LAN after `rip sites expose lan`), conventional
 ```sh
 rip sites stop hello
 rip sites trust edge
-rip sites expose lan --interface en0
+janus mode lan
 rip sites start hello
 # Mac:     https://hello.local/
 # Phone:   install CA from http://rip.local/trust (then Full Trust on iOS)

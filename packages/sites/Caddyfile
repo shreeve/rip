@@ -1,10 +1,15 @@
-# Rip development edge — routing for the localhost and wan scopes (no
-# Bonjour). RIP_EDGE placeholders are filled by rip sites when it renders
-# this posture into Janus's service config (edge.rip); JANUS_BIND is
-# Janus's, filled from its exposure mode whenever it loads the file.
-# Status at via.rip is Rip-owned (not Janus Bonjour). via.rip and *.via.rip
-# publicly resolve to 127.0.0.1 forever; certs come from the LOCAL CA — one
-# `rip sites trust edge` ceremony covers *.via.rip and *.local alike.
+# Rip development edge — the one routing posture. RIP_EDGE placeholders
+# are filled by rip sites when it renders this file into Janus's service
+# config (edge.rip); JANUS_BIND is Janus's, filled from its exposure mode
+# whenever it loads the file. Who can reach these sites is the mode alone
+# (`janus mode localhost | lan | wan`): the routing is the same in every
+# mode, and the bind and host firewall decide which peers get to it.
+#
+# Two name families, one local CA: via.rip and *.via.rip publicly resolve
+# to 127.0.0.1 forever (loopback URLs); rip.local and *.local are this
+# machine's Bonjour names (LAN URLs). Every certificate is an exact-host
+# cert minted on demand by the local CA — one `rip sites trust edge`
+# ceremony covers both families.
 {
 	admin unix/{$RIP_EDGE_ADMIN}
 	log {
@@ -20,8 +25,10 @@
 	servers {
 		protocols h1 h2
 	}
-	# Exact-host certs minted per SNI name by the local CA — the ask
-	# endpoint allowlists via.rip and single-label *.via.rip names.
+	# Browsers reject second-level wildcards (SAN DNS:*.local, *.via.rip).
+	# Issue one exact-host cert per SNI name from the local CA instead; the
+	# ask endpoint allowlists the two families. Ask must be a plain HTTP
+	# URL (unix dial syntax is not honored here).
 	on_demand_tls {
 		ask http://127.0.0.1:{$RIP_EDGE_HTTP_PORT:80}/tls-ask
 	}
@@ -37,18 +44,70 @@
 			precompressed
 		}
 		browse
+		# Bonjour: rip.local and every registered {app}.local. The name
+		# answers on :80 below (the trust page), so rip owns it and Janus
+		# opens no front door of its own; the agent reads Janus's per-app
+		# view over the control socket (/1.0/mdns/status).
+		mdns {
+			name rip.local
+			apps on
+		}
 	}
+}
+
+# Front door with a brain: plain-HTTP "/" serves the trust probe page — its
+# JS checks whether this device already trusts the local CA (an https fetch
+# to /trust/check survives the handshake only if trusted) and either hops
+# straight to the HTTPS dashboard or walks the user through installing the
+# CA. /trust* stays plain HTTP — it is the CA bootstrap, and a phone cannot
+# pass certificate validation for the very cert /trust hands it (chicken
+# and egg). A blind 308 here would shove untrusted phones into the browser
+# interstitial before any onboarding could happen; deep links still bounce.
+http://rip.local {
+	handle /trust* {
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
+	handle / {
+		rewrite * /trust
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
+
+# on_demand_tls ask target (loopback; no Host / Bonjour dependency).
+# Caddy itself dials this from loopback; the remote_ip guard keeps LAN
+# peers (who can reach a lan listener with a Host: 127.0.0.1 header) away
+# from the agent. Known accepted exposure that a guard here CANNOT close:
+# any LAN peer can still trigger on-demand minting via TLS handshakes with
+# fresh allowed SNI names — a dev-tool trade-off on a trusted LAN.
+http://127.0.0.1 {
+	@ask {
+		path /tls-ask*
+		remote_ip 127.0.0.1
+	}
+	handle @ask {
+		reverse_proxy unix/{$RIP_EDGE_STATUS}
+	}
+}
+
+http://*.local {
+	redir https://{host}{uri} 308
 }
 
 http://via.rip, http://*.via.rip {
 	redir https://{host}{uri} 308
 }
 
-# on_demand_tls ask target (loopback; plain-HTTP URL required by Caddy).
-http://127.0.0.1 {
-	handle /tls-ask* {
-		reverse_proxy unix/{$RIP_EDGE_STATUS}
+# Status + /trust on HTTPS: the Rip catalog page, on both family apexes.
+# on_demand so we mint DNS:rip.local — never a *.local wildcard.
+rip.local {
+	tls {
+		issuer internal
+		on_demand
 	}
+	reverse_proxy unix/{$RIP_EDGE_STATUS}
 }
 
 via.rip {
@@ -57,6 +116,20 @@ via.rip {
 		on_demand
 	}
 	reverse_proxy unix/{$RIP_EDGE_STATUS}
+}
+
+# App hosts: on-demand exact names (hello.local, hello.via.rip), never a
+# wildcard certificate.
+*.local {
+	tls {
+		issuer internal
+		on_demand
+	}
+	janus
+	log {
+		output stderr
+		format janus
+	}
 }
 
 *.via.rip {
@@ -73,5 +146,5 @@ via.rip {
 
 # Machine-local site blocks (domains + certs owned by this operator, e.g.
 # *.medlabs.health): one small .caddy file per project in Janus's sites
-# directory; the posture files stay canonical.
+# directory; this file stays canonical.
 import {$RIP_EDGE_SITES}/*.caddy

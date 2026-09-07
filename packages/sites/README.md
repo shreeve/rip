@@ -82,63 +82,52 @@ on a host leaves the edge serving Rip's sites:
 
 ```bash
 rip sites status
-# ● Edge  running (janus 1.12.1, pid 4242, up 01:12, autostart on)
-#   Mode:    default
-#   Control: ~/.local/state/janus/run/janus.sock
-#   Config:  ~/.config/janus/Caddyfile
-#   Sites:   ~/.config/janus/sites
+# ● Edge  running (janus 1.13.0, pid 4242, up 01:12, autostart on)
+#   Scope:    localhost
+#   Bind:     127.0.0.1 ::1
+#   Control:  ~/.local/state/janus/run/janus.sock
+#   Config:   ~/.config/janus/Caddyfile
+#   Sites:    ~/.config/janus/sites
 ```
 
-That binds `via.rip` and `*.via.rip` on loopback **HTTP→HTTPS** (ports
-**80/443**) with exact-host certificates minted on demand by the local CA
-— run `rip sites trust edge` once and every `*.via.rip` and `*.local` name
-verifies. Those names resolve only to `127.0.0.1`. Browser status is at
-`https://via.rip/` (Rip-owned page — not Bonjour).
+There is one posture, the same in every mode. It routes two name families
+on **HTTP→HTTPS** (ports **80/443**) with exact-host certificates minted
+on demand by the local CA — run `rip sites trust edge` once and every name
+in both families verifies on this machine:
 
-Three postures:
-
-| | **`localhost`** | **`lan`** | **`wan`** |
+| Family | Names | Resolves | For |
 | --- | --- | --- | --- |
-| Listens on (Janus, `janus mode`) | `127.0.0.1` + `::1` | localhost + one interface's private IPv4 address | every interface |
-| Bonjour | off | shared `rip.local` (apps use `{name}.local` hosts) | — |
-| Apps | `https://{name}.via.rip/` (+ `.local` twin claimed) | `https://{name}.local/` (dual-claim with via.rip) | — |
-| Status | `https://via.rip/` | `https://rip.local/` (Rip catalog + `/trust`) | — |
-| TLS | `tls internal` on-demand (trust first) | `tls internal` on-demand (trust first) | — |
+| via.rip | `https://via.rip/` (status), `https://{name}.via.rip/` (apps) | `127.0.0.1`, publicly, forever | this machine's browser |
+| .local | `https://rip.local/` (status + `/trust`), `https://{name}.local/` (apps) | Bonjour, from this machine | phones and peers on the LAN |
+
+Every app claims both: catalog adds dual-claim each `*.via.rip` host with
+its `*.local` twin, and the demos declare both in `serve.rip`.
+
+Who can reach any of it is Janus's alone. `janus mode localhost | lan |
+wan` sets which addresses the edge listens on and, on macOS, the host
+firewall rule that goes with it; the routing never changes, so a mode
+change is a bind change with every registration intact and nothing for
+rip to re-render. rip never renders a bind address: the posture says
+`default_bind {$JANUS_BIND}` and Janus fills it from its stored mode
+whenever it loads the file. This needs janus 1.13.0 or newer. `rip sites
+status` shows the scope and the bind, and on lan whether this machine
+trusts the CA. With no `janus mode` ever run, the edge is localhost-only.
 
 ```bash
-rip sites trust edge                    # install the local CA (required before lan)
-rip sites expose lan                    # LAN scope + Bonjour routing — a reload, sites stay up
-rip sites expose localhost              # back to the default
+rip sites trust edge                    # install the local CA (once per machine)
+janus mode lan                          # let the LAN in; sites stay up
+janus mode localhost                    # back to the default
 rip sites trust edge --export ca.crt    # share the CA with a phone / peer
-# phone bootstrap without temporary HTTPS accept:
+# phone bootstrap without a temporary HTTPS accept:
 #   http://rip.local/trust
-rip sites expose wan                    # every interface; the network decides who reaches it
+janus mode wan                          # every interface; the network decides who reaches it
 ```
-
-`*.via.rip` names resolve only to `127.0.0.1` — by design, forever — so
-phones on the LAN need `{name}.local` hosts (and the trusted local CA), not
-the via.rip URLs. Catalog adds and `rip sites expose lan` dual-claim every
-`*.via.rip` host with a matching `*.local` twin; demos declare both in
-`serve.rip`. After a scope change, restart sites so managers re-register
-the hosts.
-
-The scope itself — which addresses the edge listens on, and the host
-firewall rule that goes with it — is Janus's: `rip sites expose` runs
-`janus mode <scope>` (which may ask for `sudo`; on macOS every scope but
-`wan` is enforced by pf) and then renders the routing to match. rip never
-renders a bind address: the posture files say `default_bind {$JANUS_BIND}`
-and Janus fills it from its stored mode whenever it loads the file. `lan`
-takes the interface the default route uses; `--interface IF` pins another
-and `--v4 A` picks among several private addresses. This needs janus
-1.13.0 or newer; `janus status` shows scope, bind, and firewall. The
-scope is Janus's alone: with no `janus mode` ever run, the routing is
-localhost's.
 
 Phone walkthrough (hello):
 
 ```bash
 rip sites stop hello
-rip sites trust edge && rip sites expose lan
+rip sites trust edge && janus mode lan
 rip sites start hello
 # http://rip.local/trust  → install CA on the phone
 # https://hello.local/      → the app
@@ -229,7 +218,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 | `rip sites start <app\|all\|agent>` | Start a supervised app, every app, or the control agent. Apps register with Janus, so the edge must be running (`janus autostart`). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
 | `rip sites stop [noun]` | Stop a supervised app, `all`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
 | `rip sites restart <app\|all\|agent>` | Restart. For `agent` this is a recycle (stop then start). |
-| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). The edge line is Janus's status and scope plus the routing rendered for it. |
+| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). The edge line is Janus's status and scope plus whether this machine trusts the local CA. |
 | `rip sites status all` | Apps only. |
 | `rip sites status <app\|agent>` | One target. |
 | `rip sites status <path>` | Manager JSON for a project path (`.` or an existing directory not in the catalog). |
@@ -237,16 +226,13 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 ### Edge — TLS, reachability
 
 The process is Janus's — `janus autostart`, `start`, `stop`, `restart`,
-`status`, `reload` — and `rip sites` says so if asked to run it. Rip's edge
-verbs are about what the edge serves and who trusts it:
+`status`, `reload` — and so is its reach — `janus mode` — and `rip sites`
+says so if asked for either. Rip's edge verbs are about who trusts it:
 
 | Command | What it does |
 | --- | --- |
-| `rip sites trust edge` | Install the local CA (required before the lan scope). |
+| `rip sites trust edge` | Install the local CA on this machine, so both name families verify here. Phones and peers install it from `http://rip.local/trust`. |
 | `rip sites trust edge --export [PATH]` | Write the CA PEM (default: `rip-edge-local-ca.crt`). |
-| `rip sites expose lan [--interface IF] [--v4 A]` | `janus mode lan` (localhost + the default route interface's private IPv4 address; `--interface` pins another), then the Bonjour routing: `rip.local` / `{app}.local`, `tls internal`. A reload; sites stay up. |
-| `rip sites expose localhost` | `janus mode localhost` (the default), then the loopback `*.via.rip` routing. |
-| `rip sites expose wan` | `janus mode wan` (every interface), same routing as localhost, rendered before the socket opens. |
 
 **Upgrading Janus.** Install the new release, then restart the edge. The
 managers keep their registrations and re-register on their next heartbeat:
@@ -261,9 +247,9 @@ installed and what is running, and says when they differ; so does
 
 ### Custom domains
 
-The postures serve the Rip-owned name families for free: `via.rip` and
-`*.via.rip` (default), and `rip.local` plus `*.local` (`local`). Certificates
-for those are minted on demand by the local CA after `rip sites trust edge`.
+The posture serves the Rip-owned name families for free: `via.rip` and
+`*.via.rip`, and `rip.local` plus `*.local`. Certificates for those are
+minted on demand by the local CA; `rip sites trust edge` makes them verify.
 
 Your own domains — `app.example.com`, `*.medlabs.health`, anything outside
 those families — are served by a **drop-in site file** in Janus's sites
@@ -331,7 +317,7 @@ edge Caddyfile.
 
 Two limits worth knowing. A drop-in holds **site** blocks only; edge-wide
 `janus { … }` options (an edge response `cache`, for instance) are global
-and belong in the posture templates beside this README, not in a drop-in.
+and belong in the posture file beside this README, not in a drop-in.
 And the domain must resolve to this machine on its own — public DNS
 pointing at `127.0.0.1`, a `/etc/hosts` line, or mDNS for a `.local` name;
 the drop-in serves the name, it does not resolve it.
@@ -374,11 +360,11 @@ binary and no LaunchAgent — see [`tray-sites.rip`](tray-sites.rip) and
 [packages/tray/README.md](../tray/README.md).
 
 **Tray covers:** edge status and scope (Janus's), Open Dashboard, Trust CA,
-Use LAN / Use localhost (`expose`; a scope that needs sudo says so, since
-the tray has no terminal), site start/stop/restart/open/log, Add Site.
+site start/stop/restart/open/log, Add Site.
 
-**CLI-only for now:** `remove`, `trust edge --export`, `expose wan`. The
-edge process is `janus`'s to start and stop.
+**CLI-only for now:** `remove`, `trust edge --export`. The edge process
+and its reach are `janus`'s (`janus mode` may need sudo, which needs a
+terminal).
 
 **Run it** — build the host once, then from this package:
 
@@ -1444,15 +1430,15 @@ manage it. `rip sites` runs `janus` from `PATH` for what it needs of it —
 config, `trust` for the CA — and nothing else, so an upgraded install is
 what the next `janus restart` runs.
 
-What the edge serves is rendered, not hand-edited. The posture files beside
-this README (`Caddyfile` for loopback, `Caddyfile.local` for LAN) carry
+What the edge serves is rendered, not hand-edited. The posture file beside
+this README (`Caddyfile`) carries
 `{$RIP_EDGE_*}` placeholders; the control plane fills them with the paths
 Janus reports — its control and admin sockets, its log, its drop-in sites
 directory — and the runtime path of Rip's own status socket, validates the
 result, writes it as Janus's service Caddyfile, and reloads a running edge.
-That happens when the control plane boots, before an app starts, and on
-`rip sites expose`, so the file Janus runs always matches the scope Janus
-reports and a scope change is a reload with every registration intact. The
+That happens when the control plane boots and before an app starts, so
+the file Janus runs always carries the paths Janus reports; a mode change
+touches none of it, since the routing is the same in every mode. The
 bind is the one placeholder rip leaves alone: `default_bind {$JANUS_BIND}`
 is Janus's, filled from its exposure mode whenever it loads the file. Operator-owned
 domains go in one `*.caddy` file each under Janus's sites directory, which

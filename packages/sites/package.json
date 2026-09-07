@@ -40,7 +40,6 @@
     "sites.rip",
     "tray-sites.rip",
     "Caddyfile",
-    "Caddyfile.local",
     "serve-hosts.rip",
     "status.html",
     "trust.html",

@@ -35,9 +35,8 @@ dashboardUrl = (edge) ->
   "https://#{host}/"
 
 # The edge is Janus's process (janus autostart | start | stop | restart)
-# and so is its exposure scope; the menu shows both and drives trust and
-# the scope (through `rip sites expose`, which runs `janus mode`; a scope
-# that needs sudo says so, since the tray has no terminal to prompt on).
+# and so is its exposure scope (`janus mode`, which may need sudo and so
+# a terminal); the menu shows both and drives trust.
 edgeMenu = (edge) ->
   scope = edge.scope or 'localhost'
   status = if edge.state is 'running'
@@ -57,10 +56,6 @@ edgeMenu = (edge) ->
     items.push label 'Local CA trusted', icon: 'checkmark.seal.fill'
   else
     items.push action 'Trust CA…', id: 'edge.trust', icon: 'lock.shield', run: -> json! 'sites', 'trust', 'edge', '--json'
-  if scope is 'lan'
-    items.push action 'Use localhost', id: 'edge.expose.localhost', icon: 'laptopcomputer', run: -> json! 'sites', 'expose', 'localhost', '--json'
-  else
-    items.push action 'Use LAN…', id: 'edge.expose.lan', icon: 'wifi', run: -> json! 'sites', 'expose', 'lan', '--json'
   submenu 'Edge', items, id: 'edge', icon: 'network'
 
 siteMenu = (site) ->
