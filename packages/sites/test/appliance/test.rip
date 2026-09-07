@@ -66,6 +66,7 @@ test! 'the posture renders around the bind Janus owns', ->
   ok not rendered.includes('0.0.0.0'), 'rip renders no bind address'
   ok rendered.includes 'admin unix//state/run/admin.sock'
   ok rendered.includes 'control internal /state/run/janus.sock'
+  ok not /\bcontrol local\b/.test(rendered), 'the control API is the unix socket alone'
   ok rendered.includes 'output file /state/log/janus.log'
   ok rendered.includes 'import /config/sites/*.caddy'
   ok rendered.includes 'reverse_proxy unix//runtime/edge-status.sock'
@@ -75,26 +76,27 @@ test! 'the posture renders around the bind Janus owns', ->
   ok rendered.includes 'http://*.local'
   ok rendered.includes 'Rendered by rip sites'
   ok not rendered.includes 'RIP_EDGE_CERT'
-  # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards.
+  # Exact-host internal certs — browsers reject SAN DNS:*.local wildcards;
+  # Janus approves the names registered with it, the status page's too.
   ok rendered.includes 'on_demand_tls'
-  ok rendered.includes 'ask http://127.0.0.1:80/tls-ask'
-  ok rendered.includes 'remote_ip 127.0.0.1'
+  ok rendered.includes('permission janus'), 'Janus approves names in-process'
   ok rendered.includes 'issuer internal'
   ok rendered.includes 'on_demand'
+  ok rendered.includes 'via.rip, rip.local, *.via.rip, *.local {'
   # The LAN pieces are routed in every mode; 'janus mode' decides who
   # reaches them.
   ok rendered.includes 'mdns'
   ok rendered.includes 'name rip.local'
   ok rendered.includes 'apps on'
   ok not /\blisten\b/.test(rendered), 'rip owns rip.local on :80; Janus opens no front door of its own'
-  # Product HTTPS status is the Rip catalog — Janus stays on the HTTP mdns door.
-  ok /rip\.local \{[\s\S]*?reverse_proxy unix\/\/runtime\/edge-status\.sock/.test(rendered)
-  ok rendered.includes 'handle /trust*'
+  # The trust bootstrap rides plain HTTP straight from the agent's socket.
+  ok /http:\/\/rip\.local \{[\s\S]*?handle \/trust\*[\s\S]*?reverse_proxy unix\/\/runtime\/edge-status\.sock/.test(rendered)
   ok renderEdgeConfig({ ...janus, scope: 'lan' }, '/runtime/edge-status.sock') is renderEdgeConfig({ ...janus, scope: 'wan' }, '/runtime/edge-status.sock'), 'the render does not vary with the mode'
 
   agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
-  ok agent.includes "/tls-ask"
   ok agent.includes("'/1.0/mdns/status'"), "Janus's per-app view comes over the control socket"
+  ok agent.includes("STATUS_HOSTS = ['via.rip', 'rip.local']"), 'the status page registers under both apexes'
+  ok agent.includes("lease: 'heartbeat'"), 'and lapses with the agent'
   ok not agent.includes("edge.mode"), "the scope is Janus's, not catalog state"
   ok not defaultCatalog().edge.mode?, "a fresh catalog records no scope"
 
