@@ -457,6 +457,107 @@ describe('computed: laziness, caching, invalidation', () => {
   });
 });
 
+// ════════════════════════════════════════════════════════════════════
+// The equality cut: a computed whose output did not change (===) stops
+// propagation. The computed itself still recomputes (that is how it
+// learns), but its subscribers — effects and computeds alike — do not.
+// ════════════════════════════════════════════════════════════════════
+describe('computed: the equality cut', () => {
+  test('an unchanged output does not re-run the effect; the computed still recomputes', () => {
+    const outcome = both((rt) => {
+      const n = rt.__state(1);
+      let recomputes = 0, runs = 0;
+      const parity = rt.__computed(() => { recomputes++; return n.value % 2; });
+      rt.__effect(() => { runs++; parity.value; });
+      n.value = 3; n.value = 5; n.value = 7;
+      n.value = 8;
+      return [recomputes, runs];
+    });
+    expect(outcome).toEqual([5, 2]);
+  });
+
+  test('the cut is transitive: an unchanged upstream computed spares the downstream computed too', () => {
+    const outcome = both((rt) => {
+      const a = rt.__state(1);
+      let c1n = 0, c2n = 0, runs = 0;
+      const c1 = rt.__computed(() => { c1n++; return a.value > 0; });
+      const c2 = rt.__computed(() => { c2n++; return c1.value ? 'pos' : 'neg'; });
+      rt.__effect(() => { runs++; c2.value; });
+      a.value = 2; a.value = 3;
+      a.value = -1;
+      return [c1n, c2n, runs];
+    });
+    expect(outcome).toEqual([4, 2, 2]);
+  });
+
+  test('a skipped run leaves the previous run\'s cleanup and AbortSignal intact', () => {
+    const outcome = both((rt) => {
+      const n = rt.__state(1);
+      const parity = rt.__computed(() => n.value % 2);
+      let cleanups = 0;
+      let signal = null;
+      rt.__effect(() => {
+        parity.value;
+        signal = rt.getEffectSignal();
+        return () => { cleanups++; };
+      });
+      const first = signal;
+      n.value = 3;
+      const afterSkip = [cleanups, signal === first, first.aborted];
+      n.value = 4;
+      return [afterSkip, cleanups, signal === first, first.aborted];
+    });
+    expect(outcome).toEqual([[0, true, false], 1, false, true]);
+  });
+
+  test('identity is the rule: a computed returning the SAME object after a touch() is cut; direct readers still run', () => {
+    const outcome = both((rt) => {
+      const items = rt.__state([1]);
+      let direct = 0, viaSame = 0, viaLength = 0;
+      const same = rt.__computed(() => items.value);
+      const length = rt.__computed(() => items.value.length);
+      rt.__effect(() => { direct++; items.value; });
+      rt.__effect(() => { viaSame++; same.value; });
+      rt.__effect(() => { viaLength++; length.value; });
+      items.value.push(2); items.touch();
+      return [direct, viaSame, viaLength];
+    });
+    expect(outcome).toEqual([2, 1, 2]);
+  });
+
+  test('a throw during the pull-check propagates to the writer; a direct read recovers; the effect is not stranded', () => {
+    const outcome = both((rt) => {
+      const n = rt.__state(1);
+      let fail = false;
+      const c = rt.__computed(() => { if (fail) throw new Error('boom'); return n.value > 0; });
+      const seen = [];
+      rt.__effect(() => { seen.push(c.value); });
+      fail = true;
+      const write = caught(() => { n.value = 2; });
+      fail = false;
+      const recovered = c.value;   // the read retries (the computed stayed dirty)
+      n.value = -1;                // a real change: the effect runs again
+      return [write[0], write[2], recovered, seen];
+    });
+    expect(outcome).toEqual(['throw', 'boom', true, [true, false]]);
+  });
+
+  test('the diamond still runs the effect ONCE when either branch changes, and not at all when neither does', () => {
+    const outcome = both((rt) => {
+      const a = rt.__state(1);
+      const b = rt.__computed(() => a.value > 0);
+      const c = rt.__computed(() => a.value > 10);
+      let runs = 0;
+      rt.__effect(() => { runs++; b.value; c.value; });
+      a.value = 2;
+      const neither = runs;
+      a.value = 20;
+      return [neither, runs];
+    });
+    expect(outcome).toEqual([1, 2]);
+  });
+});
+
 describe('effect scheduling, batching, disposal', () => {
   test('effects flush in subscription order', () => {
     expect(both((rt) => {

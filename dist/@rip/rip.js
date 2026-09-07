@@ -24300,9 +24300,11 @@ function __state(initialValue) {
     try {
       for (const sub of subscribers) {
         if (sub.markDirty)
-          sub.markDirty();
-        else
+          sub.markDirty(true);
+        else {
+          sub._hard = true;
           __pendingEffects.add(sub);
+        }
       }
       if (!__batching)
         __flushEffects();
@@ -24362,28 +24364,51 @@ function __state(initialValue) {
   };
   return state;
 }
+var CLEAN = 0;
+var CHECK = 1;
+var DIRTY = 2;
+function __computedDepsChanged(consumer) {
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try {
+    for (const [dep, seen] of consumer.computedDeps) {
+      dep.value;
+      if (dep.version !== seen)
+        return true;
+    }
+    return false;
+  } finally {
+    __currentEffect = prev;
+  }
+}
 function __computed(fn) {
   let value;
-  let dirty = true;
+  let dirty = DIRTY;
   const subscribers = new Set;
   let locked = false;
   let dead = false;
   let computing = false;
   const computed = {
     dependencies: new Set,
+    computedDeps: new Map,
     writtenSignals: new Set,
-    markDirty() {
+    version: 0,
+    markDirty(hard) {
       if (dead || locked)
         return;
       if (computing) {
         throw new Error("reactive runtime: computed dependency changed during evaluation — " + "computed functions must derive without writing or touching a dependency");
       }
-      if (dirty)
+      const was = dirty;
+      if (hard)
+        dirty = DIRTY;
+      else if (dirty === CLEAN)
+        dirty = CHECK;
+      if (was !== CLEAN)
         return;
-      dirty = true;
       for (const sub of subscribers) {
         if (sub.markDirty)
-          sub.markDirty();
+          sub.markDirty(false);
         else
           __pendingEffects.add(sub);
       }
@@ -24394,28 +24419,39 @@ function __computed(fn) {
       if (__currentEffect && __currentEffect !== computed) {
         subscribers.add(__currentEffect);
         __currentEffect.dependencies.add(subscribers);
+        __currentEffect.computedDeps.set(computed, -1);
       }
       if (computing) {
         throw new Error("reactive runtime: computed value read during its own evaluation — " + "recursive computed reads are not supported");
       }
-      if (dirty && !locked) {
+      if (dirty === CHECK && !locked) {
+        dirty = __computedDepsChanged(computed) ? DIRTY : CLEAN;
+      }
+      if (dirty === DIRTY && !locked) {
         for (const dep of computed.dependencies)
           dep.delete(computed);
         computed.dependencies.clear();
+        computed.computedDeps.clear();
         const prev = __currentEffect;
         computed.writtenSignals.clear();
         __currentEffect = computed;
         __computingStack.push(computed);
         computing = true;
         try {
-          value = fn();
-          dirty = false;
+          const next = fn();
+          if (next !== value)
+            computed.version++;
+          value = next;
+          dirty = CLEAN;
         } finally {
           computing = false;
           __computingStack.pop();
           computed.writtenSignals.clear();
           __currentEffect = prev;
         }
+      }
+      if (__currentEffect && __currentEffect !== computed) {
+        __currentEffect.computedDeps.set(computed, computed.version);
       }
       return value;
     },
@@ -24431,6 +24467,7 @@ function __computed(fn) {
       for (const dep of computed.dependencies)
         dep.delete(computed);
       computed.dependencies.clear();
+      computed.computedDeps.clear();
       subscribers.clear();
       return computed;
     },
@@ -24450,10 +24487,16 @@ function __effect(fn) {
   const owner = __currentOwner;
   const effect = {
     dependencies: new Set,
+    computedDeps: new Map,
+    _hard: true,
     _disposed: false,
     signal: null,
     run() {
       if (effect._disposed)
+        return;
+      const hard = effect._hard;
+      effect._hard = false;
+      if (!hard && !__computedDepsChanged(effect))
         return;
       if (controller) {
         try {
@@ -24470,6 +24513,7 @@ function __effect(fn) {
       for (const dep of effect.dependencies)
         dep.delete(effect);
       effect.dependencies.clear();
+      effect.computedDeps.clear();
       const prev = __currentEffect;
       __currentEffect = effect;
       const prevOwner = __currentOwner;
