@@ -6,7 +6,7 @@
 
 import { printJson, probeAgent, requestAgent } from './appliance.rip'
 import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
-import { JANUS_MISSING, edgeControl, externalEdge, janusBinary, janusStatus, requireExposureJanus } from './edge.rip'
+import { JANUS_MISSING, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -14,10 +14,6 @@ import { join, resolve } from 'node:path'
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
 RESERVED = ['edge', 'all', 'tray', 'agent']
-
-# The scope words are Janus's (localhost | lan | wan); the earlier posture
-# names are accepted for one release.
-EXPOSE_ALIASES = { loopback: 'localhost', default: 'localhost', local: 'lan', public: 'wan' }
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
@@ -37,9 +33,8 @@ HELP = '''
     restart <app|all|agent>              Restart (agent = recycle)
     status [noun]                        Summary, or one target (default: edge+apps)
 
-  Edge (the process is Janus's: janus autostart | start | stop | restart | status):
+  Edge (Janus runs it and sets its reach: janus autostart | start | stop | status | mode):
     trust edge [--export [PATH]]         Install (or export) the local CA
-    expose localhost|lan|wan [options]   Exposure (janus mode) and the routing to match
 
   Daily:
     open <app|edge>                      Open the app URL or status dashboard
@@ -55,10 +50,6 @@ HELP = '''
   Add options:
     --name NAME  --host HOST (repeatable)  --workers N  --concurrency N
     --no-watch  --no-watch-app  --no-watch-api  --eager
-
-  Expose options (passed to janus mode):
-    --interface IF (lan: pin an interface; the default route's otherwise)
-    --v4 ADDR (lan: which private address, when it has several)
 
   Output:
     --json                               Machine-readable response
@@ -85,7 +76,6 @@ addFlags = []
 logFlags = []
 exportPath = null
 trustExport = false
-exposeFlags = []
 
 # Manager verbs invoke manager.rip as an internal module (not a user CLI).
 MANAGER = ['run', 'publish', 'browse', 'hold', 'release', 'migrate', 'recover']
@@ -191,8 +181,6 @@ while args.length
     when '--export'
       trustExport = true
       exportPath = if args[0]? and not args[0].startsWith('-') then args.shift() else 'rip-edge-local-ca.crt'
-    when '--interface', '--v4'
-      exposeFlags.push value, take(value)
     else
       abort "rip-sites: unknown option #{value}" if value.startsWith '-'
       positionals.push value
@@ -204,7 +192,6 @@ abort "rip-sites: #{verb} does not accept add options: #{addFlags.join(', ')}" i
 abort "rip-sites: #{verb} does not accept log options: #{logFlags.join(', ')}" if verb isnt 'logs' and logFlags.length
 abort 'rip-sites: --follow conflicts with --json' if follow and json
 abort "rip-sites: --export is only valid on `trust edge`" if trustExport and verb isnt 'trust'
-abort "rip-sites: #{verb} does not accept expose options: #{exposeFlags.filter((flag) -> flag.startsWith('-')).join(', ')}" if verb isnt 'expose' and exposeFlags.length
 abort "rip-sites: unexpected arguments #{JSON.stringify(extra)}" if extra.length and verb isnt 'add'
 
 requireNoun = (allowed) ->
@@ -237,9 +224,10 @@ renderApp = (app) ->
   error = if app.error then "\n  Error:   #{app.error.split('\n').join('\n           ')}" else ''
   "#{marker} #{app.name}  #{app.state}#{url}\n  #{app.root}#{warning}#{error}"
 
-# The edge line: Janus's process facts and scope, then the routing
-# rendered for it. Janus is what runs it, so what to do about a stopped
-# edge is a janus verb.
+# The edge line: Janus's process facts and scope, then Rip's. Janus is
+# what runs it, so what to do about a stopped edge is a janus verb. Trust
+# is a per-device ceremony, not a precondition for serving: on lan the
+# line says whether this machine has done it.
 renderEdge = (edge) ->
   marker = if edge.state is 'running' then '●' else '○'
   head = if edge.state is 'running'
@@ -262,7 +250,7 @@ renderEdge = (edge) ->
   lines.push "  Config:   #{edge.config}" if edge.config
   lines.push "  Sites:    #{edge.sites}" if edge.sites
   lines.push "  Upgrade:  the installed janus is newer than the running edge — janus restart" if edge.binaryNewer
-  lines.push "  Trusted:  #{if edge.localCaTrusted then 'yes' else 'no (run rip sites trust edge)'}" if edge.scope is 'lan' or verb is 'expose'
+  lines.push "  Trusted:  #{if edge.localCaTrusted then 'yes' else 'no — HTTPS warns until rip sites trust edge'}" if edge.scope is 'lan'
   lines.push "  Error:    #{edge.lastError}" if edge.lastError
   lines.join '\n'
 
@@ -546,32 +534,7 @@ switch verb
       unless result.exitCode is 0
         abort "rip-sites: certificate install failed (exit #{result.exitCode}) — manual fallback:\n  rip sites trust edge --export /tmp/rip-local-ca.crt\n  # then add that certificate to your system trust store (macOS:\n  # sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/rip-local-ca.crt)"
       edge = edgePost! '/1.0/edge/trusted', {}, true
-      if json then printJson edge else console.log "● Edge CA trusted (lan can be exposed)#{if edge.root then "\n  Root: #{edge.root}" else ''}"
-
-  when 'expose'
-    # Exposure — which addresses the edge listens on, and the host
-    # firewall that goes with it — is Janus's: `janus mode` sets it, and
-    # may need sudo, which needs THIS terminal to prompt. Then the agent
-    # renders the routing posture for the scope Janus now reports. Wan
-    # routing is rendered first, so the socket never opens to the world
-    # with lan's routing behind it; a failed mode change renders back.
-    abort 'rip-sites: expose requires a scope (localhost | lan | wan)' unless noun?
-    scope = EXPOSE_ALIASES[noun] or noun
-    abort "rip-sites: unknown scope #{JSON.stringify(noun)} — use localhost | lan | wan" unless scope in ['localhost', 'lan', 'wan']
-    abort "rip-sites: this edge is external (JANUS_CONTROL); its exposure is managed by its owner — run 'janus mode' there" if externalEdge()
-    janus = janusBinary()
-    abort "rip-sites: #{JANUS_MISSING}" unless janus?
-    requireExposureJanus janusStatus(), (message) -> abort "rip-sites: #{message}"
-    if scope is 'lan'
-      edge = requestAgent! 'rip-sites', 'GET', '/1.0/edge', null, { start: true }
-      abort 'rip-sites: lan requires `rip sites trust edge` first — install the edge CA, then retry' unless edge.localCaTrusted
-    edgePost! '/1.0/edge/sync', { scope: 'wan' }, true if scope is 'wan'
-    result = Bun.spawnSync [janus, 'mode', scope, ...exposeFlags], { stdin: 'inherit', stdout: (if json then 'pipe' else 'inherit'), stderr: 'inherit' }
-    unless result.exitCode is 0
-      process.stderr.write result.stdout.toString() if json and result.stdout?
-      edgePost! '/1.0/edge/sync', {}, true if scope is 'wan'
-      abort "rip-sites: janus mode #{scope} failed (exit #{result.exitCode})#{if result.exitCode is 4 then ' — the firewall step asks for sudo, which needs a terminal: run `rip sites expose ' + scope + '` there' else ''}"
-    printEdge edgePost!('/1.0/edge/sync', {}, true)
+      if json then printJson edge else console.log "● Edge CA trusted#{if edge.root then "\n  Root: #{edge.root}" else ''}"
 
   else
     abort "rip-sites: unknown verb #{JSON.stringify(verb)} — run `rip sites --help`"

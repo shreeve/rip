@@ -1,6 +1,6 @@
 export default
   name: 'hello'
-  hosts: ['hello.via.rip', 'hello.local'] # loopback + LAN (after `rip sites expose lan`)
+  hosts: ['hello.via.rip', 'hello.local'] # loopback + LAN (reachable per `janus mode`)
   hub:
     bridge: 'hub'           # Janus Bam door for live App watch (see index.rip)
   access:

@@ -36,7 +36,7 @@ ensureLanHosts = (hosts) ->
   out
 
 # The edge's exposure scope is Janus's; snapshots ask per app, so the
-# answer is kept for two seconds. syncEdge clears it.
+# answer is kept for two seconds. It only picks which URL to show first.
 scopeCache = { at: 0, scope: 'localhost' }
 currentScope = ->
   now = Date.now()
@@ -249,9 +249,8 @@ edgeHealth = ->
     response.json!
   catch then null
 
-# Keep Janus's service config current with the edge's scope: the routing
-# posture is rendered for the scope Janus reports. An external edge
-# (JANUS_CONTROL) is left alone.
+# Keep Janus's service config current: the posture, rendered with the
+# paths Janus reports. An external edge (JANUS_CONTROL) is left alone.
 ensureEdgeConfig = ->
   return if externalEdge()
   configureEdge paths.edgeStatus, fail
@@ -347,7 +346,7 @@ edgeSitesDir = ->
   sitesDir ?= janusStatus()?.sites or null
   sitesDir
 
-# Hosts beyond the packaged postures (*.local, via.rip) answer only when
+# Hosts beyond the packaged posture (*.local, via.rip) answer only when
 # a sites snippet declares them — and Caddy's import glob is silent
 # when nothing matches, so an app advertising its own domain with no
 # snippet looks healthy everywhere while its URL answers nothing
@@ -626,25 +625,6 @@ snapshotEdge = ->
 
 edgeAddress = (path) -> "unix/#{path}"
 
-# Exposure is Janus's ('janus mode'); the routing posture follows it: lan
-# renders Caddyfile.local (Bonjour, rip.local) and catalog-stored hosts
-# gain a *.local twin so LAN peers can open apps once their managers
-# re-register; anything else renders the via.rip posture. A reload in
-# place; the registrations survive. A target scope renders ahead of the
-# mode change: widening to wan puts the wan routing in place before the
-# socket opens to it.
-syncEdge = (target = null) ->
-  scopeCache = { at: 0, scope: 'localhost' }
-  scope = target or currentScope()
-  state.edge.baseUrl = 'https://{host}/'
-  state.edge.lastError = null
-  if scope is 'lan'
-    for app in state.apps when app.hosts.length
-      app.hosts = ensureLanHosts app.hosts
-  saveState()
-  ensureEdgeConfig!
-  snapshotEdge!
-
 # Exit when nothing remains to supervise — no idle forever control plane.
 #
 # "Nothing to supervise" is not the same as "nobody is talking to me", and
@@ -813,12 +793,13 @@ statusPage = ->
 """
 
 # Janus's redacted per-app view (workers, heartbeats, counters, launch
-# links) rides the mdns front door; Caddyfile.local pins `name rip.local`
-# and `listen :7680`. null when unavailable (not lan, or edge down).
+# links), over the control socket. null when the edge is down or has no
+# mdns.
 mdnsStatus = ->
-  return null unless currentScope() is 'lan' and edgeHealth!?
+  target = edgeTarget()
+  return null unless target?
   try
-    response = fetch! 'http://127.0.0.1:7680/status.json', { headers: { host: 'rip.local' }, signal: AbortSignal.timeout(1200) }
+    response = edgeFetch! target, '/1.0/mdns/status'
     return null unless response.ok
     response.json!
   catch
@@ -855,14 +836,14 @@ handleStatus = (request) ->
       return Response.new readFileSync(TRUST_SAFARI_HTML), { headers: { 'content-type': 'text/html; charset=utf-8' } } if existsSync TRUST_SAFARI_HTML
       return Response.new null, { status: 302, headers: { location: '/trust' } }
     if request.method is 'GET' and url.pathname is '/trust/ca.crt'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose lan`', 404 unless existsSync CADDY_PKI_ROOT
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`', 404 unless existsSync CADDY_PKI_ROOT
       return Response.new readFileSync(CADDY_PKI_ROOT), {
         headers:
           'content-type': 'application/x-x509-ca-cert'
           'content-disposition': 'attachment; filename="rip-edge-local-ca.crt"'
       }
     if request.method is 'GET' and url.pathname is '/trust/ca.mobileconfig'
-      fail 'edge CA not ready — on the Mac run `rip sites trust edge`, then `rip sites expose lan`', 404 unless existsSync CADDY_PKI_ROOT
+      fail 'edge CA not ready — on the Mac run `rip sites trust edge`', 404 unless existsSync CADDY_PKI_ROOT
       return Response.new caMobileconfig!, {
         headers:
           'content-type': 'application/x-apple-aspen-config'
@@ -880,7 +861,7 @@ handleStatus = (request) ->
         }
       html = '''<!doctype html><html><body style="font-family:system-ui;margin:2rem">
         <h1>Trust this edge</h1>
-        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>, then <code>rip sites expose lan</code>.</p>
+        <p>Local CA is not ready yet. On the Mac run <code>rip sites trust edge</code>.</p>
         </body></html>'''
       return Response.new html, { headers: { 'content-type': 'text/html; charset=utf-8' }, status: 503 }
     actionMatch = url.pathname.match /^\/apps\/([^/]+)\/(start|stop|restart)$/
@@ -947,11 +928,6 @@ route = (request) ->
         return Response.json(mutate!(-> trustEdge!)) if parts[2] is 'trust'
         return Response.json(mutate!(-> markEdgeTrusted())) if parts[2] is 'trusted'
         return Response.json(exportEdgeCa!) if parts[2] is 'export-ca'
-        if parts[2] is 'sync'
-          body = try request.json! catch then {}
-          target = body?.scope
-          return Response.json({ error: "unknown scope #{JSON.stringify(target)}" }, { status: 400 }) if target? and target not in ['localhost', 'lan', 'wan']
-          return Response.json(mutate!(-> syncEdge!(target)))
     if parts[0] is '1.0' and parts[1] is 'agent'
       if request.method is 'POST' and parts[2] is 'stop' and parts.length is 3
         # Graceful recycle: answer first, then exit. The apps are
@@ -1063,7 +1039,7 @@ try
   try unlinkSync paths.edgeStatus
   statusServer = Bun.serve { unix: paths.edgeStatus, fetch: handleStatus }
   # Janus's config names the status socket by path; a boot is the moment
-  # to make sure the file Janus runs matches the scope Janus reports.
+  # to make sure the file Janus runs carries the paths Janus reports.
   try
     ensureEdgeConfig!
   catch error
