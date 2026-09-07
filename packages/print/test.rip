@@ -289,6 +289,12 @@ test! "unknown extensions fall back to plaintext", ->
   { stdout } = serve! ['data.xyzzy'], dir
   ok stdout.includes('  data.xyzzy (2 lines) [plaintext]\n')
 
+test! "property lists print as XML", ->
+  dir = scratch()
+  write dir, 'Info.plist', '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key>\n  <string>rip</string>\n</dict>\n</plist>\n'
+  { stdout } = serve! ['Info.plist'], dir
+  ok stdout.includes('  Info.plist (8 lines) [xml]\n')
+
 # ==[ Single-markdown mode ]==
 
 console.log "\nSingle-markdown mode"

@@ -64,6 +64,7 @@ const extToLang = {
   html:   'html',
   htm:    'html',
   xml:    'xml',
+  plist:  'xml',  // property lists in their XML form (a binary bplist prints as noise either way)
   css:    'css',
   scss:   'scss',
   sass:   'scss',

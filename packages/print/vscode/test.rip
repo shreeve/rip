@@ -87,6 +87,7 @@ test "extensions and special filenames map to hljs languages", ->
   eq getLang('bunfig.toml'), 'toml'
   eq getLang('.zshrc'), 'bash'
   eq getLang('data.xyzzy'), 'plaintext'
+  eq getLang('Info.plist'), 'xml'
 
 # ==[ File discovery ]==
 
