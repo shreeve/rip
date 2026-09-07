@@ -224,8 +224,8 @@ managerStatus = (app) ->
     response.json!
   catch then null
 
-edgeFetch = (target, path = '/1.0') ->
-  options = { signal: AbortSignal.timeout(PROBE_TIMEOUT) }
+edgeFetch = (target, path = '/1.0', init = {}) ->
+  options = { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT) }
   if target.startsWith('http://') or target.startsWith('https://')
     fetch "#{target}#{path}", options
   else
@@ -255,6 +255,49 @@ ensureEdgeConfig = ->
   return if externalEdge()
   configureEdge paths.edgeStatus, fail
   state.edge.lastError = null
+
+# The status page is an app like any other: registered with Janus under
+# both family apexes, served through the janus handler from this
+# process's status socket, its names approved by Janus's own tls ask. A
+# heartbeat lease, renewed every tick: when this process exits, the
+# registration lapses and the names go dark with it. An external edge
+# (JANUS_CONTROL) routes what its owner says; nothing registers there.
+STATUS_APP = 'rip'
+STATUS_HOSTS = ['via.rip', 'rip.local']
+statusRegistration = null
+
+edgeJSON = (target, method, path, body = null) ->
+  init = { method }
+  if body?
+    init.headers = { 'content-type': 'application/json' }
+    init.body = JSON.stringify body
+  edgeFetch! target, path, init
+
+registerStatus = ->
+  return if externalEdge()
+  target = edgeTarget()
+  return unless target?
+  try
+    if statusRegistration?
+      beat = edgeJSON! target, 'POST', "/1.0/apps/#{statusRegistration.id}/heartbeat"
+      return if beat.ok
+      statusRegistration = null
+    body = { name: STATUS_APP, hosts: STATUS_HOSTS, upstreams: [{ path: paths.edgeStatus }], lease: 'heartbeat' }
+    response = edgeJSON! target, 'POST', '/1.0/apps', body
+    if response.status is 409
+      # A previous agent's lease has not lapsed yet: the names are ours.
+      for app in (edgeJSON! target, 'GET', '/1.0/apps').json! when app.name is STATUS_APP
+        edgeJSON! target, 'DELETE', "/1.0/apps/#{app.id}"
+      response = edgeJSON! target, 'POST', '/1.0/apps', body
+    statusRegistration = if response.status is 201 then response.json! else null
+  catch
+    statusRegistration = null
+
+unregisterStatus = ->
+  return unless statusRegistration?
+  target = edgeTarget()
+  try edgeJSON! target, 'DELETE', "/1.0/apps/#{statusRegistration.id}" if target?
+  statusRegistration = null
 
 # ── serve.rip host declarations ──────────────────────────────────────
 #
@@ -815,13 +858,6 @@ handleStatus = (request) ->
     if request.method is 'GET' and url.pathname is '/status.json'
       apps = Promise.all! state.apps.map (app) -> snapshotApp! app
       return Response.json { edge: snapshotEdge!, apps: apps, janus: mdnsStatus! }
-    # Caddy on_demand_tls ask — allow single-label *.local names, the
-    # via.rip apex (the loopback dashboard), and single-label *.via.rip
-    # app names. Both families are minted by the same local CA.
-    if request.method is 'GET' and url.pathname is '/tls-ask'
-      domain = String(url.searchParams.get('domain') or '').toLowerCase()
-      allowed = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(local|via\.rip)$/.test(domain) or domain is 'via.rip'
-      return Response.new null, { status: if allowed then 200 else 404 }
     # Trust onboarding. The page itself rides both plain HTTP (the CA
     # bootstrap — an untrusted device cannot load anything over https) and
     # HTTPS (informational once trusted). /trust/check is the probe target:
@@ -1027,6 +1063,7 @@ release = ->
 shutdown = ->
   return if stopping
   stopping = true
+  unregisterStatus!
   release()
   exit 0
 
@@ -1044,6 +1081,7 @@ try
     ensureEdgeConfig!
   catch error
     state.edge.lastError = error?.message or String(error)
+  registerStatus!
   # One missed probe is not an outage (see PROBE_TIMEOUT) — recovery
   # waits for DOWN_TICKS consecutive failed ticks, evidence spread
   # across seconds rather than one starved instant.
@@ -1065,6 +1103,7 @@ try
   setTimeout reconcile, 0
   setInterval (->
     reconcile()
+    registerStatus()
     maybeExitIdle()
   ), 2000
 catch error
