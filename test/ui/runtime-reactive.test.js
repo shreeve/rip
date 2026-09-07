@@ -572,7 +572,7 @@ describe('effect scheduling, batching, disposal', () => {
     })).toEqual(['first', 'second', 'third']);
   });
 
-  test('a cascading write mid-flush flushes NESTED (depth-first), then the outer flush resumes', () => {
+  test('a cascading write mid-flush drains the shared queue: the pending siblings run before the cascade\'s dependents', () => {
     expect(both((rt) => {
       const s1 = rt.__state(0), s2 = rt.__state(0);
       const order = [];
@@ -582,7 +582,7 @@ describe('effect scheduling, batching, disposal', () => {
       order.length = 0;
       s1.value = 1;
       return order;
-    })).toEqual(['A1', 'C10', 'B1']);
+    })).toEqual(['A1', 'B1', 'C10']);
   });
 
   test('__batch: one flush at the end; nested batches join the outer one; the return value passes through', () => {

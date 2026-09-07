@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from '../../support/spawn.js';
 import { describeExtended } from '../../support/extended.js';
+import { openSession } from '../../support/lsp-session.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '../../..');
@@ -4975,4 +4976,81 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
       expect(diagsOf(dir)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
+});
+
+describe('branch narrowing under the real checker', () => {
+  // TS18047 is a strict-null-checks answer, so the workspace is strict.
+  const strictWorkspace = (files) => {
+    const dir = workspace(files);
+    const base = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+    delete base.include;
+    delete base.exclude;
+    base.compilerOptions.strict = true;
+    fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(base, null, 2));
+    return dir;
+  };
+  const component = (cond) => [
+    'C = component',
+    '  @store: { user: { email: string } | null, other: boolean }',
+    '  render',
+    `    if ${cond}`,
+    '      span @store.user.email',
+    '',
+  ].join('\n');
+
+  test('the unnarrowed spelling under `if @store.user` checks clean', () => {
+    const dir = strictWorkspace({ 'narrow.rip': component('@store.user') });
+    try {
+      const r = check(dir);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  test('a branch on a different expression does not narrow: TS18047 at the read', () => {
+    const dir = strictWorkspace({ 'narrow.rip': component('@store.other') });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('TS18047');
+      expect(r.stdout).toContain('narrow.rip:5:');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+});
+
+// The editor's half of branch narrowing: the face narrows by control
+// flow (an assertion the block's effects open with), so the hover on a
+// read inside the branch reports the narrowed type, while the condition's
+// own read keeps the union. A postfix `!` would satisfy the checker and
+// leave both hovers at the union, so this is the gate that separates the
+// two spellings. Strict, because without strict null checks the union
+// never exists and both hovers agree by accident.
+describeExtended('branch narrowing — what the editor says', () => {
+  test('the hover on a narrowed read drops null; the condition read keeps it', async () => {
+    const base = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
+    delete base.include;
+    delete base.exclude;
+    base.compilerOptions.strict = true;
+    const session = await openSession({
+      'tsconfig.json': JSON.stringify(base),
+      'main.rip': [
+        'C = component',
+        '  @store: { user: { email: string } | null, other: boolean }',
+        '  render',
+        '    if @store.user',
+        '      span @store.user.email',
+        '',
+      ].join('\n'),
+    });
+    try {
+      session.open('main.rip');
+      const read = await session.hover('main.rip', 4, 19);      // `user` in `span @store.user.email`
+      const condition = await session.hover('main.rip', 3, 15); // `user` in `if @store.user`
+      expect(read, 'the read serves a hover at all').toBeTruthy();
+      expect(read).toBe('(property) user: { email: string; }');
+      expect(condition).toBe('(property) user: { email: string; } | null');
+    } finally {
+      await session.close();
+    }
+  }, 60_000);
 });

@@ -767,6 +767,7 @@ class Emitter {
     // too-deep tree rejects as a positioned diagnostic instead of an
     // engine RangeError at a machine-dependent depth.
     this.exprDepth = 0;
+    this.renderRecord = null;
     this.postfixGuardDepth = 0;
     // The binding name a schema value takes (assignment threading).
     this._schemaName = null;
@@ -10155,7 +10156,9 @@ class Emitter {
   // the one-walk rule).
   withRecordContext(rec, fn) {
     const prevSelf = this.renderSelf;
+    const prevRecord = this.renderRecord;
     this.renderSelf = rec.self;
+    this.renderRecord = rec;
     // A factory record's `bindings` is exactly its loop item/index names
     // (own plus threaded outer; the class record's is empty), so the same
     // set feeds both roles: `bound` shadows outer names, `loopVars` marks
@@ -10166,6 +10169,7 @@ class Emitter {
     } finally {
       this.rframes.pop();
       this.renderSelf = prevSelf;
+      this.renderRecord = prevRecord;
     }
   }
 
@@ -10211,6 +10215,7 @@ class Emitter {
         this.b.emit(pad);
         const emitIt = () => {
           this.b.emit(`${this.runtimeName('__effect')}(() => { `);
+          this.narrowGuard();
           s.fn();
           this.b.emit(' })');
         };
@@ -12538,7 +12543,11 @@ class Emitter {
       refs: [], loopStack, stmts: [],
       forceNonStatic: false, root: null, isStatic: false, originNode,
       hasKids: false, kidsVar: null, renameHazardNames,
+      // The chains this block's reads may treat as non-null on the TS
+      // face: every enclosing branch's tested chains plus this one's.
+      narrowed: [...(parent.narrowed ?? []), ...(this._narrowNext ?? [])],
     };
+    this._narrowNext = null;
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === 'branch' ? { record: rec, el: null } : null;
@@ -12592,6 +12601,86 @@ class Emitter {
   // through the branch factory handles them (the flat-chain fold has
   // no input shape here; a >4-length node would be one, and rejects
   // loudly if the grammar ever grew it).
+  // The chains a branch condition proves non-null for its body: the
+  // condition itself when it is a plain `.` chain rooted at a member
+  // (`session.user`, `@stash.user.profile`), and each such operand
+  // of a top-level `and`. Anything else — a call, an index, an optional
+  // link, a render local or loop variable at the root — proves nothing
+  // the face can spell.
+  narrowConjuncts(cond) {
+    if (isNode(cond) && cond[0] === '&&' && cond.length === 3) {
+      return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
+    }
+    if (!Emitter.isDotChain(cond)) return [];
+    let root = cond;
+    while (isNode(root)) root = root[1];
+    if (root === 'this') return [cond];
+    if (this.renderVarKind(root) !== null || this.bareRewrite(root) === null) return [];
+    return [cond];
+  }
+
+  static isDotChain(n) {
+    if (!isNode(n) || n[0] !== '.' || n.length !== 3 || typeof n[2] !== 'string' || n[2][0] === '"') return false;
+    const o = n[1];
+    if (o === 'this') return true;
+    if (typeof o === 'string') return /^[A-Za-z_$][\w$]*$/.test(o);
+    return Emitter.isDotChain(o);
+  }
+
+  // The TS-only narrowing a block's effect bodies open with: one
+  // `__ripNarrow(chain)` assertion per chain the enclosing branches
+  // tested, so every read of that chain in the same function body is
+  // non-null on the face by control flow — what the checker narrows on
+  // and what the editor's hover reports. Echoed: the chain's reads
+  // already publish at the branch condition. The runtime keeps the
+  // claim true: the flush runs an owner before anything it owns, so
+  // the swap disposes the block's effects before a binding under it
+  // re-runs, and a block leaving through a transition freezes its
+  // effects first (f()). A nested function body is not narrowed — a
+  // handler can fire after the flip while the leaving DOM lingers.
+  // The statement form spells `__ripNarrow(c); ` per chain; the
+  // expression form spells `(__ripNarrow(c), ` per chain for an arrow
+  // whose body is the one expression that follows, and
+  // narrowGuardClose closes what it opened.
+  // The chains the CURRENT record may assert: a chain whose bare root
+  // this record rebinds — a loop variable, a render local — would
+  // re-spell against the rebinding, so it drops here rather than
+  // asserting a claim about the wrong value. A `this`-rooted chain has
+  // no such hazard.
+  activeNarrowed() {
+    const rec = this.renderRecord;
+    if (!this.ts || !rec || !(rec.narrowed?.length > 0)) return [];
+    return rec.narrowed.filter((c) => {
+      let root = c;
+      while (isNode(root)) root = root[1];
+      return root === 'this' || !(rec.bindings.has(root) || rec.locals.has(root));
+    });
+  }
+
+  hasNarrow() {
+    return this.activeNarrowed().length > 0;
+  }
+
+  narrowGuard(form = 'statement', { trailing = true } = {}) {
+    const chains = this.activeNarrowed();
+    if (chains.length === 0) return false;
+    this._needsNarrowHelper = true;
+    this.b.tsOnly(() => this.b.echo(() => {
+      chains.forEach((c, i) => {
+        if (i > 0) this.b.emit(' ');
+        this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
+        this.renderExpr(c);
+        this.b.emit(form === 'statement' ? ');' : '),');
+      });
+      if (trailing) this.b.emit(' ');
+    }));
+    return true;
+  }
+
+  narrowGuardClose(opened) {
+    if (opened) this.b.tsOnly(() => this.b.emit(')'.repeat(this.activeNarrowed().length)));
+  }
+
   renderCond(node, markNode = node) {
     if (node.length > 4) {
       throw this.positionedError(node, 'emitter: unexpected flat conditional chain shape in render (internal)');
@@ -12608,6 +12697,7 @@ class Emitter {
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar('anchor');
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('if')`));
+    this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, 'branch', markNode);
     const prevChain = this._chainMarkNode;
     if (elsePart !== null && isNode(elsePart) && elsePart[0] === 'if' && this.stores.idOf(elsePart) === null) {
@@ -12862,6 +12952,7 @@ class Emitter {
       // A dynamic ref inside a branch writes its cell in m(): batch
       // the whole swap so observers see only the final cell value.
       if (hasRef) this.b.emit(`${p3}${this.runtimeName('__batch')}(() => {\n`);
+      if (this.hasNarrow()) this.b.tsOnly(() => { this.b.emit(p3); this.narrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
       this.b.emit(`${p3}const ${show} = !!(`);
       // $self fallback: a SWITCH lowers through this path with
       // markNode = the switch node, which has no 'condition' role —
@@ -12874,7 +12965,7 @@ class Emitter {
       this.b.emit(`${p3}if (${want} === ${showing}) return;\n`);
       this.b.emit(`${p3}if (${cur}) {\n`);
       this.b.emit(`${p3}  const ${leaving} = ${cur};\n`);
-      this.b.emit(`${p3}  if (${leaving}._t) { ${transition}(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }\n`);
+      this.b.emit(`${p3}  if (${leaving}._t) { ${leaving}.f(); ${transition}(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }\n`);
       this.b.emit(`${p3}  else { ${leaving}.d(true); }\n`);
       this.b.emit(`${p3}  ${cur} = null;\n`);
       this.b.emit(`${p3}}\n`);
@@ -12919,6 +13010,7 @@ class Emitter {
       this.b.emit(`${p2}${this.runtimeName('__effect')}(() => {\n`);
       this.b.emit(p3);
       if (hasRef) this.b.emit(`${this.runtimeName('__batch')}(() => `);
+      const guarded = this.narrowGuard(hasRef ? 'expression' : 'statement');
       this.b.emit(`${this.runtimeName('__reconcile')}(${anchorVar}, ${state}, `);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
@@ -12992,6 +13084,7 @@ class Emitter {
         this.b.emit('null');
       }
       this.b.emit(`${outerExtra})`);
+      if (hasRef) this.narrowGuardClose(guarded);
       if (hasRef) this.b.emit(')');
       this.b.emit(';\n');
       this.b.emit(`${p2}});\n`);
@@ -13204,6 +13297,15 @@ class Emitter {
           this.b.emit(`${p4}} finally { ${this.runtimeName('__popOwner')}(${ownerVar}); }\n`);
         }
         this.b.emit(`${p3}},\n`);
+        // f(): the block's effects die now while its DOM outlives them
+        // through a leave transition, so no binding re-runs against
+        // the state that dismissed the block. Branch handles only —
+        // the swap is the one caller.
+        if (rec.kind === 'branch') {
+          this.b.emit(`${p3}f() {`);
+          if (hasFrame) this.b.emit(` if (${frameVar}) { ${frameVar}.dispose(); ${frameVar} = null; }`);
+          this.b.emit(` },\n`);
+        }
         // d(): child components unmount FIRST (the order — the child
         // cascade runs while the block's effects are still live),
         // effects die with the frame, refs clear (real destroys only
@@ -18108,6 +18210,12 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (emitter._needsSourceKeyHelper === true) {
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
+  }
+  // The narrowing assertion's ONE declaration per module — an
+  // assertion signature, so each `__ripNarrow(chain)` a block's effect
+  // opens with narrows that chain's reads by control flow.
+  if (emitter._needsNarrowHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;\n'));
   }
   // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
   // spelling is the boundary: `??=` says "install unless someone already

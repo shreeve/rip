@@ -83,6 +83,10 @@ const REGION_SHAPES = [
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
   /^declare function __ripAmbientStash<T>\(v: T\): T;$/u, // the ambience helper declare
   /^declare function __ripSourceKey<const T extends \(.*\)>\(s: T\): T;$/su, // the stash-key helper declare
+  /^__ripNarrow\(.*\);$/su,                                // branch-narrowing assertions (statement form) a block's effect opens with
+  /^\(__ripNarrow\(.*\),$/su,                              // the expression form's opener (a loop's batched reconcile)
+  /^\)+$/u,                                                // the expression form's closers
+  /^declare function __ripNarrow<T>\(v: T\): asserts v is NonNullable<T>;$/u, // the narrowing helper declare
 ];
 
 describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-byte', () => {
@@ -2014,5 +2018,102 @@ describe('globalThis ??= declares the global', () => {
     expect(r.code).not.toContain('var inner');
     expect(r.globalDecls).toEqual(['seed']);
     expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+  });
+});
+
+describe('branch narrowing: a block\'s effects open with the assertion that narrows the chain its branch tested, on the face only', () => {
+  const source = [
+    'C = component',
+    '  @store: any',
+    '  session ~= @stash.session',
+    '  render',
+    '    if session.user and @store.flag',
+    '      span session.user.email',
+    '      span @store.flag.x',
+    '      span @store.other.y',
+    '      button @click: (-> session.user.z), "k"',
+    '      if session.user.address',
+    '        em session.user.address.city',
+    '    else',
+    '      span session.user.email',
+    '',
+  ].join('\n');
+  const opts = { path: 'narrow-fixture.rip', appStashSpec: './stash.rip' };
+
+  test('the tested chains and each `and` operand narrow; other chains, the else branch, and handler bodies stay bare', () => {
+    for (const runtimeDelivery of ['none', 'inline', 'import']) {
+      const faced = ts(source, { ...opts, runtimeDelivery });
+      const plain = js(source, { ...opts, runtimeDelivery });
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+      for (const [start, end] of faced.tsRegions) {
+        const text = faced.code.slice(start, end).trim();
+        expect(REGION_SHAPES.some((re) => re.test(text)), `unrecognized TS-only region shape: ${JSON.stringify(text)}`).toBe(true);
+      }
+      const guard = '__ripNarrow(ctx.session.value.user); __ripNarrow(ctx.store.value.flag); ';
+      expect(faced.code).toContain(`__effect(() => { ${guard}_t0.data = ctx.session.value.user.email; })`);
+      expect(faced.code).toContain(`__effect(() => { ${guard}_t1.data = ctx.store.value.flag.x; })`);
+      expect(faced.code).toContain(`__effect(() => { ${guard}_t2.data = ctx.store.value.other.y; })`);
+      expect(faced.code).toContain('(() => ctx.session.value.user.z)');
+      expect(faced.code).toContain(`${guard.trim()}\n              const show = !!(ctx.session.value.user.address);`);
+      expect(faced.code).toContain(`__effect(() => { ${guard}__ripNarrow(ctx.session.value.user.address); _t4.data = ctx.session.value.user.address.city; })`);
+      expect(faced.code).toContain('__effect(() => { _t5.data = ctx.session.value.user.email; })');
+      expect(faced.code).toContain('declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;');
+      expect(plain.code).not.toContain('__ripNarrow');
+    }
+  });
+
+  test('a call, an index, an optional link, or a loop variable at the root proves nothing', () => {
+    const src = [
+      'C = component',
+      '  @store: any',
+      '  rows := []',
+      '  render',
+      '    if @store.get()',
+      '      span @store.get().x',
+      '    if @store.items[0]',
+      '      span @store.items[0].x',
+      '    if @store.a?.b',
+      '      span @store.a?.b.c',
+      '    for row in rows',
+      '      if row.current',
+      '        span row.current.email',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-neg.rip' });
+    expect(faced.code).not.toContain('__ripNarrow');
+  });
+  test('a loop variable that rebinds the chain\'s root drops the chain for the row record only', () => {
+    const src = [
+      'C = component',
+      '  session: any := null',
+      '  rows := []',
+      '  render',
+      '    if session.user',
+      '      span session.user.name',
+      '      for session in rows',
+      '        li session.name',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-shadow-loop.rip' });
+    expect(faced.code).toContain('__effect(() => { __ripNarrow(ctx.session.value.user); _t0.data = ctx.session.value.user.name; })');
+    expect(faced.code).toContain('__ripNarrow(ctx.session.value.user); __reconcile(');
+    expect(faced.code).toContain('__effect(() => { _t1.data = session.name; })');
+    expect(faced.code).not.toContain('__ripNarrow(session.user)');
+  });
+
+  test('a render local that rebinds the chain\'s root shadows the member for its whole record, so no guard is emitted there', () => {
+    const src = [
+      'C = component',
+      '  session: any := null',
+      '  rows := []',
+      '  render',
+      '    if session.user',
+      '      session = rows[0]',
+      '      em session.name',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-shadow-local.rip' });
+    expect(faced.code).toContain('session = ctx.rows.value[0];');
+    expect(faced.code).not.toContain('__ripNarrow');
   });
 });
