@@ -1241,7 +1241,7 @@ function sweepOrphanMirrors() {
   for (const [, state] of states) expected.add(state.mirrorPath);
   const removed = [];
   for (const mirror of walkFiles(mirrorRoot, '.rip.ts')) {
-    if (expected.has(mirror) || mirror.startsWith(externalRoot)) continue;
+    if (expected.has(mirror) || mirror.startsWith(externalRoot) || isCurrentStub(mirror)) continue;
     try {
       fs.rmSync(mirror);
       removed.push(mirror);
@@ -1250,6 +1250,25 @@ function sweepOrphanMirrors() {
   if (removed.length) {
     connection.console.log(`[rip] orphan mirror sweep: ${removed.length} manifest-less mirror(s) removed`);
   }
+}
+
+// The auto-import stubs below are manifest-less BY DESIGN, so to the
+// sweep a stub and an orphaned face look alike until the bytes are
+// read: a stub is what the scan would write for its source today —
+// provenance, not shape. Line order is not part of the identity (the
+// whole-workspace pass and the one-file path grow a barrel's star
+// names in different orders). A stub whose source changed or vanished
+// while the server was down fails here and is swept; the population
+// pass re-derives it.
+function isCurrentStub(mirror) {
+  const file = sourcePathOfMirror(mirror);
+  if (!file || !fs.existsSync(file)) return false;
+  let bytes;
+  try { bytes = fs.readFileSync(mirror, 'utf8'); } catch { return false; }
+  const stub = stubTextFor(file);
+  if (stub === null) return false;
+  const lines = (text) => text.split('\n').sort().join('\n');
+  return lines(stub) === lines(bytes);
 }
 
 // ---- auto-import candidacy: the whole workspace, as stubs.

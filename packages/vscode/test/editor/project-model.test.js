@@ -721,6 +721,42 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       expect(api.logs.filter((l) => /mirror collision/.test(l))).toEqual([]);
     });
   }, 30000);
+
+  test('a restart keeps the stubs it wrote: nothing swept, nothing rewritten; a stale stub is re-derived, a sourceless one swept', async () => {
+    const ws = makeWorkspace({ 'util.rip': UTIL, 'b.rip': 'export b: number = 1\n', 'c.rip': 'export c: number = 2\n' });
+    try {
+      // Session 1: util's face through the closure; b and c as stubs.
+      await inSession(ws, async (api) => {
+        await api.open('app.rip', APP);
+        await api.untilLog(/auto-import stubs:/);
+        await api.until('app.rip', (codes) => codes.includes(2339));
+      });
+      const stubB = path.join(ws, '.rip', 'editor', 'b.rip.ts');
+      const stubC = path.join(ws, '.rip', 'editor', 'c.rip.ts');
+      const inoB = fs.statSync(stubB).ino;
+
+      // Session 2: a stub is manifest-less by design, not an orphan.
+      await inSession(ws, async (api) => {
+        await api.sleep(1000); // past the (backgrounded) population pass
+        expect(api.logs.filter((l) => /orphan mirror sweep|auto-import stubs:/.test(l))).toEqual([]);
+        expect(fs.statSync(stubB).ino).toBe(inoB);
+      });
+
+      // While the server is down: b's exports change, c is deleted.
+      fs.writeFileSync(path.join(ws, 'b.rip'), 'export b2: number = 1\n');
+      fs.rmSync(path.join(ws, 'c.rip'));
+
+      // Session 3: both stale stubs are swept; b's is re-derived, c's is gone.
+      await inSession(ws, async (api) => {
+        expect(api.logs.some((l) => /orphan mirror sweep: 2 /.test(l))).toBe(true);
+        await api.untilLog(/auto-import stubs: 1 /);
+        await api.poll(() => fs.readFileSync(stubB, 'utf8').includes('export declare const b2: any;'), 'b re-stubbed');
+        expect(fs.existsSync(stubC)).toBe(false);
+      });
+    } finally {
+      fs.rmSync(ws, { recursive: true, force: true });
+    }
+  }, 30000);
 });
 
 // The module marker driven end-to-end: two PLAIN buffers (no
