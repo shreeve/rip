@@ -113,7 +113,7 @@ describe('Houdini / maybe dammit lockstep (editor grammars ⇄ compiler)', () =>
   });
 
   test('Vim recognizes ?! as one special operator token', () => {
-    expect(vimSyntax).toContain('syn match  ripOperator      /!?\\|?!\\|??\\|?\\./');
+    expect(vimSyntax).toContain('syn match  ripOperator      /?!\\|??\\|?\\./');
   });
 });
 

@@ -4,9 +4,7 @@
 
 > **Vim syntax highlighting, indentation, and filetype support for Rip.**
 
-Full-featured Vim plugin for the [Rip](https://github.com/shreeve/rip)
-programming language, with highlighting quality on par with the VS Code
-extension.
+Vim plugin for the [Rip](https://github.com/shreeve/rip) programming language.
 
 **Runtime:** Vim / Neovim plugin (editor host). Not a Bun package import.
 
@@ -14,16 +12,21 @@ extension.
 
 - **Syntax highlighting** — keywords, strings, numbers, operators, types, built-ins, comments
 - **String interpolation** — `#{}` and `${}` with nested brace support
+- **Comments** — line, `###` blocks (line-start only), and the `__DATA__` payload
 - **Function calls** — `fetch(`, `.json(`, dammit (`name!`), and maybe dammit (`name?!()`)
-- **Object keys** — `method:` and `optional?:` highlighting
-- **Assignment variables** — `x = 5` highlights the variable name
+- **Object keys** — `method:` and `optional?:`, including keys spelled with a value word (`{on: 2}`)
+- **Declarations** — `x = 5`, readonly `x =! 5`, state `x := 0`, computed `x ~= y`
 - **Function definitions** — `def name`, `name = ->`, and `name: ->`
 - **Class / enum / interface** — name and extends capture
-- **Reactive operators** — `:=`, `~=`, `~>`, `<~`, `<=>`, `=!`
+- **Reactive operators** — `:=`, `~=`, `~>`, `!>`, `<~`, `<=>`, `=!`
 - **Type annotations** — single-colon `name: Type` and `type Name =` (`::` is prototype access, e.g. `String::trim`)
-- **Regular expressions** — `/regex/` and `///heregex///` with interpolation
+- **Regular expressions** — `/regex/` and `///heregex///` with interpolation, with Rip's regex-vs-division rule
+- **Render blocks** — `#id` element shorthand reads as an id, not a comment
 - **Auto-indentation** — indent/dedent for offside-rule blocks
 - **Filetype settings** — 2-space soft tabs, fold-by-indent, `gf` navigation
+
+Render-block tags, attributes and component names, and the schema DSL's field
+vocabulary, are not yet highlighted — see [TODO.md](TODO.md).
 
 ## Install
 

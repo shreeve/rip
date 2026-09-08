@@ -711,7 +711,6 @@
     {"comment": "=== COMPOUND ASSIGNMENT (before simple assignment) ==="},
     { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
-    { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
     { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
     { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*(?:[.-][a-zA-Z_$][\\w$]*)*(?:[!?](?=[\\s,)\\]};:]|$))?", "name": "constant.other.symbol.rip" },
 
