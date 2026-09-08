@@ -1113,14 +1113,24 @@ function computeActiveClosure() {
   return active;
 }
 
-// The closure SHRINKS too: when a file is no longer reachable from any
-// open buffer — its importer closed, or the import line was removed —
-// its mirror and cache entry leave the program (tsgo sees the
+// The closure SHRINKS too: when a workspace file is no longer reachable
+// from any open buffer — its importer closed, or the import line was
+// removed — its mirror and cache entry leave the program (tsgo sees the
 // deletions), so the program is always exactly the open buffers'
 // closure. A shared dependency survives while ANY importer remains
 // open.
+//
+// Stdlib faces are the exception: once materialized they stay for the
+// session, registered and on disk. The tree is finite, and a face that
+// is never deleted is never absent — a delete-and-rewrite of `rip/app`
+// is exactly the window in which tsgo answers an importer's first pull
+// with an unresolved module (a preview swap closes the last importer
+// in the same instant the next one opens). Workspace faces get the same
+// continuity from their in-place stubs below; the stdlib has no stub
+// to fall back to, so its face is the thing that stays.
 async function pruneClosure() {
   const active = computeActiveClosure();
+  const leaves = (file) => !active.has(file) && !isStdlibPath(file);
   const removed = [];
   // Mirrors overwritten with a stub rather than removed: the file left the
   // CLOSURE but not the workspace, so its names stay auto-importable.
@@ -1148,10 +1158,10 @@ async function pruneClosure() {
     } catch { /* no mirror on disk */ }
   };
   for (const file of [...materializedMirrors.keys()]) {
-    if (!active.has(file)) drop(file);
+    if (leaves(file)) drop(file);
   }
   for (const file of Object.keys(cacheManifest.entries)) {
-    if (!active.has(file)) drop(file);
+    if (leaves(file)) drop(file);
   }
   for (const file of [...pendingImports]) {
     if (!active.has(file)) pendingImports.delete(file);
@@ -2273,6 +2283,13 @@ documents.onDidClose(({ document }) => {
 // own refresh then recompiles those faces while tsgo answers the first
 // pull in between with an unresolved module. Every pending refresh
 // settles first; only then is reachability a fact.
+//
+// VS Code sends a preview swap as didClose THEN didOpen (the replaced
+// editor is disposed inside the open call; the next document's model
+// waits on a file read), so at close time there is nothing pending to
+// wait on. That order is safe because a prune never deletes a mirror
+// tsgo is answering from: workspace faces re-stub in place, and stdlib
+// faces stay (pruneClosure).
 async function reconcileClosureAfterClose(fsPath) {
   await Promise.all([...states.values()].map((state) => state.settling).filter(Boolean));
   if (computeActiveClosure().has(fsPath)) materializeClosure([fsPath]);

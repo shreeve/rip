@@ -777,31 +777,54 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 describe.skipIf(!tsgoAvailable)('the closure across a preview-tab swap', () => {
   const USES_APP = (name) => `import { source } from 'rip/app'\n\nexport ${name} =\n  user: source fetch: -> Promise.resolve { name: 'Ada' }\n  count: 0\n`;
 
-  test('closing the previous buffer as the next one opens drops nothing the next one imports', async () => {
+  // The app runtime's faces, by inode: a delete-and-rewrite changes them.
+  const inodesOf = (ws) => {
+    const out = new Map();
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.set(p, fs.statSync(p).ino); } };
+    walk(path.join(ws, '.rip', 'editor', '__external__'));
+    return out;
+  };
+
+  // a.rip is open and clean; `swap` sends the close of a.rip and the open
+  // of b.rip in the order under test, with no wait between them.
+  const swapKeepsTheFaces = (swap) => inWorkspace({}, async (api) => {
+    await api.open('a.rip', USES_APP('a'));
+    await api.until('a.rip', (codes) => !codes.includes(2307));
+    const before = inodesOf(api.ws);
+    expect(before.size).toBeGreaterThan(0);
+    const mark = api.publishedCount;
+    swap(api);
+    await api.poll(() => api.publishesSince('b.rip', mark).length > 0, 'b.rip published');
+    // The FIRST answer is the one the user sees flash.
+    const first = api.publishesSince('b.rip', mark)[0].diagnostics.map((d) => d.code);
+    expect(first).not.toContain(2307);
+    // Structural: the faces never left the program. a.rip did — it is
+    // the one thing the prune has to reconcile, and it re-stubs in place.
+    await api.poll(() => api.logs.some((l) => /closure pruned: 1 mirror/.test(l)), 'a.rip left the program');
+    expect(inodesOf(api.ws)).toEqual(before);
+  });
+
+  test('the next buffer opens as the previous one closes: nothing the next one imports is dropped', async () => {
+    await swapKeepsTheFaces((api) => { api.openNoWait('b.rip', USES_APP('b')); api.close('a.rip'); });
+  }, 30000);
+
+  // The order VS Code sends: the replaced editor is disposed inside the
+  // open call, and the next document's model waits on a file read.
+  test('the previous buffer closes before the next one opens: nothing the next one imports is dropped', async () => {
+    await swapKeepsTheFaces((api) => { api.close('a.rip'); api.openNoWait('b.rip', USES_APP('b')); });
+  }, 30000);
+
+  // The property the swap rests on: a stdlib face outlives its last
+  // importer. Only the importer leaves the program.
+  test('closing the last importer of rip/app prunes the importer alone; the stdlib faces stay', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('a.rip', USES_APP('a'));
       await api.until('a.rip', (codes) => !codes.includes(2307));
-      // The app runtime's faces, by inode: a delete-and-rewrite changes them.
-      const external = path.join(api.ws, '.rip', 'editor', '__external__');
-      const inodes = () => {
-        const out = new Map();
-        const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.set(p, fs.statSync(p).ino); } };
-        walk(external);
-        return out;
-      };
-      const before = inodes();
+      const before = inodesOf(api.ws);
       expect(before.size).toBeGreaterThan(0);
-      const mark = api.publishedCount;
-      api.openNoWait('b.rip', USES_APP('b'));
       api.close('a.rip');
-      await api.poll(() => api.publishesSince('b.rip', mark).length > 0, 'b.rip published');
-      // The FIRST answer is the one the user sees flash.
-      const first = api.publishesSince('b.rip', mark)[0].diagnostics.map((d) => d.code);
-      expect(first).not.toContain(2307);
-      // Structural: the faces never left the program. a.rip did — it is
-      // the one thing the prune has to reconcile, and it re-stubs in place.
       await api.poll(() => api.logs.some((l) => /closure pruned: 1 mirror/.test(l)), 'a.rip left the program');
-      expect(inodes()).toEqual(before);
+      expect(inodesOf(api.ws)).toEqual(before);
     });
   }, 30000);
 });
