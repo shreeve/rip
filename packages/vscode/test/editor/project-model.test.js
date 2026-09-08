@@ -707,6 +707,20 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
       await api.poll(() => !api.codes('app.rip').includes(2307), 'rip/validate resolves');
     });
   }, 30000);
+
+  test('a source the closure compiled from disk and then opened in the editor has one owner — no collision', async () => {
+    // The closure compile names a.rip by filesystem path, didOpen by
+    // URI. One file, two spellings; the collision guard exists for two
+    // DIFFERENT sources landing on one mirror.
+    await inWorkspace({ 'a.rip': 'export a: number = 41\n' }, async (api) => {
+      const APP = 'import { a } from "./a.rip"\nbad = a.toUpperCase()\n';
+      await api.open('app.rip', APP);
+      await api.until('app.rip', (codes) => codes.includes(2339)); // a.rip's face is on disk
+      await api.open('a.rip', 'export a: number = 41\n');
+      await api.change('a.rip', 'export a: number = 42\n');
+      expect(api.logs.filter((l) => /mirror collision/.test(l))).toEqual([]);
+    });
+  }, 30000);
 });
 
 // The module marker driven end-to-end: two PLAIN buffers (no

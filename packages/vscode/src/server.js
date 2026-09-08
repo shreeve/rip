@@ -488,16 +488,21 @@ function writeMirror(mirrorPath, code) {
 // other. A path-hash suffix on mirror names is not an option (the
 // mirror NAME is the resolution mechanism: `./util.rip` resolves to the
 // adjacent `util.rip.ts`), so the guard detects and warns loudly.
-const mirrorOwners = new Map(); // lowercased mirror path → owning source
+const mirrorOwners = new Map(); // lowercased mirror path → owning source, one spelling
+// A source arrives under two spellings — a filesystem path from the
+// closure compile, a URI from the open buffer — and both name one
+// owner, so the map holds the path form of either.
+const ownerKeyOf = (source) => source.startsWith('file:') ? fileURLToPath(source) : source;
 function warnOnMirrorCollision(mirrorPath, source) {
   const key = mirrorPath.toLowerCase();
   const owner = mirrorOwners.get(key);
-  if (owner && owner !== source) {
+  const claimant = ownerKeyOf(source);
+  if (owner && owner !== claimant) {
     connection.console.error(
-      `[rip] mirror collision: ${source} and ${owner} map to the same mirror (${mirrorPath}) — one face shadows the other`,
+      `[rip] mirror collision: ${claimant} and ${owner} map to the same mirror (${mirrorPath}) — one face shadows the other`,
     );
   }
-  mirrorOwners.set(key, source);
+  mirrorOwners.set(key, claimant);
 }
 
 // tsgo lifecycle: launch, watch for death, RESTART ONCE, then stay
