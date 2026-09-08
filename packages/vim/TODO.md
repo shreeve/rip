@@ -73,8 +73,11 @@ the PascalCase type color. Still flat:
 - [ ] `keyword.control.rip` carries `use`, which is not a keyword — `use foo`
       compiles to `use(foo)`, and `test/rip/components.rip:3711` uses it as an
       ordinary variable.
-- [ ] `keyword.operator.otherwise.rip` (`rip.tmLanguage.json:685`) claims `!?`.
-      `a !? b` is a parse error; `a!?` is DAMMIT plus postfix existence.
+- [ ] `keyword.operator.otherwise.rip` (`rip.tmLanguage.json:685`) scopes `!?`
+      as one operator. The spelling is real — `a!?` compiles to
+      `await a() != null` — but it is DAMMIT plus postfix existence, two
+      tokens, so the name points at an operator that does not exist. The
+      single-token spelling is `?!`, already scoped as `presence`.
 - [ ] `=== INLINE JAVASCRIPT ===` (`rip.tmLanguage.json:83`) embeds `source.js`
       in backticks. A backtick in value position is a hard lexer error
       (`src/lexer.js:2030`); the one legitimate use is a template-literal type
