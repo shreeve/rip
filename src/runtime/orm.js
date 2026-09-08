@@ -3504,8 +3504,17 @@ function sqlEnumMembers(type) {
 // and the last moment the registry can be asked. `def` is the model
 // being rendered, named only so the rejection can say where.
 function columnType(field, def) {
-  // An array of anything is a JSON document, whatever the element is.
-  if (field.array) return 'JSON';
+  // An array whose element has a scalar column form is DuckDB's own
+  // LIST of that form — `tags? string[]` is `VARCHAR[]`, a type the
+  // database can index and `list_contains` can push down, and one the
+  // wire carries natively in both directions (harbor sends a real JSON
+  // array and binds one back). An element with no scalar form — a
+  // `json`/`any` document, a nested schema — has no list rendering, so
+  // it stays a JSON document.
+  if (field.array) {
+    const element = SQL_TYPES[field.typeName];
+    return element && element !== 'JSON' ? element + '[]' : 'JSON';
+  }
   const intrinsic = SQL_TYPES[field.typeName];
   if (intrinsic) return intrinsic;
   // An inline literal union (`status! "draft" | ["published"]`) is a

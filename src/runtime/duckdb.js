@@ -5,7 +5,7 @@
 // (the database), not for how it reaches it (the harbor wire service).
 //
 // It owns everything from the socket up to `{ columns, data, rowCount }`
-// with temporals decoded and a typed error thrown: URL resolution,
+// with values decoded per column type and a typed error thrown: URL resolution,
 // headers, NDJSON reading, error classification, timeouts,
 // caller aborts, statement cancellation, and the session lifecycle. It
 // owns nothing above that line — how a statement's TEXT is built and
@@ -252,10 +252,16 @@ class CancelledError extends DbError {
 
 function isDbError(value) { return value instanceof DbError; }
 
-// ── Temporal values at the wire ──────────────────────────────────────
+// ── Values at the wire ───────────────────────────────────────────────
 //
-// DuckDB temporal columns decode to real JS `Date` objects here — the
-// ONE decode seam. A naive TIMESTAMP is defined as UTC wall-clock and
+// The ONE decode seam, keyed off the per-column type harbor sends with
+// every result. Most types arrive already shaped and pass through
+// untouched: LIST is a real array, STRUCT a real object, and DECIMAL a
+// lossless decimal string that `rip/decimal` parses exactly. Two need
+// work here — temporal columns become real JS `Date` objects, and a
+// JSON column's text becomes its document.
+//
+// A naive TIMESTAMP is defined as UTC wall-clock and
 // gets its `Z` appended, so a result never shifts with the host's
 // offset. On the way out a `Date` becomes an ISO-8601 UTC string
 // (nested Dates inside arrays and structs included), because JSON has
@@ -295,12 +301,33 @@ function decodeTemporal(value, kind) {
   return Number.isNaN(date.getTime()) ? value : date;
 }
 
-// Whole-result decode in one pass. Fast path: when no column is
-// temporal the rows are returned untouched, with no row copy.
+// A JSON column arrives as its serialized text — the document is what
+// the column holds, so it decodes here beside the temporals, off the
+// same per-column type harbor already sends. Text that does not parse
+// returns unchanged, the same rule decodeTemporal follows: a column's
+// type stays stable except for values it genuinely names.
+function decodeJson(value) {
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+// The decode kinds, in one lookup — `null` for every type that arrives
+// already shaped (scalars, LIST, STRUCT, DECIMAL's lossless string).
+function cellKind(duckdbType) {
+  return String(duckdbType ?? '').trim().toUpperCase() === 'JSON'
+    ? 'json' : temporalKind(duckdbType);
+}
+
+function decodeCell(value, kind) {
+  return kind === 'json' ? decodeJson(value) : decodeTemporal(value, kind);
+}
+
+// Whole-result decode in one pass. Fast path: when no column decodes
+// the rows are returned untouched, with no row copy.
 function decodeRows(columns, rows) {
-  const kinds = (columns ?? []).map((c) => temporalKind(c?.duckdbType ?? c?.type));
+  const kinds = (columns ?? []).map((c) => cellKind(c?.duckdbType ?? c?.type));
   if (!kinds.some((k) => k)) return rows;
-  return rows.map((row) => row.map((v, i) => (kinds[i] ? decodeTemporal(v, kinds[i]) : v)));
+  return rows.map((row) => row.map((v, i) => (kinds[i] ? decodeCell(v, kinds[i]) : v)));
 }
 
 function isPlainObject(v) {
@@ -783,7 +810,7 @@ function harborAdapter(opts = {}) {
 export {
   harborAdapter, resolveUrl, resolveTarget, socketFor, toResult,
   DbError, ConnectionError, QueryError, CancelledError, isDbError,
-  temporalKind, decodeTemporal, decodeRows, encodeParam, encodeParams,
+  temporalKind, decodeTemporal, cellKind, decodeJson, decodeRows, encodeParam, encodeParams,
   parseNdjson, parseBody, isPlainObject, abortable,
   DEFAULT_URL, DEFAULT_TIMEOUT_MS,
 };

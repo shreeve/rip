@@ -762,6 +762,24 @@ test! "odd / unparseable values pass through unchanged", ->
   eq decoded!('TIMESTAMP', null), null
   eq decoded!('TIMESTAMP', 'not a date'), 'not a date'
 
+test! "a JSON column decodes to its document", ->
+  eq (decoded! 'JSON', '{"x":1,"y":[2,3]}'), { x: 1, y: [2, 3] }
+  eq (decoded! 'JSON', '[1,2,3]'), [1, 2, 3]
+  eq (decoded! 'json', '{"a":true}'), { a: true }
+
+test! "JSON text that does not parse passes through unchanged", ->
+  eq decoded!('JSON', '{not json'), '{not json'
+  eq decoded!('JSON', null), null
+  eq decoded!('JSON', 42), 42
+
+test! "types that arrive already shaped are not decoded", ->
+  # LIST and STRUCT come off the wire as a real array and object; a
+  # DECIMAL comes as its lossless string, which is what makes it exact.
+  eq decoded!('VARCHAR[]', ['a', 'b']), ['a', 'b']
+  eq decoded!('STRUCT(a INTEGER)', { a: 1 }), { a: 1 }
+  eq decoded!('DECIMAL(38,6)', '12345678901234567890123456789012.345678'),
+     '12345678901234567890123456789012.345678'
+
 test! "non-temporal cells in a mixed row are untouched", ->
   fetch = harborFetch(
     [{ name: 'id', duckdbType: 'INTEGER', lossless: true }, { name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }]
