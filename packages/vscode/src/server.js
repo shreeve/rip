@@ -2114,7 +2114,10 @@ async function refresh(document) {
     const m = mapTsDiagnostic(state.lastGood, d);
     if (m) mapped.push(m);
     else if (!SUPPRESSED_TS_CODES.has(d.code)) {
-      connection.console.log(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
+      // Debug, not info: this fires once per unmappable diagnostic on every
+      // publish, so at info it drowns the channel's per-session summary
+      // lines. The Output panel's log-level picker brings it back.
+      connection.console.debug(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
     }
   }
   // rip's own parse rejections ride in front of the mapped TS set — a
