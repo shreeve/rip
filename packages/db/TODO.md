@@ -39,6 +39,29 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 
 ## Landed
 
+- **Scalar arrays are DuckDB LIST, and JSON columns decode**
+  (2026-09-08). `columnType` (`orm.js:3506`) renders an array whose
+  element has a scalar column form as that form's LIST — `tags?
+  string[]` is `VARCHAR[]`, `nums? integer[]` is `INTEGER[]` — so the
+  database can index the column and `list_contains` pushes down. An
+  element with no scalar form (a nested schema, `json`, `any`) still
+  renders `JSON`, which is why `items! OrderItem[]` in the cart demo is
+  unchanged. An array's `max` bounds its LENGTH, so it never renders as
+  a VARCHAR width the way a scalar string's does.
+
+  Neither direction of the wire needed anything: harbor already sent a
+  real JSON array for a LIST column and already bound one back, verified
+  end to end against a live 0.33.1 (create → read → `list_contains` with
+  a bound param → array edit → save).
+
+  `JSON` columns decode to their document at the same seam the temporals
+  use (`cellKind`/`decodeJson`, `duckdb.js`), keyed off the per-column
+  type harbor sends. Text that does not parse returns unchanged — the
+  rule `decodeTemporal` already followed. This makes the `json` write
+  path symmetric (`serialize` stringifies, the seam parses) and it makes
+  dirty tracking work on a `json` field, which previously compared a
+  hydrated string against an assigned object and so always read dirty.
+
 - **Unix-socket and `harbor:<name>` targets** (2026-08-19). Two
   transports, both public — `http://host:port` (TCP) and
   `unix:///path.sock` (Bun's fetch `unix` option) — with `harbor:<name>`
@@ -422,28 +445,39 @@ representation the current pipeline has end to end:
 - `~:Decimal` (from `rip/decimal`) validates and coerces exactly in JS,
   but `typeName` is `any`, so the column is **JSON** — the database
   cannot sum, index, or compare it.
-- An explicit `{type: "DECIMAL(9,2)"}` escape hatch would be a **trap**,
-  and this is the reason not to add one: `duckdb.js` decodes only
-  temporal columns off `duckdbType` (`decodeRows`, `temporalKind`), so a
-  DECIMAL comes back as a plain JSON number. The DDL would be right and
-  every value would silently be a float. The DDL is not the binding
-  constraint — the wire is.
+- A `decimal` field type is the whole of what is missing, and the wire
+  is not part of it. Measured against live harbor 0.33.1 (2026-09-08):
+  DECIMAL columns arrive as **lossless decimal strings** across all four
+  storage tiers, carrying
+  `{"duckdbType":"DECIMAL(38,6)","lossless":true,"decimal":{"width":38,"scale":6}}`,
+  and `toColumn` (`duckdb.js:469`) preserves that metadata by spread. A
+  38-digit value round-trips through `Decimal.parse` exactly, and
+  binding a `Decimal` as a parameter is already lossless — `encodeParam`
+  passes the instance through and `Decimal.toJSON()` renders the string,
+  so `D"19.99".mul(Decimal.from(3))` stores as `"59.97"`.
+
+  What has no spelling is the **declaration**. `SQL_TYPES`
+  (`orm.js:3450-3452`) has no `decimal` entry, and `~:Decimal` carries
+  `typeName: any`, so the column renders `JSON` and the database cannot
+  sum, index, or compare it.
+
+**The spelling is `decimal(p, s)`** — `price! decimal(9, 2)`, `rate!
+decimal(6, 4)` — and it is **not built**. It is the first field type to
+take parenthesized arguments, so the work is a grammar change plus a
+`SQL_TYPES` entry that reads them; a range (`amount! decimal, 0..`)
+could not carry them, because a range already bounds the value.
+
+Everything downstream of that spelling exists. `rip/decimal` supplies
+`fitsDecimal(p, s)` for the column fit and `toFixed(scale,
+'UNNECESSARY')` to emit at the column scale or throw; the hydrate is one
+`Decimal.parse` on a string harbor already sends; the encode already
+works through `Decimal.toJSON()`. No harbor change, no package change.
 
 **Revive when** more than two decimal places are needed (4dp unit
-prices, tax rates) or the database must do the rounding. The fix is then
-a real `decimal` field type mapping to `DECIMAL(p, s)` **and** a wire
-decode that reconstructs a `Decimal` — a package + runtime + harbor
-change, not a type override.
+prices, tax rates) or the database must do the rounding.
 
 ### Correctness items that are real but dormant
 
-- **`json` fields never parse back.** `serialize` (`:1581`)
-  stringifies on write; there is no `JSON.parse` in `orm.js` or
-  `schema.js`. Since `create()` runs `INSERT … RETURNING *`, the field is
-  already a string when `create()` returns. **Zero declared `json` fields
-  on the harbor path.** The cart demo hits this and solved it *at the
-  adapter seam* (`cart/api/db.rip:52-56`) — probably where the fix
-  belongs. **Revive when:** a model declares a `json` field.
 - **A `was:` naming nothing deployed degrades to ADD + DROP.**
   `migrate.js:538-556`: when `pCols.get(col.was)` is `undefined` the
   rename branch never fires. Same hole in the table half (`:431-444`).
@@ -509,6 +543,168 @@ nothing in any shipped path — all use `import` (`loader.js:105`,
 copies in one process, which is what prevents 30 separate adapter and
 transaction-scope identities. `duckdb.js` itself is runtime-portable (no
 `node:`/`Bun.` references; both `process.env` reads guarded).
+
+## Competitive posture — Prisma 7/8 and Drizzle 1.0
+
+Recorded 2026-09-08. **Every item here serves an adopter who does not
+exist yet**, so by this file's own who-this-serves rule each one is
+cuttable, and none has a victim in medlabs or cart. They are written
+down so the comparison is not re-derived from scratch, and each carries
+the trigger that would turn it into work.
+
+Where the field stands: drizzle-orm 19.0M weekly npm downloads, prisma
+15.4M / `@prisma/client` 14.8M, kysely 15.6M (a query builder, largely
+transitive). Prisma 7 (2025-11) replaced the Rust query engine with a
+TS/WASM query compiler — ~3x faster `findMany`, ~90% smaller bundles;
+7.10.0 shipped 2026-08-26 and `prisma@latest` now resolves to 8.x.
+Drizzle is at 1.0 RC with Relational Queries v2: object-based
+`db.query`, first-class many-to-many, and filtering parent rows by a
+child's columns. Both now ship `push`/`pull` for iteration beside
+`generate`/`migrate` for production.
+
+**Ahead of both, and the list worth not regressing:** validation fused
+into the model (Prisma bolts on Zod, Drizzle codegens drizzle-zod —
+neither unifies); ambient transactions via `AsyncLocalStorage` (both
+require threading `tx` through every call); dirty tracking where a
+no-op save issues no SQL (neither has it); `push` that still writes the
+timestamped artifact into the checksummed history (both write nothing
+and leave drift); the migration lock as a renewed lease with takeover
+(Prisma's advisory lock strands a failed deploy into `migrate resolve`);
+literal redaction in migration failure reports (neither redacts); unique
+violations arriving as the same structured `SchemaError` as validation
+(Prisma hands you `P2002` + `meta.target` to map yourself); and the
+`find` / `with` / `where().first()` split, where `with`'s `LIMIT 2`
+turns a violated uniqueness assumption into a throw instead of a
+silently-chosen winner.
+
+### Native DuckDB types
+
+**Measured against live harbor 0.33.1, 2026-09-08.** Harbor's wire
+`Column` (`crates/wire/src/lib.rs:180-217`) carries `decimal{width,
+scale}`, `child` (LIST/ARRAY element), `array_length`, `fields`
+(STRUCT), `key_type`/`value_type` (MAP), `members` (UNION), `values`
+(ENUM), and `lossless`; `toColumn` (`duckdb.js:469`) preserves every one
+by spread. What actually arrives:
+
+| declared | harbor sends | JS receives |
+|---|---|---|
+| `DECIMAL(38,6)` | `"12345678901234567890123456789012.345678"` | an exact string, `decimal{width,scale}` beside it |
+| `VARCHAR[]` | `["x","y"]` | a real array, `child` type beside it |
+| `STRUCT(a INTEGER, b VARCHAR)` | `{"a":1,"b":"z"}` | a real object, `fields` beside it |
+| `JSON` | `"{\"x\":1,\"y\":[2,3]}"` | text, decoded to its document at the seam |
+
+Scalar arrays render as DuckDB LIST and JSON columns decode — both
+landed, see **Landed** above. STRUCT is the one native type the DDL map
+still does not reach: a nested schema renders `JSON`
+(`orm.js:3547`), where a `STRUCT(...)` column would let the database
+read individual members.
+
+**Revive when:** a nested-schema field is queried by one of its members
+— the point at which a JSON document stops being the honest shape and
+the planner's inability to see inside it starts costing something.
+
+### Query result types are not inferred
+
+`src/ts/schema.js:221-243` types the model and erases the query:
+
+```
+where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[])
+order(spec: string)
+includes(...specs: unknown[])
+all(): Promise<T[]>
+```
+
+Keys are checked against `keyof Data`; values are `unknown`, operator
+maps go unchecked, `order` is a bare string, `includes` is `unknown[]`,
+and `all()` always returns the full instance type. Result-type narrowing
+from `select`/`include` — the single feature that sells both Prisma and
+Drizzle — has no analogue, and cannot until reads can project at all
+(see **Projection** above, which is the prerequisite).
+
+The cheap 80% is separable from that and local to this one file: type
+`where` values per-field off the declared field type, and make `order`'s
+structured spec a union of the closed direction set rather than
+`string`. Neither needs projection.
+
+**Revive when:** a non-Rip-authoring adopter is real, or projection
+lands and makes narrowing expressible.
+
+### The read builder is three terminals wide
+
+`all()`, `first()`, `count()` (`orm.js:1674-1700`). No `sum` / `avg` /
+`groupBy` / `having` / `join` / `distinct`, and no relation filtering —
+`where` keys validate against this model's own columns, so Prisma's
+`some`/`every`/`none` and Drizzle RQBv2's parent-by-child filter have no
+spelling. Everything else drops to raw SQL, which is a first-class path
+but costs instances, hooks, and scopes.
+
+The who-this-serves ceiling is the honest counterargument and it holds:
+medlabs' SQL surface is zero `JOIN`, zero `GROUP BY`, zero aggregate.
+The tension worth naming anyway is that this is an **OLAP engine** — the
+gap is not that the builder is narrow, it is that the builder is narrow
+in exactly the dimension DuckDB is fastest at.
+
+**Revive when:** an app wants an aggregate back as anything other than a
+raw row — or when `toPublic()`-shaped reporting endpoints start
+accumulating hand-written SQL.
+
+### `includes` cannot be constrained
+
+`preload` (`orm.js:1849`) takes nesting specs only — no `where`,
+`limit`, or `order` on the preloaded relation, so
+`user.includes('orders')` loads every order that user has ever had.
+Prisma (`include: { orders: { where, take, orderBy } }`) and Drizzle
+RQBv2 both support it. Distinct from the read-builder item above: it is
+the preload path, so widening the builder does not deliver it.
+
+**Revive when:** a preloaded relation's row count stops being bounded by
+the app's own shape — the first `hasMany` that grows without limit.
+
+### No query observability
+
+There is no logger, timing hook, or query event anywhere in `orm.js` or
+`duckdb.js` — the grep is empty. Prisma has `$on('query')` plus
+OpenTelemetry; Drizzle has a `logger` option. Today there is no way to
+answer "which statement is slow" in production without a harbor-side
+capture.
+
+Cheapest item on this list by a wide margin: `runSQL` (`orm.js:703-711`)
+is a single chokepoint, and the adapter half already has the timing
+information. It is also the one item here whose absence is felt by the
+apps that **do** exist.
+
+**Revive when:** anything is slow and the answer is not already obvious
+— i.e. the first time it is wanted, since the cost is one hook.
+
+### Optimistic locking
+
+Stale-row detection catches a row the database **revoked** (an
+affirmative zero on a pk-targeted write), not one concurrently updated:
+two `save()` calls race and the later silently wins. Neither Prisma nor
+Drizzle has row versioning either, so this is peer-level, not a deficit.
+
+It is recorded because dirty tracking makes it nearly free here and a
+differentiator rather than parity — `WHERE pk = ? AND updated_at = ?` on
+a `@times` model reuses the snapshot that already exists, and the
+existing `{error: 'stale'}` `SchemaError` is already the right report.
+
+**Revive when:** two writers can touch one row — concurrent operators on
+one record, or any background sweep that writes rows a request can also
+write. **Note the ceiling first:** `WORKER_CONCURRENCY` defaults to 1
+and apps run 2 workers, so a default Rip app has 2 statements in flight.
+
+### Already covered above, cross-referenced so they are not re-raised
+
+- **Composite primary keys** — the mapping ledger's Bucket A, with its
+  own decision section. Prisma (`@@id`) and Drizzle both have it; it
+  stays the hole in the inherited-schema story.
+- **`SELECT *` on every read** — see **Projection**. When it is revived,
+  the decision that unblocks the most is whether a projected read
+  returns **plain rows rather than instances**: instances inherit the
+  partial-instance problem (the snapshot assumes a full column set,
+  `toJSON`'s shape becomes load-dependent, `save()` can write a column it
+  never read), which is what Rails needed `MissingAttributeError` for.
+  Plain rows is the same contract `sql!` already has.
 
 ## Harbor (Rust)
 
