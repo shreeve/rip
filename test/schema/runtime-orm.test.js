@@ -3664,7 +3664,22 @@ describe('orm: runtime delivery', () => {
       // a nested schema is an object, so it is a JSON document — the
       // same answer the array form has always given
       expect(ddl(field('a', 'Point'))).toContain('"a" JSON');
+      // an array of a nested schema has no scalar element form, so it
+      // is a JSON document too
       expect(ddl(field('a', 'Point', { array: true }))).toContain('"a" JSON');
+      // an array of a SCALAR is DuckDB's own LIST of that scalar — a
+      // type the database can index and list_contains can push down
+      expect(ddl(field('a', 'string', { array: true }))).toContain('"a" VARCHAR[]');
+      expect(ddl(field('a', 'integer', { array: true }))).toContain('"a" INTEGER[]');
+      expect(ddl(field('a', 'uuid', { array: true }))).toContain('"a" UUID[]');
+      expect(ddl(field('a', 'datetime', { array: true }))).toContain('"a" TIMESTAMP[]');
+      // a document element has no scalar form either way round
+      expect(ddl(field('a', 'json', { array: true }))).toContain('"a" JSON');
+      expect(ddl(field('a', 'any', { array: true }))).toContain('"a" JSON');
+      // an array's max bounds its LENGTH, so it never renders as a
+      // VARCHAR width the way a scalar string's does
+      expect(ddl(field('a', 'string', { array: true, constraints: { max: 24 } })))
+        .toContain('"a" VARCHAR[]');
       // an enum materializes to its member values, as the closed set
       // the column is allowed to hold
       expect(ddl(field('a', 'Role'))).toContain(`"a" ENUM('admin')`);

@@ -110,7 +110,12 @@ describe('cli: compile surface', () => {
     const sites = rip(['sites', '--help']);
     expect(sites.status).toBe(0);
     expect(sites.stdout).toContain('rip sites <verb>');
-    expect(sites.stdout).toContain('expose localhost|lan|wan');
+    // Reach is Janus's — the edge section delegates rather than
+    // restating the modes.
+    expect(sites.stdout).toContain("Edge: Janus's");
+    // The last line of the catalog: the whole help rendered from a
+    // directory that is not a project, not just the usage header.
+    expect(sites.stdout).toContain('--json');
   });
 
   test('retired site and edge CLIs point at rip sites', () => {
