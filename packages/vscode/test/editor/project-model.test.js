@@ -100,6 +100,17 @@ async function inSession(ws, fn) {
     close(rel) {
       client.notify('textDocument/didClose', { textDocument: { uri: uriOf(rel) } });
     },
+    // didOpen with NO wait — for sequences where the next notification
+    // must land before the server's first refresh of this buffer.
+    openNoWait(rel, text) {
+      versions.set(rel, 1);
+      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
+    },
+    // Every publish for `rel` at or after index `since` in arrival order.
+    publishesSince(rel, since) {
+      return published.slice(since).filter((p) => p.uri === uriOf(rel));
+    },
+    get publishedCount() { return published.length; },
     // Open a document by RAW uri (non-file schemes — the __external__ path).
     async openUri(uri, text) {
       const before = published.length;
@@ -756,6 +767,42 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
     } finally {
       fs.rmSync(ws, { recursive: true, force: true });
     }
+  }, 30000);
+});
+
+// The active closure is the open buffers' RECORDED imports, and a
+// buffer opened inside the last debounce window has recorded none yet.
+// A preview tab closes the previous file in the same instant it opens
+// the next — the shape a single click in the Explorer sends.
+describe.skipIf(!tsgoAvailable)('the closure across a preview-tab swap', () => {
+  const USES_APP = (name) => `import { source } from 'rip/app'\n\nexport ${name} =\n  user: source fetch: -> Promise.resolve { name: 'Ada' }\n  count: 0\n`;
+
+  test('closing the previous buffer as the next one opens drops nothing the next one imports', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('a.rip', USES_APP('a'));
+      await api.until('a.rip', (codes) => !codes.includes(2307));
+      // The app runtime's faces, by inode: a delete-and-rewrite changes them.
+      const external = path.join(api.ws, '.rip', 'editor', '__external__');
+      const inodes = () => {
+        const out = new Map();
+        const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.set(p, fs.statSync(p).ino); } };
+        walk(external);
+        return out;
+      };
+      const before = inodes();
+      expect(before.size).toBeGreaterThan(0);
+      const mark = api.publishedCount;
+      api.openNoWait('b.rip', USES_APP('b'));
+      api.close('a.rip');
+      await api.poll(() => api.publishesSince('b.rip', mark).length > 0, 'b.rip published');
+      // The FIRST answer is the one the user sees flash.
+      const first = api.publishesSince('b.rip', mark)[0].diagnostics.map((d) => d.code);
+      expect(first).not.toContain(2307);
+      // Structural: the faces never left the program. a.rip did — it is
+      // the one thing the prune has to reconcile, and it re-stubs in place.
+      await api.poll(() => api.logs.some((l) => /closure pruned: 1 mirror/.test(l)), 'a.rip left the program');
+      expect(inodes()).toEqual(before);
+    });
   }, 30000);
 });
 

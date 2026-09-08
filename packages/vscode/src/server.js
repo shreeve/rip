@@ -2260,11 +2260,24 @@ documents.onDidClose(({ document }) => {
     try { fsPath = fileURLToPath(document.uri); } catch { /* non-path uri */ }
     if (fsPath) {
       materializedMirrors.delete(fsPath);
-      if (computeActiveClosure().has(fsPath)) materializeClosure([fsPath]);
-      pruneClosure().catch((err) => connection.console.error(`[rip] prune failed: ${err.stack ?? err}`));
+      reconcileClosureAfterClose(fsPath).catch((err) => connection.console.error(`[rip] prune failed: ${err.stack ?? err}`));
     }
   }
 });
+
+// The active closure reads the open buffers' RECORDED imports, and a
+// buffer opened inside the debounce window has recorded none yet. A
+// preview tab closes the previous file in the same instant it opens the
+// next, so a close-time prune that runs at once sees the new buffer as
+// importing nothing, drops everything only it needs, and the buffer's
+// own refresh then recompiles those faces while tsgo answers the first
+// pull in between with an unresolved module. Every pending refresh
+// settles first; only then is reachability a fact.
+async function reconcileClosureAfterClose(fsPath) {
+  await Promise.all([...states.values()].map((state) => state.settling).filter(Boolean));
+  if (computeActiveClosure().has(fsPath)) materializeClosure([fsPath]);
+  await pruneClosure();
+}
 
 // Watched files: .rip creates/changes/deletes maintain the CLOSURE
 // (renames arrive as delete+create pairs) — a created file some importer
