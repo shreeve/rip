@@ -4801,8 +4801,9 @@ class Emitter {
     // too, or stripping would leave a dangling comma.
     const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
     let emitted = 0;
+    let erased = 0;
     list.forEach((s) => {
-      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const gone = this.typeOnlyImports.has(Emitter.specifierLocal(s));
       const one = () => {
         if (isNode(s)) {
           this.emitPrimitive(s[0]);
@@ -4810,17 +4811,20 @@ class Emitter {
           this.emitPrimitive(s[1]);
         } else this.emitPrimitive(s);
       };
-      if (erased) {
+      if (gone) {
         if (!this.ts) return;                  // the shipping emission: gone
         // The face keeps it, inside a region so stripping reproduces the
         // JS byte for byte. The separator rides along — lead with it when
         // something survives ahead, otherwise trail it — or a strip would
-        // leave a dangling comma.
+        // leave a dangling comma. When NOTHING survives, the clause is
+        // all regions and no name trails a separator, so every name
+        // past the first leads with one instead — else the names fuse.
         this.b.tsOnly(() => {
-          if (emitted > 0) this.b.emit(', ');
+          if (emitted > 0 || (kept.length === 0 && erased > 0)) this.b.emit(', ');
           one();
           if (emitted === 0 && kept.length > 0) this.b.emit(', ');
         });
+        erased++;
         return;
       }
       if (emitted > 0) this.b.emit(', ');
@@ -18013,7 +18017,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (face === 'ts') {
     let story = null;
     try {
-      story = buildSchemaTypeStory(parseResult.sexpr, builder.source);
+      story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
+        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))));
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);

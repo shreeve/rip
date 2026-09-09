@@ -155,6 +155,20 @@ test('a type-only import of a module with NO runtime face still loads', async ()
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a clause whose every name is type-only keeps its separators on the face', () => {
+  // Nothing survives to the JS, so no name trails a separator for the
+  // next one to follow: each name past the first leads with its own.
+  const src = [
+    "import { Config, User, Role as R } from './lib.rip'",
+    'export use = (c: Config, u: User): R -> 1',
+  ].join('\n') + '\n';
+  const js = compile(src, { runtimeDelivery: 'none' });
+  expect(js.code).toContain("import './lib.rip';");
+  const ts = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+  expect(ts.code).toContain("import { Config, User, Role as R } from './lib.rip';");
+  expect(stripFace(ts.code, ts.tsRegions)).toBe(js.code);
+});
+
 test('the two plain readings of `type` keep their statements', () => {
   // TypeScript's lookahead rule, applied at the lexer: `type` followed
   // by `from` is a default binding named `type`; `type` inside braces
