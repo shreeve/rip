@@ -944,6 +944,86 @@ const normHover = (h) => {
     : (h.contents?.value ?? (Array.isArray(h.contents) ? h.contents.map((c) => c.value ?? c).join('\n') : ''));
   return flattenHover(raw) || null;
 };
+// The names a destructuring PATTERN binds, with the column of each, read
+// off a code line (strings blanked) from the pattern's opening bracket.
+// Shorthand (`{ host }`), renamed (`port: portNumber`), defaulted
+// (`mode = 'manual'`), rest (`...metaRest`), and nested elements all bind;
+// a key before `:` and a default's expression do not. CONSERVATIVE by
+// `declsOf`'s contract: null for anything it cannot read cleanly — a
+// pattern that does not close on the line, a computed or quoted key, a
+// member target (`obj.p`, which binds nothing) — so a row here is a
+// position the hover lane can defend, never a guess. Returns the bound
+// names and the offset just past the closing bracket, so the caller can
+// confirm the pattern is an assignment target.
+function patternBindingsOf(code, start) {
+  const out = [];
+  let i = start;
+  const ident = () => /^[A-Za-z_$][\w$]*/.exec(code.slice(i))?.[0] ?? null;
+  const ws = () => { while (i < code.length && /\s/.test(code[i])) i++ }
+  // A default's expression: skipped to the element's end — a top-level
+  // comma or the pattern's own closer, which stays unconsumed.
+  const skipDefault = () => {
+    let depth = 0;
+    for (; i < code.length; i++) {
+      const c = code[i];
+      if ('([{'.includes(c)) depth++;
+      else if (')]}'.includes(c)) { if (depth === 0) return; depth-- }
+      else if (c === ',' && depth === 0) return;
+    }
+  }
+  const bind = (name, at) => out.push({ name, character: at });
+  const walk = () => {
+    const object = code[i] === '{';
+    const closer = object ? '}' : ']';
+    i++;
+    for (;;) {
+      ws();
+      if (i >= code.length) return false;               // did not close on this line
+      if (code[i] === closer) { i++; return true }
+      if (code[i] === ',') { i++; continue }           // separator, or an array hole
+      if (code.startsWith('...', i)) {
+        i += 3; ws();
+        const rest = ident();
+        if (rest === null) return false;
+        bind(rest, i); i += rest.length;
+        continue;
+      }
+      if (code[i] === '{' || code[i] === '[') {
+        if (object) return false;                       // a computed key
+        if (!walk()) return false;
+        ws(); if (code[i] === '=') { i++; skipDefault() }
+        continue;
+      }
+      const name = ident();
+      if (name === null) return false;                  // a quoted key, or not a pattern
+      const at = i; i += name.length; ws();
+      if (object && code[i] === ':') {
+        i++; ws();
+        if (code[i] === '{' || code[i] === '[') { if (!walk()) return false }
+        else {
+          const target = ident();
+          if (target === null) return false;
+          const targetAt = i; i += target.length; ws();
+          if (code[i] === '.' || code[i] === '[') return false;   // a member target binds nothing
+          bind(target, targetAt);
+        }
+        ws(); if (code[i] === '=') { i++; skipDefault() }
+        continue;
+      }
+      if (code[i] === '.' || code[i] === '[') return false;       // a member target
+      bind(name, at);
+      if (code[i] === '=') { i++; skipDefault() }
+    }
+  }
+  if (!walk()) return null;
+  return { names: out, end: i }
+}
+// A pattern statement's tail: the pattern must be an ASSIGNMENT target
+// (`= value`, never `==`, `=>`, or a bare expression) — on the twin side,
+// optionally annotated first (`let { a }: T = …`).
+const PATTERN_ASSIGN = /^\s*=(?![=>])/;
+const TWIN_PATTERN_ASSIGN = /^\s*(?::|=(?![=>]))/;
+
 // Top-level declarations: a name at column 0, optionally after a leading
 // export/def/class/interface/enum/type keyword. Heuristic, not a parser.
 const DECL = /^(?:export\s+)?(?:(def|class|interface|enum|type)\s+)?([A-Za-z_$][\w$]*)/;
@@ -952,6 +1032,21 @@ function declsOf(src) {
   const out = [];
   src.split('\n').forEach((text, line) => {
     if (/^\s*#/.test(text) || !text.trim() || /^\s/.test(text)) return;
+    // A destructuring assignment at column 0 declares every name its
+    // pattern binds. DECL cannot see one — its first byte is a bracket, not
+    // a name — and a pattern binding hovers at exactly that position, so
+    // without these rows no gauge would probe it. `pattern` marks them:
+    // the hover lanes judge them; the token lane declines them, having no
+    // derivation for a pattern element's token class.
+    if (text[0] === '{' || text[0] === '[') {
+      const code = codeOf(text);
+      const pattern = patternBindingsOf(code, 0);
+      if (pattern === null || !PATTERN_ASSIGN.test(code.slice(pattern.end))) return;
+      for (const { name, character } of pattern.names) {
+        out.push({ name, keyword: null, line, character, text: text.trim(), code: codeOf(text.trim()), pattern: true });
+      }
+      return;
+    }
     const m = text.match(DECL);
     if (!m || KEYWORDS.has(m[2])) return;
     const keyword = m[1];
@@ -1053,10 +1148,23 @@ function typeMembersOf(src) {
 // would let a line-start `x => …` register the ARROW'S PARAMETER as a
 // declaration, which would shift every later `name#occurrence` for that name.
 const TS_DECL = /^(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|interface|enum|type)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=[^=>])/;
+const TS_PATTERN_DECL = /^(?:export\s+)?(?:const|let|var)\s+(?=[{[])/;
 function tsDeclsOf(src) {
   const out = [];
   src.split('\n').forEach((text, line) => {
     if (/^\s/.test(text) || !text.trim()) return;
+    // A pattern declaration (`let { host, port: portNumber } = config`)
+    // names every binding inside the pattern — the same rows `declsOf`
+    // emits for the rip side, so `name#occurrence` stays aligned and each
+    // pattern binding has the twin's answer as its oracle.
+    const pm = text.match(TS_PATTERN_DECL);
+    if (pm) {
+      const code = codeOf(text);
+      const pattern = patternBindingsOf(code, pm[0].length);
+      if (pattern === null || !TWIN_PATTERN_ASSIGN.test(code.slice(pattern.end))) return;
+      for (const { name, character } of pattern.names) out.push({ name, line, character });
+      return;
+    }
     const m = text.match(TS_DECL);
     if (!m) return;
     // The keyword branch's match ENDS at the name, so its offset is exact; the
@@ -1848,7 +1956,7 @@ function expectedToken(d) {
 // No-oracle invariant: an initialized binding (`name = expr`) whose RHS
 // is not itself `: any` must not hover as `any`.
 const invariantHit = (r) =>
-  /^(?:export\s+)?[A-Za-z_$][\w$]*\s*=\s*\S/.test(r.text) && !/:\s*any\b/.test(r.text)
+  (r.pattern === true || /^(?:export\s+)?[A-Za-z_$][\w$]*\s*=\s*\S/.test(r.text)) && !/:\s*any\b/.test(r.text)
   && /(?:^|:\s*)any$/.test(r.hover ?? '');
 
 // ── mapping machinery (the Mapping Audit): walk every source identifier and
@@ -4734,6 +4842,10 @@ if (RUN_TOKENS) {
         // leading name is a reference, not a declaration (declsOf's
         // line-shape heuristic cannot tell the difference).
         if (/^[A-Za-z_$][\w$]*::/.test(d.text)) continue;
+        // A pattern binding's token class is not derivable from the line —
+        // the position is an element of an assignment pattern in the face —
+        // so the row is the hover lanes' alone (declsOf).
+        if (d.pattern === true) continue;
         const want = expectedToken(d);
         const got = at.get(`${d.line}:${d.character}`);
         probed++;

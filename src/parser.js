@@ -282,9 +282,7 @@ const parserInstance = {
     }
   },
   parse(input, { primitives: wantPrimitives = !1, tolerant = !1 } = {}) {
-    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, locs, message, node, ownerNodeId, primitiveLocs, q, r, recordFirst, register, row, sem, span, start, state, stk, vals;
-    [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
-    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
+    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, message, node, ownerNodeId, q, r, recordFirst, register, row, sem, span, start, state, [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]], parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))

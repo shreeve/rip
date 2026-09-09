@@ -7821,9 +7821,7 @@ var parserInstance = {
     }
   },
   parse(input, { primitives: wantPrimitives = false, tolerant = false } = {}) {
-    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, locs, message, node, ownerNodeId, primitiveLocs, q, r, recordFirst, register, row, sem, span, start, state, stk, vals;
-    [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]];
-    let parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
+    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, len, message, node, ownerNodeId, q, r, recordFirst, register, row, sem, span, start, state, [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]], parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
@@ -11000,6 +10998,28 @@ class Emitter {
   static isPattern(x) {
     return isObject(x) || isNode(x) && x[0] === "array";
   }
+  static declarablePattern(p) {
+    const leaf = (t) => typeof t === "string" || (isNode(t) && t[0] === "=" ? leaf(t[1]) : Emitter.declarablePattern(t));
+    if (isNode(p) && p[0] === "array") {
+      const els = p.slice(1);
+      return els.every((el, i) => isNode(el) && el[0] === "..." ? i === els.length - 1 && typeof el[1] === "string" : leaf(el));
+    }
+    if (isObject(p)) {
+      const pairs = p.slice(1);
+      return pairs.every((pair, i) => {
+        if (!isNode(pair))
+          return false;
+        if (pair[0] === null)
+          return typeof pair[2] === "string";
+        if (pair[0] === "=")
+          return typeof pair[1] === "string";
+        if (pair[0] === "...")
+          return i === pairs.length - 1 && typeof pair[1] === "string";
+        return pair[0] === ":" && leaf(pair[2]);
+      });
+    }
+    return false;
+  }
   rejectDuplicateDefault(stmts) {
     let seen = null;
     for (const s of stmts) {
@@ -11271,7 +11291,7 @@ class Emitter {
         return;
       let f = facts.get(name);
       if (f === undefined)
-        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null, firstWritePath: "" });
+        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: "" });
       if (!f.seen) {
         f.seen = true;
         f.decl = declStmt;
@@ -11288,13 +11308,57 @@ class Emitter {
           f.inDef = true;
       }
     };
+    const walkPattern = (p, inFn, bind) => {
+      const element = (el) => {
+        if (typeof el === "string") {
+          if (el !== ",")
+            bind(el);
+          return;
+        }
+        if (el[0] === "=") {
+          walk(el[2], inFn);
+          element(el[1]);
+          return;
+        }
+        if (el[0] === "...") {
+          bind(el[1]);
+          return;
+        }
+        walkPattern(el, inFn, bind);
+      };
+      if (p[0] === "array") {
+        for (const el of p.slice(1))
+          element(el);
+        return;
+      }
+      for (const pair of p.slice(1)) {
+        if (pair[0] === null)
+          bind(pair[2]);
+        else if (pair[0] === "=") {
+          walk(pair[2], inFn);
+          bind(pair[1]);
+        } else if (pair[0] === "...")
+          bind(pair[1]);
+        else if (pair[0] === ":") {
+          if (isNode(pair[1]))
+            walk(pair[1], inFn);
+          element(pair[2]);
+        }
+      }
+    };
     const walk = (n, inFn) => {
       if (typeof n === "string")
         return occur(n, inFn);
       if (!isNode(n))
         return;
-      if (Emitter.isTypedWrapper(n))
+      if (Emitter.isTypedWrapper(n)) {
+        if (typeof n[1] === "string") {
+          const af = facts.get(n[1]);
+          if (af !== undefined && af.annotated === null)
+            af.annotated = n;
+        }
         return;
+      }
       const head = n[0];
       if (isFunc(n)) {
         for (const el of n.slice(1))
@@ -11333,6 +11397,15 @@ class Emitter {
           if (!declaring)
             occur(n[1], inFn);
           occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
+          if (declaring && this.annotationText(n) !== null) {
+            const af = facts.get(n[1]);
+            if (af !== undefined && af.annotated === null)
+              af.annotated = n;
+          }
+        } else if (head === "=" && Emitter.declarablePattern(n[1])) {
+          const declStmt = !inFn && top.has(n) ? n : null;
+          const paths = new Map(patternBindings(n[1]));
+          walkPattern(n[1], inFn, (bound) => occur(bound, inFn, true, declStmt, paths.has(bound) ? n : null, paths.get(bound) ?? ""));
         } else {
           walk(n[1], inFn);
           if (DECLARING_ASSIGNS.has(head)) {
@@ -11389,6 +11462,26 @@ class Emitter {
       }
     }
     const ownerToDecl = new Map;
+    const targets = new Set(entries.filter(([, , role]) => role === "target").map(([n]) => n));
+    const patternVerdicts = new Map;
+    const patternDeclares = (stmt) => {
+      let v = patternVerdicts.get(stmt);
+      if (v === undefined) {
+        const names = this.patternNames(stmt[1]);
+        v = names.every((nm) => {
+          const ff = facts.get(nm);
+          return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
+        });
+        if (v) {
+          const typed = names.find((nm) => facts.get(nm).annotated !== null);
+          if (typed !== undefined) {
+            throw this.positionedError(facts.get(typed).annotated, `emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` + `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`);
+          }
+        }
+        patternVerdicts.set(stmt, v);
+      }
+      return v;
+    };
     const kept = entries.filter(([name, , role]) => {
       if (role !== "target")
         return true;
@@ -11397,6 +11490,12 @@ class Emitter {
         return true;
       if (isNode(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) && (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2])))
         return true;
+      if (Emitter.isPattern(f.decl[1])) {
+        if (!patternDeclares(f.decl))
+          return true;
+        Emitter.declaresInPlace.add(f.decl);
+        return false;
+      }
       const owner = entries.annotations?.get(name);
       if (owner !== undefined && owner !== f.decl) {
         Emitter.inlineOwners.set(f.decl, owner);
@@ -11824,8 +11923,9 @@ class Emitter {
   emitSpecifiers(list) {
     const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
     let emitted = 0;
+    let erased = 0;
     list.forEach((s) => {
-      const erased = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const gone = this.typeOnlyImports.has(Emitter.specifierLocal(s));
       const one = () => {
         if (isNode(s)) {
           this.emitPrimitive(s[0]);
@@ -11834,16 +11934,17 @@ class Emitter {
         } else
           this.emitPrimitive(s);
       };
-      if (erased) {
+      if (gone) {
         if (!this.ts)
           return;
         this.b.tsOnly(() => {
-          if (emitted > 0)
+          if (emitted > 0 || kept.length === 0 && erased > 0)
             this.b.emit(", ");
           one();
           if (emitted === 0 && kept.length > 0)
             this.b.emit(", ");
         });
+        erased++;
         return;
       }
       if (emitted > 0)
@@ -14810,7 +14911,8 @@ ${pad ?? ""}`);
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
     const patternTarget = Emitter.isPattern(node[1]);
-    const wrapParens = isObject(node[1]) && !this.inPattern;
+    const declares = Emitter.declaresInPlace.has(node);
+    const wrapParens = isObject(node[1]) && !this.inPattern && !declares;
     if (typeof node[1] === "string" && this.isComputedName(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
@@ -14865,7 +14967,7 @@ ${pad ?? ""}`);
         }
       }
     }
-    if (Emitter.declaresInPlace.has(node))
+    if (declares)
       this.b.emit("let ");
     this.mark(node, "voidMarker", () => this.mark(node, "annotation", () => this.mark(node, "$self", () => {
       if (wrapParens)
@@ -14876,7 +14978,7 @@ ${pad ?? ""}`);
         else
           this.withTarget(() => this.expr(node[1]));
       });
-      if (this.ts && Emitter.declaresInPlace.has(node)) {
+      if (this.ts && declares) {
         const owner = Emitter.inlineOwners.get(node);
         const text = this.annotationText(node) ?? (owner !== undefined ? this.annotationText(owner) : null);
         if (text !== null) {
@@ -22022,7 +22124,7 @@ return { ${unit.names.join(", ")} };
   if (face === "ts") {
     let story = null;
     try {
-      story = buildSchemaTypeStory(parseResult.sexpr, builder.source);
+      story = buildSchemaTypeStory(parseResult.sexpr, builder.source, Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))));
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -27586,8 +27688,8 @@ validBase = function(base) {
   return base;
 };
 function createRouter(opts) {
-  let adapter, onError, router, routes;
-  ({ routes, adapter, onError } = opts ?? {});
+  let router;
+  let { routes, adapter, onError } = opts ?? {};
   if (!(routes != null && (typeof routes === "function" || typeof routes.match === "function" && Array.isArray(routes.routes)))) {
     throw new TypeError("Rip App: createRouter requires a route manifest or manifest thunk");
   }
@@ -27718,9 +27820,8 @@ function createRouter(opts) {
       return router;
     },
     push(url, opts2 = {}) {
-      let hash, path, query;
       guardLoop();
-      ({ path, query, hash } = splitUrl(url));
+      let { path, query, hash } = splitUrl(url);
       let hit = attempt(path);
       if (!hit)
         return miss(path);
@@ -27734,9 +27835,8 @@ function createRouter(opts) {
       return true;
     },
     replace(url, opts2 = {}) {
-      let hash, path, query;
       guardLoop();
-      ({ path, query, hash } = splitUrl(url));
+      let { path, query, hash } = splitUrl(url);
       let hit = attempt(path);
       if (!hit)
         return miss(path);
@@ -27754,8 +27854,7 @@ function createRouter(opts) {
       return adapter.go(1);
     },
     match(url) {
-      let hash, path, query;
-      ({ path, query, hash } = splitUrl(url));
+      let { path, query, hash } = splitUrl(url);
       let hit = attempt(path);
       if (!hit)
         return null;
@@ -27973,11 +28072,11 @@ componentFrom = function(components, file) {
   return found[0];
 };
 function createRenderer(opts) {
-  let components, mount, onError, router, stash, target;
+  let mount;
   if (!(opts != null && typeof opts === "object")) {
     throw new TypeError("Rip App: createRenderer expects an options object");
   }
-  ({ router, stash, components, target, onError } = opts);
+  let { router, stash, components, target, onError } = opts;
   if (!(router != null && typeof router === "object")) {
     throw new TypeError("Rip App: createRenderer requires a router object");
   }

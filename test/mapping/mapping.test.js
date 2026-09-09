@@ -1006,9 +1006,11 @@ describe('implicit-object spans stay honest', () => {
   });
 
   test('pattern-target spans stay honest', () => {
-    const src = '[a, b] = pair';
+    // A read before the pattern keeps it hoisted — the shape whose target
+    // has more than one manifestation.
+    const src = 'console.log a\n[a, b] = pair';
     const { code, mappings, stores } = compile(src);
-    expect(code).toBe('let a, b;\n\n[a, b] = pair;');
+    expect(code).toBe('let a, b;\n\nconsole.log(a);\n[a, b] = pair;');
     const [assign] = stores.nodesByKind('assign');
     const target = mappings.of(assign.nodeId, 'target');
     // The pattern target has THREE generated manifestations: one per
@@ -1027,9 +1029,9 @@ describe('implicit-object spans stay honest', () => {
     expect(a).toContain('[y = 2] = [];');
     expect(run(a, 'return y;')).toBe(2);
     // Rename default in assignment position: valid JS with BOTH names
-    // declared (the defaulted name must not drop from the hoist).
+    // declared (the defaulted name must not drop from the declaration).
     const c = compile('{a: x, b: y = 2} = {a: 1}').code;
-    expect(c).toContain('let x, y;');
+    expect(c).toContain('let {a: x, b: y = 2} = {a: 1};');
     expect(run(c, 'return [x, y];')).toEqual([1, 2]);
     // Sweep: rest after default, deep nesting, loop and comprehension
     // pattern vars with defaults — all Function-valid.

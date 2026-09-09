@@ -27,6 +27,12 @@ parser.lexer = makeParserLexer();
 // coverage regression; files whose verified counts sat above their old
 // floors were raised at the same time, and the grow-or-hold rule
 // resumes from these counts.
+//
+// The same recalibration covers destructuring patterns: a pattern whose
+// names are fresh straight-line locals declares at its own statement
+// (`let {a, b} = v;`), so the hoist-line positions its names once held
+// disappear the same way — on the two files that carry such patterns,
+// and nowhere else.
 const FLOORS = {
   'types.rip': 96,
   'typedecls.rip': 18,
@@ -37,12 +43,12 @@ const FLOORS = {
   'heredocs2.rip': 15,
   'multiline.rip': 205,
   'optchain.rip': 71,
-  'dynkeys.rip': 64,
+  'dynkeys.rip': 63,
   'mathops.rip': 56,
   'implicitcalls.rip': 182,
   'implicitobjects.rip': 177,
   'classes.rip': 143,
-  'destructuring.rip': 232,
+  'destructuring.rip': 229,
   'lowerings.rip': 177,
   'closeout.rip': 189,
   'async.rip': 119,

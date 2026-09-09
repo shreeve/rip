@@ -1,15 +1,15 @@
-let a, a1, aOut, b, b1, c1, c2, head, keep, m1, others, ren, sd, tail, x1, y1, z1;
+let c1, c2;
 
 let pair = [1, 2];
 let obj = {a: 10, b: 20};
-[a1, b1] = pair;
-({a, b} = obj);
-({a: ren, b: keep} = obj);
-[x1, [y1, z1]] = [7, [8, 9]];
-({m1 = 5} = {a: 3});
+let [a1, b1] = pair;
+let {a, b} = obj;
+let {a: ren, b: keep} = obj;
+let [x1, [y1, z1]] = [7, [8, 9]];
+let {m1 = 5} = {a: 3};
 [x1, y1] = [y1, x1];
-[head, ...tail] = [1, 2, 3, 4];
-({a: aOut, ...others} = {a: 1, b: 2, c: 3});
+let [head, ...tail] = [1, 2, 3, 4];
+let {a: aOut, ...others} = {a: 1, b: 2, c: 3};
 let sum = function(...nums) {
   let t = 0;
   for (let n of nums) {
@@ -65,7 +65,7 @@ let dfor = 0;
 for (let [q = 7] of [[], [2]]) {
   dfor += q;
 }
-[{sd = 8}] = [{}];
+let [{sd = 8}] = [{}];
 let comp = (() => {
   const result = [];
   for (let [a2, x2] of [[1, 2], [3, 4]]) {

@@ -730,10 +730,8 @@ code "pattern default indented", '''
     1} = o
   a
   ''', '''
-  let a;
-
   let o = {};
-  ({a = 1} = o);
+  let {a = 1} = o;
   a;
   '''
 

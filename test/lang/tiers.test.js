@@ -64,8 +64,53 @@ describe('what stays hoisted — each early-execution/expression vector', () => 
     expect(js('x += 1')).toBe('let x;\n\nx += 1;');
   });
 
-  test('destructuring pattern targets (v1: patterns keep the hoist)', () => {
-    expect(js('[a, b] = pair')).toBe('let a, b;\n\n[a, b] = pair;');
+  test('a pattern whose every name is a fresh straight-line local declares in place, as one statement', () => {
+    expect(js('[a, b] = pair')).toBe('let [a, b] = pair;');
+    expect(js('{ host, port: portNumber } = config')).toBe('let {host, port: portNumber} = config;');
+    expect(js('{ mode = "manual", ...rest } = meta')).toBe('let {mode = "manual", ...rest} = meta;');
+    expect(js('{ meta: { retries } } = config')).toBe('let {meta: {retries}} = config;');
+  });
+
+  test('a pattern declares all of its names or none — one name that is not a fresh local keeps the whole pattern hoisted', () => {
+    // `a` is a parameter: `let {a, b}` would shadow it.
+    expect(js('f = (a) ->\n  { a, b } = source()\n  a + b')).toContain('  let b;\n  ({a, b} = source());');
+    // `c` is read before the pattern writes it.
+    expect(js('console.log c\n{ c, d } = source()')).toStartWith('let c, d;');
+    // A default reads a sibling bound AFTER it — a `let` pattern would throw there.
+    expect(js('{ b = a, a } = source()')).toStartWith('let a, b;');
+    // A def body reads one name.
+    expect(js('{ e, f } = source()\ndef g()\n  e')).toStartWith('let e, f;');
+  });
+
+  test('a pattern no `let` can spell keeps the hoist: a member element, a middle rest', () => {
+    expect(js('{ p: obj.p, q } = source()')).toBe('let q;\n\n({p: obj.p, q} = source());');
+    expect(js('[h, ...mid, t] = src')).toStartWith('let h, mid, t;');
+  });
+
+  test('a pattern in an expression or branch position keeps the hoist like a plain name', () => {
+    expect(js('f = ->\n  { r } = source()')).toContain('  let r;\n  return (({r} = source()));');
+    expect(js('if ok\n  { x, y } = source()\nconsole.log x')).toStartWith('let x, y;');
+  });
+
+  test('an annotated write to a name a pattern declares is rejected in both faces — TypeScript annotates a pattern only whole, so the annotation would manifest nowhere', () => {
+    const src = '{ id, rows } = parse(text)\nrows: Row[] = rows.map(fix)';
+    const message = /'rows' is declared by a destructuring pattern, which cannot carry this annotation/;
+    expect(() => js(src)).toThrow(message);
+    expect(() => ts(src)).toThrow(message);
+    // A bare typed forward is the same annotation in its other spelling.
+    const forward = '{ id, rows } = parse(text)\nrows: Row[]\nrows = rows.map(fix)';
+    expect(() => js(forward)).toThrow(message);
+    expect(() => ts(forward)).toThrow(message);
+    // The canonical spelling: rename the element, declare the typed name from it.
+    expect(ts('{ id, rows: raw } = parse(text)\nrows: Row[] = raw.map(fix)')).toContain('let {id, rows: raw} = parse(text);\nlet rows: Row[] = raw.map(fix);');
+    // A pattern hoisted for another reason is a plain assignment, and the
+    // hoist line carries the annotation as before.
+    expect(ts('console.log rows\n{ id, rows } = parse(text)\nrows: Row[] = rows.map(fix)')).toContain('let id, rows: Row[];');
+  });
+
+  test('a pattern declaration is the same bytes in both faces (strip parity)', () => {
+    const src = '{ host, port: portNumber } = config\nconsole.log host';
+    expect(js(src)).toBe(ts(src).replace(/\nexport \{\};\n?$/, ''));
   });
 
   test('function-body tail is implicit-return expression position — never `return (let …)`', () => {

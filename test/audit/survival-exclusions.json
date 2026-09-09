@@ -7,7 +7,7 @@
     "9:22:beta": "lowered into a string — the face holds these bytes inside a literal"
   },
   "04-assignments.rip": {
-    "75:54:retries": "member read on `metaRest`, which hovers `any` (verified 2026-08-03) — no symbol, no token; tsgo behaves identically on hand-written TS",
+    "75:96:length": "member read on `restScores`, a rest bound by a declaring array pattern and so tuple-typed (`[number, number]`) — tsgo issues no token for a tuple's `length`, while an array's `length` tokens `property`; probe-verified on hand-written TS",
     "95:20:alpha": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `keyName`'s hoist widens it from 'alpha' to string, degrading `dynamic`'s computed key to an index signature — the member read loses its symbol (probe-verified: a const key tokens)"
   },
   "07-exceptions.rip": {

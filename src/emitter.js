@@ -3524,6 +3524,33 @@ class Emitter {
     return isObject(x) || (isNode(x) && x[0] === 'array');
   }
 
+  // A pattern a `let` declaration can spell: plain-name leaves only (a
+  // member element assigns, it does not bind), a rest element last at
+  // every depth (the middle rest is rip's own statement lowering), and
+  // nested patterns of the same shape. Defaults and computed keys are
+  // declaration-legal and pass.
+  static declarablePattern(p) {
+    const leaf = (t) => typeof t === 'string'
+      || (isNode(t) && t[0] === '=' ? leaf(t[1]) : Emitter.declarablePattern(t));
+    if (isNode(p) && p[0] === 'array') {
+      const els = p.slice(1);
+      return els.every((el, i) => (isNode(el) && el[0] === '...')
+        ? i === els.length - 1 && typeof el[1] === 'string'
+        : leaf(el));
+    }
+    if (isObject(p)) {
+      const pairs = p.slice(1);
+      return pairs.every((pair, i) => {
+        if (!isNode(pair)) return false;
+        if (pair[0] === null) return typeof pair[2] === 'string';
+        if (pair[0] === '=') return typeof pair[1] === 'string';
+        if (pair[0] === '...') return i === pairs.length - 1 && typeof pair[1] === 'string';
+        return pair[0] === ':' && leaf(pair[2]);
+      });
+    }
+    return false;
+  }
+
   // The module's class-DECLARATION names (`class Box`, exported or
   // not). Interface merging joins a same-module interface only to a
   // class declaration — an expression-form class (`A = class`) binds a
@@ -3976,7 +4003,23 @@ class Emitter {
   // assigned name throws either way); a hoisted `def` is the ONE
   // construct callable from above its own statement, so any name its
   // body touches keeps the hoist. Everything else keeps today's
-  // hoist too (conditional first writes, patterns, compounds).
+  // hoist too (conditional first writes, compounds).
+  //
+  // A destructuring pattern declares in place under the same rules,
+  // decided per STATEMENT: `let {a, b} = v` binds all of its names or
+  // none, so every name the pattern binds must qualify, and the pattern
+  // must be one a `let` can spell — plain names only, a rest last, no
+  // member element (declarablePattern). A name such a pattern declares
+  // takes no annotation from a later write: TypeScript annotates a
+  // pattern only whole, so the annotation would have no manifestation,
+  // and the emitter rejects the write instead — the honest spelling
+  // renames the element and declares the typed name from it. Split from
+  // its declaration a pattern is an assignment EXPRESSION to
+  // TypeScript: a shorthand element is an object-literal property whose
+  // type is the evolving base, a rest element never narrows, and an
+  // array literal loses the tuple the binding pattern would keep — so
+  // the hoisted form hovers `(property) name: any` at the very
+  // position that declares the name.
   //
   // Static and shared across emitter instances (sub-emitters, both
   // faces): membership is a pure function of the AST, so re-adding is
@@ -4020,7 +4063,7 @@ class Emitter {
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
       if (typeof name !== 'string' || !IDENT.test(name)) return;
       let f = facts.get(name);
-      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, firstWrite: null, firstWritePath: '' }));
+      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
       // The textually first WRITE with a known statement node — the
       // pin pipeline's probe site (its RHS is what TS infers from).
@@ -4030,6 +4073,26 @@ class Emitter {
       if (write && f.firstWrite === null && writeNode !== null) { f.firstWrite = writeNode; f.firstWritePath = writePath; }
       if (inFn > 0) { f.nested = true; if (write) f.nestedWrite = true; if (inFn === 2) f.inDef = true; }
     };
+    // A declarable pattern's elements in EVALUATION order: a default's
+    // expression and a computed key read before the element binds, so a
+    // name an earlier default reads is seen before its own write and
+    // disqualifies itself — the plain self-referential rule, element by
+    // element. `bind` receives each bound name.
+    const walkPattern = (p, inFn, bind) => {
+      const element = (el) => {
+        if (typeof el === 'string') { if (el !== ',') bind(el); return; }
+        if (el[0] === '=') { walk(el[2], inFn); element(el[1]); return; }
+        if (el[0] === '...') { bind(el[1]); return; }
+        walkPattern(el, inFn, bind);
+      };
+      if (p[0] === 'array') { for (const el of p.slice(1)) element(el); return; }
+      for (const pair of p.slice(1)) {
+        if (pair[0] === null) bind(pair[2]);
+        else if (pair[0] === '=') { walk(pair[2], inFn); bind(pair[1]); }
+        else if (pair[0] === '...') bind(pair[1]);
+        else if (pair[0] === ':') { if (isNode(pair[1])) walk(pair[1], inFn); element(pair[2]); }
+      }
+    };
     const walk = (n, inFn) => {
       if (typeof n === 'string') return occur(n, inFn);
       if (!isNode(n)) return;
@@ -4038,7 +4101,13 @@ class Emitter {
       // modes, so `r: number` + `r = 5` and plain `r = 5` classify
       // identically (whole-statement erasure invariance(b)); the
       // forward's annotation re-homes inline at the declaring write.
-      if (Emitter.isTypedWrapper(n)) return;
+      // It still records the annotation, as an annotated write does: a
+      // pattern that declares the name has nowhere to carry it and
+      // rejects the forward (applyDeclareInPlace).
+      if (Emitter.isTypedWrapper(n)) {
+        if (typeof n[1] === 'string') { const af = facts.get(n[1]); if (af !== undefined && af.annotated === null) af.annotated = n; }
+        return;
+      }
       const head = n[0];
       // Nested execution scopes: def/class/component names are
       // bindings, not references — skip the name slot. A class parent
@@ -4083,19 +4152,31 @@ class Emitter {
           // (`let x: T = v`), so typed/stripped twins ship identical JS
           // (the dts.test.js erasure invariant).
           occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
+          // The first annotation on the name — an annotated write here, a
+          // bare forward above — read from the AST so both faces see it:
+          // a pattern that declares the name rejects it
+          // (applyDeclareInPlace), and the faces must agree.
+          if (declaring && this.annotationText(n) !== null) { const af = facts.get(n[1]); if (af !== undefined && af.annotated === null) af.annotated = n; }
+        } else if (head === '=' && Emitter.declarablePattern(n[1])) {
+          // A pattern a `let` can spell: every element is a write with
+          // this statement as its declaring site, in evaluation order.
+          // Whether the statement declares is decided per statement
+          // (applyDeclareInPlace). The pin pipeline reaches only the
+          // names patternBindings can address — a default's or rest's
+          // type is not its accessor's — so those alone record a first
+          // write, with the path that keeps siblings apart in the probe
+          // and in the cache key.
+          const declStmt = !inFn && top.has(n) ? n : null;
+          const paths = new Map(patternBindings(n[1]));
+          walkPattern(n[1], inFn, (bound) => occur(bound, inFn, true, declStmt, paths.has(bound) ? n : null, paths.get(bound) ?? ''));
         } else {
-          // Pattern and member targets: names inside over-count as
-          // reads (patterns stay hoisted; a member target's object is
-          // a genuine read).
+          // Member targets, and patterns no `let` can spell (a member
+          // element, a middle rest): names inside over-count as reads (a
+          // member target's object is a genuine read), so the shape stays
+          // hoisted. A pattern's bindings still record a first write for
+          // the pin pipeline — a hoisted `def` reading one gets no type
+          // any other way.
           walk(n[1], inFn);
-          // A pattern's bindings ALSO record a first write, so the pin
-          // pipeline can reach them — a hoisted `def` reading one gets no
-          // type any other way. `declStmt` stays null on purpose: patterns
-          // stay hoisted, and passing one here would make the pattern a
-          // declare-in-place candidate, which is a different decision with
-          // different rules (this branch is reached by member targets too).
-          // The path is what keeps a pattern's siblings apart, in the probe
-          // AND in the cache key.
           if (DECLARING_ASSIGNS.has(head)) {
             for (const [bound, path] of patternBindings(n[1])) {
               occur(bound, inFn, true, null, n, path);
@@ -4156,6 +4237,40 @@ class Emitter {
       }
     }
     const ownerToDecl = new Map();
+    // A pattern statement declares ALL of its names or none, so its
+    // verdict is per statement: every name the pattern binds must be a
+    // target of this scope (an entry here) whose first occurrence is this
+    // statement and which no def touches. A name with no entry — a
+    // parameter, an outer binding, an exported const, a reactive member —
+    // keeps the whole pattern hoisted, since a `let` there would shadow
+    // it. A name the pattern declares cannot carry an annotation from an
+    // annotated write or a bare typed forward: TypeScript annotates a
+    // pattern only as a whole, so the annotation would manifest nowhere,
+    // and the annotating statement is rejected in the author's vocabulary. A pattern that stays hoisted for another reason
+    // is a plain assignment, and the hoist line carries the annotation as
+    // it always has.
+    const targets = new Set(entries.filter(([, , role]) => role === 'target').map(([n]) => n));
+    const patternVerdicts = new Map();
+    const patternDeclares = (stmt) => {
+      let v = patternVerdicts.get(stmt);
+      if (v === undefined) {
+        const names = this.patternNames(stmt[1]);
+        v = names.every((nm) => {
+          const ff = facts.get(nm);
+          return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
+        });
+        if (v) {
+          const typed = names.find((nm) => facts.get(nm).annotated !== null);
+          if (typed !== undefined) {
+            throw this.positionedError(facts.get(typed).annotated,
+              `emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` +
+              `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`);
+          }
+        }
+        patternVerdicts.set(stmt, v);
+      }
+      return v;
+    };
     const kept = entries.filter(([name, , role]) => {
       if (role !== 'target') return true;
       const f = facts.get(name);
@@ -4165,6 +4280,11 @@ class Emitter {
       // target keeps its hoist-line declaration.
       if (isNode(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) &&
           (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2]))) return true;
+      if (Emitter.isPattern(f.decl[1])) {
+        if (!patternDeclares(f.decl)) return true;
+        Emitter.declaresInPlace.add(f.decl);
+        return false;
+      }
       // A bare typed FORWARD (`x: number` … `x = 5`) keeps the hoist —
       // its annotation manifests on the hoist line and the forward is
       // the name's first occurrence anyway. An annotated ASSIGN
@@ -8399,14 +8519,16 @@ class Emitter {
     if (typeof node[1] === 'string' && node[1][0] === '"') {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
-    // Pattern targets emit as direct ES destructuring —
-    // names hoist like plain targets. An OBJECT pattern wraps the whole
-    // assignment in parens (a bare `{` would open a block)
-    // — except inside an enclosing pattern, where this `=` is a DEFAULT
-    // and parens/grouping are invalid destructuring JS. The default's
-    // value is an expression position again.
+    // Pattern targets emit as direct ES destructuring — names declare
+    // in place or hoist like plain targets. An OBJECT pattern that
+    // assigns wraps the whole assignment in parens (a bare `{` would
+    // open a block); one that DECLARES needs none, `let` already
+    // opens a declaration. Inside an enclosing pattern this `=` is a
+    // DEFAULT, where parens/grouping are invalid destructuring JS. The
+    // default's value is an expression position again.
     const patternTarget = Emitter.isPattern(node[1]);
-    const wrapParens = isObject(node[1]) && !this.inPattern;
+    const declares = Emitter.declaresInPlace.has(node);
+    const wrapParens = isObject(node[1]) && !this.inPattern && !declares;
     // A computed (`~=`) derives from its dependencies — it has no
     // legal write; the runtime's read-only container would throw at
     // the assignment, which is the loud error in the wrong place.
@@ -8513,11 +8635,11 @@ class Emitter {
     // the whole emitted assignment — its only generated manifestation;
     // mark() is a no-op for the untyped rows (no such role).
     // Tier-1 declare-in-place: this statement's `=` also declares its
-    // (always plain-name) target. The `let ` is declaration syntax the
-    // statement adds — like semicolons and indentation it sits OUTSIDE
-    // all role marks, so every role row (including $self) keeps its
-    // exact source↔generated slice.
-    if (Emitter.declaresInPlace.has(node)) this.b.emit('let ');
+    // target — a plain name, or every name of a pattern. The `let ` is
+    // declaration syntax the statement adds — like semicolons and
+    // indentation it sits OUTSIDE all role marks, so every role row
+    // (including $self) keeps its exact source↔generated slice.
+    if (declares) this.b.emit('let ');
     this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       if (wrapParens) this.b.emit('(');
       this.mark(node, 'target', () => {
@@ -8529,7 +8651,7 @@ class Emitter {
       // schema story type. Both are TS-only regions, so the stripped
       // face stays byte-equal to the JS emission — annotating a
       // binding never changes shipped JS.
-      if (this.ts && Emitter.declaresInPlace.has(node)) {
+      if (this.ts && declares) {
         const owner = Emitter.inlineOwners.get(node);
         const text = this.annotationText(node) ?? (owner !== undefined ? this.annotationText(owner) : null);
         if (text !== null) {
