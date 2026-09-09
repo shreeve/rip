@@ -14,10 +14,11 @@
 // in-range by construction: every source compiles through the real
 // pipeline, whose spans derive from token offsets.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CodeBuilder } from '../../src/builder.js';
 import { compile } from '../../src/compile.js';
+import { ripFiles } from '../support/rip-files.js';
 
 // endMark with matchesSource replaced by the definition, verbatim.
 const refEndMark = function () {
@@ -51,9 +52,7 @@ const runWith = (impl, src, name) => {
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const sources = readdirSync(corpusDir)
-  .filter((f) => f.endsWith('.rip'))
-  .sort()
+const sources = ripFiles(corpusDir)
   .map((f) => [f, readFileSync(join(corpusDir, f), 'utf8')]);
 
 // Adversarial chain shapes: deep spines stress the memo's skip logic;

@@ -539,6 +539,24 @@ export function hostFloorDts(typesRoot, { userSetsTypes = false, strict = false 
 // (`..\\pkg` is not a legal `extends` spec).
 const posix = (p) => p.split(path.sep).join('/');
 
+// The repository `dir` sits in, or null when it sits in none. `.git` is
+// a DIRECTORY in an ordinary checkout and a FILE in a worktree or a
+// submodule, so existence is the test and never a stat kind.
+//
+// This is what anchors the mirror. The editor's folder is wherever a
+// person happened to open, so anchoring there scatters a `.rip/editor`
+// into every subdirectory anyone has ever opened — one per folder across
+// a monorepo. One repository is one workspace, so the mirror lands once,
+// at the top.
+export function gitRootFor(dir) {
+  for (let at = dir; ; ) {
+    if (fs.existsSync(path.join(at, '.git'))) return at;
+    const up = path.dirname(at);
+    if (up === at) return null;
+    at = up;
+  }
+}
+
 // The nearest tsconfig.json at or above `dir`, BOUNDED by `anchor`: a
 // dir outside the anchor answers null immediately — without that, an
 // out-of-workspace document adopted whatever config it met on the climb

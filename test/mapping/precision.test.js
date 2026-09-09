@@ -4,12 +4,13 @@
 // positions, raise the floor to the new verified count in the same
 // commit. A drop is a regression, never an expectation to lower.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { toSourceMap, decodeMappings } from '../../src/sourcemap.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -99,7 +100,7 @@ const FLOORS = {
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const files = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
+const files = ripFiles(corpusDir);
 
 describe('precision regression gate', () => {
   test('every corpus file has a committed floor', () => {

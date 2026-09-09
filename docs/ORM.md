@@ -61,7 +61,7 @@ name!    string                # required — absence is a validation error, col
 handle?  string, 2..24         # optional — nullable column
 status   "open" | "closed", ["open"]   # unmarked, with a default
 bio?     text
-tags?    string[]              # array — stored as a JSON column
+tags?    string[]              # array — stored as a VARCHAR[] column
 ```
 
 - `!` — required. Missing or `null` fails validation; the column is
@@ -74,8 +74,12 @@ tags?    string[]              # array — stored as a JSON column
 Field types and their columns: `string`/`email`/`url`/`phone`/`zip` →
 `VARCHAR`, `text` → `TEXT`, `integer` → `INTEGER`, `number` → `DOUBLE`,
 `boolean` → `BOOLEAN`, `date` → `DATE`, `datetime` → `TIMESTAMP`,
-`uuid` → `UUID`, `json`/`any` → `JSON`. Arrays and nested schemas are
-`JSON`. An unknown type name is a loud error, never a silent `VARCHAR`.
+`uuid` → `UUID`, `json`/`any` → `JSON`. An array of a scalar is DuckDB's
+own LIST of it — `tags? string[]` is `VARCHAR[]`, `integer[]` is
+`INTEGER[]` — so the database can index it and `list_contains` can
+push down. An array whose element has no scalar form (a nested schema,
+`json`, `any`) and a nested schema itself are `JSON` documents. An
+unknown type name is a loud error, never a silent `VARCHAR`.
 
 ### Constraints
 
@@ -952,17 +956,21 @@ Optional, feature-detected:
   transaction, so the migration runner may claim whole-file rollback).
 
 **The adapter owns value decoding — with one temporal backstop.** The
-harbor adapter decodes temporal columns to real `Date`s keyed off each
-column's `duckdbType` (and encodes `Date` params to ISO-8601 UTC on
-the way out). For an adapter that skips that, the ORM coerces the
-columns whose *declared* type is temporal (`date`/`datetime` fields,
-plus the `@times`/`@softDelete` columns) through the same codec
+harbor adapter decodes off each column's `duckdbType`: temporal columns
+become real `Date`s (and `Date` params encode to ISO-8601 UTC on the
+way out), and a `JSON` column's text becomes its document. Everything
+else arrives already shaped — a LIST is a real array, a STRUCT a real
+object, and a DECIMAL a lossless decimal string that `rip/decimal`
+parses exactly. For an adapter that skips the temporal step, the ORM
+coerces the columns whose *declared* type is temporal (`date`/`datetime`
+fields, plus the `@times`/`@softDelete` columns) through the same codec
 on hydrate: `Date`s pass through untouched, ISO-8601 / SQL-timestamp
 text and epoch-millisecond numbers become the same instant, and a
 value that cannot be read as an instant rejects loudly naming the
 column. Every other column stores whatever the adapter returned,
-verbatim. The same goes for JSON columns — the ORM stringifies objects
-written to `json` fields but never parses on read.
+verbatim — an adapter that does not decode its own `JSON` columns
+hands back the text, which is why the `bun:sqlite` example below owns
+that step itself.
 
 **Encoding has no such backstop: every adapter encodes `Date` params
 itself.** The ORM binds a real `Date` for the `@times` `updated_at`
@@ -1129,11 +1137,24 @@ the directory layout, checksummed history, the lock, and repair.
 
 ## Money
 
-Store money as **integer cents** (`price! integer, 0..`). The reason
-is the wire, not the column: only
-temporal columns decode by database type on the way back, so a
-`DECIMAL(9,2)` column would return every value as a plain JSON number —
-a silent float, with `0.1 + 0.2` arithmetic — while the DDL looked
-exactly right. `INTEGER` is exact in the column, exact on the wire,
-exact in JS to 2^53 cents, and the database can `SUM`, compare, and
-index it.
+Store money as **integer cents** (`price! integer, 0..`). `INTEGER` is
+exact in the column, exact on the wire, exact in JS to 2^53 cents
+(≈ $90 trillion), and the database can `SUM`, compare, and index it.
+`number` is `DOUBLE` — binary floating point, where `0.1 + 0.2` is the
+whole argument — so it is never the answer for money.
+
+Two decimal places is what integer cents buys. Beyond that — 4dp unit
+prices, tax rates, or rounding the database itself must do — the field
+type is `decimal(p, s)`:
+
+```rip
+price!  decimal(9, 2)      # not built yet
+rate!   decimal(6, 4)
+```
+
+**That spelling is not implemented.** Everything under it is: harbor
+sends `DECIMAL` as a lossless decimal string carrying its own width and
+scale, and `rip/decimal` parses one exactly, checks it fits a
+`DECIMAL(p, s)`, and binds back losslessly as a parameter. What is
+missing is only the declaration — the parenthesized arguments on a
+field type, which no other type takes.

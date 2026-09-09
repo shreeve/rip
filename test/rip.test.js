@@ -2,12 +2,12 @@
 // row runs against the compiler — one bun test per row, so a
 // failure names its file, verb, and case and prints the diff.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBattery, runRow } from './support/battery.js';
+import { ripFiles } from './support/rip-files.js';
 
 const dir = join(import.meta.dir, 'rip');
-const files = readdirSync(dir).filter((f) => f.endsWith('.rip')).sort();
+const files = ripFiles(dir);
 
 for (const file of files) {
   const rows = await loadBattery(join(dir, file));

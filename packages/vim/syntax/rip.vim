@@ -8,9 +8,18 @@ endif
 
 " --- Comments ---------------------------------------------------------------
 
+" A `###` block opens only at the START of a line (after its indent) and
+" runs to the next `###`. Mid-line, a `#` is always a line comment — so is
+" a fourth hash (`####…`).
 syn match  ripComment      /#\%({\)\@!.*$/                       contains=ripTodo
-syn region ripBlockComment  start=/###\%(#\)\@!/  end=/###/      contains=ripTodo
+syn region ripBlockComment  start=/^\s*###\%(#\)\@!/  end=/###/  contains=ripTodo
 syn keyword ripTodo         TODO FIXME XXX NOTE HACK BUG WARN    contained
+
+" --- __DATA__ ---------------------------------------------------------------
+
+" Everything after a line that is exactly `__DATA__` is the program's DATA
+" constant — raw text, never parsed.
+syn region ripData          matchgroup=ripDataMarker start=/^__DATA__$/ end=/\%$/ contains=NONE
 
 " --- Strings ----------------------------------------------------------------
 
@@ -29,9 +38,12 @@ syn match  ripEscape        /\\./                                contained
 syn region ripInterpolation matchgroup=ripInterpDelim start=/#{/ start=/\${/ end=/}/ contained contains=TOP,ripInterpBraces
 syn region ripInterpBraces  start=/{/ end=/}/ transparent contained contains=TOP,ripInterpBraces
 
-" --- Inline JavaScript ------------------------------------------------------
+" --- Template-Literal Types -------------------------------------------------
 
-syn region ripInlineJS      start=/`/  end=/`/  oneline
+" A backtick opens a template-literal TYPE (`type Px = `${number}px``) — TS
+" type text carried through verbatim. Strings are quote-based, so a backtick
+" is the type spelling and nothing else.
+syn region ripTypeTemplate  start=/`/  end=/`/  oneline
 
 " --- Numbers ----------------------------------------------------------------
 
@@ -49,45 +61,28 @@ syn keyword ripKeyword      try catch finally
 syn keyword ripKeyword      yield await
 syn keyword ripKeyword      import export from default
 syn keyword ripKeyword      delete typeof instanceof new super
-syn keyword ripKeyword      debugger use own extends
+syn keyword ripKeyword      debugger own extends
 syn keyword ripKeyword      in of by as
-syn keyword ripKeyword      class def enum interface type schema
 syn keyword ripKeyword      component render slot offer accept
 syn keyword ripKeyword      and or not is isnt
 syn keyword ripKeyword      it
 
-" --- Booleans ---------------------------------------------------------------
+" Declaring words are syn-MATCH, not syn-keyword: a keyword outranks every
+" match at its own position, which would leave the definition rules below —
+" all of which anchor on one of these words — unable to claim their name.
+syn match  ripKeyword       /\<\%(class\|def\|enum\|interface\|type\|schema\)\>/
 
-syn keyword ripBoolean      true false yes no on off
-
-" --- Constants --------------------------------------------------------------
-
-syn keyword ripConstant     null undefined NaN Infinity
-syn keyword ripThis         this
-
-" --- Type Keywords ----------------------------------------------------------
-
-syn keyword ripType         number string boolean void any never unknown object symbol bigint
-
-" --- Built-ins --------------------------------------------------------------
-
-syn keyword ripBuiltin      console process require module exports
-syn keyword ripBuiltin      setTimeout setInterval clearTimeout clearInterval
-syn keyword ripBuiltin      requestAnimationFrame cancelAnimationFrame
+" PascalCase globals are syn-keyword: a keyword outranks every match wherever
+" it sits, so these need no ordering, and no object key is spelled this way.
 syn keyword ripBuiltin      Promise Array Object String Number Boolean
 syn keyword ripBuiltin      Math Date RegExp Error TypeError RangeError
 syn keyword ripBuiltin      JSON Map Set WeakMap WeakSet
 syn keyword ripBuiltin      Symbol Proxy Reflect Buffer Bun
-syn keyword ripBuiltin      document window globalThis navigator
-syn keyword ripBuiltin      fetch URL URLSearchParams FormData
+syn keyword ripBuiltin      URL URLSearchParams FormData
 syn keyword ripBuiltin      Event CustomEvent EventSource
 syn keyword ripBuiltin      HTMLElement Node NodeList Element
 syn keyword ripBuiltin      DocumentFragment MutationObserver ResizeObserver
 syn keyword ripBuiltin      IntersectionObserver
-
-" Rip stdlib (injected globals)
-syn keyword ripBuiltin      p pp pj pr abort assert exit kind noop
-syn keyword ripBuiltin      raise rand sleep todo warn zip
 
 " --- Instance Variables -----------------------------------------------------
 
@@ -112,13 +107,15 @@ syn match  ripOperator      /===\|!==\|>>>\|\.\.\./
 " Compound assignment (longest alternatives first within alternation)
 syn match  ripOperator      />>>=\|\*\*=\|\/\/=\|%%=\|&&=\|||=\|??=\|<<=\|>>=\|+=\|-=\|\*=\|\/=\|%=\|&=\||=\|\^=/
 
-" Special. `?!` is one token: bare Houdini/presence, or maybe dammit
-" when call arguments follow.
+" Special. `?!` is the presence operator, one token — bare Houdini, or
+" maybe dammit when call arguments follow. `!?` is the reverse pair, two
+" tokens (dammit then postfix existence: `a!?` is `await a() != null`),
+" matched together because it reads as one idiom.
 syn match  ripOperator      /!?\|?!\|??\|?\./
 
-" Method assignment (x .= trim()), merge assignment (*>obj = {…}),
+" Method assignment (x .= trim()), map literal (*{a: 1}),
 " existence assignment (a ?= 5)
-syn match  ripOperator      /\.=\|\*>\|\*{\@=\|?=/
+syn match  ripOperator      /\.=\|\*{\@=\|?=/
 
 " Tagged-template bridge: sh $"cmd" (the $ heads the template)
 syn match  ripOperator      /\$\ze['"]/
@@ -131,8 +128,9 @@ syn match  ripSymbol        /\%(\w\)\@<!:[a-zA-Z_$][a-zA-Z0-9_$]*\%([.-][a-zA-Z_
 " Arrow functions
 syn match  ripArrow         /[=-]>/
 
-" Reactive (high priority)
-syn match  ripReactive      /<=>\|<\~\|:=\|\~=\|\~>\|=!/
+" Reactive (high priority). `~>` is the effect head; `!>` is the schema
+" body's eager-derived field — siblings, so they read alike.
+syn match  ripReactive      /<=>\|<\~\|:=\|\~=\|[~!]>\|=!/
 
 " Prototype access: String::trim (`::` is prototype access only —
 " `:` is the sole type-annotation operator. Type names after a `:`
@@ -154,8 +152,14 @@ syn region ripWordArray     matchgroup=ripWordDelim start=/%w\z([^ \t[:alnum:]([
 " last-defined item wins, so /// must outrank the // operator and
 " /regex/ must outrank the / operator.
 
+" A `/` opens a regex unless it divides, which mirrors the lexer's rule:
+" division needs a value-ending token before the slash. Tight against one
+" (`a/b`, `f()/2`, `arr[0]/2`) it always divides; spaced, a space AFTER the
+" slash marks the division too (`a / b`), so `text.match /ab+c/` and
+" `text =~ /foo/` stay regexes. `/=` is compound assignment, and `//`
+" is floor division — the heregex above owns `///`.
 syn region ripHeregex       start=/\/\/\//  end=/\/\/\/[gimsuy]*/  contains=ripInterpolation,ripComment,ripEscape
-syn region ripRegex         matchgroup=ripRegexDelim start=+\%(^\s*\|[=(:,;\[!&|?{]\s*\)\@<=/\%([/*]\)\@!+ skip=+\\/+ end=+/[gimsuy]*+ oneline contains=ripEscape
+syn region ripRegex         matchgroup=ripRegexDelim start=+[A-Za-z0-9_$)\]}@]\@<!/\%([/*=]\|\s\)\@!+ skip=+\\/+ end=+/[gimsuy]*+ oneline contains=ripEscape
 
 " --- Object Keys ------------------------------------------------------------
 
@@ -180,6 +184,14 @@ syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze!=\@!/
 " Variable assignment: name = (but not ==, =>, =~, =!)
 syn match  ripAssignment    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*=\%([>=~!]\)\@!/
 
+" The declaring forms `=!` (readonly), `:=` (state) and `~=` (computed)
+" name a binding too, and each is excluded from the rule above. The name is
+" the statement's FIRST word, so the match anchors there — reading backward
+" from the operator instead would claim the type of an annotated declaration
+" (`limit: number =! 100` names limit, not number).
+syn match  ripReadonlyName  /^\s*\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*\%(:[^=]*\)\?=!/
+syn match  ripReactiveName  /^\s*\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*\%(:[^=~]*\)\?\%(:=\|\~=\)/
+
 " --- Function Definitions ---------------------------------------------------
 
 " def name or def name!
@@ -187,30 +199,68 @@ syn match  ripFuncDef       /\<def\s\+[a-zA-Z_$][a-zA-Z0-9_$]*[!?]\?/ contains=r
 syn match  ripFuncKeyword   /\<def\>/                            contained
 syn match  ripFuncName      /\%(\<def\s\+\)\@<=[a-zA-Z_$][a-zA-Z0-9_$]*[!?]\?/ contained
 
-" name = (...) -> or name = ->
-syn match  ripFuncAssign    /[a-zA-Z_$][a-zA-Z0-9_$]*\s*=\s*\%(([^)]*)\s*\)\?[=-]>/ contains=ripFuncAssignName,ripArrow
-syn match  ripFuncAssignName /[a-zA-Z_$][a-zA-Z0-9_$]*/         contained
-
-" name: (...) -> or name: -> (method in object/class)
-syn match  ripFuncMethod    /[a-zA-Z_$][a-zA-Z0-9_$]*\s*:\s*\%(([^)]*)\s*\)\?[=-]>/ contains=ripFuncMethodName,ripArrow
-syn match  ripFuncMethodName /[a-zA-Z_$][a-zA-Z0-9_$]*/         contained
+" name = (...) -> or name = ->  /  name: (...) -> or name: -> (method).
+" The match stops at `\ze` so it covers the NAME alone — carrying the
+" parameter list inside it painted the parameters as function names too.
+syn match  ripFuncAssign    /[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*=\s*\%(([^)]*)\s*\)\?[=-]>/
+syn match  ripFuncMethod    /[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*:\s*\%(([^)]*)\s*\)\?[=-]>/
 
 " --- Class / Enum / Interface -----------------------------------------------
 
-syn match  ripClassDef      /\<class\s\+\w\+\%(\s\+extends\s\+\w\+\%(\.\w\+\)*\)\?/ contains=ripKeyword,ripClassName
+syn match  ripClassDef      /\<class\s\+\w\+\%(\s\+extends\s\+\w\+\%(\.\w\+\)*\)\?/ contains=ripKeyword,ripClassName,ripSuperName
 syn match  ripEnumDef       /\<enum\s\+[A-Z]\w*/                 contains=ripKeyword,ripTypeName
-syn match  ripInterfaceDef  /\<interface\s\+[A-Z]\w*\%(\s\+extends\s\+[A-Z]\w*\)\?/ contains=ripKeyword,ripTypeName
+syn match  ripInterfaceDef  /\<interface\s\+[A-Z]\w*\%(\s\+extends\s\+[A-Z]\w*\)\?/ contains=ripKeyword,ripTypeName,ripSuperName
 syn match  ripTypeAliasDef  /\<type\s\+[A-Z]\w*/                 contains=ripKeyword,ripTypeName
 
 syn match  ripClassName     /\%(\<class\s\+\)\@<=\w\+/          contained
+syn match  ripSuperName     /\%(\<extends\s\+\)\@<=\w\+\%(\.\w\+\)*/ contained
 syn match  ripTypeName      /\%(\<\%(enum\|interface\|type\)\s\+\)\@<=[A-Z]\w*/ contained
 
 " PascalCase identifiers (type names)
 syn match  ripPascalCase    /\<[A-Z]\w*/
 
+" --- Value Words -----------------------------------------------------------
+"
+" Booleans, constants, primitive type names, `this`, and the globals spelled
+" in lowercase. These sit last so they outrank the broad rules above — a
+" call, an assignment target, a PascalCase name — which is the precedence a
+" syn-keyword would give them for free. The trailing guard is what a keyword
+" cannot express: a value word directly before a colon is an object KEY
+" (`{on: 2}`, `{string: 1}`, `{kind: 3}`), so it declines the position and
+" ripObjKey takes it.
+
+syn match  ripBoolean       /\<\%(true\|false\|yes\|no\|on\|off\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripConstant      /\<\%(null\|undefined\|NaN\|Infinity\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn keyword ripThis         this
+
+syn match  ripType          /\<\%(number\|string\|boolean\|void\|any\|never\|unknown\|object\|symbol\|bigint\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+
+syn match  ripBuiltin       /\<\%(console\|process\|require\|module\|exports\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBuiltin       /\<\%(setTimeout\|setInterval\|clearTimeout\|clearInterval\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBuiltin       /\<\%(requestAnimationFrame\|cancelAnimationFrame\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBuiltin       /\<\%(document\|window\|globalThis\|navigator\|fetch\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+
+" Rip stdlib (injected globals)
+syn match  ripBuiltin       /\<\%(p\|pp\|pj\|pr\|abort\|assert\|exit\|kind\|noop\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBuiltin       /\<\%(raise\|rand\|sleep\|todo\|warn\|zip\|toMatchable\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+
+" --- Render Blocks ----------------------------------------------------------
+
+" Inside a render block a TIGHT `#word` is element-id syntax, not a comment:
+" it merges into an unspaced preceding tag (`div#main`, `.card#x`) or mints
+" an implicit div at a child position (`#main` → div#main). A spaced
+" `# word` stays a comment. The block runs from `render` to the first
+" non-blank line not indented deeper than `render` itself, which is the
+" same span the scanner walks.
+syn region ripRender        start=/^\z(\s*\)render\>/ end=/^\%(\z1\s\)\@!\s*\S/me=s-1 contains=TOP
+syn match  ripRenderId      /[A-Za-z0-9_.-]\@<=#[A-Za-z_][A-Za-z0-9_-]*/  contained containedin=ripRender
+syn match  ripRenderId      /\%(^\s*\)\@<=#[A-Za-z_][A-Za-z0-9_-]*/       contained containedin=ripRender
+
 " --- Highlight Links --------------------------------------------------------
 
 hi def link ripComment        Comment
+hi def link ripData           String
+hi def link ripDataMarker     PreProc
 hi def link ripBlockComment   Comment
 hi def link ripTodo           Todo
 
@@ -224,7 +274,7 @@ hi def link ripHeredocDouble  String
 hi def link ripEscape         SpecialChar
 hi def link ripInterpDelim    Special
 
-hi def link ripInlineJS       Special
+hi def link ripTypeTemplate   Type
 
 hi def link ripHeregex        String
 hi def link ripRegex          String
@@ -254,10 +304,25 @@ hi def link ripAssignment     Identifier
 
 hi def link ripFuncKeyword    Keyword
 hi def link ripFuncName       Function
-hi def link ripFuncAssignName Function
-hi def link ripFuncMethodName Function
+hi def link ripFuncAssign     Function
+hi def link ripFuncMethod     Function
+hi def link ripReadonlyName   Constant
+hi def link ripReactiveName   Identifier
+hi def link ripRenderId       Identifier
 hi def link ripClassName      Type
+hi def link ripSuperName      Type
 hi def link ripTypeName       Type
 hi def link ripPascalCase     Type
+
+" --- Sync ---------------------------------------------------------------------
+"
+" Parse from the top of the file. Rip's multi-line constructs — heredocs,
+" `###` blocks, heregexes, and a render block, which runs as deep as its
+" indent — have no bounded look-back that establishes which one a line sits
+" inside. A backward search over a fixed window puts the cursor's own line in
+" whichever state that window happens to start in, so a line deep in a heredoc
+" reads as code and a `#id` deep in a render block reads as a comment.
+
+syn sync fromstart
 
 let b:current_syntax = 'rip'

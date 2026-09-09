@@ -12,12 +12,13 @@ import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { toSourceMap } from '../../src/sourcemap.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
 const corpusDir = join(import.meta.dir, '../corpus');
 const expectedDir = join(corpusDir, 'expected');
-const files = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
+const files = ripFiles(corpusDir);
 
 test('the artifact set is exactly three files per corpus program — no missing, no orphans', () => {
   const want = files.flatMap((f) => {
