@@ -87,7 +87,10 @@ pickRedirect = (creds, port) ->
   loopback = uris.find (u) -> /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/i.test(u)
   if loopback?
     m = loopback.match /:(\d+)/
-    return loopback.replace(/\/$/, '') unless m?
+    # A registered loopback URI with no port ("http://localhost") is a wildcard:
+    # Google ignores the port when matching loopback redirects for installed
+    # apps. Use the port we actually bound — port 80 has nothing listening.
+    return "http://127.0.0.1:#{port}" unless m?
     return "http://127.0.0.1:#{m[1]}"
   "http://127.0.0.1:#{port}"
 
