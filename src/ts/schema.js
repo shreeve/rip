@@ -31,9 +31,12 @@
 // Field types map through the intrinsic vocabulary below; a field
 // naming a schema declared in the SAME module renders that name (the
 // alias exists — recursion and mutual reference resolve in TS type
-// space); an unknown name renders `unknown` — never an unresolved
-// identifier in a shipped artifact (emitting it bare would be a
-// as-is and its artifact fails any self-contained checker).
+// space), and so does one naming a binding the module IMPORTS (a
+// .rip schema export carries its instance type under the same name,
+// and the import statement survives in both artifacts); an unknown
+// name renders `unknown` — never an unresolved identifier in a
+// shipped artifact (emitting it bare would be a as-is and its
+// artifact fails any self-contained checker).
 //
 // Computed/derived members type `unknown`; a method states its declared
 // parameter list and types its output `unknown` — @times
@@ -372,9 +375,9 @@ export function isModuleShaped(programSexpr, isModuleImport) {
 // ── field/property rendering ─────────────────────────────────────────
 
 // A field entry's TS type: literal unions verbatim, the intrinsic
-// vocabulary through the table, a SAME-MODULE schema name as itself
-// (its alias exists), anything else `unknown` — never an unresolved
-// identifier in a shipped artifact.
+// vocabulary through the table, a KNOWN name as itself (a same-module
+// schema alias, or an imported binding), anything else `unknown` —
+// never an unresolved identifier in a shipped artifact.
 //
 // A `[null]` default widens the type: the runtime substitutes it when
 // the input is absent OR null (_applyDefaults), so `invite? string,
@@ -485,8 +488,8 @@ const modelCreateProps = (descriptor, known) => {
 // Relation accessor signatures per the runtime's actual shapes:
 // async, memoized, `{reload: true}` busts the memo; hasMany accessors
 // pluralize through the SAME rules the runtime derives names with.
-// Same-module targets type as their bare instance name; cross-file
-// targets stay `unknown` honestly.
+// Known targets (same-module or imported) type as their bare instance
+// name; any other target stays `unknown` honestly.
 const relationAccessors = (descriptor, known) => {
   const out = [];
   const OPTS = 'opts?: { reload?: boolean }';
@@ -717,7 +720,12 @@ export function schemaTypeStory(decl, byName, known, source = null) {
 // vocabulary, another emitted alias, or a user-declared type name.
 // Returns null when the module declares no named schema (the zero-
 // cost path: no intrinsics, no aliases, nothing).
-export function buildSchemaTypeStory(programSexpr, source = null) {
+// `imported` is the module's import-bound local names: each names a
+// type the artifact can reference (the import line ships with it), so
+// a field, union member, or relation target spelling one renders it
+// rather than `unknown`. The caller supplies them because telling a
+// module import from a dynamic-import call takes the stores.
+export function buildSchemaTypeStory(programSexpr, source = null, imported = []) {
   const decls = collectSchemaDecls(programSexpr);
   if (decls.length === 0) return null;
   // A DERIVED binding (`UserPublic = User.pick("id", "email")`) builds
@@ -733,12 +741,14 @@ export function buildSchemaTypeStory(programSexpr, source = null) {
   // each of those keeps today's behavior, never a wrong companion.
   const derived = derivedSchemaDescriptors(programSexpr);
   const assignedNames = collectAssignedNames(programSexpr);
-  // Only names that actually get an alias may be `known`: a field
-  // rendering a name no alias binds would ship an unresolved
-  // identifier, which this module's whole rendering contract forbids.
+  // Only names that actually resolve in type space may be `known` —
+  // an alias this module emits, or an import binding — a field
+  // rendering any other name would ship an unresolved identifier,
+  // which this module's whole rendering contract forbids.
   const known = new Set([
     ...decls.map((d) => d.name),
     ...derived.filter((d) => assignedNames.get(d.name) === 1).map((d) => d.name),
+    ...imported,
   ]);
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);

@@ -117,6 +117,21 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('type Tree = { label: string; kids?: Tree[] };');
   });
 
+  test('an imported name renders itself: fields, union constituents, relation targets', () => {
+    // A .rip schema export carries its instance type under the binding's
+    // name, and the import line ships with both artifacts.
+    const src = "import { User, Team as T } from './types.rip'\n" +
+      'Session = schema :shape\n  user! User\n  teams? T[]\n' +
+      'Either = schema :union\n  @on :kind\n  Session\n  User\n' +
+      'Post = schema :model\n  title! string\n  @belongsTo User';
+    const d = dts(src);
+    expect(d).toContain("import { User, Team as T } from './types.rip';");
+    expect(d).toContain('type Session = { user: User; teams?: T[] };');
+    expect(d).toContain('type Either = Session | User;');
+    expect(d).toContain('user(opts?: { reload?: boolean }): Promise<User | null>');
+    expect(face(src).code).toContain('type Session = { user: User; teams?: T[] };');
+  });
+
   test(':model — implicit columns, create optionality, relations, scopes, softDelete', () => {
     const d = dts([
       'Org = schema :model',

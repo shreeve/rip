@@ -85,6 +85,21 @@ const memberName = (k) => (isStaticKey(k) ? k[2] : k);
 
 // ── declaration generation ───────────────────────────────────────────
 
+// An import node's specifier list (the attributes clause, a
+// ["with", object] element before the source, is not one), and the
+// LOCAL names it binds.
+const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+const importBoundNames = (node) => {
+  const names = [];
+  for (const spec of importSpecs(node)) {
+    if (spec === '{}') continue;
+    if (typeof spec === 'string') names.push(spec);
+    else if (spec[0] === '*') names.push(spec[1]);
+    else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+  }
+  return names;
+};
+
 export function emitDeclarations({ sexpr, stores, source }) {
   if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
   const lines = [];
@@ -96,7 +111,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // names reject here; JS output never carries them.
   let schemaStory = null;
   try {
-    schemaStory = buildSchemaTypeStory(sexpr, source);
+    schemaStory = buildSchemaTypeStory(sexpr, source,
+      sexpr.slice(1).filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames));
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;
@@ -469,7 +485,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // ["with", object] element before the source. The declaration keeps
   // it after the source — a JSON import without it does not resolve
   // under NodeNext — printed from the object's string-literal pairs.
-  const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
   const importAttributesText = (node) => {
     const clause = node.length > 2 ? node[node.length - 2] : null;
     if (!isNode(clause) || clause[0] !== 'with') return '';
@@ -494,17 +509,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // The names an import binds locally: the default name, the
   // namespace name, or each specifier's local (its alias when
   // renamed). A side-effect import binds nothing.
-  const importBoundNames = (node) => {
-    const names = [];
-    for (const spec of importSpecs(node)) {
-      if (spec === '{}') continue;
-      if (typeof spec === 'string') names.push(spec);
-      else if (spec[0] === '*') names.push(spec[1]);
-      else for (const s of spec) names.push(isNode(s) ? s[1] : s);
-    }
-    return names;
-  };
-
   // The emitter's own predicate, not a copy of it: shape cannot tell a
   // side-effect import from a dynamic one, and the copy that used to live
   // here fell out of step the day the two stopped sharing a node shape.
