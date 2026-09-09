@@ -20,7 +20,7 @@
 //      diagnostics — annotations engage the checker for real — and a
 //      deliberate violation must FAIL, so the gate has teeth.
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
 import { spawnSync } from '../../support/spawn.js';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -29,6 +29,7 @@ import { describeExtended, EXTENDED } from '../../support/extended.js';
 import { tscBatch } from '../../support/tscbatch.js';
 import { resolveTsc } from '../../support/tsc.js';
 import { AMBIENT } from '../../support/ambient.js';
+import { ripFiles } from '../../support/rip-files.js';
 
 // tsc is the repository's pinned TypeScript (resolveTsc), resolved only
 // in the extended tier that spawns it. A missing install throws here —
@@ -67,7 +68,7 @@ const tscRun = (files) => {
 };
 
 const corpusDir = join(import.meta.dir, '../../corpus');
-const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 
 // The rows run in the EXTENDED tier only; tsc is the repo's pinned
 // TypeScript, so absence is a loud install error (resolveTsc throws),

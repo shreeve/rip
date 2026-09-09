@@ -2,12 +2,13 @@
 // generated span AND back, exactly, with zero string searching — plus
 // the generated-span invariants.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { Stores, Mappings } from '../../src/stores.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -19,7 +20,7 @@ const compile = (src) => {
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 
 // An identifier READ inherits the cover row of whatever construct carries it
 // unless it owns one — and a cover resolves by byte arithmetic that any

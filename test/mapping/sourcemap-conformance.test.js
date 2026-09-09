@@ -9,7 +9,7 @@
 // debugging (breakpoint/step fidelity), browser DevTools (sourcesContent
 // view-source, names-based identifier resolution).
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   SourceMapConsumer,
@@ -26,6 +26,7 @@ import { emit } from '../../src/emitter.js';
 import { Mappings } from '../../src/stores.js';
 import { SourceFile } from '../../src/source.js';
 import { toSourceMap, decodeMappings } from '../../src/sourcemap.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -45,7 +46,7 @@ const compile = (src) => {
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 const corpus = new Map(
   corpusFiles.map(f => [f, readFileSync(join(corpusDir, f), 'utf8')])
 );

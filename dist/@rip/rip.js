@@ -9099,6 +9099,7 @@ class Emitter {
     this.voidReason = null;
     this.usesSchema = false;
     this.exprDepth = 0;
+    this.renderRecord = null;
     this.postfixGuardDepth = 0;
     this._schemaName = null;
     this.subParses = new Map;
@@ -16111,13 +16112,16 @@ ${pad ?? ""}`);
   }
   withRecordContext(rec, fn) {
     const prevSelf = this.renderSelf;
+    const prevRecord = this.renderRecord;
     this.renderSelf = rec.self;
+    this.renderRecord = rec;
     this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings });
     try {
       fn();
     } finally {
       this.rframes.pop();
       this.renderSelf = prevSelf;
+      this.renderRecord = prevRecord;
     }
   }
   renderDirectives(node, pad) {
@@ -16156,6 +16160,7 @@ ${pad ?? ""}`);
         this.b.emit(pad);
         const emitIt = () => {
           this.b.emit(`${this.runtimeName("__effect")}(() => { `);
+          this.narrowGuard();
           s.fn();
           this.b.emit(" })");
         };
@@ -17826,8 +17831,10 @@ ${this.replayPad}}` : " }");
       originNode,
       hasKids: false,
       kidsVar: null,
-      renameHazardNames
+      renameHazardNames,
+      narrowed: [...parent.narrowed ?? [], ...this._narrowNext ?? []]
     };
+    this._narrowNext = null;
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === "branch" ? { record: rec, el: null } : null;
@@ -17864,6 +17871,67 @@ ${this.replayPad}}` : " }");
       rec.kidsVar = Emitter.mintName("_factoryChildren", used);
     return rec;
   }
+  narrowConjuncts(cond) {
+    if (isNode(cond) && cond[0] === "&&" && cond.length === 3) {
+      return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
+    }
+    if (!Emitter.isDotChain(cond))
+      return [];
+    let root = cond;
+    while (isNode(root))
+      root = root[1];
+    if (root === "this")
+      return [cond];
+    if (this.renderVarKind(root) !== null || this.bareRewrite(root) === null)
+      return [];
+    return [cond];
+  }
+  static isDotChain(n) {
+    if (!isNode(n) || n[0] !== "." || n.length !== 3 || typeof n[2] !== "string" || n[2][0] === '"')
+      return false;
+    const o = n[1];
+    if (o === "this")
+      return true;
+    if (typeof o === "string")
+      return /^[A-Za-z_$][\w$]*$/.test(o);
+    return Emitter.isDotChain(o);
+  }
+  activeNarrowed() {
+    const rec = this.renderRecord;
+    if (!this.ts || !rec || !(rec.narrowed?.length > 0))
+      return [];
+    return rec.narrowed.filter((c) => {
+      let root = c;
+      while (isNode(root))
+        root = root[1];
+      return root === "this" || !(rec.bindings.has(root) || rec.locals.has(root));
+    });
+  }
+  hasNarrow() {
+    return this.activeNarrowed().length > 0;
+  }
+  narrowGuard(form = "statement", { trailing = true } = {}) {
+    const chains = this.activeNarrowed();
+    if (chains.length === 0)
+      return false;
+    this._needsNarrowHelper = true;
+    this.b.tsOnly(() => this.b.echo(() => {
+      chains.forEach((c, i) => {
+        if (i > 0)
+          this.b.emit(" ");
+        this.b.emit(form === "statement" ? "__ripNarrow(" : "(__ripNarrow(");
+        this.renderExpr(c);
+        this.b.emit(form === "statement" ? ");" : "),");
+      });
+      if (trailing)
+        this.b.emit(" ");
+    }));
+    return true;
+  }
+  narrowGuardClose(opened) {
+    if (opened)
+      this.b.tsOnly(() => this.b.emit(")".repeat(this.activeNarrowed().length)));
+  }
   renderCond(node, markNode = node) {
     if (node.length > 4) {
       throw this.positionedError(node, "emitter: unexpected flat conditional chain shape in render (internal)");
@@ -17876,6 +17944,7 @@ ${this.replayPad}}` : " }");
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar("anchor");
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('if')`));
+    this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, "branch", markNode);
     const prevChain = this._chainMarkNode;
     if (elsePart !== null && isNode(elsePart) && elsePart[0] === "if" && this.stores.idOf(elsePart) === null) {
@@ -18082,6 +18151,13 @@ ${this.replayPad}}` : " }");
       if (hasRef)
         this.b.emit(`${p3}${this.runtimeName("__batch")}(() => {
 `);
+      if (this.hasNarrow())
+        this.b.tsOnly(() => {
+          this.b.emit(p3);
+          this.narrowGuard("statement", { trailing: false });
+          this.b.emit(`
+`);
+        });
       this.b.emit(`${p3}const ${show} = !!(`);
       this.mark(markNode, "$self", () => this.mark(markNode, "condition", () => this.renderExpr(node[1])));
       this.b.emit(`);
@@ -18094,7 +18170,7 @@ ${this.replayPad}}` : " }");
 `);
       this.b.emit(`${p3}  const ${leaving} = ${cur};
 `);
-      this.b.emit(`${p3}  if (${leaving}._t) { ${transition}(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }
+      this.b.emit(`${p3}  if (${leaving}._t) { ${leaving}.f(); ${transition}(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }
 `);
       this.b.emit(`${p3}  else { ${leaving}.d(true); }
 `);
@@ -18151,6 +18227,7 @@ ${this.replayPad}}` : " }");
       this.b.emit(p3);
       if (hasRef)
         this.b.emit(`${this.runtimeName("__batch")}(() => `);
+      const guarded = this.narrowGuard(hasRef ? "expression" : "statement");
       this.b.emit(`${this.runtimeName("__reconcile")}(${anchorVar}, ${state}, `);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
@@ -18207,6 +18284,8 @@ ${this.replayPad}}` : " }");
         this.b.emit("null");
       }
       this.b.emit(`${outerExtra})`);
+      if (hasRef)
+        this.narrowGuardClose(guarded);
       if (hasRef)
         this.b.emit(")");
       this.b.emit(`;
@@ -18411,6 +18490,13 @@ ${this.replayPad}}` : " }");
         }
         this.b.emit(`${p3}},
 `);
+        if (rec.kind === "branch") {
+          this.b.emit(`${p3}f() {`);
+          if (hasFrame)
+            this.b.emit(` if (${frameVar}) { ${frameVar}.dispose(); ${frameVar} = null; }`);
+          this.b.emit(` },
+`);
+        }
         this.b.emit(`${p3}d(detaching`);
         this.tsScaffoldAny();
         this.b.emit(`) {
@@ -22110,6 +22196,11 @@ declare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;
 declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;
 `));
   }
+  if (emitter._needsNarrowHelper === true) {
+    builder.tsOnly(() => builder.emit(`
+declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;
+`));
+  }
   const globalDecls = [];
   if (face === "ts" && isNode(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
     const IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -24250,7 +24341,46 @@ if (globalThis[__RIP_REACTIVE_SENTINEL]) {
 globalThis[__RIP_REACTIVE_SENTINEL] = true;
 var __currentEffect = null;
 var __computingStack = [];
-var __pendingEffects = new Set;
+var __pendingEffects = {
+  buckets: [],
+  size: 0,
+  low: 0,
+  add(e) {
+    const d = e.depth;
+    let b = this.buckets[d];
+    if (b === undefined)
+      b = this.buckets[d] = new Set;
+    if (b.has(e))
+      return;
+    b.add(e);
+    this.size++;
+    if (d < this.low)
+      this.low = d;
+  },
+  delete(e) {
+    const b = this.buckets[e.depth];
+    if (b !== undefined && b.delete(e))
+      this.size--;
+  },
+  clear() {
+    this.buckets = [];
+    this.size = 0;
+    this.low = 0;
+  },
+  shift() {
+    for (let d = this.low;d < this.buckets.length; d++) {
+      const b = this.buckets[d];
+      if (b === undefined || b.size === 0)
+        continue;
+      this.low = d;
+      const e = b.values().next().value;
+      b.delete(e);
+      this.size--;
+      return e;
+    }
+    return null;
+  }
+};
 var __batching = false;
 var __currentOwner = null;
 var __effectErrorReporter = (label, err) => console.error(label, err);
@@ -24260,11 +24390,15 @@ function __setEffectErrorReporter(reporter) {
   return prev;
 }
 function __flushEffects() {
-  const effects = [...__pendingEffects];
-  __pendingEffects.clear();
-  for (const effect of effects) {
-    if (!effect._disposed)
-      effect.run();
+  try {
+    while (__pendingEffects.size > 0) {
+      const next = __pendingEffects.shift();
+      if (!next._disposed)
+        next.run();
+    }
+  } catch (e) {
+    __pendingEffects.clear();
+    throw e;
   }
 }
 var __primitiveCoercion = {
@@ -24486,6 +24620,7 @@ function __effect(fn) {
   let runId = 0;
   const owner = __currentOwner;
   const effect = {
+    depth: owner ? owner.depth + 1 : 0,
     dependencies: new Set,
     computedDeps: new Map,
     _hard: true,
@@ -24593,7 +24728,9 @@ function __batch(fn) {
 function __ownerFrame({ nested = true } = {}) {
   let disposers = [];
   let detach = null;
+  const depth = __currentOwner ? __currentOwner.depth + 1 : 0;
   const frame = {
+    depth,
     get disposed() {
       return disposers === null;
     },
