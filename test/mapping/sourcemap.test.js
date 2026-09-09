@@ -2,7 +2,7 @@
 // are asserted as decoded structured segments; the corpus round-trips
 // through the map API.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
@@ -10,6 +10,7 @@ import { emit } from '../../src/emitter.js';
 import { Mappings } from '../../src/stores.js';
 import { SourceFile } from '../../src/source.js';
 import { encodeVLQ, decodeMappings, toSourceMap, createLookup } from '../../src/sourcemap.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -26,7 +27,7 @@ const compile = (src) => {
 };
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 
 describe('VLQ encoding', () => {
   test('encodes canonical values', () => {

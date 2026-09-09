@@ -1,13 +1,14 @@
 // NodeStore + RoleStore populated at reduce
 // time, asserted by OFFSET — plus the store invariants over the corpus.
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { Stores } from '../../src/stores.js';
 import { expectLinearDoubling, expectLinearOpsDoubling } from '../support/scaling.js';
 import { describeExtended } from '../support/extended.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -557,7 +558,7 @@ describe('CodeBuilder mark-span protocol', () => {
 
 describe('store invariants over the corpus', () => {
   const corpusDir = join(import.meta.dir, '../corpus');
-  const files = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
+  const files = ripFiles(corpusDir);
 
   for (const file of files) {
     test(file, () => {
@@ -648,7 +649,7 @@ describe('the mapping query index', () => {
   test('answers byte-identically to the full scan over the corpus, order included', async () => {
     const { compile } = await import('../../src/compile.js');
     const dir = join(import.meta.dir, '../corpus');
-    for (const f of readdirSync(dir).filter((n) => n.endsWith('.rip'))) {
+    for (const f of ripFiles(dir)) {
       const src = readFileSync(join(dir, f), 'utf8');
       const r = compile(src, { path: f });
       const m = r.mappings;

@@ -24,14 +24,15 @@
 // The face's TypeScript VALIDITY is gated separately in
 // test/lang/tsface-tsc.test.js (against the repo's pinned TypeScript).
 import { describe, test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { compile, CompileError } from '../../src/compile.js';
 import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
+import { ripFiles } from '../support/rip-files.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
-const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 
 const ts = (source, opts = {}) => compile(source, { runtimeDelivery: 'none', face: 'ts', ...opts });
 const js = (source, opts = {}) => compile(source, { runtimeDelivery: 'none', ...opts });

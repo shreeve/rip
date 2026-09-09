@@ -9,11 +9,11 @@
 // whose onReduce records the rule ids; the denominator is the parser's
 // own ruleNames table (index 0 is the $accept pad).
 import { test, expect } from 'bun:test';
-import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { loadBattery, dedent } from '../support/battery.js';
+import { ripFiles } from '../support/rip-files.js';
 
 // Productions no battery row can or should reduce.
 const EXCLUDED = new Map([
@@ -25,7 +25,7 @@ const EXCLUDED = new Map([
 
 const names = Parser().ruleNames;
 const dir = join(import.meta.dir, '../rip');
-const files = readdirSync(dir).filter((f) => f.endsWith('.rip')).sort();
+const files = ripFiles(dir);
 
 const reached = new Set();
 for (const file of files) {

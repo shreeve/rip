@@ -74,7 +74,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, gitRootFor, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -210,10 +210,28 @@ function scheduleManifestSave() {
   manifestTimer = setTimeout(saveManifestNow, 500);
 }
 
+// The workspace root, promoted to the repository root whenever the
+// editor's folder is inside one.
+//
+// The client's folder is wherever a person happened to open, and the
+// mirror is anchored to it — so opening a repo's subdirectory scatters a
+// second `.rip/editor` inside it, and a monorepo collects one per folder
+// anyone has ever opened. One repository is one workspace, so the mirror
+// lands once, at the top.
+//
+// The promotion moves the relative-path base with it, which is the point:
+// a mirror is `<root>/.rip/editor/<path relative to root>`, so anchoring
+// higher while measuring from lower would map `test/corpus/x.rip` and
+// `x.rip` onto one mirror file. Both ends move or neither does.
+//
+// Outside a repository the folder itself is the root, unchanged — the
+// editor still works in a bare directory, it just keeps its cache there.
 function detectWorkspaceRoot(params) {
   const uri = params.workspaceFolders?.[0]?.uri ?? params.rootUri;
   if (!uri || !uri.startsWith('file://')) return null;
-  try { return fileURLToPath(uri); } catch { return null; }
+  let root;
+  try { root = fileURLToPath(uri); } catch { return null; }
+  try { return gitRootFor(root) ?? root; } catch { return root; }
 }
 
 // The mirror root: workspace-local (.rip/editor — inside the workspace so

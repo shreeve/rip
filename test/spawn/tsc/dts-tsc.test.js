@@ -19,12 +19,13 @@
 // files (TS7006/TS7010), which is exactly the defect class (#67) this
 // harness guards against.
 import { test, expect } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { compile } from '../../../src/compile.js';
 import { describeExtended, EXTENDED } from '../../support/extended.js';
 import { tscBatch } from '../../support/tscbatch.js';
 import { resolveTsc } from '../../support/tsc.js';
+import { ripFiles } from '../../support/rip-files.js';
 
 // tsc is the repository's pinned TypeScript (resolveTsc), resolved only
 // in the extended tier that spawns it. A missing install throws here —
@@ -36,7 +37,7 @@ const TSC = EXTENDED ? resolveTsc() : null;
 const TSC_TIMEOUT = 60_000;
 
 const corpusDir = join(import.meta.dir, '../../corpus');
-const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
+const corpusFiles = ripFiles(corpusDir);
 
 // The rows run in the EXTENDED tier only; tsc is the repo's pinned
 // TypeScript, so absence is a loud install error (resolveTsc throws),

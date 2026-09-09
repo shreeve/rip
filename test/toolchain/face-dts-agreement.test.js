@@ -36,9 +36,10 @@
 // that ships to users, and it should not take the extended tier to see.
 
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { compile } from '../../src/compile.js';
+import { ripFiles } from '../support/rip-files.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
 
@@ -266,7 +267,7 @@ describe('the face and the .d.ts describe the same API', () => {
   });
 
   describe('the corpus, file by file', () => {
-    const files = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
+    const files = ripFiles(corpusDir);
     for (const f of files) {
       test(f, () => {
         const src = readFileSync(join(corpusDir, f), 'utf8');
