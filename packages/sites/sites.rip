@@ -4,7 +4,8 @@
 # Reserved nouns: edge, all, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
-import { printJson, probeAgent, requestAgent } from './appliance.rip'
+import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { readLog } from './logs.rip'
 import { RESERVED, findCatalogApp, loadCatalog, snapshotCatalogApp } from './catalog.rip'
 import { JANUS_MISSING, dashboardUrl, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
@@ -432,52 +433,31 @@ switch verb
   when 'logs'
     edgeIsJanus 'status (it names the log)' if noun is 'edge'
     requireNoun ['<app>', 'all']
-    if noun is 'all'
-      apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: wantsControl! }
-      abort 'rip-sites: no apps in the catalog' unless apps.length
-      offsets = {}
-      for app in apps
-        id = encodeURIComponent app.id
-        log = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?lines=#{lines}", null, { start: false }
-        console.log "—— #{app.name} ——"
-        process.stdout.write log.text or '(empty)\n'
-        offsets[app.id] = log.next
+    catalog = loadCatalog()
+    apps = if noun is 'all' then catalog.apps else [findCatalogApp(catalog, noun)]
+    abort 'rip-sites: no apps in the catalog' unless apps.length
+    paths = agentPaths 'rip-sites'
+    read = (app, after = null) -> readLog(join(paths.appLogs, app.id + '.log'), lines, after)
+    logs = apps.map (app) -> read(app)
+    if json
+      printJson if noun is 'all' then logs.map((log, i) -> { id: apps[i].id, name: apps[i].name, ...log }) else logs[0]
+    else
+      for log, i in logs
+        console.log "—— #{apps[i].name} ——" if noun is 'all'
+        process.stdout.write log.text or (if noun is 'all' then '(empty)\n' else '')
       if follow
-        # One poll loop over every app; the header reprints only when
-        # the app producing lines changes, so a single busy app reads
-        # as one uninterrupted stream.
-        current = apps[apps.length - 1].id
+        offsets = Object.fromEntries logs.map (log, i) -> [apps[i].id, log.next]
+        current = apps.at(-1).id
         loop
           sleep! 250
           for app in apps
-            id = encodeURIComponent app.id
-            next = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?after=#{offsets[app.id]}", null, { start: false, soft: true }
-            continue unless next?
+            next = read app, offsets[app.id]
             if next.text
-              unless current is app.id
+              if noun is 'all' and current isnt app.id
                 console.log "—— #{app.name} ——"
                 current = app.id
               process.stdout.write next.text
             offsets[app.id] = next.next
-    else
-      requireApp!
-      id = encodeURIComponent noun
-      # A follower is a reader: a lost plane is waited out, never
-      # rebooted — its boot is the duplicate the socket guard refuses.
-      read = (after = null, options) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}", null, options
-      log = read! null, { start: wantsControl! }
-      if json
-        printJson log
-      else
-        process.stdout.write log.text
-        if follow
-          offset = log.next
-          loop
-            sleep! 250
-            next = read! offset, { start: false, soft: true }
-            continue unless next?
-            process.stdout.write next.text if next.text
-            offset = next.next
 
   when 'reload'
     edgeIsJanus 'reload'

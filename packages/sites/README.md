@@ -333,6 +333,11 @@ the drop-in serves the name, it does not resolve it.
 | `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
 | `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
 
+Logs are durable files: reading or following them does not require a running
+agent. `logs <app> --json` returns the path, text, byte cursor, and truncation
+status; `logs all --json` returns an array with those fields plus each app's
+ID and name. `--follow` and `--json` are mutually exclusive.
+
 ### Manager — foreground, publish, deploy barriers
 
 Supervised apps use the catalog lifecycle above. These forms are for foreground

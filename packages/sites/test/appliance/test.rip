@@ -477,6 +477,18 @@ test! 'logs -f keeps polling through a control-plane outage without booting an a
     ok not follower.proc.exitCode?, 'follower must be running after its first read'
 
     stopAgent! site.runtime
+    catalog = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    logPath = join(site.state, 'apps', catalog.apps[0].id + '.log')
+    writeFileSync logPath, 'durable log line\n'
+    offline = cli! APP, ['logs', 'fixture', '--json'], env
+    eq offline.code, 0, offline.err
+    eq JSON.parse(offline.out).text, 'durable log line\n'
+    all = cli! APP, ['logs', 'all', '--json'], env
+    eq all.code, 0, all.err
+    records = JSON.parse all.out
+    eq records.length, 1
+    eq records[0].id, catalog.apps[0].id
+    eq records[0].text, 'durable log line\n'
     sleep! 3000
     ok not follower.proc.exitCode?, 'follower must ride out the outage'
     ok not existsSync(join(site.runtime, 'agent.json')), 'follower must not boot a control plane'

@@ -35,6 +35,7 @@
     "control.rip",
     "appliance.rip",
     "catalog.rip",
+    "logs.rip",
     "agent.rip",
     "edge.rip",
     "sites.rip",

@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 import { RESERVED, findCatalogApp, loadCatalog, saveCatalog } from './catalog.rip'
+import { readLog } from './logs.rip'
 import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
@@ -71,20 +72,6 @@ saveState = ->
   saveCatalog state, 'rip-agent'
 
 state = null
-
-tail = (path, lines = 100) ->
-  return '' unless existsSync path
-  text = readFileSync path, 'utf8'
-  rows = text.split '\n'
-  rows.pop() if rows.at(-1) is ''
-  rows.slice(-lines).join('\n') + if rows.length then '\n' else ''
-
-readLog = (path, lines, after) ->
-  bytes = if existsSync(path) then readFileSync(path) else Buffer.alloc(0)
-  if after?
-    start = if after <= bytes.length then after else 0
-    return { path, text: bytes.subarray(start).toString('utf8'), next: bytes.length, truncated: after > bytes.length }
-  { path, text: tail(path, lines), next: bytes.length, truncated: false }
 
 # Managers get a CLEAN environment, never the agent's. The long-lived
 # agent carries whatever Bun auto-loaded from the directory it happened
@@ -439,7 +426,7 @@ startApp = (app, automatic = false) ->
         return snapshotApp! app
       break if child?.exitCode? or Date.now() >= deadline
       sleep! 25
-    diagnostic = tail(logPath, 20).trim()
+    diagnostic = readLog(logPath, 20).text.trim()
     message = if child?.exitCode? then "manager exited #{child.exitCode}" else 'manager readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
     app.lastError = message

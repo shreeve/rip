@@ -1,0 +1,42 @@
+# Durable manager logs can be read independently of the control agent.
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
+
+export readLog = (path, lines = 100, after = null) ->
+  fd = null
+  try
+    fd = openSync path, 'r'
+  catch error
+    throw error unless error.code is 'ENOENT'
+    return { path, text: '', next: 0, truncated: after? and after > 0 }
+  try
+    size = fstatSync(fd).size
+    truncated = after? and after > size
+    start = if after? and not truncated then after else size
+    chunks = []
+    if after?
+      start = 0 if truncated
+      bytes = Buffer.alloc size - start
+      count = 0
+      while count < bytes.length
+        n = readSync fd, bytes, count, bytes.length - count, start + count
+        break unless n
+        count += n
+      return { path, text: bytes.subarray(0, count).toString('utf8'), next: start + count, truncated }
+    # Scan backward in blocks until the requested tail is covered. Decode
+    # only after joining blocks so a UTF-8 character crossing a block survives.
+    newlines = 0
+    while start > 0 and newlines <= lines
+      length = Math.min 8192, start
+      start -= length
+      bytes = Buffer.alloc length
+      count = readSync fd, bytes, 0, length, start
+      bytes = bytes.subarray 0, count
+      newlines += 1 for byte in bytes when byte is 10
+      chunks.unshift bytes
+    text = Buffer.concat(chunks).toString 'utf8'
+    rows = text.split '\n'
+    rows.pop() if rows.at(-1) is ''
+    text = rows.slice(-lines).join('\n') + if rows.length then '\n' else ''
+    { path, text, next: size, truncated: false }
+  finally
+    closeSync fd
