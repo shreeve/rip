@@ -37,6 +37,42 @@ test "if in function", "fn = (x) ->\n  if x > 0\n    'positive'\n  else\n    'ne
 # Code generation
 code "simple if", "if cond then a else b", "if (cond) { a; } else { b; }"
 
+# Loose `then` (Ruby `and`): below assignment, not inside if/unless conditions
+test "then is loose and", '''
+  hits = []
+  y = 5 then hits.push 'yes'
+  [y, hits]
+''', [5, ['yes']]
+
+test "then skips on falsy", '''
+  hits = []
+  y = 0 then hits.push 'yes'
+  [y, hits]
+''', [0, []]
+
+code "then binds below assignment", "y = get() then print 'ok'", "let y;\n\n(y = get()) && print(\"ok\");"
+
+# Loose `else` (Ruby `or`): same slot as `then`; if/unless tails and
+# postfix `b if c else d` stay themselves
+test "else is loose or", '''
+  hits = []
+  y = 0 else hits.push 'yes'
+  [y, hits]
+''', [0, ['yes']]
+
+test "else skips on truthy", '''
+  hits = []
+  y = 5 else hits.push 'yes'
+  [y, hits]
+''', [5, []]
+
+code "else binds below assignment", "y = get() else error 'nope'", "let y;\n\n(y = get()) || error(\"nope\");"
+code "else closes implicit call", "print a else b", "print(a) || b;"
+code "then closes implicit call", "print a then b", "print(a) && b;"
+code "if-else stays inside implicit call", "f if a then b else c", "f(a ? b : c);"
+
+test "postfix if else stays the ternary", "x = 0 if false else 2\nx", 2
+
 # ==============================================================================
 # Unless Statements: "unless"
 # ==============================================================================

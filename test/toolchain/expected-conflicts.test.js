@@ -19,7 +19,7 @@ test('an undeclared conflict fails generation and names the rule', () => {
 test('a resolution-count drift fails generation with both counts', () => {
   const bumped = grammar.expectedConflicts.map(([category, rule, count]) =>
     [category, rule, rule === 'Try → TRY Expression' ? count + 1 : count]);
-  expect(() => new Generator(withManifest(bumped))).toThrow(/count drift: \[ambiguous\] Try → TRY Expression — declared 24, actual 23/);
+  expect(() => new Generator(withManifest(bumped))).toThrow(/count drift: \[ambiguous\] Try → TRY Expression — declared 26, actual 25/);
 });
 
 test('a declared conflict the table no longer has fails generation', () => {

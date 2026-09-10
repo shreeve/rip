@@ -55,7 +55,9 @@ function applyInsertions(tokens, collect, mintId) {
 //
 // Triggers:
 //   - an arrow not followed by INDENT wraps its single-line body
-//   - THEN retags to the block's INDENT
+//   - THEN retags to the block's INDENT when it closes an if/unless
+//     (or other control) condition — otherwise THEN stays a token for
+//     the loose-`and` operator (`x = get() then print "ok"`)
 //   - ELSE followed by neither INDENT nor IF wraps its single-line body
 // A body ends at the first depth-0 TERMINATOR, OUTDENT, ELSE, or
 // enclosing closer; brackets and INDENT/OUTDENT pairs track depth.
@@ -66,6 +68,31 @@ function applyInsertions(tokens, collect, mintId) {
 // depth-0 stop at greater-or-equal depth and fewer unclaimed inline
 // IFs) — so pops are innermost-first, which is exactly the token
 // order the tape needs at a shared boundary.
+// THEN introduces a one-line body only when it sits in an if/unless
+// (or when/catch/while/for) condition. Anywhere else it is the loose
+// `and` operator and must reach the parser as THEN.
+const BODY_THEN_HEADS = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'LEADING_WHEN', 'CATCH', 'FOR', 'LOOP']);
+const BODY_THEN_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
+const BODY_THEN_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
+
+function thenIntroducesBody(tokens, i) {
+  let depth = 0;
+  for (let j = i - 1; j >= 0; j--) {
+    if (counter.on) counter.n++;
+    const k = tokens[j].kind;
+    if (BODY_THEN_CLOSERS.has(k) || k === 'OUTDENT') { depth++; continue; }
+    if (BODY_THEN_OPENERS.has(k) || k === 'INDENT') {
+      if (depth === 0) return false;
+      depth--;
+      continue;
+    }
+    if (depth > 0) continue;
+    if (BODY_THEN_HEADS.has(k)) return true;
+    if (k === 'TERMINATOR') return false;
+  }
+  return false;
+}
+
 function collectBlocks(tokens, mintId) {
   const OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
   const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
@@ -230,7 +257,7 @@ function collectBlocks(tokens, mintId) {
       const body = measureBody(i + 1);
       insertions.push({ at: i + 1, token: makeBlockToken('INDENT', body.openAt, body.firstReal ? body.firstReal.id : null) });
       pending.push(body);
-    } else if (t.kind === 'THEN') {
+    } else if (t.kind === 'THEN' && thenIntroducesBody(tokens, i)) {
       // THEN becomes the block's INDENT in place (id and record persist)
       // — a retag, not an insertion; only its OUTDENT is recorded.
       const body = measureBody(i + 1);
@@ -293,7 +320,7 @@ const IMPLICIT_CALL_STARTERS = new Set([
 ]);
 const IMPLICIT_END = new Set([
   'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP',
-  'TERMINATOR', '||', '&&', '??',
+  'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE',
 ]);
 // CLASS is control-in-implicit like IF/SWITCH — its body INDENT must not
 // close an enclosing implicit call/object — with one extra rule:
@@ -706,7 +733,9 @@ function collectObjects(tokens, mintId) {
     if (IMPLICIT_END.has(k) || ((k === '.' || k === '?.') && t.newLine)) {
       // Logical operators never close an implicit object — the operator
       // binds the pair's value (`x = a: 1 && 2` is {a: (1 && 2)}).
-      if (k === '||' || k === '&&' || k === '??') continue;
+      // ELSE stays open too: postfix `a: 1 if c else 2` is one pair,
+      // and loose `a: x else y` binds the value like `||`.
+      if (k === '||' || k === '&&' || k === '??' || k === 'ELSE') continue;
       if (k === 'TERMINATOR') {
         // A statement boundary clears unconsumed ternary claims at
         // this depth and un-samelines every open implicit frame.
@@ -869,6 +898,11 @@ function collectCalls(tokens, mintId) {
       // `f(a, b or c)`), exactly as they bind a pair's value in the
       // object pass. They are ordinary continuing operators like `+`.
       if (k === '||' || k === '&&' || k === '??') continue;
+      // If-tail ELSE follows the then-body OUTDENT; CONTROL was already
+      // consumed at that INDENT, so the call must stay open through the
+      // else-body (`f if a then b else c`). Loose `f a else b` has no
+      // OUTDENT and still closes, like `then`.
+      if (k === 'ELSE' && tokens[i - 1]?.kind === 'OUTDENT') continue;
       if (tokens[i - 1]?.kind !== ',') {
         // A CONTROL frame on top shields the call: the boundary token
         // belongs to the control construct, not the call — except
