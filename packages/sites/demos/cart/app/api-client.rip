@@ -4,7 +4,6 @@ export api = http.create({ prefixUrl: '/api', retry: 0 })
 
 ErrorBody = schema
   error!  string
-  code!   string
   fields  json
 
 export type ApiError<K extends string = string> =
