@@ -1,9 +1,10 @@
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute, join } from 'node:path'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
+import { RESERVED, findCatalogApp, loadCatalog, saveCatalog } from './catalog.rip'
 import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
@@ -65,94 +66,11 @@ processAlive = (pid) ->
   catch error
     error?.code is 'EPERM'
 
-defaultState = ->
-  version: 1
-  apps: []
-  edge:
-    baseUrl: 'https://{host}/'
-    lastError: null
-
-validateState = (state) ->
-  fail("malformed state at #{paths.state}", 500) unless isRecord(state) and state.version is 1 and Array.isArray(state.apps) and isRecord(state.edge)
-  ids = Set.new()
-  names = Set.new()
-  roots = Set.new()
-  for app in state.apps
-    valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
-    fail("malformed app record at #{paths.state}", 500) unless valid
-    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'agent']
-    fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
-    ids.add app.id
-    names.add app.name
-    roots.add app.root
-  edge = state.edge
-  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and (edge.lastError is null or typeof edge.lastError is 'string')
-  fail("malformed edge record at #{paths.state}", 500) unless valid
-  state
-
-normalizeAppOptions = (options) ->
-  fail 'app options must be an object', 500 unless isRecord options
-  watchApp = options.watchApp
-  watchApi = options.watchApi
-  if typeof options.watch is 'boolean'
-    watchApp = options.watch unless typeof watchApp is 'boolean'
-    watchApi = options.watch unless typeof watchApi is 'boolean'
-  {
-    workers: options.workers
-    concurrency: options.concurrency
-    watchApp: watchApp
-    watchApi: watchApi
-    eager: options.eager
-  }
-
-migrateState = (raw) ->
-  return { state: raw, dirty: false } unless isRecord(raw) and Array.isArray(raw.apps)
-  changed = false
-  apps = raw.apps.map (app) ->
-    return app unless isRecord(app) and isRecord(app.options)
-    options = normalizeAppOptions app.options
-    return app if typeof options.watchApp is 'boolean' and typeof options.watchApi is 'boolean' and not ('watch' of app.options)
-    changed = true
-    { ...app, options }
-  edge = if isRecord(raw.edge) then { ...raw.edge } else null
-  if edge?
-    unless typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}')
-      edge.baseUrl = 'https://{host}/'
-      changed = true
-    # The edge record holds Rip's facts only; the process, its ports, its
-    # exposure scope, and trust in its CA are Janus's to know.
-    for key of edge when key not in ['baseUrl', 'lastError']
-      delete edge[key]
-      changed = true
-  return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
-  { state: raw, dirty: false }
-
-loadState = ->
-  return { state: defaultState(), dirty: false } unless existsSync paths.state
-  try
-    migrated = migrateState JSON.parse(readFileSync(paths.state, 'utf8'))
-    { state: validateState(migrated.state), dirty: migrated.dirty }
-  catch error
-    throw error if error?.status?
-    fail "cannot read state at #{paths.state}: #{error?.message or error}", 500
-
-writeSecure = (path, text) ->
-  temporary = "#{path}.tmp-#{process.pid}"
-  fd = openSync temporary, 'w', 0o600
-  try
-    writeFileSync fd, text
-    fsyncSync fd
-  finally
-    closeSync fd
-  renameSync temporary, path
-  directory = openSync paths.stateRoot, 'r'
-  try fsyncSync(directory) finally closeSync(directory)
-
 saveState = ->
   assertOwner()
-  writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
-loaded = loadState()
-state = loaded.state
+  saveCatalog state, 'rip-agent'
+
+state = null
 
 tail = (path, lines = 100) ->
   return '' unless existsSync path
@@ -376,12 +294,7 @@ snapshotApp = (app) ->
     lastExit: app.lastExit or null
   }
 
-findApp = (selector) ->
-  decoded = decodeURIComponent selector
-  matches = state.apps.filter (app) -> app.id is decoded or app.name is decoded or app.root is decoded
-  fail "unknown app #{JSON.stringify(decoded)}", 404 unless matches.length
-  fail "ambiguous app #{JSON.stringify(decoded)}", 409 unless matches.length is 1
-  matches[0]
+findApp = (selector) -> findCatalogApp state, decodeURIComponent(selector)
 
 validHost = (host) ->
   return false unless typeof host is 'string'
@@ -402,7 +315,7 @@ addApp = (body) ->
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
-  fail "#{JSON.stringify(name)} is reserved (edge | all | agent) — not an app name" if name in ['edge', 'all', 'agent']
+  fail "#{JSON.stringify(name)} is reserved (edge | all | agent) — not an app name" if name in RESERVED
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
@@ -412,13 +325,12 @@ addApp = (body) ->
   hosts = ensureLanHosts hosts
   fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
   options = body.options or {}
-  rejectUnknown options, ['workers', 'concurrency', 'watch', 'watchApp', 'watchApi', 'eager'], 'app options'
-  fail 'watch must be Boolean' if options.watch? and typeof options.watch isnt 'boolean'
+  rejectUnknown options, ['workers', 'concurrency', 'watchApp', 'watchApi', 'eager'], 'app options'
   fail 'watchApp must be Boolean' if options.watchApp? and typeof options.watchApp isnt 'boolean'
   fail 'watchApi must be Boolean' if options.watchApi? and typeof options.watchApi isnt 'boolean'
   fail 'eager must be Boolean' if options.eager? and typeof options.eager isnt 'boolean'
-  watchApp = if options.watchApp? then options.watchApp else if options.watch? then options.watch else true
-  watchApi = if options.watchApi? then options.watchApi else if options.watch? then options.watch else true
+  watchApp = options.watchApp ?? true
+  watchApi = options.watchApi ?? true
   app =
     id: randomBytes(8).toString('hex')
     name: name
@@ -779,7 +691,7 @@ process.on 'SIGTERM', shutdown
 
 acquire!
 try
-  saveState() if loaded.dirty
+  state = loadCatalog 'rip-agent'
   # A boot is the moment to make sure rip's site file is in Janus's sites
   # directory.
   try

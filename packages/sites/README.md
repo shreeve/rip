@@ -49,8 +49,8 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
-`sites.json` (Rip-owned). The control plane starts with the edge / desired
-apps and exits when nothing remains to supervise — Janus stays live-only.
+`sites.json` (Rip-owned). The agent serializes every catalog mutation, starts on demand,
+and exits when nothing remains to supervise — Janus stays live-only.
 
 ## Quick Start
 
@@ -203,8 +203,8 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 - App selectors: catalog **id**, unique **name**, or canonical **root**.
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
-- Durable catalog: `sites.json` (Rip-owned). Control starts with the first
-  desired-running app and exits when nothing remains to supervise.
+- Durable catalog: `sites.json` (Rip-owned). The agent is the single writer;
+  mutations start it on demand, even with Janus stopped. It exits when idle.
 - The edge process is Janus's: `janus autostart`, `start`, `stop`,
   `restart`, `status`. `rip sites` renders what it serves.
 
@@ -1379,13 +1379,13 @@ Day-to-day commands live under [Commands at a glance](#commands-at-a-glance).
 This section is the ownership contract behind them.
 
 Rip owns the durable catalog at `sites.json`
-(`~/Library/Application Support/Rip/sites.json` on macOS; a one-time rename
-from `agent.json` still applies). Catalog reads and writes (`list` / `add` /
-`remove`) do not require a live control plane. A small control process starts
-when a desired-running app needs supervision, adopts healthy managers after
-a restart, and exits when no app remains desired-running. Janus never writes
-the catalog, and the catalog keeps only Rip's own edge facts: the URL shape
-and whether this machine trusts the local CA; the scope is Janus's.
+(`~/Library/Application Support/Rip/sites.json` on macOS). One agent owns all
+catalog writes; commands that change the catalog or app state start it as
+needed, even while Janus is stopped. Read-only commands can inspect the
+catalog without an agent. The agent adopts healthy managers after a restart
+and exits when no app remains desired-running. Janus never writes the catalog,
+and the catalog keeps only Rip's URL shape and last edge configuration error.
+Exposure scope and CA trust are Janus's facts.
 
 The edge process is Janus's. `janus autostart` installs it under launchd
 (macOS) or systemd (Linux), running now, at every login, and again after a

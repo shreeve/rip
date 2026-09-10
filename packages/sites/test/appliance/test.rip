@@ -161,7 +161,8 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq app.state, 'stopped'
     eq app.url, 'https://fixture.via.rip/'
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
-    ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
+    ok existsSync(join(site.runtime, 'agent.json')), 'catalog mutations use the single writer'
+    stopAgent! site.runtime
 
     # Offline list/status must await catalog snapshots — bare Promises JSON as `{}`.
     offlineList = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
@@ -329,7 +330,7 @@ test! 'start all reports a failed app in place and still starts the rest', ->
 # site-template manager refuses --host outright.
 test! 'offline snapshots derive hosts from serve.rip without persisting them', ->
   site = fixture 'rip-serve-hosts-'
-  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime }
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
   hostsProject = join site.root, 'probe'
   mkdirSync join(hostsProject, 'app'), { recursive: true }
   writeFileSync join(hostsProject, 'app', 'index.rip'), "export default -> 'ok'\n"
@@ -349,9 +350,11 @@ test! 'offline snapshots derive hosts from serve.rip without persisting them', -
   eq tenants.url, 'https://beta.probe.dev/'
   stored = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
   eq (app.hosts for app in stored.apps), [[], []]
+  stopAgent! site.runtime
   listed = JSON.parse (cli!(APP, ['list', '--json'], env)).out
   eq (app.hosts.length for app in listed), [2, 1]
-  ok not existsSync(join(site.runtime, 'agent.json')), 'offline serve.rip reads must not spawn the control plane'
+  stopAgent! site.runtime
+  ok not existsSync(join(site.runtime, 'agent.json')), 'catalog writer can exit while all apps are stopped'
 
 AGENT = join(import.meta.dir, '..', '..', 'agent.rip')
 
@@ -654,6 +657,30 @@ test! 'status agent reports liveness without starting it', ->
     live = cli! APP, ['status', 'agent', '--json'], env
     eq live.code, 0, live.err
     eq JSON.parse(live.out), { state: 'running', pid: JSON.parse(started.out).pid }
+  finally
+    stopAgent! site.runtime
+    rmSync site.root, { recursive: true, force: true }
+
+test! 'concurrent catalog changes have one writer and preserve every successful add', ->
+  site = fixture 'rip-catalog-concurrency-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  try
+    projects = (join(site.root, "project-#{i}") for i in [0...24])
+    for project in projects
+      mkdirSync project
+      writeFileSync join(project, 'index.rip'), '# project\n'
+    results = Promise.all! projects.map (project) -> cli! APP, ['add', project, '--json'], env
+    for result in results
+      eq result.code, 0, result.err
+    state = JSON.parse readFileSync(join(site.state, 'sites.json'), 'utf8')
+    eq state.apps.length, projects.length
+    eq Set.new(state.apps.map((app) -> app.root)).size, projects.length
+    eq Set.new(state.apps.map((app) -> app.id)).size, projects.length
+    removed = Promise.all! state.apps.map (app) -> cli! APP, ['remove', app.id, '--json'], env
+    for result in removed
+      eq result.code, 0, result.err
+    eq JSON.parse(readFileSync(join(site.state, 'sites.json'), 'utf8')).apps, []
+    waitFor! 'idle catalog writer exit', (-> not existsSync(join(site.runtime, 'agent.json'))), 15000
   finally
     stopAgent! site.runtime
     rmSync site.root, { recursive: true, force: true }

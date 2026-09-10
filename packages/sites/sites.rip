@@ -5,14 +5,12 @@
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
 import { printJson, probeAgent, requestAgent } from './appliance.rip'
-import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
+import { RESERVED, findCatalogApp, loadCatalog, snapshotCatalogApp } from './catalog.rip'
 import { JANUS_MISSING, dashboardUrl, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
-
-RESERVED = ['edge', 'all', 'agent']
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
@@ -345,18 +343,12 @@ switch verb
       name: name
       hosts: hosts
       options: { workers, concurrency, watchApp, watchApi, eager: eager is true }
-    if probeAgent! 'rip-sites'
-      app = requestAgent! 'rip-sites', 'POST', '/1.0/apps', body, { start: false }
-    else
-      app = addCatalogApp! body
+    app = requestAgent! 'rip-sites', 'POST', '/1.0/apps', body
     if json then printJson app else console.log "Added #{app.name}\n#{app.root}"
 
   when 'remove'
     requireApp!
-    if probeAgent! 'rip-sites'
-      app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: false }
-    else
-      app = removeCatalogApp! noun
+    app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{encodeURIComponent(noun)}"
     if json then printJson app else console.log "Removed #{app.name}"
 
   when 'start', 'stop', 'restart'
