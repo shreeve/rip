@@ -4279,7 +4279,7 @@ class Emitter {
       // (`if (!(y = x)) return e;`) — `let` is invalid there, so the
       // target keeps its hoist-line declaration.
       if (isNode(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) &&
-          (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2]))) return true;
+          Emitter.controlGuard(f.decl[2])) return true;
       if (Emitter.isPattern(f.decl[1])) {
         if (!patternDeclares(f.decl)) return true;
         Emitter.declaresInPlace.add(f.decl);
@@ -5891,15 +5891,15 @@ class Emitter {
         this.replDeclEcho(node);
         return;
       }
-      // Return guards are statement rewrites: bare (`x or return e`)
-      // and assigning (`y = x or return e`) forms both emit an `if`
-      // whose body is the return — the one lowering that keeps the
-      // return's function target.
-      if (Emitter.returnGuard(node) || Emitter.throwGuard(node)) {
+      // Control guards are statement rewrites: bare (`x or return e`,
+      // `x or continue`) and assigning (`y = x or return e`) forms
+      // both emit an `if` whose body is the jump — the one lowering
+      // that keeps the jump's target (function, loop, or debugger).
+      if (Emitter.controlGuard(node)) {
         return this.returnGuardStatement(node, null);
       }
       if (node[0] === '=' && node.length === 3 && typeof node[1] === 'string' &&
-          (Emitter.returnGuard(node[2]) || Emitter.throwGuard(node[2]))) {
+          Emitter.controlGuard(node[2])) {
         return this.returnGuardStatement(node[2], node);
       }
       // A MIDDLE-REST array pattern (`[a, ...mid, b] = src`) has no
@@ -7303,8 +7303,9 @@ class Emitter {
       const inBlock = head === 'block' || head === 'program' || head === 'try';
       for (let i = 1; i < n.length; i++) {
         const el = n[i];
-        const ctrl = typeof el === 'string' ? (inBlock ? el : null)
-          : isNode(el) && el.length === 1 && typeof el[0] === 'string' ? el[0] : null;
+        const ctrl = typeof el === 'string' ? (
+          inBlock || ((head === '||' || head === '&&' || head === '??') && i === 2) ? el : null
+        ) : isNode(el) && el.length === 1 && typeof el[0] === 'string' ? el[0] : null;
         if (ctrl === 'break' && want.has('break') && l + s === 0) { found = { kind: 'break', node: null }; return; }
         if (ctrl === 'continue' && want.has('continue') && l === 0) { found = { kind: 'continue', node: null }; return; }
         walk(el, l, s);
@@ -13853,6 +13854,18 @@ class Emitter {
       x.length === 3 && isNode(x[2]) && x[2][0] === 'return';
   }
 
+  // STATEMENT guards: `x or continue` / `x and break` / `x ?? debugger`.
+  // The right operand is the bare word (lexer STATEMENT token), not
+  // a `["return", …]` node. Same statement rewrite as returnGuard.
+  static stmtGuard(x) {
+    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+      x.length === 3 && (x[2] === 'continue' || x[2] === 'break' || x[2] === 'debugger');
+  }
+
+  static controlGuard(x) {
+    return Emitter.returnGuard(x) || Emitter.throwGuard(x) || Emitter.stmtGuard(x);
+  }
+
   // A throw GUARD in statement position takes the same rewrite —
   // `if (!(y = x)) throw e;` — cleaner bytes than the value form's
   // IIFE. Value positions KEEP the IIFE (a throw propagates out of
@@ -14345,6 +14358,9 @@ class Emitter {
   binary(node) {
     if (Emitter.returnGuard(node)) {
       throw this.positionedError(node[2], "emitter: a return guard is a statement — in value position the 'return' would lose its function target (bind the value first, or use `or throw`)");
+    }
+    if (Emitter.stmtGuard(node)) {
+      throw this.positionedError(node[2], `emitter: a ${node[2]} guard is a statement`);
     }
     if (node[0] === '&&' || node[0] === '||') return this.logicalChain(node);
     // A string-LITERAL left operand of `*` is repetition (`"-" * 40`
@@ -16114,11 +16130,13 @@ class Emitter {
       if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) {
         return this.statement(stmt, ind);
       }
-      // A tail-position return guard stays a statement: its return
-      // fires on the guard path, and the fall-through returns
-      // undefined — there is no value form to wrap.
-      if (Emitter.returnGuard(stmt) ||
-          (h === '=' && stmt.length === 3 && Emitter.returnGuard(stmt[2]))) {
+      // A tail-position return/continue/break guard stays a statement:
+      // its jump fires on the guard path, and the fall-through returns
+      // undefined — there is no value form to wrap. Throw guards are
+      // NOT included: a tail `x or throw e` still has a value form
+      // (and must keep rejecting yield inside that IIFE).
+      if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt) ||
+          (h === '=' && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2])))) {
         return this.statement(stmt, ind);
       }
       // Tail-position method assignment stays a statement (the
@@ -16533,10 +16551,15 @@ class Emitter {
   //   y = x or return e  →  if (!(y = x)) return e;
   //   x ?? return e      →  if (x == null) return e;
   //   x and return e     →  if (x) return e;
+  //   y = x or continue  →  if (!(y = x)) continue;
   returnGuardStatement(guard, assign) {
     const ret = guard[2];
-    if (ret[0] === 'return' && this.scopes.length <= 1) {
+    const kind = typeof ret === 'string' ? ret : ret[0];
+    if (kind === 'return' && this.scopes.length <= 1) {
       throw this.positionedError(ret, "emitter: 'return' outside a function");
+    }
+    if ((kind === 'break' || kind === 'continue') && this.ctrlDepth === 0) {
+      throw this.positionedError(guard, `emitter: '${kind}' outside a loop${kind === 'break' ? ' or switch' : ''}`);
     }
     const op = guard[0];
     const emitCond = () => {
@@ -16573,9 +16596,9 @@ class Emitter {
       this.b.emit('if (');
       emitCond();
       this.b.emit(') ');
-      this.mark(ret, '$self', () => {
-        this.b.emit(ret[0]);
-        if (ret.length > 1) {
+      const emitJump = () => {
+        this.b.emit(kind);
+        if (isNode(ret) && ret.length > 1) {
           this.b.emit(' ');
           this.mark(ret, 'value', () => {
             if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return')) {
@@ -16583,7 +16606,9 @@ class Emitter {
             } else this.expr(ret[1]);
           });
         }
-      });
+      };
+      if (typeof ret === 'string') emitJump();
+      else this.mark(ret, '$self', emitJump);
       this.b.emit(';');
     });
   }

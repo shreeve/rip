@@ -173,6 +173,52 @@ test "continue in for-in", '''
   sum
   ''', 25
 
+test "or continue skips falsy", '''
+  out = []
+  for line in ['a', '  ', 'b', '']
+    code = line.trim() or continue
+    out.push code
+  out
+  ''', ['a', 'b']
+
+test "and continue fires on truthy", '''
+  out = []
+  for x in [0, 1, 2]
+    x is 1 and continue
+    out.push x
+  out
+  ''', [0, 2]
+
+test "?? continue fires on nullish only", '''
+  out = []
+  for x in [0, null, '', undefined]
+    y = x ?? continue
+    out.push y
+  out
+  ''', [0, '']
+
+test "or break stops the loop", '''
+  n = 0
+  for i in [1..10]
+    i < 5 or break
+    n += i
+  n
+  ''', 10
+
+code "or continue assignment lowers to an if-guard", '''
+for x in [1]
+  y = x or continue
+''', '''
+let y;
+
+for (let x of [1]) {
+  if (!(y = x)) continue;
+}
+'''
+
+fail "a continue guard rejects in value position", "f = ->\n  g(x or continue)", "a continue guard is a statement"
+fail "a continue guard rejects outside a loop", "x or continue", "'continue' outside a loop"
+
 # ==============================================================================
 # For-As Loops (ES6 for-of on iterables): "for-as"
 # ==============================================================================
