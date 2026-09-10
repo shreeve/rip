@@ -1609,6 +1609,32 @@ describe('child components: props — the pinned contract', () => {
     expect(code).toContain("__effect(() => { if (this._inst3) this._inst3._updateProp('label', (this.name.value + \"!\")); });");
   });
 
+  test('a chain rooted at a plain member or a module binding is live in both spellings; a render local or static loop row stays a snapshot', () => {
+    // `save.pending` and `@save.pending` emit the same read, and a
+    // module binding's chain is the same shape one level up: any of
+    // them may end in a signal-backed getter (a mutation's `pending`,
+    // a router's `navigating`). A render local lives in _create and a
+    // static loop row in its block, so their chains keep the snapshot.
+    const { code } = compile(`${KID}mod = { pending: false }
+App = component
+  save = { pending: false }
+  rows = [{ pending: false }]
+  render
+    div
+      Kid label: save.pending
+      Kid label: @save.pending
+      Kid label: mod.pending
+      loc = save
+      Kid label: loc.pending
+      for r in rows
+        Kid label: r.pending
+`);
+    expect(code.match(/_updateProp\('label', this\.save\.pending\)/g)).toHaveLength(2);
+    expect(code).toContain("_updateProp('label', mod.pending)");
+    expect(code).not.toContain("_updateProp('label', loc.pending)");
+    expect(code).not.toContain("_updateProp('label', r.pending)");
+  });
+
   test('a function-literal prop takes no updater; a callback INVOKED while the prop evaluates still does', () => {
     // A closure's reads run when the child CALLS it, so the prop's value
     // cannot change: the effect would track nothing (the body never runs

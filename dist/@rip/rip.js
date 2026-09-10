@@ -16371,10 +16371,16 @@ ${pad ?? ""}`);
     if (sexpr[0] === "." && sexpr[1] === "this" && sexpr.length === 3 && typeof sexpr[2] === "string") {
       return this.memberIsReactive(sexpr[2]);
     }
+    const rootsAtBinding = (n) => {
+      if (typeof n !== "string" || n === "this" || this.renderVarKind(n) !== null)
+        return false;
+      const r = this.resolveBareRead(n);
+      return r === "member" || r === null && (this.inScope(n) || this.moduleBound !== undefined && this.moduleBound.has(n));
+    };
     const rootsAtThis = (n) => {
       while (isNode(n) && (n[0] === "." || n[0] === "[]") && n.length === 3)
         n = n[1];
-      return n === "this";
+      return n === "this" || rootsAtBinding(n);
     };
     const rootsAtLoopReactive = (n) => {
       while (isNode(n) && (n[0] === "." || n[0] === "[]" || n[0] === "?." || n[0] === "optindex") && n.length === 3)

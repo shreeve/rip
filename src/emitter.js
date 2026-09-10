@@ -10470,9 +10470,11 @@ class Emitter {
   }
 
   // Does a render expression read anything reactive — a component
-  // member, a module-level `:=`/`~=` name, a deeper this-rooted chain
-  // (signal-backed getters), a component-method call, or a loop
-  // item/index variable over a reactive collection? the rule plus
+  // member, a module-level `:=`/`~=` name, a deeper chain rooted at
+  // `this`, a plain member, or a module binding (signal-backed
+  // getters: a mutation's `pending`, a router's `navigating`), a
+  // component-method call, or a loop item/index variable over a
+  // reactive collection? the rule plus
   // the deliberate widenings: module-level reactive names bind LIVE
   // here (a one-time read would go silently stale), and index
   // variables patch live (staying correct across keyed reorders). Over-wrapping a static chain in
@@ -10488,9 +10490,16 @@ class Emitter {
     if (sexpr[0] === '.' && sexpr[1] === 'this' && sexpr.length === 3 && typeof sexpr[2] === 'string') {
       return this.memberIsReactive(sexpr[2]);
     }
+    // A render local or a static loop row is a snapshot by
+    // construction, so its chain is not a root here.
+    const rootsAtBinding = (n) => {
+      if (typeof n !== 'string' || n === 'this' || this.renderVarKind(n) !== null) return false;
+      const r = this.resolveBareRead(n);
+      return r === 'member' || (r === null && (this.inScope(n) || (this.moduleBound !== undefined && this.moduleBound.has(n))));
+    };
     const rootsAtThis = (n) => {
       while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 3) n = n[1];
-      return n === 'this';
+      return n === 'this' || rootsAtBinding(n);
     };
     const rootsAtLoopReactive = (n) => {
       while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 3) n = n[1];
