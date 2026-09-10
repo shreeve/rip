@@ -104,7 +104,8 @@ workers, and routing health; Rip's CLI owns Start/Stop/Restart and
 the remembered catalog, including stopped apps. Rip runs no browser status
 server and registers no dashboard app. `rip sites open edge` discovers
 Janus's configured front door, including renamed hosts, custom ports,
-and a canonical HTTPS origin. With mDNS disabled or no reachable front door
+and a canonical HTTPS origin. Dashboard URL discovery requires Janus 1.15
+or later. With mDNS disabled or no available front door
 for the current exposure mode, the CLI reports that no dashboard is available.
 Localhost-only edges need a reachable canonical origin or a dedicated
 listener; wildcard dedicated listeners open through loopback. `.local`
