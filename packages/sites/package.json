@@ -38,14 +38,9 @@
     "agent.rip",
     "edge.rip",
     "sites.rip",
-    "tray-sites.rip",
-    "Caddyfile",
+    "rip.caddy",
     "serve-hosts.rip",
-    "status.html",
-    "trust.html",
-    "trust-safari.html",
     "monitor.rip",
-    "README.md",
-    "assets"
+    "README.md"
   ]
 }

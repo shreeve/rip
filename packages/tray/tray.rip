@@ -222,7 +222,7 @@ export serve = (definition) ->
 # `rip tray` — find a provider in the cwd, then launch the generic host with
 # that file. Candidates, in order:
 #   tray.rip
-#   tray-<cwd-basename>.rip   (e.g. packages/sites → tray-sites.rip)
+#   tray-<cwd-basename>.rip   (e.g. project → tray-project.rip)
 # The toolkit file itself never counts as a provider.
 export resolveProvider = (cwd = process.cwd()) ->
   self = realpathSync(join(import.meta.dir, 'tray.rip'))

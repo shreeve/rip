@@ -7,7 +7,7 @@
 A tray is an ordinary `.rip` **provider**: it owns title, icon, menu, state, and
 callbacks. One reusable SwiftUI **host** (`rip-tray-host`) renders whatever
 panel the provider sends and returns clicks. There is no YAML/JSON menu schema
-and no Sites-specific code in the host.
+and the host is independent of the provider.
 
 **Runtime:** not browser-safe — macOS only; providers use Bun processes and
 the host uses SwiftUI/AppKit.
@@ -21,10 +21,6 @@ provider.rip          rip-tray-host (ONE program)
 └── actions/state     └── posts clicks back to Rip
 ```
 
-Sites is just another provider
-([`packages/sites/tray-sites.rip`](../sites/tray-sites.rip)). It is not a second
-native app.
-
 ## Layout
 
 | Path | Role |
@@ -37,10 +33,6 @@ native app.
 | [`test.rip`](test.rip) | Rip suite |
 | `macos/.build/` | Compiled host (gitignored) |
 | `dist/` | Optional `.app` output (gitignored) |
-
-**Not in this package:** the Sites provider
-([`packages/sites/tray-sites.rip`](../sites/tray-sites.rip)). Repo `bin/`
-holds only the `rip` compiler CLI.
 
 ### Swift pieces
 
@@ -77,12 +69,14 @@ rip tray
 
 1. Finds a provider in the **current directory**:
    - `tray.rip` (skipped if it is this toolkit file)
-   - `tray-<dirname>.rip` — e.g. `packages/sites` → `tray-sites.rip`
+   - `tray-<dirname>.rip` — e.g. `project` → `tray-project.rip`
 2. Launches `rip-tray-host` with that provider (menubar appears).
 
 ```bash
-cd packages/sites
-rip tray              # host + tray-sites.rip
+mkdir -p /tmp/rip-tray-demo
+cp demo.rip /tmp/rip-tray-demo/tray.rip
+cd /tmp/rip-tray-demo
+rip tray
 ```
 
 From `packages/tray` itself there is no provider file (only the toolkit) —
@@ -95,7 +89,6 @@ use `bun run demo` instead. Build the host once if missing:
 | --- | --- |
 | Demo counter tray | `bun run demo` |
 | Menubar for cwd provider | `rip tray` |
-| Sites menubar (dev) | `cd packages/sites && rip tray` |
 | Any provider path | `rip-tray-host /abs/path/to/provider.rip` |
 
 Bins: `rip-tray` / `rip tray` launches the host; `rip-tray-build` is the optional
@@ -180,20 +173,6 @@ Leading icons share one column when any sibling row has an `icon:`. This package
 ships [`rip-color.svg`](assets/rip-color.svg) and
 [`rip-template.svg`](assets/rip-template.svg).
 
-## Rip Sites (separate package)
-
-Full instructions:
-[packages/sites/README.md — Tray, menubar host](../sites/README.md#tray--menubar-host).
-
-| Piece | Location |
-| --- | --- |
-| Provider | [`packages/sites/tray-sites.rip`](../sites/tray-sites.rip) |
-| CLIs used | `rip sites` only |
-
-```bash
-cd packages/sites && rip tray
-```
-
 ## Test
 
 ```bash
@@ -202,5 +181,5 @@ bun run test:swift
 ```
 
 Rip tests cover vocabulary, SVG modes, validation, callbacks, provider
-discovery, and compilation of the toolkit plus Sites provider. Swift checks
+discovery, and compilation of the toolkit and demo provider. Swift checks
 cover protocol decoding, SVG rendering, and host discovery.

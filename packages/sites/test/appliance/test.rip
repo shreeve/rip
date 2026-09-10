@@ -2,7 +2,7 @@ import { test, eq, ok } from 'rip/testing'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SITE, SITE_NAME, ensureEdgeSite, requireExposureJanus } from '../../edge.rip'
+import { SITE, SITE_NAME, dashboardUrl, ensureEdgeSite, requireExposureJanus } from '../../edge.rip'
 import { defaultCatalog } from '../../catalog.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
@@ -83,10 +83,15 @@ test! "rip's site file joins Janus's edge as shipped", ->
   finally
     rmSync sites, { recursive: true, force: true }
 
-  agent = readFileSync join(import.meta.dir, '..', '..', 'agent.rip'), 'utf8'
-  ok agent.includes("'/1.0/mdns/status'"), "Janus's per-app view comes over the control socket"
-  ok agent.includes("STATUS_HOSTS = ['via.rip', 'rip.local']"), 'the status page registers under both apexes'
-  ok agent.includes("lease: 'heartbeat'"), 'and lapses with the agent'
+  packageRoot = join(import.meta.dir, '..', '..')
+  manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+  for file in manifest.files
+    ok existsSync(join(packageRoot, file)), "packaged file exists: #{file}"
+  ok not existsSync(join(packageRoot, 'tray-sites.rip')), 'Sites controls use the CLI'
+  agent = readFileSync join(packageRoot, 'agent.rip'), 'utf8'
+  ok not existsSync(join(import.meta.dir, '..', '..', 'status.html')), 'Janus owns the browser dashboard'
+  ok not agent.includes('statusServer'), 'no separate dashboard listener'
+  ok not agent.includes('registerStatus'), 'no synthetic dashboard app registration'
   ok not agent.includes("edge.mode"), "the scope is Janus's, not catalog state"
   ok not defaultCatalog().edge.mode?, "a fresh catalog records no scope"
   ok not agent.includes("'/trust"), 'the agent serves no trust route'
@@ -107,9 +112,6 @@ test! "rip's site file joins Janus's edge as shipped", ->
   eq reports.length, 0
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
-  # status page: `.join` must follow a parenthesized map, not the row string
-  ok agent.includes '(apps.map (app) ->'
-  ok /\)\.join ''/.test(agent)
   helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
   ok helloServe.includes 'hello.via.rip'
   ok helloServe.includes 'hello.local'
@@ -151,61 +153,66 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq idle.edge.control, janusSocket
     ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
-    added = cli! APP, ['add', project, '--name', 'fixture', '--host', 'fixture.via.rip', '--json'], env
+    added = cli! APP, ['add', project, '--name', 'tray', '--host', 'fixture.via.rip', '--json'], env
     eq added.code, 0
     app = JSON.parse added.out
-    eq app.name, 'fixture'
+    eq app.name, 'tray'
     eq app.state, 'stopped'
     eq app.url, 'https://fixture.via.rip/'
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok not existsSync(join(site.runtime, 'agent.json')), 'add must not spawn the control plane'
 
-    # Offline list/status must await catalog snapshots — bare Promises JSON as `{}`
-    # and the tray then throws "label title must be a non-empty string".
+    # Offline list/status must await catalog snapshots — bare Promises JSON as `{}`.
     offlineList = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
     eq offlineList.length, 1
-    eq offlineList[0].name, 'fixture'
+    eq offlineList[0].name, 'tray'
     eq offlineList[0].root, app.root
     eq realpathSync(offlineList[0].root), realpathSync(project)
     eq offlineList[0].state, 'stopped'
     offlineSummary = JSON.parse((cli!(APP, ['status', '--json'], env)).out)
     eq offlineSummary.apps.length, 1
-    eq offlineSummary.apps[0].name, 'fixture'
+    eq offlineSummary.apps[0].name, 'tray'
     eq offlineSummary.apps[0].root, app.root
     ok not existsSync(join(site.runtime, 'agent.json')), 'offline list/status must not spawn the control plane'
 
     # Catalog nouns resolve like start/stop — manager is internal, not `rip site`.
-    held = cli! APP, ['hold', 'fixture'], env
+    held = cli! APP, ['hold', 'tray'], env
     eq held.code, 1
-    ok not held.err.includes('project not found: fixture'), 'hold must resolve catalog name to root'
+    ok not held.err.includes('project not found: tray'), 'hold must resolve catalog name to root'
     ok held.err.includes('hold failed') or held.err.includes('ECONNREFUSED') or held.err.includes('No such file') or held.err.includes('manager'), "hold reaches manager for #{project}: #{held.err}"
-    migrated = cli! APP, ['migrate', 'fixture', '--dir', 'migrations'], env
+    migrated = cli! APP, ['migrate', 'tray', '--dir', 'migrations'], env
     eq migrated.code, 1
     ok not migrated.err.includes('migration entries'), 'migrate must not treat the app name as a migration entry'
-    ok not migrated.err.includes('project not found: fixture')
+    ok not migrated.err.includes('project not found: tray')
     unknownHold = cli! APP, ['hold', 'missing-app'], env
     eq unknownHold.code, 1
     ok unknownHold.err.includes 'unknown app'
-    recoverShape = cli! APP, ['recover', 'fixture'], env
+    recoverShape = cli! APP, ['recover', 'tray'], env
     eq recoverShape.code, 1
     ok recoverShape.err.includes 'operation id'
     duplicate = cli! APP, ['add', project], env
     eq duplicate.code, 1
     ok duplicate.err.includes 'project is already registered'
 
-    wrongSurface = cli! APP, ['status', 'fixture', '--workers', '9'], env
+    wrongSurface = cli! APP, ['status', 'tray', '--workers', '9'], env
     eq wrongSurface.code, 1
     ok wrongSurface.err.includes 'status does not accept add options: --workers'
-    conflictingLogs = cli! APP, ['logs', 'fixture', '--follow', '--json'], env
+    conflictingLogs = cli! APP, ['logs', 'tray', '--follow', '--json'], env
     eq conflictingLogs.code, 1
     ok conflictingLogs.err.includes '--follow conflicts with --json'
 
-    started = cli! APP, ['start', 'fixture', '--json'], env
+    started = cli! APP, ['start', 'tray', '--json'], env
     eq started.code, 0
     live = JSON.parse started.out
     eq live.state, 'running'
     eq live.desired, 'running'
     ok Number.isInteger live.pid
+    ok not existsSync(join(site.runtime, 'edge-status.sock')), 'no browser status socket'
+    for path in ['/', '/status.json', '/v1/apps']
+      response = fetch! "http://agent#{path}", { unix: join(site.runtime, 'agent.sock') }
+      eq response.status, 404
+    browserAction = fetch! "http://agent/apps/#{app.id}/stop", { method: 'POST', unix: join(site.runtime, 'agent.sock') }
+    eq browserAction.status, 404
 
     listed = JSON.parse((cli!(APP, ['list', '--json'], env)).out)
     eq listed.length, 1
@@ -229,7 +236,7 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     # The manager outlives the UI/control client. A replacement agent adopts
     # the same canonical manager socket and preserves the desired state.
     stopAgent! site.runtime
-    adopted = JSON.parse((cli!(APP, ['status', 'fixture', '--json'], env)).out)
+    adopted = JSON.parse((cli!(APP, ['status', 'tray', '--json'], env)).out)
     eq adopted.state, 'running'
     eq adopted.desired, 'running'
     eq adopted.pid, live.pid
@@ -239,25 +246,25 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq listedAfter[0].state, 'running'
     eq listedAfter[0].pid, live.pid
 
-    logs = cli! APP, ['logs', 'fixture', '--json'], env
+    logs = cli! APP, ['logs', 'tray', '--json'], env
     eq logs.code, 0
     log = JSON.parse logs.out
     ok log.path.endsWith("#{app.id}.log")
     ok Number.isInteger log.next
     eq log.truncated, false
 
-    blocked = cli! APP, ['remove', 'fixture'], env
+    blocked = cli! APP, ['remove', 'tray'], env
     eq blocked.code, 1
     ok blocked.err.includes 'is running — stop it before removal'
 
-    stopped = cli! APP, ['stop', 'fixture', '--json'], env
+    stopped = cli! APP, ['stop', 'tray', '--json'], env
     eq stopped.code, 0
     eq JSON.parse(stopped.out).state, 'stopped'
     ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/app-1')
 
-    removed = cli! APP, ['remove', 'fixture', '--json'], env
+    removed = cli! APP, ['remove', 'tray', '--json'], env
     eq removed.code, 0
-    eq JSON.parse(removed.out).name, 'fixture'
+    eq JSON.parse(removed.out).name, 'tray'
     eq JSON.parse((cli!(APP, ['list', '--json'], env)).out), []
 
     # The grace that stops a just-probed client from being reset must not
@@ -266,7 +273,7 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     waitFor! 'idle control plane exit', (-> not existsSync(join(site.runtime, 'agent.json'))), 15000
   finally
     try
-      stopped = cli! APP, ['stop', 'fixture'], env
+      stopped = cli! APP, ['stop', 'tray'], env
     stopAgent! site.runtime
     janus.stop true
     rmSync site.root, { recursive: true, force: true }
@@ -477,4 +484,103 @@ test! 'logs -f keeps polling through a control-plane outage without booting an a
   finally
     try follower?.proc.kill 'SIGKILL'
     stopAgent! site.runtime
+    rmSync site.root, { recursive: true, force: true }
+
+# The CLI uses Janus's advertised front door; no agent or dashboard
+# registration is needed to discover it.
+test! 'dashboard links follow Janus configuration and exposure', ->
+  mdns = { enabled: true, name: 'edge.local', effective_name: 'edge-2.local', mode: 'shared', front_door: ':80' }
+  failResponse = false
+  requests = []
+  server = Bun.serve
+    port: 0
+    fetch: (request) ->
+      requests.push URL.new(request.url).pathname
+      return Response.new('unavailable', { status: 503 }) if failResponse
+      Response.json mdns
+  edge = { state: 'running', scope: 'lan', control: "http://127.0.0.1:#{server.port}/custom/" }
+  try
+    eq dashboardUrl!(edge), 'http://edge-2.local/'
+    eq requests.at(-1), '/custom/1.0/mdns'
+    mdns.effective_name = ''
+    mdns.front_door = ':8080'
+    eq dashboardUrl!(edge), 'http://edge.local:8080/'
+    edge.scope = 'localhost'
+    eq dashboardUrl!(edge), null
+    mdns.mode = 'dedicated'
+    mdns.front_door = '127.0.0.1:7680'
+    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
+    mdns.front_door = 'localhost:7680'
+    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
+    mdns.front_door = '[::1]:7680'
+    eq dashboardUrl!(edge), 'http://[::1]:7680/'
+    for scope in ['localhost', 'lan', 'wan']
+      edge.scope = scope
+      for [listen, expected] in [
+        [':7680', 'http://127.0.0.1:7680/']
+        ['0.0.0.0:7680', 'http://127.0.0.1:7680/']
+        ['[::]:7680', 'http://[::1]:7680/']
+        ['127.0.0.2:7680', 'http://127.0.0.2:7680/']
+        ['192.0.2.1:7680', 'http://192.0.2.1:7680/']
+      ]
+        mdns.front_door = listen
+        eq dashboardUrl!(edge), expected
+    mdns.front_door = '[fe80::1%en0]:7680'
+    edge.scope = 'lan'
+    eq dashboardUrl!(edge), 'http://edge.local:7680/'
+    for scope in ['localhost', 'wan']
+      edge.scope = scope
+      eq dashboardUrl!(edge), null
+    mdns.exposure = 'wan'
+    mdns.front_door = '127.0.0.1:7680'
+    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
+    delete mdns.exposure
+    edge.scope = 'localhost'
+    mdns.canonical = 'https://edge.example.com:8443'
+    eq dashboardUrl!(edge), 'https://edge.example.com:8443/'
+    edge.scope = 'wan'
+    eq dashboardUrl!(edge), 'https://edge.example.com:8443/'
+    delete mdns.canonical
+    mdns.mode = 'shared'
+    mdns.front_door = ':80'
+    eq dashboardUrl!(edge), null
+    edge.scope = 'lan'
+    mdns.exposure = 'wan'
+    eq dashboardUrl!(edge), null
+    delete mdns.exposure
+    for bad in ['javascript:alert(1)', 'http://edge.example.com', 'https://user:password@edge.example.com']
+      mdns.canonical = bad
+      eq dashboardUrl!(edge), null
+    delete mdns.canonical
+    mdns.front_door = ':99999'
+    eq dashboardUrl!(edge), null
+    mdns.enabled = false
+    eq dashboardUrl!(edge), null
+    mdns = null
+    eq dashboardUrl!(edge), null
+    failResponse = true
+    eq dashboardUrl!(edge), null
+    edge.state = 'stopped'
+    before = requests.length
+    eq dashboardUrl!(edge), null
+    eq requests.length, before
+  finally
+    server.stop true
+
+
+test! 'dashboard discovery uses the Unix control socket without booting an agent', ->
+  site = fixture 'rip-dashboard-unix-'
+  socket = join site.runtime, 'janus.sock'
+  paths = []
+  janus = Bun.serve
+    unix: socket
+    fetch: (request) ->
+      paths.push URL.new(request.url).pathname
+      Response.json { enabled: true, name: 'janus.local', mode: 'dedicated', front_door: '127.0.0.1:7680' }
+  try
+    eq dashboardUrl!({ state: 'running', scope: 'localhost', control: socket }), 'http://127.0.0.1:7680/'
+    eq paths, ['/1.0/mdns']
+    ok not existsSync(join(site.runtime, 'agent.json'))
+  finally
+    janus.stop true
     rmSync site.root, { recursive: true, force: true }

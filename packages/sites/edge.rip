@@ -13,6 +13,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { isIP } from 'node:net'
 
 export JANUS_MISSING = 'no janus on PATH — install Janus: curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash'
 export JANUS_STOPPED = "Janus is not running — 'janus autostart' installs it as a service (once), 'janus start' starts it"
@@ -35,6 +36,40 @@ export edgeControl = (janus = null) ->
   (janus or janusStatus())?.socket or null
 
 export externalEdge = -> process.env.JANUS_CONTROL?
+
+# The dashboard belongs to Janus. Discover its configured front door instead
+# of assuming a default name, port, or an enabled mDNS capability.
+export dashboardUrl = (edge) ->
+  return null unless edge.state is 'running' and edge.control?
+  options = { signal: AbortSignal.timeout(2000) }
+  target = edge.control
+  unless target.startsWith('http://') or target.startsWith('https://')
+    options.unix = target
+    target = 'http://janus'
+  try
+    response = fetch! "#{target.replace(/\/$/, '')}/1.0/mdns", options
+    return null unless response.ok
+    mdns = response.json!
+  catch then return null
+  return null unless mdns?.enabled is true
+  if mdns.canonical?
+    canonical = try URL.new(mdns.canonical) catch then null
+    return canonical.href if canonical?.protocol is 'https:' and not canonical.username and not canonical.password
+    return null
+  address = /^([^:]*|\[[^\]]+\]):([0-9]+)$/.exec(mdns.front_door or '')
+  return null unless address? and Number(address[2]) > 0 and Number(address[2]) <= 65535
+  host = null
+  if mdns.mode is 'dedicated'
+    bind = address[1]
+    if bind in ['', '0.0.0.0', 'localhost'] then host = '127.0.0.1'
+    else if bind is '[::]' then host = '[::1]'
+    else if not bind.includes('%') and isIP(bind.replace(/^\[|\]$/g, '')) then host = bind
+  unless host?
+    return null if edge.scope in ['localhost', 'wan'] or mdns.exposure is 'wan'
+    host = mdns.effective_name or mdns.name
+    return null unless typeof host is 'string' and /^[a-z0-9-]+\.local$/.test(host)
+  port = if address[2] is '80' then '' else ":#{address[2]}"
+  "http://#{host}#{port}/"
 
 # Rip's site file: via.rip and *.via.rip, on Janus's edge as a drop-in.
 export SITE = join(import.meta.dir, 'rip.caddy')

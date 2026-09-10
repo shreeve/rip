@@ -17,8 +17,8 @@ export secureDirectory = (path, label) ->
   path
 
 # The runtime root must resolve to ONE place from every context that can
-# spawn a control agent. launchd hands its jobs no TMPDIR (the tray's is
-# one), and tmpdir() then falls back to /tmp: a second root, a second
+# spawn a control agent. launchd may omit TMPDIR, so tmpdir() falls
+# back to /tmp: a second root, a second
 # control socket, a second agent over the same catalog. The per-user temp
 # directory is a confstr fact, not an environment one — ask for it.
 userTempDir = ->
@@ -46,7 +46,6 @@ export agentPaths = (label = 'rip-agent') ->
     agentLog: join(stateRoot, 'agent.log')
     socket: join(runtimeRoot, 'agent.sock')
     owner: join(runtimeRoot, 'agent.json')
-    edgeStatus: join(runtimeRoot, 'edge-status.sock')
     appLogs: join(stateRoot, 'apps')
   }
 

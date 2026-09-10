@@ -13,7 +13,7 @@ suite's own fixture (`test/browser/hmr-app`, `bun run test:live`).
 
 | File | Role |
 | --- | --- |
-| `serve.rip` | Catalog name, hosts, Hub bridge (tray **Add Site…** target) |
+| `serve.rip` | Catalog name, hosts, Hub bridge |
 | `index.rip` | The API: statuses routes and bare `start!` handoff |
 | `app/index.html` | SPA shell (`bootApp` over `/bundle.json`) |
 | `app/stash.rip` | `stash` — the `statuses` source over `/api/statuses` |

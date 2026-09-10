@@ -21,6 +21,9 @@ Rip Manager ── publishes application files ──► Caddy / Janus ──►
   validators, and access streams. Neither interprets Rip source or Rip hashes.
 - **Workers execute API code.** They do not compile browser Apps or serve App
   files.
+- **Janus owns the browser status dashboard.** It is read-only and reports
+  registrations and routing health. Rip's CLI retains the app catalog
+  and process controls; the agent has no browser listener or dashboard app.
 - **Rip App consumes browser publications.** Its browser runtime fetches,
   compiles, activates, and updates the published Rip program.
 - **The compiler is shared infrastructure.** Manager uses it to validate and

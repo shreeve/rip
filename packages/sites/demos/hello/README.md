@@ -11,16 +11,9 @@ ship a Caddyfile.
 
 ## Add and start
 
-In the Rip tray, choose **Add Site…**, then select this project directory:
+From the repository root:
 
-```text
-packages/sites/demos/hello
-```
-
-Select the directory containing `serve.rip`, not `app/` and not the
-`serve.rip` file itself. The picker runs the equivalent of:
-
-```sh
+```bash
 rip sites add packages/sites/demos/hello
 rip sites start hello
 ```
@@ -31,7 +24,7 @@ loopback, `hello.local` for LAN once `janus mode lan` opens it), conventional
 
 ## LAN / phone
 
-```sh
+```bash
 janus mode lan
 rip sites start hello
 # Mac:     https://hello.local/

@@ -6,11 +6,10 @@
 
 Rip Sites is how you run Rip projects on HTTPS locally: a **framework** for
 routes and validation, a **manager** per project, a **shared edge** for TLS and
-routing, and an optional **menu-bar tray** that drives the same CLIs.
+routing, and a **CLI** for catalog and process controls.
 
 **Runtime:** Bun on the server (managers, workers, edge-scoped control).
-Browser Apps use the published Workspace. The menubar host is macOS-only
-(`rip/tray`).
+Browser Apps use the published Workspace.
 
 The system-wide ownership, reload, migration, and cache contract is
 [docs/SERVER.md](../../docs/SERVER.md). App publication wire details are under
@@ -34,8 +33,6 @@ The system-wide ownership, reload, migration, and cache contract is
 │  your project          index.rip + app/ + serve.rip         │
 │                        workers + published dist/            │
 └─────────────────────────────────────────────────────────────┘
-
-Optional UI:  cd packages/sites && rip tray   →  menu over the same CLI
 ```
 
 Caddy and [Janus](https://github.com/shreeve/janus) own every client request
@@ -49,9 +46,8 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | `rip/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
 | `rip sites` | Unified CLI: catalog, apps, edge, agent, advanced | Day-to-day Sites |
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
-| `rip tray` (from `packages/sites`) | Menu-bar UI over `rip sites` | Click instead of typing |
 
-Reserved nouns (not app names): **`edge`**, **`all`**, **`tray`**, **`agent`**.
+Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
 `sites.json` (Rip-owned). The control plane starts with the edge / desired
 apps and exits when nothing remains to supervise — Janus stays live-only.
@@ -97,11 +93,22 @@ machine:
 
 | Family | Names | Resolves | Served by | For |
 | --- | --- | --- | --- | --- |
-| via.rip | `https://via.rip/` (status), `https://{name}.via.rip/` (apps) | `127.0.0.1`, publicly, forever | `rip.caddy` | this machine's browser |
-| .local | `https://rip.local/` (status), `https://{name}.local/` (apps) | Bonjour, from this machine | Janus's own `*.local` site | phones and peers on the LAN |
+| via.rip | `https://{name}.via.rip/` (apps) | `127.0.0.1`, publicly, forever | `rip.caddy` | this machine's browser |
+| .local | `https://janus.local/` (status), `https://{name}.local/` (apps) | Bonjour, from this machine | Janus's own `*.local` site | phones and peers on the LAN |
 
 Every app claims both: catalog adds dual-claim each `*.via.rip` host with
 its `*.local` twin, and the demos declare both in `serve.rip`.
+
+Janus owns the read-only browser dashboard. It shows live registrations,
+workers, and routing health; Rip's CLI owns Start/Stop/Restart and
+the remembered catalog, including stopped apps. Rip runs no browser status
+server and registers no dashboard app. `rip sites open edge` discovers
+Janus's configured front door, including renamed hosts, custom ports,
+and a canonical HTTPS origin. With mDNS disabled or no reachable front door
+for the current exposure mode, the CLI reports that no dashboard is available.
+Localhost-only edges need a reachable canonical origin or a dedicated
+listener; wildcard dedicated listeners open through loopback. `.local`
+advertising does not resolve to loopback.
 
 Who can reach any of it is Janus's alone. `janus mode localhost | lan |
 wan` sets which addresses the edge listens on and, on macOS, the host
@@ -128,7 +135,8 @@ janus mode lan
 rip sites start hello
 # http://janus.local/trust  → trust the CA on the phone
 # https://hello.local/      → the app
-# https://rip.local/        → Rip catalog (Start/Stop/Restart)
+# https://janus.local/      → Janus status (read-only)
+# rip sites stop hello     → process controls stay in the CLI
 ```
 
 An edge Rip does not configure — a test's, or one with a hand-written
@@ -191,7 +199,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 **Grammar**
 
 - Most spells are `<verb> <noun>`.
-- Reserved nouns (never app names): **`edge`**, **`all`**, **`tray`**, **`agent`**.
+- Reserved nouns (never app names): **`edge`**, **`all`**, **`agent`**.
 - App selectors: catalog **id**, unique **name**, or canonical **root**.
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
@@ -240,8 +248,8 @@ installed and what is running, and says when they differ; so does
 
 ### Custom domains
 
-The Rip-owned name families come for free: `via.rip` and `*.via.rip`
-from `rip.caddy`, and `rip.local` plus `*.local` from Janus's own site.
+The app name families come for free: `via.rip` and `*.via.rip`
+from `rip.caddy`, and `*.local` from Janus's own site.
 Certificates for those are minted on demand by the local CA; `janus trust`
 makes them verify.
 
@@ -321,7 +329,7 @@ the drop-in serves the name, it does not resolve it.
 | Command | What it does |
 | --- | --- |
 | `rip sites open <app>` | Open the app URL in the default browser. |
-| `rip sites open edge` | Open the status dashboard (`via.rip` or `rip.local`). |
+| `rip sites open edge` | Open Janus's configured read-only status dashboard. |
 | `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
 | `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
 
@@ -344,45 +352,6 @@ cd packages/sites/demos/hello
 rip sites run               # registers with the edge Janus runs
 rip sites stop              # drain manager for cwd
 rip sites status .          # manager JSON for cwd
-```
-
-### Tray — menubar host
-
-The Sites menu is the foreground `rip tray` host, run from this package. It
-drives the same `rip sites` spells. There is **no** Sites-specific native
-binary and no LaunchAgent — see [`tray-sites.rip`](tray-sites.rip) and
-[packages/tray/README.md](../tray/README.md).
-
-**Tray covers:** edge status and scope (Janus's), Open Dashboard, site
-start/stop/restart/open/log, Add Site.
-
-**CLI-only:** `remove`. The edge process, its reach, and its trust are
-`janus`'s (`janus mode` and `janus trust` may need sudo, which needs a
-terminal).
-
-**Run it** — build the host once, then from this package:
-
-```bash
-# from repo root
-swift build -c release --package-path packages/tray/macos --product rip-tray-host
-
-cd packages/sites
-rip tray                  # discovers tray-sites.rip → launches rip-tray-host
-```
-
-**Using the menu**
-
-1. **Edge** shows Janus's state; `janus autostart` in a terminal if it is down
-2. **Edge → Open Dashboard** for the Rip status page (`via.rip` or `rip.local`)
-3. **Edge → Trust CA…** then **Use LAN…** when you want Bonjour
-4. **Add Site…** and pick a project directory
-5. Site submenu → **Start** → **Open**
-6. **Open Log** / **Restart** / **Stop** as needed
-
-Provider alone (what the host spawns), without the menubar chrome:
-
-```bash
-rip packages/sites/tray-sites.rip
 ```
 
 Output: add `--json` on most verbs for machine-readable responses.
