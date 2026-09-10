@@ -504,85 +504,36 @@ test! 'logs -f keeps polling through a control-plane outage without booting an a
 
 # The CLI uses Janus's advertised front door; no agent or dashboard
 # registration is needed to discover it.
-test! 'dashboard links follow Janus configuration and exposure', ->
-  mdns = { enabled: true, name: 'edge.local', effective_name: 'edge-2.local', mode: 'shared', front_door: ':80' }
-  failResponse = false
+test! 'dashboard discovery consumes Janus URLs without reconstructing them', ->
+  mdns = { enabled: true, dashboard_url: 'http://edge-2.local:8080/' }
   requests = []
   server = Bun.serve
     port: 0
     fetch: (request) ->
       requests.push URL.new(request.url).pathname
-      return Response.new('unavailable', { status: 503 }) if failResponse
       Response.json mdns
-  edge = { state: 'running', scope: 'lan', control: "http://127.0.0.1:#{server.port}/custom/" }
+  edge = { state: 'running', external: true, control: "http://127.0.0.1:#{server.port}/custom/" }
   try
-    eq dashboardUrl!(edge), 'http://edge-2.local/'
+    eq dashboardUrl!(edge), mdns.dashboard_url
     eq requests.at(-1), '/custom/1.0/mdns'
-    mdns.effective_name = ''
-    mdns.front_door = ':8080'
-    eq dashboardUrl!(edge), 'http://edge.local:8080/'
-    edge.scope = 'localhost'
-    eq dashboardUrl!(edge), null
-    mdns.mode = 'dedicated'
-    mdns.front_door = '127.0.0.1:7680'
-    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
-    mdns.front_door = 'localhost:7680'
-    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
-    mdns.front_door = '[::1]:7680'
-    eq dashboardUrl!(edge), 'http://[::1]:7680/'
-    for scope in ['localhost', 'lan', 'wan']
-      edge.scope = scope
-      for [listen, expected] in [
-        [':7680', 'http://127.0.0.1:7680/']
-        ['0.0.0.0:7680', 'http://127.0.0.1:7680/']
-        ['[::]:7680', 'http://[::1]:7680/']
-        ['127.0.0.2:7680', 'http://127.0.0.2:7680/']
-        ['192.0.2.1:7680', 'http://192.0.2.1:7680/']
-      ]
-        mdns.front_door = listen
-        eq dashboardUrl!(edge), expected
-    mdns.front_door = '[fe80::1%en0]:7680'
-    edge.scope = 'lan'
-    eq dashboardUrl!(edge), 'http://edge.local:7680/'
-    for scope in ['localhost', 'wan']
-      edge.scope = scope
+    for url in ['http://[::1]:7680/', 'https://edge.example/']
+      mdns.dashboard_url = url
+      eq dashboardUrl!(edge), url
+    for bad in ['', 'javascript:alert(1)', 'https://user:password@edge.example/']
+      mdns.dashboard_url = bad
       eq dashboardUrl!(edge), null
-    mdns.exposure = 'wan'
-    mdns.front_door = '127.0.0.1:7680'
-    eq dashboardUrl!(edge), 'http://127.0.0.1:7680/'
-    delete mdns.exposure
-    edge.scope = 'localhost'
-    mdns.canonical = 'https://edge.example.com:8443'
-    eq dashboardUrl!(edge), 'https://edge.example.com:8443/'
-    edge.scope = 'wan'
-    eq dashboardUrl!(edge), 'https://edge.example.com:8443/'
-    delete mdns.canonical
-    mdns.mode = 'shared'
-    mdns.front_door = ':80'
-    eq dashboardUrl!(edge), null
-    edge.scope = 'lan'
-    mdns.exposure = 'wan'
-    eq dashboardUrl!(edge), null
-    delete mdns.exposure
-    for bad in ['javascript:alert(1)', 'http://edge.example.com', 'https://user:password@edge.example.com']
-      mdns.canonical = bad
-      eq dashboardUrl!(edge), null
-    delete mdns.canonical
-    mdns.front_door = ':99999'
-    eq dashboardUrl!(edge), null
+    mdns.dashboard_url = 'http://edge.local/'
     mdns.enabled = false
     eq dashboardUrl!(edge), null
-    mdns = null
-    eq dashboardUrl!(edge), null
-    failResponse = true
-    eq dashboardUrl!(edge), null
-    edge.state = 'stopped'
+    edge.external = false
+    edge.dashboardUrl = 'https://local-status.example/'
     before = requests.length
-    eq dashboardUrl!(edge), null
+    eq dashboardUrl!(edge), edge.dashboardUrl
     eq requests.length, before
+    edge.state = 'stopped'
+    eq dashboardUrl!(edge), null
   finally
     server.stop true
-
 
 test! 'dashboard discovery uses the Unix control socket without booting an agent', ->
   site = fixture 'rip-dashboard-unix-'
@@ -592,7 +543,7 @@ test! 'dashboard discovery uses the Unix control socket without booting an agent
     unix: socket
     fetch: (request) ->
       paths.push URL.new(request.url).pathname
-      Response.json { enabled: true, name: 'janus.local', mode: 'dedicated', front_door: '127.0.0.1:7680' }
+      Response.json { enabled: true, dashboard_url: 'http://127.0.0.1:7680/' }
   try
     eq dashboardUrl!({ state: 'running', scope: 'localhost', control: socket }), 'http://127.0.0.1:7680/'
     eq paths, ['/1.0/mdns']
