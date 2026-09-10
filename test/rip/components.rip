@@ -3353,6 +3353,150 @@ code '@children slot rendering', '''
   };
   '''
 
+code 'slot under a child component forwards the received children', '''
+  Section = component
+    render
+      section
+        slot
+  export Frame = component
+    render
+      Section style: 'x:1'
+        slot
+  ''', '''
+  let Section = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('section');
+      this._el0.setAttribute('data-part', 'Section');
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+  };
+  export const Frame = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Section({ style: "x:1", children: this.children });
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Section');
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Section');
+      }
+      } catch (__childErr) {
+        console.error('[Rip] Section construction failed:', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Section');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Section'));
+      }
+    }
+  };
+  '''
+
+fail 'slot beside an explicit children: prop is a compile error', '''
+  Section = component
+    render
+      section
+        slot
+  export Frame = component
+    render
+      Section style: 'x:1', children: @children
+        slot
+  ''', 'receives `children` TWICE — an explicit `children:` prop beside a nested `slot`'
+
+code 'a member named slot under a child component keeps its text reading', '''
+  Section = component
+    render
+      section
+        slot
+  export Frame = component
+    slot =! 'text'
+    render
+      Section
+        slot
+  ''', '''
+  let Section = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('section');
+      this._el0.setAttribute('data-part', 'Section');
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+  };
+  export const Frame = class extends __Component {
+    _init(props) {
+      this.slot = "text";
+    }
+    _create() {
+      this._t0 = document.createTextNode(this.slot);
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Section({ children: this._t0 });
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Section');
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Section');
+      }
+      } catch (__childErr) {
+        console.error('[Rip] Section construction failed:', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Section');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Section'));
+      }
+    }
+  };
+  '''
+
+code 'slot reads a declared @children cell by value', '''
+  export A = component
+    @children
+    render
+      div
+        slot
+  ''', '''
+  export const A = class extends __Component {
+    static __props = ['children'];
+    _init(props) {
+      this.children = __state(props.__bind_children__ ?? props.children);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._slot1 = this.children.value instanceof Node ? this.children.value : (this.children.value != null ? document.createTextNode(String(this.children.value)) : document.createComment(''));
+      this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+  };
+  '''
+
 code '@prop rendered as text (readonly)', '''
   export A = component
     @name =! "anon"

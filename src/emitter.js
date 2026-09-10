@@ -11125,46 +11125,67 @@ class Emitter {
     return true;
   }
 
-  // `slot` — children projection: the parent's emission passed its
-  // built child DOM as the `children` prop; the slot line materializes
-  // it (a fixed ternary — a Node projects, a plain value renders as
-  // text, absence leaves a comment). `children` is ONE node, so the
-  // projection point is structurally single: a second slot, a slot
-  // inside a loop row, and slot arguments all reject loudly (a
-  // silent move to the last projection point would drop
-  // slot arguments).
-  renderSlot(node, args) {
+  // `slot` — children projection. Under a native tag the slot line
+  // materializes the received children (a fixed ternary — a Node
+  // projects, a plain value renders as text, absence leaves a
+  // comment); under a child component the nested word forwards them
+  // as that call's `children` prop (renderChildComponent). `children`
+  // is ONE node, so the projection point is structurally single
+  // across both spellings: a second slot, a slot inside a loop row,
+  // and slot arguments all reject loudly (a silent move to the last
+  // projection point would drop slot arguments).
+  claimSlot(markNode) {
     const R = this.rstate;
+    const at = markNode ?? this.rstate.node;
+    if (R.sink.loopStack.length > 0) {
+      throw this.positionedError(at,
+        'emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight ' +
+        'over it; ' +
+        'project it once, outside the loop', this.rstate.node);
+    }
+    if (R.slotSeen) {
+      throw this.positionedError(at,
+        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ' +
+        '', this.rstate.node);
+    }
+    R.slotSeen = true;
+    this.noteVocabulary('render-channel', 'slot', at);
+  }
+
+  // The `children` read a slot spelling makes. A declared `@children`
+  // with no initializer is a reactive cell like every other bare prop
+  // (the face types it as one), so the read unwraps it the way any
+  // reactive member read does; an undeclared or `=!` member reads
+  // plain. The `slot` word answers the children it projects: the
+  // `children` word of the first read is the typed position
+  // (RULINGS.md, `slot`).
+  childrenReadText() {
+    const s = this.renderSelf ?? 'this';
+    return `${s}.children${this.memberIsReactive('children') ? '.value' : ''}`;
+  }
+
+  emitChildrenRead(slotSpan) {
+    this.b.emit(`${this.renderSelf ?? 'this'}.`);
+    if (slotSpan !== null) this.intrinsics.push({ start: slotSpan[0], end: slotSpan[1], kind: 'slot', gen: this.b.offset });
+    this.b.emit('children');
+    if (this.memberIsReactive('children')) this.b.emit('.value');
+  }
+
+  renderSlot(node, args) {
     const markNode = isNode(node) ? node : null;
     if (args.length > 0) {
       throw this.positionedError(markNode ?? node,
         'emitter: `slot` takes no arguments — fallback content has no ' +
         'reading here (render it through a conditional around the slot)', this.rstate.node);
     }
-    if (R.sink.loopStack.length > 0) {
-      throw this.positionedError(markNode ?? node,
-        'emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight ' +
-        'over it; ' +
-        'project it once, outside the loop', this.rstate.node);
-    }
-    if (R.slotSeen) {
-      throw this.positionedError(markNode ?? node,
-        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ' +
-        '', this.rstate.node);
-    }
-    R.slotSeen = true;
-    this.noteVocabulary('render-channel', 'slot', markNode ?? this.rstate.node);
+    this.claimSlot(markNode);
     const v = this.newRenderVar('slot');
     const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
-      const s = this.renderSelf ?? 'this';
-      this.b.emit(v);
-      this.b.emit(` = ${s}.`);
-      // The `slot` word answers the children it projects: the first
-      // `children` read here is the typed position (RULINGS.md, `slot`).
-      if (slotSpan !== null) this.intrinsics.push({ start: slotSpan[0], end: slotSpan[1], kind: 'slot', gen: this.b.offset });
-      this.b.emit(`children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
-        `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
+      const c = this.childrenReadText();
+      this.b.emit(`${v} = `);
+      this.emitChildrenRead(slotSpan);
+      this.b.emit(` instanceof Node ? ${c} : (${c} != null ? document.createTextNode(String(${c})) : document.createComment(''))`);
     });
     return v;
   }
@@ -11249,17 +11270,21 @@ class Emitter {
     // rest application — the #164 family; the twin is frozen-broken
     // instead). `__bind_x__` normalizes to `x`: a bind and a plain
     // prop of one name write the same member. `children` collides
-    // across SPELLINGS — an explicit `children:` pair against the
-    // element body.
+    // across SPELLINGS — an explicit `children:` pair, the element
+    // body, and a nested `slot` forwarding the received children.
     const seenKeys = new Map();
-    const declareKey = (rawKey, pair) => {
+    const CHILDREN_SPELLINGS = {
+      prop: 'an explicit `children:` prop', body: 'element body content', slot: 'a nested `slot`',
+    };
+    let childrenFrom = null;
+    const declareKey = (rawKey, pair, spelling = 'prop') => {
       const k = rawKey.startsWith('__bind_') && rawKey.endsWith('__') ? rawKey.slice(7, -2) : rawKey;
       if (seenKeys.has(k)) {
         if (k === 'children') {
           throw this.positionedError(pair ?? markNode ?? node,
-            'emitter: this child component receives `children` TWICE — an explicit `children:` prop beside element ' +
-            'body content; give the children ONE ' +
-            'spelling: the element body (indented or inline), or the explicit `children:` prop', this.rstate.node);
+            `emitter: this child component receives \`children\` TWICE — ${CHILDREN_SPELLINGS[childrenFrom]} beside ` +
+            `${CHILDREN_SPELLINGS[spelling]}; give the children ONE spelling: the element body (indented or inline), ` +
+            'the explicit `children:` prop, or a nested `slot` forwarding the received children', this.rstate.node);
         }
         throw this.positionedError(pair ?? markNode ?? node,
           `emitter: duplicate prop '${k}' on a child component — duplicate keys emit one object literal where the ` +
@@ -11267,6 +11292,7 @@ class Emitter {
           'element; pass one value per prop', this.rstate.node);
       }
       seenKeys.set(k, pair ?? null);
+      if (k === 'children') childrenFrom = spelling;
     };
 
     const addPair = (pair) => {
@@ -11464,6 +11490,7 @@ class Emitter {
     // collect for the build below (the split — every non-prop arg
     // is child DOM).
     const domItems = [];
+    let forwardSlot = false;
     const isTextChild = (arg) =>
       !isNode(arg) && !(typeof arg === 'string' &&
         ((isHtmlTag(arg.split(/[#.]/)[0]) || isComponentName(arg.split(/[#.]/)[0])) &&
@@ -11475,6 +11502,18 @@ class Emitter {
       if (isBareWord && (isHtmlTag(arg) || arg === 'slot')
           && (this.inScope(arg) || this.moduleBound.has(arg))) {
         rejectTagWord(markNode ?? this.rstate.node, arg);
+      }
+      // A nested `slot` is the received children, forwarded — never
+      // a boolean-shorthand prop named `slot`. Alone, it passes the
+      // member itself (the children build below); beside body
+      // content it materializes into the fragment like any slot line.
+      // A `slot` that resolves to a value keeps the shadow-to-text
+      // rule (isBareWord is false for it).
+      if (isBareWord && arg === 'slot') {
+        forwardSlot = true;
+        scanAdvance(arg);
+        domItems.push(arg);
+        return;
       }
       if (isBareWord && !this.inScope(arg) && !this.moduleBound.has(arg)) {
         addBareWord(markNode ?? this.rstate.node, arg);
@@ -11532,8 +11571,17 @@ class Emitter {
       return t;
     };
     const renderables = domItems.filter((a) => !this.isRenderBinding(a));
-    if (renderables.length === 1) {
-      declareKey('children', null);
+    if (renderables.length === 1 && forwardSlot) {
+      // The forward: `Section` + nested `slot` is `Section children:
+      // @children` — the received children pass through unmaterialized,
+      // so the child's own slot decides how a plain value renders.
+      declareKey('children', null, 'slot');
+      this.claimSlot(markNode);
+      const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
+      for (const arg of domItems) if (arg !== 'slot') buildChild(arg);
+      props.push({ pair: null, key: 'children', fn: () => this.emitChildrenRead(slotSpan) });
+    } else if (renderables.length === 1) {
+      declareKey('children', null, 'body');
       let childrenVar = null;
       for (const arg of domItems) {
         const v = buildChild(arg);
@@ -11541,7 +11589,7 @@ class Emitter {
       }
       props.push({ pair: null, key: 'children', fn: () => this.b.emit(childrenVar) });
     } else if (renderables.length > 1) {
-      declareKey('children', null);
+      declareKey('children', null, 'body');
       const frag = this.newRenderVar('frag');
       this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
       for (const arg of domItems) {

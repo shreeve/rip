@@ -395,3 +395,38 @@ test 'toEmail plain text output', '''
   { text } = toEmail(TestEmail)
   text.includes('Title') and text.includes('Body text') and text.includes('Click (https://example.com)')
 ''', true
+
+test 'a nested slot under a component forwards the received children', '''
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Section } = emailPkg
+  Frame = component
+    render
+      Section style: 'background:#eee'
+        slot
+  E = component
+    render
+      Email
+        Body
+          Frame
+            p "inside"
+  html = toHTML(E)
+  html.includes('data-part="Section"') and html.includes('<td><p>inside</p></td>')
+''', true
+
+test 'a declared @children with no initializer forwards the content, not its cell', '''
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Section } = emailPkg
+  Frame = component
+    @children
+    render
+      Section style: 'background:#eee'
+        slot
+  E = component
+    render
+      Email
+        Body
+          Frame
+            p "inside"
+  html = toHTML(E)
+  html.includes('<td><p>inside</p></td>') and not html.includes('[object Object]')
+''', true
