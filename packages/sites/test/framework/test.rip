@@ -123,7 +123,7 @@ test! 'routes, parameters, prefixes, and smart responses compose', ->
   eq (handle! request('GET', '/text/')).status, 200
   malformed = handle! request('GET', '/users/%zz')
   eq malformed.status, 400
-  eq malformed.json!, { error: { message: 'malformed percent-encoding in path' } }
+  eq malformed.json!, { error: 'malformed percent-encoding in path', code: 'bad_request' }
   head = handle! request('HEAD', '/text')
   eq head.status, 200
   eq head.text!, ''
@@ -165,7 +165,7 @@ test! 'middleware can short-circuit and rejects duplicate next calls', ->
   warnings = captureWarnings! ->
     response = handle! request('GET', '/once')
     eq response.status, 500
-    eq response.json!, { error: { message: 'Internal Server Error' } }
+    eq response.json!, { error: 'Internal Server Error', code: 'internal_error' }
   ok warnings.some((message) -> message.includes('next() more than once'))
 
 test! 'before and after filters compose around handlers and short-circuit', ->
@@ -218,7 +218,7 @@ test! 'before and after filters compose around handlers and short-circuit', ->
   warnings = captureWarnings! ->
     failure = handle! request('GET', '/failure')
     eq failure.status, 500
-    eq failure.json!, { error: { message: 'Internal Server Error' } }
+    eq failure.json!, { error: 'Internal Server Error', code: 'internal_error' }
   ok warnings.some((message) -> message.includes('filter secret'))
 
 test! 'after filters run on thrown errors and never mask them', ->
@@ -291,14 +291,14 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
   warnings = captureWarnings! ->
     bad = handle! request('GET', '/bad')
     eq bad.status, 422
-    eq bad.json!, { error: { message: 'invalid' } }
+    eq bad.json!, { error: 'invalid', code: 'invalid_field' }
     noticeResponse = handle! request('GET', '/notice')
     eq noticeResponse.status, 400
-    eq noticeResponse.json!, { error: { notice: 'try again' } }
+    eq noticeResponse.json!, { error: 'try again', code: 'bad_request' }
     bailResponse = handle! request('GET', '/bail')
     eq bailResponse.status, 401
-    eq bailResponse.json!, { error: { message: 'Unauthorized' } }
-    eq (handle! request('GET', '/secret')).json!, { error: { message: 'Internal Server Error' } }
+    eq bailResponse.json!, { error: 'Unauthorized', code: 'unauthorized' }
+    eq (handle! request('GET', '/secret')).json!, { error: 'Internal Server Error', code: 'internal_error' }
     eq (handle! request('GET', '/missing')).text!, 'lost'
 
     resetGlobals()
@@ -322,7 +322,7 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     eq obj.json!, { claimed: 'short and stout', code: 'teapot' }
     declined = handle! request('GET', '/declined')
     eq declined.status, 500
-    eq declined.json!, { error: { message: 'Internal Server Error' } }
+    eq declined.json!, { error: 'Internal Server Error', code: 'internal_error' }
 
     resetGlobals()
     get '/present' -> 'yes'
@@ -346,7 +346,7 @@ test! 'read takes symbol types — :email! and :phone? spell the vocabulary', ->
   bad = handle! jsonRequest('POST', '/sym', { mail: 'a@b.co', phone: 'call me' })
   eq bad.status, 422       # :phone? loud-optional, supplied but invalid
 
-test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
+test 'error! with a field map: empty no-op, full map ships as 422 fields', ->
   error {}   # nothing wrong -> nothing thrown; the validate stanza needs no guard
   caught = null
   try
@@ -358,7 +358,7 @@ test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
   # the default envelope carries the map through
   eq errorEnvelope(caught),
     status: 422
-    error: { message: 'Validation failed', errors: { firstName: 'Enter a first name', phone: 'Enter a phone number' } }
+    body: { error: 'Validation failed', code: 'invalid_field', fields: { firstName: 'Enter a first name', phone: 'Enter a phone number' } }
   # an explicit status overrides the 422 default
   overridden = null
   try
@@ -375,15 +375,13 @@ test 'error! with a field map: empty no-op, full map ships as 422 errors', ->
 test 'error envelopes expose client details and mask server details', ->
   eq errorEnvelope(Error.new('database password')),
     status: 500
-    error: { message: 'Internal Server Error' }
+    body: { error: 'Internal Server Error', code: 'internal_error' }
   failure = Object.assign Error.new('invalid input'),
     status: 400
-    issues: [{ field: 'email' }]
+    issues: [{ field: 'email', message: 'email is required' }]
   eq errorEnvelope(failure),
     status: 400
-    error:
-      message: 'invalid input'
-      issues: [{ field: 'email' }]
+    body: { error: 'invalid input', code: 'invalid_field', fields: { email: 'email is required' } }
 
 test! 'read merges body, query, and path with request-local context', ->
   resetGlobals()
@@ -430,7 +428,7 @@ test! 'read merges body, query, and path with request-local context', ->
     token: 'minted'
   required = handle! jsonRequest('POST', '/required', {})
   eq required.status, 400
-  eq required.json!, { error: { message: 'Missing required field: missing' } }
+  eq required.json!, { error: 'Missing required field: missing', code: 'bad_request' }
   eq ctx(), null
   eq mark(), null
   throws (-> read('outside')), 'no context for read()'
@@ -450,7 +448,7 @@ test! "read's loud-optional '?' rejects supplied garbage, allows absence", ->
   # never a silent null impersonating an omitted field.
   bad = handle! jsonRequest 'POST', '/loud', { dob: '02/29/2024' }
   eq bad.status, 422
-  eq bad.json!, { error: { message: 'dob is not a valid date' } }
+  eq bad.json!, { error: 'dob is not a valid date', code: 'invalid_field', fields: { dob: 'dob is not a valid date' } }
 
 test! 'request marks and trusted tenant context stay request-local', ->
   resetGlobals()
@@ -495,16 +493,14 @@ test! 'schema input and OpenAPI stay tied to live routes', ->
   bad = handle! jsonRequest('POST', '/signup', { name: 'x' })
   eq bad.status, 400
   badBody = bad.json!
-  eq badBody.error.message, 'Validation failed'
-  ok Array.isArray(badBody.error.issues)
+  eq badBody.error, 'Validation failed'
+  eq badBody.code, 'invalid_field'
+  ok badBody.fields.name, 'the refused field is named'
   invalid = handle! request 'POST', '/signup',
     body: '{oops'
     headers: { 'content-type': 'application/json' }
   eq invalid.status, 400
-  eq invalid.json!,
-    error:
-      message: 'Invalid JSON body'
-      issues: [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
+  eq invalid.json!, { error: 'Invalid JSON body', code: 'invalid_json' }
   document = (handle! request('GET', '/openapi.json')).json!
   eq document.openapi, '3.1.0'
   eq document.info, { title: 'Framework Test', version: '1.0.0' }

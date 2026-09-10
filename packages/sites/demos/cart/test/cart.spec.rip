@@ -101,7 +101,7 @@ test('a rejected order shows the error and keeps the cart', ({ page }) ->
 
   rejectOrder = (route: Route) ->
     return route.continue() unless route.request().method() is 'POST'
-    route.fulfill({ status: 400, contentType: 'application/json', body: '{"errors":{"form":"Invalid order data"}}' })
+    route.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"Invalid order data","code":"invalid_order"}' })
 
   page.route!('**/api/orders', rejectOrder)
 

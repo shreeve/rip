@@ -1,13 +1,24 @@
-import { http, HTTPError } from 'rip/http'
+import { http, HTTPError, NetworkError } from 'rip/http'
 
 export api = http.create({ prefixUrl: '/api', retry: 0 })
 
-export type ApiErrors<K extends string = string> =
-  form?: string
-  field?: Partial<Record<K, string>>
+ErrorBody = schema
+  error!  string
+  code!   string
+  fields  json
 
-export def parseApiError(err: unknown): Promise<ApiErrors>
-  return { form: 'Network error' } unless err instanceof HTTPError
-  body: { errors?: ApiErrors } | null = try err.response.json! catch then null
-  return body.errors if body?.errors?.form or body?.errors?.field
-  return { form: 'Something went wrong' }
+export type ApiError<K extends string = string> =
+  message?: string
+  fields?: Partial<Record<K, string>>
+
+export def parseApiError(err: unknown): Promise<ApiError>
+  unless err instanceof HTTPError
+    console.error(err)
+    return { message: if err instanceof NetworkError then 'Network error' else 'Something went wrong' }
+  body = try err.response.json! catch then null
+  parsed = ErrorBody.safe(body)
+  unless parsed.ok
+    console.error('API error in an unexpected shape', body, parsed.errors)
+    return { message: 'Something went wrong' }
+  { error, fields } = parsed.value
+  if fields then { fields } else { message: error }

@@ -1,11 +1,11 @@
-import { api, ApiErrors, parseApiError } from '../api-client.rip'
+import { api, ApiError, parseApiError } from '../api-client.rip'
 import { Button, ButtonLink } from '../components/button.rip'
 import { title, formatPrice } from '../config.rip'
 import { createMutation } from 'rip/app'
 
 export Cart = component
   cart ~= @stash.cart
-  errors: ApiErrors := {}
+  error: ApiError := {}
 
   mounted: -> document.title = title('Cart')
 
@@ -15,9 +15,9 @@ export Cart = component
   ),
     onSuccess: =>
       cart.clear()
-      errors = {}
+      error = {}
       @stash.orders = null
-    onError: (err) => errors = parseApiError!(err)
+    onError: (err) => error = parseApiError!(err)
 
   render
     if placeOrder.succeeded
@@ -75,5 +75,5 @@ export Cart = component
       div.cart-actions
         Button loading: placeOrder.pending, @click: (-> placeOrder()), 'Place Order'
         Button variant: 'secondary', outline, link, @click: (-> cart.clear()), 'Clear Cart'
-      if errors.form
-        p.error errors.form
+      if error.message
+        p.error error.message

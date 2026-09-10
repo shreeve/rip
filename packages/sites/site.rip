@@ -412,29 +412,58 @@ STATUS_TEXT: Record<number, string> =
   502: 'Bad Gateway'
   503: 'Service Unavailable'
 
-export type ApiError = { message?: string, notice?: string, issues?: unknown[] }
+# The code a thrown error carries when nobody gave it one: derived from
+# its status, so a client can always branch on `code` and never on text.
+STATUS_CODE: Record<number, string> =
+  400: 'bad_request'
+  401: 'unauthorized'
+  403: 'forbidden'
+  404: 'not_found'
+  409: 'conflict'
+  422: 'invalid_field'
+  429: 'too_many_requests'
+  500: 'internal_error'
+  502: 'upstream_failure'
+  503: 'unavailable'
 
-# One JSON error envelope for every thrown error. `notice` (notice!) and
-# `issues` (read/schema validation) are explicitly user-facing, so they're
-# always shown. A plain `error!` message is shown only for 4xx; 5xx and raw
-# throws (no/invalid status) are masked to a generic status message so internal
-# details never leak. Exported so a custom `onError` can reuse the same shape.
-# (`err` is an arbitrary thrown value — untyped by nature, like a catch binding.)
-export errorEnvelope = (err): { status: number, error: ApiError } ->
+export type ErrorBody = { error: string, code: string, fields?: Record<string, string> }
+
+# One JSON error envelope for every thrown error, flat: { error, code,
+# fields? }. `error` is the message, `code` is always present, and a
+# refused field is always reported the same way, one or many — `fields`
+# maps each to its message, whether the throw named one field (`error!
+# msg, status, code, field`, read's loud-optional `type?`), collected a
+# map (`error! map`), or came from a schema `input:` refusal. A coded
+# throw ships as authored; an uncoded one takes its code from the
+# status. `notice` (notice!) is explicitly user-facing and is always the
+# message. Any other 5xx or raw throw (no/invalid status) is masked to a
+# generic status message so internal details never leak, and carries no
+# fields. (`err` is an arbitrary thrown value — untyped by nature, like
+# a catch binding.)
+export errorEnvelope = (err): { status: number, body: ErrorBody } ->
   raw = err?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
-  error =
-    if err?.errors
-      { message: err.message or 'Validation failed', errors: err.errors }
-    else if err?.issues
-      { message: err.message or 'Validation failed', issues: err.issues }
-    else if err?.notice
-      { notice: err.notice }
-    else if status < 500
-      { message: err.message or STATUS_TEXT[status] or 'Error' }
-    else
-      { message: STATUS_TEXT[status] or 'Internal Server Error' }
-  { status, error }
+  coded = err?.api is true and typeof err.code is 'string'
+  message =
+    if err?.notice then err.notice
+    else if coded or status < 500 then err.message or STATUS_TEXT[status] or 'Error'
+    else STATUS_TEXT[status] or 'Internal Server Error'
+  body: ErrorBody =
+    error: message
+    code:  if coded then err.code else STATUS_CODE[status] ?? "http_#{status}"
+  fields = null
+  if status < 500
+    fields = err?.errors
+    if not fields? and err?.issues?
+      fields = {}
+      fields[i.field] = i.message for i in err.issues when i.field and i.message
+    if not fields? and typeof err?.field is 'string'
+      fields = {}
+      fields[err.field] = err.message
+  if fields? and Object.keys(fields).length
+    body.code   = 'invalid_field' unless coded
+    body.fields = fields
+  { status, body }
 
 smart = (fn) ->
   (c, next) ->
@@ -454,8 +483,8 @@ smart = (fn) ->
 # ==============================================================================
 
 # Validate the JSON body through a schema before the handler runs. On
-# failure the request never reaches the handler — a 400 with structured
-# {field, error, message} issues goes out instead.
+# failure the request never reaches the handler — a 400 goes out in the
+# flat envelope, each refused field's message under `fields`.
 # On success the parsed, defaulted, coerced value is `@input`. Uses
 # safeAsync so schemas with @ensure! async refinements work too.
 withInput = (schema, fn) ->
@@ -463,7 +492,8 @@ withInput = (schema, fn) ->
     if c._bodyInvalid
       err = Error.new 'Invalid JSON body'
       err.status = 400
-      err.issues = [{ field: '', error: 'json', message: 'request body is not valid JSON' }]
+      err.code   = 'invalid_json'
+      err.api    = true
       throw err
     r = schema.safeAsync! (c._body ?? {})
     unless r.ok
@@ -531,13 +561,6 @@ export all:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) =>
 # validation-failure shape. The document is rebuilt per request — route
 # tables are small and this keeps it always-current.
 
-ISSUE_SCHEMA =!
-  type: 'object'
-  properties:
-    field:   { type: 'string' }
-    error:   { type: 'string' }
-    message: { type: 'string' }
-
 buildOpenAPI = ->
   paths = {}
   for r in _routes
@@ -554,12 +577,11 @@ buildOpenAPI = ->
             'application/json':
               schema:
                 type: 'object'
+                required: ['error', 'code']
                 properties:
-                  error:
-                    type: 'object'
-                    properties:
-                      message: { type: 'string' }
-                      issues:  { type: 'array', items: ISSUE_SCHEMA }
+                  error:  { type: 'string' }
+                  code:   { type: 'string' }
+                  fields: { type: 'object', additionalProperties: { type: 'string' } }
       requestBody:
         required: true
         content:
@@ -633,8 +655,8 @@ dispatchRequest = (req) ->
   try
     match = matchRoute((if method is 'HEAD' then 'GET' else method), pathname)
   catch err
-    { status, error } = errorEnvelope(err)
-    return Response.new JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    { status, body } = errorEnvelope(err)
+    return Response.new JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
 
   unless match
     c = createContext(req, {}, url, pathname)
@@ -710,8 +732,8 @@ export fetch = (request: Request): Promise<Response> ->
       response
   catch err
     console.warn 'Request error:', err if not err?.status or err.status >= 500
-    { status, error } = errorEnvelope(err)
-    Response.new JSON.stringify({ error }), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+    { status, body } = errorEnvelope(err)
+    Response.new JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
 
 # Each route's filter chain is cached on the route object.
 composedChain = (route) ->
@@ -749,7 +771,7 @@ runHandler = (c, route) ->
       # No handler, or the handler declined (null/undefined): the same
       # masked JSON envelope smart() emits — 5xx internals never leak.
       masked = errorEnvelope(err)
-      Response.new JSON.stringify({ error: masked.error }), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+      Response.new JSON.stringify(masked.body), { status: masked.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     applyMark(res)
 
 # ==============================================================================

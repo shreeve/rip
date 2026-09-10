@@ -668,8 +668,10 @@ get '/admin' ->
   ...
 ```
 
-Thrown failures become `{ error: { message, notice?, issues? } }`. Explicit
-4xx messages are visible. Raw failures and 5xx details are masked.
+Thrown failures become `{ error, code, fields? }`: the message, a machine code
+(the throw's own, else one derived from the status), and, for a refused field
+or a validation map, each field's message under `fields`. Explicit 4xx
+messages are visible. Raw failures and 5xx details are masked.
 
 `notFound` handles unmatched requests; `onError` replaces the default matched
 route error response:

@@ -1,5 +1,5 @@
 import { User } from '../types.rip'
-import { api, ApiErrors, parseApiError } from '../api-client.rip'
+import { api, ApiError, parseApiError } from '../api-client.rip'
 import { Button } from '../components/button.rip'
 import { title } from '../config.rip'
 import { createMutation } from 'rip/app'
@@ -7,15 +7,15 @@ import { createMutation } from 'rip/app'
 export Profile = component
   user <~ @stash.user
   form: User := { ...user }
-  errors: ApiErrors<keyof User> := {}
+  error: ApiError<keyof User> := {}
 
   mounted: -> document.title = title('Profile')
 
   updateUser = createMutation (data: User) -> User.parse(api.patch!('user', { json: data }).json!),
     onSuccess: (user) =>
-      errors = {}
+      error = {}
       @stash.user = user
-    onError: (err) => errors = parseApiError!(err)
+    onError: (err) => error = parseApiError!(err)
 
   render
     h1 'Profile'
@@ -25,16 +25,16 @@ export Profile = component
           'First name'
           input
             value <=> form.firstName
-            aria-invalid: errors.field?.firstName?!
-          if errors.field?.firstName
-            small errors.field?.firstName
+            aria-invalid: error.fields?.firstName?!
+          if error.fields?.firstName
+            small error.fields?.firstName
         label
           'Last name'
           input
             value <=> form.lastName
-            aria-invalid: errors.field?.lastName?!
-          if errors.field?.lastName
-            small errors.field?.lastName
+            aria-invalid: error.fields?.lastName?!
+          if error.fields?.lastName
+            small error.fields?.lastName
       div.grid
         label
           'Email'
@@ -45,7 +45,7 @@ export Profile = component
             value <=> form.phone
             type: 'tel'
       Button type: 'submit', loading: updateUser.pending, 'Update Profile'
-      if errors.form
-        p.error errors.form
+      if error.message
+        p.error error.message
       if updateUser.succeeded
         p.success 'Profile updated!'
