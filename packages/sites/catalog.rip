@@ -3,9 +3,10 @@
 # Durable Sites catalog — Rip owns sites.json. Janus never writes this file.
 # The agent is the only writer; CLI readers use the same schema.
 
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { agentPaths } from './appliance.rip'
+import { snapshotEnvironment } from './edge.rip'
 import { managerRuntime } from './control.rip'
 
 export RESERVED = ['edge', 'all', 'agent']
@@ -79,7 +80,7 @@ export findCatalogApp = (doc, selector, required = true) ->
   fail "ambiguous app #{JSON.stringify(selector)}", 409 unless matches.length is 1
   matches[0]
 
-readOwnerPid = (root, label) ->
+export readOwnerPid = (root, label = 'rip-sites') ->
   owner = managerRuntime(root, label).owner
   return null unless existsSync owner
   try
@@ -87,44 +88,72 @@ readOwnerPid = (root, label) ->
     if Number.isInteger(value.pid) then value.pid else null
   catch then null
 
-# Live manager probe without the control plane — keeps list/status honest after crash.
-# Hosts mirror the agent's effective order (manager → catalog pin → serve.rip);
-# this runs in a one-shot CLI process, so importing serve.rip directly is
-# always fresh — the module-cache staleness the agent must dodge cannot occur.
-export snapshotCatalogApp = (app, label = 'rip-sites') ->
-  manager = null
+# The agent supplies its cached serve.rip reader; a one-shot CLI can import
+# the declaration directly. Host precedence and response shape are shared.
+readServeDecl = (app) ->
+  return null unless existsSync join(app.root, 'serve.rip')
   try
-    response = fetch! 'http://manager/status', { method: 'GET', unix: managerRuntime(app.root, label).socket, signal: AbortSignal.timeout(500) }
-    manager = response.json! if response.ok
-  catch then null
-  hosts = app.hosts or []
-  site = manager?.site or null
-  serveError = null
-  if manager?.hosts?.length
-    hosts = manager.hosts
-  else if site?
-    hosts = Object.keys site.aliases or {}
-  else if not hosts.length and existsSync join(app.root, 'serve.rip')
+    { loadServeConfig } = import!(join(import.meta.dir, 'manager.rip'))
+    (loadServeConfig! app.root) or {}
+  catch error
+    { error: error?.message or String(error) }
+
+effectiveHosts = (app, manager, readDecl) ->
+  if manager?
+    site = manager.site or null
+    return { hosts: manager.hosts, site, error: null } if manager.hosts?.length
+    return { hosts: Object.keys(site.aliases or {}), site, error: null } if site?
+  return { hosts: app.hosts, site: null, error: null } if app.hosts.length
+  decl = readDecl! app
+  return { hosts: [], site: null, error: null } unless decl?
+  return { hosts: [], site: null, error: decl.error } if decl.error?
+  site = decl.site or null
+  hosts = decl.hosts or []
+  hosts = Object.keys(site.aliases or {}) if not hosts.length and site?
+  # A bare serve.rip (neither hosts nor sites) makes the manager serve
+  # the app name as its host — mirror that.
+  hosts = [app.name] unless hosts.length
+  { hosts, site, error: null }
+
+hostCovered = (host, dir) ->
+  return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
+  return false unless dir?
+  names = try
+    readdirSync(dir).filter (name) -> name.endsWith '.caddy'
+  catch then []
+  for name in names
+    text = try
+      readFileSync join(dir, name), 'utf8'
+    catch then ''
+    return true if text.includes host
+    for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
+      return true if host.endsWith ".#{match[1]}"
+  false
+
+export snapshotCatalogApp = (app, label = 'rip-sites', options = {}) ->
+  manager = null
+  if options.managerStatus?
+    manager = options.managerStatus! app
+  else
     try
-      # Lazy: manager.rip's module graph is heavy and only this offline
-      # serve.rip branch needs it — keep it off the common CLI path.
-      { loadServeConfig } = import!(join(import.meta.dir, 'manager.rip'))
-      serve = loadServeConfig! app.root
-      site = serve?.site or null
-      hosts = serve?.hosts or []
-      hosts = Object.keys site.aliases or {} if not hosts.length and site?
-      # A bare serve.rip makes the manager serve the app name as its host.
-      hosts = [app.name] unless hosts.length
-    catch error
-      serveError = error?.message or String(error)
-  host = hosts.find((h) -> h.endsWith '.via.rip') or hosts[0]
+      response = fetch! 'http://manager/status', { method: 'GET', unix: managerRuntime(app.root, label).socket, signal: AbortSignal.timeout(500) }
+      manager = response.json! if response.ok
+    catch then null
+  { hosts, site, error } = effectiveHosts! app, manager, options.readDecl or readServeDecl
+  edge = options.edge or snapshotEnvironment()
+  suffix = if edge.scope is 'lan' then '.local' else '.via.rip'
+  host = hosts.find((h) -> h.endsWith(suffix)) or hosts[0]
+  uncovered = (h for h in hosts when not hostCovered(h, edge.sites))
   {
     ...app
-    state: if manager? then (if manager.stopping then 'stopping' else 'running') else 'stopped'
+    state: if manager? then (if manager.stopping then 'stopping' else if manager.ready is false then 'starting' else 'running') else 'stopped'
     pid: if manager? then readOwnerPid(app.root, label) else null
-    url: if host? then "https://#{host}/" else null
+    url: if host? then (options.baseUrl or 'https://{host}/').replace('{host}', host) else null
     hosts
     sitePattern: site?.host or null
-    serveError
+    serveError: error
+    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add #{join(edge.sites or '<janus sites dir>', app.name + '.caddy')} (or any *.caddy declaring these hosts)" else null
     manager
+    lastError: app.lastError or null
+    lastExit: app.lastExit or null
   }

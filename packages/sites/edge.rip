@@ -129,3 +129,45 @@ export configureEdge = (report = abort) ->
   janus = requireExposureJanus janusStatus(), report
   return null unless janus?
   ensureEdgeSite janus, report
+
+# Snapshot readers share the same short-lived service facts. No disk state
+# is cached: this only avoids spawning Janus once for every app in a list.
+snapshotCache = { at: 0, value: null }
+export snapshotEnvironment = ->
+  return { scope: 'localhost', sites: null } if externalEdge()
+  now = Date.now()
+  if now - snapshotCache.at >= 2000
+    snapshotCache = { at: now, value: janusStatus() }
+  snapshotCache.value or { scope: 'localhost', sites: null }
+
+export snapshotEdgeState = (edge, janus, health = null) ->
+  {
+    state: if health? then 'running' else 'stopped'
+    external: externalEdge()
+    control: edgeControl(janus)
+    scope: janus?.scope or null
+    interface: janus?.interface or null
+    bind: janus?.bind or null
+    firewall: janus?.firewall or null
+    baseUrl: edge?.baseUrl or 'https://{host}/'
+    pid: janus?.pid or null
+    uptime: janus?.uptime or null
+    supervisor: janus?.supervisor or null
+    autostart: janus?.autostart is true
+    version: janus?.janus or null
+    binaryNewer: janus?.binary_newer is true
+    config: janus?.config or null
+    sites: janus?.sites or null
+    log: janus?.log or null
+    admin: janus?.admin or null
+    janus: health
+    lastError: edge?.lastError or null
+  }
+
+export edgeFetch = (target, path = '/1.0', init = {}) ->
+  options = { signal: AbortSignal.timeout(5000), ...init }
+  if target.startsWith('http://') or target.startsWith('https://')
+    fetch "#{target.replace(/\/$/, '')}#{path}", options
+  else
+    options.unix = target
+    fetch "http://janus#{path}", options

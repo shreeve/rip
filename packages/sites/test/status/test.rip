@@ -1,0 +1,40 @@
+import { test, eq, ok } from 'rip/testing'
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { snapshotCatalogApp } from '../../catalog.rip'
+import { managerRuntime } from '../../control.rip'
+
+test! 'direct and supervised snapshots share readiness, fields, and host choice', ->
+  root = mkdtempSync join(tmpdir(), 'rip-status-')
+  runtime = managerRuntime root
+  manager = { ready: false, stopping: false, hosts: ['test.via.rip', 'test.local'] }
+  server = Bun.serve { unix: runtime.socket, fetch: -> Response.json(manager) }
+  app = { id: '1234567890abcdef', name: 'test', root, hosts: ['pinned.local'], desired: 'running', options: { workers: 2 }, addedAt: '2026-09-10' }
+  edge = { scope: 'lan', sites: null }
+  try
+    writeFileSync runtime.owner, JSON.stringify({ pid: process.pid })
+    direct = snapshotCatalogApp! app, 'test', { edge, baseUrl: 'https://{host}:8443/' }
+    supervised = snapshotCatalogApp! app, 'test', { edge, baseUrl: 'https://{host}:8443/', managerStatus: -> manager }
+    eq JSON.stringify(direct), JSON.stringify(supervised)
+    eq direct.state, 'starting'
+    eq direct.url, 'https://test.local:8443/'
+    eq direct.options.workers, 2
+    eq direct.addedAt, app.addedAt
+    eq direct.hostWarning, null
+    eq direct.pid, process.pid
+    manager.ready = true
+    eq (snapshotCatalogApp! app, 'test', { edge }).state, 'running'
+    manager.stopping = true
+    eq (snapshotCatalogApp! app, 'test', { edge }).state, 'stopping'
+    server.stop true
+    stopped = snapshotCatalogApp! app, 'test', { edge }
+    eq stopped.state, 'stopped'
+    eq stopped.pid, null
+    eq stopped.url, 'https://pinned.local/'
+    eq app.hosts[0], 'pinned.local'
+  finally
+    server.stop true
+    unlinkSync runtime.owner if existsSync runtime.owner
+    unlinkSync runtime.socket if existsSync runtime.socket
+    rmSync root, { recursive: true, force: true }

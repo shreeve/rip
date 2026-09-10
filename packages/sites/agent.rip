@@ -1,12 +1,12 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
-import { RESERVED, findCatalogApp, loadCatalog, saveCatalog } from './catalog.rip'
+import { RESERVED, findCatalogApp, loadCatalog, readOwnerPid, saveCatalog, snapshotCatalogApp } from './catalog.rip'
 import { readLog } from './logs.rip'
-import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeFetch, snapshotEdgeState, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
 
@@ -28,25 +28,6 @@ ensureLanHosts = (hosts) ->
     out.push twin
     seen.add twin
   out
-
-# The edge's exposure scope is Janus's; snapshots ask per app, so the
-# answer is kept for two seconds. It only picks which URL to show first.
-scopeCache = { at: 0, scope: 'localhost' }
-currentScope = ->
-  now = Date.now()
-  return scopeCache.scope if now - scopeCache.at < 2000
-  scopeCache = { at: now, scope: (if externalEdge() then 'localhost' else edgeScope()) }
-  scopeCache.scope
-
-preferredHost = (hosts) ->
-  return null unless hosts?.length
-  if currentScope() is 'lan'
-    match = hosts.find (host) -> host.endsWith '.local'
-    return match if match?
-  else
-    match = hosts.find (host) -> host.endsWith '.via.rip'
-    return match if match?
-  hosts[0]
 
 fail = (message, status = 400) ->
   error = Error.new message
@@ -90,14 +71,6 @@ managerEnv = ->
     env[key] = process.env[key] if key.startsWith 'LC_'
   env
 
-readOwnerPid = (root) ->
-  owner = managerRuntime(root, 'rip-agent').owner
-  return null unless existsSync owner
-  try
-    value = JSON.parse readFileSync(owner, 'utf8')
-    if Number.isInteger(value.pid) then value.pid else null
-  catch then null
-
 # Probe verdicts ride the agent's OWN event loop: AbortSignal.timeout
 # is wall-clock, so with every core busy a healthy peer's reply sits
 # unread past a tight deadline and reads as dead (observed in the field:
@@ -116,14 +89,6 @@ managerStatus = (app) ->
     return null unless response.ok
     response.json!
   catch then null
-
-edgeFetch = (target, path = '/1.0', init = {}) ->
-  options = { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT) }
-  if target.startsWith('http://') or target.startsWith('https://')
-    fetch "#{target}#{path}", options
-  else
-    options.unix = target
-    fetch "http://janus#{path}", options
 
 # The control target apps register with. Janus's socket path does not
 # move, so one answer serves the agent's life; a missing janus is asked
@@ -205,81 +170,7 @@ serveDecl = (app) ->
   serveDecls.set app.root, entry
   entry.promise
 
-# Effective hosts in serving-truth order: what a live manager claims
-# (a site-template manager claims hosts: [] — its concrete alias hosts
-# stand in), then an operator pin in the catalog, then the serve.rip
-# declaration read from disk. Built into snapshots ONLY — never assign
-# the result to app.hosts: the catalog feeds serverArgv --host flags,
-# and a site-template manager aborts on any --host.
-effectiveHosts = (app, manager) ->
-  if manager?
-    site = manager.site or null
-    return { hosts: manager.hosts, site, error: null } if manager.hosts?.length
-    return { hosts: Object.keys(site.aliases or {}), site, error: null } if site?
-  return { hosts: app.hosts, site: null, error: null } if app.hosts.length
-  decl = serveDecl! app
-  return { hosts: [], site: null, error: null } unless decl?
-  return { hosts: [], site: null, error: decl.error } if decl.error?
-  site = decl.site or null
-  hosts = decl.hosts or []
-  hosts = Object.keys(site.aliases or {}) if not hosts.length and site?
-  # A bare serve.rip (neither hosts nor sites) makes the manager serve
-  # the app name as its host — mirror that.
-  hosts = [app.name] unless hosts.length
-  { hosts, site, error: null }
-
-appUrl = (hosts) ->
-  host = preferredHost hosts
-  return null unless host?
-  (state.edge.baseUrl or 'https://{host}/').replace '{host}', host
-
-# Janus's drop-in sites directory, from its status; asked once.
-sitesDir = null
-edgeSitesDir = ->
-  sitesDir ?= janusStatus()?.sites or null
-  sitesDir
-
-# Hosts beyond Janus's *.local site and rip's via.rip file answer only
-# when a sites snippet declares them — and Caddy's import glob is silent
-# when nothing matches, so an app advertising its own domain with no
-# snippet looks healthy everywhere while its URL answers nothing
-# (observed in the field). The snapshot carries the warning instead.
-hostCovered = (host) ->
-  return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
-  dir = edgeSitesDir()
-  return false unless dir?
-  names = try
-    readdirSync(dir).filter (name) -> name.endsWith '.caddy'
-  catch then []
-  for name in names
-    text = try
-      readFileSync join(dir, name), 'utf8'
-    catch then ''
-    return true if text.includes host
-    for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
-      return true if host.endsWith ".#{match[1]}"
-  false
-
-snapshotApp = (app) ->
-  manager = managerStatus! app
-  { hosts, site, error } = effectiveHosts! app, manager
-  uncovered = (host for host in hosts when not hostCovered(host))
-  {
-    id: app.id
-    name: app.name
-    root: app.root
-    desired: app.desired
-    state: if manager? then (if manager.stopping then 'stopping' else if manager.ready is false then 'starting' else 'running') else 'stopped'
-    pid: if manager? then readOwnerPid(app.root) else null
-    url: appUrl(hosts)
-    hosts: hosts
-    sitePattern: site?.host or null
-    serveError: error
-    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add #{join(edgeSitesDir() or '<janus sites dir>', app.name + '.caddy')} (or any *.caddy declaring these hosts)" else null
-    manager
-    lastError: app.lastError or null
-    lastExit: app.lastExit or null
-  }
+snapshotApp = (app) -> snapshotCatalogApp! app, 'rip-agent', { managerStatus, readDecl: serveDecl, baseUrl: state.edge.baseUrl }
 
 findApp = (selector) -> findCatalogApp state, decodeURIComponent(selector)
 
@@ -486,28 +377,7 @@ removeApp = (app) ->
 snapshotEdge = ->
   janus = if externalEdge() then null else janusStatus()
   health = edgeHealth!
-  {
-    state: if health? then 'running' else 'stopped'
-    external: externalEdge()
-    control: edgeTarget()
-    scope: janus?.scope or null
-    interface: janus?.interface or null
-    bind: janus?.bind or null
-    firewall: janus?.firewall or null
-    baseUrl: state.edge.baseUrl
-    pid: janus?.pid or null
-    uptime: janus?.uptime or null
-    supervisor: janus?.supervisor or null
-    autostart: janus?.autostart is true
-    version: janus?.janus or null
-    binaryNewer: janus?.binary_newer is true
-    config: janus?.config or null
-    sites: janus?.sites or null
-    log: janus?.log or null
-    admin: janus?.admin or null
-    janus: health
-    lastError: state.edge.lastError
-  }
+  snapshotEdgeState state.edge, janus, health
 
 # Exit when nothing remains to supervise — no idle forever control plane.
 #

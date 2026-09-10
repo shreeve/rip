@@ -7,7 +7,7 @@
 import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
 import { readLog } from './logs.rip'
 import { RESERVED, findCatalogApp, loadCatalog, snapshotCatalogApp } from './catalog.rip'
-import { JANUS_MISSING, dashboardUrl, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { JANUS_MISSING, dashboardUrl, edgeControl, edgeFetch, snapshotEdgeState, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -267,7 +267,7 @@ wantsControl = ->
 
 # snapshotCatalogApp awaits a manager probe — map through Promise.all, never
 # leave bare Promises (JSON.stringify turns those into `{}`).
-offlineApps = (apps) -> Promise.all! apps.map (app) -> snapshotCatalogApp! app
+offlineApps = (doc) -> Promise.all! doc.apps.map (app) -> snapshotCatalogApp! app, 'rip-sites', { baseUrl: doc.edge.baseUrl }
 
 ensureLiveControl = ->
   live = probeAgent! 'rip-sites'
@@ -278,41 +278,10 @@ ensureLiveControl = ->
     probeAgent! 'rip-sites'
   catch then null
 
-# The edge without a control plane: Janus's status plus the catalog's
-# edge facts. The same shape the agent's snapshot has.
-offlineEdge = (edge, janus, health = null) ->
-  {
-    state: if health? then 'running' else 'stopped'
-    external: externalEdge()
-    control: edgeControl(janus)
-    scope: janus?.scope or null
-    interface: janus?.interface or null
-    bind: janus?.bind or null
-    firewall: janus?.firewall or null
-    baseUrl: edge?.baseUrl or 'https://{host}/'
-    pid: janus?.pid or null
-    uptime: janus?.uptime or null
-    supervisor: janus?.supervisor or null
-    autostart: janus?.autostart is true
-    version: janus?.janus or null
-    binaryNewer: janus?.binary_newer is true
-    config: janus?.config or null
-    sites: janus?.sites or null
-    log: janus?.log or null
-    admin: janus?.admin or null
-    janus: health
-    lastError: edge?.lastError or null
-  }
-
 probeJanus = (control) ->
   return null unless typeof control is 'string' and control.length
   try
-    options = { signal: AbortSignal.timeout(1000) }
-    if control.startsWith('http://') or control.startsWith('https://')
-      response = fetch! "#{control}/1.0", options
-    else
-      options.unix = control
-      response = fetch! 'http://janus/1.0', options
+    response = edgeFetch! control, '/1.0', { signal: AbortSignal.timeout(1000) }
     return response.json! if response.ok
   catch then null
   null
@@ -320,7 +289,7 @@ probeJanus = (control) ->
 readOfflineEdge = ->
   doc = loadCatalog()
   janus = if externalEdge() then null else janusStatus()
-  offlineEdge doc.edge, janus, probeJanus!(edgeControl(janus))
+  snapshotEdgeState doc.edge, janus, probeJanus!(edgeControl(janus))
 
 # The edge is Janus's process; its verbs are janus's.
 edgeIsJanus = (action) ->
@@ -333,7 +302,7 @@ switch verb
     if live
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
     else
-      apps = offlineApps! loadCatalog().apps
+      apps = offlineApps! loadCatalog()
     if json then printJson apps else if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
 
   when 'add'
@@ -396,7 +365,7 @@ switch verb
         else
           doc = loadCatalog()
           edge = readOfflineEdge!
-          apps = offlineApps! doc.apps
+          apps = offlineApps! doc
         if json
           printJson if noun is 'all' then apps else { edge, apps }
         else if noun is 'all'
@@ -412,7 +381,8 @@ switch verb
         if live or wantsControl!
           printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
         else
-          printApp snapshotCatalogApp!(findCatalogApp(loadCatalog(), noun))
+          doc = loadCatalog()
+          printApp snapshotCatalogApp!(findCatalogApp(doc, noun), 'rip-sites', { baseUrl: doc.edge.baseUrl })
 
   when 'open'
     requireNoun ['<app>', 'edge']
