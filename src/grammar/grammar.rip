@@ -1277,14 +1277,12 @@ grammar =
     o 'Expression || Expression'                  , '["||", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression ?? Expression'                  , '["??", 1, 3]'     , 'binary: operator, left, right'
 
-    # Return GUARDS: `x or return e` / `x and return e` / `x ?? return e`.
-    # `throw` is an Expression alternative, so the throw guards need no
-    # productions; `return` is a Statement, so the guard forms admit it
-    # as a logical right operand explicitly. The emitter lowers the guard
-    # as a statement rewrite; value-position uses reject there.
     o 'Expression && Return'                      , '["&&", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression || Return'                      , '["||", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression ?? Return'                      , '["??", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression && STATEMENT'                   , '["&&", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression || STATEMENT'                   , '["||", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression ?? STATEMENT'                   , '["??", 1, 3]'     , 'binary: operator, left, right'
   ]
 
 # ==============================================================================
@@ -1549,14 +1547,14 @@ kinds =
 #   could attach to this try or end it. Shift attaches greedily to the
 #   nearest try, matching every brace language; canonical LR(1) would
 #   keep these conflicts too.
-# • The guard operations over Statement → Return — after the
-#   guard-return idiom (`E && return V`, `||`, `??`), the four postfix
-#   modifiers (POST_IF POST_UNLESS WHILE UNTIL) sit in the lookaheads
-#   of both the completed Operation and the bare Return-as-Statement
-#   (an LALR merge: no canonical state has both). The Operation must
-#   win — `Expression && Statement` is no rule, so the other reading
-#   is a parse error — and the pinned behavior is modifier-binds-widest
-#   (`c && return 3 if flag` compiles to `if (flag) if (c) return 3`).
+# • The guard operations over Statement → Return / STATEMENT — after
+#   the guard idiom (`E && return V`, `E || continue`, `||`, `??`), the
+#   four postfix modifiers (POST_IF POST_UNLESS WHILE UNTIL) sit in the
+#   lookaheads of both the completed Operation and the bare
+#   Return/STATEMENT-as-Statement (an LALR merge: no canonical state has
+#   both). The Operation must win, and the pinned behavior is
+#   modifier-binds-widest (`c && return 3 if flag` compiles to
+#   `if (flag) if (c) return 3`; `x or continue if y` likewise).
 # • Gate over Arguments — after `target <~ path(...)`, the trailing
 #   call completes the gate's keyed-source form (Gate → … CALL_END,
 #   which owns the arguments as key spans) or a plain call expression
@@ -1577,6 +1575,9 @@ expectedConflicts = [
   ['reduce-reduce', 'Operation → Expression && Return over Statement → Return'                                                                    ,  4]
   ['reduce-reduce', 'Operation → Expression || Return over Statement → Return'                                                                    ,  4]
   ['reduce-reduce', 'Operation → Expression ?? Return over Statement → Return'                                                                    ,  4]
+  ['reduce-reduce', 'Operation → Expression && STATEMENT over Statement → STATEMENT'                                                              ,  4]
+  ['reduce-reduce', 'Operation → Expression || STATEMENT over Statement → STATEMENT'                                                              ,  4]
+  ['reduce-reduce', 'Operation → Expression ?? STATEMENT over Statement → STATEMENT'                                                              ,  4]
   ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                       , 42]
   ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                  , 42]
   ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END'     , 42]
