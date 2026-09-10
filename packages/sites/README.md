@@ -1404,7 +1404,8 @@ Rip's names are one site file, `rip.caddy` beside this README: the via.rip
 family, site blocks only, nothing rendered. The control plane copies it
 into Janus's sites directory as shipped and reloads a running edge when
 it changed; that happens when the control plane boots and before an app
-starts. The LAN family, `*.local`, is Janus's own site; the bind, the
+starts, including foreground `run` and `publish`. A failed reload restores
+the previous file so the next attempt retries. The LAN family, `*.local`, is Janus's own site; the bind, the
 firewall, the local CA, and trust in it are Janus's; a mode change touches
 nothing of Rip's. Operator-owned domains go in one `*.caddy` file each in
 the same directory. `JANUS_CONTROL` names an edge Rip does not configure:

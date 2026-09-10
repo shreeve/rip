@@ -75,25 +75,16 @@ logFlags = []
 # Manager verbs invoke manager.rip as an internal module (not a user CLI).
 MANAGER = ['run', 'publish', 'hold', 'release', 'migrate', 'recover']
 
-# A foreground manager registers where the supervised apps do: Janus's
-# control socket, unless JANUS_CONTROL already says otherwise.
-seedJanusControl = (env) ->
-  return env if env.JANUS_CONTROL
-  control = try edgeControl() catch then null
-  env.JANUS_CONTROL = control if control?
-  env
-
 runManager = (argv, options = {}) ->
   manager = join(import.meta.dir, 'manager.rip')
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-sites: the Rip loader is missing' unless preload?
-  env = seedJanusControl! { ...process.env }
   result = Bun.spawnSync [process.execPath, preload, manager, ...argv],
     cwd: options.cwd or process.cwd()
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'inherit'
-    env: env
+    env: { ...process.env }
   exit result.exitCode ?? 1
 
 takeAppNoun = ->

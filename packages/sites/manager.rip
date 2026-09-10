@@ -7,6 +7,7 @@ import { rash, check } from 'rip/app/rash'
 import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
+import { configureEdge, edgeControl, edgeFetch } from './edge.rip'
 
 positiveEnv = (name, fallback) ->
   text = process.env[name] or String(fallback)
@@ -151,11 +152,7 @@ controlFetch = (target, method, path, body = null) ->
   if body?
     options.body = JSON.stringify body
     options.headers = { 'content-type': 'application/json' }
-  if target.startsWith('http://') or target.startsWith('https://')
-    fetch "#{target}#{path}", options
-  else
-    options.unix = target
-    fetch "http://janus#{path}", options
+  edgeFetch target, path, options
 
 # The rip installation RUNNING US, not the package this file ships in —
 # they are the same tree in-repo and need not be once @rip/sites is a
@@ -440,7 +437,7 @@ runBrowse = (args) ->
   abort 'rip-site: browse accepts at most one --host' if args.hosts.length > 1
   explicitHost = args.hosts[0] ?? null
   abort "rip-site: browse host is not valid: #{explicitHost}" if explicitHost? and not validHost(explicitHost)
-  abort 'rip-site: --control or JANUS_CONTROL is required' unless args.control?
+  args.control = edgeControl(configureEdge()) unless args.control?
   probeControl! args.control
   earlySignalStatus = null
   earlySignalCount = 0
@@ -1035,7 +1032,7 @@ export main = (argv) ->
     warn 'rip-site: WATCH ENABLED IN PRODUCTION'
   if project.entry? and args.concurrency > 1 and (args.watchApi or args.eager)
     abort "rip-site: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
-  abort 'rip-site: --control or JANUS_CONTROL is required' unless args.control?
+  args.control = edgeControl(configureEdge()) unless args.control?
   probeControl! args.control
   # A system edge (e.g. Janus under systemd) runs as its own user and
   # must traverse into this directory to reach the worker sockets —

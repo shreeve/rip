@@ -1,7 +1,8 @@
 import { test, eq, ok } from 'rip/testing'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { SITE, SITE_NAME } from '../../edge.rip'
 
 test! 'failed edge reload restores the file and the next attempt retries', ->
   dir = mkdtempSync join(tmpdir(), 'rip-edge-retry-')
@@ -50,4 +51,43 @@ test! 'failed edge reload restores the file and the next attempt retries', ->
     stderr = Response.new(child.stderr).text()
     eq await child.exited, 0, (await stdout) + (await stderr)
   finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'foreground publish installs the service site before registering', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-foreground-edge-')
+  socket = join dir, 'control.sock'
+  target = join(dir, 'sites', SITE_NAME)
+  requests = []
+  server = Bun.serve
+    unix: socket
+    fetch: (request) ->
+      requests.push URL.new(request.url).pathname
+      return Response.json({ type: 'janus' }) if request.method is 'GET'
+      eq readFileSync(target, 'utf8'), readFileSync(SITE, 'utf8')
+      Response.json { id: 'fixture' }, { status: 201 }
+  try
+    bin = join dir, 'bin'
+    mkdirSync bin
+    writeFileSync join(bin, 'janus'), '''
+    #!/bin/sh
+    case "$1" in
+      status) printf '%s\n' "$RIP_TEST_JANUS_STATUS" ;;
+      reload) printf x >> "$RIP_TEST_RELOAD_CALLS" ;;
+      *) exit 1 ;;
+    esac
+    ''', { mode: 0o755 }
+    preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+    env = { ...process.env, PATH: bin + ':' + process.env.PATH, RIP_TEST_RELOAD_CALLS: join(dir, 'calls'), RIP_TEST_JANUS_STATUS: JSON.stringify({ sites: join(dir, 'sites'), socket, running: true, scope: 'localhost', bind: ['127.0.0.1'] }) }
+    delete env.JANUS_CONTROL
+    cli = join(import.meta.dir, '..', '..', 'sites.rip')
+    for argv in [['run', '--help'], ['publish', dir, '--host', 'fixture.via.rip', '--until-restart']]
+      child = Bun.spawn [process.execPath, preload, cli, ...argv], { env, stdout: 'pipe', stderr: 'pipe' }
+      stdout = Response.new(child.stdout).text()
+      stderr = Response.new(child.stderr).text()
+      eq await child.exited, 0, (await stdout) + (await stderr)
+      ok not existsSync(target) if argv[0] is 'run'
+    eq requests, ['/1.0', '/1.0/apps']
+    eq readFileSync(join(dir, 'calls'), 'utf8'), 'x'
+  finally
+    server.stop true
     rmSync dir, { recursive: true, force: true }
