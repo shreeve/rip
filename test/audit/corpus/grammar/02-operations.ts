@@ -130,6 +130,49 @@ let classify = function(n: number, label: string | null = null) {
 
 console.log(classify(0), classify(-2), classify(3), classify(3, 'big'))
 
+// ── Loose then/else: below assignment, and the same Return / STATEMENT guards as && / || / ?? ──
+
+console.log('loose:', (ten > 0 && 'yes'), (0 || 'none'))
+
+let take = function(n: number) {
+  if (n) return 'took'
+  return 'empty'
+}
+let drop = function(n: number) {
+  if (!n) return 'empty'
+  return 'kept'
+}
+
+console.log('guards:', take(10), take(0), drop(10), drop(0))
+
+let keptAnd: number[] = []
+for (let n of [0, 1]) {
+  if (n) continue
+  keptAnd.push(n)
+}
+let keptOr: number[] = []
+for (let n of [0, 1]) {
+  if (!n) continue
+  keptOr.push(n)
+}
+let keptNull: number[] = []
+for (let n of [0, null]) {
+  if (n == null) continue
+  keptNull.push(n)
+}
+let keptThen: number[] = []
+for (let n of [0, 1]) {
+  if (n) continue
+  keptThen.push(n)
+}
+let keptElse: number[] = []
+for (let n of [0, 1]) {
+  if (!n) continue
+  keptElse.push(n)
+}
+
+console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse)
+
 // ── Arg lists: the indented block, the line-split tail, and spread args ──
 
 let sum3 = function(x: number, y: number, z: number) { return x + y + z }

@@ -219,6 +219,33 @@ for (let x of [1]) {
 fail "a continue guard rejects in value position", "f = ->\n  g(x or continue)", "a continue guard is a statement"
 fail "a continue guard rejects outside a loop", "x or continue", "'continue' outside a loop"
 
+test "else continue skips falsy", '''
+  out = []
+  for line in ['a', '  ', 'b', '']
+    code = line.trim() else continue
+    out.push code
+  out
+''', ['a', 'b']
+
+test "then continue fires on truthy", '''
+  out = []
+  for x in [0, 1, 2]
+    x is 1 then continue
+    out.push x
+  out
+''', [0, 2]
+
+code "else continue assignment lowers to an if-guard", '''
+for x in [1]
+  y = x else continue
+''', '''
+let y;
+
+for (let x of [1]) {
+  if (!(y = x)) continue;
+}
+'''
+
 # ==============================================================================
 # For-As Loops (ES6 for-of on iterables): "for-as"
 # ==============================================================================

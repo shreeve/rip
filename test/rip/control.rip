@@ -73,6 +73,29 @@ code "if-else stays inside implicit call", "f if a then b else c", "f(a ? b : c)
 
 test "postfix if else stays the ternary", "x = 0 if false else 2\nx", 2
 
+# Loose then/else guards: same rewrite as `and return` / `or continue`
+code "then return assignment lowers to an if-guard", "f = (x) ->\n  y = x then return 22\n  y", '''
+  let f = function(x) {
+    let y;
+    if (y = x) return 22;
+    return y;
+  };
+'''
+
+test "then return fires on truthy", "f = (x) ->\n  y = x then return 22\n  y\n[f(17), f(0)]", [22, 0]
+
+code "else return assignment lowers to an if-guard", "f = (x) ->\n  y = x else return 22\n  y", '''
+  let f = function(x) {
+    let y;
+    if (!(y = x)) return 22;
+    return y;
+  };
+'''
+
+test "else return fires on falsy", "f = (x) ->\n  y = x else return 22\n  y\n[f(0), f(17)]", [22, 17]
+
+test "if then return stays an if-body", "f = (x) ->\n  if x then return 22\n  0\n[f(1), f(0)]", [22, 0]
+
 # ==============================================================================
 # Unless Statements: "unless"
 # ==============================================================================
