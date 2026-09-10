@@ -1,0 +1,53 @@
+import { test, eq, ok } from 'rip/testing'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+test! 'failed edge reload restores the file and the next attempt retries', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-edge-retry-')
+  try
+    bin = join dir, 'bin'
+    mkdirSync bin
+    writeFileSync join(bin, 'janus'), '''
+    #!/bin/sh
+    if [ ! -e "$RIP_TEST_RELOAD_CALLS" ]; then
+      printf x > "$RIP_TEST_RELOAD_CALLS"
+      echo 'fixture rejection' >&2
+      exit 1
+    fi
+    printf x >> "$RIP_TEST_RELOAD_CALLS"
+    exit 0
+    ''', { mode: 0o755 }
+    source = join dir, 'probe.rip'
+    edge = join(import.meta.dir, '..', '..', 'edge.rip')
+    writeFileSync source, """
+    import { ensureEdgeSite, SITE, SITE_NAME } from #{JSON.stringify(edge)}
+    import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+    import { join } from 'node:path'
+    import { eq, ok } from 'rip/testing'
+    sites = join(import.meta.dir, 'sites')
+    mkdirSync sites
+    target = join(sites, SITE_NAME)
+    for previous in [null, '# previous config\\n']
+      unlinkSync process.env.RIP_TEST_RELOAD_CALLS if existsSync process.env.RIP_TEST_RELOAD_CALLS
+      if previous? then writeFileSync(target, previous) else if existsSync(target) then unlinkSync(target)
+      janus = { sites, running: true }
+      failures = []
+      eq ensureEdgeSite(janus, (message) -> failures.push(message); null), null
+      eq failures.length, 1
+      ok failures[0].includes 'fixture rejection'
+      eq (if existsSync(target) then readFileSync(target, 'utf8') else null), previous
+      eq ensureEdgeSite(janus), janus
+      eq readFileSync(target, 'utf8'), readFileSync(SITE, 'utf8')
+      eq readFileSync(process.env.RIP_TEST_RELOAD_CALLS, 'utf8'), 'xx'
+    """
+    preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
+    child = Bun.spawn [process.execPath, preload, source],
+      stdout: 'pipe'
+      stderr: 'pipe'
+      env: { ...process.env, PATH: bin + ':' + process.env.PATH, RIP_TEST_RELOAD_CALLS: join(dir, 'calls') }
+    stdout = Response.new(child.stdout).text()
+    stderr = Response.new(child.stderr).text()
+    eq await child.exited, 0, (await stdout) + (await stderr)
+  finally
+    rmSync dir, { recursive: true, force: true }

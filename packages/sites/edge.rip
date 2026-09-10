@@ -11,7 +11,7 @@
 # and nothing here writes a file or reloads anything. Tests and custom
 # edges use it.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isIP } from 'node:net'
 
@@ -92,6 +92,14 @@ lastLine = (result) ->
   lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
   (lines.at(-1) or '').replace /^Error: /, ''
 
+writeSite = (target, content) ->
+  temporary = "#{target}.tmp-#{process.pid}"
+  try
+    writeFileSync temporary, content
+    renameSync temporary, target
+  finally
+    unlinkSync temporary if existsSync temporary
+
 # Keep rip's site file in Janus's sites directory, as shipped, and reload
 # a running edge when it changed. `janus` is Janus's status; `report(message,
 # status)` receives a failure. Returns the status.
@@ -101,14 +109,23 @@ export ensureEdgeSite = (janus, report = abort) ->
   current = try readFileSync(target, 'utf8') catch then null
   return janus if current is desired
   mkdirSync janus.sites, { recursive: true }
-  writeFileSync target, desired
+  writeSite target, desired
   if janus.running
-    reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
-    return report("janus reload failed: #{lastLine reload}", 503) unless reload.exitCode is 0
+    try
+      reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
+      throw Error.new(lastLine(reload)) unless reload.exitCode is 0
+    catch error
+      # Restore the pre-reload file so a later attempt retries the change.
+      # Preserve an operator edit made while reload was running.
+      if (try readFileSync(target, 'utf8') catch then null) is desired
+        if current? then writeSite(target, current) else unlinkSync(target)
+      return report("janus reload failed: #{error?.message or error}", 503)
   janus
 
 # The service edge, with rip's site file in place. An external edge
 # (JANUS_CONTROL) is used as found.
 export configureEdge = (report = abort) ->
   return null if externalEdge()
-  ensureEdgeSite requireExposureJanus(janusStatus(), report), report
+  janus = requireExposureJanus janusStatus(), report
+  return null unless janus?
+  ensureEdgeSite janus, report
