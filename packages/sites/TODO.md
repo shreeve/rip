@@ -39,7 +39,7 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Distribution
 
-- [ ] Signed/notarized tray host, Janus-enabled Caddy, and local edge
+- [ ] Signed/notarized Janus-enabled Caddy and local edge
       assets. Control plane stays edge-scoped (no idle forever
       LaunchAgent for a separate Agent product).
 

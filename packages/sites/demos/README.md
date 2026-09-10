@@ -19,7 +19,7 @@ cart   →  ship-shaped App
 ```
 
 Each demo is a project directory with `serve.rip` (catalog name + hosts +
-Hub bridge). From the tray: **Add Site…** and select that directory — or:
+Hub bridge). Add and start it with the CLI:
 
 ```bash
 rip sites add packages/sites/demos/hello

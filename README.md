@@ -12,7 +12,7 @@ This repository owns the complete Rip product:
 - precise bidirectional mappings between Rip and generated artifacts;
 - reactive, schema, ORM, component, and standard-library runtimes;
 - package and application infrastructure, including
-  [`rip/sites`](packages/sites) (Agent, edge, tray, demos);
+  [`rip/sites`](packages/sites) (Agent, edge, demos);
 - VS Code/Cursor, Vim, and highlight.js integrations;
 - language, mapping, type, runtime, corpus, and editor test contracts.
 
@@ -100,4 +100,4 @@ rip sites start hello
 # https://hello.via.rip/
 ```
 
-Postures, tray, and LAN/`local` trust: [packages/sites/README.md](packages/sites/README.md).
+Postures and LAN/`local` trust: [packages/sites/README.md](packages/sites/README.md).

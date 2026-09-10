@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto'
 import { agentPaths } from './appliance.rip'
 import { managerRuntime, resolveProject } from './control.rip'
 
-RESERVED = ['edge', 'all', 'tray', 'agent']
+RESERVED = ['edge', 'all', 'agent']
 
 export catalogPaths = (label = 'rip-sites') ->
   paths = agentPaths label
@@ -168,7 +168,7 @@ export addCatalogApp = (body, label = 'rip-sites') ->
   project = resolveProject root, 'rip-sites'
   name = body.name or basename(project.root).replace /\.[^.]+$/, ''
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
-  fail "#{JSON.stringify(name)} is reserved (edge | all | tray | agent) — not an app name" if name in RESERVED
+  fail "#{JSON.stringify(name)} is reserved (edge | all | agent) — not an app name" if name in RESERVED
   fail "app name is already registered: #{name}" if doc.apps.some((app) -> app.name is name)
   fail "project is already registered: #{project.root}" if doc.apps.some((app) -> app.root is project.root)
   hosts = body.hosts

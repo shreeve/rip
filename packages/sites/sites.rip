@@ -1,24 +1,24 @@
 #!/usr/bin/env rip
 
 # Unified Sites CLI: rip sites <verb> [noun]
-# Reserved nouns: edge, all, tray, agent — never real app names.
+# Reserved nouns: edge, all, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
 import { printJson, probeAgent, requestAgent } from './appliance.rip'
 import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
-import { JANUS_MISSING, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { JANUS_MISSING, dashboardUrl, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
 
-RESERVED = ['edge', 'all', 'tray', 'agent']
+RESERVED = ['edge', 'all', 'agent']
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
 
   Grammar: rip sites <verb> <noun>
-  Reserved nouns (not app names): edge · all · tray · agent
+  Reserved nouns (not app names): edge · all · agent
   Path nouns default to the current directory when omitted.
 
   Catalog:
@@ -100,7 +100,7 @@ runManager = (argv, options = {}) ->
 takeAppNoun = ->
   abort "rip-sites: #{verb} requires an app noun (id | name | root)" unless args.length and not args[0].startsWith('-')
   selector = args.shift()
-  abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | tray | agent) — not an app name" if selector in RESERVED
+  abort "rip-sites: #{JSON.stringify(selector)} is reserved (edge | all | agent) — not an app name" if selector in RESERVED
   findCatalogApp loadCatalog(), selector
 
 # Path forms keep manager flags intact — handle before Sites option parsing.
@@ -197,7 +197,7 @@ requireApp = ->
   noun
 
 reservedAsApp = (label) ->
-  abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | tray | agent) — not an app name" if label in RESERVED
+  abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | agent) — not an app name" if label in RESERVED
 
 catalogHas = (selector) ->
   try
@@ -262,10 +262,6 @@ eachApp = (action) ->
     result = requestAgent! 'rip-sites', 'POST', "/1.0/apps/#{encodeURIComponent(app.id)}/#{action}", {}, { start: true, tolerate: true }
     results.push if result?.error? then { ...app, error: result.error } else result
   results
-
-dashboardUrl = (edge) ->
-  host = if edge.scope is 'lan' then 'rip.local' else 'via.rip'
-  "https://#{host}/"
 
 # Graceful control-plane recycle. The agent exits after replying; edge and
 # apps are detached and survive. Waits for the socket to clear so the next
@@ -437,7 +433,8 @@ switch verb
     if noun is 'edge'
       edge = if probeAgent!('rip-sites') then requestAgent!('rip-sites', 'GET', '/1.0/edge', null, { start: false }) else readOfflineEdge!
       abort 'rip-sites: edge is not running' unless edge.state is 'running'
-      url = dashboardUrl edge
+      url = dashboardUrl! edge
+      abort 'rip-sites: no reachable Janus dashboard is configured; configure a Janus mdns front door reachable by local listener, LAN name, or canonical HTTPS origin' unless url?
     else
       requireApp!
       app = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true }
