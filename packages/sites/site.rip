@@ -916,26 +916,21 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # four back off it.
 type HttpError = Error & { status: number, code?: string, api?: boolean, field?: string }
 
-def error(message: string, status?: number, code?: string, field?: string): never
-def error(message: Record<string, string>, status?: number, code?: string, field?: string): void
-def error(message: string | Record<string, string> = 'Bad request', status = 400, code: string | null = null, field: string | null = null): void
-  # Object form — a field→message map, for collected validation:
+def error(message: string, status: number, code?: string, field?: string): never
+def error(fields: Record<string, string>): void
+def error(message: string | Record<string, string>, status = 400, code?: string, field?: string): void
+  # Map form — a field→message map, for collected validation:
   #
   #   errs = {}
   #   errs.email = 'Enter a valid email' unless mail
   #   error! errs
   #
   # An EMPTY map is a no-op, so the validate stanza always ends with the
-  # same line and needs no guard. Ships as 422 unless a status says
-  # otherwise (the 400 default remaps — validation is 422's whole job).
-  if message? and typeof message is 'object'
+  # same line and needs no guard. A full map is always a 422.
+  if typeof message is 'object'
     return unless Object.keys(message).length
-    status = 422 if status is 400
-    throw Object.assign(Error.new('Validation failed'), { status, errors: message })
-  # The string branch: the object branch above has already returned or
-  # thrown. The empty-map `return` is what stops the checker proving
-  # it, so the cast says what the control flow already guarantees.
-  err: HttpError = Object.assign(Error.new(message as string), { status })
+    throw Object.assign(Error.new('Validation failed'), { status: 422, errors: message })
+  err: HttpError = Object.assign(Error.new(message), { status })
   if code?
     err.code = code
     err.api = true

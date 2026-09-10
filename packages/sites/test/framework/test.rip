@@ -359,18 +359,6 @@ test 'error! with a field map: empty no-op, full map ships as 422 fields', ->
   eq errorEnvelope(caught),
     status: 422
     body: { error: 'Validation failed', code: 'invalid_field', fields: { firstName: 'Enter a first name', phone: 'Enter a phone number' } }
-  # an explicit status overrides the 422 default
-  overridden = null
-  try
-    error { field: 'nope' }, 400
-  catch e
-    overridden = e
-  eq overridden.status, 422   # 400 remaps — validation is 422's job
-  try
-    error { field: 'gone' }, 410
-  catch e
-    overridden = e
-  eq overridden.status, 410
 
 test 'error envelopes expose client details and mask server details', ->
   eq errorEnvelope(Error.new('database password')),
