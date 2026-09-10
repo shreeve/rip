@@ -56,7 +56,7 @@ function applyInsertions(tokens, collect, mintId) {
 // Triggers:
 //   - an arrow not followed by INDENT wraps its single-line body
 //   - THEN retags to the block's INDENT when it closes an if/unless
-//     (or other control) condition — otherwise THEN stays a token for
+//     (or other control/class) head — otherwise THEN stays a token for
 //     the loose-`and` operator (`x = get() then print "ok"`)
 //   - ELSE followed by neither INDENT nor IF wraps its single-line body
 // A body ends at the first depth-0 TERMINATOR, OUTDENT, ELSE, or
@@ -69,9 +69,9 @@ function applyInsertions(tokens, collect, mintId) {
 // IFs) — so pops are innermost-first, which is exactly the token
 // order the tape needs at a shared boundary.
 // THEN introduces a one-line body only when it sits in an if/unless
-// (or when/catch/while/for) condition. Anywhere else it is the loose
+// (or when/catch/while/for/class) head. Anywhere else it is the loose
 // `and` operator and must reach the parser as THEN.
-const BODY_THEN_HEADS = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'LEADING_WHEN', 'CATCH', 'FOR', 'LOOP']);
+const BODY_THEN_HEADS = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'LEADING_WHEN', 'CATCH', 'FOR', 'LOOP', 'CLASS']);
 const BODY_THEN_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
 const BODY_THEN_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
 

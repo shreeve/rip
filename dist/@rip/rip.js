@@ -3255,7 +3255,7 @@ function applyInsertions(tokens, collect, mintId) {
   }
   return tokens;
 }
-var BODY_THEN_HEADS = new Set(["IF", "UNLESS", "WHILE", "UNTIL", "WHEN", "LEADING_WHEN", "CATCH", "FOR", "LOOP"]);
+var BODY_THEN_HEADS = new Set(["IF", "UNLESS", "WHILE", "UNTIL", "WHEN", "LEADING_WHEN", "CATCH", "FOR", "LOOP", "CLASS"]);
 var BODY_THEN_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
 var BODY_THEN_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
 function thenIntroducesBody(tokens, i) {

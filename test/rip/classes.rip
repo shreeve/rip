@@ -55,6 +55,12 @@ test 'empty class', '''
   new Empty().constructor.name
   ''', 'Empty'
 
+# One-line class body — `then` is the body introducer, not loose `and`
+test 'class then-body', '''
+  class E extends Error then noop
+  (new E()) instanceof Error
+''', true
+
 # Method chaining
 
 test 'method chaining', '''
