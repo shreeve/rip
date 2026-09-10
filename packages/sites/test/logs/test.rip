@@ -28,6 +28,16 @@ test 'log tails preserve UTF-8, byte offsets, missing files, and truncation', ->
     writeFileSync path, ''
     eq readLog(path).text, ''
     writeFileSync path, 'unterminated'
-    eq readLog(path, 1).text, 'unterminated\n'
+    eq readLog(path, 1).text, 'unterminated'
+    globe = Buffer.from '🌎'
+    writeFileSync path, globe.subarray(0, 2)
+    partial = readLog path
+    eq partial.text, ''
+    eq partial.next, 0
+    eq readLog(path, 1, 0).next, 0
+    appendFileSync path, globe.subarray(2)
+    finished = readLog path, 1, partial.next
+    eq finished.text, '🌎'
+    eq finished.next, 4
   finally
     rmSync dir, { recursive: true, force: true }
