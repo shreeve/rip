@@ -71,6 +71,7 @@ type Instance = Fetcher & {
   extend: (opts?: Options) => Instance
   HTTPError: typeof HTTPError
   TimeoutError: typeof TimeoutError
+  NetworkError: typeof NetworkError
 }
 
 # ==[ Error Classes ]==
@@ -83,11 +84,17 @@ export class HTTPError extends Error
     @options  = options
     @name     = 'HTTPError'
 
-export class TimeoutError extends Error
-  constructor: (request: Request) ->
-    super('Request timed out')
+export class NetworkError extends Error
+  constructor: (request: Request, cause: unknown) ->
+    super('Network request failed', { cause })
     @request = request
-    @name    = 'TimeoutError'
+    @name    = 'NetworkError'
+
+export class TimeoutError extends NetworkError
+  name    = 'TimeoutError'
+  message = 'Request timed out'
+  constructor: (request: Request) ->
+    super(request, undefined)
 
 # ==[ Helpers ]==
 
@@ -252,7 +259,7 @@ def request(input, opts = {})
 
       # Network error — retry if eligible
       if retryCount >= retry.limit or not retry.methods.includes(method)
-        throw err
+        throw NetworkError.new(req, err)
 
       retryCount++
       if hooks.beforeRetry?.length
@@ -311,6 +318,7 @@ def makeInstance(defaults: Options = {}): Instance
     extend:       (opts: Options = {}) -> makeInstance(mergeOptions(defaults, opts))
     HTTPError:    HTTPError
     TimeoutError: TimeoutError
+    NetworkError: NetworkError
 
 # ==[ Public API ]==
 

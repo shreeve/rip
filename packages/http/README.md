@@ -106,7 +106,9 @@ else
 
 Default timeout is 10 seconds. Uses `AbortSignal.timeout()` under the
 hood; a caller's `signal` composes with it — a caller abort surfaces as
-`AbortError`, a timeout as `TimeoutError`.
+`AbortError`, a timeout as `TimeoutError`, and a request that never got an
+answer (fetch itself rejected, retries included) as `NetworkError`. A
+`TimeoutError` is a `NetworkError`, so one check covers both.
 
 ```coffee
 # Custom timeout
@@ -301,6 +303,22 @@ catch err
   err.name     # 'TimeoutError'
   err.message  # 'Request timed out'
   err.request  # Request object
+```
+
+### NetworkError
+
+Thrown when fetch itself rejects — no connection, DNS failure, a dropped
+socket — and every retry the options allowed did too. Not an HTTP error: no
+response exists.
+
+```coffee
+try
+  http.get! url
+catch err
+  err.name     # 'NetworkError'
+  err.message  # 'Network request failed'
+  err.request  # Request object
+  err.cause    # the last fetch rejection (a TypeError in browsers)
 ```
 
 ## Comparison with ky

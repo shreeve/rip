@@ -5,7 +5,7 @@
 # ==============================================================================
 
 import { test, eq, ok } from 'rip/testing'
-import { HTTPError, TimeoutError, http } from 'rip/http'
+import { HTTPError, NetworkError, TimeoutError, http } from 'rip/http'
 import * as mod from 'rip/http'
 import { readFileSync } from 'fs'
 
@@ -72,7 +72,7 @@ base = "http://localhost:#{server.port}"
 console.log "\nPackage"
 
 test "public entry exposes named exports only", ->
-  eq Object.keys(mod).sort(), ['HTTPError', 'TimeoutError', 'http']
+  eq Object.keys(mod).sort(), ['HTTPError', 'NetworkError', 'TimeoutError', 'http']
   ok not ('default' of mod), 'no default export'
 
 test "no dependencies of any kind (the stdlib ships with rip)", ->
@@ -267,7 +267,7 @@ test! "Retry-After as an HTTP date is honored", ->
   eq res.json!.attempts, 2
   ok Date.now() - started < 250
 
-test! "network errors retry then rethrow the original error", ->
+test! "network errors retry then throw NetworkError with the last rejection as cause", ->
   probe = Bun.serve({ port: 0, fetch: -> Response.new('x') })
   closed = probe.port
   probe.stop(true)
@@ -277,7 +277,10 @@ test! "network errors retry then rethrow the original error", ->
     retry: fast
     hooks: { beforeRetry: [({ error, retryCount }) -> seen.push({ retryCount, hasError: error isnt null }); return] }
   }))
-  ok err isnt null
+  ok err instanceof NetworkError
+  eq err.name, 'NetworkError'
+  ok err.request instanceof Request
+  ok err.cause instanceof Error, 'the fetch rejection rides along as cause'
   ok not (err instanceof HTTPError)
   ok not (err instanceof TimeoutError)
   eq seen, [{ retryCount: 1, hasError: true }, { retryCount: 2, hasError: true }]
@@ -301,6 +304,7 @@ console.log "\nTimeout and abort"
 test! "a timeout throws TimeoutError with the request attached", ->
   err = caught!(http.get("#{base}/slow", { timeout: 40 }))
   ok err instanceof TimeoutError
+  ok err instanceof NetworkError, 'a timeout is a request that never got an answer'
   eq err.name, 'TimeoutError'
   eq err.message, 'Request timed out'
   ok err.request instanceof Request
