@@ -105,9 +105,10 @@ export saveCatalog = (doc, label = 'rip-sites') ->
   writeSecure paths, paths.catalog, JSON.stringify(doc, null, 2) + '\n'
   doc
 
-export findCatalogApp = (doc, selector) ->
+export findCatalogApp = (doc, selector, required = true) ->
   decoded = decodeURIComponent selector
   matches = doc.apps.filter (app) -> app.id is decoded or app.name is decoded or app.root is decoded
+  return null unless required or matches.length
   fail "unknown app #{JSON.stringify(decoded)}" unless matches.length
   fail "ambiguous app #{JSON.stringify(decoded)}" unless matches.length is 1
   matches[0]

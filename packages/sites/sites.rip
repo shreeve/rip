@@ -74,7 +74,7 @@ addFlags = []
 logFlags = []
 
 # Manager verbs invoke manager.rip as an internal module (not a user CLI).
-MANAGER = ['run', 'publish', 'browse', 'hold', 'release', 'migrate', 'recover']
+MANAGER = ['run', 'publish', 'hold', 'release', 'migrate', 'recover']
 
 # A foreground manager registers where the supervised apps do: Janus's
 # control socket, unless JANUS_CONTROL already says otherwise.
@@ -107,16 +107,8 @@ takeAppNoun = ->
 if verb in MANAGER
   if verb is 'run'
     runManager! args
-  else if verb is 'publish' or verb is 'browse'
-    # publish is the taught verb; browse remains as a quiet synonym.
-    dir = null
-    rest = []
-    for value, i in args
-      if not dir? and not value.startsWith('-')
-        dir = value
-      else
-        rest.push value
-    runManager! ['browse', (dir or process.cwd()), ...rest]
+  else if verb is 'publish'
+    runManager! ['browse', ...args]
   else if verb in ['hold', 'release']
     app = takeAppNoun!
     runManager! [verb, app.root, ...args]
@@ -200,10 +192,7 @@ reservedAsApp = (label) ->
   abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | agent) — not an app name" if label in RESERVED
 
 catalogHas = (selector) ->
-  try
-    findCatalogApp loadCatalog(), selector
-    true
-  catch then false
+  findCatalogApp(loadCatalog(), selector, false)?
 
 pathNoun = (selector = null) ->
   raw = selector or process.cwd()
@@ -399,7 +388,11 @@ switch verb
     abort 'rip-sites: status takes at most one noun' if positionals.length > 1
     # Path / cwd manager JSON when noun is `.`, an existing path, or missing
     # from the catalog — but bare status stays the edge+apps summary.
-    if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
+    if noun is 'agent'
+      info = requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: false, soft: true }
+      status = { state: (if info? then 'running' else 'stopped'), pid: info?.pid or null }
+      if json then printJson status else console.log(if info? then "Control agent running (pid #{info.pid})." else 'Control agent is not running.')
+    else if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
       runManager! ['status', pathNoun!(noun)]
     else
       live = ensureLiveControl!

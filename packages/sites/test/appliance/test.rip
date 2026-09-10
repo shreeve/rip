@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { SITE, SITE_NAME, dashboardUrl, ensureEdgeSite, requireExposureJanus } from '../../edge.rip'
 import { defaultCatalog } from '../../catalog.rip'
+import { managerRuntime } from '../../control.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
@@ -583,4 +584,76 @@ test! 'dashboard discovery uses the Unix control socket without booting an agent
     ok not existsSync(join(site.runtime, 'agent.json'))
   finally
     janus.stop true
+    rmSync site.root, { recursive: true, force: true }
+
+test! 'path status and stop reach an uncataloged manager', ->
+  site = fixture 'rip-path-controls-'
+  project = join site.root, 'project'
+  mkdirSync project
+  writeFileSync join(project, 'index.rip'), '# project\n'
+  socket = managerRuntime(realpathSync(project)).socket
+  requests = []
+  manager = null
+  manager = Bun.serve
+    unix: socket
+    fetch: (request) ->
+      path = URL.new(request.url).pathname
+      requests.push [request.method, path]
+      if request.method is 'POST' and path is '/stop'
+        setTimeout (-> manager.stop true), 50
+      Response.json { fixture: true, ready: true }
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  try
+    status = cli! APP, ['status', project], env
+    eq status.code, 0, status.err
+    eq JSON.parse(status.out).fixture, true
+    stopped = cli! APP, ['stop', '.'], env, project
+    eq stopped.code, 0, stopped.err
+    ok requests.some((row) -> row[0] is 'POST' and row[1] is '/stop')
+    ok not existsSync(join(site.runtime, 'agent.json'))
+  finally
+    manager.stop true
+    rmSync site.root, { recursive: true, force: true }
+
+test! 'public manager grammar preserves option values and cwd defaults', ->
+  site = fixture 'rip-public-manager-'
+  project = join site.root, 'project'
+  mkdirSync project
+  socket = join site.root, 'janus.sock'
+  calls = []
+  janus = startJanus socket, calls
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: socket }
+  try
+    for args in [
+      ['publish', '--host', 'review.local', project, '--until-restart']
+      ['publish', '--host', 'review.local', '--until-restart']
+    ]
+      published = cli! APP, args, env, project
+      eq published.code, 0, published.err
+      ok published.out.includes 'https://review.local/'
+    for verb in ['run', 'publish']
+      help = cli! APP, [verb, '--help'], env
+      eq help.code, 0, help.err
+      ok help.out.includes 'rip sites run'
+      ok help.out.includes 'rip sites publish'
+      ok not help.out.includes 'rip site '
+  finally
+    janus.stop true
+    rmSync site.root, { recursive: true, force: true }
+
+test! 'status agent reports liveness without starting it', ->
+  site = fixture 'rip-agent-status-'
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  try
+    before = cli! APP, ['status', 'agent', '--json'], env
+    eq before.code, 0, before.err
+    eq JSON.parse(before.out), { state: 'stopped', pid: null }
+    ok not existsSync(join(site.runtime, 'agent.json'))
+    started = cli! APP, ['start', 'agent', '--json'], env
+    eq started.code, 0, started.err
+    live = cli! APP, ['status', 'agent', '--json'], env
+    eq live.code, 0, live.err
+    eq JSON.parse(live.out), { state: 'running', pid: JSON.parse(started.out).pid }
+  finally
+    stopAgent! site.runtime
     rmSync site.root, { recursive: true, force: true }

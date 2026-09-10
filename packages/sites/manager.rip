@@ -104,7 +104,7 @@ parseArgs = (argv) ->
         args.concurrency = parseInt text
         abort 'rip-site: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
-        p 'usage: rip site [project] [options] | rip site <status|stop|hold|release> [project] | rip site browse <directory> [--host HOST] [--until-restart] | rip site migrate [migration-entry] [--dir DIR] [--id 32hex] | rip site recover <operation-id>'
+        p 'usage: rip sites run [project] [options] | rip sites <status|stop> [project] | rip sites publish [directory] [--host HOST] [--until-restart] | rip sites <hold|release> <app> | rip sites migrate <app> [migration-entry] [--dir DIR] [--id 32hex] | rip sites recover <app> <operation-id>'
         exit 0
       else
         if value.startsWith '--access-log='
@@ -137,7 +137,6 @@ parseArgs = (argv) ->
       parseAccessPicture args.accessPicture
     catch error
       abort "rip-site: #{error?.message or error}"
-  abort 'rip-site: browse requires exactly one directory' if command is 'browse' and not args.entry?
   args
 
 controlFetch = (target, method, path, body = null) ->
@@ -434,7 +433,7 @@ defaultBrowseHost = ->
   "browse-#{randomBytes(6).toString('hex')}.localhost"
 
 runBrowse = (args) ->
-  directory = resolve args.entry
+  directory = resolve(args.entry or process.cwd())
   abort "rip-site: browse directory not found: #{args.entry}" unless existsSync directory
   abort "rip-site: browse path is not a directory: #{args.entry}" unless statSync(directory).isDirectory()
   directory = realpathSync directory
