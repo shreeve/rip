@@ -55,15 +55,10 @@ bun run audit
 Package work: `bun run test` from that package directory (for example
 `packages/sites`). Browser smoke: `bun run test:browser`.
 
-`test:all` needs `xcaddy` on PATH for the Sites janus lane:
-
-```sh
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-export PATH="$(go env GOPATH)/bin:$PATH"     # in your shell profile
-```
-
-`JANUS_CADDY=/path/to/caddy` supplies an existing janus-enabled binary
-instead of building one.
+`test:all` needs `janus` on PATH for the Sites integration lane. Install
+[Janus](https://github.com/shreeve/janus#prebuilt-releases), or put a Janus
+build on PATH. The lane exercises that binary and rejects a local Go module
+replacement; it does not build a separate edge.
 
 ## REPL
 

@@ -2,14 +2,14 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:f
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-# Project identity and private manager discovery are shared by the direct
-# `rip site` surface and the per-user appliance. One canonical root must
+# Project identity and private manager discovery are shared by foreground
+# commands and the per-user agent. One canonical root must
 # always select one manager socket, regardless of which client asks.
 
 # `report` receives the failure: the CLI surfaces let it abort, a server
 # handing a client's path back as a client error passes a thrower. No
 # label, no prefix — the caller that owns the message owns its framing.
-export resolveProject = (input, label = 'rip-site', report = abort) ->
+export resolveProject = (input, label = 'rip-sites', report = abort) ->
   prefix = if label then "#{label}: " else ''
   if input?
     given = resolve input
@@ -41,7 +41,7 @@ export resolveProject = (input, label = 'rip-site', report = abort) ->
     report "#{prefix}#{input} has no API entry, app/ directory, or serve.rip"
   report "#{prefix}no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
 
-export managerRuntime = (root, label = 'rip-site') ->
+export managerRuntime = (root, label = 'rip-sites') ->
   abort "#{label}: manager control requires a POSIX user identity" unless typeof process.getuid is 'function'
   uid = process.getuid()
   key = Bun.CryptoHasher.new('sha256').update(root).digest('hex').slice 0, 16

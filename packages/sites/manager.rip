@@ -12,7 +12,7 @@ import { configureEdge, edgeControl, edgeFetch } from './edge.rip'
 positiveEnv = (name, fallback) ->
   text = process.env[name] or String(fallback)
   value = parseInt text
-  abort "rip-site: #{name} must be an integer greater than zero" unless Number.isFinite(value) and value > 0 and String(value) is text
+  abort "rip-sites: #{name} must be an integer greater than zero" unless Number.isFinite(value) and value > 0 and String(value) is text
   value
 
 HEARTBEAT_MS = positiveEnv 'RIP_HEARTBEAT_MS', 5000
@@ -32,11 +32,11 @@ parseArgs = (argv) ->
     value = argv[i]
     take = ->
       i++
-      abort "rip-site: #{value} requires a value" if i >= argv.length
+      abort "rip-sites: #{value} requires a value" if i >= argv.length
       argv[i]
     switch value
       when '--name'
-        abort 'rip-site: --name does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --name does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.name = take()
       when '--host'
@@ -46,64 +46,64 @@ parseArgs = (argv) ->
         args.startupFlags.push value
         args.control = take()
       when '--watch'
-        abort 'rip-site: --watch does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApp = true
         args.watchApi = true
       when '--no-watch'
-        abort 'rip-site: --no-watch does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --no-watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApp = false
         args.watchApi = false
       when '--watch-app'
-        abort 'rip-site: --watch-app does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --watch-app does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApp = true
       when '--no-watch-app'
-        abort 'rip-site: --no-watch-app does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --no-watch-app does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApp = false
       when '--watch-api'
-        abort 'rip-site: --watch-api does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --watch-api does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApi = true
       when '--no-watch-api'
-        abort 'rip-site: --no-watch-api does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --no-watch-api does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.watchApi = false
       when '--allow-watch'
-        abort 'rip-site: --allow-watch does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --allow-watch does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.allowWatch = true
       when '--eager'
-        abort 'rip-site: --eager does not apply to browse' if command is 'browse'
+        abort 'rip-sites: --eager does not apply to browse' if command is 'browse'
         args.startupFlags.push value
         args.eager = true
       when '--until-restart'
-        abort 'rip-site: --until-restart only applies to browse' unless command is 'browse'
+        abort 'rip-sites: --until-restart only applies to browse' unless command is 'browse'
         args.untilRestart = true
       when '--access-format'
         args.accessExplicit = true
         args.accessPicture = take()
       when '--dir'
-        abort 'rip-site: --dir only applies to migrate' unless command is 'migrate'
+        abort 'rip-sites: --dir only applies to migrate' unless command is 'migrate'
         args.migrationDir = take()
       when '--id'
-        abort 'rip-site: --id only applies to migrate' unless command is 'migrate'
+        abort 'rip-sites: --id only applies to migrate' unless command is 'migrate'
         args.operationId = take()
-        abort 'rip-site: --id requires exactly 32 lowercase hex characters' unless /^[a-f0-9]{32}$/.test(args.operationId)
+        abort 'rip-sites: --id requires exactly 32 lowercase hex characters' unless /^[a-f0-9]{32}$/.test(args.operationId)
       when '--workers', '-w'
-        abort "rip-site: #{value} does not apply to browse" if command is 'browse'
+        abort "rip-sites: #{value} does not apply to browse" if command is 'browse'
         args.startupFlags.push value
         text = take()
         args.workers = parseInt text
-        abort 'rip-site: --workers must be an integer greater than zero' unless Number.isFinite(args.workers) and args.workers > 0 and String(args.workers) is text
+        abort 'rip-sites: --workers must be an integer greater than zero' unless Number.isFinite(args.workers) and args.workers > 0 and String(args.workers) is text
       when '--concurrency', '-c'
-        abort "rip-site: #{value} does not apply to browse" if command is 'browse'
+        abort "rip-sites: #{value} does not apply to browse" if command is 'browse'
         args.startupFlags.push value
         text = take()
         args.concurrency = parseInt text
-        abort 'rip-site: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
+        abort 'rip-sites: --concurrency must be an integer greater than zero' unless Number.isFinite(args.concurrency) and args.concurrency > 0 and String(args.concurrency) is text
       when '--help', '-h'
         p 'usage: rip sites run [project] [options] | rip sites <status|stop> [project] | rip sites publish [directory] [--host HOST] [--until-restart] | rip sites <hold|release> <app> | rip sites migrate <app> [migration-entry] [--dir DIR] [--id 32hex] | rip sites recover <app> <operation-id>'
         exit 0
@@ -111,33 +111,33 @@ parseArgs = (argv) ->
         if value.startsWith '--access-log='
           args.accessExplicit = true
           args.accessMode = value.slice '--access-log='.length
-          abort 'rip-site: --access-log must be pretty, raw, or off' unless args.accessMode in ['pretty', 'raw', 'off']
+          abort 'rip-sites: --access-log must be pretty, raw, or off' unless args.accessMode in ['pretty', 'raw', 'off']
         else
-          abort "rip-site: unknown option #{value}" if value.startsWith '-'
+          abort "rip-sites: unknown option #{value}" if value.startsWith '-'
           if command is 'migrate'
-            abort "rip-site: multiple migration entries (#{args.migrationEntry} and #{value})" if args.migrationEntry?
+            abort "rip-sites: multiple migration entries (#{args.migrationEntry} and #{value})" if args.migrationEntry?
             args.migrationEntry = value
           else if command is 'recover'
-            abort 'rip-site: recover takes exactly one operation id' if args.operationId?
+            abort 'rip-sites: recover takes exactly one operation id' if args.operationId?
             args.operationId = value
           else if command is 'browse'
-            abort 'rip-site: browse takes exactly one directory' if args.entry?
+            abort 'rip-sites: browse takes exactly one directory' if args.entry?
             args.entry = value
           else
-            abort "rip-site: multiple app entries (#{args.entry} and #{value})" if args.entry?
+            abort "rip-sites: multiple app entries (#{args.entry} and #{value})" if args.entry?
             args.entry = value
     i++
-  abort 'rip-site: recover requires an operation id' if command is 'recover' and not args.operationId?
-  abort 'rip-site: recover operation id must be exactly 32 lowercase hex characters' if command is 'recover' and not /^[a-f0-9]{32}$/.test(args.operationId)
-  abort 'rip-site: --access-format only applies with --access-log=pretty' if args.accessPicture? and args.accessMode isnt 'pretty'
-  abort 'rip-site: explicit access flags conflict with browse --until-restart' if args.untilRestart and args.accessExplicit
-  abort "rip-site: access flags do not apply to #{command}" if args.accessExplicit and command not in ['start', 'browse']
-  abort "rip-site: #{command} does not accept startup options: #{args.startupFlags.join(', ')}" if command not in ['start', 'browse'] and args.startupFlags.length
+  abort 'rip-sites: recover requires an operation id' if command is 'recover' and not args.operationId?
+  abort 'rip-sites: recover operation id must be exactly 32 lowercase hex characters' if command is 'recover' and not /^[a-f0-9]{32}$/.test(args.operationId)
+  abort 'rip-sites: --access-format only applies with --access-log=pretty' if args.accessPicture? and args.accessMode isnt 'pretty'
+  abort 'rip-sites: explicit access flags conflict with browse --until-restart' if args.untilRestart and args.accessExplicit
+  abort "rip-sites: access flags do not apply to #{command}" if args.accessExplicit and command not in ['start', 'browse']
+  abort "rip-sites: #{command} does not accept startup options: #{args.startupFlags.join(', ')}" if command not in ['start', 'browse'] and args.startupFlags.length
   if args.accessPicture?
     try
       parseAccessPicture args.accessPicture
     catch error
-      abort "rip-site: #{error?.message or error}"
+      abort "rip-sites: #{error?.message or error}"
   args
 
 controlFetch = (target, method, path, body = null) ->
@@ -165,7 +165,7 @@ controlFetch = (target, method, path, body = null) ->
 # what silently broke all three when the loader moved up a level.
 loaderDir = ->
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
-  abort 'rip-site: the Rip loader is missing' unless preload?
+  abort 'rip-sites: the Rip loader is missing' unless preload?
   dirname resolve(preload.slice('--preload='.length))
 
 ripRoot = -> join loaderDir(), '..'
@@ -186,7 +186,7 @@ isRecord = (value) ->
   value? and typeof value is 'object' and not Array.isArray(value)
 
 invalidServe = (message) ->
-  throw Error.new "rip-site: #{message}"
+  throw Error.new "rip-sites: #{message}"
 
 rejectUnknown = (value, allowed, at) ->
   invalidServe "#{at} must be an object" unless isRecord value
@@ -424,19 +424,19 @@ probeControl = (target) ->
   try
     controlFetch! target, 'GET', '/1.0'
   catch error
-    abort "rip-site: control endpoint unreachable at #{target}: #{error?.message or error}"
+    abort "rip-sites: control endpoint unreachable at #{target}: #{error?.message or error}"
 
 defaultBrowseHost = ->
   "browse-#{randomBytes(6).toString('hex')}.localhost"
 
 runBrowse = (args) ->
   directory = resolve(args.entry or process.cwd())
-  abort "rip-site: browse directory not found: #{args.entry}" unless existsSync directory
-  abort "rip-site: browse path is not a directory: #{args.entry}" unless statSync(directory).isDirectory()
+  abort "rip-sites: browse directory not found: #{args.entry}" unless existsSync directory
+  abort "rip-sites: browse path is not a directory: #{args.entry}" unless statSync(directory).isDirectory()
   directory = realpathSync directory
-  abort 'rip-site: browse accepts at most one --host' if args.hosts.length > 1
+  abort 'rip-sites: browse accepts at most one --host' if args.hosts.length > 1
   explicitHost = args.hosts[0] ?? null
-  abort "rip-site: browse host is not valid: #{explicitHost}" if explicitHost? and not validHost(explicitHost)
+  abort "rip-sites: browse host is not valid: #{explicitHost}" if explicitHost? and not validHost(explicitHost)
   args.control = edgeControl(configureEdge()) unless args.control?
   probeControl! args.control
   earlySignalStatus = null
@@ -465,7 +465,7 @@ runBrowse = (args) ->
     response = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
     if response.status is 201
       registration = response.json!
-      abort 'rip-site: Janus registration returned no app id' unless registration?.id?
+      abort 'rip-sites: Janus registration returned no app id' unless registration?.id?
       break
     if response.status is 409 and not explicitHost? and retries < 5
       retries++
@@ -473,8 +473,8 @@ runBrowse = (args) ->
       continue
     detail = try response.text! catch then ''
     if response.status is 409
-      abort "rip-site: browse host already claimed at the control plane (409): #{host}"
-    abort "rip-site: browse registration failed (#{response.status})#{if detail then ": #{detail}" else ''}"
+      abort "rip-sites: browse host already claimed at the control plane (409): #{host}"
+    abort "rip-sites: browse registration failed (#{response.status})#{if detail then ": #{detail}" else ''}"
   if earlySignalStatus?
     try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
     process.off 'SIGINT', earlyStop
@@ -498,7 +498,7 @@ runBrowse = (args) ->
     try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
     process.off 'SIGINT', earlyStop
     process.off 'SIGTERM', earlyStop
-    warn "rip-site: browse output failure: #{error?.message or error}"
+    warn "rip-sites: browse output failure: #{error?.message or error}"
     return 1
   if earlySignalStatus?
     try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registration.id}"
@@ -537,7 +537,7 @@ runBrowse = (args) ->
       control: (if args.control.startsWith('http://') or args.control.startsWith('https://') then { base: args.control } else { unix: args.control })
     access.move(registration.id).catch (error) ->
       unless stopping
-        warn "rip-site: terminal access output failure: #{error?.message or error}"
+        warn "rip-sites: terminal access output failure: #{error?.message or error}"
         stop null, error
   beat = ->
     return if stopping or heartbeatTask?
@@ -549,17 +549,17 @@ runBrowse = (args) ->
           fresh = controlFetch! args.control, 'POST', '/1.0/apps', bodyFor(host)
           if fresh.status is 201
             registration = fresh.json!
-            abort 'rip-site: Janus registration returned no app id' unless registration?.id?
+            abort 'rip-sites: Janus registration returned no app id' unless registration?.id?
             access?.move(registration.id).catch (error) ->
               unless stopping
-                warn "rip-site: terminal access output failure: #{error?.message or error}"
+                warn "rip-sites: terminal access output failure: #{error?.message or error}"
                 stop null, error
           else
-            warn "rip-site: browse re-registration failed (#{fresh.status})"
+            warn "rip-sites: browse re-registration failed (#{fresh.status})"
         else unless response.ok
-          warn "rip-site: browse heartbeat failed (#{response.status})"
+          warn "rip-sites: browse heartbeat failed (#{response.status})"
       catch error
-        warn "rip-site: browse heartbeat failed: #{error?.message or error}" unless stopping
+        warn "rip-sites: browse heartbeat failed: #{error?.message or error}" unless stopping
       finally
         heartbeatTask = null
     heartbeatTask
@@ -605,9 +605,9 @@ readOperation = (path) ->
   try
     record = JSON.parse readFileSync(path, 'utf8')
   catch error
-    abort "rip-site: malformed operation journal at #{path}: #{String(error)}"
+    abort "rip-sites: malformed operation journal at #{path}: #{String(error)}"
   valid = record? and typeof record is 'object' and not Array.isArray(record) and record.version is 1 and /^[a-f0-9]{32}$/.test(record.id or '') and typeof record.phase is 'string' and typeof record.targetArtifact is 'string'
-  abort "rip-site: malformed operation journal at #{path}" unless valid
+  abort "rip-sites: malformed operation journal at #{path}" unless valid
   record
 
 writeAtomic = (path, text) ->
@@ -664,7 +664,7 @@ appModules = (appRoot, changes) ->
           try
             modules[id] = TextDecoder.new('utf-8', { fatal: true, ignoreBOM: true }).decode bytes
           catch
-            throw Error.new "rip-site: App module '#{id}' is not valid UTF-8"
+            throw Error.new "rip-sites: App module '#{id}' is not valid UTF-8"
           moduleFiles[id] = path
   walk appRoot, ''
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
@@ -843,7 +843,7 @@ commitAppDocuments = (project, documents) ->
     try
       renameSync temporaryCompressed, compressedPath
     catch error
-      warn "rip-site: bundle.json committed without Brotli sidecar: #{String(error)}"
+      warn "rip-sites: bundle.json committed without Brotli sidecar: #{String(error)}"
     writeAtomic join(dist, 'latest.json'), documents.latest
   finally
     unlinkSync temporaryBundle if existsSync temporaryBundle
@@ -869,7 +869,7 @@ commitShipSet = (dist, ship) ->
   return
 
 writeAppDocuments = (project) ->
-  ship = try settleShipSet! catch error then abort "rip-site: #{error.message}"
+  ship = try settleShipSet! catch error then abort "rip-sites: #{error.message}"
   documents = buildAppDocuments! project, ship
   commitAppDocuments project, documents
   documents
@@ -975,7 +975,7 @@ export main = (argv) ->
     body = null
     if args.command is 'migrate'
       migrationEntry = resolve args.migrationEntry if args.migrationEntry?
-      abort "rip-site: migration entry not found: #{args.migrationEntry}" if migrationEntry? and not existsSync(migrationEntry)
+      abort "rip-sites: migration entry not found: #{args.migrationEntry}" if migrationEntry? and not existsSync(migrationEntry)
       # dir stays null unless given: the schema child discovers the
       # conventional directory (beside the models entry) from cwd.
       body = { id: args.operationId or randomBytes(16).toString('hex'), entry: migrationEntry, dir: (if args.migrationDir? then resolve(args.migrationDir) else null) }
@@ -987,7 +987,7 @@ export main = (argv) ->
       options.headers = { 'content-type': 'application/json' }
     response = fetch! "http://manager/#{args.command}", options
     body = response.text!
-    abort "rip-site: #{args.command} failed (#{response.status}): #{body}" unless response.ok
+    abort "rip-sites: #{args.command} failed (#{response.status}): #{body}" unless response.ok
     waitManagerStopped! managerPath if args.command is 'stop'
     p body
     return
@@ -1005,33 +1005,33 @@ export main = (argv) ->
   args.name = args.name or serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   site = serve?.site ?? null
   if site? and args.hosts.length > 0
-    abort 'rip-site: --host conflicts with serve.rip sites'
+    abort 'rip-sites: --host conflicts with serve.rip sites'
   hosts =
     if site? then []
     else if args.hosts.length > 0 then args.hosts
     else if serve?.hosts? then serve.hosts
     else [args.name]
   for host, i in hosts
-    abort "rip-site: --host value is not valid: #{host}" unless typeof host is 'string' and validHost host
+    abort "rip-sites: --host value is not valid: #{host}" unless typeof host is 'string' and validHost host
   if hubBridge? and not project.entry?
-    abort 'rip-site: hub.bridge requires an API entry so Janus can POST the Bam bridge to workers'
+    abort 'rip-sites: hub.bridge requires an API entry so Janus can POST the Bam bridge to workers'
   if serve?.files? and not serve.files.shell? and project.entry?
-    abort 'rip-site: shell-less browse policy cannot publish API upstreams'
+    abort 'rip-sites: shell-less browse policy cannot publish API upstreams'
   unless args.accessExplicit
     if serve?.access?.log?
       args.accessMode = serve.access.log
     if serve?.access?.format?
-      abort 'rip-site: serve.rip access.format requires --access-log=pretty (or omit --access-log)' unless args.accessMode is 'pretty'
+      abort 'rip-sites: serve.rip access.format requires --access-log=pretty (or omit --access-log)' unless args.accessMode is 'pretty'
       args.accessPicture = serve.access.format
   prod = process.env.RIP_ENV is 'production'
   defaultWatch = not prod
   args.watchApp = args.watchApp ?? defaultWatch
   args.watchApi = args.watchApi ?? defaultWatch
   if (args.watchApp or args.watchApi) and prod
-    abort 'rip-site: watch in production requires --allow-watch' unless args.allowWatch
-    warn 'rip-site: WATCH ENABLED IN PRODUCTION'
+    abort 'rip-sites: watch in production requires --allow-watch' unless args.allowWatch
+    warn 'rip-sites: WATCH ENABLED IN PRODUCTION'
   if project.entry? and args.concurrency > 1 and (args.watchApi or args.eager)
-    abort "rip-site: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
+    abort "rip-sites: -c #{args.concurrency} requires API watch off — raise c only with --no-watch-api"
   args.control = edgeControl(configureEdge()) unless args.control?
   probeControl! args.control
   # A system edge (e.g. Janus under systemd) runs as its own user and
@@ -1127,7 +1127,7 @@ export main = (argv) ->
   dropCaps = ->
     return unless capsPublishable
     capsPublishable = false
-    warn 'rip-site: this Janus predates upstream concurrency; publishing sockets without it'
+    warn 'rip-sites: this Janus predates upstream concurrency; publishing sockets without it'
   rejectsConcurrency = (response) ->
     rejected = concurrencyRejected response.text!
     dropCaps() if rejected
@@ -1169,7 +1169,7 @@ export main = (argv) ->
     task.finally(-> workerPumps.delete(task)).catch(-> null)
     task.catch (error) ->
       return if stopping
-      warn "rip-site: worker output failed: #{String(error)}"
+      warn "rip-sites: worker output failed: #{String(error)}"
       stop! 1
 
   moveAccess = ->
@@ -1177,7 +1177,7 @@ export main = (argv) ->
     task = accessClient.move appId
     task.catch (error) ->
       return if stopping
-      warn "rip-site: access output failed: #{String(error)}"
+      warn "rip-sites: access output failed: #{String(error)}"
       stop! 1
 
   operationResponse = (key, run) ->
@@ -1220,7 +1220,7 @@ export main = (argv) ->
       try
         process.kill owner?.pid, 0
         alive = true
-      abort "rip-site: manager already running for #{project.root}" if alive
+      abort "rip-sites: manager already running for #{project.root}" if alive
       unlinkSync managerOwner
       acquire()
     acquire()
@@ -1234,7 +1234,7 @@ export main = (argv) ->
           unless stopping
             setTimeout (->
               stop().catch (error) ->
-                warn "rip-site: stop cleanup failed: #{String(error)}"
+                warn "rip-sites: stop cleanup failed: #{String(error)}"
                 process.exitCode = 1
             ), 0
           return Response.json({ ...status(), stopping: true }, { status: 202 })
@@ -1257,7 +1257,7 @@ export main = (argv) ->
             bootPrepared! if prepared?
             await bootPromise if bootPromise?
           catch error
-            warn "rip-site: pending API candidate failed while holding: #{String(error)}"
+            warn "rip-sites: pending API candidate failed while holding: #{String(error)}"
           operation = 'Held'
           return Response.json status()
         if request.method is 'POST' and path is '/release'
@@ -1355,8 +1355,8 @@ export main = (argv) ->
       workers = workers.filter (candidate) -> candidate isnt worker
       try queuePublish!
       catch error
-        warn "rip-site: cannot remove crashed worker from Janus: #{String(error)}"
-      managerOutput! "rip-site: worker exited (#{code}); replacing"
+        warn "rip-sites: cannot remove crashed worker from Janus: #{String(error)}"
+      managerOutput! "rip-sites: worker exited (#{code}); replacing"
       loop
         return if stopping
         try
@@ -1365,7 +1365,7 @@ export main = (argv) ->
           queuePublish!
           return
         catch error
-          warn "rip-site: replacement worker failed: #{String(error)}"
+          warn "rip-sites: replacement worker failed: #{String(error)}"
           Promise.new! (done) -> setTimeout done, 250
     return
 
@@ -1379,9 +1379,9 @@ export main = (argv) ->
       try
         response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], change }]
         return if response.ok
-        warn "rip-site: Janus change publish failed (#{response.status}); retrying"
+        warn "rip-sites: Janus change publish failed (#{response.status}); retrying"
       catch error
-        warn "rip-site: Janus change publish failed: #{String(error)}; retrying"
+        warn "rip-sites: Janus change publish failed: #{String(error)}; retrying"
       return if stopping
       sleep! delay
       delay = Math.min delay * 2, 1000
@@ -1399,9 +1399,9 @@ export main = (argv) ->
       try
         response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/assets'], touched: paths }]
         return if response.ok
-        warn "rip-site: Janus touched publish failed (#{response.status}); retrying"
+        warn "rip-sites: Janus touched publish failed (#{response.status}); retrying"
       catch error
-        warn "rip-site: Janus touched publish failed: #{String(error)}; retrying"
+        warn "rip-sites: Janus touched publish failed: #{String(error)}; retrying"
       return if stopping
       sleep! delay
       delay = Math.min delay * 2, 1000
@@ -1482,7 +1482,7 @@ export main = (argv) ->
         reconcileApp!
       appChain = next.catch (error) ->
         appReconcile = true
-        warn "rip-site: App publication failed: #{String(error)}"
+        warn "rip-sites: App publication failed: #{String(error)}"
     , delay
     return
 
@@ -1502,7 +1502,7 @@ export main = (argv) ->
     paths = [...touchedPaths].sort()
     touchedPaths.clear()
     touchedChain = touchedChain.then(-> publishTouched paths).catch (error) ->
-      warn "rip-site: touched publish failed: #{String(error)}"
+      warn "rip-sites: touched publish failed: #{String(error)}"
     return
 
   scheduleTouchedPublish = ->
@@ -1574,7 +1574,7 @@ export main = (argv) ->
         appReconcile = true
         return
       break if appSettled()
-      warn 'rip-site: App sources changed during publication; reconciling again'
+      warn 'rip-sites: App sources changed during publication; reconciling again'
       sleep! 25
     return
 
@@ -1622,7 +1622,7 @@ export main = (argv) ->
     try
       ship = currentShipSet appPublication?.ship
     catch error
-      warn "rip-site: #{error.message}; retrying on the sweep"
+      warn "rip-sites: #{error.message}; retrying on the sweep"
       ship = appPublication?.ship
       return true unless ship?.files?.length
       owed = true
@@ -1639,7 +1639,7 @@ export main = (argv) ->
       documents = stabilized.documents
       ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
     else
-      warn "rip-site: publishing App sources after assemble failure (browser will quarantine): #{String(assembleError)}"
+      warn "rip-sites: publishing App sources after assemble failure (browser will quarantine): #{String(assembleError)}"
     if documents.hash is appPublication.hash
       # Output-neutral change (e.g. a package manifest edit that leaves
       # assembly identical): re-baseline from the consumed hashes so the
@@ -1723,7 +1723,7 @@ export main = (argv) ->
       try
         watchAssetsRoot root.path
       catch error
-        warn "rip-site: cannot watch assets root '#{prefix}': #{String(error)}"
+        warn "rip-sites: cannot watch assets root '#{prefix}': #{String(error)}"
     return
 
   bootPrepared = ->
@@ -1794,9 +1794,9 @@ export main = (argv) ->
         # silently serve code the developer has replaced. Drop it; rings
         # fail fast until a save compiles.
         prepared = null
-        warn "rip-site: API candidate rejected while holding the doorbell; rings fail fast until a save compiles: #{String(error)}"
+        warn "rip-sites: API candidate rejected while holding the doorbell; rings fail fast until a save compiles: #{String(error)}"
       else
-        warn "rip-site: API candidate rejected; keeping current workers: #{String(error)}"
+        warn "rip-sites: API candidate rejected; keeping current workers: #{String(error)}"
       return
     return if epoch isnt apiEpoch or stopping
     candidate = { artifact, inputs: report.inputs, epoch }
@@ -1826,7 +1826,7 @@ export main = (argv) ->
       apiTimer = null
       apiDeadline = null
       next = apiChain.then -> prepareApi! epoch
-      apiChain = next.catch (error) -> warn "rip-site: API reload failed: #{String(error)}"
+      apiChain = next.catch (error) -> warn "rip-sites: API reload failed: #{String(error)}"
     , delay
     return
 
@@ -1985,9 +1985,9 @@ export main = (argv) ->
       try
         response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], reload: { epoch: generation } }]
         return if response.ok
-        warn "rip-site: Janus reload publish failed (#{response.status}); retrying"
+        warn "rip-sites: Janus reload publish failed (#{response.status}); retrying"
       catch error
-        warn "rip-site: Janus reload publish failed: #{String(error)}; retrying"
+        warn "rip-sites: Janus reload publish failed: #{String(error)}; retrying"
       return if stopping
       sleep! delay
       delay = Math.min delay * 2, 1000
@@ -2039,7 +2039,7 @@ export main = (argv) ->
         next = appChain.then -> reconcileApp!
         appChain = next.catch (error) ->
           appReconcile = true
-          warn "rip-site: post-migration App refresh failed: #{String(error)}"
+          warn "rip-sites: post-migration App refresh failed: #{String(error)}"
       scheduleApiRefresh() if apiChanged or apiReconcile
       status()
     catch error
@@ -2165,9 +2165,9 @@ export main = (argv) ->
           appId = replacementId
           moveAccess()
         else unless response.ok
-          warn "rip-site: Janus heartbeat failed (#{response.status})"
+          warn "rip-sites: Janus heartbeat failed (#{response.status})"
       catch error
-        warn "rip-site: Janus heartbeat failed: #{String(error)}" unless stopping
+        warn "rip-sites: Janus heartbeat failed: #{String(error)}" unless stopping
       finally
         heartbeatTask = null
     heartbeatTask
@@ -2202,9 +2202,9 @@ export main = (argv) ->
       try
         if appId?
           response = controlFetch! args.control, 'DELETE', "/1.0/apps/#{appId}"
-          warn "rip-site: Janus deregistration failed (#{response.status})" unless response.ok
+          warn "rip-sites: Janus deregistration failed (#{response.status})" unless response.ok
       catch error
-        warn "rip-site: Janus deregistration failed: #{String(error)}"
+        warn "rip-sites: Janus deregistration failed: #{String(error)}"
       try await accessStop if accessStop?
       allWorkers = [...workers, ...bootingWorkers]
       Promise.all! allWorkers.map (worker) -> stopWorker worker.proc
@@ -2225,7 +2225,7 @@ export main = (argv) ->
       process.kill process.pid, signal
       return
     stop(status).catch (error) ->
-      warn "rip-site: signal cleanup failed: #{String(error)}"
+      warn "rip-sites: signal cleanup failed: #{String(error)}"
       process.exitCode = 1
 
   onSigint = -> onSignal 'SIGINT', 130
@@ -2291,12 +2291,12 @@ export main = (argv) ->
       monitorWorker worker
     heartbeat = setInterval beat, HEARTBEAT_MS
     if operation is 'Maintenance'
-      warn "rip-site: unresolved migration #{migration.id}; Maintenance has empty admission"
+      warn "rip-sites: unresolved migration #{migration.id}; Maintenance has empty admission"
     else
-      managerOutput! "rip-site: https://#{if site? then site.host else hosts[0]}/"
+      managerOutput! "rip-sites: https://#{if site? then site.host else hosts[0]}/"
     process.exitCode = await finished
   catch error
-    warn "rip-site: #{String(error)}" unless stopping
+    warn "rip-sites: #{String(error)}" unless stopping
     process.exitCode = stop! 1
   finally
     process.off 'SIGINT', onSigint

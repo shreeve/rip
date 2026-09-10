@@ -8,7 +8,7 @@ PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
 PROJECT = join(import.meta.dir, '..', 'reloads', 'project')
 
-# The same rule agent.rip's resolveCaddy uses: `janus` on PATH, nothing
+# The same rule edge.rip's janusBinary uses: `janus` on PATH, nothing
 # else. Test and production must not disagree about where the edge comes
 # from, and neither an environment variable nor a binary inside this
 # checkout can make this lane run something the host would not.
@@ -46,8 +46,7 @@ certification = ->
   build = info.stdout.toString()
   eq info.exitCode, 0, info.stderr.toString()
   lines = build.split '\n'
-  # The repo-owned main (cmd/janus) makes janus the MAIN module — a
-  # `mod` line, not `dep`. Accept both so xcaddy-era binaries still pass.
+  # Janus can be the executable's main module or a Caddy module dependency.
   janusAt = lines.findIndex (line) -> line.startsWith('mod\tgithub.com/shreeve/janus\t') or line.startsWith('dep\tgithub.com/shreeve/janus\t')
   ok janusAt >= 0, build
   replaced = lines[janusAt].includes('=>') or (lines[janusAt + 1] or '').startsWith('=>')
