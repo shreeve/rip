@@ -6,7 +6,7 @@ import { brotliCompressSync, brotliDecompressSync, constants as zlib } from 'nod
 import { rash, check } from 'rip/app/rash'
 import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
-import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
+import { janusErrorMessage, managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
 import { configureEdge, edgeControl, edgeFetch } from './edge.rip'
 
 positiveEnv = (name, fallback) ->
@@ -559,7 +559,7 @@ runBrowse = (args) ->
         else unless response.ok
           warn "rip-sites: browse heartbeat failed (#{response.status})"
       catch error
-        warn "rip-sites: browse heartbeat failed: #{error?.message or error}" unless stopping
+        warn "rip-sites: browse heartbeat failed: #{janusErrorMessage(error)}" unless stopping
       finally
         heartbeatTask = null
     heartbeatTask
@@ -2167,7 +2167,7 @@ export main = (argv) ->
         else unless response.ok
           warn "rip-sites: Janus heartbeat failed (#{response.status})"
       catch error
-        warn "rip-sites: Janus heartbeat failed: #{String(error)}" unless stopping
+        warn "rip-sites: Janus heartbeat failed: #{janusErrorMessage(error)}" unless stopping
       finally
         heartbeatTask = null
     heartbeatTask

@@ -237,6 +237,9 @@ certification = ->
 
     caddy.kill 'SIGTERM'
     await caddy.exited
+    # Keep the edge down through a heartbeat to exercise both control
+    # clients' connection diagnostics before registration recovery.
+    sleep! 5100
     caddy = startEdge()
     caddyOut = Response.new(caddy.stdout).text()
     caddyErr = Response.new(caddy.stderr).text()
@@ -258,6 +261,8 @@ certification = ->
     eq (await manager.exited), 143, await managerErr
     ok (await managerOut).includes('/api/version'), 'released Janus access events must reach foreground output'
     ok (await managerOut).includes('/api/restart-observation'), 'access output must resume after edge restart'
+    ok (await managerErr).includes('Janus heartbeat failed: Janus unavailable')
+    ok not (await managerErr).includes('Was there a typo')
     manager = null
     waitFor! 'deregistration', ->
       response = edgeFetch! port, '/api/version'

@@ -1,4 +1,5 @@
 import { identifierRuns, isIdentifierName } from '../../src/ident.js'
+import { janusErrorMessage } from './control.rip'
 
 export DEFAULT_ACCESS_PICTURE =! '{local_time} {local_timezone} {duration_seconds:@s} │ {status} {mime_abbrev:<4} {response_bytes:@B} │ {method} {path} │ {mark}'
 export MAX_ACCESS_LINE_BYTES =! 8192
@@ -775,10 +776,8 @@ export class AccessClient
         return if signal.aborted or generation isnt @generation
         message = if missingRegistration
           "app #{appId} is no longer registered; waiting for app re-registration"
-        else if e?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
-          'Janus unavailable; reconnecting'
         else
-          "#{e?.message or e}; reconnecting"
+          "#{janusErrorMessage(e)}; reconnecting"
         if message isnt reportedError
           writeAccessOutput! @stderr, "rip-sites: access stream: #{message}\n"
           reportedError = message
