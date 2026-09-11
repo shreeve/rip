@@ -129,10 +129,10 @@ test 'Body carries its background on the body element and zeroes the box the cel
         Body style: "background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px"
           p "x"
   result = toHTML(E)
-  result.includes('<body style="background:#fafafa;padding:0;margin-top:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px">')
+  result.includes('<body style="background:#fafafa;margin:0;padding:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px">')
 ''', true
 
-test 'Body without a style leaves the body element bare', '''
+test 'Body without a style still zeroes the body element margin', '''
   email = import!("#{process.cwd()}/packages/ui/email/email.rip")
   { toHTML, Email, Body } = email
   E = component
@@ -140,7 +140,7 @@ test 'Body without a style leaves the body element bare', '''
       Email
         Body
           p "x"
-  toHTML(E).includes('<body data-part="Body">')
+  toHTML(E).includes('<body style="margin:0" data-part="Body">')
 ''', true
 
 test 'Section renders full-width table', '''

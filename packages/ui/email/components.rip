@@ -55,18 +55,22 @@ export Head = component
       slot
 
 # The body element carries the background so the ground fills the
-# viewport past the content, and zeroes any margin or padding the style
-# sets, since the cell carries those and a client adds its own to the
-# body. Everything else stays on the cell.
+# viewport past the content, and no box: its margin is zeroed always,
+# since a client's default is not zero, and its padding whenever the
+# style sets one, since the cell carries it. Everything else stays on
+# the cell.
 bodyStyle = (style: string): string ->
   declarations: string[] = []
+  padded = false
   for part in style.split(';')
     declaration = part.trim()
     property = declaration.split(':')[0].trim().toLowerCase()
     if property is 'background' or property is 'background-color'
       declarations.push declaration
-    else if property.startsWith('margin') or property.startsWith('padding')
-      declarations.push "#{property}:0"
+    else if property.startsWith('padding')
+      padded = true
+  declarations.push 'margin:0'
+  declarations.push 'padding:0' if padded
   declarations.join ';'
 
 export Body = component
