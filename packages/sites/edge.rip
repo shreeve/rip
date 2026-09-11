@@ -11,9 +11,8 @@
 # and nothing here writes a file or reloads anything. Tests and custom
 # edges use it.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isIP } from 'node:net'
 
 export JANUS_MISSING = 'no janus on PATH — install Janus: curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash'
 export JANUS_STOPPED = "Janus is not running — 'janus autostart' installs it as a service (once), 'janus start' starts it"
@@ -39,37 +38,22 @@ export externalEdge = -> process.env.JANUS_CONTROL?
 
 # The dashboard belongs to Janus. Discover its configured front door instead
 # of assuming a default name, port, or an enabled mDNS capability.
+validDashboardUrl = (value) ->
+  return null unless typeof value is 'string' and value.length
+  parsed = try URL.new(value) catch then null
+  return null unless parsed? and parsed.protocol in ['http:', 'https:'] and not parsed.username and not parsed.password
+  parsed.href
+
 export dashboardUrl = (edge) ->
-  return null unless edge.state is 'running' and edge.control?
-  options = { signal: AbortSignal.timeout(2000) }
-  target = edge.control
-  unless target.startsWith('http://') or target.startsWith('https://')
-    options.unix = target
-    target = 'http://janus'
+  return null unless edge.state is 'running'
+  return validDashboardUrl(edge.dashboardUrl) if edge.external is false
+  return null unless edge.control?
   try
-    response = fetch! "#{target.replace(/\/$/, '')}/1.0/mdns", options
+    response = edgeFetch! edge.control, '/1.0/mdns', { signal: AbortSignal.timeout(2000) }
     return null unless response.ok
     mdns = response.json!
-  catch then return null
-  return null unless mdns?.enabled is true
-  if mdns.canonical?
-    canonical = try URL.new(mdns.canonical) catch then null
-    return canonical.href if canonical?.protocol is 'https:' and not canonical.username and not canonical.password
-    return null
-  address = /^([^:]*|\[[^\]]+\]):([0-9]+)$/.exec(mdns.front_door or '')
-  return null unless address? and Number(address[2]) > 0 and Number(address[2]) <= 65535
-  host = null
-  if mdns.mode is 'dedicated'
-    bind = address[1]
-    if bind in ['', '0.0.0.0', 'localhost'] then host = '127.0.0.1'
-    else if bind is '[::]' then host = '[::1]'
-    else if not bind.includes('%') and isIP(bind.replace(/^\[|\]$/g, '')) then host = bind
-  unless host?
-    return null if edge.scope in ['localhost', 'wan'] or mdns.exposure is 'wan'
-    host = mdns.effective_name or mdns.name
-    return null unless typeof host is 'string' and /^[a-z0-9-]+\.local$/.test(host)
-  port = if address[2] is '80' then '' else ":#{address[2]}"
-  "http://#{host}#{port}/"
+    if mdns?.enabled is true then validDashboardUrl(mdns.dashboard_url) else null
+  catch then null
 
 # Rip's site file: via.rip and *.via.rip, on Janus's edge as a drop-in.
 export SITE = join(import.meta.dir, 'rip.caddy')
@@ -92,6 +76,14 @@ lastLine = (result) ->
   lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
   (lines.at(-1) or '').replace /^Error: /, ''
 
+writeSite = (target, content) ->
+  temporary = "#{target}.tmp-#{process.pid}"
+  try
+    writeFileSync temporary, content
+    renameSync temporary, target
+  finally
+    unlinkSync temporary if existsSync temporary
+
 # Keep rip's site file in Janus's sites directory, as shipped, and reload
 # a running edge when it changed. `janus` is Janus's status; `report(message,
 # status)` receives a failure. Returns the status.
@@ -101,14 +93,66 @@ export ensureEdgeSite = (janus, report = abort) ->
   current = try readFileSync(target, 'utf8') catch then null
   return janus if current is desired
   mkdirSync janus.sites, { recursive: true }
-  writeFileSync target, desired
+  writeSite target, desired
   if janus.running
-    reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
-    return report("janus reload failed: #{lastLine reload}", 503) unless reload.exitCode is 0
+    try
+      reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
+      throw Error.new(lastLine(reload)) unless reload.exitCode is 0
+    catch error
+      # Restore the pre-reload file so a later attempt retries the change.
+      # Preserve an operator edit made while reload was running.
+      if (try readFileSync(target, 'utf8') catch then null) is desired
+        if current? then writeSite(target, current) else unlinkSync(target)
+      return report("janus reload failed: #{error?.message or error}", 503)
   janus
 
 # The service edge, with rip's site file in place. An external edge
 # (JANUS_CONTROL) is used as found.
 export configureEdge = (report = abort) ->
   return null if externalEdge()
-  ensureEdgeSite requireExposureJanus(janusStatus(), report), report
+  janus = requireExposureJanus janusStatus(), report
+  return null unless janus?
+  ensureEdgeSite janus, report
+
+# Snapshot readers share the same short-lived service facts. No disk state
+# is cached: this only avoids spawning Janus once for every app in a list.
+snapshotCache = { at: 0, value: null }
+export snapshotEnvironment = ->
+  return { scope: 'localhost', sites: null } if externalEdge()
+  now = Date.now()
+  if now - snapshotCache.at >= 2000
+    snapshotCache = { at: now, value: janusStatus() }
+  snapshotCache.value or { scope: 'localhost', sites: null }
+
+export snapshotEdgeState = (edge, janus, health = null) ->
+  {
+    state: if health? then 'running' else 'stopped'
+    external: externalEdge()
+    control: edgeControl(janus)
+    dashboardUrl: janus?.dashboard_url or null
+    scope: janus?.scope or null
+    interface: janus?.interface or null
+    bind: janus?.bind or null
+    firewall: janus?.firewall or null
+    baseUrl: edge?.baseUrl or 'https://{host}/'
+    pid: janus?.pid or null
+    uptime: janus?.uptime or null
+    supervisor: janus?.supervisor or null
+    autostart: janus?.autostart is true
+    version: janus?.janus or null
+    binaryNewer: janus?.binary_newer is true
+    config: janus?.config or null
+    sites: janus?.sites or null
+    log: janus?.log or null
+    admin: janus?.admin or null
+    janus: health
+    lastError: edge?.lastError or null
+  }
+
+export edgeFetch = (target, path = '/1.0', init = {}) ->
+  options = { signal: AbortSignal.timeout(5000), ...init }
+  if target.startsWith('http://') or target.startsWith('https://')
+    fetch "#{target.replace(/\/$/, '')}#{path}", options
+  else
+    options.unix = target
+    fetch "http://janus#{path}", options

@@ -1,0 +1,43 @@
+import { test, eq } from 'rip/testing'
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { readLog } from '../../logs.rip'
+
+test 'log tails preserve UTF-8, byte offsets, missing files, and truncation', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-log-read-')
+  path = join dir, 'manager.log'
+  try
+    eq readLog(path).text, ''
+    eq readLog(path, 1, 12).truncated, true
+    writeFileSync path, 'old\n'.repeat(30000) + '世界\nlast\n'
+    log = readLog path, 2
+    eq log.text, '世界\nlast\n'
+    eq log.next, 120012
+    appendFileSync path, 'new 🌎\n'
+    next = readLog path, 2, log.next
+    eq next.text, 'new 🌎\n'
+    eq next.next, log.next + Buffer.byteLength('new 🌎\n')
+    eq next.truncated, false
+    eq readLog(path, 1, next.next).text, ''
+    writeFileSync path, 'reset\n'
+    reset = readLog path, 2, next.next
+    eq reset.text, 'reset\n'
+    eq reset.next, 6
+    eq reset.truncated, true
+    writeFileSync path, ''
+    eq readLog(path).text, ''
+    writeFileSync path, 'unterminated'
+    eq readLog(path, 1).text, 'unterminated'
+    globe = Buffer.from '🌎'
+    writeFileSync path, globe.subarray(0, 2)
+    partial = readLog path
+    eq partial.text, ''
+    eq partial.next, 0
+    eq readLog(path, 1, 0).next, 0
+    appendFileSync path, globe.subarray(2)
+    finished = readLog path, 1, partial.next
+    eq finished.text, '🌎'
+    eq finished.next, 4
+  finally
+    rmSync dir, { recursive: true, force: true }

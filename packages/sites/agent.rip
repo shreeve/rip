@@ -1,10 +1,12 @@
-import { closeSync, existsSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute, join } from 'node:path'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { agentPaths, loaderArg, secureDirectory } from './appliance.rip'
 import { managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
-import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeScope, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { RESERVED, findCatalogApp, loadCatalog, readOwnerPid, saveCatalog, snapshotCatalogApp } from './catalog.rip'
+import { readLog } from './logs.rip'
+import { JANUS_MISSING, JANUS_STOPPED, configureEdge, edgeControl, edgeFetch, snapshotEdgeState, externalEdge, janusBinary, janusStatus } from './edge.rip'
 
 throw Error.new('rip/sites/agent is private process machinery') unless import.meta.main
 
@@ -27,25 +29,6 @@ ensureLanHosts = (hosts) ->
     seen.add twin
   out
 
-# The edge's exposure scope is Janus's; snapshots ask per app, so the
-# answer is kept for two seconds. It only picks which URL to show first.
-scopeCache = { at: 0, scope: 'localhost' }
-currentScope = ->
-  now = Date.now()
-  return scopeCache.scope if now - scopeCache.at < 2000
-  scopeCache = { at: now, scope: (if externalEdge() then 'localhost' else edgeScope()) }
-  scopeCache.scope
-
-preferredHost = (hosts) ->
-  return null unless hosts?.length
-  if currentScope() is 'lan'
-    match = hosts.find (host) -> host.endsWith '.local'
-    return match if match?
-  else
-    match = hosts.find (host) -> host.endsWith '.via.rip'
-    return match if match?
-  hosts[0]
-
 fail = (message, status = 400) ->
   error = Error.new message
   error.status = status
@@ -65,108 +48,11 @@ processAlive = (pid) ->
   catch error
     error?.code is 'EPERM'
 
-defaultState = ->
-  version: 1
-  apps: []
-  edge:
-    baseUrl: 'https://{host}/'
-    lastError: null
-
-validateState = (state) ->
-  fail("malformed state at #{paths.state}", 500) unless isRecord(state) and state.version is 1 and Array.isArray(state.apps) and isRecord(state.edge)
-  ids = Set.new()
-  names = Set.new()
-  roots = Set.new()
-  for app in state.apps
-    valid = isRecord(app) and /^[a-f0-9]{16}$/.test(app.id) and typeof app.name is 'string' and typeof app.root is 'string' and Array.isArray(app.hosts) and app.hosts.every((host) -> typeof host is 'string') and isRecord(app.options) and Number.isInteger(app.options.workers) and app.options.workers > 0 and Number.isInteger(app.options.concurrency) and app.options.concurrency > 0 and typeof app.options.watchApp is 'boolean' and typeof app.options.watchApi is 'boolean' and typeof app.options.eager is 'boolean' and app.desired in ['running', 'stopped']
-    fail("malformed app record at #{paths.state}", 500) unless valid
-    fail("reserved app name #{JSON.stringify(app.name)} at #{paths.state}", 500) if app.name in ['edge', 'all', 'agent']
-    fail("duplicate app record at #{paths.state}", 500) if ids.has(app.id) or names.has(app.name) or roots.has(app.root)
-    ids.add app.id
-    names.add app.name
-    roots.add app.root
-  edge = state.edge
-  valid = typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}') and (edge.lastError is null or typeof edge.lastError is 'string')
-  fail("malformed edge record at #{paths.state}", 500) unless valid
-  state
-
-normalizeAppOptions = (options) ->
-  fail 'app options must be an object', 500 unless isRecord options
-  watchApp = options.watchApp
-  watchApi = options.watchApi
-  if typeof options.watch is 'boolean'
-    watchApp = options.watch unless typeof watchApp is 'boolean'
-    watchApi = options.watch unless typeof watchApi is 'boolean'
-  {
-    workers: options.workers
-    concurrency: options.concurrency
-    watchApp: watchApp
-    watchApi: watchApi
-    eager: options.eager
-  }
-
-migrateState = (raw) ->
-  return { state: raw, dirty: false } unless isRecord(raw) and Array.isArray(raw.apps)
-  changed = false
-  apps = raw.apps.map (app) ->
-    return app unless isRecord(app) and isRecord(app.options)
-    options = normalizeAppOptions app.options
-    return app if typeof options.watchApp is 'boolean' and typeof options.watchApi is 'boolean' and not ('watch' of app.options)
-    changed = true
-    { ...app, options }
-  edge = if isRecord(raw.edge) then { ...raw.edge } else null
-  if edge?
-    unless typeof edge.baseUrl is 'string' and edge.baseUrl.includes('{host}')
-      edge.baseUrl = 'https://{host}/'
-      changed = true
-    # The edge record holds Rip's facts only; the process, its ports, its
-    # exposure scope, and trust in its CA are Janus's to know.
-    for key of edge when key not in ['baseUrl', 'lastError']
-      delete edge[key]
-      changed = true
-  return { state: (if edge? then { ...raw, apps, edge } else { ...raw, apps }), dirty: true } if changed
-  { state: raw, dirty: false }
-
-loadState = ->
-  return { state: defaultState(), dirty: false } unless existsSync paths.state
-  try
-    migrated = migrateState JSON.parse(readFileSync(paths.state, 'utf8'))
-    { state: validateState(migrated.state), dirty: migrated.dirty }
-  catch error
-    throw error if error?.status?
-    fail "cannot read state at #{paths.state}: #{error?.message or error}", 500
-
-writeSecure = (path, text) ->
-  temporary = "#{path}.tmp-#{process.pid}"
-  fd = openSync temporary, 'w', 0o600
-  try
-    writeFileSync fd, text
-    fsyncSync fd
-  finally
-    closeSync fd
-  renameSync temporary, path
-  directory = openSync paths.stateRoot, 'r'
-  try fsyncSync(directory) finally closeSync(directory)
-
 saveState = ->
   assertOwner()
-  writeSecure paths.state, JSON.stringify(state, null, 2) + '\n'
-loaded = loadState()
-state = loaded.state
+  saveCatalog state, 'rip-agent'
 
-tail = (path, lines = 100) ->
-  return '' unless existsSync path
-  text = readFileSync path, 'utf8'
-  rows = text.split '\n'
-  rows.pop() if rows.at(-1) is ''
-  rows.slice(-lines).join('\n') + if rows.length then '\n' else ''
-
-readLog = (path, lines, after) ->
-  bytes = if existsSync(path) then readFileSync(path) else Buffer.alloc(0)
-  if after?
-    start = if after <= bytes.length then after else 0
-    return { path, text: bytes.subarray(start).toString('utf8'), next: bytes.length, truncated: after > bytes.length }
-  { path, text: tail(path, lines), next: bytes.length, truncated: false }
+state = null
 
 # Managers get a CLEAN environment, never the agent's. The long-lived
 # agent carries whatever Bun auto-loaded from the directory it happened
@@ -184,14 +70,6 @@ managerEnv = ->
   for key of process.env
     env[key] = process.env[key] if key.startsWith 'LC_'
   env
-
-readOwnerPid = (root) ->
-  owner = managerRuntime(root, 'rip-agent').owner
-  return null unless existsSync owner
-  try
-    value = JSON.parse readFileSync(owner, 'utf8')
-    if Number.isInteger(value.pid) then value.pid else null
-  catch then null
 
 # Probe verdicts ride the agent's OWN event loop: AbortSignal.timeout
 # is wall-clock, so with every core busy a healthy peer's reply sits
@@ -211,14 +89,6 @@ managerStatus = (app) ->
     return null unless response.ok
     response.json!
   catch then null
-
-edgeFetch = (target, path = '/1.0', init = {}) ->
-  options = { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT) }
-  if target.startsWith('http://') or target.startsWith('https://')
-    fetch "#{target}#{path}", options
-  else
-    options.unix = target
-    fetch "http://janus#{path}", options
 
 # The control target apps register with. Janus's socket path does not
 # move, so one answer serves the agent's life; a missing janus is asked
@@ -300,88 +170,9 @@ serveDecl = (app) ->
   serveDecls.set app.root, entry
   entry.promise
 
-# Effective hosts in serving-truth order: what a live manager claims
-# (a site-template manager claims hosts: [] — its concrete alias hosts
-# stand in), then an operator pin in the catalog, then the serve.rip
-# declaration read from disk. Built into snapshots ONLY — never assign
-# the result to app.hosts: the catalog feeds serverArgv --host flags,
-# and a site-template manager aborts on any --host.
-effectiveHosts = (app, manager) ->
-  if manager?
-    site = manager.site or null
-    return { hosts: manager.hosts, site, error: null } if manager.hosts?.length
-    return { hosts: Object.keys(site.aliases or {}), site, error: null } if site?
-  return { hosts: app.hosts, site: null, error: null } if app.hosts.length
-  decl = serveDecl! app
-  return { hosts: [], site: null, error: null } unless decl?
-  return { hosts: [], site: null, error: decl.error } if decl.error?
-  site = decl.site or null
-  hosts = decl.hosts or []
-  hosts = Object.keys(site.aliases or {}) if not hosts.length and site?
-  # A bare serve.rip (neither hosts nor sites) makes the manager serve
-  # the app name as its host — mirror that.
-  hosts = [app.name] unless hosts.length
-  { hosts, site, error: null }
+snapshotApp = (app) -> snapshotCatalogApp! app, 'rip-agent', { managerStatus, readDecl: serveDecl, baseUrl: state.edge.baseUrl }
 
-appUrl = (hosts) ->
-  host = preferredHost hosts
-  return null unless host?
-  (state.edge.baseUrl or 'https://{host}/').replace '{host}', host
-
-# Janus's drop-in sites directory, from its status; asked once.
-sitesDir = null
-edgeSitesDir = ->
-  sitesDir ?= janusStatus()?.sites or null
-  sitesDir
-
-# Hosts beyond Janus's *.local site and rip's via.rip file answer only
-# when a sites snippet declares them — and Caddy's import glob is silent
-# when nothing matches, so an app advertising its own domain with no
-# snippet looks healthy everywhere while its URL answers nothing
-# (observed in the field). The snapshot carries the warning instead.
-hostCovered = (host) ->
-  return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
-  dir = edgeSitesDir()
-  return false unless dir?
-  names = try
-    readdirSync(dir).filter (name) -> name.endsWith '.caddy'
-  catch then []
-  for name in names
-    text = try
-      readFileSync join(dir, name), 'utf8'
-    catch then ''
-    return true if text.includes host
-    for match in text.matchAll /\*\.([a-z0-9.-]+)/gi
-      return true if host.endsWith ".#{match[1]}"
-  false
-
-snapshotApp = (app) ->
-  manager = managerStatus! app
-  { hosts, site, error } = effectiveHosts! app, manager
-  uncovered = (host for host in hosts when not hostCovered(host))
-  {
-    id: app.id
-    name: app.name
-    root: app.root
-    desired: app.desired
-    state: if manager? then (if manager.stopping then 'stopping' else if manager.ready is false then 'starting' else 'running') else 'stopped'
-    pid: if manager? then readOwnerPid(app.root) else null
-    url: appUrl(hosts)
-    hosts: hosts
-    sitePattern: site?.host or null
-    serveError: error
-    hostWarning: if uncovered.length then "no edge site block covers #{uncovered.join(', ')} — add #{join(edgeSitesDir() or '<janus sites dir>', app.name + '.caddy')} (or any *.caddy declaring these hosts)" else null
-    manager
-    lastError: app.lastError or null
-    lastExit: app.lastExit or null
-  }
-
-findApp = (selector) ->
-  decoded = decodeURIComponent selector
-  matches = state.apps.filter (app) -> app.id is decoded or app.name is decoded or app.root is decoded
-  fail "unknown app #{JSON.stringify(decoded)}", 404 unless matches.length
-  fail "ambiguous app #{JSON.stringify(decoded)}", 409 unless matches.length is 1
-  matches[0]
+findApp = (selector) -> findCatalogApp state, decodeURIComponent(selector)
 
 validHost = (host) ->
   return false unless typeof host is 'string'
@@ -402,7 +193,7 @@ addApp = (body) ->
   fail "project is already registered: #{project.root}", 409 if state.apps.some((app) -> app.root is project.root)
   name = body.name or basename(project.root).replace(/\.[^.]+$/, '')
   fail "invalid app name #{JSON.stringify(name)}" unless validName name
-  fail "#{JSON.stringify(name)} is reserved (edge | all | agent) — not an app name" if name in ['edge', 'all', 'agent']
+  fail "#{JSON.stringify(name)} is reserved (edge | all | agent) — not an app name" if name in RESERVED
   fail "app name is already registered: #{name}", 409 if state.apps.some((app) -> app.name is name)
   hosts = body.hosts
   if not hosts?
@@ -412,13 +203,12 @@ addApp = (body) ->
   hosts = ensureLanHosts hosts
   fail 'hosts must not contain duplicates' unless Set.new(hosts).size is hosts.length
   options = body.options or {}
-  rejectUnknown options, ['workers', 'concurrency', 'watch', 'watchApp', 'watchApi', 'eager'], 'app options'
-  fail 'watch must be Boolean' if options.watch? and typeof options.watch isnt 'boolean'
+  rejectUnknown options, ['workers', 'concurrency', 'watchApp', 'watchApi', 'eager'], 'app options'
   fail 'watchApp must be Boolean' if options.watchApp? and typeof options.watchApp isnt 'boolean'
   fail 'watchApi must be Boolean' if options.watchApi? and typeof options.watchApi isnt 'boolean'
   fail 'eager must be Boolean' if options.eager? and typeof options.eager isnt 'boolean'
-  watchApp = if options.watchApp? then options.watchApp else if options.watch? then options.watch else true
-  watchApi = if options.watchApi? then options.watchApi else if options.watch? then options.watch else true
+  watchApp = options.watchApp ?? true
+  watchApi = options.watchApi ?? true
   app =
     id: randomBytes(8).toString('hex')
     name: name
@@ -527,7 +317,7 @@ startApp = (app, automatic = false) ->
         return snapshotApp! app
       break if child?.exitCode? or Date.now() >= deadline
       sleep! 25
-    diagnostic = tail(logPath, 20).trim()
+    diagnostic = readLog(logPath, 20).text.trim()
     message = if child?.exitCode? then "manager exited #{child.exitCode}" else 'manager readiness deadline expired'
     message += ":\n#{diagnostic}" if diagnostic
     app.lastError = message
@@ -587,28 +377,7 @@ removeApp = (app) ->
 snapshotEdge = ->
   janus = if externalEdge() then null else janusStatus()
   health = edgeHealth!
-  {
-    state: if health? then 'running' else 'stopped'
-    external: externalEdge()
-    control: edgeTarget()
-    scope: janus?.scope or null
-    interface: janus?.interface or null
-    bind: janus?.bind or null
-    firewall: janus?.firewall or null
-    baseUrl: state.edge.baseUrl
-    pid: janus?.pid or null
-    uptime: janus?.uptime or null
-    supervisor: janus?.supervisor or null
-    autostart: janus?.autostart is true
-    version: janus?.janus or null
-    binaryNewer: janus?.binary_newer is true
-    config: janus?.config or null
-    sites: janus?.sites or null
-    log: janus?.log or null
-    admin: janus?.admin or null
-    janus: health
-    lastError: state.edge.lastError
-  }
+  snapshotEdgeState state.edge, janus, health
 
 # Exit when nothing remains to supervise — no idle forever control plane.
 #
@@ -779,7 +548,7 @@ process.on 'SIGTERM', shutdown
 
 acquire!
 try
-  saveState() if loaded.dirty
+  state = loadCatalog 'rip-agent'
   # A boot is the moment to make sure rip's site file is in Janus's sites
   # directory.
   try

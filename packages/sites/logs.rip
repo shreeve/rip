@@ -1,0 +1,56 @@
+# Durable manager logs can be read independently of the control agent.
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
+
+# A writer can pause between bytes of one character. Keep that suffix
+# behind the cursor so a follower decodes it with the next append.
+completeLength = (bytes) ->
+  i = bytes.length - 1
+  i -= 1 while i >= 0 and (bytes[i] & 0xc0) is 0x80
+  return bytes.length if i < 0
+  lead = bytes[i]
+  width = if lead >= 0xc2 and lead <= 0xdf then 2 else if lead >= 0xe0 and lead <= 0xef then 3 else if lead >= 0xf0 and lead <= 0xf4 then 4 else 1
+  if bytes.length - i < width then i else bytes.length
+
+export readLog = (path, lines = 100, after = null) ->
+  fd = null
+  try
+    fd = openSync path, 'r'
+  catch error
+    throw error unless error.code is 'ENOENT'
+    return { path, text: '', next: 0, truncated: after? and after > 0 }
+  try
+    size = fstatSync(fd).size
+    truncated = after? and after > size
+    start = if after? and not truncated then after else size
+    chunks = []
+    if after?
+      start = 0 if truncated
+      bytes = Buffer.alloc size - start
+      count = 0
+      while count < bytes.length
+        n = readSync fd, bytes, count, bytes.length - count, start + count
+        break unless n
+        count += n
+      count = completeLength bytes.subarray(0, count)
+      return { path, text: bytes.subarray(0, count).toString('utf8'), next: start + count, truncated }
+    # Scan backward in blocks until the requested tail is covered. Decode
+    # only after joining blocks so a UTF-8 character crossing a block survives.
+    newlines = 0
+    while start > 0 and newlines <= lines
+      length = Math.min 8192, start
+      start -= length
+      bytes = Buffer.alloc length
+      count = readSync fd, bytes, 0, length, start
+      bytes = bytes.subarray 0, count
+      newlines += 1 for byte in bytes when byte is 10
+      chunks.unshift bytes
+    bytes = Buffer.concat chunks
+    complete = completeLength bytes
+    text = bytes.subarray(0, complete).toString 'utf8'
+    newline = text.endsWith '\n'
+    rows = text.split '\n'
+    rows.pop() if rows.at(-1) is ''
+    text = rows.slice(-lines).join('\n') + if newline then '\n' else ''
+    { path, text, next: size - bytes.length + complete, truncated: false }
+  finally
+    closeSync fd

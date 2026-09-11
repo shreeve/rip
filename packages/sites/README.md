@@ -49,8 +49,8 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
-`sites.json` (Rip-owned). The control plane starts with the edge / desired
-apps and exits when nothing remains to supervise — Janus stays live-only.
+`sites.json` (Rip-owned). The agent serializes every catalog mutation, starts on demand,
+and exits when nothing remains to supervise — Janus stays live-only.
 
 ## Quick Start
 
@@ -104,7 +104,8 @@ workers, and routing health; Rip's CLI owns Start/Stop/Restart and
 the remembered catalog, including stopped apps. Rip runs no browser status
 server and registers no dashboard app. `rip sites open edge` discovers
 Janus's configured front door, including renamed hosts, custom ports,
-and a canonical HTTPS origin. With mDNS disabled or no reachable front door
+and a canonical HTTPS origin. Dashboard URL discovery requires Janus 1.15
+or later. With mDNS disabled or no available front door
 for the current exposure mode, the CLI reports that no dashboard is available.
 Localhost-only edges need a reachable canonical origin or a dedicated
 listener; wildcard dedicated listeners open through loopback. `.local`
@@ -203,8 +204,8 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 - App selectors: catalog **id**, unique **name**, or canonical **root**.
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
-- Durable catalog: `sites.json` (Rip-owned). Control starts with the first
-  desired-running app and exits when nothing remains to supervise.
+- Durable catalog: `sites.json` (Rip-owned). The agent is the single writer;
+  mutations start it on demand, even with Janus stopped. It exits when idle.
 - The edge process is Janus's: `janus autostart`, `start`, `stop`,
   `restart`, `status`. `rip sites` renders what it serves.
 
@@ -332,6 +333,11 @@ the drop-in serves the name, it does not resolve it.
 | `rip sites open edge` | Open Janus's configured read-only status dashboard. |
 | `rip sites logs <app> [--lines N] [-f]` | Print (or follow) a supervised app’s manager log. |
 | `rip sites logs all [--lines N]` | Tail every remembered app’s log once. |
+
+Logs are durable files: reading or following them does not require a running
+agent. `logs <app> --json` returns the path, text, byte cursor, and truncation
+status; `logs all --json` returns an array with those fields plus each app's
+ID and name. `--follow` and `--json` are mutually exclusive.
 
 ### Manager — foreground, publish, deploy barriers
 
@@ -1379,13 +1385,13 @@ Day-to-day commands live under [Commands at a glance](#commands-at-a-glance).
 This section is the ownership contract behind them.
 
 Rip owns the durable catalog at `sites.json`
-(`~/Library/Application Support/Rip/sites.json` on macOS; a one-time rename
-from `agent.json` still applies). Catalog reads and writes (`list` / `add` /
-`remove`) do not require a live control plane. A small control process starts
-when a desired-running app needs supervision, adopts healthy managers after
-a restart, and exits when no app remains desired-running. Janus never writes
-the catalog, and the catalog keeps only Rip's own edge facts: the URL shape
-and whether this machine trusts the local CA; the scope is Janus's.
+(`~/Library/Application Support/Rip/sites.json` on macOS). One agent owns all
+catalog writes; commands that change the catalog or app state start it as
+needed, even while Janus is stopped. Read-only commands can inspect the
+catalog without an agent. The agent adopts healthy managers after a restart
+and exits when no app remains desired-running. Janus never writes the catalog,
+and the catalog keeps only Rip's URL shape and last edge configuration error.
+Exposure scope and CA trust are Janus's facts.
 
 The edge process is Janus's. `janus autostart` installs it under launchd
 (macOS) or systemd (Linux), running now, at every login, and again after a
@@ -1399,7 +1405,8 @@ Rip's names are one site file, `rip.caddy` beside this README: the via.rip
 family, site blocks only, nothing rendered. The control plane copies it
 into Janus's sites directory as shipped and reloads a running edge when
 it changed; that happens when the control plane boots and before an app
-starts. The LAN family, `*.local`, is Janus's own site; the bind, the
+starts, including foreground `run` and `publish`. A failed reload restores
+the previous file so the next attempt retries. The LAN family, `*.local`, is Janus's own site; the bind, the
 firewall, the local CA, and trust in it are Janus's; a mode change touches
 nothing of Rip's. Operator-owned domains go in one `*.caddy` file each in
 the same directory. `JANUS_CONTROL` names an edge Rip does not configure:

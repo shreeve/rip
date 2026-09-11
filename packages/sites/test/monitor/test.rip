@@ -903,8 +903,8 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
   raw = run! 'raw'
   eq raw.output, TextDecoder.new().decode(Uint8Array.new([...helloLine(), ...accessLine(sequence: '1')]))
   eq raw.accessCount, 1
-  ok raw.diagnostic.includes 'rip-site: https://cart.test/'
+  ok raw.diagnostic.includes 'rip-sites: https://cart.test/'
 
   disabled = run! 'off'
   eq disabled.accessCount, 0
-  ok disabled.output.includes 'rip-site: https://cart.test/'
+  ok disabled.output.includes 'rip-sites: https://cart.test/'

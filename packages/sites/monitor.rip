@@ -769,7 +769,7 @@ export class AccessClient
         try reader?.cancel().catch(-> null)
         throw e if e?.accessOutput or e?.code is 'EPIPE'
         return if signal.aborted
-        try writeAccessOutput!(@stderr, "rip-site: access stream: #{e?.message or e}; reconnecting\n")
+        try writeAccessOutput!(@stderr, "rip-sites: access stream: #{e?.message or e}; reconnecting\n")
         catch outputError
           throw outputError
       break unless generation is @generation and not signal.aborted
@@ -784,7 +784,7 @@ export class AccessClient
   consume: (line) ->
     record = line.record
     if record.type is 'gap'
-      writeAccessOutput! @stderr, "rip-site: access gap #{record.from}..#{record.through} (#{record.reason})\n"
+      writeAccessOutput! @stderr, "rip-sites: access gap #{record.from}..#{record.through} (#{record.reason})\n"
     if @mode is 'raw'
       writeAccessOutput! @stdout, line.bytes
     else if @mode is 'pretty' and record.type is 'access'

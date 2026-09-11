@@ -4,15 +4,14 @@
 # Reserved nouns: edge, all, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
-import { printJson, probeAgent, requestAgent } from './appliance.rip'
-import { addCatalogApp, findCatalogApp, loadCatalog, removeCatalogApp, snapshotCatalogApp } from './catalog.rip'
-import { JANUS_MISSING, dashboardUrl, edgeControl, externalEdge, janusBinary, janusStatus } from './edge.rip'
+import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { readLog } from './logs.rip'
+import { RESERVED, findCatalogApp, loadCatalog, snapshotCatalogApp } from './catalog.rip'
+import { JANUS_MISSING, dashboardUrl, edgeControl, edgeFetch, snapshotEdgeState, externalEdge, janusBinary, janusStatus } from './edge.rip'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 throw Error.new('rip/sites/sites is a CLI, not a library; run `rip sites`') unless import.meta.main
-
-RESERVED = ['edge', 'all', 'agent']
 
 HELP = '''
   usage: rip sites <verb> [noun] [options]
@@ -74,27 +73,18 @@ addFlags = []
 logFlags = []
 
 # Manager verbs invoke manager.rip as an internal module (not a user CLI).
-MANAGER = ['run', 'publish', 'browse', 'hold', 'release', 'migrate', 'recover']
-
-# A foreground manager registers where the supervised apps do: Janus's
-# control socket, unless JANUS_CONTROL already says otherwise.
-seedJanusControl = (env) ->
-  return env if env.JANUS_CONTROL
-  control = try edgeControl() catch then null
-  env.JANUS_CONTROL = control if control?
-  env
+MANAGER = ['run', 'publish', 'hold', 'release', 'migrate', 'recover']
 
 runManager = (argv, options = {}) ->
   manager = join(import.meta.dir, 'manager.rip')
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-sites: the Rip loader is missing' unless preload?
-  env = seedJanusControl! { ...process.env }
   result = Bun.spawnSync [process.execPath, preload, manager, ...argv],
     cwd: options.cwd or process.cwd()
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'inherit'
-    env: env
+    env: { ...process.env }
   exit result.exitCode ?? 1
 
 takeAppNoun = ->
@@ -107,16 +97,8 @@ takeAppNoun = ->
 if verb in MANAGER
   if verb is 'run'
     runManager! args
-  else if verb is 'publish' or verb is 'browse'
-    # publish is the taught verb; browse remains as a quiet synonym.
-    dir = null
-    rest = []
-    for value, i in args
-      if not dir? and not value.startsWith('-')
-        dir = value
-      else
-        rest.push value
-    runManager! ['browse', (dir or process.cwd()), ...rest]
+  else if verb is 'publish'
+    runManager! ['browse', ...args]
   else if verb in ['hold', 'release']
     app = takeAppNoun!
     runManager! [verb, app.root, ...args]
@@ -200,10 +182,7 @@ reservedAsApp = (label) ->
   abort "rip-sites: #{JSON.stringify(label)} is reserved (edge | all | agent) — not an app name" if label in RESERVED
 
 catalogHas = (selector) ->
-  try
-    findCatalogApp loadCatalog(), selector
-    true
-  catch then false
+  findCatalogApp(loadCatalog(), selector, false)?
 
 pathNoun = (selector = null) ->
   raw = selector or process.cwd()
@@ -279,7 +258,7 @@ wantsControl = ->
 
 # snapshotCatalogApp awaits a manager probe — map through Promise.all, never
 # leave bare Promises (JSON.stringify turns those into `{}`).
-offlineApps = (apps) -> Promise.all! apps.map (app) -> snapshotCatalogApp! app
+offlineApps = (doc) -> Promise.all! doc.apps.map (app) -> snapshotCatalogApp! app, 'rip-sites', { baseUrl: doc.edge.baseUrl }
 
 ensureLiveControl = ->
   live = probeAgent! 'rip-sites'
@@ -290,41 +269,10 @@ ensureLiveControl = ->
     probeAgent! 'rip-sites'
   catch then null
 
-# The edge without a control plane: Janus's status plus the catalog's
-# edge facts. The same shape the agent's snapshot has.
-offlineEdge = (edge, janus, health = null) ->
-  {
-    state: if health? then 'running' else 'stopped'
-    external: externalEdge()
-    control: edgeControl(janus)
-    scope: janus?.scope or null
-    interface: janus?.interface or null
-    bind: janus?.bind or null
-    firewall: janus?.firewall or null
-    baseUrl: edge?.baseUrl or 'https://{host}/'
-    pid: janus?.pid or null
-    uptime: janus?.uptime or null
-    supervisor: janus?.supervisor or null
-    autostart: janus?.autostart is true
-    version: janus?.janus or null
-    binaryNewer: janus?.binary_newer is true
-    config: janus?.config or null
-    sites: janus?.sites or null
-    log: janus?.log or null
-    admin: janus?.admin or null
-    janus: health
-    lastError: edge?.lastError or null
-  }
-
 probeJanus = (control) ->
   return null unless typeof control is 'string' and control.length
   try
-    options = { signal: AbortSignal.timeout(1000) }
-    if control.startsWith('http://') or control.startsWith('https://')
-      response = fetch! "#{control}/1.0", options
-    else
-      options.unix = control
-      response = fetch! 'http://janus/1.0', options
+    response = edgeFetch! control, '/1.0', { signal: AbortSignal.timeout(1000) }
     return response.json! if response.ok
   catch then null
   null
@@ -332,7 +280,7 @@ probeJanus = (control) ->
 readOfflineEdge = ->
   doc = loadCatalog()
   janus = if externalEdge() then null else janusStatus()
-  offlineEdge doc.edge, janus, probeJanus!(edgeControl(janus))
+  snapshotEdgeState doc.edge, janus, probeJanus!(edgeControl(janus))
 
 # The edge is Janus's process; its verbs are janus's.
 edgeIsJanus = (action) ->
@@ -345,7 +293,7 @@ switch verb
     if live
       apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: false }
     else
-      apps = offlineApps! loadCatalog().apps
+      apps = offlineApps! loadCatalog()
     if json then printJson apps else if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites. Add one with `rip sites add [project]`.'
 
   when 'add'
@@ -356,18 +304,12 @@ switch verb
       name: name
       hosts: hosts
       options: { workers, concurrency, watchApp, watchApi, eager: eager is true }
-    if probeAgent! 'rip-sites'
-      app = requestAgent! 'rip-sites', 'POST', '/1.0/apps', body, { start: false }
-    else
-      app = addCatalogApp! body
+    app = requestAgent! 'rip-sites', 'POST', '/1.0/apps', body
     if json then printJson app else console.log "Added #{app.name}\n#{app.root}"
 
   when 'remove'
     requireApp!
-    if probeAgent! 'rip-sites'
-      app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: false }
-    else
-      app = removeCatalogApp! noun
+    app = requestAgent! 'rip-sites', 'DELETE', "/1.0/apps/#{encodeURIComponent(noun)}"
     if json then printJson app else console.log "Removed #{app.name}"
 
   when 'start', 'stop', 'restart'
@@ -399,7 +341,11 @@ switch verb
     abort 'rip-sites: status takes at most one noun' if positionals.length > 1
     # Path / cwd manager JSON when noun is `.`, an existing path, or missing
     # from the catalog — but bare status stays the edge+apps summary.
-    if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
+    if noun is 'agent'
+      info = requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: false, soft: true }
+      status = { state: (if info? then 'running' else 'stopped'), pid: info?.pid or null }
+      if json then printJson status else console.log(if info? then "Control agent running (pid #{info.pid})." else 'Control agent is not running.')
+    else if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
       runManager! ['status', pathNoun!(noun)]
     else
       live = ensureLiveControl!
@@ -410,7 +356,7 @@ switch verb
         else
           doc = loadCatalog()
           edge = readOfflineEdge!
-          apps = offlineApps! doc.apps
+          apps = offlineApps! doc
         if json
           printJson if noun is 'all' then apps else { edge, apps }
         else if noun is 'all'
@@ -426,7 +372,8 @@ switch verb
         if live or wantsControl!
           printApp requestAgent!('rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true })
         else
-          printApp snapshotCatalogApp!(findCatalogApp(loadCatalog(), noun))
+          doc = loadCatalog()
+          printApp snapshotCatalogApp!(findCatalogApp(doc, noun), 'rip-sites', { baseUrl: doc.edge.baseUrl })
 
   when 'open'
     requireNoun ['<app>', 'edge']
@@ -447,52 +394,31 @@ switch verb
   when 'logs'
     edgeIsJanus 'status (it names the log)' if noun is 'edge'
     requireNoun ['<app>', 'all']
-    if noun is 'all'
-      apps = requestAgent! 'rip-sites', 'GET', '/1.0/apps', null, { start: wantsControl! }
-      abort 'rip-sites: no apps in the catalog' unless apps.length
-      offsets = {}
-      for app in apps
-        id = encodeURIComponent app.id
-        log = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?lines=#{lines}", null, { start: false }
-        console.log "—— #{app.name} ——"
-        process.stdout.write log.text or '(empty)\n'
-        offsets[app.id] = log.next
+    catalog = loadCatalog()
+    apps = if noun is 'all' then catalog.apps else [findCatalogApp(catalog, noun)]
+    abort 'rip-sites: no apps in the catalog' unless apps.length
+    paths = agentPaths 'rip-sites'
+    read = (app, after = null) -> readLog(join(paths.appLogs, app.id + '.log'), lines, after)
+    logs = apps.map (app) -> read(app)
+    if json
+      printJson if noun is 'all' then logs.map((log, i) -> { id: apps[i].id, name: apps[i].name, ...log }) else logs[0]
+    else
+      for log, i in logs
+        console.log "—— #{apps[i].name} ——" if noun is 'all'
+        process.stdout.write log.text or (if noun is 'all' then '(empty)\n' else '')
       if follow
-        # One poll loop over every app; the header reprints only when
-        # the app producing lines changes, so a single busy app reads
-        # as one uninterrupted stream.
-        current = apps[apps.length - 1].id
+        offsets = Object.fromEntries logs.map (log, i) -> [apps[i].id, log.next]
+        current = apps.at(-1).id
         loop
           sleep! 250
           for app in apps
-            id = encodeURIComponent app.id
-            next = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?after=#{offsets[app.id]}", null, { start: false, soft: true }
-            continue unless next?
+            next = read app, offsets[app.id]
             if next.text
-              unless current is app.id
+              if noun is 'all' and current isnt app.id
                 console.log "—— #{app.name} ——"
                 current = app.id
               process.stdout.write next.text
             offsets[app.id] = next.next
-    else
-      requireApp!
-      id = encodeURIComponent noun
-      # A follower is a reader: a lost plane is waited out, never
-      # rebooted — its boot is the duplicate the socket guard refuses.
-      read = (after = null, options) -> requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{id}/logs?#{if after? then "after=#{after}" else "lines=#{lines}"}", null, options
-      log = read! null, { start: wantsControl! }
-      if json
-        printJson log
-      else
-        process.stdout.write log.text
-        if follow
-          offset = log.next
-          loop
-            sleep! 250
-            next = read! offset, { start: false, soft: true }
-            continue unless next?
-            process.stdout.write next.text if next.text
-            offset = next.next
 
   when 'reload'
     edgeIsJanus 'reload'
