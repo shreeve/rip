@@ -1273,6 +1273,8 @@ When Janus restarts, the manager re-registers its app and moves access logging
 to the replacement ID. A stream that receives 404 waits for that registration
 instead of retrying the deleted ID. Repeated connection failures are reported
 once until the stream reconnects; a changed error is still reported.
+A single `access stream: reconnected` message confirms the replacement stream
+has completed its initial protocol exchange. Normal startup stays quiet.
 
 `app.root` selects the browser App directory relative to the project.
 `app.changes` classifies authored files by client apply verdict. The block

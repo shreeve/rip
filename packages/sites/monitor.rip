@@ -640,6 +640,7 @@ export class AccessClient
   reader = null
   task = null
   terminal = null
+  reconnecting = false
 
   constructor: (opts = {}) ->
     @mode = opts.mode or 'pretty'
@@ -656,11 +657,13 @@ export class AccessClient
     @reader = null
     @task = null
     @terminal = null
+    @reconnecting = false
 
   move: (appId) ->
     @generation += 1
     generation = @generation
     prior = @task
+    @reconnecting = true if prior?
     priorReader = @reader
     @controller?.abort()
     @task = do =>
@@ -751,6 +754,10 @@ export class AccessClient
                 highWater = record.head
             try
               @consume! line
+              return unless generation is @generation and not signal.aborted
+              if @reconnecting and (not expectedInitialGap or sawAfterHello) and record.type isnt 'closed'
+                @reconnecting = false
+                writeAccessOutput! @stderr, 'rip-sites: access stream: reconnected\n'
             catch caughtOutput
               outputError = caughtOutput
               outputError.accessOutput = true
@@ -774,6 +781,7 @@ export class AccessClient
         try reader?.cancel().catch(-> null)
         throw e if e?.accessOutput or e?.code is 'EPIPE'
         return if signal.aborted or generation isnt @generation
+        @reconnecting = true
         message = if missingRegistration
           "app #{appId} is no longer registered; waiting for app re-registration"
         else
@@ -785,6 +793,7 @@ export class AccessClient
         # ID cannot recover the stream; move starts the new subscription.
         return if missingRegistration
       break unless generation is @generation and not signal.aborted
+      @reconnecting = true
       delay = Math.floor(@sample() * (base + 1))
       try
         @sleep! delay, signal

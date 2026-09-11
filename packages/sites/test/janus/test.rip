@@ -262,6 +262,7 @@ certification = ->
     ok (await managerOut).includes('/api/version'), 'released Janus access events must reach foreground output'
     ok (await managerOut).includes('/api/restart-observation'), 'access output must resume after edge restart'
     ok (await managerErr).includes('Janus heartbeat failed: Janus unavailable')
+    eq (await managerErr).split('rip-sites: access stream: reconnected\n').length - 1, 1
     ok not (await managerErr).includes('Was there a typo')
     manager = null
     waitFor! 'deregistration', ->
