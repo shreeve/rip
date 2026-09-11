@@ -1269,6 +1269,11 @@ passed. You can edit `access.format` while the site is running; restart the
 manager (`rip sites restart <app>`, or stop/start a foreground `rip sites run`) to
 pick up the new picture — the access stream does not hot-reload `serve.rip`.
 
+When Janus restarts, the manager re-registers its app and moves access logging
+to the replacement ID. A stream that receives 404 waits for that registration
+instead of retrying the deleted ID. Repeated connection failures are reported
+once until the stream reconnects; a changed error is still reported.
+
 `app.root` selects the browser App directory relative to the project.
 `app.changes` classifies authored files by client apply verdict. The block
 shown above is the complete default; omitting `app`, `changes`, or one of its

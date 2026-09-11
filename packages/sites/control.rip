@@ -2,6 +2,12 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:f
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
+export janusErrorMessage = (error) ->
+  if error?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
+    'Janus unavailable'
+  else
+    "#{error?.message or error}"
+
 # Project identity and private manager discovery are shared by foreground
 # commands and the per-user agent. One canonical root must
 # always select one manager socket, regardless of which client asks.
