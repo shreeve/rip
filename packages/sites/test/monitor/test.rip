@@ -932,6 +932,7 @@ test! 'a missing registration waits for move instead of retrying its dead ID', -
     waitFor! -> output.length is 2
     eq calls, ['/1.0/apps/old-aaaaaa/access', '/1.0/apps/cart-abc123/access']
     eq JSON.parse(Buffer.from(output[1]).toString()).sequence, '1'
+    eq Buffer.concat(diagnostic).toString().trim().split('\n').at(-1), 'rip-sites: access stream: reconnected'
   finally
     client.stop!
 
@@ -954,8 +955,45 @@ test! 'connection outages report once and a recovered stream resets the diagnost
     client.move 'cart-abc123'
     waitFor! -> calls is 6
     text = Buffer.concat(diagnostic).toString()
-    eq text.trim().split('\n').length, 2
+    eq text.trim().split('\n'), [
+      'rip-sites: access stream: Janus unavailable; reconnecting'
+      'rip-sites: access stream: reconnected'
+      'rip-sites: access stream: Janus unavailable; reconnecting'
+    ]
     ok text.includes('Janus unavailable; reconnecting')
     ok not text.includes('typo')
+  finally
+    client.stop!
+
+test! 'recovery waits for the initial gap and stays off raw stdout and normal startup', ->
+  output = []
+  diagnostic = []
+  sources = []
+  fetcher = (_url, options) ->
+    Response.new ReadableStream.new
+      start: (controller) ->
+        sources.push controller
+        head = if sources.length is 1 then '0' else '2'
+        controller.enqueue encoder.encode("#{JSON.stringify({
+          v: 1, type: 'hello', app_id: 'cart-abc123', app_name: 'cart',
+          after: '0', head, heartbeat_seconds: 15, max_line_bytes: 8192
+        })}\n")
+        options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink(diagnostic), fetch: fetcher }
+  try
+    client.move 'cart-abc123'
+    waitFor! -> output.length is 1
+    eq diagnostic.length, 0
+    client.move 'cart-abc123'
+    waitFor! -> output.length is 2
+    eq diagnostic.length, 0
+    sources[1].enqueue encoder.encode("#{JSON.stringify({
+      v: 1, type: 'gap', app_id: 'cart-abc123', from: '1', through: '2', head: '2', reason: 'no_replay'
+    })}\n")
+    waitFor! -> Buffer.concat(diagnostic).toString().includes('reconnected')
+    sources[1].enqueue heartbeatLine('2')
+    waitFor! -> output.length is 4
+    eq Buffer.concat(diagnostic).toString().match(/access stream: reconnected/g).length, 1
+    eq output.map((bytes) -> JSON.parse(Buffer.from(bytes).toString()).type), ['hello', 'hello', 'gap', 'heartbeat']
   finally
     client.stop!
