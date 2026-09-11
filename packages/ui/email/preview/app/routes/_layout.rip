@@ -3,8 +3,6 @@ export Layout = component
   ui ~= @stash.ui
   problem?: string := undefined
 
-  # A template save arrives as a stamp on the site's hub, published by
-  # the launcher on the /templates channel.
   mounted: ->
     connect = ->
       socket = WebSocket.new "wss://#{location.host}/hub"
@@ -26,15 +24,17 @@ export Layout = component
   onError: (err) -> problem = err.message
 
   render
-    div class: 'grid h-screen grid-cols-[260px_1fr]'
-      aside class: 'flex flex-col overflow-auto border-r border-chrome-line'
-        h1 class: 'flex h-14 shrink-0 items-center px-4 text-sm font-medium text-chrome-bright', 'Rip Email'
-        if catalog.length is 0
-          p class: 'px-4 py-2', 'No templates found.'
-        nav class: 'flex flex-col gap-0.5 px-3.5'
-          for entry in catalog
-            a href: "/#{entry.path}", class: 'flex h-8 items-center rounded-md px-2 hover:bg-chrome-fill aria-[current=page]:bg-accent-fill aria-[current=page]:text-accent', entry.path
+    div class: 'grid h-screen grid-cols-[250px_1fr]'
+      aside class: 'flex flex-col border-r border-surface'
+        h1 class: 'flex h-15 shrink-0 items-center px-4 text-sm font-semibold', 'Rip Email'
+        div class: 'flex min-h-0 flex-col overflow-auto p-2'
+          div class: 'flex h-8 shrink-0 items-center px-2 text-xs font-medium text-tertiary', 'Templates'
+          if catalog.length is 0
+            p class: 'p-2 text-sm text-secondary', 'No templates found.'
+          nav class: 'flex flex-col gap-1'
+            for entry in catalog
+              a href: "/#{entry.path}", class: 'flex h-8 items-center rounded-md p-2 text-sm hover:bg-surface-active aria-[current=page]:bg-surface-active aria-[current=page]:font-medium', entry.path
       main class: 'grid min-w-0 grid-rows-[auto_1fr] overflow-hidden'
         if problem
-          pre class: 'm-6 rounded-lg border border-red-900 bg-red-950/40 p-4 font-mono text-xs break-words whitespace-pre-wrap text-red-300', problem
+          pre class: 'wrap-break-word m-6 font-mono text-xs whitespace-pre-wrap text-error', problem
         div id: 'content', class: 'contents'

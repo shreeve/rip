@@ -5,5 +5,4 @@ export Home = component
     first = catalog[0]
     @router.replace "/#{first.path}" if first
 
-  render
-    div
+  render null

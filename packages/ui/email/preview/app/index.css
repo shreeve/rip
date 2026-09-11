@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+:root {
+  --color-error: var(--color-red-400);
+
+  --color-text-primary:   var(--color-neutral-50);
+  --color-text-secondary: var(--color-neutral-300);
+  --color-text-tertiary:  var(--color-neutral-400);
+
+  --color-bg-background:     var(--color-neutral-950);
+  --color-bg-surface-active: oklch(from var(--color-neutral-800) calc(l + 0.02) c h);
+
+  --color-border-surface: var(--color-neutral-800);
+  --color-border-input:   oklch(from var(--color-border-surface) calc(l + 0.04) c h);
+}
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  --text-xs-plus: 0.8125rem;
+  --text-xs-plus--line-height: calc(1.1 / 0.8125);
+  --text-sm-plus: 0.9375rem;
+  --text-sm-plus--line-height: calc(1.35 / 0.9375);
+  --text-base-plus: 1.0625rem;
+  --text-base-plus--line-height: calc(1.6 / 1.0625);
+
+  --color-error: var(--color-error);
+
+  --text-color-primary:   var(--color-text-primary);
+  --text-color-secondary: var(--color-text-secondary);
+  --text-color-tertiary:  var(--color-text-tertiary);
+
+  --background-color-background:     var(--color-bg-background);
+  --background-color-surface-active: var(--color-bg-surface-active);
+
+  --border-color-surface: var(--color-border-surface);
+  --border-color-input:   var(--color-border-input);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-primary antialiased;
+  }
+
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
