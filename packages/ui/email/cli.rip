@@ -220,7 +220,7 @@ dev = (root, host, open) ->
   # already has. Anything else it says there passes through.
   manager.stdout.on 'data', (chunk) ->
     text = String chunk
-    process.stdout.write text unless text is "rip-site: #{address}\n"
+    process.stdout.write text unless text is "rip-sites: #{address}\n"
   # The manager owns the shutdown: it deregisters from the edge on its way
   # out, so a signal to this process is handed to it, and the project
   # goes once it has exited.
