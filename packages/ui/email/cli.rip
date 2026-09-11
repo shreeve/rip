@@ -214,8 +214,13 @@ dev = (root, host, open) ->
   writeFileSync join(project, 'index.rip'), "import '#{join(import.meta.dir, 'preview', 'index.rip')}'\n"
 
   manager = spawn process.execPath, ["--preload=#{join ROOT, 'src', 'loader.js'}", join(ROOT, 'packages', 'sites', 'manager.rip'), project, '--no-watch-api', '--access-log=off'],
-    stdio: 'inherit'
+    stdio: ['inherit', 'pipe', 'inherit']
     env: { ...process.env, RIP_EMAIL_DIR: root, JANUS_CONTROL: control }
+  # The manager announces its host on stdout once registered; the banner
+  # already has. Anything else it says there passes through.
+  manager.stdout.on 'data', (chunk) ->
+    text = String chunk
+    process.stdout.write text unless text is "rip-site: #{address}\n"
   # The manager owns the shutdown: it deregisters from the edge on its way
   # out, so a signal to this process is handed to it, and the project
   # goes once it has exited.
