@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rip Email</title>
+    <script src="/@rip/tailwind.min.js"></script>
+    <style type="text/tailwindcss">
+      @import "tailwindcss";
+      @theme {
+        --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+        --color-chrome-text: rgba(241, 247, 254, 0.71);
+        --color-chrome-bright: rgba(252, 253, 255, 0.937);
+        --color-chrome-line: rgba(214, 235, 253, 0.19);
+        --color-chrome-fill: rgba(216, 244, 246, 0.035);
+        --color-accent: rgba(82, 225, 254, 0.9);
+        --color-accent-fill: rgba(0, 190, 253, 0.3);
+      }
+    </style>
+  </head>
+  <body class="bg-black font-sans text-sm text-chrome-text">
+    <div id="app"></div>
+    <script type="module">
+      import { bootApp } from '/@rip/rip.min.js'
+      bootApp({ url: '/bundle.json', watch: true })
+    </script>
+  </body>
+</html>

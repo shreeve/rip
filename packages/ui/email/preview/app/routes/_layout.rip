@@ -1,0 +1,40 @@
+export Layout = component
+  catalog <~ @stash.catalog
+  ui ~= @stash.ui
+  problem?: string := undefined
+
+  # A template save arrives as a stamp on the site's hub, published by
+  # the launcher on the /templates channel.
+  mounted: ->
+    connect = ->
+      socket = WebSocket.new "wss://#{location.host}/hub"
+      socket.onopen = ->
+        socket.send JSON.stringify({ '+': ['/templates'] })
+        ui.live = true
+      socket.onmessage = (event) ->
+        frames = JSON.parse event.data
+        frames = [frames] unless Array.isArray frames
+        if frames.some((frame) -> frame?.stamp?)
+          @stash.source('catalog').refetch()
+          @stash.source('message', ui.current).refetch() if ui.current
+      socket.onclose = ->
+        ui.live = false
+        setTimeout connect, 1000
+    connect()
+    @router.onNavigate -> problem = undefined
+
+  onError: (err) -> problem = err.message
+
+  render
+    div class: 'grid h-screen grid-cols-[260px_1fr]'
+      aside class: 'flex flex-col overflow-auto border-r border-chrome-line'
+        h1 class: 'flex h-14 shrink-0 items-center px-4 text-sm font-medium text-chrome-bright', 'Rip Email'
+        if catalog.length is 0
+          p class: 'px-4 py-2', 'No templates found.'
+        nav class: 'flex flex-col gap-0.5 px-3.5'
+          for entry in catalog
+            a href: "/#{entry.path}", class: 'flex h-8 items-center rounded-md px-2 hover:bg-chrome-fill aria-[current=page]:bg-accent-fill aria-[current=page]:text-accent', entry.path
+      main class: 'grid min-w-0 grid-rows-[auto_1fr] overflow-hidden'
+        if problem
+          pre class: 'm-6 rounded-lg border border-red-900 bg-red-950/40 p-4 font-mono text-xs break-words whitespace-pre-wrap text-red-300', problem
+        div id: 'content', class: 'contents'

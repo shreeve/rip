@@ -54,11 +54,27 @@ export Head = component
       meta name: 'x-apple-disable-message-reformatting'
       slot
 
+# The body element carries the background so the ground fills the
+# viewport past the content, and zeroes any margin or padding the style
+# sets, since the cell carries those and a client adds its own to the
+# body. Everything else stays on the cell.
+bodyStyle = (style: string): string ->
+  declarations: string[] = []
+  for part in style.split(';')
+    declaration = part.trim()
+    property = declaration.split(':')[0].trim().toLowerCase()
+    if property is 'background' or property is 'background-color'
+      declarations.push declaration
+    else if property.startsWith('margin') or property.startsWith('padding')
+      declarations.push "#{property}:0"
+  declarations.join ';'
+
 export Body = component
   @class: string := ''
   @style: string := ''
+  _body: string ~= bodyStyle @style
   render
-    body class: @class
+    body class: @class, style: _body
       table align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation'
         tbody
           tr
@@ -123,25 +139,38 @@ export Font = component
     if _family
       style innerHTML: _css
 
+# Padding goes on the cell, everything else on the table: Outlook and
+# Klaviyo drop padding on a table and honor it on a td.
+splitPadding = (style: string): { table: string, cell: string } ->
+  table: string[] = []
+  cell: string[] = []
+  for part in style.split(';')
+    declaration = part.trim()
+    if declaration
+      (if /^padding/i.test(declaration) then cell else table).push declaration
+  { table: table.join(';'), cell: cell.join(';') }
+
 export Container = component
   @class: string := ''
   @style: string := ''
-  _style: string ~= joinStyles 'max-width:37.5em', @style
+  _split: { table: string, cell: string } ~= splitPadding @style
+  _style: string ~= joinStyles 'max-width:37.5em', _split.table
   render
     table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: _style
       tbody
         tr style: 'width:100%'
-          td
+          td style: _split.cell
             slot
 
 export Section = component
   @class: string := ''
   @style: string := ''
+  _split: { table: string, cell: string } ~= splitPadding @style
   render
-    table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: @style
+    table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: _split.table
       tbody
         tr
-          td
+          td style: _split.cell
             slot
 
 export Row = component

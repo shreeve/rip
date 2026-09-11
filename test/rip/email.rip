@@ -56,6 +56,93 @@ test 'Container renders centered table', '''
   result.includes('max-width:37.5em') and result.includes('role="presentation"') and result.includes('<p>inside</p>')
 ''', true
 
+test 'Section moves padding onto its cell and keeps the rest on the table', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Section } = email
+  E = component
+    render
+      Email
+        Body
+          Section style: "background:#eee;padding:20px 8px;border-radius:4px;padding-top:1px"
+            p "x"
+  result = toHTML(E)
+  result.includes('<table style="background:#eee;border-radius:4px" data-part="Section"') and result.includes('<td style="padding:20px 8px;padding-top:1px">')
+''', true
+
+test 'Container moves padding onto its cell under the max-width', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Container } = email
+  E = component
+    render
+      Email
+        Body
+          Container style: "padding:32px;max-width:400px"
+            p "x"
+  result = toHTML(E)
+  result.includes('<table style="max-width:400px" data-part="Container"') and result.includes('<td style="padding:32px">')
+''', true
+
+test 'Section and Container without padding leave the cell bare', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Section, Container } = email
+  E = component
+    render
+      Email
+        Body
+          Container
+            Section style: "background:#eee"
+              p "x"
+  result = toHTML(E)
+  not result.includes('<td style=')
+''', true
+
+test 'toEmail answers the inbox preview line, raw, beside html and text', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toEmail, Email, Body, Preview, Text } = email
+  E = component
+    render
+      Email
+        Body
+          Preview text: "Hi & co <3"
+          Text "body"
+  out = toEmail(E)
+  out.preview is "Hi & co <3" and out.html.includes('Hi &amp; co &lt;3') and not out.text.includes('Hi')
+''', true
+
+test 'toEmail answers a null preview when the message renders no Preview', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toEmail, Email, Body, Text } = email
+  E = component
+    render
+      Email
+        Body
+          Text "body"
+  toEmail(E).preview is null
+''', true
+
+test 'Body carries its background on the body element and zeroes the box the cell owns', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body } = email
+  E = component
+    render
+      Email
+        Body style: "background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px"
+          p "x"
+  result = toHTML(E)
+  result.includes('<body style="background:#fafafa;padding:0;margin-top:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px">')
+''', true
+
+test 'Body without a style leaves the body element bare', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body } = email
+  E = component
+    render
+      Email
+        Body
+          p "x"
+  toHTML(E).includes('<body data-part="Body">')
+''', true
+
 test 'Section renders full-width table', '''
   email = import!("#{process.cwd()}/packages/ui/email/email.rip")
   { toHTML, Section } = email

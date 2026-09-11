@@ -1,0 +1,331 @@
+#!/usr/bin/env rip
+# ==============================================================================
+# rip-email: preview and export Rip email templates
+#
+# dev launches the preview as a Rip Site: a transient project whose
+# manifest points at the package's own page and whose entry is the
+# package's API, run by the Sites manager in the foreground under the
+# edge. That API answers every catalog and render from a fresh process
+# running this file's catalog and render verbs, so a save is seen whole,
+# edits to modules a template imports included, and a template that
+# throws reports the error instead of a stale page. export and the
+# launcher's own readiness check are one fresh process already.
+# ==============================================================================
+
+import { execSync, spawn } from 'child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { basename, join, relative, resolve } from 'path'
+import { edgeControl } from 'rip/sites/edge'
+import { toEmail } from './render.rip'
+
+throw Error.new('rip/ui/email/cli is a CLI, not a library; run it as rip-email (rip email)') unless import.meta.main
+
+VERSION = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf-8')).version
+
+USAGE = '''
+usage: rip-email <verb> [args]
+
+  rip-email dev [dir] [--host H] [--open]         serve a live preview at https://email.local/
+  rip-email export [dir] [--out DIR] [--text]     write <out>/<file>.html per template
+
+  dir defaults to ./emails, or to the current directory when it is
+  itself named emails. A template is a .rip file exporting one component;
+  a file led by an underscore, such as _layout.rip, is shared by templates
+  and is not one. Component.previewProps chooses the props it renders
+  with; Component.subject and Component.from, functions of the props,
+  give the subject line and the sender's name.
+'''
+
+die = (message) ->
+  console.error message
+  process.exit 1
+
+RESET  =! "\x1b[0m"
+GREEN  =! "\x1b[32m"
+RED    =! "\x1b[31m"
+YELLOW =! "\x1b[33m"
+DIM    =! "\x1b[2m"
+
+useColor =! !!Bun.enableANSIColors
+
+paint = (code, text) ->
+  if useColor then "#{code}#{text}#{RESET}" else text
+
+OK   = paint GREEN, '✓'
+BAD  = paint RED, '✗'
+WARN = paint YELLOW, '⚠'
+
+# ------------------------------------------------------------------------------
+# Arguments
+# ------------------------------------------------------------------------------
+
+args = process.argv.slice 2
+verb = args[0]
+
+if verb is '--version' or verb is '-v'
+  console.log "rip-email #{VERSION}"
+  process.exit 0
+if not verb or verb is '--help' or verb is '-h' or args.includes('--help')
+  console.log USAGE.trim()
+  process.exit 0
+
+# What each verb takes. Anything else on the line is a mistake, and a
+# value flag's value may not itself look like a flag. `catalog` and
+# `render` are the child-process verbs, not part of the usage.
+FLAGS =
+  dev:     { '--host': 'value', '--open': 'switch' }
+  export:  { '--out': 'value', '--text': 'switch' }
+  render:  {}
+  catalog: {}
+
+flags = {}
+positional = []
+i = 1
+while i < args.length
+  arg = args[i]
+  if arg.startsWith('-')
+    kind = FLAGS[verb]?[arg]
+    die "rip-email: #{verb} does not take #{arg}" unless kind
+    if kind is 'value'
+      value = args[i + 1]
+      die "rip-email: #{arg} needs a value" if not value? or value.startsWith('-')
+      flags[arg] = value
+      i += 1
+    else
+      flags[arg] = true
+  else
+    positional.push arg
+  i += 1
+
+flag = (name) -> flags[name] ?? null
+has = (name) -> flags[name] is true
+
+# ------------------------------------------------------------------------------
+# Templates
+# ------------------------------------------------------------------------------
+
+# A compiled `component` is a class whose chain passes through the
+# runtime's __Component base; nothing else a module exports does.
+isComponent = (value) ->
+  return false unless typeof value is 'function'
+  proto = Object.getPrototypeOf value
+  while proto and proto isnt Function.prototype
+    return true if proto.name is '__Component'
+    proto = Object.getPrototypeOf proto
+  false
+
+templateFiles = (root) ->
+  files = []
+  walk = (dir) ->
+    for entry in readdirSync(dir, withFileTypes: true)
+      hidden = entry.name.startsWith('.') or entry.name is 'node_modules'
+      if entry.isDirectory()
+        walk join(dir, entry.name) unless hidden
+      else if entry.name.endsWith('.rip') and not hidden and not entry.name.startsWith('_')
+        files.push join(dir, entry.name)
+  walk root
+  files.sort()
+
+# A template file's one component. A file with none is not a template;
+# a file with several is a mistake, named.
+templateIn = (mod, label) ->
+  names = (name for name in Object.keys(mod) when isComponent mod[name]).sort()
+  throw Error.new "#{label} exports #{names.join(', ')} — a template file exports one component" if names.length > 1
+  if names.length then mod[names[0]] else null
+
+# One entry per template file: its address (the path without .rip), the
+# file, and the component's name.
+catalog = (root) ->
+  entries = []
+  for file in templateFiles(root)
+    label = relative root, file
+    try
+      mod = import!(file)
+    catch error
+      framed = Error.new "#{label}: #{error.message}"
+      framed.cause = error
+      throw framed
+    Component = templateIn mod, label
+    entries.push { path: label.replace(/\.rip$/, ''), file: label, component: Component.name } if Component
+  entries
+
+# The rendered message: html, text, the subject static's answer, and the
+# inbox preview line. Throws when the file is not a template.
+renderTemplate = (file) ->
+  mod = import!(resolve file)
+  Component = templateIn mod, file
+  throw Error.new "#{file} exports no component" unless Component
+  props = Component.previewProps ?? {}
+  { html, text, preview } = toEmail Component, props
+  subject = if typeof Component.subject is 'function' then Component.subject(props) else null
+  from    = if typeof Component.from is 'function' then Component.from(props) else null
+  { from, subject, preview, html, text }
+
+shown = (path) ->
+  rel = relative process.cwd(), path
+  if not rel then basename(path) else if rel.startsWith('..') then path else rel
+
+# ------------------------------------------------------------------------------
+# dev — the preview server
+# ------------------------------------------------------------------------------
+
+# The checkout, from this file: email/ under ui/ under packages/ under
+# the root.
+ROOT = join(import.meta.dir, '..', '..', '..')
+
+# The edge's control plane, a unix socket or an http origin.
+edge = (control, method, path, body = null) ->
+  options = { method, signal: AbortSignal.timeout(5000) }
+  if body?
+    options.body = JSON.stringify body
+    options.headers = { 'content-type': 'application/json' }
+  return fetch("#{control}#{path}", options) if control.startsWith 'http'
+  options.unix = control
+  fetch "http://janus#{path}", options
+
+# Another app holding the host would make the manager wait thirty seconds
+# for the claim to lapse and then refuse, so the host is a flag.
+dev = (root, host, open) ->
+  control = edgeControl()
+  die 'rip-email: the edge is not running — start it with `janus autostart`' unless control
+  address = "https://#{host}/"
+  title = paint GREEN, "Rip Email #{VERSION}"
+  console.log ''
+  console.log "    #{title}"
+  console.log "    Templates:                   #{shown root}"
+  console.log "    Running preview at:          #{address}"
+  console.log ''
+  pending = paint DIM, '◌ Getting the preview ready...'
+  process.stdout.write " #{pending}" if process.stdout.isTTY
+
+  # The first catalog is where a template that cannot load first shows
+  # itself.
+  try
+    entries = catalog! root
+  catch error
+    problem = error.message
+
+  # The site: the package's page linked in as the app, and an entry that
+  # imports the package's API. The manager needs a project directory to
+  # run, and this one lives only as long as the run.
+  project = mkdtempSync join(tmpdir(), 'rip-email-')
+  symlinkSync join(import.meta.dir, 'preview', 'app'), join(project, 'app')
+  writeFileSync join(project, 'serve.rip'), "export default\n  name: 'email'\n  hosts: ['#{host}']\n"
+  writeFileSync join(project, 'index.rip'), "import '#{join(import.meta.dir, 'preview', 'index.rip')}'\n"
+
+  manager = spawn process.execPath, ["--preload=#{join ROOT, 'src', 'loader.js'}", join(ROOT, 'packages', 'sites', 'manager.rip'), project, '--no-watch-api', '--access-log=off'],
+    stdio: 'inherit'
+    env: { ...process.env, RIP_EMAIL_DIR: root, JANUS_CONTROL: control }
+  # The manager owns the shutdown: it deregisters from the edge on its way
+  # out, so a signal to this process is handed to it, and the project
+  # goes once it has exited.
+  process.on 'SIGINT',  -> manager.kill 'SIGINT'
+  process.on 'SIGTERM', -> manager.kill 'SIGTERM'
+  manager.on 'exit', (code) ->
+    rmSync project, recursive: true, force: true
+    process.exit code ?? 1
+
+  # Ready is the edge routing the host to the site: its registration,
+  # found by name and host.
+  app = null
+  until app? or manager.exitCode?
+    apps = try (edge! control, 'GET', '/1.0/apps').json! catch then []
+    app = apps.find (entry) -> entry.name is 'email' and entry.hosts?.includes(host)
+    Bun.sleep! 100 unless app?
+  return unless app?
+  process.stdout.write "\r\x1b[K" if process.stdout.isTTY
+  seconds = (performance.now() / 1000).toFixed 1
+  if problem?
+    console.log " #{BAD} #{problem.split('\n')[0]}"
+  else if entries.length is 0
+    console.log " #{WARN} No templates under #{shown root}"
+  else
+    console.log " #{OK} Ready in #{seconds}s"
+
+  if open
+    try
+      execSync (if process.platform is 'darwin' then "open '#{address}'" else "xdg-open '#{address}'")
+    catch
+      console.log "rip-email: open #{address} in your browser"
+
+  # A save is a stamp published on the site's hub, where the page listens.
+  # One stamp per burst: an editor save touches a file several times.
+  timer = null
+  watch root, { recursive: true }, ->
+    clearTimeout timer if timer
+    timer = setTimeout (->
+      try edge! control, 'POST', "/1.0/apps/#{app.id}/hub/publish", [{ '@': ['/templates'], stamp: Date.now() }]
+    ), 100
+
+# ------------------------------------------------------------------------------
+# export
+# ------------------------------------------------------------------------------
+
+exportAll = (root, out, withText) ->
+  try
+    entries = catalog! root
+  catch error
+    die "rip-email: #{error.message}"
+  die "rip-email: no templates under #{shown root}" unless entries.length
+  mkdirSync out, recursive: true
+  for entry in entries
+    try
+      { html, text } = renderTemplate! join(root, entry.file)
+    catch error
+      die "rip-email: #{error.message}"
+    base = join out, entry.path.split(/[\/\\]/).join('-')
+    writeFileSync "#{base}.html", html
+    console.log " #{OK} #{shown base}.html"
+    if withText
+      writeFileSync "#{base}.txt", text
+      console.log " #{OK} #{shown base}.txt"
+
+# ------------------------------------------------------------------------------
+# Verbs
+# ------------------------------------------------------------------------------
+
+templateRoot = (dir) ->
+  root = resolve dir
+  die "rip-email: no such directory: #{dir}" unless existsSync(root) and statSync(root).isDirectory()
+  root
+
+# Never the bare cwd: from a project root that would import every .rip
+# in the tree, and importing an app's entry file boots the app.
+defaultRoot = ->
+  return resolve('emails') if existsSync('emails') and statSync('emails').isDirectory()
+  return process.cwd() if basename(process.cwd()) is 'emails'
+  die "rip-email: no emails directory here — pass one: rip-email #{verb} <dir>"
+
+# Only three families of name reach this machine: <name>.local over
+# Bonjour, <name>.via.rip through public DNS, <name>.localhost in the
+# browser's own resolver. The edge would claim any other name and serve
+# it to no one.
+FAMILIES = ['.local', '.via.rip', '.localhost']
+previewHost = (host) ->
+  ok = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host) and FAMILIES.some (family) -> host.endsWith family
+  return host if ok
+  label = host.split('.')[0] or 'mail'
+  die "rip-email: nothing resolves #{host} to this machine — use #{label}.local, #{label}.via.rip, or #{label}.localhost"
+
+rootArg = -> if positional[0] then templateRoot(positional[0]) else defaultRoot()
+
+switch verb
+  when 'dev'
+    host = previewHost flag('--host') ?? 'email.local'
+    dev rootArg(), host, has('--open')
+  when 'export'
+    exportAll! rootArg(), resolve(flag('--out') ?? 'out'), has('--text')
+  when 'render'
+    [file] = positional
+    die 'rip-email: render takes <file>' unless file
+    die "rip-email: no such file: #{file}" unless existsSync file
+    try
+      message = renderTemplate! file
+    catch error
+      die "rip-email: #{error.message}"
+    process.stdout.write JSON.stringify(message)
+  when 'catalog'
+    process.stdout.write JSON.stringify(catalog!(rootArg()))
+  else
+    die "rip-email: unknown verb '#{verb}'\n\n#{USAGE.trim()}"

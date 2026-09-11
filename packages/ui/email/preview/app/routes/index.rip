@@ -1,0 +1,9 @@
+export Home = component
+  catalog <~ @stash.catalog
+
+  mounted: ->
+    first = catalog[0]
+    @router.replace "/#{first.path}" if first
+
+  render
+    div

@@ -6,7 +6,8 @@
   "description": "Rip Sites — Sinatra-style site framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context for managed workers behind Janus (App + API)",
   "exports": {
     ".": "./site.rip",
-    "./middleware": "./middleware.rip"
+    "./middleware": "./middleware.rip",
+    "./edge": "./edge.rip"
   },
   "bin": {
     "rip-sites": "./sites.rip"

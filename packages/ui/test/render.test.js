@@ -18,6 +18,7 @@ test('email SSR mounts, serializes, disposes, and restores globals', () => {
   expect(toEmail(BasicEmail, { message: 'both' })).toEqual({
     html: expect.stringContaining('<p>both</p>'),
     text: 'Title\n\nboth',
+    preview: null,
   });
 
   expect(Object.hasOwn(globalThis, 'document')).toBe(hadDocument);

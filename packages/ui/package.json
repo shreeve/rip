@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "rip-email": "./email/cli.rip"
+  },
   "exports": {
     "./browser": "./browser/browser.rip",
     "./email": "./email/email.rip",

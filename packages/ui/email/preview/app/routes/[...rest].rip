@@ -1,0 +1,80 @@
+import type { Message } from '../stash.rip'
+import { darken } from '../dark.rip'
+
+export TemplatePage = component
+  message <~ @stash.message(params.rest)
+  ui ~= @stash.ui
+
+  mounted: -> ui.current = @params.rest
+
+  render
+    div class: 'contents'
+      header class: 'flex h-14 items-center gap-3 border-b border-chrome-line px-3'
+        span class: 'min-w-0 flex-1 truncate text-sm font-medium text-chrome-bright', "#{@params.rest}.rip"
+        Group
+          Choice label: 'HTML',   active: ui.view is 'html',   pick: (-> ui.view = 'html')
+          Choice label: 'Text',   active: ui.view is 'text',   pick: (-> ui.view = 'text')
+          Choice label: 'Source', active: ui.view is 'source', pick: (-> ui.view = 'source')
+        Group
+          Choice label: 'Desktop', active: ui.width is 'desktop', pick: (-> ui.width = 'desktop')
+          Choice label: 'Mobile',  active: ui.width is 'mobile',  pick: (-> ui.width = 'mobile')
+        Group
+          Choice label: 'Dark', active: ui.dark, pick: (-> ui.dark = not ui.dark)
+        if not ui.live
+          span class: 'text-red-400', 'disconnected'
+      Stage message: message, view: ui.view, width: ui.width, dark: ui.dark
+
+Group = component
+  render
+    span class: 'flex h-9 items-center overflow-hidden rounded-lg border border-chrome-line'
+      slot
+
+Choice = component
+  @label: string
+  @active: boolean
+  @pick: (() => void)
+  render
+    button type: 'button', @click: (-> pick()), class: "h-full px-3 text-sm transition-colors #{if active then 'bg-chrome-fill text-chrome-bright' else 'hover:bg-chrome-fill'}"
+      = label
+
+# The inbox list row, where a recipient meets the sender, the subject,
+# and the preview line before opening the message. It is not part of
+# the message, so it sits apart from the sheet. A client's list names
+# the sender and keeps the address for the opened message; here the
+# full header rides on the name as a tooltip.
+InboxRow = component
+  @from: string | null
+  @subject: string | null
+  @preview: string | null
+  @dark: boolean
+  # A sender reads "Name <address>" or just a name.
+  sender ~= from?.match(/^\s*(.*?)\s*<([^>]+)>\s*$/)
+  name ~= if sender then sender[1] else from
+  address ~= if sender then sender[2] else null
+  initial ~= if name then name.trim().charAt(0).toUpperCase() else '?'
+  render
+    div class: "flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
+      div class: "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold #{if dark then 'bg-neutral-700 text-neutral-100' else 'bg-neutral-200 text-neutral-700'}", initial
+      div class: 'min-w-0 flex-1'
+        div class: "truncate text-sm font-semibold #{if name then (if dark then 'text-neutral-100' else 'text-neutral-900') else 'text-red-500'}", title: (if address then from else null), (if name then name else 'no sender: the template declares no from static')
+        div class: "truncate text-sm #{if subject? then (if dark then 'text-neutral-200' else 'text-neutral-800') else 'text-red-500'}", (if subject? then subject else 'no subject: the template declares no subject static')
+        div class: "truncate text-[13px] #{if dark then 'text-neutral-400' else 'text-neutral-500'}", (if preview? then preview else 'no preview: the template renders no Preview block')
+
+# The canvas is a client's window; the list row and the opened message
+# float in the middle of it, the message as a viewport of a device's
+# size, 1024 by 600 or 375 by 667. A longer email scrolls inside it.
+Stage = component
+  @message: Message
+  @view: 'html' | 'text' | 'source'
+  @width: 'desktop' | 'mobile'
+  @dark: boolean
+  doc ~= if dark then darken(message.html) else message.html
+  render
+    section class: "flex min-h-0 overflow-auto p-4 #{if dark then 'bg-gray-400' else 'bg-gray-200'}"
+      div class: "m-auto flex max-w-full flex-col gap-4 #{if width is 'mobile' then 'w-[375px]' else 'w-[1024px]'}"
+        InboxRow from: message.from, subject: message.subject, preview: message.preview, dark: dark
+        div class: 'overflow-hidden rounded-lg shadow-lg'
+          if view is 'html'
+            iframe title: 'Rendered email', srcdoc: doc, class: "block w-full bg-white #{if width is 'mobile' then 'h-[667px]' else 'h-[600px]'}"
+          else
+            pre class: "overflow-auto p-4 font-mono text-xs break-words whitespace-pre-wrap #{if width is 'mobile' then 'h-[667px]' else 'h-[600px]'} #{if dark then 'bg-neutral-900 text-neutral-200' else 'bg-white text-neutral-800'}", (if view is 'text' then message.text else message.html)
