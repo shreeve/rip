@@ -908,3 +908,54 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
   disabled = run! 'off'
   eq disabled.accessCount, 0
   ok disabled.output.includes 'rip-sites: https://cart.test/'
+
+test! 'a missing registration waits for move instead of retrying its dead ID', ->
+  calls = []
+  output = []
+  diagnostic = []
+  fetcher = (url, options) ->
+    calls.push URL.new(url).pathname
+    return Response.json({ error: 'unknown app id' }, { status: 404 }) if calls.at(-1).includes('old-aaaaaa')
+    Response.new ReadableStream.new
+      start: (controller) ->
+        controller.enqueue helloLine()
+        controller.enqueue accessLine(sequence: '1')
+        options.signal.addEventListener 'abort', (-> controller.close()), { once: true }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink(output), stderr: memorySink(diagnostic), fetch: fetcher, sample: -> 0 }
+  try
+    client.move 'old-aaaaaa'
+    waitFor! -> calls.length > 0
+    sleep! 30
+    eq calls, ['/1.0/apps/old-aaaaaa/access']
+    ok Buffer.concat(diagnostic).toString().includes('waiting for app re-registration')
+    client.move 'cart-abc123'
+    waitFor! -> output.length is 2
+    eq calls, ['/1.0/apps/old-aaaaaa/access', '/1.0/apps/cart-abc123/access']
+    eq JSON.parse(Buffer.from(output[1]).toString()).sequence, '1'
+  finally
+    client.stop!
+
+test! 'connection outages report once and a recovered stream resets the diagnostic', ->
+  diagnostic = []
+  calls = 0
+  fetcher = (_url, options) ->
+    calls++
+    if calls <= 3 or calls is 5
+      throw Object.assign(Error.new('Was there a typo in the url or port?'), { code: 'FailedToOpenSocket' })
+    if calls is 4
+      return Response.new ReadableStream.new
+        start: (controller) ->
+          controller.enqueue helloLine()
+          controller.close()
+    Promise.new (_resolve, reject) ->
+      options.signal.addEventListener 'abort', (-> reject(options.signal.reason)), { once: true }
+  client = AccessClient.new { mode: 'raw', control: { base: 'http://janus' }, stdout: memorySink([]), stderr: memorySink(diagnostic), fetch: fetcher, sleep: -> null }
+  try
+    client.move 'cart-abc123'
+    waitFor! -> calls is 6
+    text = Buffer.concat(diagnostic).toString()
+    eq text.trim().split('\n').length, 2
+    ok text.includes('Janus unavailable; reconnecting')
+    ok not text.includes('typo')
+  finally
+    client.stop!

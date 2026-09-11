@@ -100,13 +100,15 @@ certification = ->
 
   caddy = null
   manager = null
-  try
-    caddy = Bun.spawn [CADDY, 'run', '--config', config, '--adapter', 'caddyfile'],
+  startEdge = ->
+    Bun.spawn [CADDY, 'run', '--config', config, '--adapter', 'caddyfile'],
       cwd: dir
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
       env: { ...process.env, JANUS_HEARTBEAT_TTL: '6s', XDG_DATA_HOME: join(dir, 'data'), XDG_CONFIG_HOME: join(dir, 'config') }
+  try
+    caddy = startEdge()
     caddyOut = Response.new(caddy.stdout).text()
     caddyErr = Response.new(caddy.stderr).text()
     waitFor! 'control socket', ->
@@ -121,7 +123,16 @@ certification = ->
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
-    managerOut = Response.new(manager.stdout).text()
+    managerText = ''
+    managerOut = do ->
+      outputReader = manager.stdout.getReader()
+      decoder = TextDecoder.new()
+      loop
+        { done, value } = outputReader.read!
+        break if done
+        managerText += decoder.decode(value, { stream: true })
+      managerText += decoder.decode()
+      managerText
     managerErr = Response.new(manager.stderr).text()
 
     edgeDiagnostic = 'no response'
@@ -224,9 +235,29 @@ certification = ->
       catch then null
     eq second, { version: 'two' }
 
+    caddy.kill 'SIGTERM'
+    await caddy.exited
+    caddy = startEdge()
+    caddyOut = Response.new(caddy.stdout).text()
+    caddyErr = Response.new(caddy.stderr).text()
+    waitFor! 'registration after edge restart', (->
+      try
+        registered = (fetch!('http://janus/1.0/apps', { unix: control })).json!
+        registered.length is 1 and registered[0].id isnt apps[0].id
+      catch then false
+    ), 15000
+    recovered = edgeFetch! port, '/api/version'
+    eq recovered.json!, { version: 'two' }
+    # A path requested only after restart proves the manager's access
+    # subscription follows the replacement registration, too.
+    observed = edgeFetch! port, '/api/restart-observation'
+    observed.text!
+    waitFor! 'access output after edge restart', -> managerText.includes('/api/restart-observation')
+
     manager.kill 'SIGTERM'
     eq (await manager.exited), 143, await managerErr
     ok (await managerOut).includes('/api/version'), 'released Janus access events must reach foreground output'
+    ok (await managerOut).includes('/api/restart-observation'), 'access output must resume after edge restart'
     manager = null
     waitFor! 'deregistration', ->
       response = edgeFetch! port, '/api/version'

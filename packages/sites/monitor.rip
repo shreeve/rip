@@ -689,14 +689,17 @@ export class AccessClient
   run: (generation, appId, signal) ->
     cursor = '0'
     base = 100
+    reportedError = null
     while generation is @generation and not signal.aborted
       validHello = false
+      missingRegistration = false
       reader = null
       try
         requested = cursor
         response = @request! appId, requested, signal
         unless response.status is 200
           detail = (response.text!).trim()
+          missingRegistration = response.status is 404
           throw Error.new("access stream HTTP #{response.status}#{if detail then ": #{detail}" else ''}")
         throw Error.new('access stream response has no body') unless response.body?
         reader = response.body.getReader()
@@ -722,6 +725,7 @@ export class AccessClient
               throw Error.new('hello does not match registration generation') unless record.app_id is appId and record.after is requested
               validHello = true
               base = 100
+              reportedError = null
               helloHead = record.head
               highWater = record.head
               expectedInitialGap = compareDecimal(record.head, requested) > 0
@@ -768,10 +772,19 @@ export class AccessClient
         e = caught
         try reader?.cancel().catch(-> null)
         throw e if e?.accessOutput or e?.code is 'EPIPE'
-        return if signal.aborted
-        try writeAccessOutput!(@stderr, "rip-sites: access stream: #{e?.message or e}; reconnecting\n")
-        catch outputError
-          throw outputError
+        return if signal.aborted or generation isnt @generation
+        message = if missingRegistration
+          "app #{appId} is no longer registered; waiting for app re-registration"
+        else if e?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
+          'Janus unavailable; reconnecting'
+        else
+          "#{e?.message or e}; reconnecting"
+        if message isnt reportedError
+          writeAccessOutput! @stderr, "rip-sites: access stream: #{message}\n"
+          reportedError = message
+        # Only the manager can replace a registration. Retrying its dead
+        # ID cannot recover the stream; move starts the new subscription.
+        return if missingRegistration
       break unless generation is @generation and not signal.aborted
       delay = Math.floor(@sample() * (base + 1))
       try
