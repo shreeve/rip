@@ -37,28 +37,18 @@ Choice = component
     button type: 'button', @click: (-> pick()), class: "h-full px-3 text-sm transition-colors #{if active then 'bg-chrome-fill text-chrome-bright' else 'hover:bg-chrome-fill'}"
       = label
 
-# The inbox list row, where a recipient meets the sender, the subject,
-# and the preview line before opening the message. It is not part of
-# the message, so it sits apart from the sheet. A client's list names
-# the sender and keeps the address for the opened message; here the
-# full header rides on the name as a tooltip.
+# The inbox list row, where a recipient meets the subject and the
+# preview line before opening the message. It is not part of the
+# message, so it sits apart from the sheet. The sender is the mailer's,
+# not the template's, so the row does not show one.
 InboxRow = component
-  @from: string | null
   @subject: string | null
   @preview: string | null
   @dark: boolean
-  # A sender reads "Name <address>" or just a name.
-  sender ~= from?.match(/^\s*(.*?)\s*<([^>]+)>\s*$/)
-  name ~= if sender then sender[1] else from
-  address ~= if sender then sender[2] else null
-  initial ~= if name then name.trim().charAt(0).toUpperCase() else '?'
   render
-    div class: "flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
-      div class: "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold #{if dark then 'bg-neutral-700 text-neutral-100' else 'bg-neutral-200 text-neutral-700'}", initial
-      div class: 'min-w-0 flex-1'
-        div class: "truncate text-sm font-semibold #{if name then (if dark then 'text-neutral-100' else 'text-neutral-900') else 'text-red-500'}", title: (if address then from else null), (if name then name else 'no sender: the template declares no from static')
-        div class: "truncate text-sm #{if subject? then (if dark then 'text-neutral-200' else 'text-neutral-800') else 'text-red-500'}", (if subject? then subject else 'no subject: the template declares no subject static')
-        div class: "truncate text-[13px] #{if dark then 'text-neutral-400' else 'text-neutral-500'}", (if preview? then preview else 'no preview: the template renders no Preview block')
+    div class: "min-w-0 rounded-lg px-4 py-3 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
+      div class: "truncate text-sm font-semibold #{if subject? then (if dark then 'text-neutral-100' else 'text-neutral-900') else 'text-red-500'}", (if subject? then subject else 'no subject: the template declares no subject static')
+      div class: "truncate text-[13px] #{if dark then 'text-neutral-400' else 'text-neutral-500'}", (if preview? then preview else 'no preview: the template renders no Preview block')
 
 # The canvas is a client's window; the list row and the opened message
 # float in the middle of it, the message as a viewport of a device's
@@ -72,7 +62,7 @@ Stage = component
   render
     section class: "flex min-h-0 overflow-auto p-4 #{if dark then 'bg-gray-400' else 'bg-gray-200'}"
       div class: "m-auto flex max-w-full flex-col gap-4 #{if width is 'mobile' then 'w-[375px]' else 'w-[1024px]'}"
-        InboxRow from: message.from, subject: message.subject, preview: message.preview, dark: dark
+        InboxRow subject: message.subject, preview: message.preview, dark: dark
         div class: 'overflow-hidden rounded-lg shadow-lg'
           if view is 'html'
             iframe title: 'Rendered email', srcdoc: doc, class: "block w-full bg-white #{if width is 'mobile' then 'h-[667px]' else 'h-[600px]'}"

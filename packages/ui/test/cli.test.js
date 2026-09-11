@@ -28,7 +28,6 @@ export Welcome = component
 
 Welcome.previewProps = name: 'Ada'
 Welcome.subject = (props) -> "Hello #{props.name}"
-Welcome.from = -> 'Ada & Co'
 
 export helper = -> 1
 `);
@@ -157,8 +156,6 @@ test('render, the child-process verb, answers the message as json from previewPr
   expect(welcome.text).toBe('Hello, Ada');
   expect(welcome.subject).toBe('Hello Ada');
   expect(welcome.preview).toBe('Hi Ada & co');
-  expect(welcome.from).toBe('Ada & Co');
-  expect(json.from).toBeNull();
 });
 
 test('render refuses a file with no component', () => {

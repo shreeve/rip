@@ -33,8 +33,8 @@ usage: rip-email <verb> [args]
   itself named emails. A template is a .rip file exporting one component;
   a file led by an underscore, such as _layout.rip, is shared by templates
   and is not one. Component.previewProps chooses the props it renders
-  with; Component.subject and Component.from, functions of the props,
-  give the subject line and the sender's name.
+  with; Component.subject, a function of the props, gives the subject
+  line.
 '''
 
 die = (message) ->
@@ -159,8 +159,7 @@ renderTemplate = (file) ->
   props = Component.previewProps ?? {}
   { html, text, preview } = toEmail Component, props
   subject = if typeof Component.subject is 'function' then Component.subject(props) else null
-  from    = if typeof Component.from is 'function' then Component.from(props) else null
-  { from, subject, preview, html, text }
+  { subject, preview, html, text }
 
 shown = (path) ->
   rel = relative process.cwd(), path

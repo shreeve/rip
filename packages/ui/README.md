@@ -102,14 +102,13 @@ client's dark mode, and can show the plain-text twin or the raw HTML. A
 save under the template directory refetches the page in place; an edit
 to the page's own source hot-reloads through the manager.
 
-`subject` and `from` statics, functions of the same props, give the
-message's subject line and its sender's name; the preview shows them in
-an inbox row, and an application's mailer can read them so the envelope
-and the body never disagree:
+A `subject` static, a function of the same props, gives the message's
+subject line; the preview shows it in an inbox row above the message, and
+an application's mailer can read it so the envelope and the body never
+disagree:
 
 ```coffee
 SignInCode.subject = (props) -> "Use code #{props.code} to sign in"
-SignInCode.from    = -> 'MedLabs'
 ```
 
 A `previewProps` static on the component supplies the props previews

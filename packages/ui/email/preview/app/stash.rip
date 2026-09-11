@@ -7,7 +7,6 @@ export type Entry =
   component: string
 
 export type Message =
-  from: string | null
   subject: string | null
   preview: string | null
   html: string
