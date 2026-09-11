@@ -13,7 +13,7 @@
 # ==============================================================================
 
 import { execSync, spawn } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join, relative, resolve } from 'path'
 import { edgeControl } from 'rip/sites/edge'
@@ -226,11 +226,13 @@ dev = (root, host, open) ->
     process.exit code ?? 1
 
   # Ready is the edge routing the host to the site: its registration,
-  # found by name and host.
+  # known by its dist root under this run's project, since another run's
+  # registration carries the same name and host.
+  ours = realpathSync(project) + '/'
   app = null
   until app? or manager.exitCode?
     apps = try (edge! control, 'GET', '/1.0/apps').json! catch then []
-    app = apps.find (entry) -> entry.name is 'email' and entry.hosts?.includes(host)
+    app = apps.find (entry) -> entry.files?.roots?.some (root) -> root.path.startsWith ours
     Bun.sleep! 100 unless app?
   return unless app?
   process.stdout.write "\r\x1b[K" if process.stdout.isTTY
