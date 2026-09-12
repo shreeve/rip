@@ -1,15 +1,12 @@
 # Gmail's dark mode: every color's lightness is inverted on one line,
 # white landing at 12 percent and black at 95, whether it paints a
-# background, a border, or text, with chroma cut by a fifth. Applied to
-# inline styles and bgcolor attributes, which is where an email's colors
-# live.
+# background, a border, or text, with chroma cut by a fifth.
 
 canvas = document.createElement('canvas').getContext('2d')
 SENTINEL = '#010203'
 KEYWORDS = Set.new ['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'none', 'solid', 'dashed', 'dotted', 'double', 'auto']
 TOKEN = /#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^)]*\)|\b[a-z]+\b/gi
 
-# Any color the browser can read, as [r, g, b, a] on 0..1, or null.
 rgba = (text: string) ->
   return null if KEYWORDS.has text.toLowerCase()
   canvas.fillStyle = SENTINEL

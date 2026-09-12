@@ -1,6 +1,4 @@
-# The Source view's indentation, for reading only: the html sent is the
-# serializer's one line. Every block tag opens a line at its depth; text
-# and inline tags run together on one line inside it, the way they read.
+# For reading only: the html sent is the serializer's one line.
 
 VOID   = Set.new ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']
 INLINE = Set.new ['a', 'b', 'code', 'em', 'i', 'small', 'span', 'strong', 'sub', 'sup', 'u']
