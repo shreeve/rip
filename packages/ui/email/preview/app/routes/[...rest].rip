@@ -10,8 +10,8 @@ export TemplatePage = component
 
   render
     div class: 'contents'
-      header class: 'flex h-15 items-center gap-5 border-b border-surface px-4'
-        span class: 'min-w-0 flex-1 truncate text-sm font-medium', "#{@params.rest}.rip"
+      header class: 'flex h-15 min-w-0 items-center gap-5 border-b border-surface px-5'
+        span class: 'flex-1 truncate text-sm font-semibold', "#{@params.rest}.rip"
         Group
           Choice label: 'HTML',   active: ui.view is 'html',   pick: (-> ui.view = 'html')
           Choice label: 'Text',   active: ui.view is 'text',   pick: (-> ui.view = 'text')
@@ -22,7 +22,7 @@ export TemplatePage = component
         Group
           Choice label: 'Dark', active: ui.dark, pick: (-> ui.dark = not ui.dark)
         if not ui.live
-          span class: 'text-sm text-error', 'Disconnected'
+          span class: 'text-sm font-medium text-error', 'Disconnected'
       Stage message: message, view: ui.view, width: ui.width, dark: ui.dark
 
 Group = component
@@ -37,7 +37,7 @@ Choice = component
   render
     button
       type: 'button'
-      class: "h-7 rounded-md px-2.5 text-sm transition-colors #{if active then 'bg-surface-active' else 'text-secondary hover:text-primary'}"
+      class: "h-7 rounded-md px-2.5 text-sm font-medium #{if active then 'bg-surface-active' else 'text-secondary hover:text-primary'}"
       @click: (-> pick())
       label
 
@@ -52,8 +52,8 @@ Stage = component
     root = frame.contentDocument.documentElement
     ResizeObserver.new(-> frame.style.height = "#{root.scrollHeight}px").observe root
   render
-    section class: "flex min-h-0 p-8 #{if dark then 'bg-neutral-400' else 'bg-neutral-200'}"
-      div class: "m-auto flex max-h-full max-w-full flex-col gap-4 #{if width is 'mobile' then 'w-[390px]' else 'w-[800px]'}"
+    section class: "flex min-h-0 min-w-0 p-8 #{if dark then 'bg-neutral-400' else 'bg-neutral-200'}"
+      div class: "m-auto flex max-h-full max-w-full flex-col gap-5 #{if width is 'mobile' then 'w-[390px]' else 'w-[800px]'}"
         InboxRow subject: message.subject, preview: message.preview, dark: dark
         div class: 'flex min-h-0 flex-col overflow-hidden rounded-lg shadow-lg'
           if view is 'html'
@@ -66,6 +66,6 @@ InboxRow = component
   @preview: string | null
   @dark: boolean
   render
-    div class: "min-w-0 rounded-lg px-4 py-3.5 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
+    div class: "flex flex-col gap-y-0.5 rounded-lg px-4.5 py-4 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
       div class: "truncate text-sm-plus font-semibold #{if subject? then (if dark then 'text-neutral-100' else 'text-neutral-900') else 'text-red-500'}", (if subject? then subject else 'no subject: the template declares no subject static')
-      div class: "truncate text-sm #{if dark then 'text-neutral-400' else 'text-neutral-500'}", (if preview? then preview else 'no preview: the template renders no Preview block')
+      div class: "truncate text-sm #{if dark then 'text-neutral-400' else 'text-neutral-600'}", (if preview? then preview else 'no preview: the template renders no Preview block')
