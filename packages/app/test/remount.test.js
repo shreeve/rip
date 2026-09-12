@@ -3,8 +3,9 @@ import {
   createComponents,
   createRenderer,
   createStash,
+  source,
 } from 'rip/app';
-import { __Component, __hmrEvents } from '../../../src/runtime/components.js';
+import { __Component, __gateBind, __hmrEvents } from '../../../src/runtime/components.js';
 
 const target = () => ({
   children: [],
@@ -411,6 +412,56 @@ describe('renderer remountDirty', () => {
     components.setCompiled('retry/b.rip', { B: Fixed });
     expect(await renderer.remountDirty(['retry/b.rip'])).toBe('narrow');
     expect(renderer.current).toBeInstanceOf(Fixed);
+    renderer.stop();
+  });
+
+  // A handled failure leaves the boundary chain up with no completed
+  // page mount behind it. Changes must still reach that screen: a dirty
+  // layout rebuilds the boundary from the new module, and the fix to
+  // the failed page mounts it.
+  test('a change arriving while a boundary is up reaches the layout and the failed page', async () => {
+    let layouts = 0;
+    const handled = [];
+    const data = createStash({
+      broken: source({ fetch: async () => { throw new Error('down'); } }),
+    });
+    class Layout extends __Component {
+      _init() { layouts++; }
+      _create() { return node('layout'); }
+      onError(failure) { handled.push([this, failure]); }
+    }
+    class Page extends __Component {
+      static __gates = ['broken'];
+      _init() { this.broken = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    class Fixed extends __Component {
+      _create() { return node('page'); }
+    }
+    const info = route('page.rip', { layouts: ['layout.rip'] });
+    const components = registry({ 'layout.rip': { Layout }, 'page.rip': { Page } });
+    const renderer = createRenderer({
+      router: { current: info, navigating: false },
+      stash: data,
+      components,
+      target: target(),
+    });
+
+    expect(await renderer.mount(info)).toBeNull();
+    expect(layouts).toBe(1);
+    expect(handled.length).toBe(1);
+    expect(renderer.current).toBeInstanceOf(Layout);
+
+    expect(await renderer.remountDirty(['layout.rip'])).toBe('narrow');
+    expect(layouts).toBe(2);
+    expect(handled.length).toBe(2);
+    expect(handled[1][0]).toBe(renderer.current);
+    expect(handled[1][0]).not.toBe(handled[0][0]);
+
+    components.setCompiled('page.rip', { Page: Fixed });
+    expect(await renderer.remountDirty(['page.rip'])).toBe('narrow');
+    expect(renderer.current).toBeInstanceOf(Fixed);
+    expect(renderer.current._parent).toBeInstanceOf(Layout);
     renderer.stop();
   });
 

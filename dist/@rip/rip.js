@@ -16908,29 +16908,43 @@ ${pad ?? ""}`);
     this.renderBareAttribute(el, child, siblings, k, owner);
     return true;
   }
-  renderSlot(node, args) {
+  claimSlot(markNode) {
     const R = this.rstate;
+    const at = markNode ?? this.rstate.node;
+    if (R.sink.loopStack.length > 0) {
+      throw this.positionedError(at, "emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight " + "over it; " + "project it once, outside the loop", this.rstate.node);
+    }
+    if (R.slotSeen) {
+      throw this.positionedError(at, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it " + "", this.rstate.node);
+    }
+    R.slotSeen = true;
+    this.noteVocabulary("render-channel", "slot", at);
+  }
+  childrenReadText() {
+    const s = this.renderSelf ?? "this";
+    return `${s}.children${this.memberIsReactive("children") ? ".value" : ""}`;
+  }
+  emitChildrenRead(slotSpan) {
+    this.b.emit(`${this.renderSelf ?? "this"}.`);
+    if (slotSpan !== null)
+      this.intrinsics.push({ start: slotSpan[0], end: slotSpan[1], kind: "slot", gen: this.b.offset });
+    this.b.emit("children");
+    if (this.memberIsReactive("children"))
+      this.b.emit(".value");
+  }
+  renderSlot(node, args) {
     const markNode = isNode(node) ? node : null;
     if (args.length > 0) {
       throw this.positionedError(markNode ?? node, "emitter: `slot` takes no arguments — fallback content has no " + "reading here (render it through a conditional around the slot)", this.rstate.node);
     }
-    if (R.sink.loopStack.length > 0) {
-      throw this.positionedError(markNode ?? node, "emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight " + "over it; " + "project it once, outside the loop", this.rstate.node);
-    }
-    if (R.slotSeen) {
-      throw this.positionedError(markNode ?? node, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it " + "", this.rstate.node);
-    }
-    R.slotSeen = true;
-    this.noteVocabulary("render-channel", "slot", markNode ?? this.rstate.node);
+    this.claimSlot(markNode);
     const v = this.newRenderVar("slot");
     const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
-      const s = this.renderSelf ?? "this";
-      this.b.emit(v);
-      this.b.emit(` = ${s}.`);
-      if (slotSpan !== null)
-        this.intrinsics.push({ start: slotSpan[0], end: slotSpan[1], kind: "slot", gen: this.b.offset });
-      this.b.emit(`children instanceof Node ? ${s}.children : (${s}.children != null ? ` + `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
+      const c = this.childrenReadText();
+      this.b.emit(`${v} = `);
+      this.emitChildrenRead(slotSpan);
+      this.b.emit(` instanceof Node ? ${c} : (${c} != null ? document.createTextNode(String(${c})) : document.createComment(''))`);
     });
     return v;
   }
@@ -16968,15 +16982,23 @@ ${pad ?? ""}`);
     const eventBindings = [];
     const childVars = [];
     const seenKeys = new Map;
-    const declareKey = (rawKey, pair) => {
+    const CHILDREN_SPELLINGS = {
+      prop: "an explicit `children:` prop",
+      body: "element body content",
+      slot: "a nested `slot`"
+    };
+    let childrenFrom = null;
+    const declareKey = (rawKey, pair, spelling = "prop") => {
       const k = rawKey.startsWith("__bind_") && rawKey.endsWith("__") ? rawKey.slice(7, -2) : rawKey;
       if (seenKeys.has(k)) {
         if (k === "children") {
-          throw this.positionedError(pair ?? markNode ?? node, "emitter: this child component receives `children` TWICE — an explicit `children:` prop beside element " + "body content; give the children ONE " + "spelling: the element body (indented or inline), or the explicit `children:` prop", this.rstate.node);
+          throw this.positionedError(pair ?? markNode ?? node, `emitter: this child component receives \`children\` TWICE — ${CHILDREN_SPELLINGS[childrenFrom]} beside ` + `${CHILDREN_SPELLINGS[spelling]}; give the children ONE spelling: the element body (indented or inline), ` + "the explicit `children:` prop, or a nested `slot` forwarding the received children", this.rstate.node);
         }
         throw this.positionedError(pair ?? markNode ?? node, `emitter: duplicate prop '${k}' on a child component — duplicate keys emit one object literal where the ` + "last silently wins, and on an extends child the pair leaves two live writers racing over the inherited " + "element; pass one value per prop", this.rstate.node);
       }
       seenKeys.set(k, pair ?? null);
+      if (k === "children")
+        childrenFrom = spelling;
     };
     const addPair = (pair) => {
       if (!isNode(pair) || pair.length !== 3) {
@@ -17096,6 +17118,7 @@ ${pad ?? ""}`);
       this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
     };
     const domItems = [];
+    let forwardSlot = false;
     const isTextChild = (arg) => !isNode(arg) && !(typeof arg === "string" && ((isHtmlTag2(arg.split(/[#.]/)[0]) || isComponentName2(arg.split(/[#.]/)[0])) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null));
     const classifyChild = (arg) => {
       if (arg == null)
@@ -17103,6 +17126,12 @@ ${pad ?? ""}`);
       const isBareWord = typeof arg === "string" && RENDER_LOCAL_RE.test(arg) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
       if (isBareWord && (isHtmlTag2(arg) || arg === "slot") && (this.inScope(arg) || this.moduleBound.has(arg))) {
         rejectTagWord(markNode ?? this.rstate.node, arg);
+      }
+      if (isBareWord && arg === "slot") {
+        forwardSlot = true;
+        scanAdvance(arg);
+        domItems.push(arg);
+        return;
       }
       if (isBareWord && !this.inScope(arg) && !this.moduleBound.has(arg)) {
         addBareWord(markNode ?? this.rstate.node, arg);
@@ -17156,8 +17185,16 @@ ${pad ?? ""}`);
       return t;
     };
     const renderables = domItems.filter((a) => !this.isRenderBinding(a));
-    if (renderables.length === 1) {
-      declareKey("children", null);
+    if (renderables.length === 1 && forwardSlot) {
+      declareKey("children", null, "slot");
+      this.claimSlot(markNode);
+      const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
+      for (const arg of domItems)
+        if (arg !== "slot")
+          buildChild(arg);
+      props.push({ pair: null, key: "children", fn: () => this.emitChildrenRead(slotSpan) });
+    } else if (renderables.length === 1) {
+      declareKey("children", null, "body");
       let childrenVar = null;
       for (const arg of domItems) {
         const v = buildChild(arg);
@@ -17166,7 +17203,7 @@ ${pad ?? ""}`);
       }
       props.push({ pair: null, key: "children", fn: () => this.b.emit(childrenVar) });
     } else if (renderables.length > 1) {
-      declareKey("children", null);
+      declareKey("children", null, "body");
       const frag = this.newRenderVar("frag");
       this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
       for (const arg of domItems) {
@@ -28818,7 +28855,7 @@ function createRenderer(opts) {
         return "escape";
     }
     let info = router.current;
-    if (!(info?.route?.file && lastRoute != null))
+    if (!(info?.route?.file && mountedEntries.length > 0))
       return "noop";
     let layoutFiles = info.layouts ?? info.route.layouts ?? [];
     let chain = [...layoutFiles, info.route.file];

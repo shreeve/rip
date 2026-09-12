@@ -697,7 +697,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     for path in paths
       return 'escape' if path is 'stash.rip' or path.startsWith('stash/') or path is 'seed.rip'
     info = router.current
-    return 'noop' unless info?.route?.file and lastRoute?
+    return 'noop' unless info?.route?.file and mountedEntries.length > 0
     layoutFiles = info.layouts ?? info.route.layouts ?? []
     chain = [...layoutFiles, info.route.file]
     # After a navigation whose mount failed, the previous screen is still
