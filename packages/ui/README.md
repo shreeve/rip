@@ -51,6 +51,24 @@ html = toHTML WelcomeEmail, name: 'Alice'
 APIs for framework and tooling code. Application email templates should use
 `rip/ui/email`.
 
+### Where a style lands
+
+`Body`, `Container`, and `Section` each render a table with one cell, and
+a `style` on any of them is split between the two. Padding lands on the
+cell: Outlook and Klaviyo drop padding on a table and honor it on a `td`.
+Everything else stays on the table. `Body` also carries its background on
+the `body` element, so the ground fills the viewport past the content, and
+zeroes that element's margin always and its padding whenever the style sets
+one, since the cell carries the box:
+
+```coffee
+Section style: 'background:#eee;padding:20px 8px'
+# <table style="background:#eee" …><tbody><tr><td style="padding:20px 8px">
+```
+
+A template that styles padding on `Container` or `Section` renders that
+padding on the cell, not the table.
+
 Email rendering is synchronous. The default Tailwind configuration is prepared
 when the package loads. Prepare a custom configuration once before passing the
 same object to `Tailwind`:
