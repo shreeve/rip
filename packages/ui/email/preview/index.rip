@@ -1,0 +1,43 @@
+# The preview site's API. The manager serves the page under app/ (bundle,
+# runtime, hub, hot reload); this entry answers the catalog and one
+# rendered template. Rendering runs in a fresh child process, so a save
+# is seen whole, edits to modules a template imports included, and a
+# template that throws reports the error instead of a stale page. The
+# launcher tells the page of a save over the hub; nothing here watches.
+
+import { get, hub, start } from 'rip/sites'
+import { existsSync } from 'fs'
+import { join, resolve, sep } from 'path'
+import { spawnSync } from 'child_process'
+
+EMAILS = process.env.RIP_EMAIL_DIR
+throw Error.new 'rip-email: RIP_EMAIL_DIR names the template directory' unless EMAILS
+
+# Workers run from a bundled artifact with no loader on their command
+# line, so the checkout is found from this file: preview/ under email/
+# under ui/ under packages/ under the root.
+ROOT = join(import.meta.dir, '..', '..', '..', '..')
+child = (...rest) ->
+  r = spawnSync process.execPath, ["--preload=#{join ROOT, 'src', 'loader.js'}", join(ROOT, 'src', 'cli', 'run.js'), join(ROOT, 'packages', 'ui', 'email', 'cli.rip'), ...rest],
+    encoding: 'utf8'
+    env: process.env
+    maxBuffer: 64 * 1024 * 1024
+  { ok: r.status is 0, out: r.stdout ?? '', err: (r.stderr ?? '') or (if r.error then String(r.error) else '') }
+
+failed = (r) -> Response.new r.err, status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
+json = (text) -> Response.new text, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+
+get '/api/catalog' ->
+  r = child 'catalog', EMAILS
+  if r.ok then json(r.out) else failed(r)
+
+# A template's address is its file path without the extension.
+get '/api/preview/*' ->
+  address = decodeURIComponent @req.path.slice('/api/preview/'.length)
+  file = resolve EMAILS, "#{address}.rip"
+  return Response.new('Not found', status: 404) unless address and file.startsWith(EMAILS + sep) and existsSync(file)
+  r = child 'render', file
+  if r.ok then json(r.out) else failed(r)
+
+hub auth: false
+start()

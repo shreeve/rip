@@ -1,0 +1,44 @@
+import { source } from 'rip/app'
+import { http, HTTPError } from 'rip/http'
+
+export type Entry =
+  path: string
+  file: string
+  component: string
+
+export type Message =
+  subject: string | null
+  preview: string | null
+  html: string
+  text: string
+
+export type Ui =
+  view: 'html' | 'text' | 'source'
+  width: 'desktop' | 'mobile'
+  dark: boolean
+  current: string
+  live: boolean
+
+api = http.create({ retry: 0 })
+
+# A failed render answers its error as text; that text is the message.
+get = (url: string) ->
+  try
+    api.get!(url).json!
+  catch error
+    throw Error.new(error.response.text!) if error instanceof HTTPError
+    throw error
+
+ui: Ui =
+  view: 'html'
+  width: 'desktop'
+  dark: false
+  current: ''
+  live: true
+
+export stash =
+  ui: ui
+  catalog: source
+    fetch: -> get('/api/catalog')
+  message: source
+    fetch: (key: string) -> get("/api/preview/#{key}")

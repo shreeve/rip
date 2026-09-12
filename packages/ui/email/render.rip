@@ -1,10 +1,11 @@
 import { _renderComponent } from '../shared/render.rip'
+import { configKey, inlineEmailTree, takeEmailTailwindRoots } from '../tailwind/tailwind.rip'
 import { serializeChildren, toPlainText } from './dom.rip'
-import { inlineEmailTree, takeEmailTailwindRoots, configKey } from '../tailwind/tailwind.rip'
 
 export type EmailOutput =
   html: string
   text: string
+  preview: string | null
 
 DOCTYPE =! '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
 
@@ -42,6 +43,19 @@ finalizeEmail = (root) ->
   inlineTailwind root
   dedupeStyles root
 
+previewText = (root): string | null ->
+  found: string | null = null
+  visit = (node) ->
+    return if found?
+    if node.attributes?.get('data-part') is 'Preview'
+      found = (child.data for child in node.childNodes when child.nodeType is 3).join('')
+      return
+    for child in (node.childNodes ?? [])
+      visit child
+    return
+  visit root
+  found
+
 renderEmail = (ComponentClass, props: Record<string, any>, consume) ->
   takeEmailTailwindRoots()
   try
@@ -59,4 +73,4 @@ export toEmail = (ComponentClass, props: Record<string, any> = {}): EmailOutput 
   renderEmail ComponentClass, props, (root) ->
     html = serializeChildren root
     text = toPlainText root
-    { html: "#{DOCTYPE}#{html}", text }
+    { html: "#{DOCTYPE}#{html}", text, preview: previewText(root) }

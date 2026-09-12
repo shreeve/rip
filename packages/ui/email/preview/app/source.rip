@@ -1,0 +1,32 @@
+# The Source view's indentation, for reading only: the html sent is the
+# serializer's one line. Every block tag opens a line at its depth; text
+# and inline tags run together on one line inside it, the way they read.
+
+VOID   = Set.new ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']
+INLINE = Set.new ['a', 'b', 'code', 'em', 'i', 'small', 'span', 'strong', 'sub', 'sup', 'u']
+TOKEN  = /<!--[\s\S]*?-->|<[^>]+>|[^<]+/g
+
+export indent = (html: string): string ->
+  lines: string[] = []
+  run = ''
+  depth = 0
+  flush = ->
+    lines.push run if run
+    run = ''
+  for token in (html.match(TOKEN) ?? [])
+    unless token.startsWith '<'
+      text = token.replace(/\s+/g, ' ').trim()
+      continue unless text
+      run = if run then "#{run}#{text}" else "#{'  '.repeat depth}#{text}"
+      continue
+    name = token.match(/^<\/?([a-zA-Z][\w-]*)/)?[1]?.toLowerCase()
+    if name? and INLINE.has name
+      run = if run then "#{run}#{token}" else "#{'  '.repeat depth}#{token}"
+      continue
+    flush()
+    closing = token.startsWith '</'
+    depth = Math.max(0, depth - 1) if closing
+    lines.push "#{'  '.repeat depth}#{token}"
+    depth += 1 if name? and not closing and not VOID.has(name) and not token.endsWith('/>')
+  flush()
+  lines.join '\n'
