@@ -57,10 +57,24 @@ test('group directories contribute no segment; _-prefixed entries are unroutable
   expect(fromApp(root, '(admin)/settings.rip').union).toBe('"/settings"');
 });
 
-test('catch-alls are excluded from the union but contribute params', () => {
+test('catch-alls claim their bare prefix and everything under it', () => {
   const root = makeApp(['index.rip', 'files/[...rest].rip']);
+  const answer = fromApp(root, 'files/[...rest].rip');
+  expect(answer.union).toBe('"/" | "/files" | `/files/${string}`');
+  expect(answer.params).toBe('{ rest: string }');
+  expect(answer.entries.map((e) => e.display)).toEqual(['/', '/files', '/files/*rest']);
+  const only = makeApp(['[...rest].rip']);
+  expect(fromApp(only, '[...rest].rip').union).toBe('"/" | `/${string}`');
+  expect(fromApp(only, '[...rest].rip').entries.map((e) => e.display)).toEqual(['/', '/*rest']);
+});
+
+test('a not-found page is no route: no member, its directory params', () => {
+  const root = makeApp(['index.rip', '_404.rip', 'users/[id]/_404.rip', 'docs/[[page]]/_404.rip', '_lib/_404.rip']);
   expect(fromApp(root).union).toBe('"/"');
-  expect(fromApp(root, 'files/[...rest].rip').params).toBe('{ rest: string }');
+  expect(fromApp(root, '_404.rip').params).toBeNull();
+  expect(fromApp(root, 'users/[id]/_404.rip').params).toBe('{ id: string }');
+  expect(fromApp(root, 'docs/[[page]]/_404.rip').params).toBeNull();
+  expect(fromApp(root, '_lib/_404.rip').params).toBeNull();
 });
 
 test('optional segments contribute both expansions and an optional param', () => {
@@ -78,15 +92,13 @@ test('params answer only for the exact route file, in segment order', () => {
   expect(appRoutesFor(path.join(root, 'index.rip'), root).params).toBeNull();
 });
 
-test('no routes dir, or catch-alls only, leaves checking unarmed — null, never `never`', () => {
+test('no routes dir, or no routable files, leaves checking unarmed — null, never `never`', () => {
   const bare = makeApp([]);
   fs.rmSync(path.join(bare, 'app'), { recursive: true, force: true });
   expect(appRoutesFor(path.join(bare, 'index.rip'), bare)).toEqual({ union: null, params: null, entries: [] });
 
-  const fallbackOnly = makeApp(['[...rest].rip']);
-  const answer = fromApp(fallbackOnly, '[...rest].rip');
-  expect(answer.union).toBeNull();
-  expect(answer.params).toBe('{ rest: string }');
+  const pageOnly = makeApp(['_layout.rip', '_404.rip']);
+  expect(fromApp(pageOnly, '_404.rip')).toEqual({ union: null, params: null, entries: [] });
 });
 
 test('no anchoring project root answers unarmed', () => {
