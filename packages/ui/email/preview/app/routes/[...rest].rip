@@ -1,12 +1,13 @@
 import type { Message } from '../stash.rip'
 import { darken } from '../dark.rip'
 import { indent } from '../source.rip'
-import { NoTemplates, Notice } from '../notice.rip'
+import { NoTemplates, Notice } from '../components/notice.rip'
 
 export TemplatePage = component
-  message <~ @stash.message(params.rest)
-  templates <~ @stash.templates
   ui ~= @stash.ui
+  templates <~ @stash.templates
+  message <~ @stash.message(params.rest)
+
   found ~= if 'missing' of message then null else message
 
   mounted: -> ui.current = @params.rest
@@ -55,11 +56,14 @@ Stage = component
   @view: 'html' | 'text' | 'source'
   @width: 'desktop' | 'mobile'
   @dark: boolean
+
   doc ~= if dark then darken(message.html) else message.html
+
   fit: (event) ->
     frame = event.target
     root = frame.contentDocument.documentElement
     ResizeObserver.new(-> frame.style.height = "#{root.scrollHeight}px").observe root
+
   render
     section class: "flex min-h-0 min-w-0 p-8 #{if dark then 'bg-neutral-400' else 'bg-neutral-200'}"
       div class: "m-auto flex max-h-full max-w-full flex-col gap-5 #{if width is 'mobile' then 'w-[390px]' else 'w-[800px]'}"

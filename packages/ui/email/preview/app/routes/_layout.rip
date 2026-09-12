@@ -1,7 +1,7 @@
 export Layout = component
-  templates <~ @stash.templates
   ui ~= @stash.ui
-  problem?: string := undefined
+  templates <~ @stash.templates
+  error?: string := undefined
 
   mounted: ->
     connect = ->
@@ -19,9 +19,11 @@ export Layout = component
         ui.live = false
         setTimeout connect, 1000
     connect()
-    @router.onNavigate -> problem = undefined
+    @router.onNavigate -> error = undefined
 
-  onError: (err) -> problem = err.message
+  onError: (err) ->
+    console.error(err)
+    error = err.message
 
   render
     div class: 'grid h-screen grid-cols-[260px_1fr]'
@@ -32,12 +34,12 @@ export Layout = component
           if templates.length is 0
             p class: 'p-2.5 text-sm text-secondary', 'No templates found'
           nav class: 'flex flex-col'
-            for entry in templates
+            for template in templates
               a
-                href: "/#{entry.path}"
+                href: "/#{template.path}"
                 class: 'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
-                entry.path
+                template.path
       main class: 'grid grid-rows-[auto_1fr] overflow-hidden'
-        if problem
-          pre class: 'wrap-break-word m-6 font-mono text-xs whitespace-pre-wrap text-error', problem
+        if error
+          pre class: 'wrap-break-word m-6 font-mono text-xs whitespace-pre-wrap text-error', error
         div id: 'content', class: 'contents'

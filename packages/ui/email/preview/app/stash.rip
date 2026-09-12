@@ -1,16 +1,16 @@
 import { source } from 'rip/app'
 import { http, HTTPError } from 'rip/http'
 
-export type Entry =
-  path: string
-  file: string
-  component: string
+export Template = schema :shape
+  path!      string
+  file!      string
+  component! string
 
-export type Message =
-  subject: string | null
-  preview: string | null
-  html: string
-  text: string
+export Message = schema :shape
+  html!     string
+  text!     string
+  subject?  string
+  preview?  string
 
 export type Missing =
   missing: true
@@ -22,14 +22,14 @@ export type Ui =
   current: string
   live: boolean
 
-api = http.create({ retry: 0 })
+api = http.create({ prefixUrl: '/api', retry: 0 })
 
 get = (url: string) ->
   try
     api.get!(url).json!
   catch error
-    throw Error.new(error.response.text!) if error instanceof HTTPError
-    throw error
+    throw error unless error instanceof HTTPError
+    throw Object.assign(Error.new(error.response.text!), { status: error.response.status })
 
 ui: Ui =
   view: 'html'
@@ -41,12 +41,10 @@ ui: Ui =
 export stash =
   ui: ui
   templates: source
-    fetch: (): Promise<Entry[]> -> get('/api/templates')
+    fetch: -> Template.array.parse(get!('templates'))
   message: source
     fetch: (key: string): Promise<Message | Missing> ->
       try
-        api.get!("/api/preview/#{key}").json!
+        Message.parse(get!("preview/#{key}"))
       catch error
-        throw error unless error instanceof HTTPError
-        return { missing: true } if error.response.status is 404
-        throw Error.new(error.response.text!)
+        if error.status is 404 then { missing: true } else throw error

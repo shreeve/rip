@@ -1,8 +1,8 @@
-import { NoTemplates } from '../notice.rip'
+import { NoTemplates } from '../components/notice.rip'
 
 export Home = component
-  templates <~ @stash.templates
   ui ~= @stash.ui
+  templates <~ @stash.templates
 
   ~>
     first = templates[0]
