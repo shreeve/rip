@@ -127,6 +127,12 @@ is installed. `rip jobs.rip` runs the same script identically — the
 └── died/       ← failed (retryable)
 ```
 
+One queue per working directory, shared by every swarm script run
+there. A script that runs beside others names its own with a tag —
+`swarm { tag: 'reports' }` or `-t reports` — and its queue lives under
+`.swarm/reports/` instead, so a day one script leaves in `died/` is
+never replayed by another.
+
 Tasks are plain files. The filename identifies the task (e.g., `000315`,
 `2024-01-15`, `amazon.json`). Files can be empty (filename is the data)
 or contain a payload that `perform` reads. File moves use `renameSync`
@@ -150,6 +156,7 @@ todo('task-2', data) # Create task file with data (string or JSON)
 ```coffee
 swarm { setup, perform }
 swarm { setup, perform, workers: 8, bar: 30, char: '█' }
+swarm { setup, perform, tag: 'reports' }
 ```
 
 | Option | Description | Default |
@@ -159,6 +166,7 @@ swarm { setup, perform, workers: 8, bar: 30, char: '█' }
 | **workers** | Number of worker threads | CPU count |
 | **bar** | Progress bar width in characters | 20 |
 | **char** | Character for progress bars | `•` |
+| **tag** | Name of this script's queue, kept under `.swarm/<tag>/` | none — `.swarm/` |
 
 ### CLI Flags
 
@@ -166,7 +174,8 @@ swarm { setup, perform, workers: 8, bar: 30, char: '█' }
 -w, --workers <n>     Number of workers (default: CPU count)
 -b, --bar <width>     Progress bar width (default: 20)
 -c, --char <ch>       Bar character (default: •)
--r, --reset           Remove .swarm directory and quit
+-t, --tag <name>      Keep the queue under .swarm/<name> (default: .swarm)
+-r, --reset           Remove the queue directory and quit
 -s, --safe            Set safe: true on the worker context
 -q, --quiet           No progress display, one summary line
 -h, --help            Show help (bare `swarm` command only)

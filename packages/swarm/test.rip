@@ -156,6 +156,41 @@ test "-r/--reset removes the .swarm directory and quits", ->
   eq r.stdout, 'removed .swarm directory\n'
   ok not existsSync(join(dir, '.swarm'))
 
+test "a tag keeps the queue under .swarm/<tag>", ->
+  dir = fresh()
+  r = run dir, 'tagged.rip', '-q'
+  eq r.status, 0
+  eq readdirSync(join(dir, '.swarm', 'alpha', 'done')).sort(), ['1', '2', '3']
+  ok not existsSync(join(dir, '.swarm', 'todo')), 'the shared queue is untouched'
+
+test "-t/--tag on the command line names the queue too", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-q', '-t', 'beta'
+  eq r.status, 0
+  eq readdirSync(join(dir, '.swarm', 'beta', 'done')).length, 12
+  ok not existsSync(join(dir, '.swarm', 'todo'))
+  # two tagged scripts in one directory never see each other's days
+  r = run dir, 'tagged.rip', '-q'
+  eq r.status, 0
+  eq readdirSync(join(dir, '.swarm', 'alpha', 'done')).sort(), ['1', '2', '3']
+  eq readdirSync(join(dir, '.swarm', 'beta', 'done')).length, 12
+
+test "-r with a tag removes only that queue and names it", ->
+  dir = fresh()
+  mkdirSync join(dir, '.swarm', 'beta', 'todo'), { recursive: true }
+  mkdirSync join(dir, '.swarm', 'todo'), { recursive: true }
+  r = run dir, 'basic.rip', '-r', '-t', 'beta'
+  eq r.status, 0
+  eq r.stdout, 'removed .swarm/beta directory\n'
+  ok not existsSync(join(dir, '.swarm', 'beta'))
+  ok existsSync(join(dir, '.swarm', 'todo')), 'the shared queue stays'
+
+test "a tag that is not a plain name is refused", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-q', '-t', '../x'
+  eq r.status, 1
+  ok r.stderr.includes('error: tag must be a plain name')
+
 test "long-form --workers=N is honored", ->
   dir = fresh()
   r = run dir, 'basic.rip', '--workers=4', '-q'
