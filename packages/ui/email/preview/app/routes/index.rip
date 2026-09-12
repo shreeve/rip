@@ -6,7 +6,8 @@ export Home = component
 
   ~>
     first = templates[0]
-    @router.replace "/#{first.path}" if first
+    @router.replace("/#{first.path}") if first
+    return
 
   render
     div class: 'contents'
