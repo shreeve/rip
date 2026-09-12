@@ -103,6 +103,33 @@ describe('launch', () => {
     expect(host.children.map(child => child.name)).toEqual(['about']);
   });
 
+  test('an unmatched URL mounts the not-found page, at boot and on push', async () => {
+    class NotFound extends __Component {
+      _create() { return node('not-found'); }
+    }
+    const withPage = bundle({
+      modules: { 'routes/index.rip': 'export Home = component', 'routes/_404.rip': 'export NotFound = component' },
+      compiled: { 'routes/index.rip': { Home }, 'routes/_404.rip': { NotFound } },
+    });
+    const host = node('host');
+    const failures = [];
+    const result = launch({ bundle: withPage, target: host, adapter: fakeAdapter('/nope'), onError: f => failures.push(f) });
+    running.push(result);
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['not-found']);
+    expect(result.router.path).toBe('/nope');
+    result.router.push('/');
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['home']);
+    result.router.push('/missing/deeper');
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(host.children.map(child => child.name)).toEqual(['not-found']);
+    expect(failures).toEqual([]);
+  });
+
   test('clears a static placeholder (e.g. #app-loader) before the first mount', async () => {
     const host = node('host');
     const loader = node('loader');

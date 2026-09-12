@@ -655,3 +655,73 @@ describe('rebuild and destroy', () => {
     expect(router.current.route.file).toBe('routes/about.rip');
   });
 });
+
+describe('not-found page', () => {
+  const withPage = () => buildRoutes([...FILES, 'routes/_404.rip']);
+
+  test('an unmatched initial URL lands on the page at that URL, and onError stays quiet', () => {
+    const adapter = fakeAdapter('/nope?x=1#top');
+    const seen = [];
+    const router = createRouter({ routes: withPage(), adapter, onError: f => seen.push(f) }).init();
+    expect(router.current.route.file).toBe('routes/_404.rip');
+    expect(router.current.layouts).toEqual(['routes/_layout.rip']);
+    expect(router.path).toBe('/nope');
+    expect(router.query).toEqual({ x: '1' });
+    expect(router.hash).toBe('top');
+    expect(seen).toEqual([]);
+  });
+
+  test('an unmatched push lands on the page with a history entry; replace with none', () => {
+    const adapter = fakeAdapter('/');
+    const seen = [];
+    const router = createRouter({ routes: withPage(), adapter, onError: f => seen.push(f) }).init();
+    expect(router.push('/missing')).toBeTrue();
+    expect(adapter.calls.push).toEqual(['/missing']);
+    expect(router.current.route.file).toBe('routes/_404.rip');
+    expect(router.path).toBe('/missing');
+    expect(router.replace('/gone')).toBeTrue();
+    expect(adapter.calls.push).toEqual(['/missing']);
+    expect(adapter.entries[adapter.entries.length - 1].url).toBe('/gone');
+    expect(router.path).toBe('/gone');
+    expect(seen).toEqual([]);
+  });
+
+  test('match and claims never answer the page', () => {
+    const { router } = makeRouter({ router: { routes: withPage() } });
+    router.init();
+    expect(router.match('/missing')).toBeNull();
+    expect(router.claims('/missing')).toBeNull();
+    expect(router.match('/about')).not.toBeNull();
+  });
+
+  test('a URL outside the base, a protocol-relative one, or a backslash still misses', () => {
+    const adapter = fakeAdapter('/elsewhere');
+    const seen = [];
+    const router = createRouter({ routes: withPage(), adapter, base: '/app', onError: f => seen.push(f) }).init();
+    expect(seen).toEqual([{ status: 404, path: '/elsewhere' }]);
+    expect(router.push('//evil.example/x')).toBeFalse();
+    expect(router.push('/a\\b')).toBeFalse();
+    expect(router.current).toBeNull();
+    expect(seen.map(f => f.path)).toEqual(['/elsewhere', '//evil.example/x', '/a\\b']);
+  });
+
+  test('a rebuild that drops the current route lands on the page', () => {
+    const adapter = fakeAdapter('/about');
+    let files = [...FILES, 'routes/_404.rip'];
+    const seen = [];
+    const router = createRouter({ routes: () => buildRoutes(files), adapter, onError: f => seen.push(f) }).init();
+    expect(router.current.route.file).toBe('routes/about.rip');
+    files = files.filter(f => f !== 'routes/about.rip');
+    router.rebuild();
+    expect(router.current.route.file).toBe('routes/_404.rip');
+    expect(router.path).toBe('/about');
+    expect(seen).toEqual([]);
+  });
+
+  test('the page carries its directory params', () => {
+    const adapter = fakeAdapter('/users/7/nope');
+    const router = createRouter({ routes: buildRoutes([...FILES, 'routes/users/[id]/_404.rip']), adapter }).init();
+    expect(router.current.route.file).toBe('routes/users/[id]/_404.rip');
+    expect(router.params).toEqual({ id: '7' });
+  });
+});

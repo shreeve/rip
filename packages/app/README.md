@@ -99,13 +99,7 @@ manifest = buildRoutes components.listAll('routes')
 manifest.match '/users/7'   # { route: { pattern, file, layouts }, params: { id: '7' } }
 ```
 
-Route files map to URLs by convention: `index.rip` is `/`, `[id]` captures a
-segment, `[[page]]` is optional, `[...rest]` captures the remaining path, and
-a `(group)` directory adds no URL segment while contributing its
-`_layout.rip`. Underscore-prefixed files and directories are not routable.
-Precedence is decided per segment, left to right — static before dynamic
-before optional before catch-all — and two files claiming the same URL shape
-reject at build time.
+Route files map to URLs by convention: `index.rip` is `/`, `[id]` captures a segment, `[[page]]` is optional, `[...rest]` captures the remaining path, and a `(group)` directory adds no URL segment while contributing its `_layout.rip`. Underscore-prefixed files and directories are not routable. `_404.rip` is the page an unmatched URL lands on: the one in the deepest directory whose path prefixes the URL, under that directory's layout chain, with the directory's dynamic segments captured as params. It is not a route, `match` never answers it, and a directory holding an optional or catch-all segment cannot hold one. Precedence is decided per segment, left to right — static before dynamic before optional before catch-all — and two files claiming the same URL shape reject at build time.
 
 `match` takes a URL pathname without query or hash. A trailing `/` is
 stripped before matching, except at the root, so `/about/` and `/about`
@@ -135,31 +129,7 @@ router.init()
 router.push '/users/7?tab=posts'
 ```
 
-`current` bundles the resolved route, layout chain, params, and query
-into one reactive dependency, exactly the shape the renderer consumes;
-the fragment lives on `router.hash`, so an in-page anchor navigation
-never looks like a route change. Params and query keep their identity
-across navigations that do not change them. `push`/`replace` take
-app-relative URLs (`base` joins on write and strips on read);
-`hash: true` routes through the fragment. History writes land before
-state commits and callback dispatch, so a redirect from `onNavigate`
-supersedes a coherent history — and an unconditional redirect loop is
-cut loudly after ten nested navigations. A push saves the outgoing
-scroll position into the outgoing entry under `__ripScroll`, merging
-with any host state, and a throttled watch keeps the current entry's
-position fresh between navigations, so a departure the router cannot
-intercept (back/forward) still preserves it; traversal restores the
-saved position — retrying across frames while the destination is still
-mounting — and leaves entries without one alone. An unmatched push
-reports
-`{ status: 404, path }` to `onError` and changes nothing; a traversal
-to a URL the manifest no longer claims reports 404 and keeps the prior
-state while the address bar owns the dead URL. `onNavigate` callbacks
-receive each successful navigation and cannot break it — or each
-other — by throwing. `navigating` is a writable flag the renderer owns
-during mounts, read through a 100 ms grace: a navigation that finishes
-inside the window never shows as navigating, so fast pages don't flash
-a spinner.
+`current` bundles the resolved route, layout chain, params, and query into one reactive dependency, exactly the shape the renderer consumes; the fragment lives on `router.hash`, so an in-page anchor navigation never looks like a route change. Params and query keep their identity across navigations that do not change them. `push`/`replace` take app-relative URLs (`base` joins on write and strips on read); `hash: true` routes through the fragment. History writes land before state commits and callback dispatch, so a redirect from `onNavigate` supersedes a coherent history — and an unconditional redirect loop is cut loudly after ten nested navigations. A push saves the outgoing scroll position into the outgoing entry under `__ripScroll`, merging with any host state, and a throttled watch keeps the current entry's position fresh between navigations, so a departure the router cannot intercept (back/forward) still preserves it; traversal restores the saved position — retrying across frames while the destination is still mounting — and leaves entries without one alone. An unmatched navigation lands on the manifest's not-found page in reach (`_404.rip`), committed at the requested URL like any hit, with `onError` unconsulted. Without one, a push reports `{ status: 404, path }` to `onError` and changes nothing, and a traversal to a URL the manifest no longer claims reports 404 and keeps the prior state while the address bar owns the dead URL. `match` and `claims` never answer the not-found page: it is where a navigation lands, not a URL the app owns, so a link to one stays a full navigation. `onNavigate` callbacks receive each successful navigation and cannot break it — or each other — by throwing. `navigating` is a writable flag the renderer owns during mounts, read through a 100 ms grace: a navigation that finishes inside the window never shows as navigating, so fast pages don't flash a spinner.
 
 `match` and `claims` take different spellings of a URL. `match` takes an
 app-relative URL — in path mode the argument is used as given, with no

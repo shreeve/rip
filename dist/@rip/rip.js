@@ -27450,9 +27450,11 @@ function createComponents() {
 }
 // packages/app/routes.rip
 var compile2;
+var compileNotFound;
 var fail;
 var layoutChain;
 var matchParts;
+var matchPrefix;
 var validRoot;
 var NAME = /^\w+$/;
 var RANKS = { static: 0, dynamic: 1, optional: 2, catchall: 3 };
@@ -27585,6 +27587,45 @@ compile2 = function(rel) {
     fail(`route '${rel}' is ambiguous with itself`);
   return { pattern, parts: kept, ranks, expansions };
 };
+compileNotFound = function(dirSegments, rel) {
+  let parsed = (() => {
+    const result = [];
+    for (let segment of dirSegments) {
+      result.push(parseSegment(segment, rel));
+    }
+    return result;
+  })();
+  let kept = parsed.filter(function(part) {
+    return part.kind !== "group";
+  });
+  for (let part of kept) {
+    if (part.kind === "optional" || part.kind === "catchall") {
+      fail(`not-found page under an optional or catch-all segment: '${rel}'`);
+    }
+  }
+  let names = [];
+  for (let part of kept) {
+    if (part.name != null) {
+      if (names.includes(part.name))
+        fail(`duplicate parameter name '${part.name}' in '${rel}'`);
+      names.push(part.name);
+    }
+  }
+  let pattern = "";
+  let shape = "";
+  let ranks = [];
+  for (let part of kept) {
+    ranks.push(RANKS[part.kind]);
+    if (part.kind === "static") {
+      pattern += "/" + part.text;
+      shape += "/" + part.text;
+    } else {
+      pattern += `/:${part.name}`;
+      shape += "/:";
+    }
+  }
+  return { pattern: pattern + "/*", shape: shape + "/*", parts: kept, ranks };
+};
 matchParts = function(parts, segments) {
   let walk;
   walk = function(pi, si) {
@@ -27638,6 +27679,27 @@ matchParts = function(parts, segments) {
   };
   return walk(0, 0);
 };
+matchPrefix = function(parts, segments) {
+  let value;
+  if (segments.length < parts.length)
+    return null;
+  let pairs = [];
+  for (let i = 0;i < parts.length; i++) {
+    let part = parts[i];
+    value = decodeSegment(segments[i]);
+    if (!(value != null))
+      return null;
+    if (part.kind === "static") {
+      if (!(value === part.text))
+        return null;
+    } else {
+      if (segments[i] === "")
+        return null;
+      pairs.push([part.name, value]);
+    }
+  }
+  return pairs;
+};
 layoutChain = function(rel, layouts) {
   let chain = [];
   if (layouts.has(""))
@@ -27662,6 +27724,7 @@ function buildRoutes(files, root = "routes") {
   root = validRoot(root);
   let prefix = root ? root + "/" : "";
   let layouts = new Map;
+  let pages = [];
   let entries = [];
   for (let file of files) {
     if (!(typeof file === "string")) {
@@ -27679,6 +27742,14 @@ function buildRoutes(files, root = "routes") {
     }
     if (segments.at(-1) === "_layout.rip") {
       layouts.set(segments.slice(0, -1).join("/"), file);
+      continue;
+    }
+    if (segments.at(-1) === "_404.rip") {
+      if (segments.slice(0, -1).some(function(segment) {
+        return segment.startsWith("_");
+      }))
+        continue;
+      pages.push({ ...compileNotFound(segments.slice(0, -1), rel), rel, file });
       continue;
     }
     if (segments.some(function(segment) {
@@ -27720,12 +27791,38 @@ function buildRoutes(files, root = "routes") {
       return 1;
     return 0;
   });
+  let seenReach = new Map;
+  for (let page of [...pages].sort(function(a, b) {
+    return a.rel < b.rel ? -1 : 1;
+  })) {
+    if (existing = seenReach.get(page.shape)) {
+      [first, second] = [existing, page.rel].sort();
+      fail(`'${first}' and '${second}' both claim '${page.pattern}'`);
+    }
+    seenReach.set(page.shape, page.rel);
+  }
+  pages.sort(function(a, b) {
+    if (a.parts.length !== b.parts.length)
+      return b.parts.length - a.parts.length;
+    for (let i = 0, _ref = a.ranks.length;i < _ref; i++) {
+      if (a.ranks[i] !== b.ranks[i])
+        return a.ranks[i] - b.ranks[i];
+    }
+    if (a.pattern < b.pattern)
+      return -1;
+    if (a.pattern > b.pattern)
+      return 1;
+    return 0;
+  });
   let compiled = entries.map(function(entry) {
     let route = Object.freeze({ pattern: entry.pattern, file: entry.file, layouts: Object.freeze(layoutChain(entry.rel, layouts)) });
     return { route, parts: entry.parts };
   });
-  let match = function(path) {
-    let pairs;
+  let landings = pages.map(function(page) {
+    let route = Object.freeze({ pattern: page.pattern, file: page.file, layouts: Object.freeze(layoutChain(page.rel, layouts)) });
+    return { route, parts: page.parts };
+  });
+  let segmentsOf = function(path) {
     if (!(typeof path === "string")) {
       throw new TypeError("Rip App: route match expects a path string");
     }
@@ -27734,7 +27831,13 @@ function buildRoutes(files, root = "routes") {
     while (path.length > 1 && path.endsWith("/")) {
       path = path.slice(0, -1);
     }
-    segments = path === "/" ? [] : path.slice(1).split("/");
+    return path === "/" ? [] : path.slice(1).split("/");
+  };
+  let match = function(path) {
+    let pairs;
+    segments = segmentsOf(path);
+    if (!segments)
+      return null;
     for (let entry of compiled) {
       pairs = matchParts(entry.parts, segments);
       if (!pairs)
@@ -27743,9 +27846,22 @@ function buildRoutes(files, root = "routes") {
     }
     return null;
   };
+  let notFound = function(path) {
+    let pairs;
+    segments = segmentsOf(path);
+    if (!segments)
+      return null;
+    for (let landing of landings) {
+      pairs = matchPrefix(landing.parts, segments);
+      if (!pairs)
+        continue;
+      return { route: landing.route, params: Object.fromEntries(pairs) };
+    }
+    return null;
+  };
   return Object.freeze({ routes: Object.freeze(compiled.map(function(c) {
     return c.route;
-  })), match });
+  })), match, notFound });
 }
 function parseQuery(search) {
   if (!(typeof search === "string")) {
@@ -27841,10 +27957,18 @@ function createRouter(opts) {
     return false;
   };
   let depth = 0;
+  let routable = function(path) {
+    return typeof path === "string" && !path.startsWith("//") && !path.includes("\\");
+  };
   let attempt = function(path) {
-    if (typeof path !== "string" || path.startsWith("//") || path.includes("\\"))
+    if (!routable(path))
       return null;
     return activeManifest.match(path);
+  };
+  let land = function(path) {
+    if (!routable(path))
+      return null;
+    return activeManifest.match(path) ?? activeManifest.notFound?.(path) ?? null;
   };
   let commit = function(hit, path, queryString, hash) {
     let params = stableRecord(_params.value, hit.params);
@@ -27891,7 +28015,7 @@ function createRouter(opts) {
       if (!(path != null))
         return miss(splitUrl(external).path);
     }
-    let hit = attempt(path);
+    let hit = land(path);
     if (!hit)
       return miss(path);
     return commit(hit, path, query, hash);
@@ -27923,7 +28047,7 @@ function createRouter(opts) {
     push(url, opts2 = {}) {
       guardLoop();
       let { path, query, hash } = splitUrl(url);
-      let hit = attempt(path);
+      let hit = land(path);
       if (!hit)
         return miss(path);
       let position = adapter.scroll?.save?.() ?? null;
@@ -27938,7 +28062,7 @@ function createRouter(opts) {
     replace(url, opts2 = {}) {
       guardLoop();
       let { path, query, hash } = splitUrl(url);
-      let hit = attempt(path);
+      let hit = land(path);
       if (!hit)
         return miss(path);
       let state = adapter.readState?.() ?? {};
@@ -28014,7 +28138,7 @@ function createRouter(opts) {
         if (!(path != null))
           return miss(splitUrl(external).path);
       }
-      let hit = attempt(path);
+      let hit = land(path);
       if (!hit)
         return miss(path);
       let prev = _route.value;

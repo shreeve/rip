@@ -168,9 +168,21 @@ export def createRouter(opts: RouterOpts): Router
   # Protocol-relative spellings and backslashes never match: a browser
   # reads '//host/x' as cross-origin and normalizes '\' to '/', so a
   # catch-all must not claim either.
+  routable = (path) ->
+    typeof path is 'string' and not path.startsWith('//') and not path.includes('\\')
+
   attempt = (path) ->
-    return null if typeof path isnt 'string' or path.startsWith('//') or path.includes('\\')
+    return null unless routable path
     activeManifest.match path
+
+  # Where a navigation lands: its route, or the manifest's not-found page
+  # in reach of an unclaimed path. `match` and `claims` never answer the
+  # page — it is not a URL the app owns, so a link to one stays a full
+  # navigation and an unowned URL never reads as a route — and the
+  # spellings a catch-all must not claim, the page must not either.
+  land = (path) ->
+    return null unless routable path
+    activeManifest.match(path) ?? activeManifest.notFound?(path) ?? null
 
   commit = (hit, path, queryString, hash) ->
     params = stableRecord _params.value, hit.params
@@ -207,7 +219,7 @@ export def createRouter(opts: RouterOpts): Router
       { path, query, hash } = splitUrl external
       path = stripBase path
       return miss splitUrl(external).path unless path?
-    hit = attempt path
+    hit = land path
     return miss path unless hit
     commit hit, path, query, hash
 
@@ -239,7 +251,7 @@ export def createRouter(opts: RouterOpts): Router
     push: (url, opts: { noScroll?: boolean } = {}) ->
       guardLoop()
       { path, query, hash } = splitUrl url
-      hit = attempt path
+      hit = land path
       return miss path unless hit
       position = adapter.scroll?.save?() ?? null
       state = adapter.readState?() ?? {}
@@ -252,7 +264,7 @@ export def createRouter(opts: RouterOpts): Router
     replace: (url, opts: { noScroll?: boolean } = {}) ->
       guardLoop()
       { path, query, hash } = splitUrl url
-      hit = attempt path
+      hit = land path
       return miss path unless hit
       state = adapter.readState?() ?? {}
       adapter.replace externalFor(url), { ...state, __ripScroll: null }
@@ -318,7 +330,7 @@ export def createRouter(opts: RouterOpts): Router
         { path, query, hash } = splitUrl external
         path = stripBase path
         return miss splitUrl(external).path unless path?
-      hit = attempt path
+      hit = land path
       return miss path unless hit
       prev = _route.value
       prevLayouts = prev?.layouts ?? []
