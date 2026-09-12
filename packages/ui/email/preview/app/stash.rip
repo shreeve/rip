@@ -12,6 +12,9 @@ export type Message =
   html: string
   text: string
 
+export type Missing =
+  missing: true
+
 export type Ui =
   view: 'html' | 'text' | 'source'
   width: 'desktop' | 'mobile'
@@ -21,7 +24,6 @@ export type Ui =
 
 api = http.create({ retry: 0 })
 
-# A failed render answers its error as text; that text is the message.
 get = (url: string) ->
   try
     api.get!(url).json!
@@ -39,6 +41,12 @@ ui: Ui =
 export stash =
   ui: ui
   catalog: source
-    fetch: -> get('/api/catalog')
+    fetch: (): Promise<Entry[]> -> get('/api/catalog')
   message: source
-    fetch: (key: string) -> get("/api/preview/#{key}")
+    fetch: (key: string): Promise<Message | Missing> ->
+      try
+        api.get!("/api/preview/#{key}").json!
+      catch error
+        throw error unless error instanceof HTTPError
+        return { missing: true } if error.response.status is 404
+        throw Error.new(error.response.text!)

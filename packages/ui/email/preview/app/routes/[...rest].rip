@@ -1,10 +1,13 @@
 import type { Message } from '../stash.rip'
 import { darken } from '../dark.rip'
 import { indent } from '../source.rip'
+import { EmptyCatalog, Notice } from '../notice.rip'
 
 export TemplatePage = component
   message <~ @stash.message(params.rest)
+  catalog <~ @stash.catalog
   ui ~= @stash.ui
+  found ~= if 'missing' of message then null else message
 
   mounted: -> ui.current = @params.rest
 
@@ -12,18 +15,24 @@ export TemplatePage = component
     div class: 'contents'
       header class: 'flex h-15 min-w-0 items-center gap-5 border-b border-surface px-5'
         span class: 'flex-1 truncate text-sm font-semibold', "#{@params.rest}.rip"
-        Group
-          Choice label: 'HTML',   active: ui.view is 'html',   pick: (-> ui.view = 'html')
-          Choice label: 'Text',   active: ui.view is 'text',   pick: (-> ui.view = 'text')
-          Choice label: 'Source', active: ui.view is 'source', pick: (-> ui.view = 'source')
-        Group
-          Choice label: 'Desktop', active: ui.width is 'desktop', pick: (-> ui.width = 'desktop')
-          Choice label: 'Mobile',  active: ui.width is 'mobile',  pick: (-> ui.width = 'mobile')
-        Group
-          Choice label: 'Dark', active: ui.dark, pick: (-> ui.dark = not ui.dark)
+        if found
+          Group
+            Choice label: 'HTML',   active: ui.view is 'html',   pick: (-> ui.view = 'html')
+            Choice label: 'Text',   active: ui.view is 'text',   pick: (-> ui.view = 'text')
+            Choice label: 'Source', active: ui.view is 'source', pick: (-> ui.view = 'source')
+          Group
+            Choice label: 'Desktop', active: ui.width is 'desktop', pick: (-> ui.width = 'desktop')
+            Choice label: 'Mobile',  active: ui.width is 'mobile',  pick: (-> ui.width = 'mobile')
+          Group
+            Choice label: 'Dark', active: ui.dark, pick: (-> ui.dark = not ui.dark)
         if not ui.live
           span class: 'text-sm font-medium text-error', 'Disconnected'
-      Stage message: message, view: ui.view, width: ui.width, dark: ui.dark
+      if found
+        Stage message: found, view: ui.view, width: ui.width, dark: ui.dark
+      else if catalog.length is 0
+        EmptyCatalog dark: ui.dark
+      else
+        Notice title: "No template at #{@params.rest}.rip", body: 'Pick one from the sidebar, or save the file into the templates directory.', dark: ui.dark
 
 Group = component
   render
@@ -66,6 +75,6 @@ InboxRow = component
   @preview: string | null
   @dark: boolean
   render
-    div class: "flex flex-col gap-y-0.5 rounded-lg px-4.5 py-4 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
+    div class: "flex flex-col gap-y-1 rounded-lg px-4.5 py-4 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"
       div class: "truncate text-sm-plus font-semibold #{if subject? then (if dark then 'text-neutral-100' else 'text-neutral-900') else 'text-red-500'}", (if subject? then subject else 'no subject: the template declares no subject static')
       div class: "truncate text-sm #{if dark then 'text-neutral-400' else 'text-neutral-600'}", (if preview? then preview else 'no preview: the template renders no Preview block')

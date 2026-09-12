@@ -30,7 +30,7 @@ export Layout = component
         div class: 'flex flex-col overflow-y-auto p-2.5'
           div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Templates'
           if catalog.length is 0
-            p class: 'p-2 text-sm text-secondary', 'No templates found.'
+            p class: 'p-2.5 text-sm text-secondary', 'No templates found'
           nav class: 'flex flex-col'
             for entry in catalog
               a
