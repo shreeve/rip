@@ -23,7 +23,7 @@ console.log "\nManifest"
 
 test "identity, entry, and engine pins", ->
   eq pkg.name, 'print'
-  eq pkg.version, '4.0.0'
+  eq pkg.version, '4.0.1'
   eq pkg.publisher, 'rip-lang'
   eq pkg.displayName, 'Rip Print'
   eq pkg.main, './src/extension.js'

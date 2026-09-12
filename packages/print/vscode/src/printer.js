@@ -495,8 +495,9 @@ function generateMarkdownHtml(fileName, markdown, options = {}) {
 <style>
   ${rootVars}
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 13.5px; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
-    font-size: 16px; line-height: 1.7; color: var(--text); background: var(--bg);
+    font-size: 1rem; line-height: 1.6; color: var(--text); background: var(--bg);
     max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem;
     -webkit-font-smoothing: antialiased; }
   h1, h2, h3, h4 { margin: 1.75em 0 .5em; line-height: 1.3; }
