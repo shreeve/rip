@@ -1,43 +1,46 @@
-# The preview site's API. The manager serves the page under app/ (bundle,
-# runtime, hub, hot reload); this entry answers the catalog and one
-# rendered template. Rendering runs in a fresh child process, so a save
-# is seen whole, edits to modules a template imports included, and a
-# template that throws reports the error instead of a stale page. The
-# launcher tells the page of a save over the hub; nothing here watches.
+# Rendering runs in a fresh child process, so a save is seen whole,
+# edits to modules a template imports included, and a template that
+# throws reports the error instead of a stale page. The launcher tells
+# the page of a save over the hub; nothing here watches.
 
-import { get, hub, start } from 'rip/sites'
+import { spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import { join, resolve, sep } from 'path'
-import { spawnSync } from 'child_process'
+import { get, hub, start } from 'rip/sites'
 
 EMAILS = process.env.RIP_EMAIL_DIR
 throw Error.new 'rip-email: RIP_EMAIL_DIR names the template directory' unless EMAILS
 
 # Workers run from a bundled artifact with no loader on their command
-# line, so the checkout is found from this file: preview/ under email/
-# under ui/ under packages/ under the root.
-ROOT = join(import.meta.dir, '..', '..', '..', '..')
-child = (...rest) ->
-  r = spawnSync process.execPath, ["--preload=#{join ROOT, 'src', 'loader.js'}", join(ROOT, 'src', 'cli', 'run.js'), join(ROOT, 'packages', 'ui', 'email', 'cli.rip'), ...rest],
-    encoding: 'utf8'
-    env: process.env
-    maxBuffer: 64 * 1024 * 1024
-  { ok: r.status is 0, out: r.stdout ?? '', err: (r.stderr ?? '') or (if r.error then String(r.error) else '') }
+# line, so the child is given one, found from this file.
+ROOT   = join(import.meta.dir, '..', '..', '..', '..')
+LOADER = join(ROOT, 'src', 'loader.js')
+RUN    = join(ROOT, 'src', 'cli', 'run.js')
+CLI    = join(ROOT, 'packages', 'ui', 'email', 'cli.rip')
 
-failed = (r) -> Response.new r.err, status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
-json = (text) -> Response.new text, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+child = (...rest) ->
+  args = ["--preload=#{LOADER}", RUN, CLI, ...rest]
+  result = spawnSync process.execPath, args,
+    encoding: 'utf8'
+    maxBuffer: 64 * 1024 * 1024
+  err = result.stderr or (if result.error then String(result.error) else '')
+  { ok: result.status is 0, out: result.stdout ?? '', err }
+
+# The child's stdout is already JSON, so it goes out as-is.
+JSON_TEXT = { 'Content-Type': 'application/json' }
 
 get '/api/catalog' ->
-  r = child 'catalog', EMAILS
-  if r.ok then json(r.out) else failed(r)
+  @cache 'no-store'
+  result = child 'catalog', EMAILS
+  if result.ok then @body(result.out, 200, JSON_TEXT) else @text(result.err, 500)
 
-# A template's address is its file path without the extension.
 get '/api/preview/*' ->
+  @cache 'no-store'
   address = decodeURIComponent @req.path.slice('/api/preview/'.length)
   file = resolve EMAILS, "#{address}.rip"
-  return Response.new('Not found', status: 404) unless address and file.startsWith(EMAILS + sep) and existsSync(file)
-  r = child 'render', file
-  if r.ok then json(r.out) else failed(r)
+  return @text('Not found', 404) unless address and file.startsWith(EMAILS + sep) and existsSync(file)
+  result = child 'render', file
+  if result.ok then @body(result.out, 200, JSON_TEXT) else @text(result.err, 500)
 
 hub auth: false
 start()
