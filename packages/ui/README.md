@@ -141,7 +141,7 @@ export SignInCode = component
 SignInCode.previewProps = code: '482913'
 ```
 
-Every catalog and render runs in a fresh child process, so a save is
+Every listing and render runs in a fresh child process, so a save is
 seen whole — edits to modules a template imports included — and a
 template that throws shows its error in place of the frame. The bin is
 `email/cli.rip` itself (`rip-email`); `rip email` reaches it from any

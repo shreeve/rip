@@ -115,8 +115,8 @@ test('a repeated positional is read where it stands, not where it first appears'
   expect(readFileSync(join(dir, 'welcome.txt'), 'utf8')).toBe('Hello, Ada');
 });
 
-test('catalog lists one template per file, skipping dot directories, _files, and files with no component', () => {
-  const r = run('catalog', '.');
+test('templates lists one template per file, skipping dot directories, _files, and files with no component', () => {
+  const r = run('templates', '.');
   expect(r.status).toBe(0);
   expect(JSON.parse(r.stdout)).toEqual([{ path: 'emails/note', file: 'emails/note.rip', component: 'Note' }, { path: 'plain', file: 'plain.rip', component: 'Plain' }, { path: 'welcome', file: 'welcome.rip', component: 'Welcome' }]);
 });
@@ -137,7 +137,7 @@ export B2 = component
       Body
         Text 'b'
 `);
-    const r = runIn(two, 'catalog', '.');
+    const r = runIn(two, 'templates', '.');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('two.rip exports A1, B2 — a template file exports one component');
   } finally {
@@ -193,15 +193,15 @@ test('export names the template that would not load, in one line', () => {
 });
 
 test('the directory defaults to ./emails, or the cwd when it is named emails, never the bare cwd', () => {
-  const beside = runIn(dir, 'catalog');
+  const beside = runIn(dir, 'templates');
   expect(beside.status).toBe(0);
   expect(JSON.parse(beside.stdout)).toEqual([{ path: 'note', file: 'note.rip', component: 'Note' }]);
 
-  const inside = runIn(join(dir, 'emails'), 'catalog');
+  const inside = runIn(join(dir, 'emails'), 'templates');
   expect(inside.status).toBe(0);
   expect(JSON.parse(inside.stdout)).toEqual([{ path: 'note', file: 'note.rip', component: 'Note' }]);
 
-  const elsewhere = runIn(join(dir, 'lib'), 'catalog');
+  const elsewhere = runIn(join(dir, 'lib'), 'templates');
   expect(elsewhere.status).toBe(1);
   expect(elsewhere.stderr).toContain('no emails directory here');
 });

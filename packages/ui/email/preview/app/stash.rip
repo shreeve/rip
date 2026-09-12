@@ -40,8 +40,8 @@ ui: Ui =
 
 export stash =
   ui: ui
-  catalog: source
-    fetch: (): Promise<Entry[]> -> get('/api/catalog')
+  templates: source
+    fetch: (): Promise<Entry[]> -> get('/api/templates')
   message: source
     fetch: (key: string): Promise<Message | Missing> ->
       try

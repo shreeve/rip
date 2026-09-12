@@ -5,8 +5,8 @@
 # dev launches the preview as a Rip Site: a transient project whose
 # manifest points at the package's own page and whose entry is the
 # package's API, run by the Sites manager in the foreground under the
-# edge. That API answers every catalog and render from a fresh process
-# running this file's catalog and render verbs, so a save is seen whole,
+# edge. That API answers every listing and render from a fresh process
+# running this file's templates and render verbs, so a save is seen whole,
 # edits to modules a template imports included, and a template that
 # throws reports the error instead of a stale page. export and the
 # launcher's own readiness check are one fresh process already.
@@ -71,13 +71,13 @@ if not verb or verb is '--help' or verb is '-h' or args.includes('--help')
   process.exit 0
 
 # What each verb takes. Anything else on the line is a mistake, and a
-# value flag's value may not itself look like a flag. `catalog` and
+# value flag's value may not itself look like a flag. `templates` and
 # `render` are the child-process verbs, not part of the usage.
 FLAGS =
   dev:     { '--host': 'value', '--open': 'switch' }
   export:  { '--out': 'value', '--text': 'switch' }
-  render:  {}
-  catalog: {}
+  render:    {}
+  templates: {}
 
 flags = {}
 positional = []
@@ -136,7 +136,7 @@ templateIn = (mod, label) ->
 
 # One entry per template file: its address (the path without .rip), the
 # file, and the component's name.
-catalog = (root) ->
+templates = (root) ->
   entries = []
   for file in templateFiles(root)
     label = relative root, file
@@ -198,10 +198,10 @@ dev = (root, host, open) ->
   pending = paint DIM, '◌ Getting the preview ready...'
   process.stdout.write " #{pending}" if process.stdout.isTTY
 
-  # The first catalog is where a template that cannot load first shows
+  # The first listing is where a template that cannot load first shows
   # itself.
   try
-    entries = catalog! root
+    entries = templates! root
   catch error
     problem = error.message
 
@@ -270,7 +270,7 @@ dev = (root, host, open) ->
 
 exportAll = (root, out, withText) ->
   try
-    entries = catalog! root
+    entries = templates! root
   catch error
     die "rip-email: #{error.message}"
   die "rip-email: no templates under #{shown root}" unless entries.length
@@ -331,7 +331,7 @@ switch verb
     catch error
       die "rip-email: #{error.message}"
     process.stdout.write JSON.stringify(message)
-  when 'catalog'
-    process.stdout.write JSON.stringify(catalog!(rootArg()))
+  when 'templates'
+    process.stdout.write JSON.stringify(templates!(rootArg()))
   else
     die "rip-email: unknown verb '#{verb}'\n\n#{USAGE.trim()}"

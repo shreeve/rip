@@ -29,9 +29,9 @@ child = (...rest) ->
 # The child's stdout is already JSON, so it goes out as-is.
 JSON_TEXT = { 'Content-Type': 'application/json' }
 
-get '/api/catalog' ->
+get '/api/templates' ->
   @cache 'no-store'
-  result = child 'catalog', EMAILS
+  result = child 'templates', EMAILS
   if result.ok then @body(result.out, 200, JSON_TEXT) else @text(result.err, 500)
 
 get '/api/preview/*' ->

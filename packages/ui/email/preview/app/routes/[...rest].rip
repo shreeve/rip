@@ -1,11 +1,11 @@
 import type { Message } from '../stash.rip'
 import { darken } from '../dark.rip'
 import { indent } from '../source.rip'
-import { EmptyCatalog, Notice } from '../notice.rip'
+import { NoTemplates, Notice } from '../notice.rip'
 
 export TemplatePage = component
   message <~ @stash.message(params.rest)
-  catalog <~ @stash.catalog
+  templates <~ @stash.templates
   ui ~= @stash.ui
   found ~= if 'missing' of message then null else message
 
@@ -29,8 +29,8 @@ export TemplatePage = component
           span class: 'text-sm font-medium text-error', 'Disconnected'
       if found
         Stage message: found, view: ui.view, width: ui.width, dark: ui.dark
-      else if catalog.length is 0
-        EmptyCatalog dark: ui.dark
+      else if templates.length is 0
+        NoTemplates dark: ui.dark
       else
         Notice title: "No template at #{@params.rest}.rip", body: 'Pick one from the sidebar, or save the file into the templates directory.', dark: ui.dark
 

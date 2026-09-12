@@ -8,7 +8,7 @@ export Notice = component
         div class: "text-sm-plus font-semibold #{if dark then 'text-neutral-100' else 'text-neutral-900'}", title
         div class: "text-sm #{if dark then 'text-neutral-400' else 'text-neutral-600'}", body
 
-export EmptyCatalog = component
+export NoTemplates = component
   @dark: boolean
   render
     Notice

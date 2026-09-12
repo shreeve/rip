@@ -1,5 +1,5 @@
 export Layout = component
-  catalog <~ @stash.catalog
+  templates <~ @stash.templates
   ui ~= @stash.ui
   problem?: string := undefined
 
@@ -13,7 +13,7 @@ export Layout = component
         frames = JSON.parse event.data
         frames = [frames] unless Array.isArray frames
         if frames.some((frame) -> frame?.stamp?)
-          @stash.source('catalog').refetch()
+          @stash.source('templates').refetch()
           @stash.source('message', ui.current).refetch() if ui.current
       socket.onclose = ->
         ui.live = false
@@ -29,10 +29,10 @@ export Layout = component
         h1 class: 'flex h-15 shrink-0 items-center px-5 text-sm-plus font-semibold', 'Rip Email'
         div class: 'flex flex-col overflow-y-auto p-2.5'
           div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Templates'
-          if catalog.length is 0
+          if templates.length is 0
             p class: 'p-2.5 text-sm text-secondary', 'No templates found'
           nav class: 'flex flex-col'
-            for entry in catalog
+            for entry in templates
               a
                 href: "/#{entry.path}"
                 class: 'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'

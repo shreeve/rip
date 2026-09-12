@@ -1,15 +1,15 @@
-import { EmptyCatalog } from '../notice.rip'
+import { NoTemplates } from '../notice.rip'
 
 export Home = component
-  catalog <~ @stash.catalog
+  templates <~ @stash.templates
   ui ~= @stash.ui
 
   ~>
-    first = catalog[0]
+    first = templates[0]
     @router.replace "/#{first.path}" if first
 
   render
     div class: 'contents'
-      if catalog.length is 0
+      if templates.length is 0
         header class: 'h-15 border-b border-surface'
-        EmptyCatalog dark: ui.dark
+        NoTemplates dark: ui.dark
