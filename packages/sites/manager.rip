@@ -1369,42 +1369,53 @@ export main = (argv) ->
           Promise.new! (done) -> setTimeout done, 250
     return
 
-  publishChange = (change) ->
-    return unless change?.list?.length > 0
+  # One publish plane for change, touched and reload frames. A publish is
+  # retried only when the refusal can pass: the edge could not be reached,
+  # or answered 5xx or 429. A 404 is the edge saying it no longer knows
+  # this registration (it restarted, or swept it) — re-register now, as
+  # the heartbeat would on its tick, and send the frame under the new id.
+  # Any other answer is the edge's statement about this app — 409 when no
+  # site of it has a hub, 400 when the frame itself is malformed — said
+  # once, after which frames are dropped quietly until the app registers
+  # again.
+  hubRefused = false
+  publish = (label, frame) ->
     while not appId? and not stopping
       sleep! 5
-    return if stopping
+    return if stopping or hubRefused
     delay = 25
     loop
       try
-        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], change }]
+        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [frame]
         return if response.ok
-        warn "rip-sites: Janus change publish failed (#{response.status}); retrying"
+        if response.status is 404
+          stale = appId
+          warn "rip-sites: Janus does not know app #{stale}; re-registering before the #{label} publish"
+          await (beat() or heartbeatTask)
+          return if stopping or appId is stale
+        else if response.status < 500 and response.status isnt 429
+          hubRefused = true
+          detail = try (response.json!).error catch then ''
+          verdict = if response.status is 400 then "rejected the #{label} frame" else "refused the #{label} publish"
+          warn "rip-sites: Janus #{verdict} (#{response.status}#{if detail then ': ' + detail else ''}); frames are dropped until the app registers again"
+          return
+        else
+          warn "rip-sites: Janus #{label} publish failed (#{response.status}); retrying"
       catch error
-        warn "rip-sites: Janus change publish failed: #{String(error)}; retrying"
+        warn "rip-sites: Janus #{label} publish failed: #{String(error)}; retrying"
       return if stopping
       sleep! delay
       delay = Math.min delay * 2, 1000
 
+  publishChange = (change) ->
+    return unless change?.list?.length > 0
+    publish! 'change', { '@': ['/hub'], change }
+
   # Asset dings are notifications, never deliveries: URL paths only, no
-  # content — the page refetches itself over HTTP. Same publish plane and
-  # retry shape as publishChange.
+  # content — the page refetches itself over HTTP.
   publishTouched = (paths) ->
     return unless paths.length > 0
-    while not appId? and not stopping
-      sleep! 5
-    return if stopping
-    delay = 25
-    loop
-      try
-        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/assets'], touched: paths }]
-        return if response.ok
-        warn "rip-sites: Janus touched publish failed (#{response.status}); retrying"
-      catch error
-        warn "rip-sites: Janus touched publish failed: #{String(error)}; retrying"
-      return if stopping
-      sleep! delay
-      delay = Math.min delay * 2, 1000
+    publish! 'touched', { '@': ['/assets'], touched: paths }
 
   changedAppIds = (prior, current) ->
     before = Map.new((prior?.graph?.entries or []).map((entry) -> [entry.id, entry.hash]))
@@ -1980,17 +1991,7 @@ export main = (argv) ->
 
   publishReload = ->
     return unless args.watchApp
-    delay = 25
-    loop
-      try
-        response = controlFetch! args.control, 'POST', "/1.0/apps/#{appId}/hub/publish", [{ '@': ['/hub'], reload: { epoch: generation } }]
-        return if response.ok
-        warn "rip-sites: Janus reload publish failed (#{response.status}); retrying"
-      catch error
-        warn "rip-sites: Janus reload publish failed: #{String(error)}; retrying"
-      return if stopping
-      sleep! delay
-      delay = Math.min delay * 2, 1000
+    publish! 'reload', { '@': ['/hub'], reload: { epoch: generation } }
 
   bootArtifact = (artifact) ->
     appArtifact = artifact
@@ -2163,6 +2164,7 @@ export main = (argv) ->
             try controlFetch! args.control, 'DELETE', "/1.0/apps/#{replacementId}"
             return
           appId = replacementId
+          hubRefused = false
           moveAccess()
         else unless response.ok
           warn "rip-sites: Janus heartbeat failed (#{response.status})"
@@ -2279,6 +2281,7 @@ export main = (argv) ->
       process.exitCode = await finished
       return
     appId = registrationId
+    hubRefused = false
     registered = true
     appWatchReady = true
     scheduleAppReconcile() if appReconcile

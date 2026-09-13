@@ -707,3 +707,84 @@ test! 'static edits ding /assets with URL paths: every edit once per burst, neve
     await proc.exited if proc?
     control.stop true
     rmSync dir, { recursive: true, force: true }
+
+# The publish plane's answer policy. 404 means the edge lost the
+# registration: the manager re-registers at once and the frame lands under
+# the new id. 409 (no hub) is a verdict about the app: warned once, then
+# frames stop until the next registration, after which they flow again.
+test! 'a lost registration re-registers before the frame; a refused hub warns once and resumes on re-registration', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-reloads-publish-')
+  project = join dir, 'project'
+  cpSync join(import.meta.dir, 'project'), project, { recursive: true }
+  controlSocket = join dir, 'janus.sock'
+  registrations = 0
+  publishes = []
+  refuse = false
+  lostHeartbeat = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registrations += 1
+        return Response.json({ id: "gen-#{registrations}" }, { status: 201 })
+      if match = url.pathname.match(/^\/1\.0\/apps\/(gen-\d+)\/hub\/publish$/)
+        publishes.push match[1]
+        return Response.json({ error: 'unknown app' }, { status: 404 }) if match[1] is 'gen-1'
+        return Response.json({ error: 'no site of this app has a hub' }, { status: 409 }) if refuse
+        return Response.json({ deliveries: 0 })
+      if match = url.pathname.match(/^\/1\.0\/apps\/(gen-\d+)\/heartbeat$/)
+        # gen-1 is "lost" only once a publish has met the 404: the interval
+        # heartbeat must not re-register first and pre-empt the path under test.
+        lost = (match[1] is 'gen-1' and publishes.includes('gen-1')) or (match[1] is 'gen-2' and lostHeartbeat)
+        return Response.json({ error: 'unknown app' }, { status: 404 }) if lost
+        return Response.new(null, { status: 204 })
+      Response.new(null, { status: 204 })
+  proc = null
+  diagnostic = null
+  settled = false
+  route = join project, 'app', 'routes', 'index.rip'
+  edit = (title) -> writeFileSync route, "export Index = component\n  render\n    h1 '#{title}'\n"
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--watch', '--workers', '1', '--host', 'publish.test', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'pipe'
+      env: { ...process.env, RIP_HEARTBEAT_MS: '200' }
+    diagnostic = readStderr proc
+    waitFor! -> registrations is 1
+
+    # 404: re-register now, then the same frame lands under gen-2.
+    edit 'Two'
+    waitFor! -> publishes.includes 'gen-2'
+    eq registrations, 2
+    eq publishes.filter((id) -> id is 'gen-1').length, 1
+    ok diagnostic.text.includes('Janus does not know app gen-1; re-registering before the change publish'), diagnostic.text
+
+    # 409: one warning, then no further attempts while the registration stands.
+    refuse = true
+    edit 'Three'
+    waitFor! -> diagnostic.text.includes 'Janus refused the change publish (409: no site of this app has a hub); frames are dropped until the app registers again'
+    attempts = publishes.length
+    edit 'Four'
+    sleep! 700
+    eq publishes.length, attempts
+    eq diagnostic.text.split('Janus refused the change publish').length, 2
+
+    # A fresh registration (heartbeat 404 → gen-3) lifts the silence.
+    refuse = false
+    lostHeartbeat = true
+    waitFor! -> registrations is 3
+    edit 'Five'
+    waitFor! -> publishes.includes 'gen-3'
+
+    proc.kill 'SIGTERM'
+    eq (await proc.exited), 143
+    settled = true
+  finally
+    console.error "publish-plane test state: registrations=#{registrations} publishes=#{JSON.stringify(publishes)}\n#{diagnostic?.text}" unless settled
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    await diagnostic.done if diagnostic?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
