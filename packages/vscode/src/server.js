@@ -69,7 +69,7 @@ import {
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, isMirrorImportItem, scrubFaceArtifacts, presentType, presentOutgoing, isImportFixTitle, ripImportText,
   noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
-  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, hoverableSpans, collapseCellArms,
+  SUPPRESSED_TS_CODES, SCAFFOLD_HOVER, prettifyRouteUnion, routeMemberDisplay, hoverableSpans, collapseCellArms,
   splitTypeAt, balancedTo, unionArms, cellShape,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
@@ -3147,6 +3147,23 @@ function presentPropSlotHover(contents) {
   return { ...contents, value: value.replace(fence[0], `${fence[1]}${reworded}${fence[3]}`) };
 }
 
+// The route-checked router members read as what they accept. The
+// ambience spells `push`/`replace` as a `const P` conditional over the
+// argument's literal type (routerAmbienceType) — the mechanism, not the
+// meaning — and tsgo prints a declared method's parameter as written,
+// so the `@router` member's hover shows the whole conditional. At a call
+// site tsgo already prints the RESOLVED parameter, the route union; the
+// member's hover reads the same way here. The union comes from the
+// walker's entries, in walker order and display form. The parameter
+// type runs to `, opts?:`, which the conditional never spells.
+function presentRouterHover(contents, entries) {
+  const value = contents?.value;
+  if (typeof value !== 'string' || !entries?.length) return null;
+  const union = entries.map(routeMemberDisplay).join(' | ');
+  const reworded = value.replace(/\b(push|replace)<const P extends string>\(url: [^]*?, opts\?: /g, (m, name) => `${name}(url: ${union}, opts?: `);
+  return reworded === value ? null : { ...contents, value: reworded };
+}
+
 async function enrichEvolvingAnyHover(ctx, hover) {
   const value = hover?.contents?.value;
   if (typeof value !== 'string' || !HOVER_EVOLVING_ANY.test(value)) return null;
@@ -3388,26 +3405,25 @@ connection.onHover(presented('textDocument/hover', async (params) => {
   // resolved stands untouched.
   const kind = (ctx.good.kinds ?? []).find((k) => ctx.offset >= k.start && ctx.offset < k.end);
   if (kind && typeof contents?.value === 'string') {
-    // Two heads to displace: the `const`/`let` tsgo gives a module binding,
-    // and the `(property) Owner.` it gives a class member. The owner is
-    // dropped with it — at a member's own declaration the class is the line
-    // above, and the ruled form names the member alone.
     // Two heads to displace. A class member arrives as `(property) Owner.name`
     // — and the owner can carry type parameters, so the replacement is
     // anchored on the member's OWN name rather than on a shape for the owner.
-    // A module binding arrives as `const`/`let`.
+    // A module binding arrives as `const`/`let` opening the fence, and only
+    // there: a `const` further in is a type parameter's modifier inside the
+    // resolved type (the ambient router's `push<const P …>`), which stands.
     const esc = kind.name === null ? null : reSource(kind.name);
     contents = { ...contents, value: contents.value
       // The marker is re-emitted from the record, never read off tsgo's text:
       // the face declares an optional member required, so only the record
       // knows the author wrote `?`.
       .replace(esc === null ? /(?!)/ : new RegExp(`\\(property\\) [^\\n]*?\\b${esc}\\??(?=:)`), `(${kind.label}) ${kind.name}${kind.optional ? '?' : ''}`)
-      .replace(/\b(?:const|let|var) (?=[A-Za-z_$])/, `(${kind.label}) `) };
+      .replace(/(```(?:typescript|ts)\r?\n\s*)(?:const|let|var) (?=[A-Za-z_$])/, `$1(${kind.label}) `) };
   }
   // A route union in the hover renders for READING — the same
   // display-only re-labeling the diagnostics road applies.
   if (typeof contents?.value === 'string' && ctx.good.routeEntries?.length) {
     contents = { ...contents, value: prettifyRouteUnion(contents.value, ctx.good.routeEntries) };
+    contents = presentRouterHover(contents, ctx.good.routeEntries) ?? contents;
   }
   // Face artifacts read back in the author's vocabulary — the
   // intrinsic-surface names among them (display only).

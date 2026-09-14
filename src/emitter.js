@@ -37,7 +37,7 @@ import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
-  selfArgsOf, anyArgsOf, readonlyCastType,
+  selfArgsOf, anyArgsOf, readonlyCastType, routeArgType,
 } from './ts/components.js';
 
 // Component member vocabulary — emission owns these sets. The type story
@@ -18388,12 +18388,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   }
   // The route helper's ONE declaration per module, at module scope —
   // where every `__ripRoute(...)` wrap can reach it (declares hoist).
-  // The union is INLINED, not aliased: the error and the hover then
-  // read as the actual list of routes instead of a helper's name. The
-  // `const T` keeps a literal argument literal, so a typo reports
-  // against the union rather than widening to `string` and passing.
+  // The parameter type is the router surface's (routeArgType), the
+  // union INLINED, not aliased: the error and the hover then read as
+  // the actual list of routes instead of a helper's name. The `const T`
+  // keeps a literal argument literal, so a typo reports against the
+  // union rather than widening to `string` and passing.
   if (emitter._needsRouteHelper === true) {
-    builder.tsOnly(() => builder.emit(`\ndeclare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;\n`));
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, 'T')}): T;\n`));
   }
   // The intrinsic-element surfaces (src/ts/dom-types.js): exactly the
   // per-tag interfaces this module's receiver casts named, plus the

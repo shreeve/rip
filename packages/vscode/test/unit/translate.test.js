@@ -14,6 +14,7 @@ import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isIm
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover, nearestSpelling,
 } from '../../src/translate.js';
+import { routerAmbienceType } from '../../../../src/ts/components.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -686,6 +687,21 @@ describe('prettifyRouteUnion', () => {
   test('every occurrence rewrites, not just the first', () => {
     expect(prettifyRouteUnion('`/orders/${string}` vs `/orders/${string}`', entries))
       .toBe('`/orders/:id` vs `/orders/:id`');
+  });
+
+  test('a member spelled as a conditional\'s check keeps its checked form; the union beside it re-labels', () => {
+    // A root catch-all's member IS the route-checked parameter's
+    // leading-slash gate, byte for byte: the real ambience text.
+    const union = '"/" | `/${string}`';
+    const catchAll = [
+      { shape: '/', text: '"/"', display: '/' },
+      { shape: '/${string}', text: '`/${string}`', display: '/*rest' },
+    ];
+    const pretty = prettifyRouteUnion(routerAmbienceType({ routesUnion: union }), catchAll);
+    expect(pretty).toContain('push<const P extends string>(url: P extends `/${string}` ? ((P extends');
+    expect(pretty).toContain('extends ("/" | `/*rest`) ? ("/" | `/*rest`) | P : ("/" | `/*rest`)) : P');
+    expect(pretty).not.toContain('extends `/*rest`');
+    expect(pretty).not.toContain('| `/${string}`');
   });
 
   test('no entries, or a non-string, answers identity', () => {

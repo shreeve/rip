@@ -12,6 +12,12 @@
 #
 # Files and directories whose name starts with `_` are not routable;
 # `_layout.rip` files form each route's layout chain, outermost first.
+# `_404.rip` is the page an unmatched URL lands on: the one in the
+# deepest directory whose path prefixes the URL, under that directory's
+# layout chain, with the directory's dynamic segments captured as params.
+# It is not a route — `match` never answers it — and a directory holding
+# an optional or catch-all segment has no prefix to claim, so it cannot
+# hold one.
 # Markers claim whole segments and a catch-all must be the final segment.
 # Matching compares percent-decoded path segments, so an encoded segment
 # reaches its route and a `%2F` inside a dynamic segment yields a param
@@ -33,6 +39,7 @@ export type RouteMatch =
 export type RouteManifest =
   readonly routes: readonly Route[]
   match: (path: string) => RouteMatch | null
+  notFound: (path: string) => RouteMatch | null
 
 NAME = /^\w+$/
 RANKS = { static: 0, dynamic: 1, optional: 2, catchall: 3 }
@@ -123,6 +130,31 @@ compile = (rel) ->
   fail "route '#{rel}' is ambiguous with itself" if shapes.size < expansions.length
   { pattern, parts: kept, ranks, expansions }
 
+# A not-found page's reach: its directory's segments, claiming a URL by
+# prefix. Groups claim nothing; optional and catch-all segments have no
+# prefix to claim.
+compileNotFound = (dirSegments, rel) ->
+  parsed = (parseSegment(segment, rel) for segment in dirSegments)
+  kept = parsed.filter (part) -> part.kind isnt 'group'
+  for part in kept when part.kind is 'optional' or part.kind is 'catchall'
+    fail "not-found page under an optional or catch-all segment: '#{rel}'"
+  names = []
+  for part in kept when part.name?
+    fail "duplicate parameter name '#{part.name}' in '#{rel}'" if names.includes part.name
+    names.push part.name
+  pattern = ''
+  shape = ''
+  ranks = []
+  for part in kept
+    ranks.push RANKS[part.kind]
+    if part.kind is 'static'
+      pattern += '/' + part.text
+      shape += '/' + part.text
+    else
+      pattern += "/:#{part.name}"
+      shape += '/:'
+  { pattern: pattern + '/*', shape: shape + '/*', parts: kept, ranks }
+
 # Match decoded path segments against a route's parts, backtracking
 # through optional segments. Returns captured [name, value] pairs, or
 # null when the route does not claim the path. A segment that fails to
@@ -166,6 +198,21 @@ matchParts = (parts, segments) ->
         [[part.name, pieces.join '/']]
   walk 0, 0
 
+# The leading segments a not-found page's directory claims, captured
+# like a route's; the remainder is unexamined.
+matchPrefix = (parts, segments) ->
+  return null if segments.length < parts.length
+  pairs = []
+  for part, i in parts
+    value = decodeSegment segments[i]
+    return null unless value?
+    if part.kind is 'static'
+      return null unless value is part.text
+    else
+      return null if segments[i] is ''
+      pairs.push [part.name, value]
+  pairs
+
 layoutChain = (rel, layouts) ->
   chain = []
   chain.push layouts.get('') if layouts.has ''
@@ -183,6 +230,7 @@ export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
   prefix = if root then root + '/' else ''
 
   layouts = Map.new()
+  pages = []
   entries = []
 
   for file in files
@@ -196,6 +244,10 @@ export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
       throw TypeError.new "Rip App: invalid route file path '#{file}'"
     if segments[-1] is '_layout.rip'
       layouts.set segments.slice(0, -1).join('/'), file
+      continue
+    if segments[-1] is '_404.rip'
+      continue if segments.slice(0, -1).some (segment) -> segment.startsWith '_'
+      pages.push { ...compileNotFound(segments.slice(0, -1), rel), rel, file }
       continue
     continue if segments.some (segment) -> segment.startsWith '_'
     unless rel.endsWith '.rip'
@@ -226,6 +278,23 @@ export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
     return 1 if a.pattern > b.pattern
     0
 
+  seenReach = Map.new()
+  for page in [...pages].sort((a, b) -> if a.rel < b.rel then -1 else 1)
+    if existing = seenReach.get page.shape
+      [first, second] = [existing, page.rel].sort()
+      fail "'#{first}' and '#{second}' both claim '#{page.pattern}'"
+    seenReach.set page.shape, page.rel
+
+  # The deepest reach lands first; within a depth, per-segment
+  # precedence and then pattern order, as for routes.
+  pages.sort (a, b) ->
+    return b.parts.length - a.parts.length if a.parts.length isnt b.parts.length
+    for i in [0...a.ranks.length]
+      return a.ranks[i] - b.ranks[i] if a.ranks[i] isnt b.ranks[i]
+    return -1 if a.pattern < b.pattern
+    return 1 if a.pattern > b.pattern
+    0
+
   compiled = entries.map (entry) ->
     route = Object.freeze
       pattern: entry.pattern
@@ -233,19 +302,39 @@ export def buildRoutes(files: string[], root: string = 'routes'): RouteManifest
       layouts: Object.freeze layoutChain(entry.rel, layouts)
     { route, parts: entry.parts }
 
-  match = (path) ->
+  landings = pages.map (page) ->
+    route = Object.freeze
+      pattern: page.pattern
+      file: page.file
+      layouts: Object.freeze layoutChain(page.rel, layouts)
+    { route, parts: page.parts }
+
+  segmentsOf = (path) ->
     unless typeof path is 'string'
       throw TypeError.new 'Rip App: route match expects a path string'
     return null unless path.startsWith '/'
     path = path.slice(0, -1) while path.length > 1 and path.endsWith '/'
-    segments = if path is '/' then [] else path.slice(1).split '/'
+    if path is '/' then [] else path.slice(1).split '/'
+
+  match = (path) ->
+    segments = segmentsOf path
+    return null unless segments
     for entry in compiled
       pairs = matchParts entry.parts, segments
       continue unless pairs
       return { route: entry.route, params: Object.fromEntries pairs }
     null
 
-  Object.freeze { routes: Object.freeze(compiled.map (c) -> c.route), match }
+  notFound = (path) ->
+    segments = segmentsOf path
+    return null unless segments
+    for landing in landings
+      pairs = matchPrefix landing.parts, segments
+      continue unless pairs
+      return { route: landing.route, params: Object.fromEntries pairs }
+    null
+
+  Object.freeze { routes: Object.freeze(compiled.map (c) -> c.route), match, notFound }
 
 export def parseQuery(search: string): Record<string, string>
   unless typeof search is 'string'

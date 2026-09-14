@@ -288,10 +288,11 @@ export function closureImportsOf(stores, sourceText, fsPath, workspaceRoot, memo
 //   - a trailing `index` segment drops (`users/index.rip` → `/users`)
 //   - `[name]` segments become `${string}` template holes
 //   - `[[name]]` segments contribute BOTH expansions (absent + present)
-//   - `[...name]` routes are excluded from the union — they are runtime
-//     fallbacks, not navigation targets, and `/${string}` would make the
-//     union accept every slash-prefixed literal — but still contribute
-//     params
+//   - `[...name]` routes claim their bare prefix and everything under it
+//     (`"/docs" | \`/docs/${string}\``), the two shapes the runtime
+//     matches — a root catch-all claims every path
+//   - `_404.rip` is the not-found page, not a route: no member, and only
+//     its directory's dynamic segments as params
 //
 // Where `buildRoutes` throws (invalid markers, catch-all not last,
 // duplicate params, over the optional limit, group-named files), the
@@ -343,13 +344,11 @@ const compileRouteRel = (rel) => {
 
   const names = [];
   let optionals = 0;
-  let catchAll = false;
   for (const part of kept) {
     if (part.name == null) continue;
     if (names.includes(part.name)) return null;
     names.push(part.name);
     if (part.kind === 'optional') optionals += 1;
-    if (part.kind === 'catchall') catchAll = true;
   }
   if (optionals > ROUTE_OPTIONAL_LIMIT) return null;
 
@@ -387,32 +386,62 @@ const compileRouteRel = (rel) => {
   // claim) rejects at build time, so it contributes nothing.
   if (new Set(expansions.map((e) => shapeOf(e.pieces))).size < expansions.length) return null;
 
-  const members = catchAll ? [] : expansions.map((e) => {
-    const dynamic = e.pieces.includes(DYNAMIC);
-    const shape = shapeOf(e.pieces);
+  const member = (pieces, display) => {
+    const dynamic = pieces.includes(DYNAMIC);
+    const shape = shapeOf(pieces);
     const text = dynamic
-      ? '`' + e.pieces.map((p) => (p === DYNAMIC ? '/${string}' : `/${escapeTemplateText(p)}`)).join('') + '`'
+      ? '`' + pieces.map((p) => (p === DYNAMIC ? '/${string}' : `/${escapeTemplateText(p)}`)).join('') + '`'
       : JSON.stringify(shape);
-    return { shape, text, display: e.display || '/' };
+    return { shape, text, display: display || '/' };
+  };
+  // A catch-all's tail is one `${string}` hole: it spans slashes.
+  const members = expansions.flatMap((e) => {
+    if (!e.pieces.includes(CATCHALL)) return [member(e.pieces, e.display)];
+    const head = e.pieces.filter((p) => p !== CATCHALL);
+    return [member(head, e.display.slice(0, e.display.lastIndexOf('/'))), member([...head, DYNAMIC], e.display)];
   });
   return { members, params };
 };
 
+// A not-found page's params: its directory's dynamic segments. Null
+// where the runtime would reject the file (an optional or catch-all
+// segment in the directory, a duplicate name) or nothing is captured.
+const compileNotFoundRel = (rel) => {
+  const names = [];
+  for (const segment of rel.split('/').slice(0, -1)) {
+    const part = parseRouteSegment(segment);
+    if (part === null || part.kind === 'optional' || part.kind === 'catchall') return null;
+    if (part.kind !== 'dynamic') continue;
+    if (names.includes(part.name)) return null;
+    names.push(part.name);
+  }
+  return names.length ? `{ ${names.map((n) => `${n}: string`).join('; ')} }` : null;
+};
+
 const walkAppRoutes = (routesDir) => {
   const rels = [];
+  const pages = [];
   const walk = (dir, rel) => {
     let dirents;
     try { dirents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of dirents) {
+      if (e.isFile() && e.name === '_404.rip') { pages.push(rel ? `${rel}/${e.name}` : e.name); continue; }
       if (e.name.startsWith('_')) continue;
       if (e.isDirectory()) walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name);
       else if (e.isFile() && e.name.endsWith('.rip') && e.name !== '.rip') rels.push(rel ? `${rel}/${e.name}` : e.name);
     }
   };
   walk(routesDir, '');
+  // Enumeration order is the filesystem's; the first file to render a
+  // member text owns its display, so the order is pinned.
+  rels.sort();
 
   const members = new Map();       // rendered text → { shape, text, display }
   const paramsByFile = new Map();  // absolute route file → params shape text
+  for (const rel of pages) {
+    const params = compileNotFoundRel(rel);
+    if (params !== null) paramsByFile.set(path.resolve(routesDir, rel), params);
+  }
   for (const rel of rels) {
     const compiled = compileRouteRel(rel);
     if (compiled === null) continue;
@@ -426,10 +455,8 @@ const walkAppRoutes = (routesDir) => {
     if (b.shape === '/') return 1;
     return a.shape < b.shape ? -1 : a.shape > b.shape ? 1 : 0;
   });
-  // Zero members — no routes dir, no routable files, or catch-alls only
-  // — leaves checking UNARMED (null), never `never`: a `never` union
-  // would reject every literal in a project whose only route is a
-  // catch-all fallback.
+  // Zero members — no routes dir or no routable files — leaves checking
+  // UNARMED (null), never `never`, which would reject every literal.
   const union = sorted.length ? sorted.map((m) => m.text).join(' | ') : null;
   return { union, paramsByFile, entries: sorted };
 };

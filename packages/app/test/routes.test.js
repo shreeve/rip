@@ -319,6 +319,78 @@ describe('manifest contract', () => {
   });
 });
 
+describe('not-found pages', () => {
+  test('an unmatched path lands on the root page, at the URL, with the root layouts', () => {
+    const m = manifest(['_layout.rip', 'index.rip', 'about.rip', '_404.rip']);
+    expect(m.match('/nope')).toBeNull();
+    expect(patterns(m)).toEqual(['/', '/about']);
+    const hit = m.notFound('/nope/deeper/');
+    expect(hit.route.file).toBe('routes/_404.rip');
+    expect(hit.route.pattern).toBe('/*');
+    expect(hit.route.layouts).toEqual(['routes/_layout.rip']);
+    expect(hit.params).toEqual({});
+    expect(m.notFound('/').route.file).toBe('routes/_404.rip');
+  });
+
+  test('without a page, notFound answers null', () => {
+    const m = manifest(['index.rip']);
+    expect(m.notFound('/nope')).toBeNull();
+    expect(m.notFound('nope')).toBeNull();
+    expect(() => m.notFound(7)).toThrow(TypeError);
+  });
+
+  test('the deepest reach lands first, under its own layout chain', () => {
+    const m = manifest(['_layout.rip', '_404.rip', 'docs/_layout.rip', 'docs/_404.rip', 'docs/intro.rip']);
+    expect(m.notFound('/docs/missing').route.file).toBe('routes/docs/_404.rip');
+    expect(m.notFound('/docs/missing').route.layouts).toEqual(['routes/_layout.rip', 'routes/docs/_layout.rip']);
+    expect(m.notFound('/docs').route.file).toBe('routes/docs/_404.rip');
+    expect(m.notFound('/other').route.file).toBe('routes/_404.rip');
+    expect(m.notFound('/docsx').route.file).toBe('routes/_404.rip');
+  });
+
+  test('a dynamic directory captures its segment as a param', () => {
+    const m = manifest(['_404.rip', 'users/[id]/_404.rip', 'users/[id]/index.rip']);
+    expect(m.notFound('/users/7/nope')).toEqual({ route: m.notFound('/users/7/nope').route, params: { id: '7' } });
+    expect(m.notFound('/users/7/nope').route.pattern).toBe('/users/:id/*');
+    expect(m.notFound('/users').route.file).toBe('routes/_404.rip');
+    expect(m.notFound('/users//x').route.file).toBe('routes/_404.rip');
+  });
+
+  test('static reach outranks dynamic reach at the same depth', () => {
+    const m = manifest(['docs/_404.rip', '[id]/_404.rip']);
+    expect(m.notFound('/docs/x').route.file).toBe('routes/docs/_404.rip');
+    expect(m.notFound('/other/x').route.file).toBe('routes/[id]/_404.rip');
+  });
+
+  test('a group directory reaches from the root with the group layouts', () => {
+    const m = manifest(['(app)/_layout.rip', '(app)/_404.rip', '(app)/orders.rip']);
+    const hit = m.notFound('/nope');
+    expect(hit.route.file).toBe('routes/(app)/_404.rip');
+    expect(hit.route.layouts).toEqual(['routes/(app)/_layout.rip']);
+  });
+
+  test('two pages with the same reach reject', () => {
+    expect(() => manifest(['_404.rip', '(app)/_404.rip'])).toThrow(/both claim '\/\*'/);
+    expect(() => manifest(['[a]/_404.rip', '[b]/_404.rip'])).toThrow(/both claim/);
+  });
+
+  test('a page under an optional or catch-all segment rejects', () => {
+    expect(() => manifest(['docs/[[page]]/_404.rip'])).toThrow(/optional or catch-all/);
+    expect(() => manifest(['[...rest]/_404.rip'])).toThrow(/optional or catch-all/);
+  });
+
+  test('a page under an underscore directory is unreachable', () => {
+    const m = manifest(['_lib/_404.rip', 'index.rip']);
+    expect(m.notFound('/_lib/x')).toBeNull();
+  });
+
+  test('a prefix segment that fails to decode does not reach; a shallower page does', () => {
+    const m = manifest(['_404.rip', '[id]/_404.rip']);
+    expect(m.notFound('/%E0%A4%A/x').route.file).toBe('routes/_404.rip');
+    expect(m.notFound('/caf%C3%A9/x').params).toEqual({ id: 'café' });
+  });
+});
+
 describe('parseQuery', () => {
   test('parses pairs with and without a leading ?', () => {
     expect(parseQuery('a=1&b=2')).toEqual({ a: '1', b: '2' });

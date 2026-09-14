@@ -3,10 +3,10 @@
 // typed hrefs, `router.push`, and per-route `@params`) re-implements
 // the routing conventions this package's `buildRoutes` owns. Both are
 // run over the same trees and must tell the same story: every route the
-// runtime accepts appears in the walker's union (catch-alls excepted —
-// they are fallbacks, not navigation targets) with the same expansion
-// of optionals, and every route's captured params match the walker's
-// per-file shape. The pattern→TS-text bridge here is deliberately
+// runtime accepts appears in the walker's union with the same expansion
+// of optionals and the same two claims per catch-all, every route's
+// captured params match the walker's per-file shape, and a not-found
+// page is no route to either. The pattern→TS-text bridge here is deliberately
 // independent of the walker's own rendering path.
 import { expect, test, afterAll } from 'bun:test';
 import fs from 'node:fs';
@@ -55,7 +55,6 @@ const unionFromManifest = (manifest) => {
   const members = new Map(); // text → shape (the sort key)
   for (const route of manifest.routes) {
     const parts = partsOf(route.pattern);
-    if (parts.some((p) => p.kind === 'catchall')) continue;
     let expansions = [[]];
     for (const part of parts) {
       if (part.kind === 'static') expansions = expansions.map((e) => [...e, part.text]);
@@ -121,12 +120,30 @@ test('optional segments agree on both expansions', () => {
   agree(['docs/[[page]].rip', 'x/[[b]]/y/[[c]].rip']);
 });
 
-test('catch-alls agree: no union claim, full params', () => {
+test('catch-alls agree: the bare prefix and the tail, full params', () => {
   agree(['index.rip', 'files/[...rest].rip', 'docs/[topic]/[...path].rip']);
 });
 
-test('a catch-all-only tree agrees on an empty union', () => {
+test('a catch-all-only tree agrees on the root and everything under it', () => {
   agree(['[...rest].rip']);
+});
+
+test('not-found pages agree: no union claim, the directory params', () => {
+  const files = ['index.rip', '_404.rip', 'users/[id]/_404.rip', 'docs/_404.rip', 'docs/intro.rip'];
+  const root = makeApp(files);
+  const manifest = buildRoutes(files.map((f) => `routes/${f}`));
+  const memo = new Map();
+  expect(appRoutesFor(path.join(root, 'index.rip'), root, memo).union).toBe(unionFromManifest(manifest));
+  const shapeOf = (params) => {
+    const keys = Object.keys(params);
+    return keys.length ? `{ ${keys.map((k) => `${k}: string`).join('; ')} }` : null;
+  };
+  for (const [probe, page] of [['/nope', '_404.rip'], ['/users/7/nope', 'users/[id]/_404.rip'], ['/docs/nope', 'docs/_404.rip']]) {
+    const hit = manifest.notFound(probe);
+    expect(hit.route.file).toBe(`routes/${page}`);
+    const answer = appRoutesFor(path.join(root, 'app', 'routes', ...page.split('/')), root, memo);
+    expect(answer.params).toBe(shapeOf(hit.params));
+  }
 });
 
 test('the cart demo tree agrees', () => {

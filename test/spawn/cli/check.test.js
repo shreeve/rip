@@ -4469,11 +4469,15 @@ describeExtended('rip check: typed routes over the real server', () => {
         "    a href: 'https://example.com', 'external'",
         "    a href: 'mailto:x@y.z', 'mail'",
         "    a href: '#frag', 'fragment'",
+        "    a href: '/cart?page=2', 'queried'",
+        '    a href: "/orders/#{@id}#items", \'interpolated-queried\'',
+        "    a href: '/settings?tab=a#b', 'queried-and-fragment'",
         '    a href: @nav, \'dynamic\'',
         '    a href: @data.href, \'string-typed-data\'',
         "    a href: ('/nowhere' as string), 'cast-hatch'",
         "    area href: '/not-a-route'",   // href on a non-anchor tag is never route-wrapped
         "    ButtonLink href: '/cart', 'component'",
+        "    ButtonLink href: '/cart?page=2', 'component-queried'",
         '    ButtonLink href: @nav, \'component-dynamic\'',
         "    PlainLink href: '/orders', 'own-prop'",
         '',
@@ -4504,6 +4508,10 @@ describeExtended('rip check: typed routes over the real server', () => {
       '    a href: "/orderz/#{1}", \'template-typo\'',
       "    ButtonLink href: '/cartz', 'component-typo'",
       "    PlainLink href: '/ordersz', 'own-prop-typo'",
+      // A query or fragment never rescues a route the union lacks: the
+      // check judges the path part, and the suggestion keeps the tail.
+      "    a href: '/cartz?page=2', 'queried-typo'",
+      "    ButtonLink href: '/ordersz#top', 'component-queried-typo'",
       '',
     ].join('\n');
     const dir = workspace({ ...ROUTE_FILES, 'app/routes/index.rip': BAD }, { strict: true });
@@ -4514,9 +4522,10 @@ describeExtended('rip check: typed routes over the real server', () => {
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
       // One diagnostic per surface, none elsewhere: the RoutePath
       // annotation (2820 — assignability with a did-you-mean, this
-      // union has a near miss to suggest) and the seven wrapped/checked
-      // positions (2345 — the six route surfaces and the source key).
-      expect(diags.length).toBe(8);
+      // union has a near miss to suggest) and the nine wrapped/checked
+      // positions (2345 — the six route surfaces, the source key, and
+      // the two queried typos).
+      expect(diags.length).toBe(10);
       expect(new Set(diags.map((d) => d.code))).toEqual(new Set([2820, 2345]));
       // Every mismatch anchors where tsgo anchors the construct the
       // lowering mimics: the four attribute typos on the pair's KEY (a
@@ -4526,7 +4535,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       // declaration the lowered `this.bogus = …` write would cover.
       const lines = BAD.split('\n');
       const spanText = (d) => lines[d.line - 1].slice(d.column - 1, d.endColumn - 1);
-      expect(diags.filter((d) => spanText(d) === 'href').map((d) => d.line)).toEqual([10, 11, 12, 13]);
+      expect(diags.filter((d) => spanText(d) === 'href').map((d) => d.line)).toEqual([10, 11, 12, 13, 14, 15]);
       expect(diags.filter((d) => d.line === 4).map(spanText)).toEqual(['bogus']);
       expect(diags.filter((d) => d.line === 6).map(spanText)).toEqual(["'/cartz'"]);
       expect(diags.filter((d) => d.line === 7).map(spanText)).toEqual(["'/ordersz'"]);
@@ -4539,14 +4548,16 @@ describeExtended('rip check: typed routes over the real server', () => {
       // statics-first normalization.
       const text = check(dir).stdout;
       expect(text).toContain('"/carts"');
-      expect(text).toContain('"/" | "/cart" | "/docs" | `/docs/:page` | "/orders" | `/orders/:id` | "/settings"');
+      expect(text).toContain('"/" | "/cart" | "/docs" | `/docs/:page` | "/files" | `/files/*rest` | "/orders" | `/orders/:id` | "/settings"');
       // No ROUTE member ever reads as its checked form.
       expect(text).not.toContain('/docs/${string}');
       expect(text).not.toContain('/orders/${string}');
       // A static route one slip away is named, in tsgo's own annotation
       // words (the RoutePath line's TS2820 reads the same way).
-      expect(text).toContain(`'"/cartz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/cart"'?`);
-      expect(text).toContain(`'"/ordersz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/orders"'?`);
+      expect(text).toContain(`'"/cartz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/files" | \`/files/*rest\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/cart"'?`);
+      expect(text).toContain(`'"/ordersz"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/files" | \`/files/*rest\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/orders"'?`);
+      expect(text).toContain(`'"/cartz?page=2"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/files" | \`/files/*rest\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/cart?page=2"'?`);
+      expect(text).toContain(`'"/ordersz#top"' is not assignable to parameter of type '"/" | "/cart" | "/docs" | \`/docs/:page\` | "/files" | \`/files/*rest\` | "/orders" | \`/orders/:id\` | "/settings"'. Did you mean '"/orders#top"'?`);
       // The source-key miss reads as one — the checker's union of keys
       // and dotted arms never prints — with the nearest key named.
       expect(text).toContain("'userz' is not a stash key — did you mean 'user'?");

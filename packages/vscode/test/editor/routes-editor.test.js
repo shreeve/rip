@@ -198,6 +198,9 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         '    a href: "/", "home"',
         "    a href: '/x', 'single'",
         "    a href: '/orderz', 'typo'",
+        "    a href: '/cart?page=2', 'queried'",
+        '    a href: "/orders/#{1}#items", \'queried-template\'',
+        "    a href: '/cartz?page=2', 'queried-typo'",
         '',
       ].join('\n');
       await api.open('app/routes/index.rip', text);
@@ -212,6 +215,17 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         const value = (await api.hover('app/routes/index.rip', line, ch))?.contents?.value;
         if (typeof value === 'string') expect(value).not.toMatch(LEAK);
       }
+      // The member's own hover reads as what the two navigation
+      // members accept — the route union, as tsgo prints it at a call
+      // site — never the `const P` conditional that checks it, and the
+      // kind relabel never mistakes that conditional's `const` for a
+      // binding head.
+      const routerHover = (await api.hover('app/routes/index.rip', 1, 12))?.contents?.value ?? '';
+      expect(routerHover).toMatch(/^```typescript\r?\n\(router\) router: /);
+      expect(routerHover).toContain('push(url: "/cart" | "/orders" | `/orders/:id`, opts?: {');
+      expect(routerHover).toContain('replace(url: "/cart" | "/orders" | `/orders/:id`, opts?: {');
+      expect(routerHover).not.toContain('infer');
+      expect(routerHover).not.toContain('<(router) P');
 
       // The href KEY answers what this position admits — the route union
       // in its display form — not the attribute road's generic string.
@@ -269,6 +283,20 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
       expect(pushTypo).toBeDefined();
       expect(pushTypo.range.start).toEqual({ line: 1, character: 22 });
       expect(pushTypo.range.end).toEqual({ line: 1, character: 30 });
+
+      // A query or fragment on a route the union holds is clean — the
+      // check judges the literal's path part, a template's holes
+      // intact — while one on a route it does not hold reports like
+      // any typo, anchored on the key, and the suggestion keeps the
+      // author's query.
+      const queriedTypo = diags.find((d) => d.message.includes('"/cartz?page=2"'));
+      expect(queriedTypo).toBeDefined();
+      expect(queriedTypo.range.start).toEqual({ line: 9, character: 6 });
+      expect(queriedTypo.range.end).toEqual({ line: 9, character: 10 });
+      expect(queriedTypo.message).toEndWith(`Did you mean '"/cart?page=2"'?`);
+      // Nothing else is new: the fixture's own typos (`"/"` and `"/x"`
+      // are no routes of this tree) and the three named above.
+      expect(diags.map((d) => d.range.start.line).sort()).toEqual([1, 4, 5, 6, 9]);
     });
   }, 60_000);
 });
