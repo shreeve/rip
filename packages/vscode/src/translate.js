@@ -354,6 +354,12 @@ export function presentOutgoing(method, result, onRescue = () => {}) {
   }
 }
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A route member as it reads: a dynamic member by its display, a
+// static by its literal text.
+export const routeMemberDisplay = (e) => (e.text.startsWith('`') && e.display ? '`' + e.display + '`' : e.text);
+
 // Route-union display prettifying, two passes over the same member
 // list. RE-LABEL: a dynamic member's CHECKED form (`/orders/${string}`)
 // reads as the parameterized display the route file spells
@@ -363,26 +369,25 @@ export function presentOutgoing(method, result, onRescue = () => {}) {
 // path-lexicographic), which keeps `/orders/:id` beside `/orders`. A
 // run rewrites only when every ` | `-separated piece is a route member,
 // so a union that mixes in anything else (`| undefined` from an
-// optional prop) keeps its tail where TS put it. Display-only — the
-// face text, the union the checker saw, and every span are untouched.
-// Entries come from the route walker (mirror.js appRoutesFor), already
-// in walker order.
+// optional prop) keeps its tail where TS put it. A member's text as a
+// conditional type's CHECK (`P extends \`/${string}\` ? …`) is a test on
+// the argument's shape, not a route — the route-checked parameter's
+// leading-slash gate spells exactly a root catch-all's member — and
+// keeps its checked form. Display-only — the face text, the union the
+// checker saw, and every span are untouched. Entries come from the
+// route walker (mirror.js appRoutesFor), already in walker order.
 export function prettifyRouteUnion(text, entries) {
   if (typeof text !== 'string' || !entries?.length) return text;
   let out = text;
   const members = [];
   for (const e of entries) {
     if (typeof e?.text !== 'string') continue;
-    if (e.text.startsWith('`') && e.display) {
-      const pretty = '`' + e.display + '`';
-      out = out.split(e.text).join(pretty);
-      members.push(pretty);
-    } else {
-      members.push(e.text);
-    }
+    const pretty = routeMemberDisplay(e);
+    if (pretty !== e.text) out = out.replace(new RegExp(`(?<!\\bextends )${escapeRegExp(e.text)}`, 'g'), pretty);
+    members.push(pretty);
   }
   if (members.length > 1) {
-    const one = `(?:${members.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`;
+    const one = `(?:${members.map(escapeRegExp).join('|')})`;
     const run = new RegExp(`${one}(?: \\| ${one})+`, 'g');
     out = out.replace(run, (match) => {
       const present = new Set(match.split(' | '));

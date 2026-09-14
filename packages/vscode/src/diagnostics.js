@@ -122,11 +122,14 @@ function stashMemberMissMessage(name, stash) {
 // A route miss names the nearest STATIC route, in the words tsgo's own
 // annotation form (TS2820) uses. Dynamic members are templates — a
 // literal near one is not a spelling slip — and a template argument
-// carries no single spelling to measure.
+// carries no single spelling to measure. The checker judges a
+// literal's PATH PART (routeArgType), so the measure does too, and the
+// suggestion keeps the query or fragment the author wrote.
 function withRouteSuggestion(message, literal, entries) {
   const statics = (entries ?? []).flatMap((e) => (typeof e?.text === 'string' && e.text.startsWith('"') ? [e.text.slice(1, -1)] : []));
-  const near = nearestSpelling(literal, statics);
-  return near === null ? message : `${message} Did you mean '"${near}"'?`;
+  const tail = literal.search(/[?#]/);
+  const near = nearestSpelling(tail === -1 ? literal : literal.slice(0, tail), statics);
+  return near === null ? message : `${message} Did you mean '"${near}${tail === -1 ? '' : literal.slice(tail)}"'?`;
 }
 
 // A tsgo diagnostic mapped onto .rip source, or null when it is a

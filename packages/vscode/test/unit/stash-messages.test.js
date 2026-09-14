@@ -26,6 +26,8 @@ const source = [
   "    @stash.source('userz.name')",
   "    @stash.source('zzz')",
   "    @router.push '/nowhere'",
+  "    @router.push '/cartz?page=2#top'",
+  "    @router.push '/nowhere?page=2'",
   '    @stash.userz',
   '    @stash.rest()',
   '    @stash.user.bogus',
@@ -88,6 +90,10 @@ test('a key miss on a recorded literal reads as one, with the nearest key; the s
 test('a route miss names the nearest static route after tsgo\'s own sentence; a far one keeps the sentence alone', () => {
   expect(mapTsDiagnostic(good, at(genSpanOf('"/cartz"'), 2345, 'mismatch.')).message).toBe(`mismatch. Did you mean '"/cart"'?`);
   expect(mapTsDiagnostic(good, at(genSpanOf('"/nowhere"'), 2345, 'mismatch.')).message).toBe('mismatch.');
+  // The checker judges the PATH PART, so the measure does too: the
+  // suggestion keeps the query and fragment the author wrote.
+  expect(mapTsDiagnostic(good, at(genSpanOf('"/cartz?page=2#top"'), 2345, 'mismatch.')).message).toBe(`mismatch. Did you mean '"/cart?page=2#top"'?`);
+  expect(mapTsDiagnostic(good, at(genSpanOf('"/nowhere?page=2"'), 2345, 'mismatch.')).message).toBe('mismatch.');
 });
 
 test('a member miss on a recorded stash member names the stash: a key, a method, or the list', () => {

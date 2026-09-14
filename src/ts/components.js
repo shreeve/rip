@@ -892,6 +892,26 @@ export const ambientClassDeclares = (info) => {
   return lines;
 };
 
+// The parameter type of a route-checked slot, over the `const` type
+// parameter `tv` that binds the argument's own literal type — ONE
+// spelling for the router ambience's `push`/`replace` and the
+// `__ripRoute` helper the attribute surfaces wrap in. A `/`-leading
+// argument checks its PATH PART — the text before the first `?` or
+// `#`, a template's holes intact — against the union, inlined so the
+// error reads as the actual route list; a query or fragment on a route
+// the union holds passes, and one on a route it does not draws the
+// same error a bare typo does. A valid path answers `union | tv`
+// rather than `tv` alone because tsgo's string-literal completions
+// read the parameter type at the literal being typed: `tv` alone would
+// offer that literal back and nothing else. Anything not `/`-leading —
+// a dynamic string, an external URL, a bare fragment — answers `tv`
+// and passes by construction.
+export const routeArgType = (union, tv) => {
+  const u = `(${union})`;
+  const path = `${tv} extends \`\${infer Q}?\${string}\` ? (Q extends \`\${infer R}#\${string}\` ? R : Q) : ${tv} extends \`\${infer Q}#\${string}\` ? Q : ${tv}`;
+  return `${tv} extends \`/\${string}\` ? ((${path}) extends ${u} ? ${u} | ${tv} : ${u}) : ${tv}`;
+};
+
 // The router's ambient type — ONE spelling for the class declare and the
 // companion interface. Plain `import('rip/app').Router` without a route
 // union; with one, the union-checked construction: Omit the two
@@ -901,16 +921,14 @@ export const ambientClassDeclares = (info) => {
 // mutually unassignable — and not an intersection, which unions an
 // overloaded parameter and loses the narrowing; method syntax stays
 // bivariant, so the typed router passes wherever a plain Router is
-// expected. The conditional keys off the ARGUMENT'S SYNTAX: a
-// `/`-leading string literal must inhabit the union (inlined, so the
-// error reads as the actual route list), while dynamic strings,
-// external URLs, and query/hash strings built as values fall through
-// to P and pass.
+// expected. The conditional keys off the ARGUMENT'S SYNTAX
+// (routeArgType): a `/`-leading string literal's path part must inhabit
+// the union, while dynamic strings, external URLs, and query/hash
+// strings built as values fall through to P and pass.
 export const routerAmbienceType = (info) => {
   if (!info.routesUnion) return `import('rip/app').Router`;
-  const u = `(${info.routesUnion})`;
   const nav = (name) =>
-    `${name}<const P extends string>(url: P extends \`/\${string}\` ? ${u} : P, opts?: { noScroll?: boolean }): boolean;`;
+    `${name}<const P extends string>(url: ${routeArgType(info.routesUnion, 'P')}, opts?: { noScroll?: boolean }): boolean;`;
   return `Omit<import('rip/app').Router, 'push' | 'replace'> & { ${nav('push')} ${nav('replace')} }`;
 };
 

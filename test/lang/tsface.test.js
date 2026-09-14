@@ -29,6 +29,7 @@ import { join } from 'path';
 import { compile, CompileError } from '../../src/compile.js';
 import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
+import { routeArgType } from '../../src/ts/components.js';
 import { ripFiles } from '../support/rip-files.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');
@@ -79,7 +80,7 @@ const REGION_SHAPES = [
   /^\(\{ __(key|bind):$/u,                                 // served-value wrap opener (a `key:` / `<=>` record's typed position)
   /^\}\)\.__(key|bind)$/u,                                 // served-value wrap closer
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
-  /^declare function __ripRoute<const T extends \(.*\)>\(s: T\): T;$/su, // the route helper declare, union inlined
+  /^declare function __ripRoute<const T extends string>\(s: T extends `\/\$\{string\}` \? .* : T\): T;$/su, // the route helper declare, the path-part conditional with the union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
   /^declare function __ripAmbientStash<T>\(v: T\): T;$/u, // the ambience helper declare
@@ -196,7 +197,7 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     expect(faced.code).toContain(`const __v: __RipAttrVals_a['href'] | undefined = nav; if (__v != null)`);
     expect(faced.code).toContain(`.setAttribute('href', __v); }`);
     expect(faced.code).toContain('href: nav');                                        // dynamic prop passes bare
-    expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
+    expect(faced.code).toContain(`declare function __ripRoute<const T extends string>(s: ${routeArgType(ROUTES, 'T')}): T;`);
     expect(faced.code).toContain(`type RoutePath = ${ROUTES};`);
     // A non-anchor element's href is a plain attribute — never wrapped
     // (its surface has no such key; the checker, not the wrap, owns
@@ -210,6 +211,51 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
     const faced = compile(src, { path: 'routes-fixture.rip', runtimeDelivery: 'none', face: 'ts' });
     expect(faced.code).not.toContain('__ripRoute');
     expect(faced.code).not.toContain('type RoutePath');
+  });
+
+  test('a query or fragment on a `/`-leading literal is still syntactically a route literal: it wraps, and the helper judges its path part', () => {
+    const queried = [
+      'Button = component extends a',
+      '  render',
+      '    a',
+      '      slot',
+      '',
+      'Page = component',
+      "  x := 'a'",
+      '  go: ->',
+      "    @router.push '/?page=2'",
+      '    @router.replace "/?template=#{@x}"',
+      '  render',
+      "    a href: '/?page=2', 'static'",
+      '    a href: "/?template=#{@x}", \'interpolated\'',
+      "    a href: '/cart#top', 'fragment'",
+      "    Button href: '/cart?x=1#y', 'prop'",
+      '',
+    ].join('\n');
+    // The router ambience rides a discovered stash (gating mirrors v3).
+    const faced = compile(queried, routed({ runtimeDelivery: 'none', face: 'ts', appStashSpec: './stash.rip' }));
+    // The gate is syntactic and unchanged: the leading `/` decides the
+    // wrap, and the bytes inside stay the author's whole literal — the
+    // split at the first `?` or `#` is the parameter type's, not the
+    // emitter's.
+    expect(faced.code).toContain(`setAttribute('href', __ripRoute("/?page=2"))`);
+    expect(faced.code).toContain(`setAttribute('href', __ripRoute(\`/?template=\${this.x.value}\`))`);
+    expect(faced.code).toContain(`setAttribute('href', __ripRoute("/cart#top"))`);
+    expect(faced.code).toContain('href: __ripRoute("/cart?x=1#y")');
+    // The ambient router emits nothing around its argument, and the
+    // parameter type does the judging; a quoted argument's slot records
+    // for completions, a template's does not (routerArgOf).
+    expect(faced.code).toContain('this.router.push("/?page=2")');
+    expect(faced.code).toContain('this.router.replace(`/?template=${this.x.value}`)');
+    expect(faced.routeWraps.filter((w) => w.key === null).map((w) => faced.code.slice(...w.value))).toEqual(['"/?page=2"']);
+    // One parameter type, both surfaces: the helper's declare spells
+    // exactly the text the router ambience spells for `push`/`replace`.
+    const helper = faced.code.match(/declare function __ripRoute<const T extends string>\(s: (.*)\): T;/su)[1];
+    expect(helper).toBe(routeArgType(ROUTES, 'T'));
+    expect(faced.code).toContain(`push<const P extends string>(url: ${routeArgType(ROUTES, 'P')}, opts?: { noScroll?: boolean }): boolean;`);
+    // The path part is the text before the FIRST `?` or `#`, whichever
+    // comes first, and a template's holes ride into the compared path.
+    expect(helper).toContain('T extends `${infer Q}?${string}` ? (Q extends `${infer R}#${string}` ? R : Q) : T extends `${infer Q}#${string}` ? Q : T');
   });
 
   test('a literal source() key wraps in __ripSourceKey; a dynamic key never does', () => {
@@ -291,7 +337,7 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
       expect(faced.code).toContain('r?.push("/cart")');
       expect(faced.code).toContain('currentRouter().push("/cart")');
       expect(faced.code).toContain('currentStash().source("user")');
-      expect(faced.code).toContain(`declare function __ripRoute<const T extends (${ROUTES})>(s: T): T;`);
+      expect(faced.code).toContain(`declare function __ripRoute<const T extends string>(s: ${routeArgType(ROUTES, 'T')}): T;`);
       expect(faced.code).toContain('declare function __ripSourceKey<const T extends');
       // A router argument records with no key: the mismatch stays on
       // the literal, and the span still tells completions the slot.
