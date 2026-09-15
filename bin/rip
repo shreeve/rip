@@ -5,7 +5,7 @@
 // transitively. Diagnostics print as path:line:col with a source excerpt
 // (CompileError's formatted message) and exit non-zero.
 
-import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync, readdirSync, realpathSync } from 'fs';
 import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { join, dirname, resolve, relative, sep, delimiter } from 'path';
@@ -181,7 +181,8 @@ if (args[0] === 'edge' || args[0] === 'site') {
 //
 // The word in first position is a subcommand when it is not a flag, not
 // an existing file or directory, and not path-shaped (contains no '/'
-// or '.'). Resolution order, first hit wins: a rip-<name> next to this
+// or '.'). Resolution order, first hit wins: a package in this checkout
+// whose manifest declares a rip-<name> bin, a rip-<name> next to this
 // executable, the cwd's git checkout bin/ (rip-<name>, rip-<name>.rip,
 // <name>, then <name>.rip),
 // the nearest node_modules/.bin/rip-<name> walking up from the cwd
@@ -235,9 +236,24 @@ if (args.length > 0 && !args[0].startsWith('-') && !args[0].includes('/') && !ar
   };
 
   const binDir = dirname(fileURLToPath(import.meta.url));
-  // Sub-commands this repository ships, found by name before any lookup.
-  const shipped = { email: join(binDir, '../packages/ui/email/cli.rip') };
-  if (shipped[name]) await runSub(shipped[name]);
+  // A package in this checkout answers for the bin its manifest declares,
+  // so `rip <name>` reaches it from any cwd with no package path written
+  // here and no PATH link installed. Packages are visited in name order,
+  // so two declaring the same bin resolve the same way on every machine.
+  const packagesDir = join(binDir, '../packages');
+  const shippedBin = (bin) => {
+    let packages;
+    try { packages = readdirSync(packagesDir).sort(); } catch { return null; }
+    for (const pkg of packages) {
+      let manifest;
+      try { manifest = JSON.parse(readFileSync(join(packagesDir, pkg, 'package.json'), 'utf8')); } catch { continue; }
+      const entry = manifest.bin?.[bin];
+      if (typeof entry === 'string') return join(packagesDir, pkg, entry);
+    }
+    return null;
+  };
+  const shipped = shippedBin(`rip-${name}`);
+  if (shipped) await runSub(shipped);
   if (existsSync(join(binDir, `rip-${name}`))) await runSub(join(binDir, `rip-${name}`));
 
   const toplevel = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });

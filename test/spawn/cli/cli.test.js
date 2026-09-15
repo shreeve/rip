@@ -5,7 +5,7 @@
 // Diagnostics tests pin exact file:line:col positions (offsets convert
 // via lineStarts only at this boundary).
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, symlinkSync } from 'fs';
 import { spawnSync } from '../../support/spawn.js';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -816,8 +816,9 @@ describe('compile() input validation and diagnostic rendering', () => {
 describe('cli: subcommand dispatch (rip <name> → rip-<name>)', () => {
   // Dispatch fires only for a first argument that is not a flag, not an
   // existing file or directory, and not path-shaped. Resolution walks:
-  // sibling of the executable, repo bin/, nearest node_modules/.bin up
-  // from the cwd, PATH. A miss rejects loudly.
+  // a checkout package whose manifest declares the bin, sibling of the
+  // executable, repo bin/, nearest node_modules/.bin up from the cwd,
+  // PATH. A miss rejects loudly.
 
   test('an unknown name rejects loudly with the unknown-command error', () => {
     const r = rip(['definitely-not-a-subcommand']);
@@ -849,6 +850,17 @@ describe('cli: subcommand dispatch (rip <name> → rip-<name>)', () => {
     const r = spawnSync('bun', [BIN, 'hello', 'up'], { cwd: nested, encoding: 'utf8' });
     expect(r.stdout).toBe('hello:up\n');
     expect(r.status).toBe(7);
+  });
+
+  test('a package in the checkout that declares rip-<name> answers rip <name> from any cwd', () => {
+    // PATH holds only bun, so no rip-email link a `bun run global` may
+    // have installed can answer: the manifest is the only road to it.
+    const pathDir = join(dir, 'path-with-bun-only');
+    mkdirSync(pathDir, { recursive: true });
+    symlinkSync(process.execPath, join(pathDir, 'bun'));
+    const r = spawnSync('bun', [BIN, 'email', '--version'], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: pathDir } });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/^rip-email \d+\.\d+\.\d+\n$/);
   });
 
   test('an existing directory still runs dir/index.rip, never dispatches', () => {
