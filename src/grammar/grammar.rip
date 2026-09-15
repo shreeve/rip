@@ -441,8 +441,8 @@ grammar =
   # literal @stash path. The emitter validates component placement,
   # target visibility, path shape, and keyed-source form. A called path
   # keeps its argument list as a spread `key` role so bad arity still
-  # reaches the emitter as a precise diagnostic and every key span is a
-  # first-class RFC-12 fact. The call rows reduce-reduce against the
+  # reaches the emitter as a precise diagnostic and every key span
+  # carries its own mapped position. The call rows reduce-reduce against the
   # plain Arguments reading and rule order picks the keyed-gate form —
   # declared, with rationale, in the expectedConflicts manifest.
   Gate: [

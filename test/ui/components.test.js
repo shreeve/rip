@@ -788,7 +788,7 @@ describe('the static render DSL: emission pins', () => {
     // reactive lowerings pinned in the boolean-attributes fork above).
     expect(compile('P = component\n  render\n    button disabled: true\n').code)
       .toContain(`if (true) this._el0.setAttribute('disabled', '')`);
-    // RFC 12: the TypeScript face lowers identically — the receiver
+    // The TypeScript face lowers identically — the receiver
     // cast rides tsOnly regions (the strip gate holds byte identity),
     // and the NAME answers through the tag's typed surface.
     expect(compile('P = component\n  render\n    button\n      disabled\n', { face: 'ts' }).code)
