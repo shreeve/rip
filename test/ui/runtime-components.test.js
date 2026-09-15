@@ -117,7 +117,7 @@ describe('module shape', () => {
  '__hmrRestoreUi', '__hmrSnapshotUi',
  '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
- '__reconcile', '__transition',
+ '__reconcile', '__style', '__transition',
  'getContext', 'hasContext', 'setContext',
     ]);
   });
@@ -1673,6 +1673,19 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     expect(el.style.margin).toBe('1px');
     inst._applyInheritedProp(el, 'style', null);
     expect(el.getAttribute('style')).toBeNull();
+    // A `--custom` property goes through setProperty where the style
+    // object has one (a browser's CSSStyleDeclaration takes it no other
+    // way), and its omission on the next write removes it; a plain bag
+    // takes the key by assignment.
+    const written = [];
+    el.style = { setProperty: (k, v) => written.push(['set', k, v]), removeProperty: (k) => written.push(['remove', k]) };
+    inst._applyInheritedProp(el, 'style', { '--brand': '#06a', color: 'red' });
+    inst._applyInheritedProp(el, 'style', { color: 'blue' });
+    expect(written).toEqual([['set', '--brand', '#06a'], ['remove', '--brand']]);
+    expect(el.style.color).toBe('blue');
+    el.style = {};
+    inst._applyInheritedProp(el, 'style', { '--brand': '#06a' });
+    expect(el.style['--brand']).toBe('#06a');
     // innerHTML family assigns directly.
     inst._applyInheritedProp(el, 'textContent', 'text');
     expect(el.textContent).toBe('text');
@@ -1801,9 +1814,9 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
- '__popComponent', '__clsx', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
+ '__popComponent', '__clsx', '__style', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
  '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
 
 // A program that exercises the runtime for real without the language
@@ -1849,7 +1862,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');

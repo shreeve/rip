@@ -7,7 +7,8 @@
 # ==============================================================================
 
 import { previewPadding, computeMsoPadding, pxToPt, parsePadding } from './compat.rip'
-import { joinStyles, withMargin } from '../shared/styles.rip'
+import { mergeStyles, withMargin } from '../shared/styles.rip'
+import type { CSSProperties, StyleValue } from '../shared/styles.rip'
 import { registerEmailTailwindRoot } from '../tailwind/tailwind.rip'
 
 safeCssString = (value: unknown, name: string): string ->
@@ -59,24 +60,19 @@ export Head = component
 # since a client's default is not zero, and its padding whenever the
 # style sets one, since the cell carries it. Everything else stays on
 # the cell.
-bodyStyle = (style: string): string ->
-  declarations: string[] = []
-  padded = false
-  for part in style.split(';')
-    declaration = part.trim()
-    property = declaration.split(':')[0].trim().toLowerCase()
-    if property is 'background' or property is 'background-color'
-      declarations.push declaration
-    else if property.startsWith('padding')
-      padded = true
-  declarations.push 'margin:0'
-  declarations.push 'padding:0' if padded
-  declarations.join ';'
+bodyStyle = (style: StyleValue): CSSProperties ->
+  cell = mergeStyles style
+  body: CSSProperties = {}
+  body.background = cell.background if cell.background?
+  body.backgroundColor = cell.backgroundColor if cell.backgroundColor?
+  body.margin = 0
+  body.padding = 0 if Object.keys(cell).some (key) -> key.startsWith('padding')
+  body
 
 export Body = component
   @class: string := ''
-  @style: string := ''
-  _body: string ~= bodyStyle @style
+  @style: StyleValue := ''
+  _body: CSSProperties ~= bodyStyle @style
   render
     body class: @class, style: _body
       table align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation'
@@ -145,20 +141,18 @@ export Font = component
 
 # Padding goes on the cell, everything else on the table: Outlook and
 # Klaviyo drop padding on a table and honor it on a td.
-splitPadding = (style: string): { table: string, cell: string } ->
-  table: string[] = []
-  cell: string[] = []
-  for part in style.split(';')
-    declaration = part.trim()
-    if declaration
-      (if /^padding/i.test(declaration) then cell else table).push declaration
-  { table: table.join(';'), cell: cell.join(';') }
+splitPadding = (style: StyleValue): { table: CSSProperties, cell: CSSProperties } ->
+  table: Record<string, string | number> = {}
+  cell: Record<string, string | number> = {}
+  for key, value of mergeStyles(style) as Record<string, string | number>
+    (if key.startsWith('padding') then cell else table)[key] = value
+  { table: table as CSSProperties, cell: cell as CSSProperties }
 
 export Container = component
   @class: string := ''
-  @style: string := ''
-  _split: { table: string, cell: string } ~= splitPadding @style
-  _style: string ~= joinStyles 'max-width:37.5em', _split.table
+  @style: StyleValue := ''
+  _split: { table: CSSProperties, cell: CSSProperties } ~= splitPadding @style
+  _style: CSSProperties ~= mergeStyles { maxWidth: '37.5em' }, _split.table
   render
     table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: _style
       tbody
@@ -168,8 +162,8 @@ export Container = component
 
 export Section = component
   @class: string := ''
-  @style: string := ''
-  _split: { table: string, cell: string } ~= splitPadding @style
+  @style: StyleValue := ''
+  _split: { table: CSSProperties, cell: CSSProperties } ~= splitPadding @style
   render
     table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: _split.table
       tbody
@@ -179,7 +173,7 @@ export Section = component
 
 export Row = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: @style
       tbody
@@ -188,49 +182,49 @@ export Row = component
 
 export Column = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     td class: @class, style: @style
       slot
 
 EmailHeadingH1 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h1 class: @class, style: @style
       slot
 
 EmailHeadingH2 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h2 class: @class, style: @style
       slot
 
 EmailHeadingH3 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h3 class: @class, style: @style
       slot
 
 EmailHeadingH4 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h4 class: @class, style: @style
       slot
 
 EmailHeadingH5 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h5 class: @class, style: @style
       slot
 
 EmailHeadingH6 = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   render
     h6 class: @class, style: @style
       slot
@@ -238,7 +232,7 @@ EmailHeadingH6 = component
 export Heading = component
   @as: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' := 'h1'
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   @children =! undefined
   @m?: string | number := undefined
   @mx?: string | number := undefined
@@ -247,7 +241,7 @@ export Heading = component
   @mr?: string | number := undefined
   @mb?: string | number := undefined
   @ml?: string | number := undefined
-  _marginStyle: string ~= withMargin {
+  _marginStyle: CSSProperties ~= withMargin {
     m: @m
     mx: @mx
     my: @my
@@ -256,7 +250,7 @@ export Heading = component
     mb: @mb
     ml: @ml
   }
-  _style: string ~= joinStyles _marginStyle, @style
+  _style: CSSProperties ~= mergeStyles _marginStyle, @style
   render
     switch @as
       when 'h1' then EmailHeadingH1 class: @class, style: _style, children: @children
@@ -268,8 +262,8 @@ export Heading = component
 
 export Text = component
   @class: string := ''
-  @style: string := ''
-  _style: string ~= joinStyles 'font-size:14px;line-height:24px;margin:16px 0', @style
+  @style: StyleValue := ''
+  _style: CSSProperties ~= mergeStyles { fontSize: '14px', lineHeight: '24px', margin: '16px 0' }, @style
   render
     p class: @class, style: _style
       slot
@@ -278,9 +272,9 @@ export Link = component
   @class: string := ''
   @href: string := ''
   @target: string := '_blank'
-  @style: string := ''
+  @style: StyleValue := ''
   _href: string ~= safeHref @href
-  _style: string ~= joinStyles 'color:#067df7;text-decoration:none', @style
+  _style: CSSProperties ~= mergeStyles { color: '#067df7', textDecoration: 'none' }, @style
   render
     a class: @class, href: _href, target: @target, style: _style
       slot
@@ -291,16 +285,16 @@ export Image = component
   @alt: string := ''
   @width?: string | number := undefined
   @height?: string | number := undefined
-  @style: string := ''
+  @style: StyleValue := ''
   _src: string | undefined ~= safeImageSrc @src
-  _style: string ~= joinStyles 'display:block;outline:none;border:none;text-decoration:none', @style
+  _style: CSSProperties ~= mergeStyles { display: 'block', outline: 'none', border: 'none', textDecoration: 'none' }, @style
   render
     img class: @class, src: _src, alt: @alt, width: @width, height: @height, style: _style
 
 export Divider = component
   @class: string := ''
-  @style: string := ''
-  _style: string ~= joinStyles 'width:100%;border:none;border-top:1px solid #eaeaea', @style
+  @style: StyleValue := ''
+  _style: CSSProperties ~= mergeStyles { width: '100%', border: 'none', borderTop: '1px solid #eaeaea' }, @style
   render
     hr class: @class, style: _style
 
@@ -308,7 +302,7 @@ export Button = component
   @class: string := ''
   @href: string := ''
   @target: string := '_blank'
-  @style: string := ''
+  @style: StyleValue := ''
   _href: string ~= safeHref @href
   _padding: ReturnType<typeof parsePadding> ~= parsePadding @style
   _vertical: number ~= (_padding.paddingTop ?? 0) + (_padding.paddingBottom ?? 0)
@@ -317,7 +311,7 @@ export Button = component
   _right: [number, number] ~= computeMsoPadding(_padding.paddingRight ?? 0)
   _msoLeft: string ~= "<!--[if mso]><i style=\"mso-font-width:#{_left[0] * 100}%;mso-text-raise:#{_textRaise}\" hidden>#{'&#8202;'.repeat(_left[1])}</i><![endif]-->"
   _msoRight: string ~= "<!--[if mso]><i style=\"mso-font-width:#{_right[0] * 100}%\" hidden>#{'&#8202;'.repeat(_right[1])}&#8203;</i><![endif]-->"
-  _linkStyle: string ~= joinStyles 'line-height:100%;text-decoration:none;display:inline-block;max-width:100%;mso-padding-alt:0px', @style
+  _linkStyle: CSSProperties ~= mergeStyles 'line-height:100%;text-decoration:none;display:inline-block;max-width:100%;mso-padding-alt:0px', @style
   render
     a class: @class, href: _href, target: @target, style: _linkStyle
       span innerHTML: _msoLeft
@@ -453,7 +447,7 @@ parseMarkdown = (source: string): string ->
 export Markdown = component
   @class: string := ''
   @text: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   _html: string ~= parseMarkdown @text
   _plainText: string ~= markdownPlainText @text
   render
@@ -463,9 +457,9 @@ export CodeBlock = component
   @class: string := ''
   @code: string := ''
   @lineNumbers: boolean := false
-  @style: string := ''
-  _baseStyle =! 'background:#f4f4f4;padding:16px;border-radius:4px;font-family:monospace;font-size:13px;overflow-x:auto;white-space:pre'
-  _style: string ~= joinStyles _baseStyle, @style
+  @style: StyleValue := ''
+  _baseStyle: CSSProperties =! { background: '#f4f4f4', padding: '16px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '13px', overflowX: 'auto', whiteSpace: 'pre' }
+  _style: CSSProperties ~= mergeStyles _baseStyle, @style
   _html: string ~=
     lines = @code.split '\n'
     output: string[] = []
@@ -483,16 +477,16 @@ export CodeBlock = component
 
 export CodeInline = component
   @class: string := ''
-  @style: string := ''
+  @style: StyleValue := ''
   @children =! undefined
-  _style: string ~= joinStyles 'background:#f4f4f4;padding:2px 4px;border-radius:3px;font-family:monospace;font-size:0.9em', @style
+  _style: CSSProperties ~= mergeStyles { background: '#f4f4f4', padding: '2px 4px', borderRadius: '3px', fontFamily: 'monospace', fontSize: '0.9em' }, @style
   _orangeCss: string =! '''
     meta ~ .cino { display: none !important; opacity: 0 !important; }
     meta ~ .cio { display: block !important; }
     '''
   _primaryClass: string ~= [@class, 'cino'].filter(Boolean).join ' '
   _fallbackClass: string ~= [@class, 'cio'].filter(Boolean).join ' '
-  _fallbackStyle: string ~= joinStyles _style, 'display:none'
+  _fallbackStyle: CSSProperties ~= mergeStyles _style, { display: 'none' }
   _content: string ~= childText @children
   render
     style 'data-email-style': 'code-inline', innerHTML: _orangeCss

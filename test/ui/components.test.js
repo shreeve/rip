@@ -687,7 +687,7 @@ describe('the static render DSL: emission pins', () => {
     expect(code).toContain(`this._el3.setAttribute('data-open', true);`);
     expect(code).toContain(`this._el3.setAttribute('data-my-thing', "x");`);
     expect(code).toContain(`this._el4.setAttribute('data-lucide', "search");`);
-    expect(code).toContain(`this._el5.setAttribute('style', "color: red");`);
+    expect(code).toContain(`{ const __v = "color: red"; __style(this._el5, __v); }`);
     expect(code).toContain('this._el5.innerHTML = "<b>x</b>";');
     expect(code).toContain('__effect(() => { this._t1.data = String(this.active.value); });');
     expect(code).toContain('createTextNode("literal")');

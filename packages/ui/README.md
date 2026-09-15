@@ -51,6 +51,35 @@ html = toHTML WelcomeEmail, name: 'Alice'
 APIs for framework and tooling code. Application email templates should use
 `rip/ui/email`.
 
+### Styles
+
+Every component's `style` takes a string or an object, and so does a native
+tag inside a render block. The object's keys are camelCased CSS property
+names, closed over the ones the DOM library knows (a misspelled key is a type
+error with a suggestion), plus `--custom` properties. Values are written as
+given: no unit is appended, so a number is admitted only on the properties
+CSS reads bare, such as `lineHeight`, `opacity`, and `zIndex`, and as `0`
+anywhere. `fontSize: 14` is a type error; `fontSize: '14px'` is the spelling.
+
+A component merges its own defaults under the caller's style by key, in
+either spelling, so a caller's `margin` beats the default `margin`:
+
+```coffee
+import type { CSSProperties } from 'rip/ui/email'
+
+styles: Record<string, CSSProperties> =
+  section: { background: '#fff', border: '1px solid #e5e5e5', borderRadius: '12px', padding: '32px' }
+  text: { color: '#262626', fontSize: '15px', lineHeight: '22px', margin: 0 }
+
+Section style: styles.section
+  Text style: styles.text
+    'Hello'
+```
+
+`mergeStyles` and `parseStyle` are exported for a layout's own components
+that wrap these. Outlook's `mso-*` properties are not DOM properties, so
+they are spelled in the string form.
+
 ### Where a style lands
 
 `Body`, `Container`, and `Section` each render a table with one cell, and

@@ -482,6 +482,55 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('style: an object is a first-class spelling, closed over CSS property names, numbers only where CSS reads them bare', async () => {
+    // The style object types through the declaration vocabulary, not
+    // the live CSSStyleDeclaration: a literal of known keys checks, a
+    // misspelled key draws the did-you-mean, and because the runtime
+    // writes values as given, a number is admitted only on the unitless
+    // properties and as 0. The alias reads as `CSSProperties` on every
+    // road — the attribute, the `@rest` member, and the message.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Card = component extends div',                                              // 0
+        '  render',                                                                         // 1
+        "    div style: { background: '#000', margin: 0, lineHeight: 1.4, '--brand': '#06a' }", // 2
+        '      p style: @rest.style',                                                       // 3
+        "        'x'",                                                                      // 4
+        '',
+      ].join('\n');
+      await api.open('card.rip', src);
+      expect(api.diagnostics('card.rip').filter((d) => d.severity <= 2)).toEqual([]);
+      const attr = (await api.hover('card.rip', 2, 9))?.contents?.value ?? '';     // inside `style`
+      expect(attr).toContain('CSSProperties');
+      expect(attr).not.toContain('CSSStyleDeclaration');
+      expect(attr).not.toContain('__Rip');
+      const member = (await api.hover('card.rip', 3, 22))?.contents?.value ?? '';  // inside `@rest.style`
+      expect(member).toContain('style?: string | CSSProperties | undefined');
+      // Inside the object, a key is an optional property of the alias and
+      // hovers as tsgo prints one; its value is a string interior and declines.
+      const key = (await api.hover('card.rip', 2, 20))?.contents?.value ?? '';     // inside `background`
+      expect(key).toContain('(property) background?: string | 0 | undefined');
+      expect(await api.hover('card.rip', 2, 34)).toBeNull();                        // inside `'#000'`
+
+      const bad = [
+        'export Card = component',                  // 0
+        '  render',                                 // 1
+        '    div style: { fontSize: 14 }',          // 2
+        "      p style: { backgroud: '#000' }",     // 3
+        "        'x'",                              // 4
+        '',
+      ].join('\n');
+      await api.change('card.rip', bad);
+      const rows = api.diagnostics('card.rip')
+        .filter((d) => d.severity <= 2)
+        .map((d) => [d.range.start.line, d.code, d.message]);
+      expect(rows).toEqual([
+        [2, 2322, "Type '14' is not assignable to type 'string | 0 | undefined'."],
+        [3, 2561, "Object literal may only specify known properties, but 'backgroud' does not exist in type 'CSSProperties'. Did you mean to write 'background'?"],
+      ]);
+    });
+  });
+
   test('hover: an `@member` read presents value-first — the container never leaks', async () => {
     // The sigil read (`@tone`) takes the property-access lowering, not
     // memberRead's bare-spelling path; both record the name's span into

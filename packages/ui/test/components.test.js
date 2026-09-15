@@ -8,7 +8,7 @@ test('email public barrel exposes the curated named component surface', () => {
     'Body', 'Button', 'CodeBlock', 'CodeInline', 'Column', 'Container',
     'Divider', 'Email', 'Font', 'Head', 'Heading', 'Image', 'Link',
     'Markdown', 'Preview', 'Row', 'Section', 'Tailwind', 'Text',
-    'toEmail', 'toHTML', 'toText',
+    'mergeStyles', 'parseStyle', 'toEmail', 'toHTML', 'toText',
   ]);
 });
 

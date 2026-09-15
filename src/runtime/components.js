@@ -875,6 +875,28 @@ function __gateBind(self, index) {
 
 // Last-applied style-object keys per element (the replacement diff).
 const __styleKeys = new WeakMap();
+// A `--custom` property is not a member of a CSSStyleDeclaration: the
+// browser takes it only through setProperty. A host whose style is a
+// plain bag (the email DOM) takes every key by assignment.
+function __writeStyle(style, key, value) {
+  if (key.startsWith('--') && typeof style.setProperty === 'function') {
+    if (value == null || value === '') style.removeProperty(key);
+    else style.setProperty(key, String(value));
+  } else style[key] = value;
+}
+// The one style writer: a string is the attribute, an object is written
+// by key and clears the keys the last object set (an assign alone would
+// leave the old declarations active), null removes. A string or null
+// write drops the replacement record, so keys set outside an object
+// write are never wiped by a later one.
+function __style(el, value) {
+  const prevKeys = __styleKeys.get(el);
+  if (value == null) { el.removeAttribute('style'); __styleKeys.delete(el); return; }
+  if (typeof value !== 'object') { el.setAttribute('style', String(value)); __styleKeys.delete(el); return; }
+  if (prevKeys) for (const k of prevKeys) { if (!(k in value)) __writeStyle(el.style, k, ''); }
+  __styleKeys.set(el, Object.keys(value));
+  for (const k of Object.keys(value)) __writeStyle(el.style, k, value[k]);
+}
 
 // The prop keys a construction passes, checked against the definition:
 // `children` is the projection channel and always legal; `__bind_x__`
@@ -1113,20 +1135,7 @@ class __Component {
       else el.className = __clsx(value);
       return;
     }
-    if (key === 'style') {
-      // Replacing a style OBJECT clears the keys the new value omits —
-      // an assign alone leaves the old declarations active. The keys
-      // applied last are remembered per element.
-      const prevKeys = __styleKeys.get(el);
-      if (value == null) { el.removeAttribute('style'); __styleKeys.delete(el); return; }
-      if (typeof value === 'string') { el.setAttribute('style', value); __styleKeys.delete(el); return; }
-      if (typeof value === 'object') {
-        if (prevKeys) for (const k of prevKeys) { if (!(k in value)) el.style[k] = ''; }
-        __styleKeys.set(el, Object.keys(value));
-        Object.assign(el.style, value);
-        return;
-      }
-    }
+    if (key === 'style') { __style(el, value); return; }
     if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
       el[key] = value ?? '';
       return;
@@ -1506,7 +1515,7 @@ class __Component {
 // untouched.
 export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
-  __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
+  __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
   __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff,
   __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,

@@ -104,6 +104,12 @@ describe('dom-types ↔ dom.js lockstep', () => {
     expect(text).not.toContain('htmlFor:');
     // class rides the clsx contract, never a string lookup.
     expect(text).toContain('class: __RipClassValue | __RipClassValue[]');
+    // style takes the declaration vocabulary, never the live object's
+    // interface, and the alias declares beside the surfaces that read it.
+    expect(text).toContain('style: __RipCSSProperties | string');
+    expect(domSurfaceDecls([{ tag: 'circle', svg: true }])).toMatch(/interface __RipSvgAttrVals \{[^}]*\n  style: __RipCSSProperties \| string;/);
+    expect(text).not.toContain("__RipAV<HTMLElement, 'style'>");
+    expect(text).toContain('type __RipCSSProperties = { [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?: K extends __RipUnitless ? string | number : string | 0 } & { [k: `--${string}`]: string | number };');
     // property road strict (no | string): the receiver surface's value/checked.
     expect(text).toContain(`value: __RipProp<HTMLElementTagNameMap['input'], 'value'>`);
     // templates admit data-/aria- on every surface.

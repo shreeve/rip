@@ -30,7 +30,7 @@ import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
-import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE } from './ts/dom-types.js';
+import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
@@ -506,6 +506,7 @@ class Emitter {
     // ref wrap emitted. TS face only.
     this.domSurfaces = new Map();
     this._needsClassValue = false;
+    this._needsCssProperties = false;
     this._needsChildren = false;
     this._restTags = new Set();
     this._needsRefCellHelper = false;
@@ -12331,6 +12332,35 @@ class Emitter {
       }
 
       const isPresence = isNode(value) && value[0] === 'presence' && value.length === 2;
+      // A style OBJECT has no attribute serialization — a browser's
+      // setAttribute stringifies it to `[object Object]` — so `style:`
+      // has its own road, one for every spelling: `__style(el, value)`,
+      // the runtime's one style writer (the rest seam applies through the
+      // same one), which sets a string as the attribute, writes an object
+      // by key while clearing the keys the last object set, and removes
+      // on null. The value checks against the attribute's own type through
+      // the scratch const's annotation (the absence fork's shape), and the
+      // key's hover answers that type from a record, since no instantiated
+      // call stands beside it to read it off.
+      if (key === 'style' && !isPresence) {
+        const recv = this.tsElReceiver(el);
+        const write = () => {
+          this.b.emit('{ const __v');
+          site([this.b.offset - 3, this.b.offset]);
+          if (this.ts) this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['style'] | undefined` : ': any'));
+          this.b.emit(' = ');
+          this.renderExpr(value);
+          this.b.emit(`; ${this.runtimeName('__style')}(`);
+          recv.emit();
+          this.b.emit(', __v); }');
+        };
+        if (this.renderReactive(value)) this.renderEffect(pair, write, value);
+        else this.renderLine(pair, write, false);
+        if (this.ts && recv.surfaced && rec !== null) {
+          this.intrinsics.push({ start: rec.key[0], end: rec.key[1], kind: 'attr', name: key, type: 'string | __RipCSSProperties | undefined' });
+        }
+        continue;
+      }
       // An anchor's `href:` given as a syntactic route literal wraps in
       // `__ripRoute(...)` — TS-only, so the shipping bytes are the
       // untouched value — and checks against the project's route union.
@@ -17443,14 +17473,14 @@ const RUNTIME_TABLE = [
   {
     key: 'components',
     names: ['setContext', 'getContext', 'hasContext', '__Component',
-            '__pushComponent', '__popComponent', '__clsx', '__lis', '__reconcile',
+            '__pushComponent', '__popComponent', '__clsx', '__style', '__lis', '__reconcile',
             '__transition', '__handleComponentError', '__gateBind', '__detach',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     generatedNames: ['setContext', 'getContext', '__Component',
-                     '__pushComponent', '__popComponent', '__clsx', '__reconcile',
+                     '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
                      '__transition', '__gateBind', '__detach', '__ownerFrame', '__pushOwner',
                      '__popOwner', '__detachRef'],
     types: {
@@ -17458,6 +17488,9 @@ const RUNTIME_TABLE = [
       // face's __RipClassValue alias arms alongside it (the tail's
       // domSurfaceDecls emission).
       __clsx: CLSX_TYPE,
+      // The style road's writer — its value parameter is the face's
+      // __RipCSSProperties alias, armed alongside.
+      __style: STYLE_FN_TYPE,
     },
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
@@ -18189,6 +18222,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // alias; the tail emission arms it (declarations hoist, so the
         // tail governs this earlier position).
         if (types !== null && types.includes('__RipClassValue')) emitter._needsClassValue = true;
+        if (types !== null && types.includes('__RipCSSProperties')) emitter._needsCssProperties = true;
         builder.emit(' = ');
         if (types) builder.tsOnly(() => builder.emit('('));
         builder.emit(`(() => {\n${unit.body}\nreturn { ${unit.names.join(', ')} };\n})()`);
@@ -18405,9 +18439,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // declares when a ref wrap emitted. Declarations hoist, so the tail
   // placement governs every earlier cast. TS-only through the
   // recorded region.
-  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
+  if (face === 'ts' && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsCssProperties === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
     const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
       needsClassValue: emitter._needsClassValue === true,
+      needsCssProperties: emitter._needsCssProperties === true,
       needsRefCell: emitter._needsRefCellHelper === true,
       needsChildren: emitter._needsChildren === true,
       // One `__RipRest_<tag>` alias per extends tag the module uses.

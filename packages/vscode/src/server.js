@@ -2991,19 +2991,23 @@ function componentPropsAt(flat, open) {
   const extendsTag = { tag: null };
   const membersOf = (inner) => {
     const out = [];
+    let styleAt = -1;
     for (const raw of splitTypeAt(inner, ';')) {
       const row = raw.trim();
       // The DEFAULT projection slot stays out of the signature — it is the
       // channel every component has, not a prop this one declares — under
       // either spelling of its minted type; a declared `@children: T` shows.
       if (row === '' || row === 'children?: __RipChildren' || row === 'children?: Children' || /^__bind_[\w$]+__\??:/.test(row)) continue;
-      // A passthrough row types through the tag's DOM interface — bare, or
-      // parenthesized where the attribute road widened it (`style`) — and
-      // the two class spellings take the clsx admission; all of them are
-      // the extends surface's, never props this component declares.
+      // A passthrough row types through the tag's DOM interface, the two
+      // class spellings take the clsx admission, and `style` takes the
+      // style-object alias widened by `| string`; all of them are the
+      // extends surface's, never props this component declares. The
+      // style row's shape is one an author could declare, so it folds
+      // only once another row has reported the tag.
       const passthrough = /^(?:"[^"]*"|'[^']*'|[\w$-]+)\??: \(?(?:HTML|SVG)ElementTagNameMap\[["']([\w-]+)["']\] extends Record</.exec(row);
       if (passthrough) { extendsTag.tag = passthrough[1]; continue; }
       if (/^(?:class|className)\??: (?:__RipClassValue \| __RipClassValue\[\]|ClassValue \| ClassValue\[\])$/.test(row)) continue;
+      if (/^style\??: (?:__RipCSSProperties|CSSProperties) \| string$/.test(row)) styleAt = out.length;
       if (/^\[key: `(?:data|aria)-\$\{string\}`\]: any$/.test(row)) continue;
       const colon = row.indexOf(': ');
       let kept = row;
@@ -3017,6 +3021,7 @@ function componentPropsAt(flat, open) {
       // Only a literal with nothing to re-escape converts.
       out.push(kept.replace(/"([^"'\\]*)"/g, "'$1'"));
     }
+    if (styleAt !== -1 && extendsTag.tag !== null) out.splice(styleAt, 1);
     return out;
   };
   // The base block holds every prop in optional spelling; each REQUIRED
@@ -3273,7 +3278,8 @@ connection.onHover(presented('textDocument/hover', async (params) => {
       // ruled interim is silence.
       // A route-checked href carries the route union; it reads in the same
       // display form the diagnostics use (`/orders/:id`, never `${string}`).
-      let type = intr.type === undefined ? null : (intr.route ? prettifyRouteUnion(intr.type, ctx.good.routeEntries) : intr.type);
+      // A style key's record spells the face alias; it reads back under the author's name.
+      let type = intr.type === undefined ? null : (intr.route ? prettifyRouteUnion(intr.type, ctx.good.routeEntries) : scrubFaceArtifacts(intr.type));
       if (type === null && typeof intr.gen === 'number') {
         const flat = await askAt(intr.gen);
         const m = /\(name: "[^"]*", (?:value|force\??): (.+?)\): void/.exec(flat);

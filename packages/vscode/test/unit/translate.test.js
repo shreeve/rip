@@ -377,6 +377,10 @@ describe('TS-face artifact filters', () => {
     // declaration's scalar-first order, undoing tsgo's display flip.
     expect(scrubFaceArtifacts("Type '42' is not assignable to type '__RipClassValue[] | __RipClassValue'."))
       .toBe("Type '42' is not assignable to type 'ClassValue | ClassValue[]'.");
+    // The style-object alias reads back under the name React, Vue, and
+    // Solid share for the same shape.
+    expect(scrubFaceArtifacts('(attribute) style: string | __RipCSSProperties | undefined'))
+      .toBe('(attribute) style: string | CSSProperties | undefined');
     // A schema behavior member reads back under the schema's own name.
     expect(scrubFaceArtifacts('(property) slip: (...args: any[]) => ReturnType<typeof __Parcel__behavior.slip>'))
       .toBe('(property) slip: (...args: any[]) => ReturnType<typeof Parcel.slip>');

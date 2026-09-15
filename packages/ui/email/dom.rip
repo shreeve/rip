@@ -1,5 +1,7 @@
 # Synchronous DOM subset for server-side email rendering.
 
+import { toStyle } from '../shared/styles.rip'
+
 VALID_ELEMENT_NAME =! /^(?:__root|[A-Za-z][A-Za-z0-9:_-]*)$/
 VALID_ATTRIBUTE_NAME =! /^[^\s"'/>=]+$/
 
@@ -122,10 +124,7 @@ export class Element extends Node
       return
     if key is 'style'
       @style = {}
-      if value isnt null and typeof value is 'object'
-        Object.assign @style, value
-      else
-        @_parseStyleString String(value)
+      Object.assign @style, toStyle(if typeof value is 'object' then value else String(value))
     else
       @attributes.set key, String(value)
 
@@ -148,17 +147,6 @@ export class Element extends Node
   addEventListener!: ->
   removeEventListener!: ->
   dispatchEvent: (): boolean -> true
-
-  _parseStyleString!: (source: string) ->
-    for raw in source.split(';')
-      declaration = raw.trim()
-      continue unless declaration
-      colon = declaration.indexOf(':')
-      continue if colon is -1
-      property = declaration.slice(0, colon).trim()
-      value = declaration.slice(colon + 1).trim()
-      camel = property.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
-      @style[camel] = value
 
 export interface Element
   id: string
@@ -272,7 +260,7 @@ styleText = (style: Record<string, any>): string ->
   declarations: string[] = []
   for key, value of style
     continue unless value? and value isnt ''
-    property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"
+    property = key.replace(/[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}").replace(/^webkit-/, '-webkit-')
     declarations.push "#{property}:#{value}"
   declarations.join ';'
 

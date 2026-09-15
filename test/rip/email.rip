@@ -517,3 +517,100 @@ test 'a declared @children with no initializer forwards the content, not its cel
   html = toHTML(E)
   html.includes('<td><p>inside</p></td>') and not html.includes('[object Object]')
 ''', true
+
+test 'a style object serializes numbers as written: bare on unitless properties and as 0', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = email
+  E = component
+    render
+      div style: { lineHeight: 1.4, fontWeight: 700, opacity: 0.5, zIndex: 2, margin: 0, fontSize: '14px' }
+  toHTML(E).includes('<div style="line-height:1.4;font-weight:700;opacity:0.5;z-index:2;margin:0;font-size:14px"')
+''', true
+
+test 'a style object serializes custom properties as written and prefixes webkit keys', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = email
+  E = component
+    render
+      div style: { '--brand': '#0069a8', webkitLineClamp: 2, color: 'var(--brand)' }
+  toHTML(E).includes('<div style="--brand:#0069a8;-webkit-line-clamp:2;color:var(--brand)"')
+''', true
+
+test 'Section takes a style object and splits padding onto its cell by key', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Section } = email
+  E = component
+    render
+      Email
+        Body
+          Section style: { background: '#eee', padding: '20px 8px', borderRadius: '4px', paddingTop: '1px' }
+            p 'x'
+  result = toHTML(E)
+  result.includes('<table style="background:#eee;border-radius:4px" data-part="Section"') and result.includes('<td style="padding:20px 8px;padding-top:1px">')
+''', true
+
+test 'Container takes a style object and keeps the max-width default under the caller', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Container } = email
+  E = component
+    render
+      Email
+        Body
+          Container style: { padding: '32px', maxWidth: '400px' }
+            p 'x'
+  result = toHTML(E)
+  result.includes('<table style="max-width:400px" data-part="Container"') and result.includes('<td style="padding:32px">')
+''', true
+
+test 'Body takes a style object: background on the body element, the box zeroed', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body } = email
+  E = component
+    render
+      Email
+        Body style: { background: '#fafafa', fontFamily: 'Inter', padding: '40px 20px' }
+          p 'x'
+  result = toHTML(E)
+  result.includes('<body style="background:#fafafa;margin:0;padding:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px">')
+''', true
+
+test "a caller's margin beats Text's default margin in both spellings, in the default's position", '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Text } = email
+  E = component
+    render
+      Email
+        Body
+          Text style: { margin: 0, color: '#262626' }
+            'a'
+          Text style: 'margin:0;color:#262626'
+            'b'
+  result = toHTML(E)
+  expected = '<p style="font-size:14px;line-height:24px;margin:0;color:#262626" data-part="Text">'
+  result.split(expected).length is 3
+''', true
+
+test 'Heading merges its margin props under a style object', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Heading } = email
+  E = component
+    render
+      Email
+        Body
+          Heading as: 'h2', mx: '8px', mt: '4px', style: { color: 'red', marginTop: '2px' }
+            'x'
+  toHTML(E).includes('<h2 style="margin-left:8px;margin-right:8px;margin-top:2px;color:red" data-part="EmailHeadingH2">')
+''', true
+
+test 'Button reads its padding from a style object', '''
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body, Button } = email
+  E = component
+    render
+      Email
+        Body
+          Button href: 'https://example.com', style: { padding: '12px 20px', background: '#111' }
+            'Go'
+  result = toHTML(E)
+  result.includes('mso-padding-alt:0px;padding:12px 20px;background:#111"') and result.includes('mso-text-raise:18')
+''', true

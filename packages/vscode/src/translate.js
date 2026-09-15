@@ -1030,6 +1030,7 @@ export function scrubFaceArtifacts(text) {
     // (scalar first; tsgo's display normalization flips it).
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
+    .replace(/\b__RipCSSProperties\b/g, 'CSSProperties')
     // The per-tag rest alias reads as `Rest<tag>` — the tag shorthand's own idiom.
     .replace(/\b__RipRest_([A-Za-z][\w]*)\b/g, 'Rest<$1>')
     // A schema's behavior object is the face's own home for the

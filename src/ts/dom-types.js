@@ -24,6 +24,11 @@
 //   - `class`/`className`: `__RipClassValue` — clsx vocabulary MINUS
 //     `number` (the runtime's __clsx silently drops numbers, so a
 //     number here is a real bug, not a serialization).
+//   - `style`: `__RipCSSProperties | string` — the declaration
+//     vocabulary (lib.dom's CSSStyleProperties less the live object's
+//     own members), camelCased, values raw: the runtime appends no
+//     unit, so a number passes only on the unitless properties and as
+//     0 anywhere.
 //   - `data-*`/`aria-*`: template keys, `string | number | boolean`
 //     (serializable primitives; any suffix is legal by design, so a
 //     misspelled `aria-labl` passes — same admission v3 made).
@@ -91,6 +96,35 @@ const HELPER_DECLS =
   "type __RipAV<E, P extends PropertyKey, F = string> = E extends Record<P, infer V> ? V | string : F;\n" +
   'type __RipProp<E, P extends PropertyKey> = E extends Record<P, infer V> ? V : any;';
 
+// The properties CSS reads as a bare number. Everything else takes a
+// unit, and the runtime writes values as given, so on those a number
+// other than 0 would be an invalid declaration the browser drops.
+export const UNITLESS = [
+  'animationIterationCount', 'aspectRatio', 'borderImageOutset', 'borderImageSlice', 'borderImageWidth',
+  'columnCount', 'columns', 'flex', 'flexGrow', 'flexShrink', 'fontWeight',
+  'gridArea', 'gridColumn', 'gridColumnEnd', 'gridColumnStart', 'gridRow', 'gridRowEnd', 'gridRowStart',
+  'lineHeight', 'opacity', 'order', 'orphans', 'scale', 'tabSize', 'widows', 'zIndex', 'zoom',
+  'fillOpacity', 'floodOpacity', 'stopOpacity', 'strokeDasharray', 'strokeDashoffset', 'strokeMiterlimit', 'strokeOpacity', 'strokeWidth',
+  'webkitLineClamp',
+];
+const unitlessUnion = UNITLESS.map((name) => `'${name}'`).join(' | ');
+// An inline style as an object: lib.dom's declaration vocabulary
+// (CSSStyleProperties less CSSStyleDeclarationBase — the live object's
+// own members, cssText and its kin), camelCased, plus `--custom` keys.
+// The face names the alias (the editor shows it as `CSSProperties`);
+// the declaration road spells the same type inline.
+const cssPropertiesBody = (unitless) =>
+  `{ [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?: K extends ${unitless} ? string | number : string | 0 } & { [k: \`--\${string}\`]: string | number }`;
+export const CSS_PROPERTIES_DECL =
+  `type __RipUnitless = ${unitlessUnion};\n` +
+  '/** An inline style as an object: CSS property names, camelCased, plus `--custom` properties. Values are written as given — no unit is appended — so a number is admitted only where CSS reads one bare: the unitless properties, and 0 anywhere. */\n' +
+  `type __RipCSSProperties = ${cssPropertiesBody('__RipUnitless')};`;
+export const CSS_PROPERTIES_TEXT = `(${cssPropertiesBody(unitlessUnion)})`;
+export const STYLE_TYPE = '__RipCSSProperties | string';
+// The style road's runtime writer, typed for the runtime-destructure
+// assertion: what `style:` admits, plus the absence the road removes on.
+export const STYLE_FN_TYPE = '(el: object, value: __RipCSSProperties | string | null | undefined) => void';
+
 export const CLASS_TYPE = '__RipClassValue | __RipClassValue[]';
 const TEMPLATE_ROWS =
   '  [k: `data-${string}`]: string | number | boolean;\n' +
@@ -118,7 +152,7 @@ export const surfaceableTag = (tag, svg) =>
 // two back against each other.
 function htmlMemberRows(attr, host) {
   const prop = CAMEL[attr] ?? attr;
-  const value = attr === 'class' ? CLASS_TYPE : `__RipAV<${host}, '${prop}'>`;
+  const value = attr === 'class' ? CLASS_TYPE : attr === 'style' ? STYLE_TYPE : `__RipAV<${host}, '${prop}'>`;
   return [`  ${keyText(attr)}: ${value};`];
 }
 
@@ -132,11 +166,12 @@ function globalAttrValsDecl() {
 }
 
 // The SVG shared base — the global + SVG attribute set every SVG tag
-// takes, uniformly `string | number` (class excepted).
+// takes, uniformly `string | number` (class and style excepted: both
+// roads write through the runtime, on either namespace).
 function svgAttrValsDecl() {
   const rows = [];
   for (const attr of new Set([...GLOBAL_ATTRS, ...SVG_ATTRS])) {
-    rows.push(`  ${keyText(attr)}: ${attr === 'class' ? CLASS_TYPE : 'string | number'};`);
+    rows.push(`  ${keyText(attr)}: ${attr === 'class' ? CLASS_TYPE : attr === 'style' ? STYLE_TYPE : 'string | number'};`);
   }
   return `interface __RipSvgAttrVals {\n${rows.join('\n')}\n${TEMPLATE_ROWS}\n}`;
 }
@@ -150,7 +185,7 @@ function attrValsDecl(tag, svg) {
   const rows = [];
   for (const attr of attributeNamesFor(tag)) {
     if (baseNames.has(attr)) continue;
-    if (svg) rows.push(`  ${keyText(attr)}: ${attr === 'class' ? CLASS_TYPE : 'string | number'};`);
+    if (svg) rows.push(`  ${keyText(attr)}: ${attr === 'class' ? CLASS_TYPE : attr === 'style' ? STYLE_TYPE : 'string | number'};`);
     else rows.push(...htmlMemberRows(attr, hostText(tag, svg)));
   }
   const body = rows.length ? `\n${rows.join('\n')}\n` : '';
@@ -192,7 +227,7 @@ function elSurfaceDecl(tag, svg) {
 // `needsClassValue` forces the __RipClassValue alias even with no
 // surfaces (the __clsx types assertion references it wherever the
 // components runtime delivers inline).
-export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
+export function domSurfaceDecls(used, { needsClassValue = false, needsCssProperties = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
   const surfaces = new Map();
   for (const { tag, svg } of used) {
     if (surfaceableTag(tag, svg)) surfaces.set(`${svg ? 'svg:' : ''}${tag}`, { tag, svg: Boolean(svg) });
@@ -200,6 +235,9 @@ export function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = 
   const parts = [];
   if (surfaces.size > 0 || needsClassValue) parts.push(CLASS_VALUE_DECL);
   if (needsChildren) parts.push(CHILDREN_DECL);
+  // Every HTML surface carries the global `style` row, and every rest
+  // alias a `style` member, so the alias declares where either reads it.
+  if (needsCssProperties || [...surfaces.values()].some((s) => !s.svg) || extra.length > 0) parts.push(CSS_PROPERTIES_DECL);
   for (const line of extra) parts.push(line);
   if (surfaces.size > 0) {
     parts.push(HELPER_DECLS);

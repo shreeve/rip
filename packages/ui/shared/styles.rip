@@ -1,18 +1,66 @@
-export joinStyles = (...styles: Array<string | false | null | undefined>): string ->
-  declarations: string[] = []
-  for style in styles
-    declarations.push String(style) if style
-  declarations.join ';'
+# Inline styles as objects: camelCased CSS property names, values written
+# as given. The string form parses into the same shape, so a component
+# merges its defaults under a caller's style by key in either spelling
+# and the DOM serializes the result once.
 
-export withMargin = (options: Record<string, any> = {}): string ->
-  declarations: string[] = []
-  declarations.push("margin:#{options.m}") if options.m?
-  declarations.push("margin-left:#{options.mx}") if options.mx?
-  declarations.push("margin-right:#{options.mx}") if options.mx?
-  declarations.push("margin-top:#{options.my}") if options.my?
-  declarations.push("margin-bottom:#{options.my}") if options.my?
-  declarations.push("margin-top:#{options.mt}") if options.mt?
-  declarations.push("margin-right:#{options.mr}") if options.mr?
-  declarations.push("margin-bottom:#{options.mb}") if options.mb?
-  declarations.push("margin-left:#{options.ml}") if options.ml?
-  declarations.join ';'
+# The properties CSS reads as a bare number. No unit is ever appended, so
+# on every other property a number other than 0 would be an invalid
+# declaration; the type admits it only here.
+export UNITLESS =! [
+  'animationIterationCount', 'aspectRatio', 'borderImageOutset', 'borderImageSlice', 'borderImageWidth',
+  'columnCount', 'columns', 'flex', 'flexGrow', 'flexShrink', 'fontWeight',
+  'gridArea', 'gridColumn', 'gridColumnEnd', 'gridColumnStart', 'gridRow', 'gridRowEnd', 'gridRowStart',
+  'lineHeight', 'opacity', 'order', 'orphans', 'scale', 'tabSize', 'widows', 'zIndex', 'zoom',
+  'fillOpacity', 'floodOpacity', 'stopOpacity', 'strokeDasharray', 'strokeDashoffset', 'strokeMiterlimit', 'strokeOpacity', 'strokeWidth',
+  'webkitLineClamp'
+] as const
+
+export type Unitless = typeof UNITLESS[number]
+
+# lib.dom's declaration vocabulary less the live object's own members
+# (cssText and its kin), plus `--custom` keys. The same type the compiler
+# mints for a native tag's `style`, so an object typed here passes
+# straight through to one.
+export type CSSProperties = { [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?: K extends Unitless ? string | number : string | 0 } & { [key: `--${string}`]: string | number }
+
+export type StyleValue = string | CSSProperties
+
+propertyName = (name: string): string ->
+  return name if name.startsWith('--')
+  name.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
+
+export parseStyle = (source: string): CSSProperties ->
+  style: Record<string, string> = {}
+  for raw in source.split(';')
+    declaration = raw.trim()
+    continue unless declaration
+    colon = declaration.indexOf(':')
+    continue if colon is -1
+    style[propertyName(declaration.slice(0, colon).trim())] = declaration.slice(colon + 1).trim()
+  style as CSSProperties
+
+export toStyle = (style: StyleValue | false | null | undefined): CSSProperties ->
+  return {} unless style
+  return parseStyle(style) if typeof style is 'string'
+  style
+
+# Later arguments win by key; a key keeps the position of its first
+# appearance, which is what the string form's serialization did too.
+export mergeStyles = (...styles: Array<StyleValue | false | null | undefined>): CSSProperties ->
+  merged: CSSProperties = {}
+  for style in styles
+    Object.assign merged, toStyle(style)
+  merged
+
+export withMargin = (options: Record<string, any> = {}): CSSProperties ->
+  style: CSSProperties = {}
+  style.margin = options.m if options.m?
+  style.marginLeft = options.mx if options.mx?
+  style.marginRight = options.mx if options.mx?
+  style.marginTop = options.my if options.my?
+  style.marginBottom = options.my if options.my?
+  style.marginTop = options.mt if options.mt?
+  style.marginRight = options.mr if options.mr?
+  style.marginBottom = options.mb if options.mb?
+  style.marginLeft = options.ml if options.ml?
+  style

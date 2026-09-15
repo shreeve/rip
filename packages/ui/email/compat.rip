@@ -1,5 +1,7 @@
 # Email-client compatibility helpers.
 
+import { parseStyle } from '../shared/styles.rip'
+
 export type Padding =
   paddingTop: number | undefined
   paddingRight: number | undefined
@@ -54,18 +56,7 @@ parsePaddingValue = (value: unknown): Padding ->
 styleObject = (style: unknown): Record<string, unknown> ->
   return {} unless style?
   return style as Record<string, unknown> if typeof style is 'object'
-
-  result: Record<string, unknown> = {}
-  for raw in String(style).split(';')
-    declaration = raw.trim()
-    continue unless declaration
-    colon = declaration.indexOf ':'
-    continue if colon is -1
-    property = declaration.slice(0, colon).trim()
-    value = declaration.slice(colon + 1).trim()
-    camel = property.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
-    result[camel] = value
-  result
+  parseStyle(String(style)) as Record<string, unknown>
 
 export parsePadding = (style: unknown = {}): Padding ->
   source = styleObject style

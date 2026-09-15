@@ -38,7 +38,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor } from '../dom.js';
-import { CAMEL, CLASS_TYPE } from './dom-types.js';
+import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
@@ -683,15 +683,16 @@ export function restPassthroughEntries(tag, road = 'dts') {
     // camel-casing of it) and the runtime applies it through __clsx, so both
     // spellings admit the clsx vocabulary — on the face; the clsx alias is
     // recursive and the declaration road ships no minted names, so a .d.ts
-    // keeps `any` there. `style` is a string or an object at runtime, the
-    // attribute road's admission: the DOM property widened by `| string`.
+    // keeps `any` there. `style` is a string or an object at runtime, and
+    // the object is the declaration vocabulary (dom-types.js): the face
+    // names its alias, the declaration road spells it inline.
     if (attr === 'class') {
       const t = road === 'face' ? CLASS_TYPE : 'any';
       put('class', t); put('className', t);
       continue;
     }
     const prop = CAMEL[attr] ?? attr;
-    const t = !isHtmlTag ? 'any' : attr === 'style' ? `(${guarded('style')}) | string` : guarded(prop);
+    const t = !isHtmlTag ? 'any' : attr === 'style' ? (road === 'face' ? STYLE_TYPE : `${CSS_PROPERTIES_TEXT} | string`) : guarded(prop);
     put(attr, t);
   }
   return out;
@@ -708,7 +709,7 @@ export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g,
 // so a consumer compiled with the language lib alone still resolves
 // every name the file uses; a new DOM global in the minted text joins
 // this list or the consumer's TS2304 is the only gate that sees it.
-export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap'];
+export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap', 'CSSStyleProperties', 'CSSStyleDeclarationBase'];
 
 export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);

@@ -1691,12 +1691,77 @@ code 'static style attribute', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.setAttribute('style', "color: red");
+      { const __v = "color: red"; __style(this._el0, __v); }
       this._el1 = document.createElement('span');
       this._t0 = document.createTextNode("styled");
       this._el1.appendChild(this._t0);
       this._el0.appendChild(this._el1);
       return this._el0;
+    }
+  };
+  '''
+
+code 'static style object takes the style road', '''
+  export A = component
+    render
+      div style: { color: 'red', margin: 0 }
+        span "styled"
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      { const __v = {color: "red", margin: 0}; __style(this._el0, __v); }
+      this._el1 = document.createElement('span');
+      this._t0 = document.createTextNode("styled");
+      this._el1.appendChild(this._t0);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'reactive style object takes the style road in an effect', '''
+  export A = component
+    tone := 'red'
+    render
+      div style: { color: tone }
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+      this.tone = __state("red");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = {color: this.tone.value}; __style(this._el0, __v); } });
+    }
+  };
+  '''
+
+code 'a style value spelled as a name takes the style road, which removes on null', '''
+  export A = component
+    @style?: string | null := null
+    render
+      div style: @style
+  ''', '''
+  export const A = class extends __Component {
+    static __props = ['style'];
+    _init(props) {
+      this.style = __state(props.__bind_style__ ?? props.style ?? null);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = this.style.value; __style(this._el0, __v); } });
     }
   };
   '''

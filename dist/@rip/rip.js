@@ -8654,6 +8654,51 @@ var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its p
 var CLSX_TYPE = "(...args: (__RipClassValue | __RipClassValue[])[]) => string";
 var HELPER_DECLS = `type __RipAV<E, P extends PropertyKey, F = string> = E extends Record<P, infer V> ? V | string : F;
 ` + "type __RipProp<E, P extends PropertyKey> = E extends Record<P, infer V> ? V : any;";
+var UNITLESS = [
+  "animationIterationCount",
+  "aspectRatio",
+  "borderImageOutset",
+  "borderImageSlice",
+  "borderImageWidth",
+  "columnCount",
+  "columns",
+  "flex",
+  "flexGrow",
+  "flexShrink",
+  "fontWeight",
+  "gridArea",
+  "gridColumn",
+  "gridColumnEnd",
+  "gridColumnStart",
+  "gridRow",
+  "gridRowEnd",
+  "gridRowStart",
+  "lineHeight",
+  "opacity",
+  "order",
+  "orphans",
+  "scale",
+  "tabSize",
+  "widows",
+  "zIndex",
+  "zoom",
+  "fillOpacity",
+  "floodOpacity",
+  "stopOpacity",
+  "strokeDasharray",
+  "strokeDashoffset",
+  "strokeMiterlimit",
+  "strokeOpacity",
+  "strokeWidth",
+  "webkitLineClamp"
+];
+var unitlessUnion = UNITLESS.map((name) => `'${name}'`).join(" | ");
+var cssPropertiesBody = (unitless) => `{ [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?: K extends ${unitless} ? string | number : string | 0 } & { [k: \`--\${string}\`]: string | number }`;
+var CSS_PROPERTIES_DECL = `type __RipUnitless = ${unitlessUnion};
+` + "/** An inline style as an object: CSS property names, camelCased, plus `--custom` properties. Values are written as given — no unit is appended — so a number is admitted only where CSS reads one bare: the unitless properties, and 0 anywhere. */\n" + `type __RipCSSProperties = ${cssPropertiesBody("__RipUnitless")};`;
+var CSS_PROPERTIES_TEXT = `(${cssPropertiesBody(unitlessUnion)})`;
+var STYLE_TYPE = "__RipCSSProperties | string";
+var STYLE_FN_TYPE = "(el: object, value: __RipCSSProperties | string | null | undefined) => void";
 var CLASS_TYPE = "__RipClassValue | __RipClassValue[]";
 var TEMPLATE_ROWS = "  [k: `data-${string}`]: string | number | boolean;\n" + "  [k: `aria-${string}`]: string | number | boolean;";
 var keyText = (name) => /^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`;
@@ -8663,7 +8708,7 @@ var hostText = (tag, svg) => `${svg ? "SVGElementTagNameMap" : "HTMLElementTagNa
 var surfaceableTag = (tag, svg) => typeof tag === "string" && (svg ? SVG_TAGS.has(tag) : HTML_TAGS.has(tag));
 function htmlMemberRows(attr, host) {
   const prop = CAMEL[attr] ?? attr;
-  const value = attr === "class" ? CLASS_TYPE : `__RipAV<${host}, '${prop}'>`;
+  const value = attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : `__RipAV<${host}, '${prop}'>`;
   return [`  ${keyText(attr)}: ${value};`];
 }
 function globalAttrValsDecl() {
@@ -8679,7 +8724,7 @@ ${TEMPLATE_ROWS}
 function svgAttrValsDecl() {
   const rows = [];
   for (const attr of new Set([...GLOBAL_ATTRS, ...SVG_ATTRS])) {
-    rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : "string | number"};`);
+    rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : "string | number"};`);
   }
   return `interface __RipSvgAttrVals {
 ${rows.join(`
@@ -8695,7 +8740,7 @@ function attrValsDecl(tag, svg) {
     if (baseNames.has(attr))
       continue;
     if (svg)
-      rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : "string | number"};`);
+      rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : "string | number"};`);
     else
       rows.push(...htmlMemberRows(attr, hostText(tag, svg)));
   }
@@ -8726,7 +8771,7 @@ ${rows.join(`
 `)}
 }`;
 }
-function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
+function domSurfaceDecls(used, { needsClassValue = false, needsCssProperties = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
   const surfaces = new Map;
   for (const { tag, svg } of used) {
     if (surfaceableTag(tag, svg))
@@ -8737,6 +8782,8 @@ function domSurfaceDecls(used, { needsClassValue = false, needsRefCell = false, 
     parts.push(CLASS_VALUE_DECL);
   if (needsChildren)
     parts.push(CHILDREN_DECL);
+  if (needsCssProperties || [...surfaces.values()].some((s) => !s.svg) || extra.length > 0)
+    parts.push(CSS_PROPERTIES_DECL);
   for (const line of extra)
     parts.push(line);
   if (surfaces.size > 0) {
@@ -9090,6 +9137,7 @@ class Emitter {
     this.stashMemberSpans = [];
     this.domSurfaces = new Map;
     this._needsClassValue = false;
+    this._needsCssProperties = false;
     this._needsChildren = false;
     this._restTags = new Set;
     this._needsRefCellHelper = false;
@@ -17743,6 +17791,28 @@ ${this.replayPad}}` : " }");
         continue;
       }
       const isPresence = isNode(value) && value[0] === "presence" && value.length === 2;
+      if (key === "style" && !isPresence) {
+        const recv2 = this.tsElReceiver(el);
+        const write = () => {
+          this.b.emit("{ const __v");
+          site([this.b.offset - 3, this.b.offset]);
+          if (this.ts)
+            this.b.tsOnly(() => this.b.emit(recv2.surfaced ? `: ${recv2.valsName}['style'] | undefined` : ": any"));
+          this.b.emit(" = ");
+          this.renderExpr(value);
+          this.b.emit(`; ${this.runtimeName("__style")}(`);
+          recv2.emit();
+          this.b.emit(", __v); }");
+        };
+        if (this.renderReactive(value))
+          this.renderEffect(pair, write, value);
+        else
+          this.renderLine(pair, write, false);
+        if (this.ts && recv2.surfaced && rec !== null) {
+          this.intrinsics.push({ start: rec.key[0], end: rec.key[1], kind: "attr", name: key, type: "string | __RipCSSProperties | undefined" });
+        }
+        continue;
+      }
       const routeWrap = this.ts && this.routesUnion !== null && key === "href" && this.rstate.tags?.get(el) === "a" && this.isRouteLiteralValue(value);
       if (routeWrap)
         this._needsRouteHelper = true;
@@ -21605,6 +21675,7 @@ var RUNTIME_TABLE = [
       "__pushComponent",
       "__popComponent",
       "__clsx",
+      "__style",
       "__lis",
       "__reconcile",
       "__transition",
@@ -21623,6 +21694,7 @@ var RUNTIME_TABLE = [
       "__pushComponent",
       "__popComponent",
       "__clsx",
+      "__style",
       "__reconcile",
       "__transition",
       "__gateBind",
@@ -21633,7 +21705,8 @@ var RUNTIME_TABLE = [
       "__detachRef"
     ],
     types: {
-      __clsx: CLSX_TYPE
+      __clsx: CLSX_TYPE,
+      __style: STYLE_FN_TYPE
     },
     url: new URL("./runtime/components.js", import.meta.url),
     requires: "reactive",
@@ -22199,6 +22272,8 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
         const types = face === "ts" && unit.types ? `{ ${bindings2.map(({ name }) => `${name}: ${unit.types[name] ?? "any"}`).join("; ")} }` : null;
         if (types !== null && types.includes("__RipClassValue"))
           emitter._needsClassValue = true;
+        if (types !== null && types.includes("__RipCSSProperties"))
+          emitter._needsCssProperties = true;
         builder.emit(" = ");
         if (types)
           builder.tsOnly(() => builder.emit("("));
@@ -22387,9 +22462,10 @@ declare function __ripAmbientStash<T>(v: T): T;
 declare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, "T")}): T;
 `));
   }
-  if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
+  if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsCssProperties === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
     const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
       needsClassValue: emitter._needsClassValue === true,
+      needsCssProperties: emitter._needsCssProperties === true,
       needsRefCell: emitter._needsRefCellHelper === true,
       needsChildren: emitter._needsChildren === true,
       extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, "face")};`)
@@ -25065,6 +25141,7 @@ __export(exports_components, {
   __pushComponent: () => __pushComponent,
   __pushOwner: () => __pushOwner,
   __reconcile: () => __reconcile,
+  __style: () => __style,
   __transition: () => __transition,
   getContext: () => getContext,
   hasContext: () => hasContext,
@@ -25736,6 +25813,36 @@ function __gateBind(self, index) {
   });
 }
 var __styleKeys = new WeakMap;
+function __writeStyle(style, key, value) {
+  if (key.startsWith("--") && typeof style.setProperty === "function") {
+    if (value == null || value === "")
+      style.removeProperty(key);
+    else
+      style.setProperty(key, String(value));
+  } else
+    style[key] = value;
+}
+function __style(el, value) {
+  const prevKeys = __styleKeys.get(el);
+  if (value == null) {
+    el.removeAttribute("style");
+    __styleKeys.delete(el);
+    return;
+  }
+  if (typeof value !== "object") {
+    el.setAttribute("style", String(value));
+    __styleKeys.delete(el);
+    return;
+  }
+  if (prevKeys)
+    for (const k of prevKeys) {
+      if (!(k in value))
+        __writeStyle(el.style, k, "");
+    }
+  __styleKeys.set(el, Object.keys(value));
+  for (const k of Object.keys(value))
+    __writeStyle(el.style, k, value[k]);
+}
 function __splitProps(ctor, props) {
   const declared = ctor.__props ?? [];
   const extendsTag = ctor.__extends ?? null;
@@ -25913,27 +26020,8 @@ class __Component {
       return;
     }
     if (key === "style") {
-      const prevKeys = __styleKeys.get(el);
-      if (value == null) {
-        el.removeAttribute("style");
-        __styleKeys.delete(el);
-        return;
-      }
-      if (typeof value === "string") {
-        el.setAttribute("style", value);
-        __styleKeys.delete(el);
-        return;
-      }
-      if (typeof value === "object") {
-        if (prevKeys)
-          for (const k of prevKeys) {
-            if (!(k in value))
-              el.style[k] = "";
-          }
-        __styleKeys.set(el, Object.keys(value));
-        Object.assign(el.style, value);
-        return;
-      }
+      __style(el, value);
+      return;
     }
     if (key === "innerHTML" || key === "textContent" || key === "innerText") {
       el[key] = value ?? "";
