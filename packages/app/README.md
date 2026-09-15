@@ -305,7 +305,10 @@ Workspace changes. Signature classify selects **patch**, **migrate**, or
 
 - **Patch** — compatible signatures keep the living instance and `:=` / prop
   containers; refresh `~=` bodies and body `~>` effects; rebuild the DOM via
-  `_create`/`_setup` (state-preserving view remount, not surgical morph).
+  `_create`/`_setup` (state-preserving view remount, not surgical morph). The
+  rebuilt view adopts its living children: a construction matching exactly
+  one released child by definition and prop keys keeps that child's instance
+  and state, wired to the new props.
 - **Migrate** — compatible named-state shape change: remount floor with
   intersecting `:=` slots preserved (`__hmrPreserveState`).
 - **Remount** — incompatible shape: replace the narrowest dirty route/layout

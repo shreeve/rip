@@ -45,7 +45,8 @@ On a compatible edit the runtime:
 3. disposes the owner frame (effects and cleanups);
 4. refreshes `~=` bodies and rebinds body `~>` effects
    (`_hmrRefreshComputeds` / `_hmrBindEffects` on hmr builds);
-5. rebuilds the view through `_create` / `_setup`;
+5. rebuilds the view through `_create` / `_setup`, handing living
+   children back to the constructions that match them (below);
 6. reinserts into a **connected** parent (never a spent staging
    `DocumentFragment`);
 7. restores focus, selection, and scroll when recorded — focus by
@@ -56,6 +57,26 @@ On a compatible edit the runtime:
 This matches the competitive bar set by React Fast Refresh: keep state,
 swap implementation, re-render. It is **not** surgical DOM morph
 (morphdom-style node reuse).
+
+**A rebuilt view adopts its living children.** The rebuild constructs
+the parent's children again, and those children are what the developer
+was looking at — the form under an edited page, holding a field error.
+The release does not tear the children down: their unmount calls, from the `_children` cascade or from a
+block's destroy inside the frame disposal, divert into a pool on the
+releasing parent. A construction that matches exactly one pooled child
+— same component definition, same prop keys (bind channels included),
+a signature the patch tier accepts — gets that instance back: released
+the same way (its own children pooled, so adoption recurses), wired to
+the new props the way `_init` read them (a container shares, a plain
+value writes the member, `children` is the new projection, `extends`
+rest is replaced), computeds and effects rebound, and mounted by the
+parent's ordinary create/setup path. `_init` does not re-run, so
+`createMutation` members survive with the `:=` slots. Two pooled
+children of one shape are ambiguous and both construct fresh; a
+construction whose prop keys changed constructs fresh; whatever the
+rebuilt view does not claim drains — unmounted — once its setup
+settles. Order among siblings is never the key: a wrong instance is
+worse than a fresh one.
 
 **Surgical DOM morph is not a goal.** Morph is optional UX polish
 (flicker, caret edge cases). It does not define correctness and does not
@@ -161,7 +182,7 @@ definition, signature, living instances.
 
 | Tier | When | Keeps | Rebuilds |
 |---|---|---|---|
-| **Patch** | Compatible implementation/render | Instance, `:=` / props, plain `_init` members | View + effects/computeds |
+| **Patch** | Compatible implementation/render | Instance, `:=` / props, plain `_init` members, unambiguous living children | View + effects/computeds |
 | **Migrate** | Compatible named-state shape change | Intersecting `:=` slots (diagnostics for kept/added/removed) | New instance on remount floor when patch cannot apply |
 | **Remount** | Incompatible contract / forced dirty chain | Ancestors above the dirty boundary; stash; UI restore | Narrowest dirty route/layout suffix |
 | **Reload** | Graph/runtime cannot isolate safely | Nothing in-page | Full document |
@@ -225,6 +246,13 @@ These are load-bearing invariants, not folklore:
    aria-label, and (by path) the same value — otherwise a sibling that
    alone matches is taken, and nothing is focused when that is
    ambiguous. A wrong field is worse than a lost caret.
+7. **A released child is pooled, never torn down, until the rebuild
+   settles.** Every path that unmounts a child during the parent's
+   release — the `_children` cascade and a block's destroy inside the
+   frame disposal — must divert into the pool, or the child's state is
+   gone before the rebuilt view can claim it. The pool drains at the end
+   of the parent's setup and on any teardown, so a claim can only land
+   during the rebuild and nothing outlives it.
 
 ---
 

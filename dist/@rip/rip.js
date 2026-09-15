@@ -8799,6 +8799,7 @@ var anyArgsOf = () => "";
 var readonlyCastType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
+var routeArgType = () => "string";
 var COMPONENT_FAILURE_TYPE = "";
 var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
@@ -8828,7 +8829,10 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_restHandlers",
   "_inheritedEl",
   "_refCleanups",
-  "_initFailed"
+  "_initFailed",
+  "_hmrOrphans",
+  "_hmrReleasing",
+  "_hmrPropKeys"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
@@ -22380,7 +22384,7 @@ declare function __ripAmbientStash<T>(v: T): T;
   }
   if (emitter._needsRouteHelper === true) {
     builder.tsOnly(() => builder.emit(`
-declare function __ripRoute<const T extends (${emitter.routesUnion})>(s: T): T;
+declare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, "T")}): T;
 `));
   }
   if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
@@ -25281,10 +25285,7 @@ function __hmrRestoreUi(snap) {
     }
   } catch {}
 }
-function __hmrPatch(instance, NewCtor) {
-  if (!instance || !NewCtor) {
-    throw new Error("__hmrPatch requires a living instance and a replacement constructor");
-  }
+function __hmrSwapDefinition(instance, NewCtor) {
   const oldId = instance.constructor?.__hmrId;
   if (typeof oldId === "string" && oldId) {
     __hmrRegistry.get(oldId)?.instances.delete(instance);
@@ -25297,9 +25298,51 @@ function __hmrPatch(instance, NewCtor) {
   });
   __hmrRegisterDefinition(NewCtor);
   __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
+}
+function __hmrPatch(instance, NewCtor) {
+  if (!instance || !NewCtor) {
+    throw new Error("__hmrPatch requires a living instance and a replacement constructor");
+  }
+  const oldId = instance.constructor?.__hmrId;
+  __hmrSwapDefinition(instance, NewCtor);
   instance._hmrRerender();
   __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null });
   return instance;
+}
+function __hmrPropKeys(props) {
+  return Object.keys(props).sort().join(",");
+}
+function __hmrAdopt(ctor, props) {
+  const pool = __currentComponent?._hmrOrphans;
+  if (!pool || pool.length === 0)
+    return null;
+  const id = ctor.__hmrId;
+  if (typeof id !== "string")
+    return null;
+  const keys = __hmrPropKeys(props);
+  let match = null;
+  for (const orphan of pool) {
+    if (orphan._state !== "mounted" || orphan.constructor.__hmrId !== id || orphan._hmrPropKeys !== keys)
+      continue;
+    if (match)
+      return null;
+    match = orphan;
+  }
+  if (!match || __hmrClassify(match.constructor, ctor) !== "patch")
+    return null;
+  pool.splice(pool.indexOf(match), 1);
+  if (match.constructor !== ctor)
+    __hmrSwapDefinition(match, ctor);
+  match._hmrRelease();
+  try {
+    match._hmrApplyProps(props);
+  } catch (error) {
+    match._teardown({ state: "failed", hooks: false, removeDOM: true });
+    throw error;
+  }
+  if (!match._hmrRebind())
+    return null;
+  return match;
 }
 function __hmrMigrateRemount(oldInstance, NewCtor, props = {}) {
   const next = new NewCtor(props);
@@ -25693,9 +25736,35 @@ function __gateBind(self, index) {
   });
 }
 var __styleKeys = new WeakMap;
+function __splitProps(ctor, props) {
+  const declared = ctor.__props ?? [];
+  const extendsTag = ctor.__extends ?? null;
+  let rest = null;
+  for (const key of Object.keys(props)) {
+    if (key === "children")
+      continue;
+    if (key.startsWith("__bind_") && key.endsWith("__")) {
+      const bound = key.slice(7, -2);
+      if (declared.includes(bound))
+        continue;
+      throw new Error(`${ctor.name || "component"}: cannot bind unknown prop '${bound}' — declared ` + `props are [${declared.join(", ")}]`);
+    }
+    if (declared.includes(key))
+      continue;
+    if (extendsTag !== null) {
+      (rest ??= {})[key] = props[key];
+      continue;
+    }
+    throw new Error(`${ctor.name || "component"}: unknown prop '${key}' — declared props are ` + `[${declared.join(", ")}]`);
+  }
+  return rest;
+}
 
 class __Component {
   constructor(props = {}) {
+    const adopted = __hmrAdopt(this.constructor, props);
+    if (adopted)
+      return adopted;
     this._state = "new";
     __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
@@ -25728,29 +25797,12 @@ class __Component {
       this.stash = globalThis.__ripStash;
     if (this.router == null && globalThis.__ripRouter != null)
       this.router = globalThis.__ripRouter;
-    const declared = this.constructor.__props ?? [];
-    const extendsTag = this.constructor.__extends ?? null;
-    let rest = null;
-    for (const key of Object.keys(props)) {
-      if (key === "children")
-        continue;
-      if (key.startsWith("__bind_") && key.endsWith("__")) {
-        const bound = key.slice(7, -2);
-        if (declared.includes(bound))
-          continue;
-        throw new Error(`${this.constructor.name || "component"}: cannot bind unknown prop '${bound}' — declared ` + `props are [${declared.join(", ")}]`);
-      }
-      if (declared.includes(key))
-        continue;
-      if (extendsTag !== null) {
-        (rest ??= {})[key] = props[key];
-        continue;
-      }
-      throw new Error(`${this.constructor.name || "component"}: unknown prop '${key}' — declared props are ` + `[${declared.join(", ")}]`);
-    }
+    const rest = __splitProps(this.constructor, props);
     if ("children" in props)
       this.children = props.children;
-    if (extendsTag !== null) {
+    if (this.constructor.__hmrId)
+      this._hmrPropKeys = __hmrPropKeys(props);
+    if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest = __state(this._rest);
     }
@@ -25960,6 +26012,7 @@ class __Component {
         this.mounted();
       this._state = "mounted";
       __detach(failurePlaceholder);
+      this._hmrDrainOrphans((label, error) => console.error(`[Rip] ${label} error:`, error));
     } catch (error) {
       failure = error;
       failed = true;
@@ -26066,6 +26119,7 @@ class __Component {
       __hmrUnregisterInstance(this);
     this._state = state;
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    this._hmrDrainOrphans(report);
     if (hooks) {
       try {
         if (this.beforeUnmount)
@@ -26095,47 +26149,97 @@ class __Component {
     this._detachDOM(report, removeDOM);
     this._target = null;
   }
-  _hmrRerender() {
-    const name = this.constructor.name || "component";
-    if (this._state !== "mounted") {
-      throw new Error(`${name}: _hmrRerender requires a mounted instance`);
-    }
+  _hmrRelease() {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
-    const target = this._target;
-    const nodes = this._nodes;
-    const first = nodes?.[0] ?? this._root;
-    const insertParent = first?.parentNode ?? null;
-    const insertBefore = nodes?.length ? nodes[nodes.length - 1].nextSibling : this._root ? this._root.nextSibling : null;
     try {
       if (this.beforeUnmount)
         this.beforeUnmount();
     } catch (e) {
       report("beforeUnmount", e);
     }
-    this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    this._hmrOrphans = [];
+    this._hmrReleasing = true;
+    try {
+      this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    } finally {
+      this._hmrReleasing = false;
+    }
     this._detachDOM(report, true);
     this._frame = __ownerFrame({ nested: false });
     this._state = "new";
-    {
-      const prevC = __pushComponent(this);
-      const prevO = __pushOwner(this._frame);
-      try {
-        if (typeof this._hmrRefreshComputeds === "function")
-          this._hmrRefreshComputeds();
-        if (typeof this._hmrBindEffects === "function")
-          this._hmrBindEffects();
-      } catch (e) {
-        __popOwner(prevO);
-        __popComponent(prevC);
-        report("hmr rebind", e);
-        this._failMount(e);
-        return this;
-      }
+  }
+  _hmrRebind() {
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    const prevC = __pushComponent(this);
+    const prevO = __pushOwner(this._frame);
+    try {
+      if (typeof this._hmrRefreshComputeds === "function")
+        this._hmrRefreshComputeds();
+      if (typeof this._hmrBindEffects === "function")
+        this._hmrBindEffects();
+    } catch (e) {
       __popOwner(prevO);
       __popComponent(prevC);
+      report("hmr rebind", e);
+      this._failMount(e);
+      return false;
     }
+    __popOwner(prevO);
+    __popComponent(prevC);
+    return true;
+  }
+  _hmrApplyProps(props) {
+    const rest = __splitProps(this.constructor, props);
+    if ("children" in props)
+      this.children = props.children;
+    for (const name of this.constructor.__props ?? []) {
+      const bindKey = `__bind_${name}__`;
+      if (bindKey in props) {
+        this[name] = props[bindKey];
+        continue;
+      }
+      if (!(name in props))
+        continue;
+      const value = props[name];
+      if (value != null && typeof value === "object" && typeof value.read === "function")
+        this[name] = value;
+      else
+        this._updateProp(name, value);
+    }
+    if (this.constructor.__extends != null) {
+      this._rest = rest ?? {};
+      this.rest.value = this._rest;
+    }
+  }
+  _hmrDrainOrphans(report) {
+    const orphans = this._hmrOrphans;
+    if (!orphans)
+      return;
+    this._hmrOrphans = null;
+    for (const orphan of orphans) {
+      try {
+        orphan.unmount({ removeDOM: true });
+      } catch (e) {
+        report("orphan teardown", e);
+      }
+    }
+  }
+  _hmrRerender() {
+    const name = this.constructor.name || "component";
+    if (this._state !== "mounted") {
+      throw new Error(`${name}: _hmrRerender requires a mounted instance`);
+    }
+    const target = this._target;
+    const nodes = this._nodes;
+    const first = nodes?.[0] ?? this._root;
+    const insertParent = first?.parentNode ?? null;
+    const insertBefore = nodes?.length ? nodes[nodes.length - 1].nextSibling : this._root ? this._root.nextSibling : null;
+    this._hmrRelease();
+    if (!this._hmrRebind())
+      return this;
     if (typeof this._create !== "function") {
       this._state = "mounted";
+      this._hmrDrainOrphans((label, error) => console.error(`[Rip] ${label} error:`, error));
       return this;
     }
     if (!this._mountCreate())
@@ -26187,6 +26291,10 @@ class __Component {
   unmount({ removeDOM = true } = {}) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    if (this._state === "mounted" && this._parent?._hmrReleasing) {
+      this._parent._hmrOrphans.push(this);
+      return;
+    }
     if (this._state === "mounting") {
       throw new Error(`${this.constructor.name || "component"}: cannot unmount while mounting`);
     }

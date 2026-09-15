@@ -41,13 +41,15 @@ import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
 } from './ts/components.js';
 
 // Component member vocabulary — emission owns these sets. The type story
-// in ts/components.js carries the same spellings for categorization;
-// keep both lists identical.
+// in ts/components.js carries the hooks under the same spellings for
+// categorization; keep the two hook lists identical. The runtime fields
+// are the instance slots src/runtime/components.js owns: a member of
+// that name would be overwritten by the runtime.
 const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl',
-  '_refCleanups', '_initFailed',
+  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys',
 ]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);

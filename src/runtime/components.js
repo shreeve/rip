@@ -333,10 +333,9 @@ function __hmrRestoreUi(snap) {
   } catch { /* focus/selection can reject on non-focusable nodes */ }
 }
 
-function __hmrPatch(instance, NewCtor) {
-  if (!instance || !NewCtor) {
-    throw new Error('__hmrPatch requires a living instance and a replacement constructor');
-  }
+// Move a living instance onto a replacement definition: prototype,
+// constructor, and the registry entry it lives under.
+function __hmrSwapDefinition(instance, NewCtor) {
   const oldId = instance.constructor?.__hmrId;
   if (typeof oldId === 'string' && oldId) {
     __hmrRegistry.get(oldId)?.instances.delete(instance);
@@ -347,9 +346,60 @@ function __hmrPatch(instance, NewCtor) {
   });
   __hmrRegisterDefinition(NewCtor);
   __hmrRegistry.get(NewCtor.__hmrId)?.instances.add(instance);
+}
+
+function __hmrPatch(instance, NewCtor) {
+  if (!instance || !NewCtor) {
+    throw new Error('__hmrPatch requires a living instance and a replacement constructor');
+  }
+  const oldId = instance.constructor?.__hmrId;
+  __hmrSwapDefinition(instance, NewCtor);
   instance._hmrRerender();
   __hmrEmit('patch', { id: NewCtor.__hmrId ?? oldId ?? null });
   return instance;
+}
+
+// The shape of a child's construction site: the prop keys it passes,
+// bind channels included. Two constructions with the same definition
+// and the same shape are the same child as far as a rebuilt parent can
+// tell without a key.
+function __hmrPropKeys(props) {
+  return Object.keys(props).sort().join(',');
+}
+
+// A rebuilt parent constructs its children again. A construction that
+// matches exactly one of the parent's released children — same
+// definition, same prop keys, a signature the patch tier accepts —
+// answers that living instance, released and wired to the new props,
+// so its `:=` state and `_init` members survive the parent's refresh.
+// Two released children matching the same construction is ambiguous
+// and constructs fresh: a wrong instance is worse than a fresh one.
+function __hmrAdopt(ctor, props) {
+  const pool = __currentComponent?._hmrOrphans;
+  if (!pool || pool.length === 0) return null;
+  const id = ctor.__hmrId;
+  if (typeof id !== 'string') return null;
+  const keys = __hmrPropKeys(props);
+  let match = null;
+  for (const orphan of pool) {
+    if (orphan._state !== 'mounted' || orphan.constructor.__hmrId !== id || orphan._hmrPropKeys !== keys) continue;
+    if (match) return null;
+    match = orphan;
+  }
+  if (!match || __hmrClassify(match.constructor, ctor) !== 'patch') return null;
+  pool.splice(pool.indexOf(match), 1);
+  if (match.constructor !== ctor) __hmrSwapDefinition(match, ctor);
+  match._hmrRelease();
+  try {
+    match._hmrApplyProps(props);
+  } catch (error) {
+    // The construction site reports it, as it would any construction
+    // failure; the released instance must not linger half-built.
+    match._teardown({ state: 'failed', hooks: false, removeDOM: true });
+    throw error;
+  }
+  if (!match._hmrRebind()) return null;
+  return match;
 }
 
 // Migrate keeps intersecting state on a fresh instance; the app layer
@@ -826,8 +876,48 @@ function __gateBind(self, index) {
 // Last-applied style-object keys per element (the replacement diff).
 const __styleKeys = new WeakMap();
 
+// The prop keys a construction passes, checked against the definition:
+// `children` is the projection channel and always legal; `__bind_x__`
+// carries the shared container the `<=>` channel passes for a DECLARED
+// prop x (_init reads props.__bind_x__ first), and an unknown bind name
+// is loud even under `extends` — __bind_ keys never ride rest. Under
+// `extends <tag>` an undeclared prop is a REST prop forwarded onto the
+// inherited element; anywhere else it is an error. Answers the rest
+// object, null when nothing rode it.
+function __splitProps(ctor, props) {
+  const declared = ctor.__props ?? [];
+  const extendsTag = ctor.__extends ?? null;
+  let rest = null;
+  for (const key of Object.keys(props)) {
+    if (key === 'children') continue;
+    if (key.startsWith('__bind_') && key.endsWith('__')) {
+      const bound = key.slice(7, -2);
+      if (declared.includes(bound)) continue;
+      throw new Error(
+        `${ctor.name || 'component'}: cannot bind unknown prop '${bound}' — declared ` +
+        `props are [${declared.join(', ')}]`,
+      );
+    }
+    if (declared.includes(key)) continue;
+    if (extendsTag !== null) {
+      (rest ??= {})[key] = props[key];
+      continue;
+    }
+    throw new Error(
+      `${ctor.name || 'component'}: unknown prop '${key}' — declared props are ` +
+      `[${declared.join(', ')}]`,
+    );
+  }
+  return rest;
+}
+
 class __Component {
   constructor(props = {}) {
+    // A living child released by its parent's HMR refresh answers the
+    // parent's construction in its place (a constructor returning an
+    // object makes `new` yield that object).
+    const adopted = __hmrAdopt(this.constructor, props);
+    if (adopted) return adopted;
     this._state = 'new';
     // Validate BEFORE any injection: the ambient assignments below put
     // `app`/`router`/`params`/`query` on the instance, and a declared
@@ -874,40 +964,10 @@ class __Component {
     // are navigation state, not app state.
     if (this.stash == null && globalThis.__ripStash != null) this.stash = globalThis.__ripStash;
     if (this.router == null && globalThis.__ripRouter != null) this.router = globalThis.__ripRouter;
-    const declared = this.constructor.__props ?? [];
-    const extendsTag = this.constructor.__extends ?? null;
-    let rest = null;
-    for (const key of Object.keys(props)) {
-      // `children` is the projection channel (the parent's emission
-      // passes the built child DOM; `slot` reads it) — always legal.
-      if (key === 'children') continue;
-      // `__bind_x__` carries the shared container the `<=>` channel
-      // passes for a DECLARED prop x (_init reads props.__bind_x__
-      // first). An unknown bind name is loud even under `extends`:
-      // __bind_ keys never ride rest.
-      if (key.startsWith('__bind_') && key.endsWith('__')) {
-        const bound = key.slice(7, -2);
-        if (declared.includes(bound)) continue;
-        throw new Error(
-          `${this.constructor.name || 'component'}: cannot bind unknown prop '${bound}' — declared ` +
-          `props are [${declared.join(', ')}]`,
-        );
-      }
-      if (declared.includes(key)) continue;
-      // Under `extends <tag>` an undeclared prop is a REST prop — it
-      // forwards onto the inherited element (the declared-props seam
-      // extended, per the runtime seam).
-      if (extendsTag !== null) {
-        (rest ??= {})[key] = props[key];
-        continue;
-      }
-      throw new Error(
-        `${this.constructor.name || 'component'}: unknown prop '${key}' — declared props are ` +
-        `[${declared.join(', ')}]`,
-      );
-    }
+    const rest = __splitProps(this.constructor, props);
     if ('children' in props) this.children = props.children;
-    if (extendsTag !== null) {
+    if (this.constructor.__hmrId) this._hmrPropKeys = __hmrPropKeys(props);
+    if (this.constructor.__extends != null) {
       // The reactive rest view: reads (`@rest.disabled`) track through
       // `this.rest.value`; `_setRestProp` mutates and touches. Set
       // BEFORE _init so member initializers and effects can read it.
@@ -1141,6 +1201,9 @@ class __Component {
       if (this.mounted) this.mounted();
       this._state = 'mounted';
       __detach(failurePlaceholder);
+      // Block children constructed by `_setup` adopt from the pool;
+      // anything the rebuilt view did not claim goes now.
+      this._hmrDrainOrphans((label, error) => console.error(`[Rip] ${label} error:`, error));
     } catch (error) {
       failure = error;
       failed = true;
@@ -1224,6 +1287,7 @@ class __Component {
     if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
     this._state = state;
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    this._hmrDrainOrphans(report);
     if (hooks) {
       try {
         if (this.beforeUnmount) this.beforeUnmount();
@@ -1245,18 +1309,94 @@ class __Component {
     this._detachDOM(report, removeDOM);
     this._target = null;
   }
-  // Patch refresh: dispose owned children and frame effects, keep
-  // instance identity and `_init` state, then rebuild DOM via
-  // `_create`/`_setup` without re-running `_init`. Emitter-minted
+  // The release half of an HMR refresh: the view goes, the instance
+  // and its `_init` state stay, and the instance is back at 'new' with
+  // a fresh owner frame, ready for `_mountCreate`. The children the
+  // view owned are not torn down: their unmount calls — from the
+  // _children cascade, or from a block's destroy inside the frame
+  // disposal — divert into the orphan pool while the release runs, so
+  // the rebuilt view can adopt them (`__hmrAdopt`); whatever it does
+  // not adopt drains once the rebuild settles.
+  _hmrRelease() {
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    try {
+      if (this.beforeUnmount) this.beforeUnmount();
+    } catch (e) { report('beforeUnmount', e); }
+    this._hmrOrphans = [];
+    this._hmrReleasing = true;
+    try {
+      this._dispose(report, (child) => child.unmount({ removeDOM: true }));
+    } finally {
+      this._hmrReleasing = false;
+    }
+    this._detachDOM(report, true);
+    this._frame = __ownerFrame({ nested: false });
+    this._state = 'new';
+  }
+  // Mirror constructor `_init` ownership: refresh computeds and rebind
+  // body effects under the new owner before `_create`. Emitter-minted
   // `_hmrRefreshComputeds` / `_hmrBindEffects` (hmr builds only)
   // refresh derived closures and recreate body effects on the new
   // owner frame — the silent-wrong-math / dead-effect defect class.
+  // False when the rebind failed and the instance was torn down.
+  _hmrRebind() {
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    const prevC = __pushComponent(this);
+    const prevO = __pushOwner(this._frame);
+    try {
+      if (typeof this._hmrRefreshComputeds === 'function') this._hmrRefreshComputeds();
+      if (typeof this._hmrBindEffects === 'function') this._hmrBindEffects();
+    } catch (e) {
+      __popOwner(prevO);
+      __popComponent(prevC);
+      report('hmr rebind', e);
+      this._failMount(e);
+      return false;
+    }
+    __popOwner(prevO);
+    __popComponent(prevC);
+    return true;
+  }
+  // An adopted child takes the rebuilt parent's props the way `_init`
+  // read them: a container (a bind channel, or a bare reactive member
+  // passed as a prop) is shared, a plain value writes the member's
+  // container, `children` is the parent's freshly built projection,
+  // and under `extends` the undeclared props become the rest view.
+  _hmrApplyProps(props) {
+    const rest = __splitProps(this.constructor, props);
+    if ('children' in props) this.children = props.children;
+    for (const name of this.constructor.__props ?? []) {
+      const bindKey = `__bind_${name}__`;
+      if (bindKey in props) {
+        this[name] = props[bindKey];
+        continue;
+      }
+      if (!(name in props)) continue;
+      const value = props[name];
+      if (value != null && typeof value === 'object' && typeof value.read === 'function') this[name] = value;
+      else this._updateProp(name, value);
+    }
+    if (this.constructor.__extends != null) {
+      this._rest = rest ?? {};
+      this.rest.value = this._rest;
+    }
+  }
+  _hmrDrainOrphans(report) {
+    const orphans = this._hmrOrphans;
+    if (!orphans) return;
+    this._hmrOrphans = null;
+    for (const orphan of orphans) {
+      try { orphan.unmount({ removeDOM: true }); } catch (e) { report('orphan teardown', e); }
+    }
+  }
+  // Patch refresh: release the view, keep instance identity and
+  // `_init` state, then rebuild DOM via `_create`/`_setup` without
+  // re-running `_init`.
   _hmrRerender() {
     const name = this.constructor.name || 'component';
     if (this._state !== 'mounted') {
       throw new Error(`${name}: _hmrRerender requires a mounted instance`);
     }
-    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     const target = this._target;
     const nodes = this._nodes;
     const first = nodes?.[0] ?? this._root;
@@ -1265,36 +1405,12 @@ class __Component {
       ? nodes[nodes.length - 1].nextSibling
       : (this._root ? this._root.nextSibling : null);
 
-    try {
-      if (this.beforeUnmount) this.beforeUnmount();
-    } catch (e) { report('beforeUnmount', e); }
-
-    this._dispose(report, (child) => child.unmount({ removeDOM: true }));
-    this._detachDOM(report, true);
-    this._frame = __ownerFrame({ nested: false });
-    this._state = 'new';
-
-    // Mirror constructor `_init` ownership: refresh computeds and
-    // rebind body effects under the new owner before `_create`.
-    {
-      const prevC = __pushComponent(this);
-      const prevO = __pushOwner(this._frame);
-      try {
-        if (typeof this._hmrRefreshComputeds === 'function') this._hmrRefreshComputeds();
-        if (typeof this._hmrBindEffects === 'function') this._hmrBindEffects();
-      } catch (e) {
-        __popOwner(prevO);
-        __popComponent(prevC);
-        report('hmr rebind', e);
-        this._failMount(e);
-        return this;
-      }
-      __popOwner(prevO);
-      __popComponent(prevC);
-    }
+    this._hmrRelease();
+    if (!this._hmrRebind()) return this;
 
     if (typeof this._create !== 'function') {
       this._state = 'mounted';
+      this._hmrDrainOrphans((label, error) => console.error(`[Rip] ${label} error:`, error));
       return this;
     }
     if (!this._mountCreate()) return this;
@@ -1349,6 +1465,10 @@ class __Component {
   }
   unmount({ removeDOM = true } = {}) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (this._state === 'mounted' && this._parent?._hmrReleasing) {
+      this._parent._hmrOrphans.push(this);
+      return;
+    }
     if (this._state === 'mounting') {
       throw new Error(`${this.constructor.name || 'component'}: cannot unmount while mounting`);
     }
