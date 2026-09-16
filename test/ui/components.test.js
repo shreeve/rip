@@ -1877,7 +1877,7 @@ App = component
 });
 
 describe('child components: children and slot', () => {
-  test('indented children build in the parent scope and pass as ONE `children:` prop; several ride a fragment', () => {
+  test('indented children build under the child and land through _setChildren; several ride a fragment', () => {
     const { code } = compile(`Card = component
   render
     div.card
@@ -1888,27 +1888,31 @@ App = component
       p "hello"
       p "world"
 `);
+    expect(code).toContain('new Card({});');
+    expect(code).toContain('{ const __kid = this._inst0._beginProjection(this); try {');
     expect(code).toContain('this._frag2 = document.createDocumentFragment();');
     expect(code).toContain('this._frag2.appendChild(this._el3);');
     expect(code).toContain('this._frag2.appendChild(this._el4);');
-    expect(code).toContain('new Card({ children: this._frag2 });');
-    // ONE children key.
-    expect(code.match(/children:/g)).toHaveLength(1);
+    expect(code).toContain('} finally { this._inst0._endProjection(__kid); } }');
+    expect(code).toContain('this._inst0._setChildren(this._frag2);');
+    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
+    expect(code).not.toContain('children:');
   });
 
   test('a single child passes directly (\'s shape); inline text children keep \'s bytes — no String() wrap, reactive binds live', () => {
     const single = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card "just text"\n').code;
     expect(single).toContain('this._t0 = document.createTextNode("just text");');
-    expect(single).toContain('new Card({ children: this._t0 });');
+    expect(single).toContain('new Card({});');
+    expect(single).toContain('this._inst0._setChildren(this._t0);');
     const live = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  v := 1\n  render\n    Card v\n').code;
     expect(live).toContain("this._t0 = document.createTextNode('');");
     expect(live).toContain('__effect(() => { this._t0.data = this.v.value; });');
-    expect(live).toContain('new Card({ children: this._t0 });');
+    expect(live).toContain('this._inst0._setChildren(this._t0);');
   });
 
   test('mixed inline text + indented children merge into ONE fragment ', () => {
     const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card "inline"\n      p "block"\n');
-    expect(code.match(/children:/g)).toHaveLength(1);
+    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
     expect(code).toContain('document.createDocumentFragment();');
     expect(code).toContain('createTextNode("inline")');
     expect(code).toContain("createElement('p')");
@@ -1918,7 +1922,7 @@ App = component
     const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  v := 1\n  w := 2\n  render\n    Card v, w\n');
     expect(code).toContain('__effect(() => { this._t0.data = this.v.value; });');
     expect(code).toContain('__effect(() => { this._t1.data = this.w.value; });');
-    expect(code.match(/children:/g)).toHaveLength(1);
+    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
   });
 
   test('a bare TEMPLATE-TAG word under a child component is a PROP, and the props type judges it', () => {
@@ -1956,7 +1960,8 @@ App = component
       p "child"
       @save: @onSave
 `);
-    expect(code).toContain('new Card({ title: "t", compact: true, children: this._el2 });');
+    expect(code).toContain('new Card({ title: "t", compact: true });');
+    expect(code).toContain('this._inst0._setChildren(this._el2);');
     expect(code).toContain("addEventListener('save'");
   });
 
@@ -1971,7 +1976,9 @@ App = component
       Kid label: "nested"
 `);
     expect(code).toContain('new Kid({ label: "nested" });');
-    expect(code).toContain('children: this._el3');
+    expect(code).toContain('this._inst0._setChildren(this._el3);');
+    expect(code.indexOf('new Kid(')).toBeGreaterThan(code.indexOf('this._inst0._beginProjection(this)'));
+    expect(code.indexOf('new Kid(')).toBeLessThan(code.indexOf('this._inst0._endProjection(__kid)'));
   });
 
   test('the slot line is \'s exact ternary; factories project through ctx', () => {

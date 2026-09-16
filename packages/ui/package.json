@@ -1,0 +1,22 @@
+{
+  "name": "@rip/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unstyled, composable UI components built on native browser features.",
+  "exports": {
+    ".": "./ui.rip"
+  },
+  "scripts": {
+    "test": "playwright test --config test/browser/playwright.config.mjs",
+    "demo": "rip sites run demo"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "ui.rip",
+    "dialog.rip",
+    "README.md"
+  ]
+}

@@ -28,13 +28,10 @@ publish story.
   header pins, Manager watch defaults, appliance distribution, Cart
   cleanups). Process workers, control-plane registration, watch
   publication, and the structured startup report are already shipped.
-- **UI** — `rip/ui` is headless compound components on the platform's
-  own machinery, opening with `Dialog`
+- **UI** — `rip/ui` ships `Dialog`
   ([RFC 1](RFCS.md#rfc-1-split-ripui-into-headless-components-and-ripemail)).
-  It waits on the compiler: a part projected through `slot` is
-  constructed by the page before the root that offers its state, so
-  `accept` cannot reach it. Projected children must be constructed
-  under the receiving component before the package lands.
+  The next component lands when the medlabs screen that needs it has
+  used its API; `Popover` rules the `closedby` support floor.
 
 ## Browser delivery
 

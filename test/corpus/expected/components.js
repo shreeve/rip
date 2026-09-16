@@ -672,21 +672,26 @@ let Holder = class extends __Component {
   _init(props) {
   }
   _create() {
-    this._el2 = document.createElement('p');
-    this._t0 = document.createTextNode("projected");
-    this._el2.appendChild(this._t0);
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst0 = new Frame({ children: this._el2 });
+    this._inst0 = new Frame({});
     if (this._inst0 && this._inst0._initFailed) {
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-init-failed: Frame');
-    } else if (this._inst0._mountCreate()) {
+    } else {
+    { const __kid = this._inst0._beginProjection(this); try {
+    this._el2 = document.createElement('p');
+    this._t0 = document.createTextNode("projected");
+    this._el2.appendChild(this._t0);
+    } finally { this._inst0._endProjection(__kid); } }
+    this._inst0._setChildren(this._el2);
+    if (this._inst0._mountCreate()) {
       this._el1 = this._inst0._root;
       (this._children || (this._children = [])).push(this._inst0);
     } else {
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-error: Frame');
+    }
     }
     } catch (__childErr) {
       console.error('[Rip] Frame construction failed:', __childErr);

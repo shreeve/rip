@@ -145,8 +145,10 @@ test('the shipped compiler imports no package — src/ and bin/ carry only relat
   expect(violations, `the compiler source imports a package:\n${violations.join('\n')}`).toEqual([]);
 });
 
-test('packages/email declares no dependencies', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/email/package.json'), 'utf8'));
+// rip/ui's browser specs share the Playwright that test/browser installs
+// and declare nothing of their own.
+test.each(['email', 'ui'])('packages/%s declares no dependencies', (name) => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, `../../packages/${name}/package.json`), 'utf8'));
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }

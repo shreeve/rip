@@ -218,8 +218,8 @@ const planLanes = () => {
 // tsgo absent (the guardrails refuse first, but that closes one
 // instance, not the class).
 //
-// Both runners end with a count, so require one and require it to be
-// positive. This is the only thing here that reads a lane's output, and
+// All three runners end with a count, so require one and require it to
+// be positive. This is the only thing here that reads a lane's output, and
 // a lane that prints no count at all is a failure too: silence is the
 // state being ruled out, so it cannot be the state that passes.
 //
@@ -230,8 +230,9 @@ const planLanes = () => {
 // /m, whose ^ also matches after a bare carriage return, where a
 // redrawn progress line would count as a run.
 const TEST_COUNTS = [
-  /(?:^|\n)Ran (\d+) tests?\b/g, // bun test
-  /(?:^|\n)(\d+) tests?:/g,      // rip test (rip/testing)
+  /(?:^|\n)Ran (\d+) tests?\b/g,   // bun test
+  /(?:^|\n)(\d+) tests?:/g,        // rip test (rip/testing)
+  /(?:^|\n) *(\d+) passed \(/g,    // playwright test (packages/ui)
 ];
 // Strip CSI / OSC so painted tallies still match the count regexes.
 const stripAnsi = (s) => s.replace(/\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, '');

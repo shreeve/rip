@@ -1,0 +1,3 @@
+export default
+  name: 'ui'
+  hosts: ['ui.local', 'ui.via.rip']

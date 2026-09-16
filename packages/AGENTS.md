@@ -125,6 +125,7 @@ one-file mold trees. Prefer the package README (and any package-local
 | `sites` | System edge / manager / workers / demos — see [docs/SERVER.md](../docs/SERVER.md) |
 | `app` | Multi-module application substrate (`index.rip` + surface modules, `test/`) |
 | `email` | Library beside its CLI and the CLI's preview app (`preview/`), a host-heavy `test/` |
+| `ui` | One file per component behind the entry, beside its demo app (`demo/`) and the real-browser specs that drive it (`test/browser/`) |
 | `tray` | Rip provider + macOS SwiftUI host (`macos/`) |
 | `ai` | MCP server entry plus `lib/` |
 | `highlight` | Single highlight.js grammar module (`.js` entry, not `.rip`) |

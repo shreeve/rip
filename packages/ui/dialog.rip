@@ -1,0 +1,83 @@
+counter = 0
+mint = (part: string): string ->
+  counter += 1
+  "rip-dialog-#{part}-#{counter}"
+
+# A boolean reaches setAttribute as is, so `false` is present as "false";
+# presence and absence are spelled here.
+flag = (present: boolean): string | undefined -> if present then '' else undefined
+
+export Dialog = component
+  offer @open := false
+  offer labelledBy := ''
+  offer describedBy := ''
+  render
+    slot
+
+export DialogTrigger = component extends button
+  accept open
+  render
+    button
+      type: 'button'
+      aria-haspopup: 'dialog'
+      aria-expanded: (if open then 'true' else 'false')
+      data-popup-open: flag(open)
+      @click: (-> open = true)
+      slot
+
+# showModal needs a connected element and a mount builds the subtree
+# before attaching it, so an initially open dialog opens on the next
+# microtask.
+export DialogPopup = component extends dialog
+  accept open
+  accept labelledBy
+  accept describedBy
+  el: HTMLDialogElement | null := null
+  ~>
+    dialog = el
+    return unless dialog
+    if open
+      return if dialog.open
+      show = -> dialog.showModal() if open and not dialog.open and dialog.isConnected
+      if dialog.isConnected then show() else queueMicrotask show
+    else
+      dialog.close() if dialog.open
+  render
+    dialog
+      ref: el
+      data-open: flag(open)
+      data-closed: flag(not open)
+      aria-labelledby: (labelledBy or undefined)
+      aria-describedby: (describedBy or undefined)
+      @close: (-> open = false)
+      slot
+
+export DialogTitle = component extends h2
+  accept labelledBy
+  minted =! mint('title')
+  id ~= @rest.id ?? minted
+  ~>
+    labelledBy = id
+    -> labelledBy = ''
+  render
+    h2 id: id
+      slot
+
+export DialogDescription = component extends p
+  accept describedBy
+  minted =! mint('description')
+  id ~= @rest.id ?? minted
+  ~>
+    describedBy = id
+    -> describedBy = ''
+  render
+    p id: id
+      slot
+
+export DialogClose = component extends button
+  accept open
+  render
+    button
+      type: 'button'
+      @click: (-> open = false)
+      slot

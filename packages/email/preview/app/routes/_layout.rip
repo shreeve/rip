@@ -37,7 +37,10 @@ export Layout = component
             for template in templates
               a
                 href: "/#{template.path}"
-                class: 'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
+                class: [
+                  'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary'
+                  'hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
+                ]
                 template.path
       main class: 'grid grid-rows-[auto_1fr] overflow-hidden'
         if error

@@ -560,6 +560,65 @@ test 'setContext and getContext via effect', '''
   result
 ''', 'dark'
 
+test 'a part projected through slot accepts what the receiving root offers', '''
+    mkDoc = ->
+      mk = (tag) ->
+        n = { tag, childNodes: [], parentNode: null, nodeType: (if tag is '#comment' then 8 else 1), _connected: false }
+        n.appendChild = (c) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          n.childNodes.push c
+          c
+        n.insertBefore = (c, ref) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          i = if ref? then n.childNodes.indexOf(ref) else -1
+          if i >= 0 then n.childNodes.splice(i, 0, c) else n.childNodes.push c
+          c
+        n.removeChild = (c) ->
+          i = n.childNodes.indexOf c
+          n.childNodes.splice(i, 1) if i >= 0
+          c.parentNode = null
+          c
+        n.remove = -> n.parentNode.removeChild(n) if n.parentNode
+        n.setAttribute = (k, v) -> n.attrs = (n.attrs or {}); n.attrs[k] = v
+        n.removeAttribute = (k) -> delete n.attrs[k] if n.attrs
+        n
+      { createElement: mk, createComment: (-> mk('#comment')), createTextNode: (-> mk('#text')) }
+    globalThis.document = mkDoc()
+    globalThis.Node = Object
+
+    seen = []
+    Part = component
+      accept open
+      ~> seen.push open
+      render
+        span
+    Other = component
+      accept open
+      ~> seen.push open
+      render
+        em
+    Root = component
+      offer @open := true
+      render
+        slot
+    Page = component
+      render
+        Root
+          Part
+          Other
+    root = document.createElement('root')
+    root._connected = true
+    globalThis.document.createDocumentFragment = -> mkDoc().createElement('#fragment')
+    page = Page.new()
+    page.mount(root)
+    part = page._children.find (c) -> c instanceof Part
+    other = page._children.find (c) -> c instanceof Other
+    receiver = page._children.find (c) -> c instanceof Root
+    "#{seen.join(',')}/#{part._parent is receiver and other._parent is receiver}/#{part._owner is page and other._owner is page}/#{receiver._parent is page}"
+''', 'true,true/true/true/true'
+
 test 'offer and accept share the same signal', '''
   result = null
   Child = component
@@ -3510,19 +3569,24 @@ code 'a member named slot under a child component keeps its text reading', '''
       this.slot = "text";
     }
     _create() {
-      this._t0 = document.createTextNode(this.slot);
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst0 = new Section({ children: this._t0 });
+      this._inst0 = new Section({  });
       if (this._inst0 && this._inst0._initFailed) {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Section');
-      } else if (this._inst0._mountCreate()) {
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._t0 = document.createTextNode(this.slot);
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._t0);
+      if (this._inst0._mountCreate()) {
         this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
       } else {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Section');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Section construction failed:', __childErr);
@@ -4092,21 +4156,26 @@ code 'child component with children (slot)', '''
     _init(props) {
     }
     _create() {
-      this._el2 = document.createElement('span');
-      this._t0 = document.createTextNode("slot content");
-      this._el2.appendChild(this._t0);
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst0 = new Child({ children: this._el2 });
+      this._inst0 = new Child({  });
       if (this._inst0 && this._inst0._initFailed) {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Child');
-      } else if (this._inst0._mountCreate()) {
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._el2 = document.createElement('span');
+      this._t0 = document.createTextNode("slot content");
+      this._el2.appendChild(this._t0);
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._el2);
+      if (this._inst0._mountCreate()) {
         this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
       } else {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Child');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
@@ -4149,21 +4218,26 @@ code 'child component with props and children', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      this._el3 = document.createElement('span');
-      this._t0 = document.createTextNode("child content");
-      this._el3.appendChild(this._t0);
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst1 = new Child({ label: "hello", children: this._el3 });
+      this._inst1 = new Child({ label: "hello" });
       if (this._inst1 && this._inst1._initFailed) {
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else if (this._inst1._mountCreate()) {
+      } else {
+      { const __kid = this._inst1._beginProjection(this); try {
+      this._el3 = document.createElement('span');
+      this._t0 = document.createTextNode("child content");
+      this._el3.appendChild(this._t0);
+      } finally { this._inst1._endProjection(__kid); } }
+      this._inst1._setChildren(this._el3);
+      if (this._inst1._mountCreate()) {
         this._el2 = this._inst1._root;
         (this._children || (this._children = [])).push(this._inst1);
       } else {
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
@@ -4253,19 +4327,24 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
     _init(props) {
     }
     _create() {
-      this._t0 = document.createTextNode("Save");
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst0 = new Btn({ outline: true, ghost: true, children: this._t0 });
+      this._inst0 = new Btn({ outline: true, ghost: true });
       if (this._inst0 && this._inst0._initFailed) {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else if (this._inst0._mountCreate()) {
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._t0 = document.createTextNode("Save");
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._t0);
+      if (this._inst0._mountCreate()) {
         this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
       } else {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
@@ -4304,19 +4383,24 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
     _init(props) {
     }
     _create() {
-      this._t0 = document.createTextNode("Save");
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst0 = new Btn({ outline: true, ghost: true, variant: "secondary", children: this._t0 });
+      this._inst0 = new Btn({ outline: true, ghost: true, variant: "secondary" });
       if (this._inst0 && this._inst0._initFailed) {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else if (this._inst0._mountCreate()) {
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._t0 = document.createTextNode("Save");
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._t0);
+      if (this._inst0._mountCreate()) {
         this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
       } else {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
@@ -4356,19 +4440,24 @@ code 'boolean prop shorthand — explicit value still wins', '''
     _init(props) {
     }
     _create() {
-      this._t0 = document.createTextNode("X");
       { const __prev = __pushComponent(this); try {
       try {
-      this._inst0 = new Btn({ outline: false, children: this._t0 });
+      this._inst0 = new Btn({ outline: false });
       if (this._inst0 && this._inst0._initFailed) {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else if (this._inst0._mountCreate()) {
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._t0 = document.createTextNode("X");
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._t0);
+      if (this._inst0._mountCreate()) {
         this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
       } else {
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
+      }
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);

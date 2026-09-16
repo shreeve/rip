@@ -1,0 +1,29 @@
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { rash } from 'rip/app/rash'
+import { assembleRipBundle } from '../../../sites/bundle.rip'
+
+ROOT = join(import.meta.dir, '..', '..', '..', '..')
+APP = join(import.meta.dir, '..', '..', 'demo', 'app')
+
+bundle = ->
+  modules = {}
+  modules[path] = readFileSync(join(APP, path), 'utf8') for path in Bun.Glob.new('**/*.rip').scanSync(APP)
+  list = assembleRipBundle { modules, packagesDir: join(ROOT, 'packages') }
+  { hash: rash(TextEncoder.new().encode(JSON.stringify(list))), list }
+
+# The page boots with watch on, so the hub is answered and never speaks:
+# a save shows on reload here, and live under the edge.
+Bun.serve
+  port: Number(process.env.PORT ?? 4180)
+  fetch: (request, server) ->
+    path = URL.new(request.url).pathname
+    return Response.json(bundle()) if path is '/bundle.json'
+    return Response.json({ hash: bundle().hash }) if path is '/latest.json'
+    return (if server.upgrade(request) then undefined else Response.new('', status: 400)) if path is '/hub'
+    file = Bun.file join((if path.startsWith('/@rip/') then join(ROOT, 'dist') else APP), path)
+    Response.new(if file.exists! then file else Bun.file(join(APP, 'index.html')))
+  websocket:
+    message: (socket, text) ->
+      token = (try JSON.parse(String(text)) catch then null)?['?']
+      socket.send JSON.stringify({ '!': token }) if typeof token is 'string'

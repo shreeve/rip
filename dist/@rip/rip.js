@@ -9208,6 +9208,7 @@ class Emitter {
     this._componentName = null;
     this.moduleBound = new Set;
     this.renderSelf = null;
+    this.projectionHost = null;
   }
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
@@ -17243,6 +17244,7 @@ ${pad ?? ""}`);
       }
       return t;
     };
+    let projection = null;
     const renderables = domItems.filter((a) => !this.isRenderBinding(a));
     if (renderables.length === 1 && forwardSlot) {
       declareKey("children", null, "slot");
@@ -17254,23 +17256,27 @@ ${pad ?? ""}`);
       props.push({ pair: null, key: "children", fn: () => this.emitChildrenRead(slotSpan) });
     } else if (renderables.length === 1) {
       declareKey("children", null, "body");
-      let childrenVar = null;
-      for (const arg of domItems) {
-        const v = buildChild(arg);
-        if (v != null)
-          childrenVar = v;
-      }
-      props.push({ pair: null, key: "children", fn: () => this.b.emit(childrenVar) });
+      projection = () => {
+        let childrenVar = null;
+        for (const arg of domItems) {
+          const v = buildChild(arg);
+          if (v != null)
+            childrenVar = v;
+        }
+        return childrenVar;
+      };
     } else if (renderables.length > 1) {
       declareKey("children", null, "body");
-      const frag = this.newRenderVar("frag");
-      this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
-      for (const arg of domItems) {
-        const v = buildChild(arg);
-        if (v != null)
-          this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${v})`));
-      }
-      props.push({ pair: null, key: "children", fn: () => this.b.emit(frag) });
+      projection = () => {
+        const frag = this.newRenderVar("frag");
+        this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
+        for (const arg of domItems) {
+          const v = buildChild(arg);
+          if (v != null)
+            this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${v})`));
+        }
+        return frag;
+      };
     } else {
       for (const arg of domItems)
         buildChild(arg);
@@ -17282,12 +17288,14 @@ ${pad ?? ""}`);
     if (isNode(node))
       Emitter.collectLeafNames(node, used);
     const prevV = Emitter.mintName("__prev", used);
+    const kidV = Emitter.mintName("__kid", used);
     const errV = Emitter.mintName("__childErr", used);
     if (rec.kind !== "class")
       rec.hasKids = true;
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? "this";
-    line(() => this.b.emit(`{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
+    const host = this.projectionHost;
+    line(() => this.b.emit(host !== null ? `{ const ${prevV} = ${host}._beginProjection(${self()}); try {` : `{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
     line(() => this.b.emit("try {"));
     line(() => {
       this.b.emit(`${instVar} = new `);
@@ -17367,8 +17375,22 @@ ${this.replayPad}}` : " }");
     line(() => this.b.emit(`if (${instVar} && ${instVar}._initFailed) {`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-init-failed: ${name}');`));
+    if (projection !== null) {
+      line(() => this.b.emit("} else {"));
+      line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
+      const outerHost = this.projectionHost;
+      this.projectionHost = instVar;
+      let childrenVar;
+      try {
+        childrenVar = projection();
+      } finally {
+        this.projectionHost = outerHost;
+      }
+      line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
+      line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
+    }
     line(() => {
-      this.b.emit(`} else if (`);
+      this.b.emit(projection !== null ? "if (" : "} else if (");
       const emitCreate = () => this.b.emit(`${instVar}._mountCreate()`);
       if (markNode !== null)
         this.mark(markNode, "$self", emitCreate);
@@ -17386,12 +17408,14 @@ ${this.replayPad}}` : " }");
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit("}"));
+    if (projection !== null)
+      line(() => this.b.emit("}"));
     line(() => this.b.emit(`} catch (${errV}) {`));
     line(() => this.b.emit(`  console.error('[Rip] ${name} construction failed:', ${errV});`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit("}"));
-    line(() => this.b.emit(`} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
+    line(() => this.b.emit(host !== null ? `} finally { ${host}._endProjection(${prevV}); } }` : `} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
     for (const { pair, event, value } of eventBindings) {
       if (this.ts) {
         const keyNode = isNode(pair) && isNode(pair[1]) ? pair[1] : null;
@@ -25395,7 +25419,8 @@ function __hmrPropKeys(props) {
   return Object.keys(props).sort().join(",");
 }
 function __hmrAdopt(ctor, props) {
-  const pool = __currentComponent?._hmrOrphans;
+  const host = __currentComponent?._projectionOwner ?? __currentComponent;
+  const pool = host?._hmrOrphans;
   if (!pool || pool.length === 0)
     return null;
   const id = ctor.__hmrId;
@@ -25422,8 +25447,7 @@ function __hmrAdopt(ctor, props) {
     match._teardown({ state: "failed", hooks: false, removeDOM: true });
     throw error;
   }
-  if (!match._hmrRebind())
-    return null;
+  match._hmrRebindPending = true;
   return match;
 }
 function __hmrMigrateRemount(oldInstance, NewCtor, props = {}) {
@@ -25878,6 +25902,7 @@ class __Component {
     if (adopted)
       return adopted;
     this._state = "new";
+    this._owner = __currentComponent?._projectionOwner ?? __currentComponent ?? null;
     __checkDeclaredProps(this.constructor, this);
     const gates = this.constructor.__gates;
     const mount = __pendingGateConstruction;
@@ -25937,6 +25962,23 @@ class __Component {
       __hmrRegisterInstance(this);
   }
   _init(props) {}
+  _beginProjection(owner) {
+    const prev = __pushComponent(this);
+    this._projectionOwner = owner;
+    return prev;
+  }
+  _endProjection(prev) {
+    this._projectionOwner = null;
+    __popComponent(prev);
+  }
+  _setChildren(value) {
+    const current = this.children;
+    if (current != null && typeof current === "object" && typeof current.read === "function" && "value" in current) {
+      current.value = value;
+      return;
+    }
+    this.children = value;
+  }
   _updateProp(name, value) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
@@ -26065,6 +26107,11 @@ class __Component {
   }
   _mountCreate() {
     this._beginMount();
+    if (this._hmrRebindPending) {
+      this._hmrRebindPending = false;
+      if (!this._hmrRebind())
+        return false;
+    }
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
     let failure = null;
@@ -26384,8 +26431,8 @@ class __Component {
   unmount({ removeDOM = true } = {}) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
-    if (this._state === "mounted" && this._parent?._hmrReleasing) {
-      this._parent._hmrOrphans.push(this);
+    if (this._state === "mounted" && this._owner?._hmrReleasing) {
+      this._owner._hmrOrphans.push(this);
       return;
     }
     if (this._state === "mounting") {

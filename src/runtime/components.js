@@ -2,8 +2,10 @@
 // the component stack, context, and the render-DSL helpers.
 //
 //   __Component               - the base class (props/mount/unmount/emit;
-//                               `children` rides every constructor for
-//                               slot projection, `__bind_x__` keys carry
+//                               an explicit `children:` prop rides the
+//                               constructor and a body projection lands
+//                               through _setChildren, built under the
+//                               instance; `__bind_x__` keys carry
 //                               shared containers for declared props,
 //                               and `static __extends` opens the rest
 //                               seam — undeclared props collect into the
@@ -375,7 +377,10 @@ function __hmrPropKeys(props) {
 // Two released children matching the same construction is ambiguous
 // and constructs fresh: a wrong instance is worse than a fresh one.
 function __hmrAdopt(ctor, props) {
-  const pool = __currentComponent?._hmrOrphans;
+  // A construction inside a projection is registered by the projection's
+  // owner, so the owner's pool is where its released twin waits.
+  const host = __currentComponent?._projectionOwner ?? __currentComponent;
+  const pool = host?._hmrOrphans;
   if (!pool || pool.length === 0) return null;
   const id = ctor.__hmrId;
   if (typeof id !== 'string') return null;
@@ -398,7 +403,10 @@ function __hmrAdopt(ctor, props) {
     match._teardown({ state: 'failed', hooks: false, removeDOM: true });
     throw error;
   }
-  if (!match._hmrRebind()) return null;
+  // Rebinding waits for _mountCreate: the parent assigns the rebuilt
+  // projection between construction and mount, and refreshed computeds
+  // must see it.
+  match._hmrRebindPending = true;
   return match;
 }
 
@@ -941,6 +949,11 @@ class __Component {
     const adopted = __hmrAdopt(this.constructor, props);
     if (adopted) return adopted;
     this._state = 'new';
+    // The component whose render block built this construction: it
+    // registers the instance, its release pools it, and its rebuild
+    // adopts it. Inside a projection that is the projection's owner,
+    // not the receiver the parent chain runs through.
+    this._owner = __currentComponent?._projectionOwner ?? __currentComponent ?? null;
     // Validate BEFORE any injection: the ambient assignments below put
     // `app`/`router`/`params`/`query` on the instance, and a declared
     // prop of the same name is supported shadowing (the emitter and
@@ -1022,6 +1035,28 @@ class __Component {
   // argument-less base would make every override an invalid
   // override, TS2416).
   _init(props) {}
+  // Parts constructed inside the projection get this instance as their
+  // parent and `owner` as their owner. Each part's own construction opens
+  // the projection again, so the end restores what it found.
+  _beginProjection(owner) {
+    const token = { prev: __pushComponent(this), owner: this._projectionOwner ?? null };
+    this._projectionOwner = owner;
+    return token;
+  }
+  _endProjection(token) {
+    this._projectionOwner = token.owner;
+    __popComponent(token.prev);
+  }
+  // A declared reactive `children` prop already holds a container;
+  // the projection goes into it, never over it.
+  _setChildren(value) {
+    const current = this.children;
+    if (current != null && typeof current === 'object' && typeof current.read === 'function' && 'value' in current) {
+      current.value = value;
+      return;
+    }
+    this.children = value;
+  }
   // The first-class prop updater: the child
   // emission's prop-updater effects call this instead of guessing at
   // member shapes. A signal-shaped member takes the .value write; a
@@ -1175,6 +1210,10 @@ class __Component {
   }
   _mountCreate() {
     this._beginMount();
+    if (this._hmrRebindPending) {
+      this._hmrRebindPending = false;
+      if (!this._hmrRebind()) return false;
+    }
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
     let failure = null;
@@ -1474,8 +1513,8 @@ class __Component {
   }
   unmount({ removeDOM = true } = {}) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
-    if (this._state === 'mounted' && this._parent?._hmrReleasing) {
-      this._parent._hmrOrphans.push(this);
+    if (this._state === 'mounted' && this._owner?._hmrReleasing) {
+      this._owner._hmrOrphans.push(this);
       return;
     }
     if (this._state === 'mounting') {

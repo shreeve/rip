@@ -829,6 +829,7 @@ class Emitter {
     // parameter (the factory methods are called unbound — `this` there
     // is the block handle, never the instance).
     this.renderSelf = null;
+    this.projectionHost = null;
   }
 
   // ── Reactive declarations ──────────────────────────────────
@@ -11577,6 +11578,10 @@ class Emitter {
       }
       return t;
     };
+    // A body projection is built after the instance exists and under
+    // it, so a part constructed inside it has the receiver on its
+    // parent chain; the emitting component stays its owner.
+    let projection = null;
     const renderables = domItems.filter((a) => !this.isRenderBinding(a));
     if (renderables.length === 1 && forwardSlot) {
       // The forward: `Section` + nested `slot` is `Section children:
@@ -11589,21 +11594,25 @@ class Emitter {
       props.push({ pair: null, key: 'children', fn: () => this.emitChildrenRead(slotSpan) });
     } else if (renderables.length === 1) {
       declareKey('children', null, 'body');
-      let childrenVar = null;
-      for (const arg of domItems) {
-        const v = buildChild(arg);
-        if (v != null) childrenVar = v;
-      }
-      props.push({ pair: null, key: 'children', fn: () => this.b.emit(childrenVar) });
+      projection = () => {
+        let childrenVar = null;
+        for (const arg of domItems) {
+          const v = buildChild(arg);
+          if (v != null) childrenVar = v;
+        }
+        return childrenVar;
+      };
     } else if (renderables.length > 1) {
       declareKey('children', null, 'body');
-      const frag = this.newRenderVar('frag');
-      this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
-      for (const arg of domItems) {
-        const v = buildChild(arg);
-        if (v != null) this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${v})`));
-      }
-      props.push({ pair: null, key: 'children', fn: () => this.b.emit(frag) });
+      projection = () => {
+        const frag = this.newRenderVar('frag');
+        this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
+        for (const arg of domItems) {
+          const v = buildChild(arg);
+          if (v != null) this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${v})`));
+        }
+        return frag;
+      };
     } else {
       for (const arg of domItems) buildChild(arg);
     }
@@ -11618,12 +11627,19 @@ class Emitter {
     if (rec.vars !== null) for (const v of rec.vars) used.add(v);
     if (isNode(node)) Emitter.collectLeafNames(node, used);
     const prevV = Emitter.mintName('__prev', used);
+    const kidV = Emitter.mintName('__kid', used);
     const errV = Emitter.mintName('__childErr', used);
     if (rec.kind !== 'class') rec.hasKids = true;
 
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? 'this';
-    line(() => this.b.emit(`{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
+    // Inside another component's projection the receiver stays current
+    // and the emitting component stays owner; outside, the emitting
+    // component is both.
+    const host = this.projectionHost;
+    line(() => this.b.emit(host !== null
+      ? `{ const ${prevV} = ${host}._beginProjection(${self()}); try {`
+      : `{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
     line(() => this.b.emit('try {'));
     line(() => {
       this.b.emit(`${instVar} = new `);
@@ -11714,8 +11730,18 @@ class Emitter {
     line(() => this.b.emit(`if (${instVar} && ${instVar}._initFailed) {`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-init-failed: ${name}');`));
+    if (projection !== null) {
+      line(() => this.b.emit('} else {'));
+      line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
+      const outerHost = this.projectionHost;
+      this.projectionHost = instVar;
+      let childrenVar;
+      try { childrenVar = projection(); } finally { this.projectionHost = outerHost; }
+      line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
+      line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
+    }
     line(() => {
-      this.b.emit(`} else if (`);
+      this.b.emit(projection !== null ? 'if (' : '} else if (');
       const emitCreate = () => this.b.emit(`${instVar}._mountCreate()`);
       if (markNode !== null) this.mark(markNode, '$self', emitCreate);
       else emitCreate();
@@ -11731,12 +11757,15 @@ class Emitter {
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
+    if (projection !== null) line(() => this.b.emit('}'));
     line(() => this.b.emit(`} catch (${errV}) {`));
     line(() => this.b.emit(`  console.error('[Rip] ${name} construction failed:', ${errV});`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
-    line(() => this.b.emit(`} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
+    line(() => this.b.emit(host !== null
+      ? `} finally { ${host}._endProjection(${prevV}); } }`
+      : `} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
 
     // Event bindings on the child's root; the listener
     // param mints against the handler's reads.

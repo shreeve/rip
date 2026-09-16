@@ -1,0 +1,37 @@
+import { Dialog, DialogTrigger, DialogPopup, DialogTitle, DialogDescription, DialogClose } from 'rip/ui'
+import { DIALOG } from '../components.rip'
+
+export DialogPage = component
+  open := false
+  render
+    div class: 'mx-auto max-w-2xl px-8 py-10'
+      h1 class: 'text-2xl font-semibold', DIALOG.name
+      p class: 'mt-2 text-secondary', DIALOG.description
+
+      div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
+        Dialog open <=> open
+          DialogTrigger
+            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+            'Open Dialog'
+          DialogPopup
+            class: [
+              'm-auto w-96 max-w-[calc(100vw-3rem)] rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,overlay,display] transition-discrete duration-150'
+              'backdrop:bg-black/20 open:opacity-100 starting:open:opacity-0'
+            ]
+            DialogTitle class: 'text-lg font-semibold', 'Notifications'
+            DialogDescription class: 'mt-2 text-secondary', 'You are all caught up. Good job!'
+            div class: 'mt-6 flex justify-end'
+              DialogClose
+                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+                'Close'
+
+      section class: 'mt-8 rounded-xl border border-surface p-5'
+        h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
+        p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
+        div class: 'mt-4 flex items-center gap-4'
+          code class: 'rounded bg-surface px-2 py-1 font-mono text-sm', "open: #{open}"
+          button
+            type: 'button'
+            class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
+            @click: (-> open = true)
+            'Open from the Parent'

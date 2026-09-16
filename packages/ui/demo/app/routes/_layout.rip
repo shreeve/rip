@@ -1,0 +1,45 @@
+import { COMPONENTS } from '../components.rip'
+import { Icon } from '../components/icon.rip'
+
+type Theme = 'light' | 'dark'
+
+export Layout = component
+  theme: Theme := preferred()
+
+  ~>
+    document.documentElement.dataset.theme = theme
+    return
+
+  preferred = (): Theme ->
+    stored = localStorage.getItem('theme')
+    return stored if stored is 'dark' or stored is 'light'
+    if matchMedia('(prefers-color-scheme: dark)').matches then 'dark' else 'light'
+
+  switchTheme: ->
+    theme = if theme is 'dark' then 'light' else 'dark'
+    localStorage.setItem('theme', theme)
+
+  render
+    div class: 'grid h-screen grid-cols-[260px_1fr]'
+      aside class: 'flex min-h-0 flex-col border-r border-surface'
+        div class: 'flex h-15 shrink-0 items-center justify-between pr-2.5 pl-5'
+          a href: '/', class: 'text-sm-plus font-semibold', 'Rip UI'
+          button
+            type: 'button'
+            class: 'flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
+            aria-label: (if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme')
+            @click: switchTheme
+            Icon name: (if theme is 'dark' then 'sun' else 'moon'), classes: 'size-4.5'
+        div class: 'flex flex-1 flex-col overflow-y-auto p-2.5'
+          div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Components'
+          nav class: 'flex flex-col'
+            for entry in COMPONENTS
+              a
+                href: entry.href
+                class: [
+                  'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary'
+                  'hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
+                ]
+                entry.name
+      main class: 'min-h-0 overflow-y-auto'
+        div id: 'content'
