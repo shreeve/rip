@@ -14016,6 +14016,10 @@ ${pad ?? ""}`);
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
     this.b.emit(Emitter.containsAwait(node) ? "await (async () => { " : "(() => { ");
+    this.tryBranches(node, ind);
+    this.b.emit(" })()");
+  }
+  tryBranches(node, ind) {
     this.mark(node, "$self", () => {
       this.b.emit("try ");
       const vbody = isBlock(node[1]) ? node[1] : ["block", node[1]];
@@ -14065,7 +14069,6 @@ ${pad ?? ""}`);
         }
       }
     });
-    this.b.emit(" })()");
   }
   valueSwitch(node) {
     const [, subject, cases, dflt] = node;
@@ -20723,9 +20726,7 @@ ${"  ".repeat(ind)}`);
         return;
       }
       if (h === "try") {
-        this.b.emit("return ");
-        this.withTailReturn(() => this.valueTry(stmt));
-        this.b.emit(";");
+        this.withTailReturn(() => this.tryBranches(stmt, ind));
         return;
       }
       if (h === "switch" && stmt.length === 4) {
@@ -26505,43 +26506,41 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
     if (!background)
       loading.value = true;
     let wasLoaded = loaded;
-    return await (async () => {
-      try {
-        pending = fetchFn(controller?.signal);
-        if (!(pending != null && typeof pending.then === "function")) {
-          throw new TypeError("Rip App: source fetch must return a Promise");
-        }
-        result = await pending;
-        if (mine !== generation)
-          return result;
-        failure.value = null;
-        data.value = result;
-        loaded = true;
-        loadedAt = Date.now();
-        freshUntil = preload && !preloadConsumed ? loadedAt + PRELOAD_FRESH_MS : 0;
-        return result;
-      } catch (error) {
-        if (mine !== generation)
-          return;
-        if (error?.name === "AbortError")
-          return;
-        failure.value = error;
-        if (!wasLoaded) {
-          loaded = false;
-          loadedAt = 0;
-          throw error;
-        }
-        return;
-      } finally {
-        if (mine === generation) {
-          loading.value = false;
-          inflight = null;
-          inflightPreload = false;
-          preloadConsumed = false;
-          onSettle?.();
-        }
+    try {
+      pending = fetchFn(controller?.signal);
+      if (!(pending != null && typeof pending.then === "function")) {
+        throw new TypeError("Rip App: source fetch must return a Promise");
       }
-    })();
+      result = await pending;
+      if (mine !== generation)
+        return result;
+      failure.value = null;
+      data.value = result;
+      loaded = true;
+      loadedAt = Date.now();
+      freshUntil = preload && !preloadConsumed ? loadedAt + PRELOAD_FRESH_MS : 0;
+      return result;
+    } catch (error) {
+      if (mine !== generation)
+        return;
+      if (error?.name === "AbortError")
+        return;
+      failure.value = error;
+      if (!wasLoaded) {
+        loaded = false;
+        loadedAt = 0;
+        throw error;
+      }
+      return;
+    } finally {
+      if (mine === generation) {
+        loading.value = false;
+        inflight = null;
+        inflightPreload = false;
+        preloadConsumed = false;
+        onSettle?.();
+      }
+    }
   };
   let start = function(background = false, preload = false) {
     let pending = load(background, preload);
@@ -27370,16 +27369,14 @@ function createMutation(fn, opts = {}) {
     }
     if (!(me === generation))
       return;
-    return await (async () => {
-      try {
-        _succeeded.value = true;
-        await opts.onSuccess?.(r);
-        return r;
-      } finally {
-        if (me === generation)
-          _pending.value = false;
-      }
-    })();
+    try {
+      _succeeded.value = true;
+      await opts.onSuccess?.(r);
+      return r;
+    } finally {
+      if (me === generation)
+        _pending.value = false;
+    }
   };
   Object.defineProperty(mutation, "pending", { get() {
     return _pending.value;
@@ -27661,13 +27658,11 @@ fail = function(message) {
   throw new Error(`Rip App: ${message}`);
 };
 var decodeSegment = function(segment) {
-  return (() => {
-    try {
-      return decodeURIComponent(segment);
-    } catch (error) {
-      return null;
-    }
-  })();
+  try {
+    return decodeURIComponent(segment);
+  } catch (error) {
+    return null;
+  }
 };
 validRoot = function(root) {
   if (root === "")
@@ -29254,30 +29249,28 @@ function createRenderer(opts) {
     let mine = ++generation;
     if (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router))
       router.navigating = true;
-    return await (async () => {
-      try {
-        return await performMount(info, mine, componentRegistry);
-      } catch (caught) {
-        error = caught;
-        if (mine !== generation)
-          return null;
-        failure = (() => {
-          if (error?.name === "GateFailure") {
-            return error;
-          } else {
-            file = info?.route?.file ?? "<route>";
-            return failureFor(error?.path ?? file, file, error);
-          }
-        })();
-        onError?.(failure);
-        if (!(current != null))
-          showFatalCard(failure);
-        throw failure;
-      } finally {
-        if (mine === generation && (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router)))
-          router.navigating = false;
-      }
-    })();
+    try {
+      return await performMount(info, mine, componentRegistry);
+    } catch (caught) {
+      error = caught;
+      if (mine !== generation)
+        return null;
+      failure = (() => {
+        if (error?.name === "GateFailure") {
+          return error;
+        } else {
+          file = info?.route?.file ?? "<route>";
+          return failureFor(error?.path ?? file, file, error);
+        }
+      })();
+      onError?.(failure);
+      if (!(current != null))
+        showFatalCard(failure);
+      throw failure;
+    } finally {
+      if (mine === generation && (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router)))
+        router.navigating = false;
+    }
   };
   let renderer = null;
   renderer = {
@@ -30201,26 +30194,24 @@ function connectFeed(client, opts = {}) {
     let verdict;
     if (failed || closed)
       return false;
-    return await (async () => {
-      try {
-        verdict = await client.apply(change);
-        if (verdict === "rejected") {
-          if (validHash2(change?.hash))
-            rejectedHash = change?.hash;
-          return false;
-        }
-        if (verdict === "reload" || !verdict) {
-          reload("change could not be applied");
-          return false;
-        }
-        rejectedHash = null;
-        return true;
-      } catch (error) {
-        report("[Rip] publication change failed:", error);
-        reload("change failed");
+    try {
+      verdict = await client.apply(change);
+      if (verdict === "rejected") {
+        if (validHash2(change?.hash))
+          rejectedHash = change?.hash;
         return false;
       }
-    })();
+      if (verdict === "reload" || !verdict) {
+        reload("change could not be applied");
+        return false;
+      }
+      rejectedHash = null;
+      return true;
+    } catch (error) {
+      report("[Rip] publication change failed:", error);
+      reload("change failed");
+      return false;
+    }
   };
   let enqueue = function(change, owner) {
     tail = tail.then(async function() {
@@ -30304,11 +30295,9 @@ function connectFeed(client, opts = {}) {
         return;
       report("[Rip] publication reconnect check failed:", error);
       ready = false;
-      return (() => {
-        try {
-          return socket?.close();
-        } catch {}
-      })();
+      try {
+        return socket?.close();
+      } catch {}
     });
     tail = task.then(function() {
       return true;
@@ -30414,11 +30403,9 @@ function connectFeed(client, opts = {}) {
         if (closed || failed || owner !== connection || ready)
           return;
         report("[Rip] publication subscription acknowledgement timed out");
-        return (() => {
-          try {
-            return socket.close();
-          } catch {}
-        })();
+        try {
+          return socket.close();
+        } catch {}
       }, ackTimeout);
       return;
     };

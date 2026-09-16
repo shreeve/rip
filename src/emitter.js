@@ -7343,6 +7343,14 @@ class Emitter {
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
     this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
+    this.tryBranches(node, ind);
+    this.b.emit(' })()');
+  }
+
+  // The try with every branch returning its value: the body of the
+  // value form's IIFE, and the whole of a tail-position try, which
+  // returns from the enclosing function in place.
+  tryBranches(node, ind) {
     this.mark(node, '$self', () => {
       this.b.emit('try ');
       // An inline body (`x = try f()`) is its own one-statement
@@ -7392,7 +7400,6 @@ class Emitter {
         }
       }
     });
-    this.b.emit(' })()');
   }
 
   valueSwitch(node) {
@@ -16202,9 +16209,7 @@ class Emitter {
         return;
       }
       if (h === 'try') {
-        this.b.emit('return ');
-        this.withTailReturn(() => this.valueTry(stmt));
-        this.b.emit(';');
+        this.withTailReturn(() => this.tryBranches(stmt, ind));
         return;
       }
       if (h === 'switch' && stmt.length === 4) {

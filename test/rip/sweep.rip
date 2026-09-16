@@ -1098,9 +1098,9 @@ code "inline try on a statement", '''
   f = -> try return 1
   ''', '''
   let f = function() {
-    return (() => { try {
+    try {
       return 1;
-    } catch {} })();
+    } catch {}
   };
   '''
 
@@ -1113,13 +1113,13 @@ code "inline try statement with catch and finally", '''
       cleanup()
   ''', '''
   let f = function() {
-    return (() => { try {
+    try {
       return 1;
     } catch {
       return 2;
     } finally {
       cleanup();
-    } })();
+    }
   };
   '''
 

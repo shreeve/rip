@@ -78,11 +78,11 @@ let tailMulti = function(v) {
   }
 };
 let tailTry = function() {
-  return (() => { try {
+  try {
     return risky();
   } catch (e) {
     return 42;
-  } })();
+  }
 };
 let tailSwitch = function(v) {
   return (() => { switch (v) {
