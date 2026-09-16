@@ -17,10 +17,10 @@ dynamic programming, and the reader walks scan lines middle-out, matching
 each eleven-module group to its nearest codeword in both directions and on
 both axes. PDF417 compacts text, bytes and digits the way the specification
 recommends and lays the stream into stacked rows with GF(929) parity; its
-reader finds a start or stop pattern on a scan line, tracks that edge up and
-down the stack, samples rays across every row, votes each codeword into the
-cell its row indicators and cluster name, and corrects erasures and errors
-together.
+reader finds a start or stop pattern on a scan line, tracks both edges up
+and down the stack, samples rays across every row along the direction
+between them, votes each codeword into the cell its row indicators and
+cluster name, and corrects erasures and errors together.
 
 **Runtime:** browser-safe (`rip.browser: true`). One file per symbology,
 `qr.rip`, `pdf417.rip` and `code128.rip`, each holding its tables, encoder
@@ -213,12 +213,13 @@ symbol in all four orientations and with the tilt and skew of a hand-held
 photo, as a mirror image, inverted, with whole rows torn off the top or
 bottom, with the start pattern cut off at the image edge, and with holes. One parity codeword is always held back to check the
 correction and the padding after the message must read as pad, so a
-damaged symbol misses rather than decoding to the wrong text. Against
-ZXing's PDF417 blackbox photo
-sets 1 to 3 it decodes 57 of 58 images at each of four rotations, missing
-one blurred frame whose modules are barely over a pixel. Its Macro set
-decodes one segment per image; images holding several symbols return the
-first found.
+damaged symbol misses rather than decoding to the wrong text. The row
+direction comes from the start and stop edges tracked together, so a
+photograph taken from the side, whose rows stay level while the edges
+lean, reads as well as a rotated one. Against ZXing's PDF417 blackbox
+photo sets 1 to 3 it decodes all 58 images at each of four rotations. Its
+Macro set decodes one segment per image; images holding several symbols
+return the first found.
 
 ## Scanner
 
@@ -307,10 +308,10 @@ its figures stand alone, measured the same way on the same machine:
 
 | PDF417 decode (µs)               |   rip |
 |----------------------------------|------:|
-| 300x100 raster, 9 rows x 2 cols  |    69 |
-| 1280x720 frame, one symbol       |   178 |
-| 1920x1080 frame, 192 bytes       |   289 |
-| 1920x1080 noise, no symbol       |   295 |
+| 300x100 raster, 9 rows x 2 cols  |    83 |
+| 1280x720 frame, one symbol       |   232 |
+| 1920x1080 frame, 192 bytes       |   343 |
+| 1920x1080 noise, no symbol       |   302 |
 
 The frames are the same kind as the QR rows above, with the symbol drawn
 at two to four pixels per module. Photographs from ZXing's corpus decode

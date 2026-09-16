@@ -766,9 +766,12 @@ START_BACK =! [3, 1, 1, 1, 1, 1, 1, 8]      # the start pattern read the same wa
 
 # A row is read from its start pattern toward the stop, or when the start
 # is out of the picture, from the stop pattern toward the start with the
-# codewords mirrored.
-FORWARD =! { anchor: START_RUNS, modules: 17, end: STOP_RUNS,  endModules: 18, mirror: false }
-MIRROR  =! { anchor: STOP_BACK,  modules: 18, end: START_BACK, endModules: 17, mirror: true }
+# codewords mirrored. Each mode names the pattern at the row's other end
+# as an anchor of its own, tracked to find the row direction.
+STOP_END  =! { anchor: STOP_RUNS,  modules: 18 }
+START_END =! { anchor: START_BACK, modules: 17 }
+FORWARD   =! { anchor: START_RUNS, modules: 17, end: STOP_RUNS,  endModules: 18, tail: STOP_END,  mirror: false }
+MIRROR    =! { anchor: STOP_BACK,  modules: 18, end: START_BACK, endModules: 17, tail: START_END, mirror: true }
 
 # Symbol index by seventeen-module pattern (index + 1, zero for none) and by
 # edge-to-similar-edge sequence, built on first use. The edge sequence is
@@ -1490,34 +1493,58 @@ metadata =! (s, rays, mode) ->
   { rows, columns, level }
 
 # One located anchor pattern through to a decoded symbol, or null.
-tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
+# The leading edge of an anchor pattern, tracked up and down the stack
+# from (x, y) and fitted as a line u = a + b t across the tracked span;
+# returns its two ends, the mean unit and the count of lines held, or null.
+edgeEnds =! (s, x, y, dx, dy, sx, sy, unit, first, mode) ->
+  edge = { n: 0, st: 0, su: 0, stt: 0, stu: 0, min: 0, max: 0 }
+  unitUp   = trackEdge s, x, y, dx, dy, sx, sy, unit, first, -1, edge, mode
+  unitDown = trackEdge s, x, y, dx, dy, sx, sy, unit, first, 1, edge, mode
+  return null if edge.n < 2
+  mt  = edge.st / edge.n
+  mu  = edge.su / edge.n
+  den = edge.stt - edge.n * mt * mt
+  b   = if den > 0 then (edge.stu - edge.n * mt * mu) / den else 0
+  a   = mu - b * mt
+  {
+    top:    { x: x + edge.min * sx + (a + b * edge.min) * dx, y: y + edge.min * sy + (a + b * edge.min) * dy }
+    bottom: { x: x + edge.max * sx + (a + b * edge.max) * dx, y: y + edge.max * sy + (a + b * edge.max) * dy }
+    unit:   (unitUp + unitDown) / 2
+    lines:  edge.n
+  }
+
+tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   {img, format, rluma, rruns, cells, rayRow, rayT, votes} = s
   # Rows stack a quarter turn from the symbol's reading direction, which a
   # mirrored read runs against.
   flip = if mode.mirror then -1 else 1
   sx = -dy * flip
   sy = dx * flip
-  edge = { n: 0, st: 0, su: 0, stt: 0, stu: 0, min: 0, max: 0 }
-  unitUp   = trackEdge s, x, y, dx, dy, sx, sy, unit, first, -1, edge, mode
-  unitDown = trackEdge s, x, y, dx, dy, sx, sy, unit, first, 1, edge, mode
-  unit = (unitUp + unitDown) / 2
-  return null if edge.n < 2
-  # Leading edge as a line u = a + b t, then its two ends.
-  mt  = edge.st / edge.n
-  mu  = edge.su / edge.n
-  den = edge.stt - edge.n * mt * mt
-  b   = if den > 0 then (edge.stu - edge.n * mt * mu) / den else 0
-  a   = mu - b * mt
-  top    = { x: x + edge.min * sx + (a + b * edge.min) * dx, y: y + edge.min * sy + (a + b * edge.min) * dy }
-  bottom = { x: x + edge.max * sx + (a + b * edge.max) * dx, y: y + edge.max * sy + (a + b * edge.max) * dy }
+  lead = edgeEnds s, x, y, dx, dy, sx, sy, unit, first, mode
+  return null unless lead
+  {top, bottom, unit} = lead
   ex  = bottom.x - top.x
   ey  = bottom.y - top.y
   len = Math.hypot ex, ey
   return null if len < 6 * unit
   ux = ex / len
   uy = ey / len
+  # Rows run from this edge to the one the pattern at the row's other end
+  # makes, when that pattern was on the scan line and its edge holds up as
+  # well as this one; a picture taken from the side skews the two edges
+  # without turning the rows. Otherwise the rows are taken square to the
+  # edge.
   rx = uy * flip
   ry = -ux * flip
+  if endAt < Infinity
+    tail = edgeEnds s, x + endAt * dx, y + endAt * dy, dx, dy, sx, sy, unit, first ^ (mode.anchor.length & 1), mode.tail
+    if tail and tail.lines * 2 >= lead.lines
+      vx = (tail.top.x - top.x + tail.bottom.x - bottom.x) / 2
+      vy = (tail.top.y - top.y + tail.bottom.y - bottom.y) / 2
+      vl = Math.hypot vx, vy
+      if vl > 0 and vx * rx + vy * ry > 0.7 * vl
+        rx = vx / vl
+        ry = vy / vl
   margin = 3 * unit + 3
   length = Math.min rluma.length, Math.ceil((MAX_CELLS + 2) * 17 * unit + 2 * margin), Math.ceil(extent + 2 * margin + 3 * unit)
   step   = Math.max 1, 0.75 * unit
@@ -1761,9 +1788,11 @@ scanLine =! (s, vertical, line, count) ->
         # The end pattern on this line bounds the symbol's width, so the
         # rays need not run out to the widest symbol there is.
         end    = findRuns r, rn, at + mode.anchor.length, mode.end, mode.endModules
-        extent = if end < 0 then Infinity else 0
-        extent += r[k] for k in [at...end + mode.end.length] if end >= 0
-        hit = tryDecode s, x, y, dx, dy, unit, first, extent, mode
+        endAt  = if end < 0 then Infinity else 0
+        endAt += r[k] for k in [at...end] if end >= 0
+        extent = endAt
+        extent += r[k] for k in [end...end + mode.end.length] if end >= 0
+        hit = tryDecode s, x, y, dx, dy, unit, first, endAt, extent, mode
         if hit
           hit.vertical = vertical
           hit.reversed = reversed
