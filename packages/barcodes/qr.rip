@@ -356,29 +356,40 @@ runsPenaltyVertical =! (m) ->
   score
 
 # N3: 1011101 with four light modules before or after, both orientations of
-# the pattern across a 32-wide stripe at once.
+# the pattern across a 32-wide stripe at once. The eleven-word window rolls
+# down the stripe: each step loads one new word and shifts the rest.
 finderPenaltyVertical =! (m) ->
   {size, words, v} = m
   tail  = if size & 31 then ~(-1 << (size & 31)) else -1
   count = 0
   for wi in [0...words]
     valid = if wi is words - 1 then tail else -1
+    i  = wi
+    r0 = v[i]
+    r1 = v[i += words]
+    r2 = v[i += words]
+    r3 = v[i += words]
+    r4 = v[i += words]
+    r5 = v[i += words]
+    r6 = v[i += words]
+    r7 = v[i += words]
+    r8 = v[i += words]
+    r9 = v[i += words]
     for y in [0..size - 11]
-      i = y * words + wi
-      r0  = v[i]
-      r1  = v[i +      words]
-      r2  = v[i +  2 * words]
-      r3  = v[i +  3 * words]
-      r4  = v[i +  4 * words]
-      r5  = v[i +  5 * words]
-      r6  = v[i +  6 * words]
-      r7  = v[i +  7 * words]
-      r8  = v[i +  8 * words]
-      r9  = v[i +  9 * words]
-      r10 = v[i + 10 * words]
-      m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10)
-      m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10
+      r10 = v[i += words]
+      m0  = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10)
+      m1  = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10
       count += popcnt(m0) + popcnt(m1)
+      r0 = r1
+      r1 = r2
+      r2 = r3
+      r3 = r4
+      r4 = r5
+      r5 = r6
+      r6 = r7
+      r7 = r8
+      r8 = r9
+      r9 = r10
   count
 
 # Score a symbol given both orientations. `limit` is the best score so far
