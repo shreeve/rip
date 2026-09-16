@@ -1,5 +1,5 @@
 # ==============================================================================
-# barcodes — QR Code and Code 128 encoder and decoder for Rip
+# barcodes — QR Code, PDF417 and Code 128 encoder and decoder for Rip
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: September 15, 2026
@@ -14,13 +14,17 @@
 #         Encodes to raw, ascii, term, svg, gif and data-url; reads RGB,
 #         RGBA and planar YUV frames, with a browser layer for canvas,
 #         camera and VideoFrame input. Code 128 is a one-line reader over
-#         the same luma sampling. Ported from paulmillr/qr, byte-identical
-#         on its outputs.
+#         the same luma sampling. PDF417 tracks a start or stop pattern
+#         down the symbol, samples rays along the true row direction with
+#         sub-pixel edges, votes codewords into rows by their cluster, and
+#         corrects erasures and errors together over GF(929). The QR half
+#         is ported from paulmillr/qr, byte-identical on its outputs.
 # ==============================================================================
 
 import { encodeQR } from './qr.rip'
 
 export { encodeQR, decodeQR, decodeQRBatch, QRScanner } from './qr.rip'
 export { encodeCode128, decodeCode128, readCode128 } from './code128.rip'
+export { encodePDF417, decodePDF417, readPDF417 } from './pdf417.rip'
 
 export default encodeQR

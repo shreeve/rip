@@ -12,6 +12,8 @@ import * as qr from 'rip/barcodes/qr'
 import * as dom from 'rip/barcodes/dom'
 import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
 import * as code128 from 'rip/barcodes/code128'
+import { encodePDF417, readPDF417, decodePDF417, _tests as p417 } from 'rip/barcodes/pdf417'
+import * as pdf417 from 'rip/barcodes/pdf417'
 import { readFileSync } from 'fs'
 
 { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt, encodeData, detectType } = _tests
@@ -75,13 +77,14 @@ gifPixels =! (gif) ->
 p "\nPackage"
 
 test "exports", ->
-  eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodeQR', 'readCode128']
+  eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodePDF417', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodePDF417', 'encodeQR', 'readCode128', 'readPDF417']
   eq enc.default,       encodeQR
   eq enc.decodeQR,      decodeQR
   eq enc.encodeCode128, encodeCode128
   eq enc.decodeCode128, decodeCode128
   eq Object.keys(qr).sort(), ['QRScanner', '_tests', 'decodeQR', 'decodeQRBatch', 'encodeQR']
   eq Object.keys(code128).sort(), ['_tests', 'decodeCode128', 'encodeCode128', 'readCode128']
+  eq Object.keys(pdf417).sort(),  ['_tests', 'decodePDF417', 'encodePDF417', 'readPDF417']
   eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
 
 test "no runtime deps, declares browser safety and earns it", ->
@@ -548,3 +551,275 @@ test "text: shifts, FNC4 high characters, latches", ->
   eq text([103, 65, 100, 65, 99, 1, 101, 66, 0, 106]), '\x01a01\x02'
   eq text([105, 0, 100, 33, 0, 106]),                  '00A'
   eq c128.decodeText([105, 102, 1, 102, 2, 0, 106], 7), { text: '01\x1d02', gs1: true }
+
+# ==[ PDF417 ]==
+
+p "\nPDF417"
+
+# Message codewords of Latin-1 text.
+cw =! (text, encoding = 'auto') -> p417.codewords Uint8Array.from(text, (ch) -> ch.charCodeAt 0), encoding, []
+
+test "codewords: modes, submodes, switching", ->
+  eq cw('ABCD', 'text'),    [1, 63]
+  eq cw('1234', 'numeric'), [902, 12, 434]
+  eq cw('abcd', 'byte'),    [901, 97, 98, 99, 100]
+  eq cw('abcdef', 'byte'),  [924, 163, 179, 507, 603, 522]
+  # Specification worked examples: nine bytes under 901 keep the tail one
+  # per codeword; text drops to numeric at thirteen digits.
+  eq cw('\x01\x02\x03\x04\x05\x06\x07\x08\x04', 'byte'), [901, 1, 620, 89, 74, 846, 7, 8, 4]
+  eq (cw('1'.repeat(n)).length for n in [1..22]), [1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9]
+  eq (cw('Ä'.repeat(n)).length for n in [1..7]), [2, 3, 4, 5, 6, 6, 7]
+  eq cw('A'),            [0 * 30 + 29]                 # alpha, punctuation-shift pad
+  eq cw('a'),            [27 * 30 + 0]                 # lower latch
+  eq cw('aB'),           [27 * 30 + 0, 27 * 30 + 1]    # alpha shift from lower
+  eq cw('A;'),           [0 * 30 + 29, 0 * 30 + 29]    # punctuation shift, pad
+  eq cw('1,2'),          [28 * 30 + 1, 13 * 30 + 2]    # mixed latch; comma is mixed
+  eq cw('1;;'),          [28 * 30 + 1, 25 * 30 + 0, 0 * 30 + 29]   # punctuation latch when two follow
+  eq cw('Hello\x01World'), [7 * 30 + 27, 4 * 30 + 11, 11 * 30 + 14, 913, 1, 27 * 30 + 22, 14 * 30 + 17, 11 * 30 + 3]
+  eq cw('ab\x01\x02\x03cd'), [901, 163, 177, 269, 787, 135, 100]   # short text runs stay binary
+  throws (-> cw 'é', 'text'),       Error, 'cannot encode'
+  throws (-> cw 'x', 'numeric'),    Error, 'digits only'
+  throws (-> cw ''),                Error, 'empty'
+
+test "Reed-Solomon over GF(929)", ->
+  eq Array.from(p417.generator 0), [27, 917]
+  eq Array.from(p417.generator 1), [522, 568, 723, 809]
+  eq p417.generator(8).length, 512
+  # Any corrected codeword polynomial has zero syndromes: encode, corrupt
+  # within capacity, correct back; one parity codeword always stays free.
+  codes = cw 'Errors and erasures over the prime field'
+  data  = p417.symbolCodewords codes, 4, 10, 3       # 40 cells, 16 parity
+  n = data.length
+  k = 16
+  scramble = (errors, erased) ->
+    c = Int32Array.from data
+    c[i] = (c[i] + 100 + i) % 929 for i in [1..errors]
+    e = Int32Array.from [20...20 + erased]
+    c[i] = 0 for i in e
+    [c, e]
+  [c, e] = scramble 3, 9                              # 2*3 + 9 = 15 <= 15
+  eq p417.correct(c, n, k, e, e.length), 3
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 0, 15
+  eq p417.correct(c, n, k, e, e.length), 0
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 4, 8                              # 2*4 + 8 = 16: nothing left to detect with
+  eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 0, 17
+  eq p417.correct(c, n, k, e, e.length), -1
+  c = Int32Array.from data
+  eq p417.correct(c, n, k, e, 0), 0
+
+test "layout: level, dimensions, indicators", ->
+  eq (p417.autoLevel m for m in [1, 40, 41, 160, 161, 320, 321, 863, 864, 925]), [2, 2, 3, 3, 4, 4, 5, 5, 4, 0]
+  eq p417.dimensions(20, undefined, undefined, 3, 3), { columns: 2, rows: 10 }
+  eq p417.dimensions(20, 5, undefined, 3, 3),         { columns: 5, rows: 4 }
+  eq p417.dimensions(20, undefined, 4, 3, 3),         { columns: 5, rows: 4 }
+  eq p417.dimensions(20, 5, 4, 3, 3),                 { columns: 5, rows: 4 }
+  throws (-> p417.dimensions 21, 5, 4, 3, 3),          RangeError, 'holds 20'
+  throws (-> p417.dimensions 2000, 1, undefined, 3, 3), RangeError, 'max 90'
+  throws (-> p417.dimensions 2000, undefined, 3, 3, 3), RangeError, 'max 30'
+  # Row 4 of a 13-row, 2-column, level 2 symbol: cluster 1 carries the
+  # level and row remainder on the left, the row count on the right.
+  eq p417.indicator(1, 4, 13, 2, 2, false), 30 + 3 * 2 + 0
+  eq p417.indicator(1, 4, 13, 2, 2, true),  30 + 4
+  eq p417.indicator(0, 4, 13, 2, 2, false), 30 + 4
+  eq p417.indicator(2, 4, 13, 2, 2, false), 30 + 1
+  data = p417.symbolCodewords [1, 63], 2, 3, 0
+  eq Array.from(data), [4, 1, 63, 900, ...Array.from(p417.eccCodewords(Int32Array.from([4, 1, 63, 900]), 0))]
+
+HELLO =! """
+  ########.#.#.#...#####.#.#..#####.##.#.#.....##....###.#.#.###......#######.#...#.#..#
+  ########.#.#.#...####.#.#....#....##..#.###..#.....####.#.#...#.....#######.#...#.#..#
+  ########.#.#.#...##.#.#.#####.....###..#.#.######..#.#.#....####....#######.#...#.#..#
+  ########.#.#.#...###.#..#.###.....#..#.....##.##...##.#.####.#####..#######.#...#.#..#
+  ########.#.#.#...##.#.###.....#...###.....#.##...#.####.#.###...###.#######.#...#.#..#
+  ########.#.#.#...#####.#.###....#.#...##.#....###..####.#.#####.##..#######.#...#.#..#
+  ########.#.#.#...#.#..###...###...##.#....##..###..#.#..###.###.....#######.#...#.#..#
+  ########.#.#.#...######.#..#.###..##.#....###...#..#.#.######...###.#######.#...#.#..#
+  ########.#.#.#...#.#..##.#####....###.#....#####.#.#####.#..###.#...#######.#...#.#..#
+  ########.#.#.#...##.#...###.####..###.##..#...##...#.#...##...##....#######.#...#.#..#
+  ########.#.#.#...##.#..###....#...##.##..####...#..####.#..###..###.#######.#...#.#..#
+  ########.#.#.#...##.#...#..#####..#..##..##..####..######.#...##..#.#######.#...#.#..#
+  ########.#.#.#...##.#.....#.##....##.###...##.#....#.#....##....##..#######.#...#.#..#
+  ########.#.#.#...####.#...#....#..#.#...######.###.#####.#...#..##..#######.#...#.#..#
+  ########.#.#.#...####.#....####.#.#.#####..##..#...#.#......#..####.#######.#...#.#..#
+  ########.#.#.#...##..#.##.###.....#.....#.###.###..###..#.#...###...#######.#...#.#..#
+  ########.#.#.#...##.#...#####.###.##.##.####...#...#.#...####....#..#######.#...#.#..#
+  ########.#.#.#...######..#.###.##.#.#####..##..#...####..#.####...#.#######.#...#.#..#
+  """
+
+# Every case here decoded with zxing-cpp when the pins were taken.
+PINS =! [
+  ['Hello PDF417', {}, '16759322038964277220', 86, 18]
+  ['The quick brown fox jumps over the lazy dog, 42 times; really? (yes) {ok} [fine] "quoted" #1 @home', {}, '7846982029010869402', 103, 37]
+  ['12345678901234567890123456789012345678901234567890', {}, '5965295783082383056', 86, 28]
+  ['ORDER-2026-09-16 qty 00001234567890123 ref abc', {}, '12089213095314550506', 86, 34]
+  ['\x00\x01\x02\xff\xfe\xfd binary \x80\x81 tail', {}, '5388649561758448112', 86, 28]
+  ['abcdef', { encoding: 'byte' }, '16385500419708780100', 86, 15]
+  ['abcdefg', { encoding: 'byte' }, '2847640181012233553', 86, 16]
+  ['Hello\x01World', {}, '10501875650112426562', 86, 17]
+  ['Grüße, 世界! ünïcödé', {}, '5450240929259030254', 86, 36]
+  ['level zero', { ecc: 0 }, '229268292100416905', 86, 9]
+  ['level eight ' + 'x'.repeat(50), { ecc: 8 }, '16611835918714643843', 205, 69]
+  ['one column', { columns: 1 }, '12025549302922334139', 86, 15]
+  ['thirty columns ' + 'y'.repeat(200), { columns: 30 }, '10289456403934732096', 579, 5]
+  ['ninety rows ' + 'z'.repeat(300), { rows: 90 }, '6998225270771950661', 103, 90]
+  ['compact symbol here', { compact: true }, '17172449583246438028', 52, 19]
+  ['B'.repeat(800) + '1'.repeat(400) + 'c'.repeat(300), {}, '3702506550965028681', 239, 76]
+  ['0000000000000000000000000000000000000000000000000000000000001', { encoding: 'numeric' }, '13842950279047227124', 86, 31]
+  [';;;;;;;;;', {}, '4601803601175570742', 86, 18]
+  ["line one\nline two\r\n\ttabbed", {}, '16347342739693649516', 86, 25]
+]
+
+test "symbols: pinned module rows", ->
+  eq rows(encodePDF417('Hello PDF417', 'raw', rowHeight: 1, border: 0)), HELLO.replaceAll('#', '1').replaceAll('.', '0')
+  for [text, opts, hash, W, H] in PINS
+    raw = encodePDF417 text, 'raw', { ...opts, rowHeight: 1, border: 0 }
+    eq [Bun.hash(rows raw).toString(), raw[0].length, raw.length], [hash, W, H], text.slice(0, 20)
+
+test "outputs agree and options apply", ->
+  # The row height shapes the symbol: at three modules a row the same
+  # message fits nine rows of four columns.
+  raw = encodePDF417 'Hello PDF417', 'raw'
+  eq [raw.length, raw[0].length], [9 * 3 + 4, 17 * 6 + 1 + 4]
+  eq raw[2 + 3][2 + 8], false
+  eq raw[2 + 3][2], true
+  eq encodePDF417('Hello PDF417', 'raw', scale: 2, border: 1, rowHeight: 2, columns: 2).length, 2 * (9 * 2 + 2)
+  ascii = encodePDF417 'Hello PDF417', 'ascii', rowHeight: 1, border: 0
+  eq ascii.split('\n').length, 10
+  term = encodePDF417 'Hello PDF417', 'term', rowHeight: 1, border: 0
+  eq term, ansi(HELLO)
+  svg = encodePDF417 'Hello PDF417', 'svg', rowHeight: 1, border: 0
+  ok svg.startsWith('<svg viewBox="0 0 86 18" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h8v1h-8ZM9 0h1v1h-1Z')
+  eq (encodePDF417('Hello PDF417', 'svg', rowHeight: 1, border: 0, optimize: false).match(/<rect /g)).length, (svg.match(/Z/g)).length
+  gif = gifPixels encodePDF417('Hello PDF417', 'gif', rowHeight: 2, border: 1, scale: 2, columns: 2)
+  eq [gif.width, gif.height], [210, 40]
+  raw = encodePDF417 'Hello PDF417', 'raw', rowHeight: 2, border: 1, scale: 2, columns: 2
+  eq gif.pixels.join(''), raw.flat().map((b) -> if b then 1 else 0).join('')
+  url = encodePDF417 'Hello PDF417', 'data-url', rowHeight: 1, border: 0
+  ok url.startsWith 'data:image/gif;base64,R0lGODdh'
+  throws (-> encodePDF417 'x', 'png'),                   Error,      'Unknown output'
+  throws (-> encodePDF417 42),                           TypeError,  'expected string'
+  throws (-> encodePDF417 'x', 'raw', scale: 0),         RangeError, 'scale'
+  throws (-> encodePDF417 'x', 'raw', ecc: 9),           RangeError, 'ecc'
+  throws (-> encodePDF417 'x', 'raw', columns: 31),      RangeError, 'columns'
+  throws (-> encodePDF417 'x', 'raw', rows: 2),          RangeError, 'rows'
+  throws (-> encodePDF417 'x', 'raw', encoding: 'ascii'), Error,     'encoding'
+  throws (-> encodePDF417 'x'.repeat(1000)),             Error,      'Capacity overflow'
+  throws (-> encodePDF417 'x', 'raw', scale: 60),        Error,      'exceeds'
+
+# RGBA raster of a module matrix on a gray field, with rotation, inversion
+# and a shear of `skew` pixels per hundred rows.
+paint =! (raw, W, H, invert = false, rotate = 0, skew = 0) ->
+  h      = raw.length
+  w      = raw[0].length
+  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
+  turned = rotate is 90 or rotate is 270
+  ox     = (W - (if turned then h else w)) >> 1
+  oy     = (H - (if turned then w else h)) >> 1
+  for y in [0...h]
+    shift = Math.round skew * y / 100
+    for x in [0...w]
+      dark = raw[y][x]
+      dark = not dark if invert
+      v    = if dark then 20 else 240
+      [px, py] = switch rotate
+        when 90  then [h - 1 - y, x]
+        when 180 then [w - 1 - x, h - 1 - y]
+        when 270 then [y, w - 1 - x]
+        else [x, y]
+      px += shift unless turned
+      py += shift if turned
+      p = 4 * ((oy + py) * W + ox + px)
+      data[p] = data[p + 1] = data[p + 2] = v
+      data[p + 3] = 255
+  { width: W, height: H, data }
+
+stack =! (text, opts, W, H, invert, rotate, skew) -> paint encodePDF417(text, 'raw', opts), W, H, invert, rotate, skew
+
+test "round trips: scales, row heights, rotations, inversion, shapes", ->
+  text = 'Rip reads PDF417 symbols in a few hundred microseconds.'
+  for scale in [1, 2, 3]
+    eq decodePDF417(stack(text, { scale }, 400, 200)), text, "scale #{scale}"
+  for rowHeight in [1, 2, 3, 5]
+    eq decodePDF417(stack(text, { rowHeight, scale: 2 }, 400, 300)), text, "row height #{rowHeight}"
+  for rotate in [0, 90, 180, 270]
+    hit = readPDF417 stack(text, { scale: 2 }, 400, 400, false, rotate)
+    eq hit.text,     text, "rotate #{rotate}"
+    eq hit.vertical, rotate is 90  or rotate is 270
+    eq hit.reversed, rotate is 180 or rotate is 270
+    eq hit.inverted, false
+    eq [hit.rows, hit.columns, hit.ecc, hit.errors, hit.erasures], [14, 3, 2, 0, 0]
+  hit = readPDF417 stack(text, { scale: 2 }, 400, 200, true)
+  eq [hit.text, hit.inverted], [text, true]
+  eq decodePDF417(stack(text, { scale: 2, compact: true }, 400, 200)), text
+  eq decodePDF417(stack(text, { scale: 2, columns: 1 }, 200, 700)), text
+  eq decodePDF417(stack(text, { scale: 1, columns: 30, rows: 3, ecc: 0 }, 700, 100)), text
+  eq decodePDF417(stack(text, { scale: 1, rows: 90 }, 300, 400)), text
+  eq decodePDF417(stack(text, { scale: 2, ecc: 8 }, 800, 400)), text
+  eq decodePDF417(stack('Grüße, 世界!', { scale: 2 }, 300, 200)), 'Grüße, 世界!'
+  eq decodePDF417(toLuma(stack(text, { scale: 2 }, 400, 200)), format: 'I420'), text
+  hit = readPDF417 stack('\x00\x01\xff\xfe', { scale: 2 }, 300, 200)
+  eq Array.from(hit.bytes), [0, 1, 255, 254]
+  eq hit.text, '\x00\x01\xff\xfe'
+  eq hit.codewords, [6, 901, 0, 1, 255, 254]
+
+test "geometry: skew, corners, cropped and damaged start patterns", ->
+  text = 'Symbols read along the true row direction'
+  for skew in [-6, -3, 3, 6]
+    eq decodePDF417(stack(text, { scale: 2 }, 500, 300, false, 0, skew)), text, "skew #{skew}"
+  raw = encodePDF417 text, 'raw', scale: 2, border: 4
+  hit = readPDF417 paint(raw, 400, 300)
+  [tl, tr, br, bl] = hit.corners
+  ok Math.abs(tl.x - ((400 - raw[0].length) >> 1) - 8) < 1.5, "left edge at #{tl.x}"
+  ok Math.abs(tl.y - ((300 - raw.length) >> 1) - 8) < 2,     "top at #{tl.y}"
+  ok Math.abs(bl.y - tl.y - (raw.length - 16)) < 3,           "height #{bl.y - tl.y}"
+  ok Math.abs(tr.x - tl.x - (raw[0].length - 16)) < 3,        "width #{tr.x - tl.x}"
+  # Start pattern cut off the left: the stop pattern anchors the read.
+  cropped = (row.slice(60) for row in raw)
+  hit = readPDF417 paint(cropped, 400, 300)
+  eq hit.text, text
+  eq hit.corners[0].x < hit.corners[1].x, true
+  # Start pattern erased on the top and bottom rows: the rows still read.
+  torn = (row.slice() for row in raw)
+  for y in [0...torn.length] when y < 8 + 12 or y >= torn.length - 8 - 12
+    torn[y][x] = false for x in [8...8 + 40]
+  hit = readPDF417 paint(torn, 400, 300)
+  eq hit.text, text
+  # Holes become erasures, not errors.
+  holed = (row.slice() for row in raw)
+  for y in [8 + 12...8 + 18]
+    holed[y][x] = false for x in [60...110]
+  hit = readPDF417 paint(holed, 400, 300)
+  eq hit.text, text
+  ok hit.erasures > 0 and hit.errors <= 1, "erasures #{hit.erasures} errors #{hit.errors}"
+  blank = flat 60, 60, 200
+  eq readPDF417(blank), null
+  throws (-> decodePDF417 blank),     Error,     'not found'
+  throws (-> readPDF417 blank, null), TypeError, 'opts'
+  throws (-> readPDF417 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
+
+test "decompaction: text, bytes, numbers, ECI, macro", ->
+  parse = (codes) -> p417.parse Int32Array.from([codes.length + 1, ...codes]), codes.length + 1
+  eq parse([1, 63]).text, 'ABCD'
+  eq parse([902, 12, 434]).text, '1234'
+  eq parse([901, 97, 98, 99, 100]).text, 'abcd'
+  eq parse([924, 163, 179, 507, 603, 522]).text, 'abcdef'
+  eq parse([901, 1, 620, 89, 74, 846, 7, 8, 4]).text, '\x01\x02\x03\x04\x05\x06\x07\x08\x04'
+  eq parse([7 * 30 + 27, 4 * 30 + 11, 11 * 30 + 14, 913, 1, 27 * 30 + 22, 14 * 30 + 17, 11 * 30 + 3]).text, 'Hello\x01World'
+  eq parse([28 * 30 + 1, 25 * 30 + 0, 0 * 30 + 29]).text, '1;;'
+  eq parse([927, 26, 901, 0xc3, 0xa9]).text, 'é'
+  eq parse([927, 4, 901, 0xb1]).text, 'ą'
+  eq Array.from(parse([927, 26, 901, 0xc3, 0xa9]).bytes), [0xc3, 0xa9]
+  eq parse([921, 1, 63]).readerInit, true
+  # Macro control block after the data: segment index, file id, fields.
+  r = parse [1, 63, 928, 111, 103, 17, 53, 923, 1, 14, 923, 0, 12 * 30 + 4, 21 * 30 + 4, 922]
+  eq r.text, 'ABCD'
+  eq r.macro, { segmentIndex: 3, fileId: '017053', last: true, segmentCount: 4, fileName: 'MEVE' }
+  throws (-> parse [913]),           Error, 'byte shift at end'
+  throws (-> parse [927]),           Error, 'ECI at end'
+  throws (-> parse [922]),           Error, 'not a mode'
+  throws (-> parse [928, 111]),      Error, 'truncated'
+  throws (-> parse [928, 111, 103]), Error, 'no file id'
+  throws (-> parse [902, 899]),      Error, 'start with 1'

@@ -1000,11 +1000,14 @@ readFrom =! (runs, n, first, expect, unit, cells, base, mode) ->
     break if i + 8 > n
     total = 0
     total += runs[i + k] for k in [0...8]
-    if total < 13 * unit or total > 21 * unit
-      cells[base + count++] = -1
+    code  = if total < 13 * unit or total > 21 * unit then -1 else lookup(runs, i, total, mode.mirror)
+    cells[base + count++] = code
+    # Only a read codeword vouches for its own width; after a miss the next
+    # is expected a nominal codeword on, since a window slipped by two runs
+    # over repeated codewords reads as a valid wrong one.
+    if code < 0
       expect = p + 17 * unit
     else
-      cells[base + count++] = lookup runs, i, total, mode.mirror
       unit   = (unit + total / 17) / 2
       expect = p + total
     p += total
@@ -1498,12 +1501,47 @@ tryDecode =! (s, x, y, dx, dy, unit, first, mode) ->
     fit = (t) -> mr + slope * (t - mt)
     true
   return null unless fitRows()
+  # The edge is short next to the width, so its fit leaves the row
+  # direction a little off, and a wide symbol's rays then drift into the
+  # neighbor rows. The rays measure that drift themselves: how the row
+  # named by each codeword's cluster moves along the ray, in rows per
+  # column. Past a fraction of a row across the width the direction is
+  # corrected and every ray sampled again.
+  drift = ->
+    num = 0
+    den = 0
+    for i in [0...rays] when rayRow[i] >= 0
+      base = i * MAX_CELLS
+      r = rayRow[i]
+      for j in [1..columns]
+        code = cells[base + j]
+        continue if code < 0
+        cluster = code // 929
+        unless cluster is r % 3
+          r = if cluster is (r + 1) % 3 then r + 1 else r - 1
+        num += j * (r - rayRow[i])
+        den += j * j
+    if den then num / den else 0
+  d = drift()
+  if Math.abs(d * columns) > 0.25
+    k  = d / ((fit(1) - fit(0)) * 17 * unit)
+    nx = rx - k * ux
+    ny = ry - k * uy
+    nl = Math.hypot nx, ny
+    rx = nx / nl
+    ry = ny / nl
+    rays = 0
+    ray i * step for i in [0..Math.floor(len / step)]
+    return null unless fitRows()
+  # One row past each end as well: a slight tilt carries a ray's far end
+  # into the neighbor row, and the row the fit names at its start would
+  # otherwise leave those cells unsampled.
   t = -step
-  while fit(t) > -0.5 and rays < s.maxRays
+  while fit(t) > -1.5 and rays < s.maxRays
     ray t
     t -= step
   t = (Math.floor(len / step) + 1) * step
-  while fit(t) < rows - 0.5 and rays < s.maxRays
+  while fit(t) < rows + 0.5 and rays < s.maxRays
     ray t
     t += step
   fitRows()
