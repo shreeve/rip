@@ -1,9 +1,12 @@
 # ==============================================================================
 # rip/barcodes — QR (ISO/IEC 18004)
 #
-# Encoder: a symbol is a packed bit matrix, one Uint32Array with 32 modules
+# Encoder: a symbol is a packed bit matrix, one Int32Array with 32 modules
 # per word, LSB-first, bits at x >= size held zero (the penalty scanners
-# depend on it). Everything the version alone determines is built once and
+# depend on it). The words are signed so a full word is an ordinary int32:
+# every use is bitwise or a popcount, and a symbol of any version then
+# reads the same value type, which keeps the JIT on one specialization
+# when small and large symbols are encoded back to back. Everything the version alone determines is built once and
 # cached in a single slot: the function-pattern template, the zigzag
 # placement order, and the eight mask XOR planes with their transposes. Mask
 # selection XORs whole words and scores the test form word-parallel, so the
@@ -286,7 +289,7 @@ encodeData =! (ver, ecc, text, type, utf8) ->
 
 mat =! (size) ->
   words = (size + 31) >>> 5
-  { size, words, v: Uint32Array.new(words * size) }
+  { size, words, v: Int32Array.new(words * size) }
 
 matGet =! (m, x, y) -> (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1
 
@@ -296,20 +299,20 @@ matSet! =! (m, x, y, bit) ->
   m.v[i] = if bit then m.v[i] | b else m.v[i] & ~b
 
 TRANSPOSE_MASKS =! [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff]
-TRANSPOSE_TMP   =! Uint32Array.new(32)
+TRANSPOSE_TMP   =! Int32Array.new(32)
 
 # 32x32 in-place bit-matrix transpose (butterfly network).
 transpose32! =! (a) ->
   for stage in [0...5]
-    m = TRANSPOSE_MASKS[stage] >>> 0
+    m = TRANSPOSE_MASKS[stage]
     s = 1 << stage
     for i in [0...32] by (s << 1)
       for k in [0...s]
-        x = a[i + k] >>> 0
-        y = a[i + k + s] >>> 0
+        x = a[i + k]
+        y = a[i + k + s]
         t = ((x >>> s) ^ y) & m
-        a[i + k] = (x ^ (t << s)) >>> 0
-        a[i + k + s] = (y ^ t) >>> 0
+        a[i + k] = x ^ (t << s)
+        a[i + k + s] = y ^ t
 
 transposeMat! =! (src, dst) ->
   {size, words, v} = src
@@ -331,12 +334,12 @@ transposeMat! =! (src, dst) ->
 # contributes L-4 windows plus one run-start window counted twice.
 runsPenaltyVertical =! (m) ->
   {size, words, v} = m
-  tail = if size & 31 then ((1 << (size & 31)) - 1) >>> 0 else 0xffffffff
+  tail = if size & 31 then ~(-1 << (size & 31)) else -1
   score = 0
   for wi in [0...words]
-    valid = if wi is words - 1 then tail else 0xffffffff
+    valid = if wi is words - 1 then tail else -1
     r3 = v[3 * words + wi]
-    dPrev = 0xffffffff
+    dPrev = -1
     d0 = v[wi] ^ v[words + wi]
     d1 = v[words + wi] ^ v[2 * words + wi]
     d2 = v[2 * words + wi] ^ r3
@@ -345,7 +348,7 @@ runsPenaltyVertical =! (m) ->
       r4 = v[idx]
       d3 = r3 ^ r4
       w = ~(d0 | d1 | d2 | d3) & valid
-      score += popcnt(w >>> 0) + 2 * popcnt((w & dPrev) >>> 0) if w
+      score += popcnt(w) + 2 * popcnt(w & dPrev) if w
       dPrev = d0
       d0 = d1
       d1 = d2
@@ -358,10 +361,10 @@ runsPenaltyVertical =! (m) ->
 # the pattern across a 32-wide stripe at once.
 finderPenaltyVertical =! (m) ->
   {size, words, v} = m
-  tail = if size & 31 then ((1 << (size & 31)) - 1) >>> 0 else 0xffffffff
+  tail = if size & 31 then ~(-1 << (size & 31)) else -1
   count = 0
   for wi in [0...words]
-    valid = if wi is words - 1 then tail else 0xffffffff
+    valid = if wi is words - 1 then tail else -1
     for y in [0..size - 11]
       i = y * words + wi
       r0  = v[i]
@@ -377,7 +380,7 @@ finderPenaltyVertical =! (m) ->
       r10 = v[i + 10 * words]
       m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10)
       m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10
-      count += popcnt(m0 >>> 0) + popcnt(m1 >>> 0)
+      count += popcnt(m0) + popcnt(m1)
   count
 
 # Score a symbol given both orientations. `limit` is the best score so far
@@ -389,13 +392,13 @@ penaltyScore =! (m, t, limit = Infinity) ->
   return adjacent if adjacent >= limit
   # N2: three points per overlapping 2x2 same-color box. Valid left edges in
   # the last word: one fewer than the bits it holds.
-  tail2 = ((1 << (size - 32 * (words - 1) - 1)) - 1) >>> 0
+  tail2 = ~(-1 << (size - 32 * (words - 1) - 1))
   boxes = 0
   dark = 0
   for y in [0...size]
     for wi in [0...words]
       a0 = v[y * words + wi]
-      dark += popcnt(a0 >>> 0)
+      dark += popcnt(a0)
       continue if y is size - 1
       a1 = v[(y + 1) * words + wi]
       n0 = if wi + 1 < words then v[y * words + wi + 1] else 0
@@ -405,7 +408,7 @@ penaltyScore =! (m, t, limit = Infinity) ->
       eqH1 = ~(a1 ^ ((a1 >>> 1) | (n1 << 31)))
       w = eqV & eqH0 & eqH1
       w &= tail2 if wi is words - 1
-      boxes += popcnt(w >>> 0)
+      boxes += popcnt(w)
   total = size * size
   darkSteps = Math.ceil(Math.max(0, Math.abs(dark * 100 - total * 50) - total * 5) / (total * 5))
   partial = adjacent + 3 * boxes + 10 * darkSteps

@@ -179,6 +179,45 @@ scanner arena without a canvas round trip. `svgToPng` and `gifToPng`
 rasterize the encoder's output, and `BarcodeDetector` is a Shape Detection
 API ponyfill over `decodeQR`. Camera access needs a secure context.
 
+## Performance
+
+Measured against [paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the
+TypeScript implementation this package was ported from, both running under
+Bun 1.4.0 on an Apple M5. Each figure is the best of three processes; every
+process runs the whole sequence in this order, so each row is timed after
+the rows above it warmed the JIT, the way an application mixes symbol sizes.
+
+| Encode (µs)         |   rip | paulmillr/qr |
+|---------------------|------:|-------------:|
+| raw, version 1      |   2.7 |          2.8 |
+| raw, version 8      |  16.9 |         17.6 |
+| raw, version 18     |  51.7 |         54.7 |
+| svg, version 8      |  42.3 |         46.9 |
+| gif, version 8      |  18.1 |         18.7 |
+
+| Decode (µs)                |    rip | paulmillr/qr |
+|----------------------------|-------:|-------------:|
+| 132x132 raster, version 1  |   39.3 |        116.8 |
+| 1280x720 frame, one symbol |    649 |         1030 |
+| 1920x1080 frame, one symbol|   1490 |         2240 |
+| 1920x1080 noise, no symbol |  22950 |        23900 |
+
+Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
+inputs are synthetic RGBA frames with one symbol centered on a flat
+background, plus a full-frame noise image for the miss case, which is
+dominated by the finder search both implementations run line for line.
+
+Encode timings are sensitive to which symbol size a process sees first.
+A version 1 symbol fits one 32-bit word per row and never fills a word, so
+a JIT that meets it first specializes the encoder on small integers; the
+first larger symbol then produces full words, which JavaScript reads as
+doubles from an unsigned array, and the recompiled mixed-type code runs
+about 1.4x slower for the rest of the process. The reference implementation
+shows this in the table: warmed only on its own size, its raw version 8 and
+18 rows are 16.8 and 52.8. This package stores matrix words in an
+`Int32Array`, so a full word is an ordinary integer in every version and
+the encoder keeps one specialization whatever order the sizes arrive in.
+
 ## Test
 
 ```bash
