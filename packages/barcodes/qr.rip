@@ -122,8 +122,9 @@ EXP =! GF256.exp
 LOG =! GF256.log
 
 # Table 10 mask predicates as an 8-bit vector: bit m is set when mask m
-# fires at (x, y).
-maskBits =! (x, y) ->
+# fires at (x, y). Every predicate is periodic in 6 columns and 12 rows, so
+# the vector is a 72-entry lookup filled once from the arithmetic.
+maskCalc =! (x, y) ->
   x2  = x % 2
   y2  = y % 2
   x3  = x % 3
@@ -139,6 +140,13 @@ maskBits =! (x, y) ->
   bits |= 64  if (xy2 + xy3) % 2 is 0
   bits |= 128 if ((x2 ^ y2) + xy3) % 2 is 0
   bits
+
+MASK_TABLE =! do ->
+  t = Uint8Array.new(72)
+  t[y * 6 + x] = maskCalc x, y for y in [0...12] for x in [0...6]
+  t
+
+maskBits =! (x, y) -> MASK_TABLE[(y % 12) * 6 + x % 6]
 
 POP16 =! do ->
   t = Uint8Array.new(1 << 16)
