@@ -572,6 +572,42 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
   // while the Problems count still reads one. The END of the range is what
   // carries that, which is why it is asserted here: the test above pins
   // starts, and a whole-component span has a correct start.
+  test('a static render loop fades its variable only when the author never reads it', async () => {
+    // A block with no reactive bindings is static: the runtime never
+    // calls its update method, so the face must not declare the loop
+    // variables on it — a second, unread declaration mapped onto the
+    // `for` head fades a variable the body reads. The factory parameter
+    // is the one declaration, so a variable the body never reads still
+    // draws its honest hint there.
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const wait = nextDiagnostics(published);
+      const fixture = [
+        "ITEMS = [{ href: '/a', name: 'A' }]",   // 0
+        'export App = component',                 // 1
+        '  render',                               // 2
+        '    nav',                                // 3
+        '      for entry, i in ITEMS',            // 4
+        '        a href: entry.href, "#{i} #{entry.name}"',   // 5
+        '      for unused in ITEMS',              // 6
+        "        span 'x'",                       // 7
+        '',
+      ].join('\n');
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: fixture },
+      });
+      const { diagnostics } = await wait();
+      expect(diagnostics.map((d) => [d.code, d.severity, d.range.start.line, d.range.start.character, d.range.end.character]))
+        .toEqual([
+          [6133, 4, 6, 10, 16],   // `unused`, never read, faded on the `for` head
+        ]);
+      expect(fixture.split('\n')[6].slice(10, 16)).toBe('unused');
+    } finally {
+      await client.stop();
+    }
+  }, 30000);
+
   test('a fault in a member type anchors on the member — no diagnostic spans the component', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));

@@ -13446,7 +13446,7 @@ class Emitter {
         this.b.emit(`${pad}${rec.name}(`);
         emitTypedParams(headerParams, 'this', (n) => paramTypes.get(n));
         this.b.emit(') {\n');
-        if (this.ts) this.b.tsOnly(() => this.b.emit(`${p2}type ${ctxType} = typeof ${self};\n`));
+        if (this.ts && needsP) this.b.tsOnly(() => this.b.emit(`${p2}type ${ctxType} = typeof ${self};\n`));
         if (rec.vars.size > 0) {
           this.b.emit(`${p2}let `);
           [...rec.vars].forEach((v, i) => {
@@ -13527,13 +13527,13 @@ class Emitter {
         // frame's effects under the owner push. A re-bind param is the
         // same row datum as the header param it writes into, so its
         // face type is `typeof` that param — one hole reports once
-        // when the header param stayed bare, never twice.
+        // when the header param stayed bare, never twice. A static
+        // block's p() takes no params: the runtime never calls it
+        // (`_s` gates every call), and a parameter spelled with the
+        // author's loop-variable name would be a second, unread
+        // declaration of that variable, faded onto the `for` head.
         this.b.emit(`${p3}p(`);
-        if (needsP) {
-          emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
-        } else {
-          emitTypedParams(headerParams, ctxType, (n) => paramTypes.get(n));
-        }
+        if (needsP) emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
         this.b.emit(') {\n');
         if (needsP && rec.paramNames.length > 0) {
           this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(' ')}\n`);

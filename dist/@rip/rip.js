@@ -18670,7 +18670,7 @@ ${this.replayPad}}` : " }");
         emitTypedParams(headerParams, "this", (n) => paramTypes.get(n));
         this.b.emit(`) {
 `);
-        if (this.ts)
+        if (this.ts && needsP)
           this.b.tsOnly(() => this.b.emit(`${p2}type ${ctxType} = typeof ${self};
 `));
         if (rec.vars.size > 0) {
@@ -18757,11 +18757,8 @@ ${this.replayPad}}` : " }");
         this.b.emit(`${p3}},
 `);
         this.b.emit(`${p3}p(`);
-        if (needsP) {
+        if (needsP)
           emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
-        } else {
-          emitTypedParams(headerParams, ctxType, (n) => paramTypes.get(n));
-        }
         this.b.emit(`) {
 `);
         if (needsP && rec.paramNames.length > 0) {
@@ -25963,13 +25960,13 @@ class __Component {
   }
   _init(props) {}
   _beginProjection(owner) {
-    const prev = __pushComponent(this);
+    const token = { prev: __pushComponent(this), owner: this._projectionOwner ?? null };
     this._projectionOwner = owner;
-    return prev;
+    return token;
   }
-  _endProjection(prev) {
-    this._projectionOwner = null;
-    __popComponent(prev);
+  _endProjection(token) {
+    this._projectionOwner = token.owner;
+    __popComponent(token.prev);
   }
   _setChildren(value) {
     const current = this.children;

@@ -130,6 +130,13 @@ Deck = component
         for item, i in ["a", "b"]
           Chip key: item, label: item
 
+# A loop whose body reads the row and binds nothing reactive: a static block.
+StaticRows = component
+  render
+    ul
+      for entry, i in [{ name: "a" }, { name: "b" }]
+        li class: "row", "#{i}: #{entry.name}"
+
 Frame = component
   render
     div.frame

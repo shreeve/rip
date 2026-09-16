@@ -2863,7 +2863,7 @@ code 'tag-named local (`code`) shadows the HTML tag name', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, ex, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -2966,7 +2966,7 @@ code 'tag-named local shadows the HTML tag in a property chain', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, ex, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -3078,7 +3078,7 @@ code 'string containing \'this\' in loop factory', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, item, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -4715,7 +4715,7 @@ code 'outer auto-index avoids body-level render-local declaration', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, x, j) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -4814,7 +4814,7 @@ code 'reactive iter var: literal-array source stays static', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, item, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -4863,7 +4863,7 @@ code 'reactive iter var: alias is NOT tracked (deferred)', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, item, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -4912,7 +4912,7 @@ code 'render-local binding compiles to a hoisted `let`, not a textnode', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, item, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);
@@ -4965,7 +4965,7 @@ code 'compound assignment mutates a render-local without re-declaring', '''
         m(target, anchor) {
           if (target) target.insertBefore(_el1, anchor);
         },
-        p(ctx, item, i) {
+        p() {
         },
         d(detaching) {
           if (detaching) __detach(_el1);

@@ -1142,7 +1142,7 @@ describe('loops: __reconcile with WORKING keys (#126 compile half)', () => {
   test('a static row block carries _s and an empty p() (the reconciler skips patching it)', () => {
     const { code } = compile('L = component\n  render\n    ul\n      for item in [1, 2]\n        li "static"\n');
     expect(code).toContain('_s: true,');
-    expect(code).toMatch(/p\(ctx, item, i\) \{\n\s*\},/);
+    expect(code).toMatch(/p\(\) \{\n\s*\},/);
   });
 
   test('item AND index reads are live over a reactive collection ; loop vars shadow members', () => {

@@ -656,6 +656,47 @@ let Deck = class extends __Component {
     };
   }
 };
+let StaticRows = class extends __Component {
+  _init(props) {
+  }
+  _create() {
+    this._el0 = document.createElement('ul');
+    this._el0.setAttribute('data-part', 'StaticRows');
+    this._anchor1 = document.createComment('for');
+    this._el0.appendChild(this._anchor1);
+    return this._el0;
+  }
+  _setup() {
+    {
+      const __s = { blocks: [], keys: [] };
+      __effect(() => {
+        __reconcile(this._anchor1, __s, [{name: "a"}, {name: "b"}], this, this.create_block_0, null);
+      });
+      __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
+    }
+  }
+  create_block_0(ctx, entry, i) {
+    let _el2, _t0;
+    return {
+      _s: true,
+      c() {
+        _el2 = document.createElement('li');
+        _el2.className = "row";
+        _t0 = document.createTextNode(String(`${i}: ${entry.name}`));
+        _el2.appendChild(_t0);
+        this._first = _el2;
+      },
+      m(target, anchor) {
+        if (target) target.insertBefore(_el2, anchor);
+      },
+      p() {
+      },
+      d(detaching) {
+        if (detaching) __detach(_el2);
+      }
+    };
+  }
+};
 let Frame = class extends __Component {
   _init(props) {
   }
