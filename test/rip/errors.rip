@@ -309,3 +309,134 @@ test 'value-position throw preserves await', '''
     msg = e.message
   msg
   ''', 'boom'
+
+# ==============================================================================
+# Tail-position try: a statement whose branches return, never a wrapper
+# ==============================================================================
+
+test "tail try returns the body value", '''
+  f = (x) ->
+    try
+      x * 2
+    catch e
+      null
+  f(21)
+  ''', 42
+
+test "tail try returns the handler value on throw", '''
+  f = ->
+    try
+      throw 'boom'
+    catch e
+      "caught #{e}"
+  f()
+  ''', "caught boom"
+
+test "tail try without a handler returns undefined on throw", '''
+  f = ->
+    try
+      throw 'boom'
+  f() is undefined
+  ''', true
+
+test "tail try runs finally after returning", '''
+  log = []
+  f = ->
+    try
+      log.push 'body'
+      1
+    finally
+      log.push 'finally'
+  [f(), log]
+  ''', [1, ['body', 'finally']]
+
+test "tail try with an explicit return inside", '''
+  f = (x) ->
+    try
+      return x + 1 if x > 0
+      0
+    catch e
+      -1
+  [f(5), f(-5)]
+  ''', [6, 0]
+
+test "tail try with a catch pattern", '''
+  f = ->
+    try
+      throw { message: 'bad', code: 7 }
+    catch { message, code }
+      "#{message}:#{code}"
+  f()
+  ''', "bad:7"
+
+test "tail try after other statements", '''
+  f = (xs) ->
+    total = 0
+    total += x for x in xs
+    try
+      total / xs.length
+    catch e
+      0
+  f([2, 4])
+  ''', 3
+
+test "tail try inside a generator may yield", '''
+  g = ->
+    try
+      yield 1
+      yield 2
+    catch e
+      yield -1
+  [...g()]
+  ''', [1, 2]
+
+test "tail try with await", '''
+  f = (p) ->
+    try
+      await p
+    catch e
+      'failed'
+  [await f(Promise.resolve(1)), await f(Promise.reject('x'))]
+  ''', [1, 'failed']
+
+code "tail try compiles to a returning statement", '''
+  f = (x) ->
+    try
+      parse x
+    catch e
+      null
+  ''', '''
+  let f = function(x) {
+    try {
+      return parse(x);
+    } catch (e) {
+      return null;
+    }
+  };
+  '''
+
+code "tail try with await stays inside the function", '''
+  f = (x) ->
+    try
+      await parse x
+    catch e
+      null
+  ''', '''
+  let f = async function(x) {
+    try {
+      return await parse(x);
+    } catch (e) {
+      return null;
+    }
+  };
+  '''
+
+code "value-position try keeps its wrapper", '''
+  x = try parse(s) catch e then null
+  ''', '''
+  let x = (() => { try {
+    return parse(s);
+  } catch (e) {
+    return null;
+  } })();
+  '''
