@@ -13,10 +13,10 @@ throw Error.new 'rip-email: RIP_EMAIL_DIR names the template directory' unless E
 
 # Workers run from a bundled artifact with no loader on their command
 # line, so the child is given one, found from this file.
-ROOT   = join(import.meta.dir, '..', '..', '..', '..')
+ROOT   = join(import.meta.dir, '..', '..', '..')
 LOADER = join(ROOT, 'src', 'loader.js')
 RUN    = join(ROOT, 'src', 'cli', 'run.js')
-CLI    = join(ROOT, 'packages', 'ui', 'email', 'cli.rip')
+CLI    = join(ROOT, 'packages', 'email', 'cli.rip')
 
 child = (...rest) ->
   args = ["--preload=#{LOADER}", RUN, CLI, ...rest]

@@ -17,11 +17,6 @@ const APPROVED = [
     kind: 'test',
     title: 'app package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)',
   },
-  {
-    file: 'packages/ui/test/types.test.js',
-    kind: 'test',
-    title: 'email package TypeScript faces and declarations are valid (deferred: package .d.ts removed until typing pass)',
-  },
 ];
 
 export function unconditionalSkips(source) {

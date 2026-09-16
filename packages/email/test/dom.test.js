@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { Document, serialize, toPlainText } from '../email/dom.rip';
+import { Document, serialize, toPlainText } from '../dom.rip';
 
 test('email DOM owns mutation, serialization, and plain text', () => {
   const document = new Document();

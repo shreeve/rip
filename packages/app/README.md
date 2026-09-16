@@ -31,6 +31,8 @@ The package currently provides:
   `ignore`) over the renderer’s remount seam
 - `rash` and `check` as server/tooling hash utilities; the browser publication
   consumer trusts Manager's declared App hash
+- the `CSSProperties` type, an inline style as an object: the type the compiler
+  gives a native tag's `style`, nameable from application code
 
 Only named exports are supported:
 

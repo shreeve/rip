@@ -1,6 +1,39 @@
-# Synchronous DOM subset for server-side email rendering.
+# The server DOM the compiled render blocks run against: the document
+# methods and node surface the emitter's output calls, the serializer,
+# and the plain-text walk. Attributes hold strings. `style` holds an
+# object of camelCased declarations whichever spelling wrote it, and
+# serializes once.
 
-import { toStyle } from '../shared/styles.rip'
+import type { CSSProperties } from 'rip/app'
+
+export type StyleValue = string | CSSProperties
+
+propertyName = (name: string): string ->
+  return name if name.startsWith('--')
+  name.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
+
+export parseStyle = (source: string): CSSProperties ->
+  style: Record<string, string> = {}
+  for raw in source.split(';')
+    declaration = raw.trim()
+    continue unless declaration
+    colon = declaration.indexOf(':')
+    continue if colon is -1
+    style[propertyName(declaration.slice(0, colon).trim())] = declaration.slice(colon + 1).trim()
+  style as CSSProperties
+
+export toStyle = (style: StyleValue | false | null | undefined): CSSProperties ->
+  return {} unless style
+  return parseStyle(style) if typeof style is 'string'
+  style
+
+# Later arguments win by key; a key keeps the position of its first
+# appearance.
+export mergeStyles = (...styles: Array<StyleValue | false | null | undefined>): CSSProperties ->
+  merged: CSSProperties = {}
+  for style in styles
+    Object.assign merged, toStyle(style)
+  merged
 
 VALID_ELEMENT_NAME =! /^(?:__root|[A-Za-z][A-Za-z0-9:_-]*)$/
 VALID_ATTRIBUTE_NAME =! /^[^\s"'/>=]+$/
@@ -276,7 +309,7 @@ serializeAttributes = (element: Element): string ->
   parts.push " style=\"#{escapeAttribute(inlineStyle)}\"" if inlineStyle
 
   for [key, value] in element.attributes
-    continue if key is 'id' or key is 'class' or key is 'data-rip-plain-text'
+    continue if key is 'id' or key is 'class'
     if value is '' and BOOLEAN_ATTRIBUTES.has key.toLowerCase()
       parts.push " #{key}"
     else
@@ -315,6 +348,9 @@ def _textContent(node: Node): string
   return '' if node instanceof Comment
   (node.childNodes.map (child: Node) -> _textContent child).join ''
 
+# The text twin: block and heading boundaries become line breaks, a link
+# keeps its address beside its text, and an element marked
+# `data-skip-in-text` contributes nothing.
 def walkText!(node: Node, parts: string[])
   if node instanceof Text
     parts.push node.data
@@ -329,10 +365,6 @@ def walkText!(node: Node, parts: string[])
   return unless node instanceof Element
   return if SKIP_TEXT_TAGS.has node.tag
   return if node.attributes.get('data-skip-in-text') is 'true'
-  plainText = node.attributes.get 'data-rip-plain-text'
-  if plainText?
-    parts.push plainText
-    return
   return if node._innerHTML?
 
   if node.tag is 'br'

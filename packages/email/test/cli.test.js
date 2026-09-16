@@ -9,14 +9,14 @@ import { join } from 'path';
 
 const repo = join(import.meta.dir, '..', '..', '..');
 const ripCli = join(repo, 'bin', 'rip');
-const emailCli = join(import.meta.dir, '..', 'email', 'cli.rip');
+const emailCli = join(import.meta.dir, '..', 'cli.rip');
 const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8'));
 
 let dir;
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'rip-email-'));
   writeFileSync(join(dir, 'welcome.rip'), `
-import { Email, Body, Preview, Text } from 'rip/ui/email'
+import { Email, Body, Preview, Text } from 'rip/email'
 
 export Welcome = component
   @name: string := 'friend'
@@ -32,7 +32,7 @@ Welcome.subject = (props) -> "Hello #{props.name}"
 export helper = -> 1
 `);
   writeFileSync(join(dir, 'plain.rip'), `
-import { Email, Body, Text } from 'rip/ui/email'
+import { Email, Body, Text } from 'rip/email'
 
 export Plain = component
   render
@@ -44,7 +44,7 @@ export Plain = component
   writeFileSync(join(dir, 'lib', 'helpers.rip'), `export shout = (s) -> s.toUpperCase()\n`);
   mkdirSync(join(dir, 'emails'));
   writeFileSync(join(dir, 'emails', 'note.rip'), `
-import { Email, Body, Text } from 'rip/ui/email'
+import { Email, Body, Text } from 'rip/email'
 
 export Note = component
   render
@@ -53,7 +53,7 @@ export Note = component
         Text 'a note'
 `);
   writeFileSync(join(dir, '_frame.rip'), `
-import { Email, Body } from 'rip/ui/email'
+import { Email, Body } from 'rip/email'
 
 export Frame = component
   @children =! undefined
@@ -74,8 +74,8 @@ delete env.FORCE_COLOR;
 const runIn = (cwd, ...args) => spawnSync(process.execPath, [ripCli, emailCli, ...args], { cwd, encoding: 'utf8', env });
 const run = (...args) => runIn(dir, ...args);
 
-test('the rip-email bin is email/cli.rip, shebang’d and executable', () => {
-  expect(pkg.bin).toEqual({ 'rip-email': './email/cli.rip' });
+test('the rip-email bin is cli.rip, shebang’d and executable', () => {
+  expect(pkg.bin).toEqual({ 'rip-email': './cli.rip' });
   expect(readFileSync(emailCli, 'utf8').startsWith('#!/usr/bin/env rip\n')).toBe(true);
   expect(statSync(emailCli).mode & 0o111).not.toBe(0);
 });
@@ -125,7 +125,7 @@ test('a file exporting two components is refused by name', () => {
   const two = mkdtempSync(join(tmpdir(), 'rip-email-two-'));
   try {
     writeFileSync(join(two, 'two.rip'), `
-import { Email, Body, Text } from 'rip/ui/email'
+import { Email, Body, Text } from 'rip/email'
 export A1 = component
   render
     Email

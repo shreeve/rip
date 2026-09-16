@@ -28,10 +28,13 @@ publish story.
   header pins, Manager watch defaults, appliance distribution, Cart
   cleanups). Process workers, control-plane registration, watch
   publication, and the structured startup report are already shipped.
-- **UI** — browser interaction primitives (`rip/ui/browser`) and
-  the Tailwind compilation boundary are shipped with tests. The
-  headless widget catalog and its app-framework integration remain
-  open with Philip.
+- **UI** — `rip/ui` is headless compound components on the platform's
+  own machinery, opening with `Dialog`
+  ([RFC 1](RFCS.md#rfc-1-split-ripui-into-headless-components-and-ripemail)).
+  It waits on the compiler: a part projected through `slot` is
+  constructed by the page before the root that offers its state, so
+  `accept` cannot reach it. Projected children must be constructed
+  under the receiving component before the package lands.
 
 ## Browser delivery
 
@@ -45,12 +48,6 @@ Product HMR for the contracted Cart bars is done
 
 Still open:
 
-- **`rip.browser` granularity** (needs an owner call — see breakdown
-  below if opening work). Today `"rip": { "browser": true }` is
-  package-wide, and assembly that claims a package copies every `.rip`
-  file under its root. A package such as `rip/ui` mixes
-  browser-safe surfaces (`./browser`) with server-only / npm-backed
-  surfaces (`./tailwind`), so it cannot set the flag without lying.
 - **Sites pin for precompressed `bundle.json`.** Janus (≥ v1.6) already
   selects `.br` / `.zst` / `.gz` sidecars from `Accept-Encoding` when
   `files { precompressed }` is on (Sites Caddyfiles already enable it).

@@ -17,11 +17,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'os'
 import { basename, join, relative, resolve } from 'path'
 import { edgeControl } from 'rip/sites/edge'
-import { toEmail } from './render.rip'
+import { toEmail } from './email.rip'
 
-throw Error.new('rip/ui/email/cli is a CLI, not a library; run it as rip-email (rip email)') unless import.meta.main
+throw Error.new('rip/email/cli is a CLI, not a library; run it as rip-email (rip email)') unless import.meta.main
 
-VERSION = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf-8')).version
+VERSION = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf-8')).version
 
 USAGE = '''
 usage: rip-email <verb> [args]
@@ -169,9 +169,8 @@ shown = (path) ->
 # dev — the preview server
 # ------------------------------------------------------------------------------
 
-# The checkout, from this file: email/ under ui/ under packages/ under
-# the root.
-ROOT = join(import.meta.dir, '..', '..', '..')
+# The checkout, from this file: email/ under packages/ under the root.
+ROOT = join(import.meta.dir, '..', '..')
 
 # The edge's control plane, a unix socket or an http origin.
 edge = (control, method, path, body = null) ->

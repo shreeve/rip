@@ -1,0 +1,232 @@
+# rip/email — email templates as components, rendered to a string on Bun.
+
+import type { CSSProperties as StyleObject } from 'rip/app'
+import { mergeStyles, serializeChildren, toPlainText } from './dom.rip'
+import type { StyleValue } from './dom.rip'
+import { renderOnce, Template } from './render.rip'
+
+export type CSSProperties = StyleObject
+
+# ------------------------------------------------------------------------------
+# Rendering
+# ------------------------------------------------------------------------------
+
+DOCTYPE =! '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
+
+# The inbox preview line is the Preview part's own text, raw.
+previewText = (root): string | null ->
+  found: string | null = null
+  visit = (node) ->
+    return if found?
+    if node.attributes?.get('data-part') is 'Preview'
+      found = (child.data for child in node.childNodes when child.nodeType is 3).join('')
+      return
+    for child in (node.childNodes ?? [])
+      visit child
+    return
+  visit root
+  found
+
+export toEmail = (Component: typeof Template, props: Record<string, unknown> = {}): { html: string, text: string, preview: string | null } ->
+  renderOnce Component, props, (root) ->
+    { html: "#{DOCTYPE}#{serializeChildren(root)}", text: toPlainText(root), preview: previewText(root) }
+
+# ------------------------------------------------------------------------------
+# Components
+# ------------------------------------------------------------------------------
+
+export Email = component
+  @class: string := ''
+  @lang: string := 'en'
+  @dir: string := 'ltr'
+  render
+    html class: @class, lang: @lang, dir: @dir
+      slot
+
+export Head = component
+  @class: string := ''
+  render
+    head class: @class
+      meta content: 'text/html; charset=UTF-8', 'http-equiv': 'Content-Type'
+      meta name: 'x-apple-disable-message-reformatting'
+      slot
+
+# The body element carries the background so the ground fills the
+# viewport past the content, and no box: its margin is zeroed always,
+# since a client's default is not zero, and its padding whenever the
+# style sets one, since the cell carries it. Everything else stays on
+# the cell.
+bodyStyle = (style: StyleValue): StyleObject ->
+  cell = mergeStyles style
+  body: StyleObject = {}
+  body.background = cell.background if cell.background?
+  body.backgroundColor = cell.backgroundColor if cell.backgroundColor?
+  body.margin = 0
+  body.padding = 0 if Object.keys(cell).some (key) -> key.startsWith('padding')
+  body
+
+export Body = component
+  @class: string := ''
+  @style: StyleValue := ''
+  ground: StyleObject ~= bodyStyle @style
+  render
+    body class: @class, style: ground
+      table align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation'
+        tbody
+          tr
+            td style: @style
+              slot
+
+# Inbox clients fill the preview line from the first text after it, so
+# the text is followed by a run of invisible characters, one run per
+# character short of the line's length.
+PREVIEW_WHITESPACE =! '\xa0\u200C\u200B\u200D\u200E\u200F\uFEFF'
+PREVIEW_LENGTH =! 150
+
+previewPadding = (text: string): string ->
+  remaining = PREVIEW_LENGTH - text.length
+  return '' if remaining <= 0
+  PREVIEW_WHITESPACE.repeat remaining
+
+export Preview = component
+  @class: string := ''
+  @text: string := ''
+  padding: string ~= previewPadding @text
+  render
+    div class: @class, style: 'display:none;overflow:hidden;line-height:1px;opacity:0;max-height:0;max-width:0', 'data-skip-in-text': 'true'
+      = @text
+      div
+        = padding
+
+# Padding goes on the cell, everything else on the table: Outlook and
+# Klaviyo drop padding on a table and honor it on a td.
+splitPadding = (style: StyleValue): { table: StyleObject, cell: StyleObject } ->
+  table: Record<string, string | number> = {}
+  cell: Record<string, string | number> = {}
+  for key, value of mergeStyles(style) as Record<string, string | number>
+    (if key.startsWith('padding') then cell else table)[key] = value
+  { table: table as StyleObject, cell: cell as StyleObject }
+
+export Container = component
+  @class: string := ''
+  @style: StyleValue := ''
+  split: { table: StyleObject, cell: StyleObject } ~= splitPadding @style
+  frame: StyleObject ~= mergeStyles { maxWidth: '37.5em' }, split.table
+  render
+    table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: frame
+      tbody
+        tr style: 'width:100%'
+          td style: split.cell
+            slot
+
+export Section = component
+  @class: string := ''
+  @style: StyleValue := ''
+  split: { table: StyleObject, cell: StyleObject } ~= splitPadding @style
+  render
+    table class: @class, align: 'center', width: '100%', border: '0', cellpadding: '0', cellspacing: '0', role: 'presentation', style: split.table
+      tbody
+        tr
+          td style: split.cell
+            slot
+
+HeadingH1 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h1 class: @class, style: @style
+      slot
+
+HeadingH2 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h2 class: @class, style: @style
+      slot
+
+HeadingH3 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h3 class: @class, style: @style
+      slot
+
+HeadingH4 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h4 class: @class, style: @style
+      slot
+
+HeadingH5 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h5 class: @class, style: @style
+      slot
+
+HeadingH6 = component
+  @class: string := ''
+  @style: StyleValue := ''
+  render
+    h6 class: @class, style: @style
+      slot
+
+export Heading = component
+  @as: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' := 'h1'
+  @class: string := ''
+  @style: StyleValue := ''
+  @children =! undefined
+  render
+    switch @as
+      when 'h1' then HeadingH1 class: @class, style: @style, children: @children
+      when 'h2' then HeadingH2 class: @class, style: @style, children: @children
+      when 'h3' then HeadingH3 class: @class, style: @style, children: @children
+      when 'h4' then HeadingH4 class: @class, style: @style, children: @children
+      when 'h5' then HeadingH5 class: @class, style: @style, children: @children
+      when 'h6' then HeadingH6 class: @class, style: @style, children: @children
+
+export Text = component
+  @class: string := ''
+  @style: StyleValue := ''
+  styles: StyleObject ~= mergeStyles { fontSize: '14px', lineHeight: '24px', margin: '16px 0' }, @style
+  render
+    p class: @class, style: styles
+      slot
+
+# An href fails closed: http, https, mailto, and tel pass, a relative
+# address passes, and anything else, control characters and
+# protocol-relative addresses included, becomes '#'.
+unsafeUrlText = (value: string): boolean ->
+  /[\u0000-\u001F\u007F-\u009F]/.test(value) or value.startsWith('//') or value.startsWith('\\')
+
+hasSchemeLikePrefix = (value: string): boolean ->
+  colon = value.indexOf ':'
+  return false if colon is -1
+  boundaries = [value.indexOf('/'), value.indexOf('?'), value.indexOf('#')]
+    .filter (index) -> index >= 0
+  firstBoundary = if boundaries.length then Math.min(...boundaries) else Infinity
+  colon < firstBoundary
+
+safeHref = (href: unknown): string ->
+  value = String(href ?? '').trim()
+  return '' unless value
+  return '#' if unsafeUrlText value
+  lower = value.toLowerCase()
+  return value if lower.startsWith('http://')
+  return value if lower.startsWith('https://')
+  return value if lower.startsWith('mailto:')
+  return value if lower.startsWith('tel:')
+  return '#' if hasSchemeLikePrefix value
+  value
+
+export Link = component
+  @class: string := ''
+  @href: string := ''
+  @target: string := '_blank'
+  @style: StyleValue := ''
+  url: string ~= safeHref @href
+  styles: StyleObject ~= mergeStyles { color: '#067df7', textDecoration: 'none' }, @style
+  render
+    a class: @class, href: url, target: @target, style: styles
+      slot
