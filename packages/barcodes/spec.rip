@@ -7,15 +7,13 @@
 
 # Table 1: total codewords by version, from the data-module area formula.
 export BYTES =! do ->
-  res = []
   for ver in [1..40]
     bits = (16 * ver + 128) * ver + 64
     if ver >= 2
       align = ver // 7 + 2
       bits -= (25 * align - 10) * align - 55
       bits -= 36 if ver >= 7
-    res.push bits >>> 3
-  res
+    bits >>> 3
 
 # Spec table order, also the format-indicator segment order.
 export ECC_LEVELS =! ['low', 'medium', 'quartile', 'high']
@@ -72,15 +70,13 @@ export alignmentPatterns =! (ver) ->
 export formatBits =! (ecc, mask) ->
   data = (EC_CODE[ecc] << 3) | mask
   d = data
-  for i in [0...10]
-    d = (d << 1) ^ ((d >> 9) * 0b10100110111)
+  d = (d << 1) ^ ((d >> 9) * 0b10100110111) for i in [0...10]
   ((data << 10) | d) ^ 0b101010000010010
 
 # §7.10 / Annex D.2: Golay-protected 18-bit version word.
 export versionBits =! (ver) ->
   d = ver
-  for i in [0...12]
-    d = (d << 1) ^ ((d >> 11) * 0b1111100100101)
+  d = (d << 1) ^ ((d >> 11) * 0b1111100100101) for i in [0...12]
   (ver << 12) | d
 
 # GF(2^8) with primitive polynomial 0x11d. EXP is doubled so the product of
@@ -117,8 +113,7 @@ export maskBits =! (x, y) ->
 
 POP16 =! do ->
   t = Uint8Array.new(1 << 16)
-  for i in [1...t.length]
-    t[i] = t[i >>> 1] + (i & 1)
+  t[i] = t[i >>> 1] + (i & 1) for i in [1...t.length]
   t
 
 export popcnt =! (n) ->

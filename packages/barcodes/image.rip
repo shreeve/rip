@@ -59,11 +59,9 @@ export LITTLE_ENDIAN =! Uint8Array.new(Uint32Array.new([1]).buffer)[0] is 1
 # three, unrolled four wide, the same (r + 2g + b) / 4 luma. Alpha and the X
 # byte fall out of the mask, and the weights are symmetric in r and b, so
 # every RGBA/BGRA/X layout takes this path.
-copyWords =! (out, data, byteStart, n) ->
+copyWords! =! (out, data, byteStart, n) ->
   words = Uint32Array.new(data.buffer, byteStart, n)
-  i = 0
-  end = n - 3
-  while i < end
+  for i in [0...n - 3] by 4
     p = words[i]
     q = words[i + 1]
     r = words[i + 2]
@@ -72,28 +70,25 @@ copyWords =! (out, data, byteStart, n) ->
     out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2
     out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2
     out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2
-    i += 4
-  while i < n
+  for i in [n - (n & 3)...n]
     p = words[i]
     out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
-    i++
-  return
 
 # Convert any input into the tight native luma plane.
-export copyLuma =! (out, maxSize, img, named, layout) ->
+export copyLuma! =! (out, maxSize, img, named, layout) ->
   {step, bits} = validateImage img, named, layout, maxSize
   {width, height, data} = img
   stride = layout?.stride or width * step
   offset = layout?.offset or 0
   return if data is out and not offset and stride is width and step is 1
   if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
-    return copyWords out, data, data.byteOffset + offset, width * height
+    copyWords out, data, data.byteOffset + offset, width * height
+    return
   for y in [0...height]
     src = offset + y * stride
     dst = y * width
     if step is 1
-      for x in [0...width]
-        out[dst++] = data[src++]
+      out[dst++] = data[src++] for x in [0...width]
     else if step is 2
       for x in [0...width]
         out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8)
@@ -102,7 +97,6 @@ export copyLuma =! (out, maxSize, img, named, layout) ->
       for x in [0...width]
         out[dst++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
         src += step
-  return
 
 # RGBA image from a per-pixel dark predicate.
 export darkToImage =! (width, height, isDark) ->

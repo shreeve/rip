@@ -40,8 +40,7 @@ fail =! (msg) -> throw Error.new msg
 # charCode -> Table 5 value; -1 outside the alphabet.
 ALNUM_VAL =! do ->
   t = Int8Array.new(128).fill(-1)
-  for i in [0...ALPHANUMERIC.length]
-    t[ALPHANUMERIC.charCodeAt(i)] = i
+  t[ALPHANUMERIC.charCodeAt(i)] = i for i in [0...ALPHANUMERIC.length]
   t
 
 # ==[ Reed-Solomon ]==
@@ -83,8 +82,7 @@ rsEcc =! (data, rs) ->
   res = Uint8Array.new(n)
   for i in [0...data.length]
     base = (data[i] ^ res[0]) * n
-    for j in [0...last]
-      res[j] = res[j + 1] ^ products[base + j]
+    res[j] = res[j + 1] ^ products[base + j] for j in [0...last]
     res[last] = products[base + last]
   res
 
@@ -118,30 +116,24 @@ encodeData =! (ver, ecc, text, type, utf8) ->
   acc = 0
   accBits = 0
   bytePos = 0
-  push = (value, len) ->
+  push! = (value, len) ->
     acc = (acc << len) | value
     accBits += len
     while accBits >= 8
       accBits -= 8
       bytes[bytePos++] = (acc >>> accBits) & 0xff
-    return
   push MODE_BITS[type], 4
   push dataLen, lengthBits
   if type is 'numeric'
-    i = 0
-    while i < dataLen
+    for i in [0...dataLen] by 3
       n = Math.min(3, dataLen - i)
       push Number(text.slice(i, i + n)), NUMERIC_BITS[n]
-      i += 3
   else if type is 'alphanumeric'
-    i = 0
-    while i + 1 < dataLen
+    for i in [0...dataLen - 1] by 2
       push ALNUM_VAL[text.charCodeAt(i)] * 45 + ALNUM_VAL[text.charCodeAt(i + 1)], 11
-      i += 2
     push ALNUM_VAL[text.charCodeAt(dataLen - 1)], 6 if dataLen & 1
   else
-    for i in [0...utf8.length]
-      push utf8[i], 8
+    push utf8[i], 8 for i in [0...utf8.length]
   bitPos = bytePos * 8 + accBits
   fail 'Capacity overflow' if bitPos > cap.capacity
   bytes[bytePos] = (acc << (8 - accBits)) & 0xff if accBits
@@ -181,50 +173,39 @@ mat =! (size) ->
 
 matGet =! (m, x, y) -> (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1
 
-matSet =! (m, x, y, bit) ->
+matSet! =! (m, x, y, bit) ->
   i = y * m.words + (x >>> 5)
   b = 1 << (x & 31)
   m.v[i] = if bit then m.v[i] | b else m.v[i] & ~b
-  return
 
 TRANSPOSE_MASKS =! [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff]
 TRANSPOSE_TMP   =! Uint32Array.new(32)
 
 # 32x32 in-place bit-matrix transpose (butterfly network).
-transpose32 =! (a) ->
+transpose32! =! (a) ->
   for stage in [0...5]
     m = TRANSPOSE_MASKS[stage] >>> 0
     s = 1 << stage
-    i = 0
-    while i < 32
+    for i in [0...32] by (s << 1)
       for k in [0...s]
         x = a[i + k] >>> 0
         y = a[i + k + s] >>> 0
         t = ((x >>> s) ^ y) & m
         a[i + k] = (x ^ (t << s)) >>> 0
         a[i + k + s] = (y ^ t) >>> 0
-      i += s << 1
-  return
 
-transposeMat =! (src, dst) ->
+transposeMat! =! (src, dst) ->
   {size, words, v} = src
   tmp = TRANSPOSE_TMP
-  y0 = 0
-  while y0 < size
+  for y0 in [0...size] by 32
     for bx in [0...words]
       rows = Math.min(32, size - y0)
-      for r in [0...rows]
-        tmp[r] = v[(y0 + r) * words + bx]
+      tmp[r] = v[(y0 + r) * words + bx] for r in [0...rows]
       tmp.fill 0, rows
       transpose32 tmp
       dstY = bx * 32
-      i = 0
-      while i < 32 and dstY < size
-        dst.v[dstY * dst.words + (y0 >>> 5)] = tmp[i]
-        i++
-        dstY++
-    y0 += 32
-  return
+      for i in [0...Math.min(32, size - dstY)]
+        dst.v[(dstY + i) * dst.words + (y0 >>> 5)] = tmp[i]
 
 # ==[ Mask penalty ]==
 
@@ -320,7 +301,7 @@ penalty =! (m, t) ->
 
 # ==[ Symbol layout ]==
 
-drawInfo =! (m, ver, ecc, mask) ->
+drawInfo! =! (m, ver, ecc, mask) ->
   size = m.size
   bits = formatBits ecc, mask
   for i in [0...15]
@@ -340,7 +321,6 @@ drawInfo =! (m, ver, ecc, mask) ->
       y = i // 3
       matSet m, x, y, value
       matSet m, y, x, value
-  return
 
 # Everything the layout alone determines, built once per version: the
 # function-pattern template with the data region zero, the zigzag placement
@@ -353,10 +333,9 @@ buildSymCache =! (ver) ->
   size = 21 + 4 * (ver - 1)
   m = mat size
   fun = Uint8Array.new(size * size)
-  setF = (x, y, bit) ->
+  setF! = (x, y, bit) ->
     matSet m, x, y, bit
     fun[y * size + x] = 1
-    return
   for [fx, fy] in [[0, 0], [size - 7, 0], [0, size - 7]]
     for dy in [-1...8]
       for dx in [-1...8]
@@ -392,9 +371,7 @@ buildSymCache =! (ver) ->
       y = i // 3
       setF x, y, 0
       setF y, x, 0
-  planes = []
-  for i in [0...8]
-    planes.push mat(size)
+  planes = (mat(size) for i in [0...8])
   posBuf = Uint16Array.new(size * size)
   n = 0
   xOffset = size - 1
@@ -458,8 +435,7 @@ drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
         bestScore = score
         mask = pl
   chosen = planes[mask]
-  for i in [0...m.v.length]
-    m.v[i] ^= chosen[i]
+  m.v[i] ^= chosen[i] for i in [0...m.v.length]
   drawInfo m, ver, ecc, mask unless test
   m
 
@@ -528,14 +504,12 @@ renderRaw =! (r) ->
 renderAscii =! (r) ->
   W = r.W
   out = ''
-  y = 0
-  while y < W
+  for y in [0...W] by 2
     for x in [0...W]
       first = darkAt r, x, y
       second = if y + 1 >= W then true else darkAt(r, x, y + 1)
       out += if not first and not second then '█' else if not first and second then '▀' else if first and not second then '▄' else ' '
     out += '\n'
-    y += 2
   out
 
 renderTerm =! (r) ->
@@ -544,8 +518,7 @@ renderTerm =! (r) ->
   white = '\x1b[1;47m  \x1b[0m'
   out = ''
   for y in [0...W]
-    for x in [0...W]
-      out += (if darkAt(r, x, y) then black else white)
+    out += (if darkAt(r, x, y) then black else white) for x in [0...W]
     out += '\n'
   out
 
@@ -584,8 +557,7 @@ renderGif =! (r) ->
       prevMy = my
       row.fill 0
       if my >= 0
-        for x in [0...W]
-          row[x] = matGet(m, map[x], my) if map[x] >= 0
+        row[x] = matGet(m, map[x], my) for x in [0...W] when map[x] >= 0
     row
 
 # ==[ Public API ]==
@@ -779,8 +751,7 @@ class Payload
         return FAIL.data if length < 0 or @position + 8 * length > dataLen * 8
         if parts
           segment = Uint8Array.new(length)
-          for i in [0...length]
-            segment[i] = @read(8)
+          segment[i] = @read(8) for i in [0...length]
           parts.push res if res
           parts.push [segment, eci]
           res = ''
@@ -788,8 +759,7 @@ class Payload
           encoding = ECI_ENCODINGS[eci]
           return FAIL.data if not encoding or length >= @views.length
           decoder = ECI_DECODERS[eci] or TextDecoder.new(encoding)
-          for i in [0...length]
-            @bytes[i] = @read(8)
+          @bytes[i] = @read(8) for i in [0...length]
           res += decoder.decode @view(length)
       else
         return FAIL.data
@@ -829,7 +799,7 @@ checkVersion =! (m, size) ->
 
 # 3x3 projective transforms, row-major in a Float64Array, applied to column
 # vectors [u, v, 1] with a perspective divide.
-squareToQuad =! (out, points) ->
+squareToQuad! =! (out, points) ->
   [x1, y1, x2, y2, x3, y3, x4, y4] = points
   dx3 = x1 - x2 + x3 - x4
   dy3 = y1 - y2 + y3 - y4
@@ -862,7 +832,7 @@ squareToQuad =! (out, points) ->
   out[8] = 1
 
 # adj[r][c] is the (c, r) cofactor.
-adjugate =! (o, m) ->
+adjugate! =! (o, m) ->
   for i in [0...9]
     r = i // 3
     c = i % 3
@@ -871,19 +841,16 @@ adjugate =! (o, m) ->
     c1 = (r + 1) % 3
     c2 = (r + 2) % 3
     o[i] = m[r1 + c1] * m[r2 + c2] - m[r1 + c2] * m[r2 + c1]
-  return
 
 # One input row is cached so the product may replace its left operand.
-ptMul =! (o, a, b) ->
+ptMul! =! (o, a, b) ->
   for r in [0, 3, 6]
     a0 = a[r]
     a1 = a[r + 1]
     a2 = a[r + 2]
-    for c in [0...3]
-      o[r + c] = a0 * b[c] + a1 * b[c + 3] + a2 * b[c + 6]
-  return
+    o[r + c] = a0 * b[c] + a1 * b[c + 3] + a2 * b[c + 6] for c in [0...3]
 
-packQuad =! (quad, x0, y0, x1, y1, x2, y2, x3, y3) ->
+packQuad! =! (quad, x0, y0, x1, y1, x2, y2, x3, y3) ->
   quad[0] = x0
   quad[1] = y0
   quad[2] = x1
@@ -899,7 +866,7 @@ mapPoint =! (map, x, y) ->
 
 # ==[ Input ]==
 
-validateOpts =! (opts) ->
+validateOpts! =! (opts) ->
   throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if opts is null or typeof opts isnt 'object' or Array.isArray(opts)
   throw TypeError.new "invalid opts.format=#{opts.format} (#{typeof opts.format})" if opts.format isnt undefined and not FORMATS[opts.format]
   if opts.effort isnt undefined and opts.effort isnt Infinity and (not Number.isSafeInteger(opts.effort) or opts.effort < 1)
@@ -908,7 +875,6 @@ validateOpts =! (opts) ->
     throw TypeError.new "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})"
   for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
     throw TypeError.new "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})" if opts[name] isnt undefined and typeof opts[name] isnt 'function'
-  return
 
 # ==[ Bitmap primitives ]==
 # A layer's bitmap is packed 32 pixels per word; a set bit is a dark pixel.
@@ -998,7 +964,7 @@ refineTriple =! (layer, triple) ->
 
 # Grayscale finder-template fit, one axis at a time, over pitch scales of
 # 0.5..1.5 in tenths so measured perspective squeeze is covered.
-fitPattern =! (layer, pattern, inverted) ->
+fitPattern! =! (layer, pattern, inverted) ->
   luma = layer.luma
   fit = (axis) ->
     center = if axis then pattern.y else pattern.x
@@ -1063,7 +1029,7 @@ edgePitch =! (layer, first, second, inverted) ->
   b = pitch second
   if a and b then (a + b) / 2 else 0
 
-copyPattern =! (layer, index, out) ->
+copyPattern! =! (layer, index, out) ->
   pos = index * 4
   out.x = layer.patterns[pos]
   out.y = layer.patterns[pos + 1]
@@ -1071,16 +1037,15 @@ copyPattern =! (layer, index, out) ->
 
 # Retry sets are stride-5 records: rank, inverted, and three finder indices,
 # kept as a max-heap of 256 then heapsorted ascending.
-swapSet =! (sets, a, b) ->
+swapSet! =! (sets, a, b) ->
   ap = a * 5
   bp = b * 5
   for i in [0...5]
     value = sets[ap + i]
     sets[ap + i] = sets[bp + i]
     sets[bp + i] = value
-  return
 
-siftDown =! (sets, end) ->
+siftDown! =! (sets, end) ->
   index = 0
   loop
     left = index * 2 + 1
@@ -1094,15 +1059,14 @@ siftDown =! (sets, end) ->
 # Horner evaluation of a low-degree-first GF(256) polynomial.
 evalLow =! (poly, length, x) ->
   value = 0
-  for i in [length - 1..0] by -1
-    value = mul(value, x) ^ poly[i]
+  value = mul(value, x) ^ poly[i] for i in [length - 1..0] by -1
   value
 
 # ==[ Row stages ]==
 # Row-ranged so the cooperative scanner can yield between bounded chunks.
 
 # 2x2 box filter into the next pyramid layer.
-resizeRows =! (src, dst, width, dstWidth, from, to) ->
+resizeRows! =! (src, dst, width, dstWidth, from, to) ->
   if LITTLE_ENDIAN and (width & 3) is 0 and (dstWidth & 1) is 0 and (src.byteOffset & 3) is 0
     resizeWords src, dst, width, dstWidth, from, to
     return
@@ -1112,11 +1076,10 @@ resizeRows =! (src, dst, width, dstWidth, from, to) ->
     for x in [0...dstWidth]
       dst[dstPos++] = (src[srcPos] + src[srcPos + 1] + src[srcPos + width] + src[srcPos + width + 1] + 2) >> 2
       srcPos += 2
-  return
 
 # The same box filter over whole words: one word from each source row holds
 # four pixels, summed in two 16-bit lanes to produce two output pixels.
-resizeWords =! (src, dst, width, dstWidth, from, to) ->
+resizeWords! =! (src, dst, width, dstWidth, from, to) ->
   words = Uint32Array.new(src.buffer, src.byteOffset, (width * (to << 1)) >> 2)
   wordsPerRow = width >> 2
   pairs = dstWidth >> 1
@@ -1131,11 +1094,10 @@ resizeWords =! (src, dst, width, dstWidth, from, to) ->
       dst[dstPos] = ((sum & 0xffff) + 2) >> 2
       dst[dstPos + 1] = ((sum >>> 16) + 2) >> 2
       dstPos += 2
-  return
 
 # One threshold per 8x8 block. Low-contrast blocks take the darkest sample so
 # faint modules survive, propagated from the neighbors above and left.
-blockRows =! (layer, from, to) ->
+blockRows! =! (layer, from, to) ->
   luma = layer.luma
   bWidth = layer.blockWidth
   maxY = layer.height - 8
@@ -1166,10 +1128,9 @@ blockRows =! (layer, from, to) ->
           previous = (2 * top + left + topLeft) / 4
           average = previous if min < previous
       blocks[bWidth * y + x] = average >>> 0
-  return
 
 # Smooth thresholds over 5x5 blocks and write each block's binary pixels.
-bitmapRows =! (layer, from, to) ->
+bitmapRows! =! (layer, from, to) ->
   luma = layer.luma
   bWidth = layer.blockWidth
   bHeight = layer.blockHeight
@@ -1202,11 +1163,10 @@ bitmapRows =! (layer, from, to) ->
           highMask = (1 << (shift - 24)) - 1
           layer.bitmap[word + 1] = ((layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))) >>> 0
         pos += layer.width
-  return
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
-recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
+recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   start = x - r0 - r1 - r2 - r3 - r4
   cx = Math.round(start + r0 + r1 + r2 / 2)
   limit = ms * 3
@@ -1236,7 +1196,7 @@ recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   layer.inverted[index] = polarity
 
 # Rolling run-length window over every second row; run() always advances.
-findRows =! (layer, from, to) ->
+findRows! =! (layer, from, to) ->
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
     runs = 0
@@ -1256,7 +1216,6 @@ findRows =! (layer, from, to) ->
       if runs >= 5
         ms = ratio r0, r1, r2, r3, r4
         recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
-  return
 
 # Legal sides are 17 + 4 * version; a non-finite estimate coerces to zero and
 # fails the dimension bounds downstream.
@@ -1426,8 +1385,7 @@ export class QRScanner
       interval += 2
     positions = @alignPos
     positions[0] = 6
-    for i in [1...count]
-      positions[i] = last - (count - i) * interval
+    positions[i] = last - (count - i) * interval for i in [1...count]
     positions[count] = last
     count + 1
 
@@ -1559,15 +1517,14 @@ export class QRScanner
         dy = sy * stepMul
         cap = bestErrors + (if tie then 1 else 0)
         errors = 0
-        y = -2
-        while y <= 2 and errors < cap
+        for y in [-2..2]
+          break if errors >= cap
           for x in [-2..2]
             dark = @read(s, map, scale + (ox + dx + x) / side, scale + (oy + dy + y) / side) is 1
             edge = Math.abs(x) is 2 or Math.abs(y) is 2
             if dark isnt (edge or (x is 0 and y is 0))
               errors++
               break if errors >= cap
-          y++
         continue if errors > bestErrors or (not tie and errors is bestErrors)
         continue if errors is bestErrors and dx * dx + dy * dy >= bestX * bestX + bestY * bestY
         bestX = dx
@@ -1625,8 +1582,7 @@ export class QRScanner
       ranks[count] = rank
       return count + 1
     worst = 0
-    for i in [1...count]
-      worst = i if ranks[worst] < ranks[i]
+    worst = i for i in [1...count] when ranks[worst] < ranks[i]
     return count if rank >= ranks[worst]
     @candidates[worst] = index
     ranks[worst] = rank
@@ -1929,8 +1885,7 @@ export class QRScanner
     sc = 1 << fine.r
     half = (sc - 1) / 2
     scaled = @to
-    for i in [0...6]
-      scaled[i] = sc * map[i] + half * map[6 + i % 3]
+    scaled[i] = sc * map[i] + half * map[6 + i % 3] for i in [0...6]
     scaled[6] = map[6]
     scaled[7] = map[7]
     scaled[8] = map[8]
@@ -1951,8 +1906,7 @@ export class QRScanner
     hasError = false
     for i in [0...words]
       value = 0
-      for j in [0...length]
-        value = mul(value, EXP[i]) ^ blockBytes[offset + j]
+      value = mul(value, EXP[i]) ^ blockBytes[offset + j] for j in [0...length]
       syndromes[i] = value
       hasError = true if value
     return true unless hasError
@@ -1970,8 +1924,7 @@ export class QRScanner
     discrepancy = 1
     for n in [0...words]
       delta = syndromes[n]
-      for i in [1...degree + 1]
-        delta ^= mul(sigma[i], syndromes[n - i])
+      delta ^= mul(sigma[i], syndromes[n - i]) for i in [1..degree]
       unless delta
         shift++
         continue
@@ -1982,16 +1935,14 @@ export class QRScanner
         b = if i >= shift and i - shift < previousLength then mul(coefficient, previous[i - shift]) else 0
         next[i] = a ^ b
       if 2 * degree <= n
-        for i in [0...sigmaLength]
-          previous[i] = sigma[i]
+        previous[i] = sigma[i] for i in [0...sigmaLength]
         previousLength = sigmaLength
         degree = n + 1 - degree
         discrepancy = delta
         shift = 1
       else
         shift++
-      for i in [0...nextLength]
-        sigma[i] = next[i]
+      sigma[i] = next[i] for i in [0...nextLength]
       sigmaLength = nextLength
     sigmaLength-- while sigmaLength > 1 and not sigma[sigmaLength - 1]
     errors = sigmaLength - 1
@@ -2000,16 +1951,12 @@ export class QRScanner
     omega = previous
     omega.fill 0, 0, words
     for i in [0...sigmaLength]
-      j = 0
-      while i + j < words
-        omega[i + j] ^= mul(sigma[i], syndromes[j])
-        j++
+      omega[i + j] ^= mul(sigma[i], syndromes[j]) for j in [0...words - i]
     locations = next
     locationCount = 0
-    i = 1
-    while i < 256 and locationCount < errors
+    for i in [1...256]
+      break if locationCount >= errors
       locations[locationCount++] = inv(i) unless evalLow(sigma, sigmaLength, i)
-      i++
     return false if locationCount isnt errors
     for i in [0...locationCount]
       location = locations[i]
@@ -2017,8 +1964,7 @@ export class QRScanner
       return false if blockPos < 0
       inverse = inv location
       denominator = 1
-      for j in [0...locationCount]
-        denominator = mul(denominator, 1 ^ mul(locations[j], inverse)) if i isnt j
+      denominator = mul(denominator, 1 ^ mul(locations[j], inverse)) for j in [0...locationCount] when i isnt j
       blockBytes[offset + blockPos] ^= mul(evalLow(omega, words, inverse), inv(denominator))
     true
 
@@ -2044,8 +1990,7 @@ export class QRScanner
         ay = align[yi]
         continue if fun[ay * size + ax]
         for dy in [-2..2]
-          for dx in [-2..2]
-            fun[(ay + dy) * size + ax + dx] = 1
+          fun[(ay + dy) * size + ax + dx] = 1 for dx in [-2..2]
     for i in [0...size]
       fun[6 * size + i] = 1
       fun[i * size + 6] = 1
@@ -2107,8 +2052,7 @@ export class QRScanner
       length = blockLen + (if block >= shortBlocks then 1 else 0)
       return FAIL.rs unless @correctBlock(offset, length, words)
       end = offset + length - words
-      for i in [offset...end]
-        data[pos++] = blockBytes[i]
+      data[pos++] = blockBytes[i] for i in [offset...end]
     @decodePayload data, dataLen, ver
 
   # Both format copies within Hamming distance three; the last in-radius
@@ -2231,10 +2175,9 @@ export class QRScanner
         @mapQuad tile
         @projectQuad sp, tile, size, (if xi then left else 0), (if xi is count - 2 then size else right), (if yi then top else 0), (if yi is count - 2 then size else bottom)
     if ctx.opts.pointsOnDetect
-      reportAligners = []
-      for i in [0...locatedCount]
+      reportAligners = for i in [0...locatedCount]
         pos = i * 4
-        reportAligners.push { point: { x: (located[pos] - half) / sc, y: (located[pos + 1] - half) / sc }, x: located[pos + 2], y: located[pos + 3] }
+        { point: { x: (located[pos] - half) / sc, y: (located[pos + 1] - half) / sc }, x: located[pos + 2], y: located[pos + 3] }
       br = if hasTileBr then { x: (tileBrX - half) / sc, y: (tileBrY - half) / sc } else brPoint
       @report t, br, reportAligners, ms, size, ctx
     @decodeGrid size
@@ -2350,30 +2293,23 @@ export class QRScanner
     failed
 
   # Threshold, pack the bitmap and collect finders for one layer.
-  binarize: (layer, cooperative) ->
+  binarize!: (layer, cooperative) ->
     bHeight = layer.blockHeight
     chunk = if cooperative then 16 else bHeight
-    y = 0
-    while y < bHeight
+    for y in [0...bHeight] by chunk
       blockRows layer, y, Math.min(bHeight, y + chunk)
       @retryStart += yield if cooperative and y + chunk < bHeight
-      y += chunk
     layer.bitmap.fill 0, 0, layer.words * layer.height
-    y = 0
-    while y < bHeight
+    for y in [0...bHeight] by chunk
       bitmapRows layer, y, Math.min(bHeight, y + chunk)
       @retryStart += yield if cooperative and y + chunk < bHeight
-      y += chunk
     @opts.imageOnBitmap darkToImage(layer.width, layer.height, (x, y) -> bit(layer, x, y) is 1) if @opts.imageOnBitmap
     layer.patternCount = 0
     rows = if cooperative then 32 else layer.height
-    y = 0
-    while y < layer.height
+    for y in [0...layer.height] by rows
       findRows layer, y, Math.min(layer.height, y + rows)
       @retryStart += yield if cooperative and y + rows < layer.height
-      y += rows
     layer.found = true
-    return
 
   # Mandatory attempt: both polarities ranked independently, then the pick
   # with the better geometry-times-evidence product.
@@ -2426,13 +2362,12 @@ export class QRScanner
 
   # Retry schedule for one layer: every finder's bounded neighborhood, each
   # pair scored by compactness over row-hit evidence, heapsorted ascending.
-  buildSets: (layer, cooperative) ->
+  buildSets!: (layer, cooperative) ->
     layer.setsReady = true
     layer.setCount = 0
     layer.setCursor = 0
     eligible = 0
-    for i in [0...layer.patternCount]
-      eligible++ unless layer.inverted[i] & 2
+    eligible++ for i in [0...layer.patternCount] when not (layer.inverted[i] & 2)
     return if eligible < 3
     pts = layer.patterns
     neighbors = @candidates
@@ -2489,7 +2424,6 @@ export class QRScanner
     for end in [layer.setCount - 1...0] by -1
       swapSet layer.sets, 0, end
       siftDown layer.sets, end
-    return
 
   # Next scheduled set that is neither excluded nor the round-0 pick.
   nextSet: (layer) ->
@@ -2552,11 +2486,9 @@ export class QRScanner
         src = layers[i - 1].luma
         width = layers[i - 1].width
         rows = if cooperative then 64 else layer.height
-        y = 0
-        while y < layer.height
+        for y in [0...layer.height] by rows
           resizeRows src, layer.luma, width, layer.width, y, Math.min(layer.height, y + rows)
           @retryStart += yield if cooperative and y + rows < layer.height
-          y += rows
       @resized = true
     mandatory = true
     loop
@@ -2568,11 +2500,11 @@ export class QRScanner
           break
         layer = layers[i]
         continue unless layer.used
-        yield from @binarize(layer, cooperative) unless layer.found
+        yield* @binarize(layer, cooperative) unless layer.found
         if mandatory
           triple = @pickTriple layer
         else
-          yield from @buildSets(layer, cooperative) unless layer.setsReady
+          yield* @buildSets(layer, cooperative) unless layer.setsReady
           triple = @nextSet layer
         unless triple
           @retryStart += yield if cooperative
@@ -2607,7 +2539,7 @@ export class QRScanner
     @retries = if @effort is Infinity then Infinity else @effort - 1
     results = []
     loop
-      result = yield from @scan(cooperative)
+      result = yield* @scan(cooperative)
       results.push result
       return results unless all
       return results if result instanceof Error
@@ -2615,21 +2547,17 @@ export class QRScanner
 
   decode: (all = false) ->
     @beginOperation()
-    results = undefined
     try
-      results = runDecode @walk(false, all)
+      runDecode @walk(false, all)
     finally
       @endOperation()
-    results
 
   decodeAsync: (all = false) ->
     @beginOperation()
-    results = undefined
     try
-      results = runDecodeAsync! @walk(true, all), @timeLimit
+      runDecodeAsync! @walk(true, all), @timeLimit
     finally
       @endOperation()
-    results
 
 # ==[ Public API ]==
 
@@ -2638,14 +2566,13 @@ export decodeQR =! (img, opts = {}) ->
   validateOpts opts
   validateImage img, opts.format
   scanner = QRScanner.new { ...opts, maxSize: { height: img.height, width: img.width } }
-  result = undefined
   try
     scanner.addImage img, opts.format
     result = scanner.decode()[0]
+    throw Error.new result.message if result instanceof Error
+    result
   finally
     scanner.clean()
-  throw Error.new result.message if result instanceof Error
-  result
 
 
 # Every QR in each image through one cooperatively scheduled scanner.
