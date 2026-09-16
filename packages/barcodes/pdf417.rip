@@ -297,10 +297,10 @@ GENERATORS =! []
 
 generator =! (level) ->
   return GENERATORS[level] if GENERATORS[level]
-  k    = 2 << level
-  gen  = Int32Array.new(k + 1)
+  k      = 2 << level
+  gen    = Int32Array.new(k + 1)
   gen[0] = 1
-  root = 1
+  root   = 1
   for i in [0...k]
     root = mul root, 3
     for j in [i + 1..1] by -1
@@ -618,7 +618,7 @@ raster =! (mods, rowHeight, scale, border) ->
   fail "PDF417 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}" if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
   bars = for row in mods
     runs = []
-    x = 0
+    x    = 0
     while x < cols
       x++ while x < cols and row[x] is 0
       break if x is cols
@@ -963,14 +963,14 @@ edgeRuns =! (luma, count, runs) ->
   n = 0
   runs[n++] = 0 if rising    # the ray opens dark
   if rising
-    at    = minAt
-    value = minV
-    best  = maxV
+    at     = minAt
+    value  = minV
+    best   = maxV
     bestAt = maxAt
   else
-    at    = maxAt
-    value = maxV
-    best  = minV
+    at     = maxAt
+    value  = maxV
+    best   = minV
     bestAt = minAt
   last = 0
   # The edge between the extremum at `at` and the candidate at `bestAt`.
@@ -1042,18 +1042,18 @@ anchorNear =! (runs, n, first, expect, slack, mode) ->
 # rest of the row. Stops at the pattern that ends the row or when sync is
 # lost. Returns the count.
 readFrom =! (runs, n, first, expect, unit, cells, base, mode) ->
-  p     = 0
-  p    += runs[k] for k in [0...first]
+  pos   = 0
+  pos  += runs[k] for k in [0...first]
   i     = first
   count = 0
   while count < MAX_CELLS
-    while i + 2 < n and Math.abs(p + runs[i] + runs[i + 1] - expect) < Math.abs(p - expect)
-      p += runs[i] + runs[i + 1]
+    while i + 2 < n and Math.abs(pos + runs[i] + runs[i + 1] - expect) < Math.abs(pos - expect)
+      pos += runs[i] + runs[i + 1]
       i += 2
-    while i - 2 >= first and Math.abs(p - runs[i - 1] - runs[i - 2] - expect) < Math.abs(p - expect)
-      p -= runs[i - 1] + runs[i - 2]
+    while i - 2 >= first and Math.abs(pos - runs[i - 1] - runs[i - 2] - expect) < Math.abs(pos - expect)
+      pos -= runs[i - 1] + runs[i - 2]
       i -= 2
-    break if Math.abs(p - expect) > 2 * unit
+    break if Math.abs(pos - expect) > 2 * unit
     break if i + mode.end.length <= n and matchRuns(runs, i, mode.end, mode.endModules)
     break if i + 8 > n
     total = 0
@@ -1064,21 +1064,21 @@ readFrom =! (runs, n, first, expect, unit, cells, base, mode) ->
     # is expected a nominal codeword on, since a window slipped by two runs
     # over repeated codewords reads as a valid wrong one.
     if code < 0
-      expect = p + 17 * unit
+      expect = pos + 17 * unit
     else
       unit   = (unit + total / 17) / 2
-      expect = p + total
-    p += total
+      expect = pos + total
+    pos += total
     i += 8
   count
 
 # Codewords along one ray from the anchor pattern at run `at`.
 readRay =! (runs, n, at, cells, base, mode) ->
-  p = 0
-  p += runs[k] for k in [0...at]
+  pos = 0
+  pos += runs[k] for k in [0...at]
   width = 0
   width += runs[at + k] for k in [0...mode.anchor.length]
-  readFrom runs, n, at + (mode.anchor.length & 1), p + width, width / mode.modules, cells, base, mode
+  readFrom runs, n, at + (mode.anchor.length & 1), pos + width, width / mode.modules, cells, base, mode
 
 # ==[ Error correction ]==
 
@@ -1089,7 +1089,7 @@ readRay =! (runs, n, at, cells, base, mode) ->
 # and Forney evaluates. Returns the number of errors corrected, or -1.
 correct =! (c, n, k, erasures, e) ->
   return -1 if e > k
-  S = Int32Array.new(k)
+  S     = Int32Array.new(k)
   dirty = 0
   for i in [0...k]
     x = EXP[i + 1]
@@ -1114,11 +1114,11 @@ correct =! (c, n, k, erasures, e) ->
     v = (v + mul(G[j], S[m + e - j])) % MODULUS for j in [0..e]
     U[m] = v
   # Berlekamp-Massey over U.
-  sigma    = Int32Array.new(N + 2)
-  previous = Int32Array.new(N + 2)
-  next     = Int32Array.new(N + 2)
-  sigma[0]    = 1
-  previous[0] = 1
+  sigma          = Int32Array.new(N + 2)
+  previous       = Int32Array.new(N + 2)
+  next           = Int32Array.new(N + 2)
+  sigma[0]       = 1
+  previous[0]    = 1
   sigmaLength    = 1
   previousLength = 1
   degree         = 0
@@ -1486,8 +1486,8 @@ tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
   unit = (unitUp + unitDown) / 2
   return null if edge.n < 2
   # Leading edge as a line u = a + b t, then its two ends.
-  mt = edge.st / edge.n
-  mu = edge.su / edge.n
+  mt  = edge.st / edge.n
+  mu  = edge.su / edge.n
   den = edge.stt - edge.n * mt * mt
   b   = if den > 0 then (edge.stu - edge.n * mt * mu) / den else 0
   a   = mu - b * mt
@@ -1535,11 +1535,12 @@ tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
     return -1 if code < 0
     row = 3 * (code % 929 // 30) + code // 929
     if row < rows then row else -1
-  fit = null
-  fitRows = ->
+  fit      = null
+  backward = false
+  fitRows  = ->
     valid = 0
-    st = 0
-    sr = 0
+    st    = 0
+    sr    = 0
     for i in [0...rays]
       rayRow[i] = rowOf i
       continue if rayRow[i] < 0
@@ -1554,11 +1555,22 @@ tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
     for i in [0...rays] when rayRow[i] >= 0
       num += (rayT[i] - mt) * (rayRow[i] - mr)
       den += (rayT[i] - mt) * (rayT[i] - mt)
-    slope = if den > 0 then num / den else 0
-    slope = rows / len if slope <= 0
+    slope    = if den > 0 then num / den else 0
+    backward = valid >= 3 and slope < 0
+    slope    = rows / len if slope <= 0
     fit = (t) -> mr + slope * (t - mt)
     true
   return null unless fitRows()
+  # Rows numbered against the walk: a mirror image of the reading
+  # direction, so the stack is walked from its other end.
+  if backward
+    [top, bottom] = [bottom, top]
+    ux = -ux
+    uy = -uy
+    rays = 0
+    ray i * step for i in [0..Math.floor(len / step)]
+    return null unless fitRows()
+    return null if backward
   # The edge is short next to the width, so its fit leaves the row
   # direction a little off, and a wide symbol's rays then drift into the
   # neighbor rows. The rays measure that drift themselves: how the row
@@ -1637,13 +1649,13 @@ tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
         if votes[slot + k] is value + 1
           votes[slot + k + 1]++
           break
-  n = rows * columns
-  k = 2 << level
-  c = s.codewords
+  n        = rows * columns
+  k        = 2 << level
+  c        = s.codewords
   erasures = s.erasures
-  grid = s.grid
-  e    = 0
-  ties = []
+  grid     = s.grid
+  e        = 0
+  ties     = []
   for cell in [0...n]
     slot  = cell * 8
     best  = 0
@@ -1772,15 +1784,15 @@ state =! { side: 0 }
 
 buffers =! (side) ->
   maxRays = 4 * side
-  state.side   = side
-  state.luma   = Uint8Array.new(side)
-  state.runs   = Int32Array.new(side)
-  state.rev    = Int32Array.new(side)
-  state.rluma  = Uint8Array.new(2 * side)
-  state.rruns  = Float64Array.new(2 * side)
-  state.cells  = Int16Array.new(maxRays * MAX_CELLS)
-  state.rayRow = Int16Array.new(maxRays)
-  state.rayT   = Float64Array.new(maxRays)
+  state.side      = side
+  state.luma      = Uint8Array.new(side)
+  state.runs      = Int32Array.new(side)
+  state.rev       = Int32Array.new(side)
+  state.rluma     = Uint8Array.new(2 * side)
+  state.rruns     = Float64Array.new(2 * side)
+  state.cells     = Int16Array.new(maxRays * MAX_CELLS)
+  state.rayRow    = Int16Array.new(maxRays)
+  state.rayT      = Float64Array.new(maxRays)
   state.maxRays   = maxRays
   state.hist      = Int32Array.new(90)
   state.votes     = Int32Array.new(MAX_ROWS * MAX_COLUMNS * 8)

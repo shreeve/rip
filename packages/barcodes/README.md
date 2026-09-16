@@ -173,15 +173,16 @@ say a switch pays: a run of thirteen digits, five text characters, or
 anything else as bytes. Characters beyond Latin-1 send the whole message as
 UTF-8 behind ECI 26. The outputs are the QR six: `raw` is `boolean[][]` with
 `true` for a bar, one entry per module and row, quiet zone included;
-`ascii` and `term` draw one line per row; `svg`, `gif` and `data-url` draw
-each row `rowHeight` modules tall.
+`ascii`, `term`, `svg`, `gif` and `data-url` draw each row `rowHeight`
+modules tall, `ascii` packing two module rows into each line of half-height
+block characters.
 
 | option | meaning | default |
 | --- | --- | --- |
 | `ecc` | error-correction level 0..8, 2 to 512 parity codewords | by message length, as the specification recommends |
 | `columns` | data columns 1..30 | the pair nearest `aspect` |
 | `rows` | rows 3..90 | the pair nearest `aspect` |
-| `aspect` | width to height ratio the automatic layout aims for | `3` |
+| `aspect` | integer width to height ratio the automatic layout aims for | `3` |
 | `rowHeight` | modules per row in every drawn output | `3` |
 | `encoding` | `'text'`, `'byte'`, `'numeric'` | `'auto'` |
 | `compact` | omit the right row indicator and shorten the stop pattern | `false` |
@@ -206,11 +207,11 @@ present for a Macro PDF417 segment:
 sender?, addressee?, fileSize?, checksum? }`; each segment decodes on its
 own and the caller assembles a file from them.
 
-The reader wants modules at least a pixel wide and rows at least a pixel
-and a half tall. It reads the symbol in all four orientations and with the
-tilt and skew of a hand-held photo, mirrored, inverted, with rows missing
-at the top or bottom, with the start pattern cut off at the image edge,
-and with holes. One parity codeword is always held back to check the
+The reader wants modules at least a pixel wide; rows a pixel tall read
+from a clean raster, and photographs want a little more. It reads the
+symbol in all four orientations and with the tilt and skew of a hand-held
+photo, as a mirror image, inverted, with whole rows torn off the top or
+bottom, with the start pattern cut off at the image edge, and with holes. One parity codeword is always held back to check the
 correction and the padding after the message must read as pad, so a
 damaged symbol misses rather than decoding to the wrong text. Against
 ZXing's PDF417 blackbox photo
@@ -334,7 +335,7 @@ in the world, and a great deal of measuring.
 
 ## Credits
 
-This package began as a port of [paulmillr/qr](https://github.com/paulmillr/qr)
+The QR half of this package is a port of [paulmillr/qr](https://github.com/paulmillr/qr)
 0.7.0 by [Paul Miller](https://paulmillr.com), released under MIT OR
 Apache-2.0 and derived in turn from the ZXing project. The QR tables,
 encoder, decoder pipeline, scanner, camera plumbing and `BarcodeDetector`
@@ -342,7 +343,7 @@ ponyfill follow his design; the port keeps his algorithms, restructures
 them for Rip, and verifies itself against his implementation with an
 oracle that compares every output format byte for byte and every decode
 result on synthetic frames. The performance work described above is on top
-of that foundation. Code 128 and PDF417 are new here and share only the
+of that foundation. Code 128 and PDF417 are original to this package and share only the
 image input, ECI table and GIF writer. The PDF417 encoder is checked
 against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp), which decodes
 its output byte for byte across compaction modes, levels, shapes and

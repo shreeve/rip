@@ -616,6 +616,9 @@ test "layout: level, dimensions, indicators", ->
   eq p417.dimensions(20, 5, undefined, 3, 3),         { columns: 5, rows: 4 }
   eq p417.dimensions(20, undefined, 4, 3, 3),         { columns: 5, rows: 4 }
   eq p417.dimensions(20, 5, 4, 3, 3),                 { columns: 5, rows: 4 }
+  eq p417.dimensions(20, undefined, undefined, 3, 1), { columns: 1, rows: 20 }
+  eq p417.dimensions(20, undefined, undefined, 3, 8), { columns: 4, rows: 5 }
+  eq encodePDF417('Hello PDF417', 'raw', aspect: 1).length > encodePDF417('Hello PDF417', 'raw', aspect: 8).length, true
   throws (-> p417.dimensions 21, 5, 4, 3, 3),          RangeError, 'holds 20'
   throws (-> p417.dimensions 2000, 1, undefined, 3, 3), RangeError, 'max 90'
   throws (-> p417.dimensions 2000, undefined, 3, 3, 3), RangeError, 'max 30'
@@ -649,7 +652,7 @@ HELLO =! """
   ########.#.#.#...######..#.###.##.#.#####..##..#...####..#.####...#.#######.#...#.#..#
   """
 
-# Every case here decoded with zxing-cpp when the pins were taken.
+# Every case here decodes with zxing-cpp.
 PINS =! [
   ['Hello PDF417', {}, '16759322038964277220', 86, 18]
   ['The quick brown fox jumps over the lazy dog, 42 times; really? (yes) {ok} [fine] "quoted" #1 @home', {}, '7846982029010869402', 103, 37]
@@ -731,9 +734,9 @@ paint =! (raw, W, H, invert = false, rotate = 0, skew = 0) ->
         else [x, y]
       px += shift unless turned
       py += shift if turned
-      p = 4 * ((oy + py) * W + ox + px)
-      data[p] = data[p + 1] = data[p + 2] = v
-      data[p + 3] = 255
+      at = 4 * ((oy + py) * W + ox + px)
+      data[at] = data[at + 1] = data[at + 2] = v
+      data[at + 3] = 255
   { width: W, height: H, data }
 
 stack =! (text, opts, W, H, invert, rotate, skew) -> paint encodePDF417(text, 'raw', opts), W, H, invert, rotate, skew
@@ -794,6 +797,16 @@ test "geometry: skew, corners, cropped and damaged start patterns", ->
   hit = readPDF417 paint(holed, 400, 300)
   eq hit.text, text
   ok hit.erasures > 0 and hit.errors <= 1, "erasures #{hit.erasures} errors #{hit.errors}"
+  # Whole rows torn off the top and bottom are erasures across the width.
+  cut = raw.slice 8 + 12, raw.length - 8 - 6
+  hit = readPDF417 paint(cut, 400, 300)
+  eq hit.text, text
+  eq [hit.columns, hit.erasures, hit.errors], [2, 6, 0]
+  # A mirror image reads with the stack walked from its other end.
+  mirror = ([...row].reverse() for row in raw)
+  eq readPDF417(paint(mirror, 400, 300)).text, text
+  # Rows a pixel tall on a clean raster.
+  eq decodePDF417(stack(text, { rowHeight: 1, scale: 1 }, 400, 200)), text
   blank = flat 60, 60, 200
   eq readPDF417(blank), null
   throws (-> decodePDF417 blank),     Error,     'not found'
