@@ -188,20 +188,20 @@ Bun 1.4.0 on an Apple M5. Each figure is the best of three processes; every
 process runs the whole sequence in this order, so each row is timed after
 the rows above it warmed the JIT, the way an application mixes symbol sizes.
 
-| Encode (µs)         |   rip | paulmillr/qr |
-|---------------------|------:|-------------:|
-| raw, version 1      |   2.4 |          3.2 |
-| raw, version 8      |  14.7 |         24.7 |
-| raw, version 18     |  46.4 |         61.8 |
-| svg, version 8      |  31.0 |         47.4 |
-| gif, version 8      |  14.6 |         18.3 |
+| Encode (µs)         |   rip | paulmillr/qr | speedup |
+|---------------------|------:|-------------:|--------:|
+| raw, version 1      |   2.4 |          3.2 |   1.33x |
+| raw, version 8      |  14.7 |         24.7 |   1.68x |
+| raw, version 18     |  46.4 |         61.8 |   1.33x |
+| svg, version 8      |  31.0 |         47.4 |   1.53x |
+| gif, version 8      |  14.6 |         18.3 |   1.25x |
 
-| Decode (µs)                |    rip | paulmillr/qr |
-|----------------------------|-------:|-------------:|
-| 132x132 raster, version 1  |   28.5 |        114.1 |
-| 1280x720 frame, one symbol |    578 |         1010 |
-| 1920x1080 frame, one symbol|   1300 |         2210 |
-| 1920x1080 noise, no symbol |   6030 |        23900 |
+| Decode (µs)                |    rip | paulmillr/qr | speedup |
+|----------------------------|-------:|-------------:|--------:|
+| 132x132 raster, version 1  |   28.5 |        114.1 |   4.00x |
+| 1280x720 frame, one symbol |    578 |         1010 |   1.75x |
+| 1920x1080 frame, one symbol|   1300 |         2210 |   1.70x |
+| 1920x1080 noise, no symbol |   6030 |        23900 |   3.96x |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
