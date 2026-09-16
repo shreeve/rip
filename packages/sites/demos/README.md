@@ -11,11 +11,13 @@ live in [`docs/SERVER.md`](../../../docs/SERVER.md) and
 | [`hello`](hello) | Workspace publication + watch policy | See Rip source `update`, CSS refresh, and asset invalidate without a product UI |
 | [`pulse`](pulse) | Live remount + Hub collaboration | Edit `app/mood.rip`, watch badges update; post in two windows |
 | [`cart`](cart) | Full App rails | Routes, stash/`source`, mutations, schema models |
+| [`scan`](scan) | Camera + a browser-safe package | Scan QR and Code 128 from a phone over the LAN with `rip/barcodes` |
 
 ```text
 hello  →  prove the feed
 pulse  →  feel live apply + collab
 cart   →  ship-shaped App
+scan   →  camera in, codes out
 ```
 
 Each demo is a project directory with `serve.rip` (catalog name + hosts +
@@ -27,5 +29,5 @@ rip sites start hello
 rip sites open hello
 ```
 
-Same pattern for `pulse` and `cart`. Edge TLS and Janus are system-wide
+Same pattern for `pulse`, `cart` and `scan`. Edge TLS and Janus are system-wide
 (`janus autostart`); demos do not ship their own Caddyfile.

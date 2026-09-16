@@ -1,0 +1,63 @@
+# One camera, two readers. QRCanvas and QRCamera decode QR through the
+# canvas path and paint the finder overlay; the same frame is drawn once
+# more into a working canvas whose pixels go to readCode128. Every hit is
+# announced once until a different code appears.
+import { QRCanvas, rearCamera, frameLoop } from 'rip/barcodes/dom'
+import { readCode128 } from 'rip/barcodes/code128'
+
+export Home = component
+  player  := null
+  overlay := null
+  status  := 'Starting the camera'
+  latest  := null
+  history := []
+  cancel  := null
+  camera  := null
+
+  mounted: ->
+    try
+      camera = rearCamera! player, format: 'canvas'
+    catch error
+      status = "Camera unavailable: #{error.message}"
+      return
+    canvas = QRCanvas.new { overlay }, cropToSquare: false
+    work   = document.createElement('canvas').getContext '2d', willReadFrequently: true
+    status = 'Point the camera at a QR code or a Code 128 label'
+    cancel = frameLoop (-> scan camera, canvas, work), player
+
+  scan: (camera, canvas, work) ->
+    text = camera.readFrame! canvas, true
+    return found('QR', text) if text isnt undefined
+    {videoWidth, videoHeight} = player
+    return unless videoWidth and videoHeight
+    work.canvas.width  = videoWidth  if work.canvas.width  isnt videoWidth
+    work.canvas.height = videoHeight if work.canvas.height isnt videoHeight
+    work.drawImage player, 0, 0
+    hit = readCode128 work.getImageData(0, 0, videoWidth, videoHeight)
+    found 'Code 128', hit.text if hit
+
+  found: (kind, text) ->
+    return if latest? and latest.kind is kind and latest.text is text
+    latest  = { kind, text }
+    history = [{ kind, text, at: Date.new().toLocaleTimeString() }, ...history].slice 0, 20
+
+  beforeUnmount: ->
+    cancel?()
+    camera?.stop()
+
+  render
+    h1 'Scan'
+    p status
+    div class: 'viewfinder'
+      video ref: player, playsinline: true, muted: true
+      canvas ref: overlay
+    if latest?
+      div class: 'latest'
+        span class: 'kind', latest.kind
+        code latest.text
+    ul class: 'history'
+      for hit in history
+        li
+          span class: 'kind', hit.kind
+          code hit.text
+          span class: 'at', hit.at
