@@ -560,13 +560,13 @@ drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
 # ==[ Validation ]==
 
 asNum =! (n, title) ->
-  throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
-  throw RangeError.new "\"#{title}\" expected safe integer, got #{n}" unless Number.isSafeInteger n
+  fail "\"#{title}\" expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  fail "\"#{title}\" expected safe integer, got #{n}", RangeError unless Number.isSafeInteger n
   n
 
 asVersion =! (ver) ->
   asNum ver, 'version'
-  throw RangeError.new "Invalid version=#{ver}. Expected number [1..40]" if ver < 1 or ver > 40
+  fail "Invalid version=#{ver}. Expected number [1..40]", RangeError if ver < 1 or ver > 40
   ver
 
 # Exact WHATWG TextEncoder byte count without encoding; lone surrogates cost
@@ -710,7 +710,7 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   else
     undefined
   if utf8 isnt undefined and not isBytes(utf8)
-    throw TypeError.new "\"opts.textEncoder\" expected Uint8Array, got type=#{typeof utf8}"
+    fail "\"opts.textEncoder\" expected Uint8Array, got type=#{typeof utf8}", TypeError
   dataLen = if encoding is 'byte' then utf8.length else text.length
   encodedBits = switch encoding
     when 'numeric'      then (dataLen // 3) * 10 + NUMERIC_BITS[dataLen % 3]
@@ -730,14 +730,14 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   # A quiet zone is required (§5.3.8); custom renderers wanting the borderless
   # matrix request border 1 and slice the ring off.
   border = if opts.border is undefined then 2 else asNum(opts.border, 'opts.border')
-  throw RangeError.new "invalid border=#{border}" if border <= 0
+  fail "invalid border=#{border}", RangeError if border <= 0
   scale = if opts.scale is undefined then 1 else asNum(opts.scale, 'opts.scale')
-  throw RangeError.new "invalid scale factor: #{scale}" if scale <= 0 or scale > 1024
+  fail "invalid scale factor: #{scale}", RangeError if scale <= 0 or scale > 1024
   W = (m.size + 2 * border) * scale
   compact = output is 'ascii' or output is 'gif' or output is 'data-url'
   maxOutputSize = if compact then MAX_COMPACT_OUTPUT_SIZE else MAX_OUTPUT_SIZE
   if W > maxOutputSize
-    throw RangeError.new "invalid opts: output is #{W}x#{W} (max #{maxOutputSize}), reduce border/scale"
+    fail "invalid opts: output is #{W}x#{W} (max #{maxOutputSize}), reduce border/scale", RangeError
   map = Int32Array.new(W)
   for i in [0...W]
     f = i // scale - border
@@ -903,7 +903,7 @@ class Payload
 
 finishPayload =! (decoded, textDecoder) ->
   return decoded if typeof decoded is 'string'
-  throw Error.new 'text decoder' unless textDecoder
+  fail 'text decoder' unless textDecoder
   res = ''
   for part in decoded
     res += if typeof part is 'string' then part else textDecoder(part[0], part[1])
@@ -1003,16 +1003,16 @@ mapPoint =! (map, x, y) ->
 validateOpts! =! (opts) ->
   asObject opts, 'opts'
   if opts.format isnt undefined and not FORMATS[opts.format]
-    throw TypeError.new "invalid opts.format=#{opts.format} (#{typeof opts.format})"
+    fail "invalid opts.format=#{opts.format} (#{typeof opts.format})", TypeError
   if opts.effort isnt undefined and opts.effort isnt Infinity and
       (not Number.isSafeInteger(opts.effort) or opts.effort < 1)
-    throw TypeError.new "invalid opts.effort=#{opts.effort} (#{typeof opts.effort})"
+    fail "invalid opts.effort=#{opts.effort} (#{typeof opts.effort})", TypeError
   if opts.timeLimit isnt undefined and opts.timeLimit isnt Infinity and
       (typeof opts.timeLimit isnt 'number' or not Number.isFinite(opts.timeLimit) or opts.timeLimit < 0)
-    throw TypeError.new "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})"
+    fail "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})", TypeError
   for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
     if opts[name] isnt undefined and typeof opts[name] isnt 'function'
-      throw TypeError.new "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})"
+      fail "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})", TypeError
 
 # ==[ Bitmap primitives ]==
 # A layer's bitmap is packed 32 pixels per word; a set bit is a dark pixel.
@@ -1331,7 +1331,7 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
     return
   index = layer.patternCount++
   pos   = index * 4
-  throw Error.new "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
+  fail "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
   patterns[pos]     = refinedX
   patterns[pos + 1] = cy
   patterns[pos + 2] = ms
@@ -1407,10 +1407,10 @@ export class QRScanner
     maxSize   = Object.freeze { ...init.maxSize }
     stride    = if init.stride is undefined then 1 else init.stride
     unless Number.isSafeInteger(stride) and stride >= 1
-      throw RangeError.new "\"stride\" expected positive safe integer, got #{stride}"
+      fail "\"stride\" expected positive safe integer, got #{stride}", RangeError
     bytes = maxPixels * stride
     unless Number.isSafeInteger(bytes) and bytes <= MAX_ARENA_BYTES
-      throw RangeError.new "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}"
+      fail "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}", RangeError
     @effort     = if init.effort    is undefined then 1         else init.effort
     @timeLimit  = if init.timeLimit is undefined then 1000 / 60 else init.timeLimit
     @opts       = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
@@ -1503,7 +1503,7 @@ export class QRScanner
     @layers = layers
 
   beginOperation!: ->
-    throw Error.new 'scanner operation already in flight' if @inFlight
+    fail 'scanner operation already in flight' if @inFlight
     @inFlight = true
 
   endOperation!: ->
@@ -2655,7 +2655,7 @@ export class QRScanner
   # Lazily build the pyramid, then one mandatory triple per layer (coarse
   # first) followed by scheduled retries while effort and time remain.
   scan: (cooperative) ->
-    throw Error.new 'expected addImage before decode' unless @staged
+    fail 'expected addImage before decode' unless @staged
     layers  = @layers
     @points = undefined
     failed  = FAIL.finder
@@ -2751,7 +2751,7 @@ export decodeQR =! (img, opts = {}) ->
   try
     scanner.addImage img, opts.format
     result = scanner.decode()[0]
-    throw Error.new result.message if result instanceof Error
+    fail result.message if result instanceof Error
     result
   finally
     scanner.clean()

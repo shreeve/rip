@@ -9,6 +9,7 @@
 # ==============================================================================
 
 import { QRScanner, decodeQR } from './qr.rip'
+import { fail } from './image.rip'
 
 # Plane descriptors per VideoFrame format: x shift, y shift, bytes per sample.
 Y8      =! [0, 0, 1]
@@ -44,7 +45,7 @@ setCanvasSize =! (canvas, width, height) ->
 
 getCanvasContext =! (canvas) ->
   context = canvas.getContext '2d'
-  throw Error.new 'Cannot get 2d context' if context is null
+  fail 'Cannot get 2d context' if context is null
   { canvas, context }
 
 clearCanvas =! (cc) ->
@@ -426,7 +427,7 @@ export class QRCanvas
     try
       if image then @scanner.addImage image, format
       else if size and format and layout then @scanner.processImage size, format, layout
-      else throw Error.new 'expected image or scanner-owned frame'
+      else fail 'expected image or scanner-owned frame'
     catch
       @endDecode()
       return @finish()
@@ -530,7 +531,7 @@ export class QRCamera
   validateFormat!: (format) ->
     return if format is 'auto' or format is 'canvas'
     return if format isnt 'RGB' and PLANES[format]
-    throw TypeError.new "invalid opts.format=#{format} (#{typeof format})"
+    fail "invalid opts.format=#{format} (#{typeof format})", TypeError
 
   # Native auto-detection, forced canvas, or one VideoFrame output format.
   setFormat!: (format) ->
@@ -564,7 +565,7 @@ export class QRCamera
   # Plane offsets and strides for a copy of the given format; returns the total bytes.
   setLayout: (copy, format, width, height) ->
     planes = PLANES[format]
-    throw Error.new "Unsupported VideoFrame format=#{format}" unless planes
+    fail "Unsupported VideoFrame format=#{format}" unless planes
     offset = 0
     for [xShift, yShift, bytes], i in planes
       planeWidth  = (width + (1 << xShift) - 1) >> xShift
@@ -583,11 +584,11 @@ export class QRCamera
     width  = visible?.width  or frame.displayWidth
     height = visible?.height or frame.displayHeight
     unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width is frame.displayWidth and height is frame.displayHeight
-      throw Error.new 'Unsupported VideoFrame dimensions'
+      fail 'Unsupported VideoFrame dimensions'
     selected = if @opts.format is 'auto' or @nativeOnly then frame.format else @opts.format
-    throw Error.new "Unsupported VideoFrame format=#{selected}" if not selected or selected is 'canvas'
+    fail "Unsupported VideoFrame format=#{selected}" if not selected or selected is 'canvas'
     planes = PLANES[selected]
-    throw Error.new "Unsupported VideoFrame format=#{selected}" unless planes
+    fail "Unsupported VideoFrame format=#{selected}" unless planes
     sourceWidth  = width
     sourceHeight = height
     sourceX      = 0
@@ -616,9 +617,9 @@ export class QRCamera
     required = @setLayout copy, selected, sourceWidth, sourceHeight
     size = frame.allocationSize copy
     unless Number.isSafeInteger(size) and size >= required and size <= reader.luma.length
-      throw Error.new "Invalid VideoFrame allocation size=#{size}, expected #{required}..#{reader.luma.length}"
+      fail "Invalid VideoFrame allocation size=#{size}, expected #{required}..#{reader.luma.length}"
     [layout] = frame.copyTo!(reader.luma, copy)
-    throw Error.new 'Missing VideoFrame plane layout' unless layout
+    fail 'Missing VideoFrame plane layout' unless layout
     scanned = @scanned
     scanned.format        = selected
     scanned.layout.offset = layout.offset
@@ -649,7 +650,7 @@ export class QRCamera
 
   # Available only after the first getUserMedia request.
   listDevices: ->
-    throw Error.new 'Media Devices not supported' unless navigator.mediaDevices?.enumerateDevices
+    fail 'Media Devices not supported' unless navigator.mediaDevices?.enumerateDevices
     devices = navigator.mediaDevices.enumerateDevices!
     devices.filter((device) -> device.kind is 'videoinput').map (d) -> { deviceId: d.deviceId, label: d.label or "Camera #{d.deviceId}" }
 
@@ -811,7 +812,7 @@ export gifToPng =! (gifBytes) ->
   try
     canvas = OffscreenCanvas.new bitmap.width, bitmap.height
     ctx = canvas.getContext 'bitmaprenderer', { alpha: false }
-    throw Error.new 'Cannot get bitmaprenderer context' unless ctx
+    fail 'Cannot get bitmaprenderer context' unless ctx
     ctx.transferFromImageBitmap bitmap
     canvas.convertToBlob!({ type: 'image/png' })
   finally

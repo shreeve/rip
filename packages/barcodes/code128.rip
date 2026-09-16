@@ -164,8 +164,8 @@ modules =! (codes) ->
 # ==[ Validation ]==
 
 asInt =! (n, title, min) ->
-  throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
-  throw RangeError.new "\"#{title}\" expected integer >= #{min}, got #{n}" unless Number.isSafeInteger(n) and n >= min
+  fail "\"#{title}\" expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  fail "\"#{title}\" expected integer >= #{min}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min
   n
 
 # ==[ Renderers ]==
@@ -455,7 +455,7 @@ export readCode128 =! (img, opts = {}) ->
 # Text only; throws on a miss.
 export decodeCode128 =! (img, opts = {}) ->
   hit = readCode128 img, opts
-  throw Error.new 'Code 128 not found' unless hit
+  fail 'Code 128 not found' unless hit
   hit.text
 
 # Internals for the test suite.

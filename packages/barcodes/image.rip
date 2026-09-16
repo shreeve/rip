@@ -22,47 +22,47 @@ export FORMATS =!
 
 # ==[ Validation ]==
 
-export fail =! (msg) -> throw Error.new msg
+export fail =! (msg, kind = Error) -> throw kind.new msg
 
 export asString =! (value, name) ->
-  throw TypeError.new "\"#{name}\" expected string, got type=#{typeof value}" unless typeof value is 'string'
+  fail "\"#{name}\" expected string, got type=#{typeof value}", TypeError unless typeof value is 'string'
   value
 
 export asObject =! (value, name) ->
-  throw TypeError.new "\"#{name}\" expected object, got type=#{typeof value}" if value is null or typeof value isnt 'object' or Array.isArray(value)
+  fail "\"#{name}\" expected object, got type=#{typeof value}", TypeError if value is null or typeof value isnt 'object' or Array.isArray(value)
   value
 
 export validateSize =! (size, name) ->
-  throw TypeError.new "#{name} expected safe integer width and height" unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
-  throw RangeError.new "#{name} expected positive width and height" if size.width <= 0 or size.height <= 0
-  throw RangeError.new "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}" if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
+  fail "#{name} expected safe integer width and height", TypeError unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
+  fail "#{name} expected positive width and height", RangeError if size.width <= 0 or size.height <= 0
+  fail "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}", RangeError if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
   size.width * size.height
 
 # Returns the input format; RGB/RGBA is detected by exact length when unnamed.
 export validateImage =! (img, named, layout, capacity) ->
   px = validateSize img, '"img"'
   if capacity and (img.width > capacity.width or img.height > capacity.height)
-    throw RangeError.new "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}"
+    fail "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}", RangeError
   bytes = img.data
-  throw TypeError.new "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}" unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
+  fail "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}", TypeError unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
   if named isnt undefined
     format = FORMATS[named]
-    throw TypeError.new "invalid opts.format=#{named} (#{typeof named})" unless format
+    fail "invalid opts.format=#{named} (#{typeof named})", TypeError unless format
     if layout
       {offset, stride} = layout
       row = format.step * img.width
       end = offset + (img.height - 1) * stride + row
       if not Number.isSafeInteger(offset) or not Number.isSafeInteger(stride) or offset < 0 or stride < row or end > bytes.length
-        throw RangeError.new "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}"
+        fail "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}", RangeError
     else
       expected = format.step * px
       planar = format.step <= 2
       if (planar and bytes.length < expected) or (not planar and bytes.length isnt expected)
-        throw RangeError.new "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}"
+        fail "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}", RangeError
     return format
   return RGB if bytes.length is 3 * px
   return RGBA if bytes.length is 4 * px
-  throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
+  fail "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}", RangeError
 
 export LITTLE_ENDIAN =! Uint8Array.new(Uint32Array.new([1]).buffer)[0] is 1
 
