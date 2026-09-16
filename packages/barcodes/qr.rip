@@ -647,6 +647,11 @@ renderTerm =! (r) ->
     out += '\n'
   out
 
+# Character counts of a path coordinate (output width is at most 1024, so
+# four digits cover every case) and of a signed move offset.
+digits =! (n) -> if n < 10 then 1 else if n < 100 then 2 else if n < 1000 then 3 else 4
+chars  =! (d) -> if d < 0 then 1 + digits(-d) else digits(d)
+
 renderSvg =! (r, optimize) ->
   W       = r.W
   out     = '<svg viewBox="0 0 ' + W + ' ' + W + '" xmlns="http://www.w3.org/2000/svg">'
@@ -660,14 +665,17 @@ renderSvg =! (r, optimize) ->
       unless optimize
         out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" />'
         continue
-      mv = "M#{x} #{y}"
+      # The shorter move wins, relative on ties; lengths are counted so only
+      # the chosen command is built.
       if hasPrev
-        rel = "m#{x - prevX} #{y - prevY}"
-        mv = rel if rel.length <= mv.length
+        dx = x - prevX
+        dy = y - prevY
+        mv = if chars(dx) + chars(dy) <= digits(x) + digits(y) then "m#{dx} #{dy}" else "M#{x} #{y}"
+      else
+        mv = "M#{x} #{y}"
       # Return to the cell's left edge by the shorter command: `H<x>` is two
       # characters for single-digit x, `h-1` three.
-      back = if x < 10 then "H#{x}" else 'h-1'
-      path += "#{mv}h1v1#{back}Z"
+      path += if x < 10 then "#{mv}h1v1H#{x}Z" else "#{mv}h1v1h-1Z"
       prevX   = x
       prevY   = y
       hasPrev = true
