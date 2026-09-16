@@ -789,3 +789,26 @@ code 'range tail loop collects from a counting loop', '''
     return _result;
   };
   '''
+
+# ==============================================================================
+# `own` is a keyword only directly after `for`
+# ==============================================================================
+
+test "own as a variable", "own = 3\nown + 1", 4
+test "own as a parameter and property", "f = (own) -> own.own\nf({ own: 7 })", 7
+test "own as a function name", "own = (x) -> x * 2\nown 21", 42
+test "for own still filters inherited keys", '''
+  base = { inherited: 1 }
+  obj = Object.create base
+  obj.mine = 2
+  keys = (k for own k of obj)
+  all = (k for k of obj)
+  [keys, all.sort()]
+  ''', [['mine'], ['inherited', 'mine']]
+test "for own with a value and an own variable in scope", '''
+  own = 'shadow'
+  out = []
+  for own k, v of { a: 1 }
+    out.push [k, v, own]
+  out
+  ''', [['a', 1, 'shadow']]
