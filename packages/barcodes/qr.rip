@@ -46,7 +46,7 @@ BYTES =! do ->
       bits -= 36 if ver >= 7
     bits >>> 3
 
-# Spec table order, also the format-indicator segment order.
+# Table order; decodeGrid packs this index as (ecc << 3) | mask.
 ECC_LEVELS =! ['low', 'medium', 'quartile', 'high']
 
 # Table 9: error-correction codewords per block.
@@ -413,10 +413,6 @@ penaltyScore =! (m, t, limit = Infinity) ->
   return partial if partial >= limit
   partial + 40 * (finderPenaltyVertical(m) + finderPenaltyVertical(t))
 
-penalty =! (m, t) ->
-  transposeMat m, t
-  penaltyScore m, t
-
 # ==[ Symbol layout ]==
 
 drawInfo! =! (m, ver, ecc, mask) ->
@@ -539,7 +535,7 @@ drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
       q = pos[i]
       m.v[q >>> 5] |= 1 << (q & 31)
   mask = maskIdx
-  unless mask?
+  if mask is undefined
     transposeMat m, t
     bestScore = Infinity
     for pl in [0...8]
@@ -602,7 +598,7 @@ isBytes =! (a) ->
 # A raster is the finished matrix plus output geometry; `map` takes an output
 # coordinate to its module index, -1 in the border.
 
-# Output column x on module row `my` (rows in the border pass my = -1).
+# Dark module at output pixel (x, y); false in the border.
 darkAt =! (r, x, y) -> r.map[x] >= 0 and r.map[y] >= 0 and matGet(r.m, r.map[x], r.map[y]) is 1
 
 renderRaw =! (r) ->
@@ -769,7 +765,6 @@ FINDER_INSET    =! 7                # finder centers sit 3.5 modules in from eac
 POLARITY =! 1                       # set for light-on-dark finders
 DEAD     =! 2                       # consumed by a decode or inside a decoded region
 ANCHOR   =! 4                       # a decoded symbol's TL record; slots 2..3 hold its TR and BL indices
-MEMBER   =! 8                       # a decoded symbol's TR or BL record; TR's slot 2 holds the exclusion padding
 
 # Failure values shared by every attempt; a decode returns a string or one
 # of these. The frame path throws only when a layer's finder storage
@@ -789,6 +784,12 @@ FAIL =! Object.freeze
 mul   =! (a, b)          -> if a and b then EXP[LOG[a] + LOG[b]] else 0
 inv   =! (a)             -> EXP[255 - LOG[a]]
 clamp =! (value, lo, hi) -> Math.max(lo, Math.min(hi, value))
+
+# Horner evaluation of a low-degree-first GF(256) polynomial.
+evalLow =! (poly, length, x) ->
+  value = 0
+  value = mul(value, x) ^ poly[i] for i in [length - 1..0] by -1
+  value
 
 # ==[ Payload ]==
 
@@ -890,9 +891,8 @@ class Payload
           parts.push [segment, eci]
           res = ''
         else
-          encoding = ECI_ENCODINGS[eci]
-          return FAIL.data if not encoding or length >= @views.length
-          decoder = ECI_DECODERS[eci] or TextDecoder.new(encoding)
+          decoder = ECI_DECODERS[eci]
+          return FAIL.data if not decoder or length >= @views.length
           @bytes[i] = @read(8) for i in [0...length]
           res += decoder.decode @view(length)
       else
@@ -903,7 +903,6 @@ class Payload
 
 finishPayload =! (decoded, textDecoder) ->
   return decoded if typeof decoded is 'string'
-  fail 'text decoder' unless textDecoder
   res = ''
   for part in decoded
     res += if typeof part is 'string' then part else textDecoder(part[0], part[1])
@@ -1175,6 +1174,8 @@ copyPattern! =! (layer, index, out) ->
   out.y  = layer.patterns[pos + 1]
   out.ms = layer.patterns[pos + 2]
 
+# ==[ Retry sets ]==
+
 # Retry sets are stride-5 records: rank, inverted, and three finder indices,
 # kept as a max-heap of MAX_SETS then heapsorted ascending.
 swapSet! =! (sets, a, b) ->
@@ -1195,12 +1196,6 @@ siftDown! =! (sets, end) ->
     return if sets[index * 5] >= sets[child * 5]
     swapSet sets, index, child
     index = child
-
-# Horner evaluation of a low-degree-first GF(256) polynomial.
-evalLow =! (poly, length, x) ->
-  value = 0
-  value = mul(value, x) ^ poly[i] for i in [length - 1..0] by -1
-  value
 
 # ==[ Row stages ]==
 # Row-ranged so the cooperative scanner can yield between bounded chunks.
@@ -1260,7 +1255,7 @@ blockRows! =! (layer, from, to) ->
           min = pixel if pixel < min
           max = pixel if pixel > max
         pos += layer.width
-      average = sum >> 6
+      average = sum >> (2 * BLOCK_SHIFT)
       if max - min <= 24
         average = min / 2
         if y > 0 and x > 0
@@ -1286,10 +1281,17 @@ bitmapRows! =! (layer, from, to) ->
       xPos = clamp x * BLOCK, 0, maxX
       left = clamp x, 2, bWidth - 3
       sum = 0
-      for yy in [-2..2]
-        row = bWidth * (top + yy) + left
-        for xx in [-2..2]
-          sum += blocks[row + xx]
+      if bWidth < 5 or bHeight < 5
+        # A grid under five blocks folds the window onto its edge blocks.
+        for yy in [-2..2]
+          row = bWidth * clamp(top + yy, 0, bHeight - 1)
+          for xx in [-2..2]
+            sum += blocks[row + clamp(left + xx, 0, bWidth - 1)]
+      else
+        for yy in [-2..2]
+          row = bWidth * (top + yy) + left
+          for xx in [-2..2]
+            sum += blocks[row + xx]
       cut = (sum / 25) | 0
       layer.cuts[y * bWidth + x] = cut
       pos = yPos * layer.width + xPos
@@ -1360,6 +1362,8 @@ findRows! =! (layer, from, to) ->
         ms = ratio r0, r1, r2, r3, r4
         recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
 
+# ==[ Decode drivers ]==
+
 # Legal sides are 17 + 4 * version; a non-finite estimate coerces to zero and
 # fails the dimension bounds downstream.
 snapSize =! (estimate) -> sizeOf(Math.round(versionOf estimate)) | 0
@@ -1403,7 +1407,7 @@ makePattern =! -> { x: 0.1, y: 0.1, ms: 0.1 }
 export class QRScanner
   constructor: (init) ->
     validateOpts init
-    maxPixels = validateSize init.maxSize, '"maxSize"'
+    maxPixels = validateSize init.maxSize, 'maxSize'
     maxSize   = Object.freeze { ...init.maxSize }
     stride    = if init.stride is undefined then 1 else init.stride
     unless Number.isSafeInteger(stride) and stride >= 1
@@ -1456,7 +1460,7 @@ export class QRScanner
     @from       = Float64Array.new(9)
     @to         = Float64Array.new(9)
     @alignPoint = { x: 0.1, y: 0.1 }
-    @finePlane  = { d: Uint8Array.new(0), cut: Int16Array.new(0), W: 0, H: 0, bw: 0, sh: 0 }
+    @finePlane  = { d: Uint8Array.new(0), cut: Int16Array.new(0), W: 0, H: 0, bw: 0, bh: 0, sh: 0 }
     @invertedProjection = false
     @decodedSize = 0
     layers = []
@@ -1484,11 +1488,11 @@ export class QRScanner
         words: 0
         # Projection reads luma through the threshold grid; `sh` is 3 for
         # the owning layer and grows when native luma reuses a coarser grid.
-        plane: { d: luma, cut: cuts, W: width, H: height, bw: blockWidth, sh: BLOCK_SHIFT }
+        plane: { d: luma, cut: cuts, W: width, H: height, bw: blockWidth, bh: blockHeight, sh: BLOCK_SHIFT }
         # Native luma offered to downscaled sampling; `r` is the layer index.
         context: { opts: @opts, scale: 1 << i, ox: 0, oy: 0, fine: (if i then { luma: @image, r: i } else undefined) }
         found: false
-        # POLARITY | DEAD | ANCHOR | MEMBER flags per finder record.
+        # POLARITY | DEAD | ANCHOR flags per finder record.
         inverted: Uint8Array.new(centers)
         setCount: 0
         setCursor: 0
@@ -1571,6 +1575,7 @@ export class QRScanner
       layer.plane.W      = layer.width
       layer.plane.H      = layer.height
       layer.plane.bw     = layer.blockWidth
+      layer.plane.bh     = layer.blockHeight
       layer.context.ox   = 0
       layer.context.oy   = 0
       layer.found        = false
@@ -2052,8 +2057,9 @@ export class QRScanner
     plane.d   = fine.luma.data
     plane.cut = p.cut
     plane.W   = Math.min fine.luma.width, p.bw << sh
-    plane.H   = Math.min fine.luma.height, ((p.cut.length / p.bw) | 0) << sh
+    plane.H   = Math.min fine.luma.height, p.bh << sh
     plane.bw  = p.bw
+    plane.bh  = p.bh
     plane.sh  = sh
     sc
 
@@ -2105,7 +2111,7 @@ export class QRScanner
     sigmaLength-- while sigmaLength > 1 and not sigma[sigmaLength - 1]
     errors = sigmaLength - 1
     return false if not errors or 2 * errors > eccWords
-    # previous and next are dead now; reuse them as omega and the locations.
+    # From here `previous` and `next` are free: reuse them as omega and the locations.
     omega = previous
     omega.fill 0, 0, eccWords
     for i in [0...sigmaLength]
@@ -2425,7 +2431,6 @@ export class QRScanner
             if tlMs and trMs and blMs and @perspective(t, tlMs, trMs, blMs)
               found = @searchAlign plane, map, scale, 3 / (1 - scale), 0, 0, 1, false
       # Data can resemble an aligner; Reed-Solomon also tries the affine estimate.
-      failed   = FAIL.alignment
       attempts = if found then 2 else 1
       for attempt in [0...attempts]
         align   = attempt is 0 and found
@@ -2646,8 +2651,8 @@ export class QRScanner
     @blocked++ unless layer.inverted[triple.trIndex] & DEAD
     @blocked++ unless layer.inverted[triple.blIndex] & DEAD
     layer.inverted[triple.tlIndex] |= DEAD | ANCHOR
-    layer.inverted[triple.trIndex] |= DEAD | MEMBER
-    layer.inverted[triple.blIndex] |= DEAD | MEMBER
+    layer.inverted[triple.trIndex] |= DEAD
+    layer.inverted[triple.blIndex] |= DEAD
     for source in @layers
       @exclude source if source.found
     @opts.pointsOnDetect @points, result if @points and @opts.pointsOnDetect

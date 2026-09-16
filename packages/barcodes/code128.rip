@@ -235,7 +235,7 @@ export encodeCode128 =! (text, output = 'raw', opts = {}) ->
   scale  = if opts.scale  is undefined then 1              else asInt(opts.scale,  'opts.scale',  1)
   border = if opts.border is undefined then QUIET_ZONE     else asInt(opts.border, 'opts.border', 0)
   height = if opts.height is undefined then DEFAULT_HEIGHT else asInt(opts.height, 'opts.height', 1)
-  codes = codewords text, opts.gs1 is true
+  codes = codewords text, !!opts.gs1
   r = raster modules(codes), scale, border, height
   switch output
     when 'raw'      then renderRaw r
@@ -459,4 +459,4 @@ export decodeCode128 =! (img, opts = {}) ->
   hit.text
 
 # Internals for the test suite.
-export _tests =! { codewords, modules, decodeText, checksum }
+export _tests =! { codewords, decodeText, checksum }

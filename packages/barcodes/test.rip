@@ -29,22 +29,25 @@ ansi =! (picture) -> picture.replaceAll('#', '\x1b[40m  \x1b[0m').replaceAll('.'
 # draws one rect per module. Everything outside the envelope must be a module.
 svgCells =! (svg, W) ->
   cells = ((false for x in [0...W]) for y in [0...W])
-  cell = /([Mm])(-?\d+) (-?\d+)h1v1(?:H\d+|h-1)Z|<rect x="(\d+)" y="(\d+)" width="1" height="1" \/>/g
+  cell = /([Mm])(-?\d+) (-?\d+)h1v1(?:H(\d+)|h-1)Z|<rect x="(\d+)" y="(\d+)" width="1" height="1" \/>/g
   x = 0
   y = 0
   for m in svg.matchAll cell
-    if m[4] isnt undefined
-      x = +m[4]
-      y = +m[5]
-    else if m[1] is 'M'
-      x = +m[2]
-      y = +m[3]
+    if m[5] isnt undefined
+      x = +m[5]
+      y = +m[6]
     else
-      x += +m[2]
-      y += +m[3]
+      if m[1] is 'M'
+        x = +m[2]
+        y = +m[3]
+      else
+        x += +m[2]
+        y += +m[3]
+      eq +m[4], x if m[4] isnt undefined   # `H<x>` returns to the cell's own left edge
     cells[y][x] = true
   rest = svg.replace cell, ''
-  ok rest is '<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"><path d=""/></svg>' or rest is '<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"></svg>', rest
+  open = "<svg viewBox=\"0 0 #{W} #{W}\" xmlns=\"http://www.w3.org/2000/svg\">"
+  ok rest is open + '<path d=""/></svg>' or rest is open + '</svg>', rest
   cells
 
 # Pixels of a GIF from the package's own writer: GIF87a, a 128-entry palette
@@ -69,7 +72,7 @@ gifPixels =! (gif) ->
 
 # ==[ Package surface ]==
 
-console.log "\nPackage"
+p "\nPackage"
 
 test "exports", ->
   eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodeQR', 'readCode128']
@@ -91,7 +94,7 @@ test "no runtime deps, declares browser safety and earns it", ->
 
 # ==[ Spec tables ]==
 
-console.log "\nSpec"
+p "\nSpec"
 
 test "Table 1 codeword totals", ->
   eq BYTES, [
@@ -120,7 +123,7 @@ test "mask predicates and popcount", ->
 
 # ==[ Encoder ]==
 
-console.log "\nEncoder"
+p "\nEncoder"
 
 ENCODE_DATA =! [
   ["12345678", 1, "low", "numeric", [16, 32, 123, 114, 39, 0, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 188, 247, 62, 248, 53, 170, 224]]
@@ -289,7 +292,7 @@ test "custom text encoder", ->
 
 # ==[ Decoder ]==
 
-console.log "\nDecoder"
+p "\nDecoder"
 
 # RGBA raster with the symbol centered on a gray field.
 raster =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
@@ -337,6 +340,15 @@ test "numeric, alphanumeric, byte and unicode payloads", ->
   for text in ['7'.repeat(300), 'HELLO WORLD $%*+-./:', 'mixed Case 123', 'Ünïcödé 🔻 text']
     eq decodeQR(raster(text, {}, 4, 500, 500)), text
 
+test "small image, low contrast", ->
+  # A 25 px side is under four threshold blocks; the window folds onto the edge.
+  raw = encodeQR 'Hi', 'raw', border: 2
+  n = raw.length
+  data = Uint8Array.new(n * n)
+  for y in [0...n]
+    data[y * n + x] = (if raw[y][x] then 40 else 200) for x in [0...n]
+  eq decodeQR({ width: n, height: n, data }, format: 'I420'), 'Hi'
+
 test "luma and packed formats", ->
   img = raster 'FORMATS', {}, 4, 300, 300
   eq decodeQR(toLuma(img), format: 'I420'), 'FORMATS'
@@ -353,13 +365,15 @@ test "throws when nothing decodes", ->
 
 test "option and image validation", ->
   img = raster 'V', {}, 4, 200, 200
-  throws (-> decodeQR(img, effort: 0)),         TypeError
-  throws (-> decodeQR(img, timeLimit: -1)),     TypeError
-  throws (-> decodeQR(img, format: 'nope')),    TypeError
-  throws (-> decodeQR(img, pointsOnDetect: 1)), TypeError
+  throws (-> decodeQR(img, effort: 0)                                  ), TypeError
+  throws (-> decodeQR(img, timeLimit: -1)                              ), TypeError
+  throws (-> decodeQR(img, format: 'nope')                             ), TypeError
+  throws (-> decodeQR(img, format: 'toString')                         ), TypeError, 'format'
+  throws (-> decodeQR(null)                                            ), TypeError, 'img'
+  throws (-> decodeQR(img, pointsOnDetect: 1)                          ), TypeError
   throws (-> decodeQR({ width: 0, height: 1, data: Uint8Array.new(0) })), RangeError
   throws (-> decodeQR({ width: 2, height: 2, data: Uint8Array.new(5) })), RangeError
-  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })),      TypeError
+  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })     ), TypeError
 
 test "pointsOnDetect reports geometry in image coordinates", ->
   scale = 5
@@ -423,7 +437,7 @@ test! "scanner reuse, exclusive operations and clean", ->
 
 # ==[ Code 128 ]==
 
-console.log "\nCode 128"
+p "\nCode 128"
 
 test "codewords: published vector, shortest subset choice, FNC1", ->
   eq c128.codewords('Wikipedia'), WIKIPEDIA
@@ -437,7 +451,9 @@ test "codewords: published vector, shortest subset choice, FNC1", ->
   for text in ['Hello, World! 2026', 'L2602852147', '12345', '\x7f~ ', 'x0y1z2', '2026-09-15T12:00']
     codes = c128.codewords text
     ok codes.length <= text.length + 3, text
-    eq codes.at(-2), c128.checksum(codes, codes.length - 2), text
+    sum = codes[0]
+    sum += codes[i] * i for i in [1...codes.length - 2]
+    eq codes.at(-2), sum % 103, text
     eq codes.at(-1), 106
   throws (-> c128.codewords 'é'), Error, 'cannot encode'
   throws (-> c128.codewords ''),  Error, 'empty'

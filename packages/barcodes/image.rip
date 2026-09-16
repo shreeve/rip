@@ -19,6 +19,7 @@ export FORMATS =!
   RGB: RGB, RGBA: RGBA, RGBX: RGBA, BGRA: RGBA, BGRX: RGBA
   I420: LUMA8, I420A: LUMA8, I422: LUMA8, I444: LUMA8, NV12: LUMA8
   I420P10: LUMA10, I420P12: LUMA12
+Object.setPrototypeOf FORMATS, null   # 'toString' is not a format
 
 # ==[ Validation ]==
 
@@ -40,7 +41,8 @@ export validateSize =! (size, name) ->
 
 # Returns the input format; RGB/RGBA is detected by exact length when unnamed.
 export validateImage =! (img, named, layout, capacity) ->
-  px = validateSize img, '"img"'
+  asObject img, 'img'
+  px = validateSize img, 'img'
   if capacity and (img.width > capacity.width or img.height > capacity.height)
     fail "img expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}", RangeError
   bytes = img.data

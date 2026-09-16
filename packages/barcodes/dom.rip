@@ -18,7 +18,6 @@ P420    =! [Y8, UV8, UV8]
 P420_16 =! [[0, 0, 2], [1, 1, 2], [1, 1, 2]]
 P_RGBA  =! [[0, 0, 4]]
 PLANES  =!
-  RGB:     [[0, 0, 3]]
   RGBA:    P_RGBA
   RGBX:    P_RGBA
   BGRA:    P_RGBA
@@ -167,8 +166,8 @@ export class QRCanvas
     decoder = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
     decoder.effort         = @opts.effort    if @opts.effort    isnt undefined
     decoder.timeLimit      = @opts.timeLimit if @opts.timeLimit isnt undefined
-    decoder.pointsOnDetect = (points, result) => @onPoints points, result if @overlay
-    decoder.imageOnResult  = (img) => @drawResultQr img if @resultQR
+    decoder.pointsOnDetect = ((points, result) => @onPoints points, result) if @overlay
+    decoder.imageOnResult  = ((img) => @drawResultQr img) if @resultQR
     if @bitmap
       decoder.imageOnBitmap = (img) =>
         # A failing frame emits many retry planes; keep only its first.
@@ -186,6 +185,7 @@ export class QRCanvas
         if @pending then @cleanPending = true else @scanner.clean()
       crop:  @opts.cropToSquare
       luma:  @scanner.luma
+      busy:  => !!@pending
       frame: @opts.onVideoFrame
       source!: (source) =>
         return if source is @frameSource
@@ -538,11 +538,15 @@ export class QRCamera
     @validateFormat format
     return if format is @opts.format
     @opts.format = format
+    @resetSource()
+    @resetFrame()
+
+  # A new source invalidates every in-flight frame and every cached capability.
+  resetSource!: ->
     @source++
     @videoFrame = undefined
     @nativeOnly = false
     @reported   = false
-    @resetFrame()
 
   resetFrame!: ->
     s = @scanned
@@ -635,11 +639,10 @@ export class QRCamera
     scanned
 
   setStream!: (stream) ->
+    if @stream and @stream isnt stream
+      track.stop() for track in @stream.getTracks()
     @stream = stream
-    @source++
-    @videoFrame = undefined
-    @nativeOnly = false
-    @reported   = false
+    @resetSource()
     @cleanFrame()
     player = @player
     # Inline autoplay on mobile must be set before the stream attaches.
@@ -648,7 +651,7 @@ export class QRCamera
     player.setAttribute 'playsinline', ''
     player.srcObject = stream
 
-  # Available only after the first getUserMedia request.
+  # Labels are empty until the first getUserMedia grant.
   listDevices: ->
     fail 'Media Devices not supported' unless navigator.mediaDevices?.enumerateDevices
     devices = navigator.mediaDevices.enumerateDevices!
@@ -684,7 +687,8 @@ export class QRCamera
     if typeof VideoFrame isnt 'function'
       @videoFrame = false
       return @draw(canvas, fullSize)
-    return if @reading
+    # An async decode still reads the arena; a new frame must not land in it.
+    return if @reading or reader.busy()
     @reading = true
     source = @source
     frame = undefined
@@ -736,10 +740,7 @@ export class QRCamera
       @reading = false
 
   stop!: ->
-    @source++
-    @videoFrame = undefined
-    @nativeOnly = false
-    @reported   = false
+    @resetSource()
     @cleanFrame()
     if @stream
       track.stop() for track in @stream.getTracks()
@@ -781,7 +782,7 @@ export frameLoop =! (cb, video) ->
 export svgToPng =! (svgData, width, height) ->
   Promise.new (resolve, reject) ->
     # 8192 is the common canvas side limit.
-    unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width < 8192 and height < 8192
+    unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width <= 8192 and height <= 8192
       return reject(Error.new "invalid width and height: #{width} #{height}")
     doc = DOMParser.new().parseFromString svgData, 'image/svg+xml'
     svgElement = doc.documentElement
@@ -941,7 +942,7 @@ export class BarcodeDetector
       points   = undefined
       rawValue = undefined
       try
-        rawValue = decodeQR data, pointsOnDetect: (p, result) -> points = p if typeof result is 'string'
+        rawValue = decodeQR data, effort: Infinity, timeLimit: Infinity, pointsOnDetect: (p, result) -> points = p if typeof result is 'string'
       catch
         return []
       box = points.boundingBox

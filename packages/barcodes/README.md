@@ -115,7 +115,7 @@ Every ASCII character encodes; the ASCII group separator (`'\x1d'`) becomes
 an FNC1 separator, and `gs1: true` opens the symbol with FNC1 for GS1-128
 application identifiers. The codeword sequence is the shortest over the
 three subsets, so `'A1234'` latches to subset C for the digit pairs while
-`'12345'` does not pay for a latch it cannot amortize. The outputs are the
+`'123'` does not pay for a latch it cannot amortize. The outputs are the
 QR six with one row of modules: `raw` is a `boolean[]` with `true` for a bar
 and the quiet zone included, `ascii` and `term` are one line, and `svg`, `gif`
 and `data-url` draw `height` modules of bar.
@@ -164,9 +164,9 @@ overlay = document.querySelector 'canvas'     # positioned over the video
 canvas = QRCanvas.new { overlay }
 camera = rearCamera! video
 cancel = frameLoop ->
-  decoded = camera.readFrame canvas           # undefined until a frame decodes
+  decoded = camera.readFrame! canvas          # undefined until a frame decodes
   if decoded isnt undefined
-    console.log decoded
+    p decoded
     cancel()
     camera.stop()
 ```
@@ -175,9 +175,9 @@ cancel = frameLoop ->
 overlay, the decoded symbol, or the binarized plane onto the canvases it is
 given. `rearCamera` and `selfieCamera` open a stream into a video element;
 `camera.listDevices()` and `camera.setDevice(id)` switch cameras. When the
-browser exposes `VideoFrame`, frames are copied plane-for-plane into the
-scanner arena without a canvas round trip. `svgToPng` and `gifToPng`
-rasterize the encoder's output, and `BarcodeDetector` is a Shape Detection
+browser exposes `VideoFrame`, `camera.readFrame! canvas, true` copies
+frames plane-for-plane into the scanner arena without a canvas round trip.
+`svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and `BarcodeDetector` is a Shape Detection
 API ponyfill over `decodeQR`. Camera access needs a secure context.
 
 ## Performance
@@ -213,8 +213,8 @@ A version 1 symbol fits one 32-bit word per row and never fills a word, so
 a JIT that meets it first specializes the encoder on small integers; the
 first larger symbol then produces full words, which JavaScript reads as
 doubles from an unsigned array, and the recompiled mixed-type code runs
-about 1.4x slower for the rest of the process. The reference implementation
-shows this in the table: warmed only on its own size, its raw version 8 and
+slower for the rest of the process. The reference implementation shows
+this in the table: warmed only on its own size, its raw version 8 and
 18 rows are 16.8 and 52.8. This package stores matrix words in an
 `Int32Array`, so a full word is an ordinary integer in every version and
 the encoder keeps one specialization whatever order the sizes arrive in.
