@@ -841,35 +841,92 @@ matchRuns =! (runs, at, pattern, modules) ->
   if err < total * 0.25 then total else 0
 
 # First run index at or after `from`, same parity, where the pattern matches.
+# A sliding sum of the window rejects one narrower than a module a run
+# before the full comparison.
 findRuns =! (runs, n, from, pattern, modules) ->
-  for at in [from...n - pattern.length + 1] by 2
-    return at if matchRuns runs, at, pattern, modules
-  -1
+  len  = pattern.length
+  last = n - len
+  return -1 if from > last
+  total = 0
+  total += runs[from + k] for k in [0...len]
+  at = from
+  loop
+    return at if total >= modules and matchRuns(runs, at, pattern, modules)
+    at += 2
+    return -1 if at > last
+    total += runs[at + len - 2] + runs[at + len - 1] - runs[at - 2] - runs[at - 1]
 
 # Luma along a ray from (x, y) in `count` steps of the unit vector (dx, dy);
 # samples outside the image read as light, the quiet zone a symbol at the
 # edge would have had.
 sampleRay! =! (luma, img, format, x, y, dx, dy, count) ->
+  {width, height} = img
+  # Samples lo...hi land inside the image and the rest read as paper; the
+  # sample at each end is checked, so the inner loops need no bounds.
+  lo = 0
+  hi = count
+  if dx > 0
+    lo = Math.max lo, Math.ceil(-x / dx)
+    hi = Math.min hi, Math.ceil((width - x) / dx)
+  else if dx < 0
+    lo = Math.max lo, Math.floor((x - width) / -dx) + 1
+    hi = Math.min hi, Math.floor(x / -dx) + 1
+  else if x < 0 or x >= width
+    hi = lo
+  if dy > 0
+    lo = Math.max lo, Math.ceil(-y / dy)
+    hi = Math.min hi, Math.ceil((height - y) / dy)
+  else if dy < 0
+    lo = Math.max lo, Math.floor((y - height) / -dy) + 1
+    hi = Math.min hi, Math.floor(y / -dy) + 1
+  else if y < 0 or y >= height
+    hi = lo
+  lo = Math.min count, Math.max(0, lo)
+  hi = Math.min count, Math.max(lo, hi)
+  luma.fill 255, 0, lo
+  luma.fill 255, hi, count
+  sampleChecked luma, img, format, x, y, dx, dy, lo, Math.min(hi, lo + 1)
+  sampleChecked luma, img, format, x, y, dx, dy, Math.max(lo, hi - 1), hi
+  lo = Math.min hi, lo + 1
+  hi = Math.max lo, hi - 1
+  step  = format.step
+  row   = width * step
+  data  = img.data
+  if step is 1
+    for n in [lo...hi]
+      luma[n] = data[(y + n * dy | 0) * row + (x + n * dx | 0)]
+  else if step is 2
+    shift = format.bits - 8
+    for n in [lo...hi]
+      at = (y + n * dy | 0) * row + (x + n * dx | 0) * 2
+      luma[n] = (data[at] | (data[at + 1] << 8)) >>> shift
+  else
+    for n in [lo...hi]
+      at = (y + n * dy | 0) * row + (x + n * dx | 0) * step
+      luma[n] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
+
+# The samples from...to of a ray, each checked against the image bounds.
+sampleChecked! =! (luma, img, format, x, y, dx, dy, from, to) ->
   {width, height, data} = img
   step  = format.step
   row   = width * step
   shift = format.bits - 8
-  for n in [0...count]
-    xi = x | 0
-    yi = y | 0
-    if x < 0 or y < 0 or xi >= width or yi >= height
+  for n in [from...to]
+    px = x + n * dx
+    py = y + n * dy
+    xi = px | 0
+    yi = py | 0
+    if px < 0 or py < 0 or xi >= width or yi >= height
       luma[n] = 255
     else
       at = yi * row + xi * step
       luma[n] = if step is 1 then data[at]
       else if step is 2 then (data[at] | (data[at + 1] << 8)) >>> shift
       else (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
-    x += dx
-    y += dy
 
 # Run lengths of one ray, even slots light and odd dark, from the edges
 # between local extrema: an extremum counts once the luma has swung a
-# quarter of the ray's range away from the last one, and each edge sits
+# third of the ray's range away from the last one, and each edge sits
 # where the luma crosses the midpoint of its own valley and peak, placed
 # between samples by interpolation. Blur leaves a narrow space short of
 # paper white and print gain widens every bar; both move the midpoint
@@ -884,7 +941,7 @@ edgeRuns =! (luma, count, runs) ->
     lo = v if v < lo
     hi = v if v > hi
   return 0 if hi - lo < 32
-  swing = (hi - lo) >> 2
+  swing = (hi - lo) / 3
   # Until the first swing the direction is unknown: track both extremes.
   minV  = luma[0]
   maxV  = luma[0]
@@ -1416,7 +1473,7 @@ metadata =! (s, rays, mode) ->
   { rows, columns, level }
 
 # One located anchor pattern through to a decoded symbol, or null.
-tryDecode =! (s, x, y, dx, dy, unit, first, mode) ->
+tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
   {img, format, rluma, rruns, cells, rayRow, rayT, votes} = s
   # Rows stack a quarter turn from the symbol's reading direction, which a
   # mirrored read runs against.
@@ -1445,7 +1502,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, mode) ->
   rx = uy * flip
   ry = -ux * flip
   margin = 3 * unit + 3
-  length = Math.min rluma.length, Math.ceil((MAX_CELLS + 2) * 17 * unit + 2 * margin)
+  length = Math.min rluma.length, Math.ceil((MAX_CELLS + 2) * 17 * unit + 2 * margin), Math.ceil(extent + 2 * margin + 3 * unit)
   step   = Math.max 1, 0.75 * unit
   slack  = Math.max 2, unit
   # One ray at distance t along the edge: the anchor pattern is found near
@@ -1580,8 +1637,6 @@ tryDecode =! (s, x, y, dx, dy, unit, first, mode) ->
         if votes[slot + k] is value + 1
           votes[slot + k + 1]++
           break
-  s.rays = rays
-  s.meta = meta
   n = rows * columns
   k = 2 << level
   c = s.codewords
@@ -1675,7 +1730,12 @@ scanLine =! (s, vertical, line, count) ->
         dx = if vertical then 0     else dir
         dy = if vertical then dir   else 0
         unit = matchRuns(r, at, mode.anchor, mode.modules) / mode.modules
-        hit = tryDecode s, x, y, dx, dy, unit, first, mode
+        # The end pattern on this line bounds the symbol's width, so the
+        # rays need not run out to the widest symbol there is.
+        end    = findRuns r, rn, at + mode.anchor.length, mode.end, mode.endModules
+        extent = if end < 0 then Infinity else 0
+        extent += r[k] for k in [at...end + mode.end.length] if end >= 0
+        hit = tryDecode s, x, y, dx, dy, unit, first, extent, mode
         if hit
           hit.vertical = vertical
           hit.reversed = reversed
@@ -1706,29 +1766,37 @@ scanLines =! (s, vertical) ->
     return hit if hit
   null
 
+# Reader buffers sized for the longest image side seen so far, so a camera
+# loop feeding frames of one size allocates once.
+state =! { side: 0 }
+
+buffers =! (side) ->
+  maxRays = 4 * side
+  state.side   = side
+  state.luma   = Uint8Array.new(side)
+  state.runs   = Int32Array.new(side)
+  state.rev    = Int32Array.new(side)
+  state.rluma  = Uint8Array.new(2 * side)
+  state.rruns  = Float64Array.new(2 * side)
+  state.cells  = Int16Array.new(maxRays * MAX_CELLS)
+  state.rayRow = Int16Array.new(maxRays)
+  state.rayT   = Float64Array.new(maxRays)
+  state.maxRays   = maxRays
+  state.hist      = Int32Array.new(90)
+  state.votes     = Int32Array.new(MAX_ROWS * MAX_COLUMNS * 8)
+  state.codewords = Int32Array.new(MAX_CODEWORDS)
+  state.grid      = Int32Array.new(MAX_CODEWORDS)
+  state.erasures  = Int32Array.new(MAX_CODEWORDS)
+
 # First PDF417 found on any scan line; null on a miss.
 export readPDF417 =! (img, opts = {}) ->
   asObject opts, 'opts'
   format = validateImage img, opts.format
-  side    = Math.max(img.width, img.height) + 2
-  maxRays = 4 * side
-  s = {
-    img, format
-    luma:  Uint8Array.new(side)
-    runs:  Int32Array.new(side)
-    rev:   Int32Array.new(side)
-    rluma: Uint8Array.new(2 * side)
-    rruns: Float64Array.new(2 * side)
-    cells: Int16Array.new(maxRays * MAX_CELLS)
-    rayRow: Int16Array.new(maxRays)
-    rayT:   Float64Array.new(maxRays)
-    maxRays
-    hist:  Int32Array.new(90)
-    votes: Int32Array.new(MAX_ROWS * MAX_COLUMNS * 8)
-    codewords: Int32Array.new(MAX_CODEWORDS)
-    grid:      Int32Array.new(MAX_CODEWORDS)
-    erasures:  Int32Array.new(MAX_CODEWORDS)
-  }
+  side   = Math.max(img.width, img.height) + 2
+  buffers side if side > state.side
+  s = state
+  s.img    = img
+  s.format = format
   scanLines(s, false) or scanLines(s, true)
 
 # Text only; throws on a miss.
@@ -1738,4 +1806,4 @@ export decodePDF417 =! (img, opts = {}) ->
   hit.text
 
 # Internals for the test suite.
-export _tests =! { PATTERNS, codewords, textSymbols, eccCodewords, generator, symbolCodewords, indicator, autoLevel, dimensions, correct, parse, lookup, tables, matchRuns, findRuns, anchorNear, readRay, trackEdge, metadata, tryDecode, sampleRay, edgeRuns, FORWARD, MIRROR }
+export _tests =! { codewords, eccCodewords, generator, symbolCodewords, indicator, autoLevel, dimensions, correct, parse }
