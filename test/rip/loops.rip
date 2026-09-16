@@ -686,3 +686,106 @@ code 'a guarded plain loop braces too', 'f x for x in xs if c', '''
   '''
 
 fail 'a var-less ranged loop with a step rejects the same way', 'for [1..5] by 2\n  x = 1', 'binds no variable'
+
+# ==============================================================================
+# Range loop direction: literal bounds decide statically, variable bounds
+# ascend, `by` decides when present; one counting header in every form
+# ==============================================================================
+
+test "range literal descending", "out = []\nfor i in [3..1]\n  out.push i\nout", [3, 2, 1]
+test "range literal descending exclusive", "out = []\nfor i in [3...1]\n  out.push i\nout", [3, 2]
+test "range equal bounds inclusive", "out = []\nfor i in [2..2]\n  out.push i\nout", [2]
+test "range equal bounds exclusive", "out = []\nfor i in [2...2]\n  out.push i\nout", []
+test "range negative literal bounds ascending", "out = []\nfor i in [-2..2]\n  out.push i\nout", [-2, -1, 0, 1, 2]
+test "range negative literal bounds descending", "out = []\nfor i in [2..-2]\n  out.push i\nout", [2, 1, 0, -1, -2]
+test "range variable start above end is empty", "hi = 3\nlo = 1\nout = []\nfor i in [hi..lo]\n  out.push i\nout", []
+test "range variable descends with by -1", "hi = 3\nlo = 1\nout = []\nfor i in [hi..lo] by -1\n  out.push i\nout", [3, 2, 1]
+test "range [1..n] with n = 0 is empty", "n = 0\nout = []\nfor i in [1..n]\n  out.push i\nout", []
+test "range [0...count - 1] with count = 0 is empty", "count = 0\nout = []\nfor i in [0...count - 1]\n  out.push i\nout", []
+test "range fractional bound compares directly", "len = 5\nout = []\nfor i in [0...len / 2]\n  out.push i\nout", [0, 1, 2]
+test "range literal step sign wins over literal bounds", "out = []\nfor i in [6..0] by 2\n  out.push i\nfor i in [0..6] by -2\n  out.push i\nout", []
+test "range two-variable form binds the index", "out = []\nfor v, i in [1..3]\n  out.push [v, i]\nout", [[1, 0], [2, 1], [3, 2]]
+test "range two-variable form with a step", "out = []\nfor v, i in [1..6] by 2\n  out.push [v, i]\nout", [[1, 0], [3, 1], [5, 2]]
+test "range two-variable form with a variable bound", "n = 3\nout = []\nfor v, i in [1..n]\n  out.push [v, i]\nout", [[1, 0], [2, 1], [3, 2]]
+
+test "range bounds evaluate once each, in order", '''
+  calls = []
+  lo = -> calls.push 'lo'; 1
+  hi = -> calls.push 'hi'; 3
+  out = []
+  for i in [lo()..hi()]
+    out.push i
+  [out, calls]
+  ''', [[1, 2, 3], ['lo', 'hi']]
+
+test "range loop variable is captured per iteration", '''
+  fs = []
+  for i in [1..3]
+    fs.push -> i
+  (f() for f in fs)
+  ''', [1, 2, 3]
+
+test "range tail loop returns the collected values", '''
+  f = ->
+    for i in [3..1]
+      i * 2
+  f()
+  ''', [6, 4, 2]
+
+test "range loop inside a generator yields each value", '''
+  g = ->
+    for i in [1..3]
+      yield i
+  [...g()]
+  ''', [1, 2, 3]
+
+test "range value keeps runtime direction while the loop ascends", '''
+  hi = 3
+  lo = 1
+  value = [hi..lo]
+  looped = []
+  for i in [hi..lo]
+    looped.push i
+  [value, looped]
+  ''', [[3, 2, 1], []]
+
+code 'range literal descending compiles to a counting loop', '''
+  for k in [3..1]
+    console.log k
+  ''', '''
+  for (let k = 3; k >= 1; k--) {
+    console.log(k);
+  }
+  '''
+
+code 'range negative literal bound needs no temp', '''
+  for k in [2..-2]
+    console.log k
+  ''', '''
+  for (let k = 2; k >= -2; k--) {
+    console.log(k);
+  }
+  '''
+
+code 'range two-variable form declares the index in the header', '''
+  for v, i in [1..3]
+    console.log v, i
+  ''', '''
+  for (let v = 1, i = 0; v <= 3; v++, i++) {
+    console.log(v, i);
+  }
+  '''
+
+code 'range tail loop collects from a counting loop', '''
+  f = ->
+    for k in [1..3]
+      k
+  ''', '''
+  let f = function() {
+    const _result = [];
+    for (let k = 1; k <= 3; k++) {
+      _result.push(k);
+    }
+    return _result;
+  };
+  '''

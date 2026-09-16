@@ -13,7 +13,7 @@ function sum(list) {
 let s = sum([1, 2, 3]);
 let v = (() => {
   const result = [];
-  for (let n of ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))(1, 3)) {
+  for (let n = 1; n <= 3; n++) {
     result.push((n * 2));
   }
   return result;
