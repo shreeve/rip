@@ -31,12 +31,12 @@ PLANES =!
   NV12: [Y8, [1, 1, 2]]
 
 # Rendered element size from computed CSS.
-export def getSize(elm)
+export getSize =! (elm) ->
   css = getComputedStyle elm
   { width: Math.floor(+css.width.split('px')[0]), height: Math.floor(+css.height.split('px')[0]) }
 
 # Setting a canvas dimension clears it even at the same size.
-def setCanvasSize!(canvas, height, width)
+setCanvasSize =! (canvas, height, width) ->
   canvas.height = height if canvas.height isnt height
   canvas.width = width if canvas.width isnt width
 
@@ -45,17 +45,17 @@ getCanvasContext = (canvas) ->
   throw Error.new 'Cannot get canvas context' if context is null
   { canvas, context }
 
-def clearCanvas!(cc)
+clearCanvas =! (cc) ->
   cc.context.clearRect 0, 0, cc.canvas.width, cc.canvas.height
 
-def traceQuad!(context, points)
+traceQuad =! (context, points) ->
   context.beginPath()
   context.moveTo points[0].x, points[0].y
   for i in [1...points.length]
     context.lineTo points[i].x, points[i].y
   context.closePath()
 
-def fillQuad!(context, points)
+fillQuad =! (context, points) ->
   traceQuad context, points
   context.fill()
 
@@ -65,7 +65,7 @@ toward = (from, to, distance) ->
   scale = Math.min 0.5, distance / Math.hypot(dx, dy)
   { x: from.x + scale * dx, y: from.y + scale * dy }
 
-def traceRoundedQuad!(context, points, radius)
+traceRoundedQuad =! (context, points, radius) ->
   starts = points.map (point, i) -> toward point, points[(i + 1) % 4], radius
   ends = points.map (point, i) -> toward point, points[(i + 3) % 4], radius
   context.beginPath()
@@ -97,10 +97,11 @@ sameOverlays = (left, right) ->
     [right[i], right[match]] = [right[match], right[i]] if match isnt i
   true
 
-def copyOverlays!(target, source)
+copyOverlays =! (target, source) ->
   target.length = source.length
   for i in [0...source.length]
     target[i] = source[i]
+  return
 
 # Drawing and decode options, with defaults.
 canvasDefaults = ->
@@ -741,14 +742,14 @@ openCamera = (player, facingMode, opts = {}) ->
   stream = navigator.mediaDevices.getUserMedia! video: { height: { ideal: window.screen.height }, width: { ideal: window.screen.width }, facingMode }
   QRCamera.new player, stream, opts
 
-export def rearCamera(player, opts = {})
+export rearCamera =! (player, opts = {}) ->
   openCamera! player, 'environment', opts
 
-export def selfieCamera(player, opts = {})
+export selfieCamera =! (player, opts = {}) ->
   openCamera! player, 'user', opts
 
 # Run a callback per presented frame; returns a canceller.
-export def frameLoop(cb, video)
+export frameLoop =! (cb, video) ->
   useVideo = !!video and typeof video.requestVideoFrameCallback is 'function' and typeof video.cancelVideoFrameCallback is 'function'
   active = true
   handle = undefined
@@ -768,7 +769,7 @@ export def frameLoop(cb, video)
     return
 
 # SVG markup to a PNG data URL through an image element and a canvas.
-export def svgToPng(svgData, width, height)
+export svgToPng =! (svgData, width, height) ->
   Promise.new (resolve, reject) ->
     unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width < 8192 and height < 8192
       return reject(Error.new "invalid width and height: #{width} #{height}")
@@ -795,7 +796,7 @@ export def svgToPng(svgData, width, height)
     img.onerror = reject
     img.src = 'data:image/svg+xml,' + encodeURIComponent(source)
 
-export def gifToPng(gifBytes)
+export gifToPng =! (gifBytes) ->
   blob = Blob.new [gifBytes], { type: 'image/gif' }
   bitmap = createImageBitmap! blob
   try

@@ -14,8 +14,8 @@ import {
   ALPHANUMERIC, BYTES, ECC_BLOCKS, ECC_LEVELS, GF256, WORDS_PER_BLOCK,
   formatBits, maskBits, popcnt, versionBits,
 } from './spec.rip'
+import { FORMATS, copyLuma, darkToImage, validateImage, validateSize } from './image.rip'
 
-MAX_IMAGE_SIDE  =! 4096
 MAX_ARENA_BYTES =! 64 * 1024 * 1024
 
 # Failure values shared by every attempt; a decode returns a string or one
@@ -180,7 +180,7 @@ checkVersion =! (m, size) ->
 
 # 3x3 projective transforms, row-major in a Float64Array, applied to column
 # vectors [u, v, 1] with a perspective divide.
-def squareToQuad!(out, points)
+squareToQuad =! (out, points) ->
   [x1, y1, x2, y2, x3, y3, x4, y4] = points
   dx3 = x1 - x2 + x3 - x4
   dy3 = y1 - y2 + y3 - y4
@@ -213,7 +213,7 @@ def squareToQuad!(out, points)
   out[8] = 1
 
 # adj[r][c] is the (c, r) cofactor.
-def adjugate!(o, m)
+adjugate =! (o, m) ->
   for i in [0...9]
     r = i // 3
     c = i % 3
@@ -222,17 +222,19 @@ def adjugate!(o, m)
     c1 = (r + 1) % 3
     c2 = (r + 2) % 3
     o[i] = m[r1 + c1] * m[r2 + c2] - m[r1 + c2] * m[r2 + c1]
+  return
 
 # One input row is cached so the product may replace its left operand.
-def ptMul!(o, a, b)
+ptMul =! (o, a, b) ->
   for r in [0, 3, 6]
     a0 = a[r]
     a1 = a[r + 1]
     a2 = a[r + 2]
     for c in [0...3]
       o[r + c] = a0 * b[c] + a1 * b[c + 3] + a2 * b[c + 6]
+  return
 
-def packQuad!(quad, x0, y0, x1, y1, x2, y2, x3, y3)
+packQuad =! (quad, x0, y0, x1, y1, x2, y2, x3, y3) ->
   quad[0] = x0
   quad[1] = y0
   quad[2] = x1
@@ -248,25 +250,7 @@ mapPoint =! (map, x, y) ->
 
 # ==[ Input ]==
 
-LUMA8  =! { step: 1, bits: 8 }
-LUMA10 =! { step: 2, bits: 10 }
-LUMA12 =! { step: 2, bits: 12 }
-RGB    =! { step: 3, bits: 8 }
-# Four-byte inputs ignore the fourth byte: alpha is never composited and the
-# X formats share the storage shape.
-RGBA   =! { step: 4, bits: 8 }
-FORMATS =!
-  RGB: RGB, RGBA: RGBA, RGBX: RGBA, BGRA: RGBA, BGRX: RGBA
-  I420: LUMA8, I420A: LUMA8, I422: LUMA8, I444: LUMA8, NV12: LUMA8
-  I420P10: LUMA10, I420P12: LUMA12
-
-validateSize =! (size, name) ->
-  throw TypeError.new "#{name} expected safe integer width and height" unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
-  throw RangeError.new "#{name} expected positive width and height" if size.width <= 0 or size.height <= 0
-  throw RangeError.new "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}" if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
-  size.width * size.height
-
-def validateOpts!(opts)
+validateOpts =! (opts) ->
   throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if opts is null or typeof opts isnt 'object' or Array.isArray(opts)
   throw TypeError.new "invalid opts.format=#{opts.format} (#{typeof opts.format})" if opts.format isnt undefined and not FORMATS[opts.format]
   if opts.effort isnt undefined and opts.effort isnt Infinity and (not Number.isSafeInteger(opts.effort) or opts.effort < 1)
@@ -275,68 +259,7 @@ def validateOpts!(opts)
     throw TypeError.new "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})"
   for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
     throw TypeError.new "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})" if opts[name] isnt undefined and typeof opts[name] isnt 'function'
-
-# Returns the input format; RGB/RGBA is detected by exact length when unnamed.
-validateImage =! (img, named, layout, capacity) ->
-  px = validateSize img, '"img"'
-  if capacity and (img.width > capacity.width or img.height > capacity.height)
-    throw RangeError.new "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}"
-  bytes = img.data
-  throw TypeError.new "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}" unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
-  if named isnt undefined
-    format = FORMATS[named]
-    throw TypeError.new "invalid opts.format=#{named} (#{typeof named})" unless format
-    if layout
-      {offset, stride} = layout
-      row = format.step * img.width
-      end = offset + (img.height - 1) * stride + row
-      if not Number.isSafeInteger(offset) or not Number.isSafeInteger(stride) or offset < 0 or stride < row or end > bytes.length
-        throw RangeError.new "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}"
-    else
-      expected = format.step * px
-      planar = format.step <= 2
-      if (planar and bytes.length < expected) or (not planar and bytes.length isnt expected)
-        throw RangeError.new "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}"
-    return format
-  return RGB if bytes.length is 3 * px
-  return RGBA if bytes.length is 4 * px
-  throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
-
-# Convert any input into the tight native luma plane.
-def copyLuma!(out, maxSize, img, named, layout)
-  {step, bits} = validateImage img, named, layout, maxSize
-  {width, height, data} = img
-  stride = layout?.stride or width * step
-  offset = layout?.offset or 0
-  return if data is out and not offset and stride is width and step is 1
-  for y in [0...height]
-    src = offset + y * stride
-    dst = y * width
-    if step is 1
-      for x in [0...width]
-        out[dst++] = data[src++]
-    else if step is 2
-      for x in [0...width]
-        out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8)
-        src += 2
-    else
-      for x in [0...width]
-        out[dst++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
-        src += step
-
-# RGBA image from a per-pixel dark predicate.
-darkToImage =! (width, height, isDark) ->
-  data = new Uint8Array(width * height * 4)
-  i = 0
-  for y in [0...height]
-    for x in [0...width]
-      color = if isDark(x, y) then 0 else 255
-      data[i] = color
-      data[i + 1] = color
-      data[i + 2] = color
-      data[i + 3] = 255
-      i += 4
-  { width, height, data }
+  return
 
 # ==[ Bitmap primitives ]==
 # A layer's bitmap is packed 32 pixels per word; a set bit is a dark pixel.
@@ -426,7 +349,7 @@ refineTriple =! (layer, triple) ->
 
 # Grayscale finder-template fit, one axis at a time, over pitch scales of
 # 0.5..1.5 in tenths so measured perspective squeeze is covered.
-def fitPattern!(layer, pattern, inverted)
+fitPattern =! (layer, pattern, inverted) ->
   luma = layer.luma
   fit = (axis) ->
     center = if axis then pattern.y else pattern.x
@@ -491,7 +414,7 @@ edgePitch =! (layer, first, second, inverted) ->
   b = pitch second
   if a and b then (a + b) / 2 else 0
 
-def copyPattern!(layer, index, out)
+copyPattern =! (layer, index, out) ->
   pos = index * 4
   out.x = layer.patterns[pos]
   out.y = layer.patterns[pos + 1]
@@ -499,15 +422,16 @@ def copyPattern!(layer, index, out)
 
 # Retry sets are stride-5 records: rank, inverted, and three finder indices,
 # kept as a max-heap of 256 then heapsorted ascending.
-def swapSet!(sets, a, b)
+swapSet =! (sets, a, b) ->
   ap = a * 5
   bp = b * 5
   for i in [0...5]
     value = sets[ap + i]
     sets[ap + i] = sets[bp + i]
     sets[bp + i] = value
+  return
 
-def siftDown!(sets, end)
+siftDown =! (sets, end) ->
   index = 0
   loop
     left = index * 2 + 1
@@ -529,17 +453,18 @@ evalLow =! (poly, length, x) ->
 # Row-ranged so the cooperative scanner can yield between bounded chunks.
 
 # 2x2 box filter into the next pyramid layer.
-def resizeRows!(src, dst, width, dstWidth, from, to)
+resizeRows =! (src, dst, width, dstWidth, from, to) ->
   for y in [from...to]
     srcPos = (y << 1) * width
     dstPos = y * dstWidth
     for x in [0...dstWidth]
       dst[dstPos++] = (src[srcPos] + src[srcPos + 1] + src[srcPos + width] + src[srcPos + width + 1] + 2) >> 2
       srcPos += 2
+  return
 
 # One threshold per 8x8 block. Low-contrast blocks take the darkest sample so
 # faint modules survive, propagated from the neighbors above and left.
-def blockRows!(layer, from, to)
+blockRows =! (layer, from, to) ->
   luma = layer.luma
   bWidth = layer.blockWidth
   maxY = layer.height - 8
@@ -570,9 +495,10 @@ def blockRows!(layer, from, to)
           previous = (2 * top + left + topLeft) / 4
           average = previous if min < previous
       blocks[bWidth * y + x] = average >>> 0
+  return
 
 # Smooth thresholds over 5x5 blocks and write each block's binary pixels.
-def bitmapRows!(layer, from, to)
+bitmapRows =! (layer, from, to) ->
   luma = layer.luma
   bWidth = layer.blockWidth
   bHeight = layer.blockHeight
@@ -605,10 +531,11 @@ def bitmapRows!(layer, from, to)
           highMask = (1 << (shift - 24)) - 1
           layer.bitmap[word + 1] = ((layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))) >>> 0
         pos += layer.width
+  return
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
-def recordFinder!(layer, y, x, r0, r1, r2, r3, r4, inverted)
+recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, inverted) ->
   ms = ratio r0, r1, r2, r3, r4
   return unless ms
   start = x - r0 - r1 - r2 - r3 - r4
@@ -640,7 +567,7 @@ def recordFinder!(layer, y, x, r0, r1, r2, r3, r4, inverted)
   layer.inverted[index] = polarity
 
 # Rolling run-length window over every second row; run() always advances.
-def findRows!(layer, from, to)
+findRows =! (layer, from, to) ->
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
     runs = 0
@@ -658,6 +585,7 @@ def findRows!(layer, from, to)
       dark = previous
       previous = not previous
       recordFinder layer, y, x, r0, r1, r2, r3, r4, (not dark) if runs >= 5
+  return
 
 # Legal sides are 17 + 4 * version; a non-finite estimate coerces to zero and
 # fails the dimension bounds downstream.
@@ -2035,7 +1963,7 @@ export class QRScanner
 # ==[ Public API ]==
 
 # First QR in an image through the coarse-to-fine scan; throws when none decodes.
-export def decodeQR(img, opts = {})
+export decodeQR =! (img, opts = {}) ->
   validateOpts opts
   validateImage img, opts.format
   scanner = QRScanner.new { ...opts, maxSize: { height: img.height, width: img.width } }
@@ -2050,8 +1978,10 @@ export def decodeQR(img, opts = {})
 
 export default decodeQR
 
+export { decodeCode128, readCode128 } from './code128.rip'
+
 # Every QR in each image through one cooperatively scheduled scanner.
-export def decodeQRBatch(images, opts = {})
+export decodeQRBatch =! (images, opts = {}) ->
   maxSize = opts.maxSize or { width: 3840, height: 3840 }
   scanner = QRScanner.new { ...opts, maxSize }
   results = []

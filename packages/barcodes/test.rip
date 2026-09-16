@@ -9,6 +9,8 @@ import * as enc from 'rip/barcodes'
 import decodeQR, { QRScanner, decodeQRBatch } from 'rip/barcodes/decode'
 import * as dec from 'rip/barcodes/decode'
 import * as dom from 'rip/barcodes/dom'
+import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
+import * as code128 from 'rip/barcodes/code128'
 import { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } from './spec.rip'
 import { readFileSync } from 'fs'
 
@@ -19,17 +21,20 @@ rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')
 console.log "\nPackage"
 
 test "exports", ->
-  eq Object.keys(enc).sort(), ['_tests', 'default', 'encodeQR']
+  eq Object.keys(enc).sort(), ['_tests', 'default', 'encodeCode128', 'encodeQR']
   eq enc.default, encodeQR
-  eq Object.keys(dec).sort(), ['QRScanner', 'decodeQR', 'decodeQRBatch', 'default']
+  eq enc.encodeCode128, encodeCode128
+  eq Object.keys(dec).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'readCode128']
   eq dec.default, decodeQR
+  eq dec.decodeCode128, decodeCode128
+  eq Object.keys(code128).sort(), ['_tests', 'decodeCode128', 'encodeCode128', 'readCode128']
   eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
 
 test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
   eq pkg.rip, { browser: true }
-  for file in ['spec.rip', 'barcodes.rip', 'decode.rip', 'dom.rip']
+  for file in ['spec.rip', 'gif.rip', 'image.rip', 'barcodes.rip', 'decode.rip', 'code128.rip', 'dom.rip']
     source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
 
@@ -288,3 +293,119 @@ test! "scanner reuse, exclusive operations and clean", ->
   eq reentered, 'scanner operation already in flight'
   scanner.clean()
   throws (-> scanner.decode()), 'expected addImage before decode'
+
+# ==[ Code 128 ]==
+
+console.log "\nCode 128"
+
+test "Code 128 codewords: published vector, shortest subset choice, FNC1", ->
+  eq c128.codewords('Wikipedia'), [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
+  eq c128.codewords('1234'), [105, 12, 34, 82, 106]
+  eq c128.codewords('A1234'), [104, 33, 99, 12, 34, 95, 106]
+  eq c128.codewords('ABC123456'), [104, 33, 34, 35, 99, 12, 34, 56, 23, 106]
+  eq c128.codewords('\x01\x02'), [103, 65, 66, 94, 106]
+  eq c128.codewords('a\x01b'), [104, 65, 98, 65, 66, 0, 106]
+  eq c128.codewords('AB\x1dCD'), [104, 33, 34, 102, 35, 36, 7, 106]
+  eq c128.codewords('(01)09501101530003', true), [104, 102, 8, 16, 17, 9, 99, 9, 50, 11, 1, 53, 0, 3, 8, 106]
+  for text in ['Hello, World! 2026', 'L2602852147', '12345', '\x7f~ ', 'x0y1z2', '2026-09-15T12:00']
+    codes = c128.codewords text
+    ok codes.length <= text.length + 3, text
+    sum = codes[0]
+    sum += k * codes[k] for k in [1...codes.length - 2]
+    eq sum % 103, codes[codes.length - 2], text
+    eq codes[codes.length - 1], 106
+  throws (-> c128.codewords 'é'), Error, 'cannot encode'
+  throws (-> c128.codewords ''), Error, 'empty'
+
+test "Code 128 modules and outputs", ->
+  raw = encodeCode128 'Wikipedia', 'raw', border: 0
+  eq raw.length, 11 * 12 + 2
+  eq raw.slice(0, 11).map((b) -> if b then 1 else 0).join(''), '11010010000'
+  eq raw.slice(-13).map((b) -> if b then 1 else 0).join(''), '1100011101011'
+  eq encodeCode128('Wikipedia').length, 11 * 12 + 2 + 20
+  eq encodeCode128('Wikipedia', 'raw', scale: 3, border: 1).length, 3 * (11 * 12 + 4)
+  ascii = encodeCode128 'ok', 'ascii', border: 2
+  eq ascii.length, 62
+  eq ascii.slice(0, 2), '██'
+  eq ascii.at(-1), '\n'
+  eq encodeCode128('ok', 'svg', border: 2, height: 10), '<svg viewBox="0 0 61 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 0h2v10h-2ZM5 0h1v10h-1ZM8 0h1v10h-1ZM13 0h1v10h-1ZM17 0h4v10h-4ZM22 0h1v10h-1ZM24 0h2v10h-2ZM30 0h1v10h-1ZM33 0h1v10h-1ZM35 0h3v10h-3ZM39 0h1v10h-1ZM42 0h2v10h-2ZM46 0h2v10h-2ZM51 0h3v10h-3ZM55 0h1v10h-1ZM57 0h2v10h-2Z"/></svg>'
+  eq (encodeCode128('ok', 'svg', border: 2, height: 10, optimize: false).match(/<rect /g)).length, 16
+  term = encodeCode128 'ok', 'term', border: 2
+  eq (term.match(/\x1b\[40m  /g).length), 28
+  gif = encodeCode128 'ok', 'gif', border: 2, height: 4
+  eq Array.from(gif.slice(0, 10)), [71, 73, 70, 56, 55, 97, 61, 0, 4, 0]
+  eq gif.length, 660
+  eq gif.at(-1), 0x3b
+  url = encodeCode128 'ok', 'data-url', border: 2, height: 4
+  eq url.slice(0, 28), 'data:image/gif;base64,R0lGOD'
+  eq url.length, 902
+  throws (-> encodeCode128 'ok', 'png'), Error, 'Unknown output'
+  throws (-> encodeCode128 42), TypeError, 'expected string'
+  throws (-> encodeCode128 'ok', 'raw', scale: 0), RangeError, 'scale'
+  throws (-> encodeCode128 'ok', 'raw', border: -1), RangeError, 'border'
+  throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError, 'height'
+  throws (-> encodeCode128 'ok', 'raw', scale: 100), Error, 'exceeds'
+
+# RGBA raster with the bar row painted 30 pixels tall on a gray field.
+bars = (text, opts, scale, W, H, rotate = 0, invert = false) ->
+  raw = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
+  w = raw.length
+  h = 30
+  data = new Uint8Array(W * H * 4).fill(if invert then 40 else 190)
+  turned = rotate is 90 or rotate is 270
+  ox = (W - (if turned then h else w)) >> 1
+  oy = (H - (if turned then w else h)) >> 1
+  for y in [0...h]
+    for x in [0...w]
+      dark = raw[x]
+      dark = not dark if invert
+      v = if dark then 20 else 240
+      px = x
+      py = y
+      switch rotate
+        when 90 then (px = h - 1 - y; py = x)
+        when 180 then (px = w - 1 - x; py = h - 1 - y)
+        when 270 then (px = y; py = w - 1 - x)
+      p = 4 * ((oy + py) * W + ox + px)
+      data[p] = data[p + 1] = data[p + 2] = v
+      data[p + 3] = 255
+  { width: W, height: H, data }
+
+test "Code 128 round trips: scales, rotations, inversion, GS1", ->
+  for scale in [1, 2, 3, 5]
+    eq decodeCode128(bars('Hello, World! 2026', {}, scale, 1400, 200)), 'Hello, World! 2026', "scale #{scale}"
+  for rotate in [0, 90, 180, 270]
+    hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, rotate)
+    eq hit.text, 'Wikipedia', "rotate #{rotate}"
+    eq hit.vertical, rotate is 90 or rotate is 270
+    eq hit.reversed, rotate is 180 or rotate is 270
+    eq hit.inverted, false
+    eq hit.codes, [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
+  hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, 0, true)
+  eq hit.text, 'Wikipedia'
+  eq hit.inverted, true
+  eq readCode128(bars('a\x01b\x02', {}, 2, 500, 300)).text, 'a\x01b\x02'
+  eq readCode128(bars('0123456789', {}, 1, 300, 100)).text, '0123456789'
+  eq readCode128(bars('ok', {}, 1, 100, 20)).text, 'ok'
+  hit = readCode128 bars('(01)09501101530003', gs1: true, 2, 600, 300)
+  eq hit.text, '(01)09501101530003'
+  eq hit.gs1, true
+  hit = readCode128 bars('AB\x1dCD', {}, 2, 500, 300)
+  eq hit.text, 'AB\x1dCD'
+  eq hit.gs1, false
+  eq readCode128(toLuma(bars('Wikipedia', {}, 2, 500, 300)), format: 'I420').text, 'Wikipedia'
+  blank = { width: 50, height: 50, data: new Uint8Array(50 * 50 * 4).fill(200) }
+  eq readCode128(blank), null
+  throws (-> decodeCode128 blank), Error, 'not found'
+  throws (-> readCode128 blank, null), TypeError, 'opts'
+  throws (-> readCode128 { width: 2, height: 2, data: new Uint8Array(3) }), RangeError, 'img.data'
+
+test "Code 128 text: shifts, FNC4 high characters, latches", ->
+  text = (codes) -> c128.decodeText(codes, codes.length).text
+  eq text([104, 98, 65, 66, 0, 106]), '\x01b'
+  eq text([104, 100, 33, 34, 0, 106]), 'ÁB'
+  eq text([104, 100, 100, 33, 34, 0, 106]), 'ÁÂ'
+  eq text([104, 100, 100, 33, 100, 34, 0, 106]), 'ÁB'
+  eq text([103, 65, 100, 65, 99, 1, 101, 66, 0, 106]), '\x01a01\x02'
+  eq text([105, 0, 100, 33, 0, 106]), '00A'
+  eq c128.decodeText([105, 102, 1, 102, 2, 0, 106], 7), { text: '01\x1d02', gs1: true }

@@ -2,7 +2,7 @@
 
 # Rip Barcodes
 
-> **QR code generator and reader — packed-bitmap encoder, camera-budgeted decoder, zero dependencies.**
+> **QR and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.**
 
 The encoder keeps a symbol as one `Uint32Array` with 32 modules per word,
 builds the function-pattern template, placement order and the eight mask
@@ -11,11 +11,16 @@ scoring the penalty rules word-parallel. The decoder binarizes a four-level
 image pyramid against 8x8 block thresholds, finds finder patterns with
 run-length windows that consume a word at a time, projects the best triple
 through a homography, and corrects with Reed-Solomon, all inside buffers
-allocated once per scanner so a camera frame never allocates.
+allocated once per scanner so a camera frame never allocates. Code 128
+lives in one file: the encoder chooses the shortest subset sequence by
+dynamic programming, and the reader walks scan lines middle-out, matching
+each eleven-module group to its nearest codeword in both directions and on
+both axes.
 
-**Runtime:** browser-safe (`rip.browser: true`). Four `.rip` files: the
-encoder entry, the decoder entry, the camera and canvas plumbing, and the
-ISO/IEC 18004 tables the first two share.
+**Runtime:** browser-safe (`rip.browser: true`). Seven `.rip` files: the
+encoder entry, the decoder entry, Code 128, the camera and canvas plumbing,
+the ISO/IEC 18004 tables, and the GIF writer and image-input helpers the
+encoders and decoders share.
 
 ## Quick Start
 
@@ -33,6 +38,12 @@ ascii  = encodeQR text, 'ascii'               # half-height block characters
 
 # decode any RGBA raster, the shape a canvas ImageData already has
 decodeQR { width, height, data }              # the text, or throws
+
+import { encodeCode128 } from 'rip/barcodes'
+import { decodeCode128 } from 'rip/barcodes/decode'
+
+encodeCode128 'L2602852147', 'svg', scale: 2  # a Code 128 label
+decodeCode128 { width, height, data }         # the text, or throws
 ```
 
 ## Features
@@ -47,6 +58,9 @@ decodeQR { width, height, data }              # the text, or throws
   `timeLimit` budget, and a cooperative `decodeAsync` that yields between
   bounded work units
 - `decodeQRBatch` finds every symbol in each image
+- Code 128 with subsets A, B and C, shortest-sequence subset selection,
+  GS1-128 FNC1, the same six outputs, and a reader that handles both
+  directions, both axes and inverted symbols
 
 ## Encoding
 
@@ -89,6 +103,40 @@ twice before decoding it.
 For photos and uploads pass `effort: Infinity, timeLimit: Infinity`.
 Successful decodes cost the same in every tier; retries only run after a
 failed strict pass.
+
+## Code 128
+
+```coffee
+import { encodeCode128 } from 'rip/barcodes'
+import { decodeCode128, readCode128 } from 'rip/barcodes/decode'
+
+encodeCode128 text, output, opts
+```
+
+Every ASCII character encodes; the ASCII group separator (`'\x1d'`) becomes
+an FNC1 separator, and `gs1: true` opens the symbol with FNC1 for GS1-128
+application identifiers. The codeword sequence is the shortest over the
+three subsets, so `'A1234'` latches to subset C for the digit pairs while
+`'12345'` does not pay for a latch it cannot amortize. The outputs are the
+QR six with one row of modules: `raw` is a `boolean[]` including the quiet
+zone, `ascii` and `term` are one line, and `svg`, `gif` and `data-url` draw
+`height` modules of bar.
+
+| option | meaning | default |
+| --- | --- | --- |
+| `scale` | pixels per module | `1` |
+| `border` | quiet-zone modules on each side | `10` |
+| `height` | bar height in modules for `svg`, `gif`, `data-url` | `40` |
+| `gs1` | open with FNC1 for GS1-128 | `false` |
+| `optimize` | one `<path>` instead of one `<rect>` per bar | `true` |
+
+`decodeCode128` takes the same `{ width, height, data }` as `decodeQR`,
+with the same `format` option, and returns the text or throws.
+`readCode128` returns `null` on a miss and otherwise
+`{ text, gs1, codes, line, vertical, reversed, inverted }`: the verified
+codewords and which scan line, axis, direction and polarity produced them.
+Modules must be at least one pixel wide; a printed label filling a quarter
+of a camera frame is plenty.
 
 ## Scanner
 
@@ -143,4 +191,6 @@ The suite pins spec tables, encoded codewords, every output format, every
 version and every mask against vectors generated from the reference
 implementation, then round-trips synthetic rasters through the decoder
 across versions, levels, rotations, inverted symbols, input formats, batch
-decoding and scanner reuse.
+decoding and scanner reuse. Code 128 is pinned against the published
+`Wikipedia` vector, shortest-subset choices, every output, and round trips
+at four scales, four rotations, inverted, luma input and GS1-128.

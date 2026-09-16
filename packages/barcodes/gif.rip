@@ -1,0 +1,71 @@
+# ==============================================================================
+# rip/barcodes — GIF87a writer
+#
+# Uncompressed LZW stream: 8-bit codes and a clear code every 126 pixels, so
+# no dictionary state exists. Palette entry 0 is white, every other entry
+# black; `rowFor(y)` returns the 0/1 byte row for output row y (identical rows
+# may return the same buffer) and each row is block-copied in spans bounded
+# by the chunk boundaries.
+# ==============================================================================
+
+export writeGif =! (W, H, rowFor) ->
+  pixels = W * H
+  N = 126
+  fullChunks = pixels // N
+  tail = pixels % N
+  out = new Uint8Array(408 + fullChunks * (N + 2) + 2 + tail + 4)
+  pos = 0
+  u16 = (v) ->
+    out[pos++] = v & 0xff
+    out[pos++] = v >>> 8
+    return
+  for b in [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]
+    out[pos++] = b
+  u16 W
+  u16 H
+  out[pos++] = 0xf6
+  pos += 2
+  out[pos++] = 0xff
+  out[pos++] = 0xff
+  out[pos++] = 0xff
+  pos += 3 * 127
+  out[pos++] = 0x2c
+  pos += 4
+  u16 W
+  u16 H
+  out[pos++] = 0x00
+  out[pos++] = 0x07
+  i = 0
+  for y in [0...H]
+    row = rowFor y
+    x = 0
+    while x < W
+      if i % N is 0
+        rem = pixels - i
+        out[pos++] = (if rem < N then rem else N) + 1
+        out[pos++] = 0x80
+      n = Math.min(N - i % N, W - x)
+      out.set row.subarray(x, x + n), pos
+      pos += n
+      x += n
+      i += n
+  if tail is 0
+    out[pos++] = 1
+    out[pos++] = 0x80
+  out[pos++] = 0x01
+  out[pos++] = 0x81
+  out[pos++] = 0x00
+  out[pos++] = 0x3b
+  out
+
+export gifDataUrl =! (gif) ->
+  b64 = if typeof gif.toBase64 is 'function'
+    gif.toBase64()
+  else
+    bin = ''
+    i = 0
+    while i < gif.length
+      bin += String.fromCharCode(...gif.subarray(i, i + 8192))
+      i += 8192
+    btoa bin
+  'data:image/gif;base64,' + b64

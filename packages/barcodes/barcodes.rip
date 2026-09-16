@@ -14,6 +14,7 @@ import {
   ALPHANUMERIC, BYTES, ECC_BLOCKS, ECC_LEVELS, GF256, WORDS_PER_BLOCK,
   alignmentPatterns, formatBits, maskBits, popcnt, versionBits,
 } from './spec.rip'
+import { gifDataUrl, writeGif } from './gif.rip'
 
 MAX_OUTPUT_SIZE         =! 1024
 MAX_COMPACT_OUTPUT_SIZE =! 4096
@@ -558,44 +559,12 @@ renderSvg =! (r, optimize) ->
       hasPrev = true
   out += '<path d="' + path + '"/>' if optimize
   out + '</svg>'
-
-# GIF87a with an uncompressed LZW stream: 8-bit codes and a clear code every
-# 126 pixels, so no dictionary state exists. Pixels come from a per-module-row
-# 0/1 buffer rebuilt only when the module row changes and block-copied in
-# spans bounded by the chunk boundaries.
 renderGif =! (r) ->
   W = r.W
-  pixels = W * W
-  N = 126
-  fullChunks = pixels // N
-  tail = pixels % N
-  out = new Uint8Array(408 + fullChunks * (N + 2) + 2 + tail + 4)
-  pos = 0
-  u16 = (v) ->
-    out[pos++] = v & 0xff
-    out[pos++] = v >>> 8
-    return
-  for b in [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]
-    out[pos++] = b
-  u16 W
-  u16 W
-  out[pos++] = 0xf6
-  pos += 2
-  out[pos++] = 0xff
-  out[pos++] = 0xff
-  out[pos++] = 0xff
-  pos += 3 * 127
-  out[pos++] = 0x2c
-  pos += 4
-  u16 W
-  u16 W
-  out[pos++] = 0x00
-  out[pos++] = 0x07
   {m, map} = r
   row = new Uint8Array(W)
   prevMy = -2
-  i = 0
-  for y in [0...W]
+  writeGif W, W, (y) ->
     my = map[y]
     if my isnt prevMy
       prevMy = my
@@ -603,41 +572,11 @@ renderGif =! (r) ->
       if my >= 0
         for x in [0...W]
           row[x] = matGet(m, map[x], my) if map[x] >= 0
-    x = 0
-    while x < W
-      if i % N is 0
-        rem = pixels - i
-        out[pos++] = (if rem < N then rem else N) + 1
-        out[pos++] = 0x80
-      n = Math.min(N - i % N, W - x)
-      out.set row.subarray(x, x + n), pos
-      pos += n
-      x += n
-      i += n
-  if tail is 0
-    out[pos++] = 1
-    out[pos++] = 0x80
-  out[pos++] = 0x01
-  out[pos++] = 0x81
-  out[pos++] = 0x00
-  out[pos++] = 0x3b
-  out
-
-gifDataUrl =! (gif) ->
-  b64 = if typeof gif.toBase64 is 'function'
-    gif.toBase64()
-  else
-    bin = ''
-    i = 0
-    while i < gif.length
-      bin += String.fromCharCode(...gif.subarray(i, i + 8192))
-      i += 8192
-    btoa bin
-  'data:image/gif;base64,' + b64
+    row
 
 # ==[ Public API ]==
 
-export def encodeQR(text, output = 'raw', opts = {})
+export encodeQR =! (text, output = 'raw', opts = {}) ->
   asString text, 'text'
   asString output, 'output'
   throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if typeof opts isnt 'object' or opts is null or Array.isArray(opts)
@@ -706,6 +645,8 @@ export def encodeQR(text, output = 'raw', opts = {})
     else fail "Unknown output: #{output}"
 
 export default encodeQR
+
+export { encodeCode128 } from './code128.rip'
 
 # Internals for the test suite.
 export _tests =! { mat, matGet, penalty, drawSymbol, encodeData, rsEcc, detectType }
