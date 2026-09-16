@@ -12,7 +12,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asObject, asString, copyLuma, fail, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asObject, asString, fail, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -283,32 +283,48 @@ nearest =! (runs, at, lo, hi) ->
       code = c
   code
 
+# One scan line as 8-bit luma straight from the source pixels: `at` is the
+# first pixel's byte and `advance` the bytes to the next pixel. Packed RGB
+# takes (r + 2g + b) / 4, symmetric in r and b so every byte order reads
+# alike; wide luma planes take their top eight bits.
+sampleLine! =! (luma, data, at, advance, count, format) ->
+  switch format.step
+    when 1
+      for k in [0...count]
+        luma[k] = data[at]
+        at += advance
+    when 2
+      shift = format.bits - 8
+      for k in [0...count]
+        luma[k] = (data[at] | (data[at + 1] << 8)) >>> shift
+        at += advance
+    else
+      for k in [0...count]
+        luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
+        at += advance
+
 # Run lengths of one thresholded scan line: even slots light, odd dark, the
 # first possibly zero. Returns the run count, zero for a flat line.
-runLengths =! (luma, start, step, count, runs) ->
+runLengths =! (luma, count, runs) ->
   lo = 255
   hi = 0
-  p  = start
   for k in [0...count]
-    v = luma[p]
+    v = luma[k]
     lo = v if v < lo
     hi = v if v > hi
-    p += step
   # Under 32 levels of contrast the line is flat.
   return 0 if hi - lo < 32
   threshold = (lo + hi) >> 1
   n    = 0
   dark = false
   len  = 0
-  p    = start
   for k in [0...count]
-    isDark = luma[p] < threshold
+    isDark = luma[k] < threshold
     if isDark isnt dark
       runs[n++] = len
       len = 0
       dark = isDark
     len++
-    p += step
   runs[n++] = len
   n
 
@@ -406,13 +422,16 @@ decodeText =! (codes, len) ->
       lastFnc4 = false
   { text: out, gs1 }
 
-# Scan lines middle-out at a stride that covers the axis in about 32 lines.
-scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
-  lines  = if vertical then width  else height
-  count  = if vertical then height else width
-  step   = if vertical then width  else 1
-  stride = Math.max 1, lines >> 5
-  middle = lines >> 1
+# Scan lines middle-out at a stride that covers the axis in about 32 lines,
+# each sampled from the source as it is reached.
+scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
+  {width, height, data} = img
+  lines   = if vertical then width  else height
+  count   = if vertical then height else width
+  row     = width * format.step
+  advance = if vertical then row else format.step
+  stride  = Math.max 1, lines >> 5
+  middle  = lines >> 1
   k = 0
   loop
     offset = stride * ((k + 1) >> 1)
@@ -420,7 +439,8 @@ scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
     break if line < 0 and middle + offset >= lines
     k++
     continue if line < 0 or line >= lines
-    n = runLengths luma, (if vertical then line else line * width), step, count, runs
+    sampleLine luma, data, (if vertical then line * format.step else line * row), advance, count, format
+    n = runLengths luma, count, runs
     # A start code and one codeword need thirteen runs.
     continue if n < 13
     m = reverseRuns runs, n, rev
@@ -435,19 +455,17 @@ scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
 # First Code 128 on any scan line and where it was read; null on a miss.
 export readCode128 =! (img, opts = {}) ->
   asObject opts, 'opts'
-  validateImage img, opts.format
-  {width, height} = img
-  luma = Uint8Array.new(width * height)
-  copyLuma luma, undefined, img, opts.format
-  side = Math.max(width, height) + 2
+  format = validateImage img, opts.format
+  side = Math.max(img.width, img.height) + 2
+  luma = Uint8Array.new(side)
   runs = Int32Array.new(side)
   rev  = Int32Array.new(side)
   codes = []
   vertical = false
-  hit = scanLines luma, width, height, false, runs, rev, codes
+  hit = scanLines img, format, false, luma, runs, rev, codes
   unless hit
     vertical = true
-    hit = scanLines luma, width, height, true, runs, rev, codes
+    hit = scanLines img, format, true, luma, runs, rev, codes
   return null unless hit
   {text, gs1} = decodeText codes, hit.len
   { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, vertical, reversed: hit.reversed, inverted: hit.inverted }
