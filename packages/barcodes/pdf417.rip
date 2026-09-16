@@ -602,7 +602,8 @@ modules =! (data, columns, rows, level, compact) ->
 
 asInt =! (n, title, min, max = Infinity) ->
   fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "#{title} expected integer in #{min}..#{max}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min and n <= max
+  range = if max is Infinity then ">= #{min}" else "in #{min}..#{max}"
+  fail "#{title} expected integer #{range}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min and n <= max
   n
 
 # ==[ Renderers ]==

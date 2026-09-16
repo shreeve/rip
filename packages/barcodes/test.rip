@@ -706,7 +706,7 @@ test "outputs agree and options apply", ->
   throws (-> encodePDF417 'x', 'raw', columns: 31),      RangeError, 'columns'
   throws (-> encodePDF417 'x', 'raw', rows: 2),          RangeError, 'rows'
   throws (-> encodePDF417 'x', 'raw', encoding: 'ascii'), Error,     'encoding'
-  throws (-> encodePDF417 'x'.repeat(1000)),             Error,      'Capacity overflow'
+  throws (-> encodePDF417 'x'.repeat(2000)),             Error,      'Capacity overflow'
   throws (-> encodePDF417 'x', 'raw', scale: 60),        Error,      'exceeds'
 
 # RGBA raster of a module matrix on a gray field, with rotation, inversion
