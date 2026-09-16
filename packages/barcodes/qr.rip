@@ -23,6 +23,7 @@ import { gifDataUrl, writeGif } from './gif.rip'
 import { FORMATS, LITTLE_ENDIAN, copyLuma, darkToImage, validateImage, validateSize } from './image.rip'
 
 # ==[ Spec tables ]==
+
 # ISO/IEC 18004:2024 tables and bit-level primitives shared by the encoder
 # and decoder: codeword counts, error-correction block layout, the
 # alphanumeric alphabet, alignment-pattern centers, the BCH format and Golay
