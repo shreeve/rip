@@ -29,7 +29,7 @@ ISO/IEC 18004 tables, GIF writer and image-input helpers they share.
 import encodeQR, { decodeQR } from 'rip/barcodes'
 
 text = 'Hello world'
-console.log encodeQR(text, 'term')            # print to any terminal
+p encodeQR(text, 'term')                      # print to any terminal
 svg    = encodeQR text, 'svg'                 # markup for a page
 gif    = encodeQR text, 'gif', scale: 4       # Uint8Array, a GIF file
 url    = encodeQR text, 'data-url', scale: 4  # 'data:image/gif;base64,...'
