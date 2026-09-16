@@ -1531,6 +1531,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
       } else if ((word === 'offer' || word === 'accept') && insideComponentBody()) {
         push(word === 'offer' ? 'OFFER' : 'ACCEPT', word, start, pos);
+      } else if (word === 'own' && last()?.kind !== 'FOR') {
+        // `own` is a keyword only where the grammar reads it, directly
+        // after FOR; everywhere else it is an ordinary name.
+        push('IDENTIFIER', word, start, pos);
       } else if (KEYWORDS[word]) {
         push(KEYWORDS[word], word, start, pos);
         if (KEYWORDS[word] === 'RENDER') {

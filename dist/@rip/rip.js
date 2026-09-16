@@ -6499,6 +6499,8 @@ ${baseline}`).join(`
         }
       } else if ((word === "offer" || word === "accept") && insideComponentBody()) {
         push(word === "offer" ? "OFFER" : "ACCEPT", word, start, pos);
+      } else if (word === "own" && last()?.kind !== "FOR") {
+        push("IDENTIFIER", word, start, pos);
       } else if (KEYWORDS[word]) {
         push(KEYWORDS[word], word, start, pos);
         if (KEYWORDS[word] === "RENDER") {
