@@ -12,8 +12,10 @@
 #
 # The encoder follows the specification's recommended mode switching and
 # lays the codewords into module rows; renderers draw those rows at a row
-# height and scale. The reader locates the start and stop patterns on scan
-# lines, samples every codeword in the band between them, votes each into
+# height and scale. The reader finds a start pattern on a scan line, or a
+# stop pattern read backward when the start is out of the picture, tracks
+# its edge along the stack and the edge at the row's other end with it,
+# reads every row along rays between the two, votes each codeword into
 # its row and column by the row indicators and cluster, then corrects
 # erasures and errors together before parsing the stream.
 # ==============================================================================
@@ -212,9 +214,9 @@ PATTERNS =! do ->
 START_PATTERN =! 0x1fea8   # 17 modules: 8 1 1 1 1 1 1 3
 STOP_PATTERN  =! 0x3fa29   # 18 modules: 7 1 1 3 1 1 1 2 1
 
-MAX_COLUMNS    =! 30
-MIN_ROWS       =! 3
-MAX_ROWS       =! 90
+MAX_COLUMNS    =!  30
+MIN_ROWS       =!   3
+MAX_ROWS       =!  90
 MAX_CODEWORDS  =! 928     # per symbol, indicators excluded
 MODULUS        =! 929
 
@@ -226,7 +228,7 @@ LATCH_NUMERIC =! 902
 SHIFT_BYTE    =! 913
 LATCH_BYTE6   =! 924     # byte compaction, a multiple of six bytes
 ECI_CHARSET   =! 927
-ECI_UTF8      =! 26
+ECI_UTF8      =!  26
 
 # Text submodes and the symbols that move between them: a latch changes the
 # submode, a shift applies to the next character only.
@@ -234,13 +236,13 @@ ALPHA =! 0
 LOWER =! 1
 MIXED =! 2
 PUNCT =! 3
-PL  =! 25   # mixed -> punct latch
-LL  =! 27   # alpha or mixed -> lower latch
-AS  =! 27   # lower: alpha shift
-ML  =! 28   # alpha or lower -> mixed latch
-AL  =! 28   # mixed -> alpha latch
-PS  =! 29   # punct shift
-PAL =! 29   # punct -> alpha latch
+PL    =! 25   # mixed -> punct latch
+LL    =! 27   # alpha or mixed -> lower latch
+AS    =! 27   # lower: alpha shift
+ML    =! 28   # alpha or lower -> mixed latch
+AL    =! 28   # mixed -> alpha latch
+PS    =! 29   # punct shift
+PAL   =! 29   # punct -> alpha latch
 
 MIXED_CHARS =! '0123456789&\r\t,:#-.$/+%*=^'
 PUNCT_CHARS =! ';<>@[\\]_`~!\r\t,:\n-.$/"|*()?{}\''
@@ -275,7 +277,7 @@ do ->
 # logs indexes it without a modulo.
 GF929 =! do ->
   exp = Int32Array.new(2 * 928)
-  log = Int32Array.new(929)
+  log = Int32Array.new(    929)
   x   = 1
   for i in [0...928]
     exp[i] = exp[i + 928] = x
@@ -601,7 +603,7 @@ modules =! (data, columns, rows, level, compact) ->
     row = Uint8Array.new(width)
     c   = r % 3
     x   = 0
-    put = (bits, n) ->
+    put! = (bits, n) ->
       for k in [n - 1..0] by -1
         row[x++] = (bits >>> k) & 1
     put START_PATTERN, 17
@@ -727,14 +729,14 @@ export encodePDF417 =! (text, output = 'raw', opts = {}) ->
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
-  scale     = if opts.scale     is undefined then 1 else asInt(opts.scale,     'opts.scale',     1)
-  border    = if opts.border    is undefined then 2 else asInt(opts.border,    'opts.border',    0)
-  rowHeight = if opts.rowHeight is undefined then 3 else asInt(opts.rowHeight, 'opts.rowHeight', 1)
-  aspect    = if opts.aspect    is undefined then 3 else asInt(opts.aspect,    'opts.aspect',    1)
-  columns   = if opts.columns   is undefined then undefined else asInt(opts.columns, 'opts.columns', 1, MAX_COLUMNS)
-  rows      = if opts.rows      is undefined then undefined else asInt(opts.rows,    'opts.rows',    MIN_ROWS, MAX_ROWS)
-  level     = if opts.ecc       is undefined then undefined else asInt(opts.ecc,     'opts.ecc',     0, 8)
-  encoding  = if opts.encoding  is undefined then 'auto' else opts.encoding
+  scale     = if opts.scale     is undefined then 1         else asInt(opts.scale,     'opts.scale',     1)
+  border    = if opts.border    is undefined then 2         else asInt(opts.border,    'opts.border',    0)
+  rowHeight = if opts.rowHeight is undefined then 3         else asInt(opts.rowHeight, 'opts.rowHeight', 1)
+  aspect    = if opts.aspect    is undefined then 3         else asInt(opts.aspect,    'opts.aspect',    1)
+  columns   = if opts.columns   is undefined then undefined else asInt(opts.columns,   'opts.columns',   1, MAX_COLUMNS)
+  rows      = if opts.rows      is undefined then undefined else asInt(opts.rows,      'opts.rows',      MIN_ROWS, MAX_ROWS)
+  level     = if opts.ecc       is undefined then undefined else asInt(opts.ecc,       'opts.ecc',       0, 8)
+  encoding  = if opts.encoding  is undefined then 'auto'    else opts.encoding
   fail "invalid encoding=#{encoding}" unless ENCODINGS.includes encoding
   codes = []
   bytes = messageBytes text, codes
@@ -1004,7 +1006,7 @@ edgeRuns =! (luma, count, runs) ->
     # Cross between samples i - 1 and i.
     a = luma[i - 1]
     b = luma[i]
-    pos = i - 1 + (if b is a then 0.5 else (level - a) / (b - a))
+    pos = i - 1 + (level - a) / (b - a)
     runs[n++] = pos - last
     last = pos
   k++
@@ -1055,12 +1057,12 @@ anchorNear =! (runs, n, first, expect, slack, mode) ->
   best
 
 # Codewords along one ray into cells, the first expected to begin `expect`
-# pixels in with modules of `unit` pixels and bars on runs of parity
-# `first`: the symbol index, or -1 for a cell that would not read. Each next
-# codeword is expected seventeen modules on; the nearest bar edge
-# resynchronizes, so a merged or split run costs one cell rather than the
-# rest of the row. Stops at the pattern that ends the row or when sync is
-# lost. Returns the count.
+# pixels in with modules of `unit` pixels, read from run `first`, which
+# also floors the resync: the symbol index, or -1 for a cell that would
+# not read. Each next codeword is expected seventeen modules on; the
+# nearest bar edge resynchronizes, so a merged or split run costs one cell
+# rather than the rest of the row. Stops at the pattern that ends the row
+# or when sync is lost. Returns the count.
 readFrom =! (runs, n, first, expect, unit, cells, base, mode) ->
   pos   = 0
   pos  += runs[k] for k in [0...first]
@@ -1258,7 +1260,7 @@ class Stream
       v = @c[@i]
       if v < 900
         @symbol v // 30
-        @symbol v % 30
+        @symbol v %  30
       else if v is SHIFT_BYTE
         fail 'PDF417 byte shift at end of data' if @i + 1 >= @count
         @out.push @c[++@i]
@@ -1309,7 +1311,7 @@ class Stream
       @i++ if @i < @count and @c[@i] is LATCH_NUMERIC
 
   # Digits of the base-900 codewords in [start, end) into the sink.
-  decimal: (start, end) ->
+  decimal!: (start, end) ->
     limbs = [0]   # base 10^7, least significant first
     for j in [start...end]
       carry = @c[j]
@@ -1433,8 +1435,8 @@ parse =! (c, count) ->
 trackEdge =! (s, x, y, dx, dy, sx, sy, unit, first, sign, edge, mode) ->
   {img, format, rluma, rruns} = s
   margin = 3 * unit + 3
-  length = Math.min rluma.length, Math.ceil(mode.modules * unit + 2 * margin)
-  slack  = Math.max 2, unit
+  length = Math.min  rluma.length, Math.ceil(mode.modules * unit + 2 * margin)
+  slack  = Math.max  2, unit
   allow  = Math.ceil 3 * unit
   misses = 0
   t      = 0
@@ -1459,8 +1461,8 @@ trackEdge =! (s, x, y, dx, dy, sx, sy, unit, first, sign, edge, mode) ->
     edge.su  += u
     edge.stt += t * t
     edge.stu += t * u
-    edge.min = t if t < edge.min
-    edge.max = t if t > edge.max
+    edge.min  = t if t < edge.min
+    edge.max  = t if t > edge.max
   unit
 
 # Row count, column count and level from the first indicator of every ray:
@@ -1492,7 +1494,6 @@ metadata =! (s, rays, mode) ->
   return null if columns * rows < 2 + (2 << level) or columns * rows > MAX_CODEWORDS
   { rows, columns, level }
 
-# One located anchor pattern through to a decoded symbol, or null.
 # The leading edge of an anchor pattern, tracked up and down the stack
 # from (x, y) and fitted as a line u = a + b t across the tracked span;
 # returns its two ends, the mean unit and the count of lines held, or null.
@@ -1513,6 +1514,7 @@ edgeEnds =! (s, x, y, dx, dy, sx, sy, unit, first, mode) ->
     lines:  edge.n
   }
 
+# One located anchor pattern through to a decoded symbol, or null.
 tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   {img, format, rluma, rruns, cells, rayRow, rayT, votes} = s
   # Rows stack a quarter turn from the symbol's reading direction, which a
@@ -1534,17 +1536,19 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   # well as this one; a picture taken from the side skews the two edges
   # without turning the rows. Otherwise the rows are taken square to the
   # edge.
-  rx = uy * flip
-  ry = -ux * flip
+  rx   = uy * flip
+  ry   = -ux * flip
+  tail = null
   if endAt < Infinity
-    tail = edgeEnds s, x + endAt * dx, y + endAt * dy, dx, dy, sx, sy, unit, first ^ (mode.anchor.length & 1), mode.tail
-    if tail and tail.lines * 2 >= lead.lines
-      vx = (tail.top.x - top.x + tail.bottom.x - bottom.x) / 2
-      vy = (tail.top.y - top.y + tail.bottom.y - bottom.y) / 2
+    far = edgeEnds s, x + endAt * dx, y + endAt * dy, dx, dy, sx, sy, unit, first ^ (mode.anchor.length & 1), mode.tail
+    if far and far.lines * 2 >= lead.lines
+      vx = (far.top.x - top.x + far.bottom.x - bottom.x) / 2
+      vy = (far.top.y - top.y + far.bottom.y - bottom.y) / 2
       vl = Math.hypot vx, vy
       if vl > 0 and vx * rx + vy * ry > 0.7 * vl
-        rx = vx / vl
-        ry = vy / vl
+        rx   = vx / vl
+        ry   = vy / vl
+        tail = far
   margin = 3 * unit + 3
   length = Math.min rluma.length, Math.ceil((MAX_CELLS + 2) * 17 * unit + 2 * margin), Math.ceil(extent + 2 * margin + 3 * unit)
   step   = Math.max 1, 0.75 * unit
@@ -1570,7 +1574,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   meta = metadata s, rays, mode
   return null unless meta
   {rows, columns, level} = meta
-  # Row of each ray from its left indicator, fitted against position along
+  # Row of each ray from its first indicator, fitted against position along
   # the edge so a misread indicator cannot move a whole line; then rays
   # beyond the tracked edge while the fit still lands inside the symbol,
   # which reads rows whose start pattern is damaged.
@@ -1744,17 +1748,23 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
     return null unless c[cell] is PAD
   result = try parse(c, size) catch then null
   return null unless result
-  # Corners: the tracked edge and its projection across the symbol width,
-  # which in mirror mode lies on the anchor's other side.
-  w = (17 * (columns + 4) + 1) * unit
-  result.columns  = columns
-  result.rows     = rows
-  result.ecc      = level
-  result.errors   = errors
-  result.erasures = e
+  result.columns   = columns
+  result.rows      = rows
+  result.ecc       = level
+  result.errors    = errors
+  result.erasures  = e
   result.codewords = Array.from c.subarray(0, size)
+  # Corners: the tracked edge and, across the symbol, the tail edge plus
+  # its pattern's width, or the nominal width when the tail was not
+  # tracked; in mirror mode the far side is the start of the row.
+  if tail
+    w    = mode.tail.modules * unit
+    ends = [tail.top, tail.bottom]
+  else
+    w    = (17 * (columns + 4) + 1) * unit
+    ends = [top, bottom]
   near = [{ x: top.x, y: top.y }, { x: bottom.x, y: bottom.y }]
-  far  = [{ x: top.x + rx * w, y: top.y + ry * w }, { x: bottom.x + rx * w, y: bottom.y + ry * w }]
+  far  = ({ x: e.x + rx * w, y: e.y + ry * w } for e in ends)
   result.corners = if mode.mirror then [far[0], near[0], near[1], far[1]] else [near[0], far[0], far[1], near[1]]
   result
 

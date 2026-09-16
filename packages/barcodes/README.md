@@ -101,15 +101,14 @@ encodeQR text, output, opts
 | `textEncoder` | custom text-to-bytes for `byte` mode | UTF-8 |
 
 Single-segment encoding is always used, and penalty scoring runs on the
-reserved test form, so output matches python-qrcode module for module.
+reserved test form, so output matches the reference implementation module
+for module.
 
 ## Decoding
 
 `decodeQR` takes `{ width, height, data }` and returns the decoded string. It
 throws when no symbol decodes; in a camera loop that is a frame miss, feed
-the next frame. Clean one-pixel-per-module rasters are too small for
-run-length finder detection, so upscale the encoder's `raw` output at least
-twice before decoding it.
+the next frame. A clean raster decodes at one pixel per module.
 
 | option | meaning | default |
 | --- | --- | --- |
@@ -211,15 +210,15 @@ The reader wants modules at least a pixel wide; rows a pixel tall read
 from a clean raster, and photographs want a little more. It reads the
 symbol in all four orientations and with the tilt and skew of a hand-held
 photo, as a mirror image, inverted, with whole rows torn off the top or
-bottom, with the start pattern cut off at the image edge, and with holes. One parity codeword is always held back to check the
-correction and the padding after the message must read as pad, so a
-damaged symbol misses rather than decoding to the wrong text. The row
-direction comes from the start and stop edges tracked together, so a
-photograph taken from the side, whose rows stay level while the edges
-lean, reads as well as a rotated one. Against ZXing's PDF417 blackbox
-photo sets 1 to 3 it decodes all 58 images at each of four rotations. Its
-Macro set decodes one segment per image; images holding several symbols
-return the first found.
+bottom, with the start pattern cut off at the image edge, and with holes.
+One parity codeword is always held back to check the correction and the
+padding after the message must read as pad, so a damaged symbol misses
+rather than decoding to the wrong text. The row direction comes from the
+start and stop edges tracked together, so a photograph taken from the
+side, whose rows stay level while the edges lean, reads as well as a
+rotated one. Against ZXing's PDF417 blackbox photo sets 1 to 3 it decodes
+all 58 images at each of four rotations. Its Macro set decodes one segment
+per image; images holding several symbols return the first found.
 
 ## Scanner
 
@@ -344,12 +343,12 @@ ponyfill follow his design; the port keeps his algorithms, restructures
 them for Rip, and verifies itself against his implementation with an
 oracle that compares every output format byte for byte and every decode
 result on synthetic frames. The performance work described above is on top
-of that foundation. Code 128 and PDF417 are original to this package and share only the
-image input, ECI table and GIF writer. The PDF417 encoder is checked
-against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp), which decodes
-its output byte for byte across compaction modes, levels, shapes and
-scales, and the reader against the photographs in ZXing's PDF417 blackbox
-corpus.
+of that foundation. Code 128 and PDF417 are original to this package and
+share only the image input, ECI table and GIF writer. The PDF417 encoder
+is checked against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp),
+which decodes its output byte for byte across compaction modes, levels,
+shapes and scales, and the reader against the photographs in ZXing's
+PDF417 blackbox corpus.
 
 ## Test
 

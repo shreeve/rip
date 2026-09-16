@@ -298,8 +298,9 @@ readFrom =! (runs, n, at, start, codes) ->
       # The termination bar is two modules; accept one to four.
       bar = runs[at + 6] * 11
       return 0 if bar < width or bar > 4 * width
-      # A quiet zone of at least half a codeword, or the edge of the line.
-      return 0 unless at + 7 >= n or 2 * runs[at + 7] >= width
+      # A quiet zone of at least half a codeword, or the edge of the line,
+      # which a reversed line that opened dark carries as an empty run.
+      return 0 unless at + 7 >= n or runs[at + 7] is 0 or 2 * runs[at + 7] >= width
       break
     at += 6
   # Start, at least one data codeword, check, stop.
@@ -404,10 +405,10 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
 export readCode128 =! (img, opts = {}) ->
   asObject opts, 'opts'
   format = validateImage img, opts.format
-  side = Math.max(img.width, img.height) + 2
-  luma = Uint8Array.new(side)
-  runs = Int32Array.new(side)
-  rev  = Int32Array.new(side)
+  side  = Math.max(img.width, img.height) + 2
+  luma  = Uint8Array.new(side)
+  runs  = Int32Array.new(side)
+  rev   = Int32Array.new(side)
   codes = []
   vertical = false
   hit = scanLines img, format, false, luma, runs, rev, codes
@@ -425,4 +426,4 @@ export decodeCode128 =! (img, opts = {}) ->
   hit.text
 
 # Internals for the test suite.
-export _tests =! { codewords, decodeText, checksum }
+export _tests =! { codewords, decodeText }
