@@ -55,17 +55,37 @@ test('Escape closes it, the cell follows, and focus returns to the trigger', asy
   await expect(trigger).toBeFocused()
 })
 
-test('a click on the backdrop closes it, and a click inside the panel does not', async ({ page }) => {
-  const { trigger, popup } = await boot(page)
-  await expect(popup).toHaveAttribute('closedby', 'any')
-  await trigger.click()
-  await expect.poll(() => isModal(page)).toBe(true)
-  await popup.click({ position: { x: 4, y: 4 } })
-  await expect.poll(() => isModal(page)).toBe(true)
-  await page.mouse.click(5, 5)
-  await expect.poll(() => isModal(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
-})
+// Stable Safari and every iOS browser ignore closedby, and no Playwright
+// engine is one of them, so the second run strips the attribute after the
+// dialog opens: the browser then ignores the press, and only the popup's
+// own handler can close it.
+for (const native of [true, false]) {
+  test(`a click on the backdrop closes it${native ? '' : ' without native closedby'}; a click inside the panel or a drag out of it does not`, async ({ page }) => {
+    const { trigger, popup } = await boot(page)
+    await expect(popup).toHaveAttribute('closedby', 'any')
+    await trigger.click()
+    await expect.poll(() => isModal(page)).toBe(true)
+    if (!native) await popup.evaluate((el) => el.removeAttribute('closedby'))
+    const { left, top, padding } = await page.evaluate(() => {
+      const dialog = document.querySelector('dialog')
+      const { left, top } = dialog.getBoundingClientRect()
+      const { paddingLeft, paddingTop } = getComputedStyle(dialog)
+      return { left, top, padding: { left: parseFloat(paddingLeft), top: parseFloat(paddingTop) } }
+    })
+    expect(Math.min(padding.left, padding.top)).toBeGreaterThan(0)
+    expect(Math.min(left, top)).toBeGreaterThan(1)
+    await page.mouse.click(left + padding.left / 2, top + padding.top / 2)
+    await expect.poll(() => isModal(page)).toBe(true)
+    await page.mouse.move(left + padding.left / 2, top + padding.top / 2)
+    await page.mouse.down()
+    await page.mouse.move(left / 2, top / 2, { steps: 4 })
+    await page.mouse.up()
+    await expect.poll(() => isModal(page)).toBe(true)
+    await page.mouse.click(left / 2, top / 2)
+    await expect.poll(() => isModal(page)).toBe(false)
+    await expect(page.getByText('open: false')).toBeVisible()
+  })
+}
 
 // Focus never reaches page content outside the modal. Past the last
 // focusable, Chromium and WebKit hand focus to the document (the

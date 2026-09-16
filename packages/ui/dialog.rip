@@ -27,6 +27,20 @@ export DialogPopup = component extends dialog
   accept labelledBy
   accept describedBy
   el: HTMLDialogElement | null := null
+  closedBy ~= @rest.closedby ?? 'any'
+
+  # Stable Safari and every iOS browser ignore closedby, so a press that
+  # starts and ends on the backdrop closes here and Escape is refused
+  # under none; where the attribute works the browser does both. Goes
+  # when Safari ships it.
+  pressed = false
+  onBackdrop = (e: PointerEvent): boolean ->
+    return false unless e.target is e.currentTarget
+    r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
+    e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
+  press = (e: PointerEvent) -> pressed = onBackdrop(e)
+  release = (e: PointerEvent) -> open = false if pressed and onBackdrop(e) and closedBy is 'any'
+
   ~>
     dialog = el
     return unless dialog
@@ -37,11 +51,14 @@ export DialogPopup = component extends dialog
   render
     dialog
       ref: el
-      closedby: @rest.closedby ?? 'any'
+      closedby: closedBy
       data-open: open or undefined
       data-closed: not open or undefined
       aria-labelledby: labelledBy or undefined
       aria-describedby: describedBy or undefined
+      @pointerdown: press
+      @pointerup: release
+      @cancel: (e) -> e.preventDefault() if closedBy is 'none'
       @close: (-> open = false)
       slot
 
