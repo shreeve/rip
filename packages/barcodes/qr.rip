@@ -1340,16 +1340,32 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   patterns[pos + 3] = 1
   layer.inverted[index] = polarity
 
-# Rolling run-length window over every second row; run() always advances.
+# Rolling run-length window over every second row. Each run is measured
+# straight off the packed row: the word's opposite-color bits are isolated
+# with clz32 and whole words are consumed until a stop or the row's end.
 findRows! =! (layer, from, to) ->
+  width  =! layer.width
+  words  =! layer.words
+  bitmap =! layer.bitmap
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
     runs = 0
-    previous = bit(layer, 0, y) is 1
+    row  = y * words
+    previous = (bitmap[row] & 1) is 1
     x = 0
-    while x < layer.width
-      length = run layer, x, y, 1, 0, (if previous then 1 else 0), Infinity
-      x += length
+    while x < width
+      length = 0
+      loop
+        shift = x & 31
+        word  = bitmap[row + (x >>> 5)]
+        stops = if previous then ~word else word
+        w     = stops >> shift
+        span  = Math.min 32 - shift, width - x
+        first = if not w then 32 else 31 - Math.clz32(w & -w)
+        len   = Math.min first, span
+        length += len
+        x      += len
+        break if first < span or x >= width
       r0 = r1
       r1 = r2
       r2 = r3
