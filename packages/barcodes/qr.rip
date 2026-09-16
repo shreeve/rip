@@ -544,7 +544,7 @@ buildSymCache =! (ver) ->
 
 # Template copy, data-bit scatter along the cached zigzag order, then mask
 # selection over XOR candidates; the first lowest score wins.
-drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
+drawSymbol =! (ver, ecc, data, maskIdx) ->
   symCache = buildSymCache ver unless symCache?.ver is ver
   {tpl, pos, planes, planesT, work} = symCache
   [m, t, cand, candT] = work
@@ -570,7 +570,7 @@ drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
         mask = pl
   chosen = planes[mask]
   m.v[i] ^= chosen[i] for i in [0...m.v.length]
-  drawInfo m, ver, ecc, mask unless test
+  drawInfo m, ver, ecc, mask
   m
 
 # ==[ Validation ]==
@@ -2003,7 +2003,8 @@ export class QRScanner
     true
 
   # Reject wrong triples and dimensions from the timing tracks before full
-  # sampling: 75% agreement across the horizontal and vertical tracks.
+  # sampling: 75% agreement over the horizontal and vertical tracks
+  # together, or one track read perfectly.
   timing: (s, map, size) ->
     gh    = 0
     gv    = 0
@@ -2129,7 +2130,6 @@ export class QRScanner
   correctBlock: (offset, length, eccWords) ->
     blockBytes = @blockBytes
     syndromes  = @syndromes
-    hasError   = false
     # The generator divides an intact block: a zero LFSR remainder, computed
     # exactly as the encoder does, settles the common case without syndromes.
     {products} = rsCached eccWords
@@ -2147,8 +2147,6 @@ export class QRScanner
       value = 0
       value = mul(value, EXP[i]) ^ blockBytes[offset + j] for j in [0...length]
       syndromes[i] = value
-      hasError = true if value
-    return true unless hasError
     sigma    = @sigma
     previous = @previous
     next     = @next
@@ -2540,7 +2538,11 @@ export class QRScanner
           failed = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
           return failed unless failed instanceof Error
           # A false local alignment can corrupt a valid global projection.
-          failed = @projectMap sp, sm, size
+          # The tiles built their homographies in the same matrices, so the
+          # global map and its fine-plane form are derived again.
+          @mapFinderQuad map, size, t, brX, brY
+          fine   = @upgrade plane, map, ctx
+          failed = @projectMap (if fine then @finePlane else plane), (if fine then @to else map), size
           return failed unless failed instanceof Error
           if fine
             failed = @projectMap plane, map, size
@@ -2771,7 +2773,8 @@ export class QRScanner
           continue
         @retries-- if not mandatory and @retries isnt Infinity
         attempted = true
-        # Large blurred symbols get template-fit refinement first; other
+        # Large blurred symbols turned past forty-five degrees get
+        # template-fit refinement first, unless the layer is blocked; other
         # projection failures retry once after a cross refinement pass.
         steep = Math.abs(triple.tr.y - triple.tl.y) > Math.abs(triple.tr.x - triple.tl.x)
         pitch = if not @blocked and steep then edgePitch(layer, triple.tl, triple.tr, triple.inverted) else 0

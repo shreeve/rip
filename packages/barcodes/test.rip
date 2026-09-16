@@ -516,6 +516,10 @@ bars =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
 test "round trips: scales, rotations, inversion, GS1", ->
   for scale in [1, 2, 3, 5]
     eq decodeCode128(bars('Hello, World! 2026', {}, scale, 1400, 200)), 'Hello, World! 2026', "scale #{scale}"
+  # No quiet zone at all: the symbol fills the line in both directions.
+  edge = encodeCode128('Wikipedia', 'raw', border: 0, scale: 2).length
+  for rotate in [0, 180]
+    eq decodeCode128(bars('Wikipedia', { border: 0 }, 2, edge, 100, false, rotate)), 'Wikipedia', "flush #{rotate}"
   for rotate in [0, 90, 180, 270]
     hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, false, rotate)
     eq hit.text,     'Wikipedia', "rotate #{rotate}"
@@ -695,7 +699,7 @@ test "symbols: pinned module rows", ->
 
 test "outputs agree and options apply", ->
   # The row height shapes the symbol: at three modules a row the same
-  # message fits nine rows of four columns.
+  # message fits nine rows of two columns.
   raw = encodePDF417 'Hello PDF417', 'raw'
   eq [raw.length, raw[0].length], [9 * 3 + 4, 17 * 6 + 1 + 4]
   eq raw[2 + 3][2 + 8], false
