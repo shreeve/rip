@@ -1744,6 +1744,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // ns`, `import d, * as ns`, `export * from`).
       if (ch === '*' && seenImport && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
       else if (ch === '*' && last()?.kind === 'EXPORT') push('EXPORT_ALL', ch, pos, pos + 1);
+      // `yield*` on the yield's own line is delegation, the same FROM
+      // token `yield from` produces: JavaScript reads the spelling that
+      // way, and a bare yield multiplied by the next operand is never
+      // what the author meant. A `*` opening the next line stays MATH.
+      else if (ch === '*' && last()?.kind === 'YIELD' && !pendingNewLine) push('FROM', ch, pos, pos + 1);
       else push('MATH', ch, pos, pos + 1);
       pos++;
       continue;
