@@ -578,6 +578,10 @@ test "codewords: modes, submodes, switching", ->
   eq cw('Hello\x01World'), [7 * 30 + 27, 4 * 30 + 11, 11 * 30 + 14, 913, 1, 27 * 30 + 22, 14 * 30 + 17, 11 * 30 + 3]
   eq cw('ab\x01\x02\x03cd'), [901, 163, 177, 269, 787, 135, 100]   # short text runs stay binary
   throws (-> cw 'é', 'text'),       Error, 'cannot encode'
+  # An odd tail padded in the punctuation submode latches to alpha, and
+  # the text after a byte shift is encoded from there.
+  eq cw('AB1;;\x01;;;;;'), [1, 841, 750, 29, 913, 1, 865, 0, 0, 29]
+  eq cw('AB1;;\x01ABCDE'), [1, 841, 750, 29, 913, 1, 1, 63, 149]
   throws (-> cw 'x', 'numeric'),    Error, 'digits only'
   throws (-> cw ''),                Error, 'empty'
 
@@ -622,6 +626,14 @@ test "layout: level, dimensions, indicators", ->
   throws (-> p417.dimensions 21, 5, 4, 3, 3),          RangeError, 'holds 20'
   throws (-> p417.dimensions 2000, 1, undefined, 3, 3), RangeError, 'max 90'
   throws (-> p417.dimensions 2000, undefined, 3, 3, 3), RangeError, 'max 30'
+  # Never more than 928 cells, whatever the shape.
+  throws (-> p417.dimensions 2, 30, 40, 3, 3),          RangeError, 'max 928'
+  throws (-> p417.dimensions 928, 30, undefined, 3, 3), RangeError, 'max 928'
+  throws (-> p417.dimensions 928, undefined, 31, 3, 3), RangeError, 'max 928'
+  for need in [921..928]
+    dims  = p417.dimensions need, undefined, undefined, 3, 3
+    cells = dims.columns * dims.rows
+    ok cells >= need and cells <= 928, "#{need} fits #{dims.columns}x#{dims.rows}"
   # Row 4 of a 13-row, 2-column, level 2 symbol: cluster 1 carries the
   # level and row remainder on the left, the row count on the right.
   eq p417.indicator(1, 4, 13, 2, 2, false), 30 + 3 * 2 + 0
@@ -671,8 +683,8 @@ PINS =! [
   ['compact symbol here', { compact: true }, '17172449583246438028', 52, 19]
   ['B'.repeat(800) + '1'.repeat(400) + 'c'.repeat(300), {}, '3702506550965028681', 239, 76]
   ['0000000000000000000000000000000000000000000000000000000000001', { encoding: 'numeric' }, '13842950279047227124', 86, 31]
-  [';;;;;;;;;', {}, '4601803601175570742', 86, 18]
-  ["line one\nline two\r\n\ttabbed", {}, '16347342739693649516', 86, 25]
+  [';;;;;;;;;', {}, '4889440228876649914', 86, 15]
+  ["line one\nline two\r\n\ttabbed", {}, '3017900233706190855', 86, 25]
 ]
 
 test "symbols: pinned module rows", ->

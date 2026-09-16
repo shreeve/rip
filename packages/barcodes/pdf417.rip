@@ -360,6 +360,15 @@ byteRun =! (bytes, at, end) ->
     i++
   i - at
 
+# Whether the punctuation run at `at` is worth a latch costing `cost`
+# symbols over a shift per character: the latch also pays the way back
+# out, one symbol to alpha and two to anything else.
+punctLatch =! (bytes, at, end, cost) ->
+  i = at
+  i++ while i < end and CLASS[bytes[i]] & PUNCT_CLASS
+  back = if i is end then 0 else if CLASS[bytes[i]] & UPPER_CLASS then 1 else 2
+  i - at > cost + back
+
 # Base-30 symbols for count bytes at `at`, starting in submode `mode`;
 # returns the submode latched at the end. Characters outside the current
 # submode latch when a longer stay is likely and shift otherwise, as the
@@ -378,7 +387,7 @@ textSymbols =! (bytes, at, count, mode, syms) ->
         else if cls & LOWER_CLASS
           syms.push LL
           mode = LOWER
-        else if cls & MIXED_CLASS
+        else if cls & MIXED_CLASS or punctLatch(bytes, i, end, 2)
           syms.push ML
           mode = MIXED
         else
@@ -391,7 +400,7 @@ textSymbols =! (bytes, at, count, mode, syms) ->
         else if cls & UPPER_CLASS
           syms.push AS, c - 65
           i++
-        else if cls & MIXED_CLASS
+        else if cls & MIXED_CLASS or punctLatch(bytes, i, end, 2)
           syms.push ML
           mode = MIXED
         else
@@ -407,7 +416,7 @@ textSymbols =! (bytes, at, count, mode, syms) ->
         else if cls & LOWER_CLASS
           syms.push LL
           mode = LOWER
-        else if i + 1 < end and CLASS[bytes[i + 1]] & PUNCT_CLASS
+        else if punctLatch bytes, i, end, 1
           syms.push PL
           mode = PUNCT
         else
@@ -423,11 +432,15 @@ textSymbols =! (bytes, at, count, mode, syms) ->
   mode
 
 # Text compaction of count bytes at `at` into codes: two symbols per
-# codeword, an odd tail padded with a punctuation shift.
+# codeword, an odd tail padded with a punctuation shift, which in the
+# punctuation submode is the latch back to alpha and leaves the stream
+# there.
 textCodewords =! (bytes, at, count, mode, codes) ->
   syms = []
   mode = textSymbols bytes, at, count, mode, syms
-  syms.push PS if syms.length & 1
+  if syms.length & 1
+    syms.push PS
+    mode = ALPHA if mode is PUNCT
   codes.push 30 * syms[i] + syms[i + 1] for i in [0...syms.length] by 2
   mode
 
@@ -525,25 +538,29 @@ autoLevel =! (m) ->
   level
 
 # Columns and rows holding `need` codewords: as requested, or the pair whose
-# width to height ratio at the given row height is nearest `aspect`.
+# width to height ratio at the given row height is nearest `aspect`. A
+# symbol holds at most 928 codewords whatever its shape.
 dimensions =! (need, columns, rows, rowHeight, aspect) ->
   if columns isnt undefined and rows isnt undefined
     fail "PDF417 #{columns}x#{rows} holds #{columns * rows} codewords, needs #{need}", RangeError if columns * rows < need
+    fail "PDF417 #{columns}x#{rows} holds #{columns * rows} codewords, max #{MAX_CODEWORDS}", RangeError if columns * rows > MAX_CODEWORDS
     return { columns, rows }
   if columns isnt undefined
     rows = Math.max MIN_ROWS, Math.ceil(need / columns)
     fail "PDF417 needs #{rows} rows at #{columns} columns, max #{MAX_ROWS}", RangeError if rows > MAX_ROWS
+    fail "PDF417 #{columns}x#{rows} holds #{columns * rows} codewords, max #{MAX_CODEWORDS}", RangeError if columns * rows > MAX_CODEWORDS
     return { columns, rows }
   if rows isnt undefined
     columns = Math.ceil need / rows
     fail "PDF417 needs #{columns} columns at #{rows} rows, max #{MAX_COLUMNS}", RangeError if columns > MAX_COLUMNS
+    fail "PDF417 #{columns}x#{rows} holds #{columns * rows} codewords, max #{MAX_CODEWORDS}", RangeError if columns * rows > MAX_CODEWORDS
     return { columns, rows }
   best     = 0
   bestRows = 0
   bestDiff = Infinity
   for c in [1..MAX_COLUMNS]
     r = Math.max MIN_ROWS, Math.ceil(need / c)
-    continue if r > MAX_ROWS
+    continue if r > MAX_ROWS or c * r > MAX_CODEWORDS
     diff = Math.abs (17 * c + 69) / (r * rowHeight) - aspect
     if diff < bestDiff
       bestDiff = diff
