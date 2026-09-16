@@ -1486,7 +1486,7 @@ metadata =! (s, rays, mode) ->
   level   = mixed // 3
   columns = cols + 1
   return null if rows < MIN_ROWS or rows > MAX_ROWS or level > 8
-  return null if columns * rows < 2 + (2 << level)
+  return null if columns * rows < 2 + (2 << level) or columns * rows > MAX_CODEWORDS
   { rows, columns, level }
 
 # One located anchor pattern through to a decoded symbol, or null.
@@ -1715,21 +1715,20 @@ tryDecode =! (s, x, y, dx, dy, unit, first, extent, mode) ->
   return null if size < 1 or size > n - k
   for cell in [size...n - k]
     return null unless c[cell] is PAD
-  result = parse c, size
-  # Corners: the tracked edge and its projection across the symbol width.
+  result = try parse(c, size) catch then null
+  return null unless result
+  # Corners: the tracked edge and its projection across the symbol width,
+  # which in mirror mode lies on the anchor's other side.
   w = (17 * (columns + 4) + 1) * unit
-  w = -w if mode.mirror
   result.columns  = columns
   result.rows     = rows
   result.ecc      = level
   result.errors   = errors
   result.erasures = e
   result.codewords = Array.from c.subarray(0, size)
-  result.corners  = [
-    { x: top.x, y: top.y }, { x: top.x + rx * w, y: top.y + ry * w }
-    { x: bottom.x + rx * w, y: bottom.y + ry * w }, { x: bottom.x, y: bottom.y }
-  ]
-  result.corners.reverse() if mode.mirror
+  near = [{ x: top.x, y: top.y }, { x: bottom.x, y: bottom.y }]
+  far  = [{ x: top.x + rx * w, y: top.y + ry * w }, { x: bottom.x + rx * w, y: bottom.y + ry * w }]
+  result.corners = if mode.mirror then [far[0], near[0], near[1], far[1]] else [near[0], far[0], far[1], near[1]]
   result
 
 # Start patterns on a sampled line, forward then reversed, both polarities,
@@ -1806,7 +1805,7 @@ buffers =! (side) ->
   state.runs      = Int32Array.new(side)
   state.rev       = Int32Array.new(side)
   state.rluma     = Uint8Array.new(2 * side)
-  state.rruns     = Float64Array.new(2 * side)
+  state.rruns     = Float64Array.new(2 * side + 2)
   state.cells     = Int16Array.new(maxRays * MAX_CELLS)
   state.rayRow    = Int16Array.new(maxRays)
   state.rayT      = Float64Array.new(maxRays)

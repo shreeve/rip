@@ -795,7 +795,9 @@ test "geometry: skew, corners, cropped and damaged start patterns", ->
   cropped = (row.slice(60) for row in raw)
   hit = readPDF417 paint(cropped, 400, 300)
   eq hit.text, text
-  eq hit.corners[0].x < hit.corners[1].x, true
+  right = ((400 - cropped[0].length) >> 1) + cropped[0].length - 8
+  ok Math.abs(hit.corners[1].x - right) < 2,                        "stop edge at #{hit.corners[1].x}"
+  ok Math.abs(hit.corners[1].x - hit.corners[0].x - (raw[0].length - 16)) < 3, "width #{hit.corners[1].x - hit.corners[0].x}"
   # Start pattern erased on the top and bottom rows: the rows still read.
   torn = (row.slice() for row in raw)
   for y in [0...torn.length] when y < 8 + 12 or y >= torn.length - 8 - 12
