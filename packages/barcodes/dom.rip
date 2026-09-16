@@ -5,10 +5,12 @@
 # canvases; QRCamera feeds it frames, preferring a zero-copy VideoFrame path
 # that writes native planes straight into the scanner arena. Overlay identity
 # changes are suppressed for three frames so camera jitter never flickers.
-# BarcodeDetector is a ponyfill over decodeQR for the Shape Detection API.
+# BarcodeDetector is a ponyfill over decodeQR and readPDF417 for the Shape
+# Detection API.
 # ==============================================================================
 
 import { QRScanner, decodeQR } from './qr.rip'
+import { readPDF417 } from './pdf417.rip'
 import { fail } from './image.rip'
 
 # Plane descriptors per VideoFrame format: x shift, y shift, bytes per sample.
@@ -821,7 +823,7 @@ export gifToPng =! (gifBytes) ->
 
 # ==[ BarcodeDetector ]==
 # Ponyfill: importing has no side effects; assign it to the global name to
-# install it. Only qr_code is detected, at most one per image, and
+# install it. qr_code and pdf417 are detected, at most one per image, and
 # cornerPoints are the decoder's projected bounds.
 
 BARCODE_FORMATS =! ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'unknown', 'upc_a', 'upc_e']
@@ -907,9 +909,9 @@ toImageData =! (image) ->
   throw TypeError.new "The provided value is not of type '(Blob or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or ImageData or OffscreenCanvas or SVGImageElement or VideoFrame)'."
 
 # Top-left, top-right, bottom-right, bottom-left in image space, rotated
-# from the decoder's clockwise projected boundary.
-symbolCorners =! (p) ->
-  points = p.bounds.map (pt) -> { x: pt.x, y: pt.y }
+# from a decoder's clockwise projected boundary.
+symbolCorners =! (bounds) ->
+  points = bounds.map (pt) -> { x: pt.x, y: pt.y }
   first = 0
   for i in [1...points.length]
     first = i if points[i].y < points[first].y or (points[i].y is points[first].y and points[i].x < points[first].x)
@@ -932,20 +934,28 @@ export class BarcodeDetector
     catch e
       throw prefixed(e, "Failed to construct 'BarcodeDetector'")
 
-  @getSupportedFormats: -> Promise.resolve ['qr_code']
+  @getSupportedFormats: -> Promise.resolve ['pdf417', 'qr_code']
 
   detect: (image) ->
     try
       data = toImageData! image
       return [] if data is null
-      return [] if @formats.length isnt 0 and not @formats.includes('qr_code')
-      points   = undefined
-      rawValue = undefined
-      try
-        rawValue = decodeQR data, effort: Infinity, timeLimit: Infinity, pointsOnDetect: (p, result) -> points = p if typeof result is 'string'
-      catch
-        return []
-      box = points.boundingBox
-      [{ boundingBox: DOMRectReadOnly.new(box.x, box.y, box.width, box.height), rawValue, format: 'qr_code', cornerPoints: symbolCorners(points) }]
+      formats = @formats
+      wanted  = (format) -> formats.length is 0 or formats.includes(format)
+      if wanted 'qr_code'
+        points   = undefined
+        rawValue = try decodeQR(data, effort: Infinity, timeLimit: Infinity, pointsOnDetect: (p, result) -> points = p if typeof result is 'string') catch then undefined
+        if rawValue isnt undefined
+          box = points.boundingBox
+          return [{ boundingBox: DOMRectReadOnly.new(box.x, box.y, box.width, box.height), rawValue, format: 'qr_code', cornerPoints: symbolCorners(points.bounds) }]
+      if wanted 'pdf417'
+        hit = readPDF417 data
+        if hit
+          xs = hit.corners.map (pt) -> pt.x
+          ys = hit.corners.map (pt) -> pt.y
+          x = Math.min ...xs
+          y = Math.min ...ys
+          return [{ boundingBox: DOMRectReadOnly.new(x, y, Math.max(...xs) - x, Math.max(...ys) - y), rawValue: hit.text, format: 'pdf417', cornerPoints: symbolCorners(hit.corners) }]
+      []
     catch e
       throw prefixed(e, "Failed to execute 'detect' on 'BarcodeDetector'")

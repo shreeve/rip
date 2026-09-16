@@ -3,12 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "QR and Code 128 generator and reader \u2014 packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.",
+  "description": "QR, PDF417 and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, ray-voted PDF417, scan-line Code 128, zero dependencies.",
   "exports": {
     ".": "./barcodes.rip",
     "./qr": "./qr.rip",
     "./code128": "./code128.rip",
-    "./dom": "./dom.rip"
+    "./dom": "./dom.rip",
+    "./pdf417": "./pdf417.rip"
   },
   "scripts": {
     "test": "rip test.rip"
@@ -18,10 +19,12 @@
   },
   "files": [
     "barcodes.rip",
+    "eci.rip",
     "gif.rip",
     "image.rip",
     "qr.rip",
     "code128.rip",
+    "pdf417.rip",
     "dom.rip",
     "README.md"
   ]

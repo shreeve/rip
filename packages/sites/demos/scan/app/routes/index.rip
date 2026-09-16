@@ -1,9 +1,10 @@
-# One camera, two readers. QRCanvas and QRCamera decode QR through the
+# One camera, three readers. QRCanvas and QRCamera decode QR through the
 # canvas path and paint the finder overlay; the same frame is drawn once
-# more into a working canvas whose pixels go to readCode128. Every hit is
-# announced once until a different code appears.
+# more into a working canvas whose pixels go to readCode128 and then
+# readPDF417. Every hit is announced once until a different code appears.
 import { QRCanvas, rearCamera, frameLoop } from 'rip/barcodes/dom'
 import { readCode128 } from 'rip/barcodes/code128'
+import { readPDF417 } from 'rip/barcodes/pdf417'
 
 export Home = component
   player  := null
@@ -22,7 +23,7 @@ export Home = component
       return
     canvas = QRCanvas.new { overlay }, cropToSquare: false
     work   = document.createElement('canvas').getContext '2d', willReadFrequently: true
-    status = 'Point the camera at a QR code or a Code 128 label'
+    status = 'Point the camera at a QR code, a PDF417 symbol or a Code 128 label'
     cancel = frameLoop (-> scan camera, canvas, work), player
 
   scan: (camera, canvas, work) ->
@@ -33,8 +34,11 @@ export Home = component
     work.canvas.width  = videoWidth  if work.canvas.width  isnt videoWidth
     work.canvas.height = videoHeight if work.canvas.height isnt videoHeight
     work.drawImage player, 0, 0
-    hit = readCode128 work.getImageData(0, 0, videoWidth, videoHeight)
-    found 'Code 128', hit.text if hit
+    pixels = work.getImageData 0, 0, videoWidth, videoHeight
+    hit = readCode128 pixels
+    return found('Code 128', hit.text) if hit
+    hit = readPDF417 pixels
+    found 'PDF417', hit.text if hit
 
   found: (kind, text) ->
     return if latest? and latest.kind is kind and latest.text is text

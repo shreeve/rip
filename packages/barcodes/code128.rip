@@ -12,7 +12,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asObject, asString, fail, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asObject, asString, fail, reverseRuns, runLengths, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -282,58 +282,6 @@ nearest =! (runs, at, lo, hi) ->
       best = v
       code = c
   code
-
-# One scan line as 8-bit luma straight from the source pixels: `at` is the
-# first pixel's byte and `advance` the bytes to the next pixel. Packed RGB
-# takes (r + 2g + b) / 4, symmetric in r and b so every byte order reads
-# alike; wide luma planes take their top eight bits.
-sampleLine! =! (luma, data, at, advance, count, format) ->
-  switch format.step
-    when 1
-      for k in [0...count]
-        luma[k] = data[at]
-        at += advance
-    when 2
-      shift = format.bits - 8
-      for k in [0...count]
-        luma[k] = (data[at] | (data[at + 1] << 8)) >>> shift
-        at += advance
-    else
-      for k in [0...count]
-        luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
-        at += advance
-
-# Run lengths of one thresholded scan line: even slots light, odd dark, the
-# first possibly zero. Returns the run count, zero for a flat line.
-runLengths =! (luma, count, runs) ->
-  lo = 255
-  hi = 0
-  for k in [0...count]
-    v = luma[k]
-    lo = v if v < lo
-    hi = v if v > hi
-  # Under 32 levels of contrast the line is flat.
-  return 0 if hi - lo < 32
-  threshold = (lo + hi) >> 1
-  n    = 0
-  dark = false
-  len  = 0
-  for k in [0...count]
-    isDark = luma[k] < threshold
-    if isDark isnt dark
-      runs[n++] = len
-      len = 0
-      dark = isDark
-    len++
-  runs[n++] = len
-  n
-
-# The same line read right to left, light run first.
-reverseRuns =! (runs, n, out) ->
-  m = 0
-  out[m++] = 0 if (n & 1) is 0
-  out[m++] = runs[k] for k in [n - 1..0] by -1
-  m
 
 # Codewords from a start at `at` through stop, check verified; the count, or 0.
 readFrom =! (runs, n, at, start, codes) ->

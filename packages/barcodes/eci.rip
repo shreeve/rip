@@ -1,0 +1,18 @@
+# ==============================================================================
+# rip/barcodes — Extended Channel Interpretation
+#
+# The AIM ECI designators for character sets, as text decoders shared by the
+# readers; an ECI stays active until another replaces it.
+# ==============================================================================
+
+ECI_ENCODINGS =!
+  1:  'iso-8859-1',    2: 'ibm437',        3: 'iso-8859-1',    4: 'iso-8859-2',  5: 'iso-8859-3'
+  6:  'iso-8859-4',    7: 'iso-8859-5',    8: 'iso-8859-6',    9: 'iso-8859-7', 10: 'iso-8859-8'
+  11: 'iso-8859-9',   13: 'iso-8859-11',  15: 'iso-8859-13',  16: 'iso-8859-14'
+  17: 'iso-8859-15',  18: 'iso-8859-16',  20: 'shift-jis',    21: 'windows-1250'
+  22: 'windows-1251', 23: 'windows-1252', 24: 'windows-1256', 25: 'utf-16be'
+  26: 'utf-8',        28: 'big5',         29: 'gbk',          30: 'euc-kr'
+
+export ECI_DECODERS =! {}
+for id, name of ECI_ENCODINGS
+  ECI_DECODERS[id] = try TextDecoder.new(name) catch then undefined
