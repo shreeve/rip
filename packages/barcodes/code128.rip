@@ -64,8 +64,7 @@ codewords =! (text, gs1) ->
   fail 'Code 128 text is empty' unless n
   cost = Int32Array.new(3 * (n + 1))
   move = Uint8Array.new(3 * (n + 1))
-  i = n - 1
-  while i >= 0
+  for i in [n - 1..0] by -1
     c = text.charCodeAt i
     fnc = c is GS
     pair = i + 1 < n and isDigit(c) and isDigit(text.charCodeAt(i + 1))
@@ -89,14 +88,14 @@ codewords =! (text, gs1) ->
           best = 2 + cost[next + 1]
           pick = 3
       else
-        inside = if s is 0 then a else b
+        own = if s is 0 then a else b
         other = if s is 0 then b else a
-        if fnc or inside
+        if fnc or own
           best = 1 + cost[next + s]
         if pair and 2 + cost[skip + 2] < best
           best = 2 + cost[skip + 2]
           pick = 4
-        if other and not inside and 2 + cost[next + s] < best
+        if other and not own and 2 + cost[next + s] < best
           best = 2 + cost[next + s]
           pick = 5
         if other and 2 + cost[next + 1 - s] < best
@@ -105,7 +104,6 @@ codewords =! (text, gs1) ->
       fail "Code 128 cannot encode #{JSON.stringify text[i]}" if best is 0x7fffffff
       cost[3 * i + s] = best
       move[3 * i + s] = pick
-    i--
   s = 1
   s = 2 if cost[2] < cost[s]
   s = 0 if cost[0] < cost[s]
@@ -137,8 +135,7 @@ codewords =! (text, gs1) ->
         codes.push SHIFT, charValue(c, 1 - s)
         i++
   sum = codes[0]
-  for k in [1...codes.length]
-    sum += k * codes[k]
+  sum += k * codes[k] for k in [1...codes.length]
   codes.push sum % 103, STOP
   codes
 
@@ -187,22 +184,17 @@ raster =! (mods, scale, border, height) ->
 
 pixelRow =! (r) ->
   row = Uint8Array.new(r.W)
-  for k in [0...r.bars.length] by 2
-    row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1]
+  row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1] for k in [0...r.bars.length] by 2
   row
 
 renderRaw =! (r) ->
   row = pixelRow r
-  out = Array.new(r.W)
-  for x in [0...r.W]
-    out[x] = row[x] is 1
-  out
+  (row[x] is 1 for x in [0...r.W])
 
 renderAscii =! (r) ->
   row = pixelRow r
   out = ''
-  for x in [0...r.W]
-    out += (if row[x] then ' ' else '█')
+  out += (if row[x] then ' ' else '█') for x in [0...r.W]
   out + '\n'
 
 renderTerm =! (r) ->
@@ -210,8 +202,7 @@ renderTerm =! (r) ->
   black = '\x1b[40m  \x1b[0m'
   white = '\x1b[1;47m  \x1b[0m'
   out = ''
-  for x in [0...r.W]
-    out += (if row[x] then black else white)
+  out += (if row[x] then black else white) for x in [0...r.W]
   out + '\n'
 
 renderSvg =! (r, optimize) ->
@@ -256,8 +247,7 @@ export encodeCode128 =! (text, output = 'raw', opts = {}) ->
 WIDTHS =! do ->
   out = Uint8Array.new(7 * PATTERNS.length)
   for pattern, code in PATTERNS
-    for k in [0...pattern.length]
-      out[7 * code + k] = pattern.charCodeAt(k) - 48
+    out[7 * code + k] = pattern.charCodeAt(k) - 48 for k in [0...pattern.length]
   out
 
 # Nearest value in lo..hi to the six runs at `at`, or -1: every run within
@@ -316,9 +306,7 @@ runLengths =! (luma, start, step, count, runs) ->
 reverseRuns =! (runs, n, out) ->
   m = 0
   out[m++] = 0 if (n & 1) is 0
-  k = n - 1
-  while k >= 0
-    out[m++] = runs[k--]
+  out[m++] = runs[k] for k in [n - 1..0] by -1
   m
 
 # Codewords from a start at `at` through stop, check verified; the count, or 0.
@@ -340,23 +328,20 @@ readFrom =! (runs, n, at, start, codes) ->
     at += 6
   return 0 if len < 4
   sum = codes[0]
-  for k in [1...len - 2]
-    sum += k * codes[k]
+  sum += k * codes[k] for k in [1...len - 2]
   return 0 unless sum % 103 is codes[len - 2]
   len
 
 # Every start code behind a quiet zone, left to right; `first` is the slot
 # of the first dark run, 1 as recorded and 0 to read the line inverted.
 readRuns =! (runs, n, codes, first) ->
-  at = first
-  while at + 5 < n
+  for at in [first...n - 5] by 2
     start = nearest runs, at, START_A, STOP - 1
     if start >= 0
       width = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
       if at is first or 2 * runs[at - 1] >= width
         len = readFrom runs, n, at, start, codes
         return len if len
-    at += 2
   0
 
 # Text from verified codewords, tracking latches, shifts, FNC1 and FNC4.
@@ -368,9 +353,8 @@ decodeText =! (codes, len) ->
   lastFnc4 = false
   gs1 = false
   out = ''
-  k = 1
-  while k < len - 2
-    code = codes[k++]
+  for k in [1...len - 2]
+    code = codes[k]
     current = if shifted >= 0 then shifted else subset
     shifted = -1
     fnc4 = false
@@ -379,7 +363,7 @@ decodeText =! (codes, len) ->
         out += (if code < 10 then '0' else '') + code
       else if code is CODE_B then subset = 1
       else if code is CODE_A then subset = 0
-      else if k is 2 then gs1 = true
+      else if k is 1 then gs1 = true
       else out += '\x1d'
     else if code < 96
       c = if code < 64 then code + 32 else if current is 0 then code - 64 else code + 32
@@ -395,7 +379,7 @@ decodeText =! (codes, len) ->
       when CODE_A
         if current is 1 then subset = 0 else fnc4 = true
       when FNC1
-        if k is 2 then gs1 = true else out += '\x1d'
+        if k is 1 then gs1 = true else out += '\x1d'
     if fnc4
       if lastFnc4
         high = not high

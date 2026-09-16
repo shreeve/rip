@@ -15,10 +15,9 @@ export writeGif =! (W, H, rowFor) ->
   tail = pixels % N
   out = Uint8Array.new(408 + fullChunks * (N + 2) + 2 + tail + 4)
   pos = 0
-  u16 = (v) ->
+  u16! = (v) ->
     out[pos++] = v & 0xff
     out[pos++] = v >>> 8
-    return
   for b in [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]
     out[pos++] = b
   u16 W
@@ -63,9 +62,6 @@ export gifDataUrl =! (gif) ->
     gif.toBase64()
   else
     bin = ''
-    i = 0
-    while i < gif.length
-      bin += String.fromCharCode(...gif.subarray(i, i + 8192))
-      i += 8192
+    bin += String.fromCharCode(...gif.subarray(i, i + 8192)) for i in [0...gif.length] by 8192
     btoa bin
   'data:image/gif;base64,' + b64

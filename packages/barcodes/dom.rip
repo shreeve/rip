@@ -51,8 +51,7 @@ clearCanvas =! (cc) ->
 traceQuad =! (context, points) ->
   context.beginPath()
   context.moveTo points[0].x, points[0].y
-  for i in [1...points.length]
-    context.lineTo points[i].x, points[i].y
+  context.lineTo points[i].x, points[i].y for i in [1...points.length]
   context.closePath()
 
 fillQuad =! (context, points) ->
@@ -97,11 +96,9 @@ sameOverlays = (left, right) ->
     [right[i], right[match]] = [right[match], right[i]] if match isnt i
   true
 
-copyOverlays =! (target, source) ->
+copyOverlays! =! (target, source) ->
   target.length = source.length
-  for i in [0...source.length]
-    target[i] = source[i]
-  return
+  target[i] = source[i] for i in [0...source.length]
 
 # Drawing and decode options, with defaults.
 canvasDefaults = ->
@@ -167,20 +164,18 @@ export class QRCanvas
         @drawBitmap img
     @scanner = Scanner.new(decoder)
     @reader =
-      clean: =>
+      clean!: =>
         @generation++
         @task?.abort()
         @task = undefined
         if @pending then @cleanPending = true else @scanner.clean()
-        return
       crop: @opts.cropToSquare
       luma: @scanner.luma
       frame: @opts.onVideoFrame
-      source: (source) =>
+      source!: (source) =>
         return if source is @frameSource
         @frameSource = source
         @opts.onFrameSource source if @opts.onFrameSource
-        return
       read: (frame) =>
         @rotate = frame.rotate
         @sourceHeight = frame.sourceHeight
@@ -208,7 +203,7 @@ export class QRCanvas
   onPoints!: (points, result) ->
     @resetOverlay() if Date.now() - @lastDetect > @opts.overlayTimeout
     if @rotate or @sourceX or @sourceY
-      move = (point) =>
+      move! = (point) =>
         x = point.x + @sourceX
         y = point.y + @sourceY
         if @rotate
@@ -217,7 +212,6 @@ export class QRCanvas
         else
           point.x = x
           point.y = y
-        return
       move point for point in [points.tl, points.tr, points.br, points.bl, ...points.aligners]
       for marker in [points.tl, points.tr, points.bl, ...points.aligners]
         move point for point in marker.corners
@@ -336,8 +330,7 @@ export class QRCanvas
         for x in [0...width]
           src = 4 * (y * width + x)
           dst = 4 * (x * height + height - 1 - y)
-          for k in [0...4]
-            out[dst + k] = data[src + k]
+          out[dst + k] = data[src + k] for k in [0...4]
       [width, height] = [height, width]
     else
       out = Uint8ClampedArray.from data
@@ -448,13 +441,12 @@ export class QRCanvas
       return if generation isnt @generation
       @endDecode()
       @finish()
-    settle = =>
+    settle! = =>
       @pending = undefined if @pending is pending
       @task = undefined if @task is task
       if @cleanPending
         @cleanPending = false
         @scanner.clean()
-      return
     pending = work.then(onDone, onFail).finally(settle)
     @pending = pending
     pending
@@ -647,7 +639,7 @@ export class QRCamera
 
   # Stop first so constrained camera hardware is released before the
   # replacement stream is requested.
-  setDevice: (deviceId) ->
+  setDevice!: (deviceId) ->
     @stop()
     source = @source
     stream = navigator.mediaDevices.getUserMedia! video: { deviceId: { exact: deviceId } }
@@ -656,7 +648,6 @@ export class QRCamera
       track.stop() for track in stream.getTracks()
       return
     @setStream stream
-    return
 
   draw: (canvas, fullSize) ->
     player = @player
@@ -715,14 +706,14 @@ export class QRCamera
       return if @player.videoWidth isnt videoWidth or @player.videoHeight isnt videoHeight
       @videoFrame = true
       reader.source 'VideoFrame'
-      return reader.read(scanned)
+      reader.read scanned
     catch
       @resetFrame()
       return if source isnt @source
       # A constructor can exist while copyTo support does not; only the
       # first frame of a source pays for finding out.
       @videoFrame = false
-      return @draw(canvas, fullSize)
+      @draw canvas, fullSize
     finally
       frame.close()
       @reading = false
@@ -753,11 +744,10 @@ export frameLoop =! (cb, video) ->
   useVideo = !!video and typeof video.requestVideoFrameCallback is 'function' and typeof video.cancelVideoFrameCallback is 'function'
   active = true
   handle = undefined
-  loopFn = (ts) ->
+  loopFn! = (ts) ->
     # Check active after the callback: it may cancel the loop from inside.
     cb ts
     handle = request() if active
-    return
   request = -> if useVideo then video.requestVideoFrameCallback(loopFn) else requestAnimationFrame(loopFn)
   cancel = (id) -> if useVideo then video.cancelVideoFrameCallback(id) else cancelAnimationFrame(id)
   handle = request()
@@ -804,7 +794,7 @@ export gifToPng =! (gifBytes) ->
     ctx = canvas.getContext 'bitmaprenderer', { alpha: false }
     throw Error.new 'was not able to create bitmaprenderer context' unless ctx
     ctx.transferFromImageBitmap bitmap
-    return canvas.convertToBlob!({ type: 'image/png' })
+    canvas.convertToBlob!({ type: 'image/png' })
   finally
     bitmap.close()
 
