@@ -188,8 +188,9 @@ syn match  ripAssignment    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*=\%([>=~!]\)\@!/
 " name a binding too, and each is excluded from the rule above. The name is
 " the statement's FIRST word, so the match anchors there — reading backward
 " from the operator instead would claim the type of an annotated declaration
-" (`limit: number =! 100` names limit, not number).
-syn match  ripReadonlyName  /^\s*\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*\%(:[^=]*\)\?=!/
+" (`limit: number =! 100` names limit, not number). A bang between the
+" name and `=!` is the void marker (`wipe! =! ->`), so the name still wins.
+syn match  ripReadonlyName  /^\s*\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze!\?\s*\%(:[^=]*\)\?=!/
 syn match  ripReactiveName  /^\s*\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*\%(:[^=~]*\)\?\%(:=\|\~=\)/
 
 " --- Function Definitions ---------------------------------------------------

@@ -55,6 +55,7 @@ describe('void definitions: the function returns undefined', () => {
     ['def save!(x)\n  x + 1\nexport default save(1)'],
     ['save! = (x) -> x + 1\nexport default save(1)'],
     ['save! = (x) => x + 1\nexport default save(1)'],
+    ['save! =! (x) -> x + 1\nexport default save(1)'],
     ['def tick!\n  1 + 1\nexport default tick()'],
   ];
   for (const [src] of rows) {
