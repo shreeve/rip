@@ -218,6 +218,11 @@ shows this in the table: warmed only on its own size, its raw version 8 and
 `Int32Array`, so a full word is an ordinary integer in every version and
 the encoder keeps one specialization whatever order the sizes arrive in.
 
+A personal note from the author of this port: Paul Miller, who wrote the
+reference implementation, is a friend of mine and wickedly smart. Coming
+even close to what he built took invoking the greatest AI frontier model
+in the world, and a great deal of measuring.
+
 ## Test
 
 ```bash
