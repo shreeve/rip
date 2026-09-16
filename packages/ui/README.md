@@ -33,12 +33,12 @@ Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives
 
 - `Dialog` — the root. Owns `open` (default `false`) and renders only its children.
 - `DialogTrigger` — a `<button>` that opens it. Carries `aria-haspopup="dialog"`, `aria-expanded`, and `data-popup-open` while open.
-- `DialogPopup` — the `<dialog>`. Carries `data-open` while open and `data-closed` otherwise, and `aria-labelledby` and `aria-describedby` pointing at the title and description parts when they are present. The element's own `close` event writes the cell, so Escape, a close part, and a programmatic close all read the same.
+- `DialogPopup` — the `<dialog>`. Carries `data-open` while open and `data-closed` otherwise, and `aria-labelledby` and `aria-describedby` pointing at the title and description parts when they are present. Carries `closedby="any"` unless the consumer passes its own, so a click on the backdrop closes it as Escape does; `closedby: 'closerequest'` keeps Escape only. The element's own `close` event writes the cell, so Escape, a backdrop click, a close part, and a programmatic close all read the same.
 - `DialogTitle` — an `<h2>` with a minted id, or the `id` you pass.
 - `DialogDescription` — a `<p>` with a minted id, or the `id` you pass.
 - `DialogClose` — a `<button>` that closes it.
 
-The attributes are bare booleans in Base UI's spelling, so Tailwind's `data-open:` and `data-popup-open:` variants style them directly.
+The attributes are present while true and absent otherwise, so Tailwind's `data-open:` and `data-popup-open:` variants style them directly.
 
 Two things stay with the application's stylesheet, because they are CSS:
 
@@ -47,7 +47,7 @@ Two things stay with the application's stylesheet, because they are CSS:
 body:has(dialog:modal) { overflow: hidden; }
 ```
 
-Transitions are `@starting-style` with discrete transitions on `display` and `overlay`; in Tailwind that is `transition-[opacity,overlay,display] transition-discrete starting:open:opacity-0 open:opacity-100 opacity-0`. Light dismiss is the `closedby` attribute, passed through to the element like any other.
+Transitions are `@starting-style` with discrete transitions on `display` and `overlay`; in Tailwind that is `transition-[opacity,overlay,display] transition-discrete starting:open:opacity-0 open:opacity-100 opacity-0`.
 
 ## Demo
 

@@ -1,11 +1,5 @@
 counter = 0
-mint = (part: string): string ->
-  counter += 1
-  "rip-dialog-#{part}-#{counter}"
-
-# A boolean reaches setAttribute as is, so `false` is present as "false";
-# presence and absence are spelled here.
-flag = (present: boolean): string | undefined -> if present then '' else undefined
+mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
 
 export Dialog = component
   offer @open := false
@@ -19,15 +13,15 @@ export DialogTrigger = component extends button
   render
     button
       type: 'button'
+      data-popup-open: open or undefined
       aria-haspopup: 'dialog'
-      aria-expanded: (if open then 'true' else 'false')
-      data-popup-open: flag(open)
+      aria-expanded: if open then 'true' else 'false'
       @click: (-> open = true)
       slot
 
-# showModal needs a connected element and a mount builds the subtree
-# before attaching it, so an initially open dialog opens on the next
-# microtask.
+# The effect's first run happens before the mounted tree reaches the
+# document, and showModal throws on a disconnected element, so a dialog
+# that starts open would fail its mount. Opening waits a microtask.
 export DialogPopup = component extends dialog
   accept open
   accept labelledBy
@@ -37,25 +31,23 @@ export DialogPopup = component extends dialog
     dialog = el
     return unless dialog
     if open
-      return if dialog.open
-      show = -> dialog.showModal() if open and not dialog.open and dialog.isConnected
-      if dialog.isConnected then show() else queueMicrotask show
+      queueMicrotask -> dialog.showModal() if open and not dialog.open and dialog.isConnected
     else
       dialog.close() if dialog.open
   render
     dialog
       ref: el
-      data-open: flag(open)
-      data-closed: flag(not open)
-      aria-labelledby: (labelledBy or undefined)
-      aria-describedby: (describedBy or undefined)
+      closedby: @rest.closedby ?? 'any'
+      data-open: open or undefined
+      data-closed: not open or undefined
+      aria-labelledby: labelledBy or undefined
+      aria-describedby: describedBy or undefined
       @close: (-> open = false)
       slot
 
 export DialogTitle = component extends h2
   accept labelledBy
-  minted =! mint('title')
-  id ~= @rest.id ?? minted
+  id =! @rest.id ?? mint('title')
   ~>
     labelledBy = id
     -> labelledBy = ''
@@ -65,8 +57,7 @@ export DialogTitle = component extends h2
 
 export DialogDescription = component extends p
   accept describedBy
-  minted =! mint('description')
-  id ~= @rest.id ?? minted
+  id =! @rest.id ?? mint('description')
   ~>
     describedBy = id
     -> describedBy = ''

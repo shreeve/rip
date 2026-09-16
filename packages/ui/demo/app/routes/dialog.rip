@@ -1,4 +1,4 @@
-import { Dialog, DialogTrigger, DialogPopup, DialogTitle, DialogDescription, DialogClose } from 'rip/ui'
+import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from 'rip/ui'
 import { DIALOG } from '../components.rip'
 
 export DialogPage = component
@@ -15,8 +15,8 @@ export DialogPage = component
             'Open Dialog'
           DialogPopup
             class: [
-              'm-auto w-96 max-w-[calc(100vw-3rem)] rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,overlay,display] transition-discrete duration-150'
-              'backdrop:bg-black/20 open:opacity-100 starting:open:opacity-0'
+              'm-auto w-96 max-w-[calc(100vw-2.5rem)] scale-96 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale,overlay,display] transition-discrete duration-150 open:scale-100 open:opacity-100 starting:open:scale-96 starting:open:opacity-0'
+              'backdrop:bg-black/20 backdrop:opacity-0 backdrop:duration-150 open:backdrop:opacity-100 starting:open:backdrop:opacity-0'
             ]
             DialogTitle class: 'text-lg font-semibold', 'Notifications'
             DialogDescription class: 'mt-2 text-secondary', 'You are all caught up. Good job!'

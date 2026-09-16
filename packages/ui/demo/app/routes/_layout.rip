@@ -27,9 +27,9 @@ export Layout = component
           button
             type: 'button'
             class: 'flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
-            aria-label: (if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme')
+            aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
             @click: switchTheme
-            Icon name: (if theme is 'dark' then 'sun' else 'moon'), classes: 'size-4.5'
+            Icon name: if theme is 'dark' then 'sun' else 'moon', classes: 'size-4.5'
         div class: 'flex flex-1 flex-col overflow-y-auto p-2.5'
           div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Components'
           nav class: 'flex flex-col'
