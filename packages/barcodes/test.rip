@@ -11,8 +11,9 @@ import * as qr from 'rip/barcodes/qr'
 import * as dom from 'rip/barcodes/dom'
 import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
 import * as code128 from 'rip/barcodes/code128'
-import { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } from './spec.rip'
 import { readFileSync } from 'fs'
+
+{ BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } = _tests
 
 rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')).join('\n')
 
@@ -34,7 +35,7 @@ test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
   eq pkg.rip, { browser: true }
-  for file in ['spec.rip', 'gif.rip', 'image.rip', 'qr.rip', 'code128.rip', 'barcodes.rip', 'dom.rip']
+  for file in ['gif.rip', 'image.rip', 'qr.rip', 'code128.rip', 'barcodes.rip', 'dom.rip']
     source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
 
