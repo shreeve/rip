@@ -1,0 +1,11 @@
+body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+p { margin: 0 0 12px; color: #aaa; }
+.viewfinder { position: relative; width: 100%; max-width: 720px; background: #000; border-radius: 8px; overflow: hidden; }
+.viewfinder video { display: block; width: 100%; height: auto; }
+.viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.latest { margin: 12px 0; padding: 12px; background: #1e2a1e; border: 1px solid #2f5; border-radius: 8px; font-size: 20px; word-break: break-all; }
+.kind { display: inline-block; margin-right: 8px; padding: 2px 6px; border-radius: 4px; background: #345; color: #cde; font-size: 12px; vertical-align: middle; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { padding: 6px 0; border-top: 1px solid #333; word-break: break-all; }
+.at { float: right; color: #777; font-size: 12px; }
