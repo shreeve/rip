@@ -23,6 +23,12 @@ root entry that re-exports both; the camera and canvas plumbing in `dom.rip`;
 and the GIF writer and image-input helpers both symbologies share.
 `rip/barcodes/qr` and `rip/barcodes/code128` import one symbology alone.
 
+**Origin:** the QR encoder, decoder and browser layer are a port of
+[paulmillr/qr](https://github.com/paulmillr/qr) by Paul Miller, itself
+derived from ZXing, rewritten in Rip with the same algorithms and
+byte-identical output on every format. The Code 128 symbology is original
+to this package. See [Credits](#credits).
+
 ## Quick Start
 
 ```coffee
@@ -223,6 +229,19 @@ A personal note from the author of this port: Paul Miller, who wrote the
 reference implementation, is a friend of mine and wickedly smart. Coming
 even close to what he built took invoking the greatest AI frontier model
 in the world, and a great deal of measuring.
+
+## Credits
+
+This package began as a port of [paulmillr/qr](https://github.com/paulmillr/qr)
+0.7.0 by [Paul Miller](https://paulmillr.com), released under MIT OR
+Apache-2.0 and derived in turn from the ZXing project. The QR tables,
+encoder, decoder pipeline, scanner, camera plumbing and `BarcodeDetector`
+ponyfill follow his design; the port keeps his algorithms, restructures
+them for Rip, and verifies itself against his implementation with an
+oracle that compares every output format byte for byte and every decode
+result on synthetic frames. The performance work described above is on top
+of that foundation. Code 128 is new here and shares only the image input
+and GIF writer.
 
 ## Test
 
