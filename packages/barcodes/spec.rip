@@ -86,8 +86,8 @@ export versionBits =! (ver) ->
 # GF(2^8) with primitive polynomial 0x11d. EXP is doubled so the product of
 # two logs indexes it without a modulo.
 export GF256 =! do ->
-  exp = new Uint8Array(510)
-  log = new Uint8Array(256)
+  exp = Uint8Array.new(510)
+  log = Uint8Array.new(256)
   x = 1
   for i in [0...255]
     exp[i] = exp[i + 255] = x
@@ -116,7 +116,7 @@ export maskBits =! (x, y) ->
   bits
 
 POP16 =! do ->
-  t = new Uint8Array(1 << 16)
+  t = Uint8Array.new(1 << 16)
   for i in [1...t.length]
     t[i] = t[i >>> 1] + (i & 1)
   t

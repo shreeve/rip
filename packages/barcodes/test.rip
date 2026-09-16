@@ -168,7 +168,7 @@ console.log "\nDecoder"
 raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
   raw = encodeQR text, 'raw', { ...opts, scale, border: 4 }
   s = raw.length
-  data = new Uint8Array(W * H * 4).fill(if invert then 40 else 200)
+  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
   ox = (W - s) >> 1
   oy = (H - s) >> 1
   for y in [0...s]
@@ -188,7 +188,7 @@ raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
 
 toLuma = (img) ->
   n = img.width * img.height
-  luma = new Uint8Array(n)
+  luma = Uint8Array.new(n)
   for i in [0...n]
     p = 4 * i
     luma[i] = (img.data[p] + 2 * img.data[p + 1] + img.data[p + 2]) >> 2
@@ -214,13 +214,13 @@ test "luma and packed formats", ->
   img = raster 'FORMATS', {}, 4, 300, 300
   eq decodeQR(toLuma(img), format: 'I420'), 'FORMATS'
   eq decodeQR(img, format: 'RGBA'), 'FORMATS'
-  rgb = new Uint8Array(img.width * img.height * 3)
+  rgb = Uint8Array.new(img.width * img.height * 3)
   for i in [0...img.width * img.height]
     rgb[3 * i + k] = img.data[4 * i + k] for k in [0...3]
   eq decodeQR({ width: img.width, height: img.height, data: rgb }), 'FORMATS'
 
 test "throws when nothing decodes", ->
-  blank = { width: 200, height: 200, data: new Uint8Array(200 * 200 * 4).fill(128) }
+  blank = { width: 200, height: 200, data: Uint8Array.new(200 * 200 * 4).fill(128) }
   throws (-> decodeQR blank), Error, 'finder'
   eq decodeQR(raster('EFFORT', {}, 4, 300, 300), effort: Infinity, timeLimit: Infinity), 'EFFORT'
 
@@ -230,8 +230,8 @@ test "option and image validation", ->
   throws (-> decodeQR(img, timeLimit: -1)), TypeError
   throws (-> decodeQR(img, format: 'nope')), TypeError
   throws (-> decodeQR(img, pointsOnDetect: 1)), TypeError
-  throws (-> decodeQR({ width: 0, height: 1, data: new Uint8Array(0) })), RangeError
-  throws (-> decodeQR({ width: 2, height: 2, data: new Uint8Array(5) })), RangeError
+  throws (-> decodeQR({ width: 0, height: 1, data: Uint8Array.new(0) })), RangeError
+  throws (-> decodeQR({ width: 2, height: 2, data: Uint8Array.new(5) })), RangeError
   throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })), TypeError
 
 test "pointsOnDetect reports geometry in image coordinates", ->
@@ -279,7 +279,7 @@ test! "scanner reuse, exclusive operations and clean", ->
   eq scanner.decode(), ['TWO']
   # A success excludes its region, so a staged frame decodes once; re-stage.
   scanner.addImage raster('TWO', {}, 4, 250, 250)
-  eq scanner.decodeAsync!(), ['TWO']
+  eq scanner.decodeAsync!, ['TWO']
   throws (-> scanner.addImage raster('BIG', {}, 4, 400, 400)), RangeError
   reentered = null
   reenter = ->
@@ -351,7 +351,7 @@ bars = (text, opts, scale, W, H, rotate = 0, invert = false) ->
   raw = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
   w = raw.length
   h = 30
-  data = new Uint8Array(W * H * 4).fill(if invert then 40 else 190)
+  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
   turned = rotate is 90 or rotate is 270
   ox = (W - (if turned then h else w)) >> 1
   oy = (H - (if turned then w else h)) >> 1
@@ -394,11 +394,11 @@ test "Code 128 round trips: scales, rotations, inversion, GS1", ->
   eq hit.text, 'AB\x1dCD'
   eq hit.gs1, false
   eq readCode128(toLuma(bars('Wikipedia', {}, 2, 500, 300)), format: 'I420').text, 'Wikipedia'
-  blank = { width: 50, height: 50, data: new Uint8Array(50 * 50 * 4).fill(200) }
+  blank = { width: 50, height: 50, data: Uint8Array.new(50 * 50 * 4).fill(200) }
   eq readCode128(blank), null
   throws (-> decodeCode128 blank), Error, 'not found'
   throws (-> readCode128 blank, null), TypeError, 'opts'
-  throws (-> readCode128 { width: 2, height: 2, data: new Uint8Array(3) }), RangeError, 'img.data'
+  throws (-> readCode128 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
 
 test "Code 128 text: shifts, FNC4 high characters, latches", ->
   text = (codes) -> c128.decodeText(codes, codes.length).text

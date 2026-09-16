@@ -165,7 +165,7 @@ export class QRCanvas
         return if @bitmapDrawn
         @bitmapDrawn = true
         @drawBitmap img
-    @scanner = new Scanner(decoder)
+    @scanner = Scanner.new(decoder)
     @reader =
       clean: =>
         @generation++
@@ -331,7 +331,7 @@ export class QRCanvas
     return unless @bitmap
     {data, height, width} = img
     if @rotate
-      out = new Uint8ClampedArray(data.length)
+      out = Uint8ClampedArray.new(data.length)
       for y in [0...height]
         for x in [0...width]
           src = 4 * (y * width + x)
@@ -821,7 +821,7 @@ invalidState = (msg) -> DOMException.new msg, 'InvalidStateError'
 
 prefixed = (e, prefix) ->
   return DOMException.new("#{prefix}: #{e.message}", e.name) if e instanceof DOMException
-  return new e.constructor("#{prefix}: #{e.message}") if e instanceof Error
+  return e.constructor.new("#{prefix}: #{e.message}") if e instanceof Error
   Error.new "#{prefix}: #{e}"
 
 createCanvas = (width, height) ->
@@ -878,8 +878,9 @@ toImageData = (image) ->
       throw invalidState('Failed to load or decode HTMLImageElement.')
     return drawSource(image, image.naturalWidth, image.naturalHeight)
   if kind is 'SVGImageElement'
+    decoding = image.decode?()
     try
-      await image.decode?()
+      await decoding
     catch
       throw invalidState('Failed to load or decode SVGImageElement.')
     return drawSource(image, image.width.baseVal.value, image.height.baseVal.value)
