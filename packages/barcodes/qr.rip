@@ -2084,6 +2084,19 @@ export class QRScanner
     blockBytes = @blockBytes
     syndromes  = @syndromes
     hasError   = false
+    # The generator divides an intact block: a zero LFSR remainder, computed
+    # exactly as the encoder does, settles the common case without syndromes.
+    {products} = rsCached eccWords
+    rem  = @next
+    last = eccWords - 1
+    rem.fill 0, 0, eccWords
+    for i in [0...length]
+      base = (blockBytes[offset + i] ^ rem[0]) * eccWords
+      rem[j] = rem[j + 1] ^ products[base + j] for j in [0...last]
+      rem[last] = products[base + last]
+    dirty = 0
+    dirty |= rem[j] for j in [0...eccWords]
+    return true unless dirty
     for i in [0...eccWords]
       value = 0
       value = mul(value, EXP[i]) ^ blockBytes[offset + j] for j in [0...length]
