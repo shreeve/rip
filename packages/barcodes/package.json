@@ -1,0 +1,25 @@
+{
+  "name": "@rip/barcodes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QR code generator and reader — packed-bitmap encoder, camera-budgeted decoder, zero dependencies.",
+  "exports": {
+    ".": "./barcodes.rip",
+    "./decode": "./decode.rip",
+    "./dom": "./dom.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "barcodes.rip",
+    "spec.rip",
+    "decode.rip",
+    "dom.rip",
+    "README.md"
+  ]
+}

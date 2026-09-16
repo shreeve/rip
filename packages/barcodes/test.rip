@@ -1,0 +1,290 @@
+# ==============================================================================
+# rip/barcodes tests — encoder pins generated once from the reference
+# implementation, decoder round trips over synthetic rasters, package surface
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import encodeQR, { _tests } from 'rip/barcodes'
+import * as enc from 'rip/barcodes'
+import decodeQR, { QRScanner, decodeQRBatch } from 'rip/barcodes/decode'
+import * as dec from 'rip/barcodes/decode'
+import * as dom from 'rip/barcodes/dom'
+import { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } from './spec.rip'
+import { readFileSync } from 'fs'
+
+rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')).join('\n')
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "exports", ->
+  eq Object.keys(enc).sort(), ['_tests', 'default', 'encodeQR']
+  eq enc.default, encodeQR
+  eq Object.keys(dec).sort(), ['QRScanner', 'decodeQR', 'decodeQRBatch', 'default']
+  eq dec.default, decodeQR
+  eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
+
+test "no runtime deps, declares browser safety and earns it", ->
+  pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
+  eq pkg.dependencies, undefined
+  eq pkg.rip, { browser: true }
+  for file in ['spec.rip', 'barcodes.rip', 'decode.rip', 'dom.rip']
+    source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
+    eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
+
+# ==[ Spec tables ]==
+
+console.log "\nSpec"
+
+test "Table 1 codeword totals", ->
+  eq BYTES, [
+    26, 44, 70, 100, 134, 172, 196, 242, 292, 346, 404, 466, 532, 581, 655, 733, 815, 901, 991, 1085,
+    1156, 1258, 1364, 1474, 1588, 1706, 1828, 1921, 2051, 2185, 2323, 2465, 2611, 2761, 2876, 3034, 3196, 3362, 3532, 3706,
+  ]
+
+test "alignment centers", ->
+  eq alignmentPatterns(1), []
+  eq alignmentPatterns(2), [6, 18]
+  eq alignmentPatterns(7), [6, 22, 38]
+  eq alignmentPatterns(40), [6, 30, 58, 86, 114, 142, 170]
+
+test "format and version words", ->
+  eq formatBits('medium', 0), 0b101010000010010
+  eq formatBits('low', 7), 0b110100101110110
+  eq versionBits(7), 0x07C94
+  eq versionBits(40), 0x28C69
+
+test "mask predicates and popcount", ->
+  eq maskBits(0, 0), 0xff
+  eq maskBits(1, 0), 0b01110010
+  eq popcnt(0), 0
+  eq popcnt(0xffffffff), 32
+  eq popcnt(0x80000001), 2
+
+# ==[ Encoder ]==
+
+console.log "\nEncoder"
+
+ENCODE_DATA =! [
+  ["12345678", 1, "low", "numeric", [16, 32, 123, 114, 39, 0, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 188, 247, 62, 248, 53, 170, 224]]
+  ["HELLO WORLD", 1, "low", "alphanumeric", [32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17, 236, 17, 236, 209, 239, 196, 207, 78, 195, 109]]
+  ["🔻", 1, "low", "byte", [64, 79, 9, 249, 75, 176, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 3, 99, 190, 127, 225, 243, 91]]
+  ["HELLO WORLD!123", 1, "low", "byte", [64, 244, 132, 84, 196, 196, 242, 5, 116, 245, 36, 196, 66, 19, 19, 35, 48, 236, 17, 224, 16, 46, 161, 123, 208, 138]]
+  ["HELLO", 1, "high", "alphanumeric", [32, 43, 11, 120, 204, 0, 236, 17, 236, 109, 149, 156, 18, 217, 41, 246, 36, 42, 84, 46, 225, 190, 218, 251, 27, 196]]
+  ["HELLO WORLD", 2, "high", "alphanumeric", [32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17, 160, 72, 249, 35, 10, 6, 195, 31, 94, 27, 113, 37, 124, 145, 66, 90, 54, 168, 56, 162, 2, 77, 162, 41, 163, 243, 119, 37]]
+]
+
+test "encodeData vectors", ->
+  for [text, version, ecc, type, bytes] in ENCODE_DATA
+    utf8 = if type is 'byte' then TextEncoder.new().encode(text) else undefined
+    eq Array.from(_tests.encodeData(version, ecc, text, type, utf8)), bytes, text
+
+test "detectType", ->
+  eq _tests.detectType('12345678'), 'numeric'
+  eq _tests.detectType('HELLO WORLD'), 'alphanumeric'
+  eq _tests.detectType('hello'), 'byte'
+  eq _tests.detectType('🔻'), 'byte'
+
+test "ascii", ->
+  eq encodeQR('Hello world', 'ascii'), "█████████████████████████\n██ ▄▄▄▄▄ ██▀ ▀██ ▄▄▄▄▄ ██\n██ █   █ █   ███ █   █ ██\n██ █▄▄▄█ █  █▀▄█ █▄▄▄█ ██\n██▄▄▄▄▄▄▄█ █ █▄█▄▄▄▄▄▄▄██\n██ █▄ ▄ ▄█▀▀  ▀▀     █▀██\n██ ▄▄▄ ▀▄▄▀▀▀▀  ▄█▀  ▄███\n████▄▄█▄▄▄  ▄█ ▄▄█▀▀██▄██\n██ ▄▄▄▄▄ █▀██▄█▀▄▀█▀  ▀██\n██ █   █ █  █▄▀▀  ▀▀██▄██\n██ █▄▄▄█ █▄▀▀█ ▀█▄▀▀ ████\n██▄▄▄▄▄▄▄█▄██▄▄█▄█▄██▄███\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+
+test "term", ->
+  eq encodeQR('Hi', 'term', border: 1), "\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n"
+
+test "svg, optimized and plain", ->
+  eq encodeQR('Hello world', 'svg'), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M2 2h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 3h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 4h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 5h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 6h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 7h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 8h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM10 9h1v1h-1Zm2 0h1v1h-1ZM2 10h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 11h1v1H2Zm3 0h1v1H5Zm2 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 12h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm1 0h1v1H9Zm5 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 13h1v1H2Zm4 0h1v1H6Zm1 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM4 14h1v1H4Zm1 0h1v1H5Zm2 0h1v1H7Zm1 0h1v1H8Zm1 0h1v1H9Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm6 0h1v1h-1Zm-12 1h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 16h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm5 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 17h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm5 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 18h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm5 0h1v1h-1ZM2 19h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 20h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm4 0h1v1h-1Zm3 0h1v1h-1Zm3 0h1v1h-1ZM2 21h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 22h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Z\"/></svg>"
+  eq encodeQR('Hi', 'svg', optimize: false), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"22\" width=\"1\" height=\"1\" /></svg>"
+
+test "gif and data-url", ->
+  eq Array.from(encodeQR('Hello world', 'gif', scale: 2)), [71, 73, 70, 56, 55, 97, 50, 0, 50, 0, 246, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 44, 0, 0, 0, 0, 50, 0, 50, 0, 0, 7, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 129, 0, 59]
+  eq encodeQR('Hello world', 'data-url'), "data:image/gif;base64,R0lGODdhGQAZAPYAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwAAAAAGQAZAAAHf4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQAAAAEAAAABAQEBAQEBAAAAAAEAAAAAAAEAAAEBAQAAAQAAAAAAAQAAAAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAB/gAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAAAAQABAQEAAQABAQAAAQABAAEBAQABAAAAAAEAAAAAAAEAAQEAAQAAAQAAAAAAAQAAAAABAQEBAQEBAAEAAQABAAEBAQEBAQEAAAAAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAAAAH+AAQABAQEBAQAAAAEBAAABAQEBAQAAAAAAAAEAAAEAAQAAAQEBAQEBAQEBAQEAAQAAAAABAQEBAQABAQAAAAABAQEAAAEBAQAAAAAAAQAAAAEBAAABAQEBAQEAAAEBAQAAAAAAAAAAAQEAAQEBAQEBAAEBAQAAAAAAAQAAAAAAf4AAAAAAAAAAAQEAAAEAAAABAQAAAAAAAAABAQEBAQEBAAAAAAEAAAEAAAABAQAAAAAAAQAAAAAAAQABAAAAAAEAAQABAQEBAAAAAAEAAQEBAAEAAQEAAQAAAQEAAAAAAQAAAAABAAEBAQABAAEBAAABAQEBAQEAAAAAAAAAAQB6gAEBAQABAAEAAAABAAABAAABAAAAAAAAAQAAAAAAAQAAAQEAAQEAAAEBAQAAAAAAAAEBAQEBAQEAAQAAAQEAAQABAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgQA7"
+
+test "raw", ->
+  eq encodeQR('Hello world', 'raw', border: 1), [[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, true, false, false, false, true, true, true, true, true, true, true, false], [false, true, false, false, false, false, false, true, false, false, true, true, true, false, false, true, false, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, false, true, false, true, true, true, false, true, false], [false, true, false, false, false, false, false, true, false, true, true, false, true, false, false, true, false, false, false, false, false, true, false], [false, true, true, true, true, true, true, true, false, true, false, true, false, true, false, true, true, true, true, true, true, true, false], [false, false, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false], [false, true, false, true, true, true, true, true, false, false, false, true, true, false, false, true, true, true, true, true, false, false, false], [false, true, false, false, true, false, true, false, false, true, true, true, true, true, true, true, true, true, true, true, false, true, false], [false, true, true, true, true, true, false, true, true, false, false, false, false, true, true, true, false, false, true, true, true, false, false], [false, true, false, false, false, true, true, false, false, true, true, true, true, true, true, false, false, true, true, true, false, false, false], [false, false, false, true, true, false, true, true, true, true, true, true, false, true, true, true, false, false, false, false, false, true, false], [false, false, false, false, false, false, false, false, false, true, true, false, false, true, false, false, false, true, true, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, false, true, false, false, true, false, false, false, true, true, false, false], [false, true, false, false, false, false, false, true, false, true, false, false, false, false, true, false, true, false, true, true, true, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, true, false, false, true, true, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, true, true, true, true, true, false, false, false, false], [false, true, false, true, true, true, false, true, false, true, false, false, false, true, false, false, true, false, false, true, false, false, false], [false, true, false, false, false, false, false, true, false, false, true, true, false, true, true, false, false, true, true, true, false, false, false], [false, true, true, true, true, true, true, true, false, true, false, false, true, true, false, true, false, true, false, false, true, false, false], [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]]
+
+VERSION_HASHES =! ["15144155502040334453", "11860336336062881808", "9136085086669388644", "1193089572591710977", "7686873670648342784", "5343431842319324110", "17390098021478000837", "3840461960574158097", "4294510183992695906", "15528468463722452699", "6845340642062067951", "2863315931406977110", "1000235694808952747", "4850376682882191310", "170292611262382408", "16193601112266899915", "3021963056225426727", "17063662145875125935", "15921535972440319276", "10460739331697383771", "4104402773850033517", "6767157915294766020", "16623589994970719969", "12747355529232067061", "17235346348443545711", "11264115602249123588", "11370428948163515140", "15807326944508417556", "135482596482876342", "4755772298643999272", "17978155199721953926", "16372105395315088973", "144795419258277521", "14530093731977448862", "18060845299463144063", "3503644178110624366", "6867699886559328586", "10580509781540705", "18052239940279011487", "2543736270194563918"]
+
+test "every version at medium, auto mask", ->
+  for hash, i in VERSION_HASHES
+    ver = i + 1
+    eq Bun.hash(rows(encodeQR('RIP'.repeat(ver), 'raw', version: ver, ecc: 'medium', border: 1))).toString(), hash, "v#{ver}"
+
+MASKS =! [
+  "00000000000000000000000\n01111111000101011111110\n01000001011011010000010\n01011101000001010111010\n01011101000101010111010\n01011101010001010111010\n01000001000001010000010\n01111111010101011111110\n00000000000111000000000\n01010101001110000100100\n01001110001000010011100\n00011001100101000100000\n00010110110100010010110\n01101101101101010101100\n00000000011110101010010\n01111111001010111001010\n01000001000111101110110\n01011101010010111001010\n01011101001000010001100\n01011101010001000100010\n01000001000100010001110\n01111111010101010101010\n00000000000000000000000"
+  "00000000000000000000000\n01111111011111011111110\n01000001000001010000010\n01011101011011010111010\n01011101001111010111010\n01011101001011010111010\n01000001011011010000010\n01111111010101011111110\n00000000001101000000000\n01010001100100001001010\n01100100100010111001000\n00110011001111101110100\n00111100011110111000010\n01000111000111111111000\n00000000010100000000110\n01111111010000010011110\n01000001001101000100010\n01011101001000010011110\n01011101000010111011000\n01011101011011101110110\n01000001001110111011010\n01111111011111111111110\n00000000000000000000000"
+  "00000000000000000000000\n01111111001001011111110\n01000001001000010000010\n01011101011101010111010\n01011101010110010111010\n01011101011101010111010\n01000001010010010000010\n01111111010101011111110\n00000000010100000000000\n01011111000010011111000\n00101100101011110000000\n00000101111001011000010\n01110100010111110001010\n01110001110001001001110\n00000000011101001001110\n01111111000110100101000\n01000001010100001101010\n01011101011110100101000\n01011101011011110010000\n01011101011101011000000\n01000001000111110010010\n01111111011001001001000\n00000000000000000000000"
+  "00000000000000000000000\n01111111011001011111110\n01000001010011010000010\n01011101000000010111010\n01011101010110010111010\n01011101000110010111010\n01000001001111010000010\n01111111010101011111110\n00000000011111000000000\n01011011101111010010110\n00101100101011110000000\n01011111100010000011000\n00011000111010011100110\n01110001110001001001110\n00000000010110010010100\n01111111011011001000100\n01000001010100001101010\n01011101000101111110010\n01011101010110011111100\n01011101011101011000000\n01000001001100101001000\n01111111010100100100100\n00000000000000000000000"
+  "00000000000000000000000\n01111111010001011111110\n01000001000000010000010\n01011101001010010111010\n01011101010001010111010\n01011101010101010111010\n01000001011010010000010\n01111111010101011111110\n00000000010011000000000\n01000101111010111110010\n00010100010011001000110\n01000011111110011111010\n00110010010000110110010\n01001001001001110001000\n00000000010101110001000\n01111111010001100010000\n01000001000011001010010\n01011101010110011101110\n01011101000011001010110\n01011101001010011111000\n01000001000000110101010\n01111111010001110001110\n00000000000000000000000"
+  "00000000000000000000000\n01111111001111011111110\n01000001010000010000010\n01011101011101010111010\n01011101011010010111010\n01011101001101010111010\n01000001001010010000010\n01111111010101011111110\n00000000011100000000000\n01000001010010110011100\n00110000110111101100010\n00000101111001011000010\n01111100011111111001010\n01000111000111111111000\n00000000010101000001110\n01111111000110100101000\n01000001001000010001000\n01011101001110100101000\n01011101000011111010000\n01011101001011101110110\n01000001001111111010010\n01111111011001001001000\n00000000000000000000000"
+  "00000000000000000000000\n01111111011111011111110\n01000001010000010000010\n01011101011001010111010\n01011101001010010111010\n01011101011111010111010\n01000001001100010000010\n01111111010101011111110\n00000000001100000000000\n01001111110110100101110\n00110000110111101100010\n00010111101011001010000\n01111010011001111111010\n01000111000111111111000\n00000000010101110001000\n01111111010010000001100\n01000001011000010001000\n01011101011100110111010\n01011101010101111100000\n01011101001011101110110\n01000001001111001010100\n01111111011101101101100\n00000000000000000000000"
+  "00000000000000000000000\n01111111000101011111110\n01000001001111010000010\n01011101000011010111010\n01011101000101010111010\n01011101000101010111010\n01000001010011010000010\n01111111010101011111110\n00000000000011000000000\n01001011011100101000000\n01001110001000010011100\n00111101000001100000100\n00000100100110000000100\n01101101101101010101100\n00000000011010001110110\n01111111001000101011000\n01000001010111101110110\n01011101000110011101110\n01011101011010000011110\n01011101000001000100010\n01000001000000110101010\n01111111010111000111000\n00000000000000000000000"
+]
+
+test "explicit masks 0..7", ->
+  for expected, mask in MASKS
+    eq rows(encodeQR('MASK', 'raw', { mask, border: 1 })), expected, "mask #{mask}"
+
+test "single-slot symbol cache survives version changes", ->
+  a = rows encodeQR('MASK', 'raw', border: 1)
+  encodeQR 'RIP'.repeat(20), 'raw'
+  eq rows(encodeQR('MASK', 'raw', border: 1)), a
+  eq rows(encodeQR('MASK', 'raw', mask: 3, border: 1)), MASKS[3]
+
+test "capacity boundaries", ->
+  ok encodeQR('x'.repeat(17), 'raw', version: 1, ecc: 'low')
+  throws (-> encodeQR('x'.repeat(18), 'raw', version: 1, ecc: 'low')), 'Capacity overflow'
+  ok encodeQR('7'.repeat(7089), 'ascii', ecc: 'low')
+  throws (-> encodeQR('7'.repeat(7090), 'ascii', ecc: 'low')), 'Capacity overflow'
+  throws (-> encodeQR('x'.repeat(3000), 'raw')), 'Capacity overflow'
+
+test "argument validation", ->
+  throws (-> encodeQR(123, 'raw')), TypeError
+  throws (-> encodeQR('x', 'nope')), 'Unknown output'
+  throws (-> encodeQR('x', 'raw', version: 0)), RangeError
+  throws (-> encodeQR('x', 'raw', version: 41)), RangeError
+  throws (-> encodeQR('x', 'raw', mask: 9)), 'invalid mask'
+  throws (-> encodeQR('x', 'raw', ecc: 'zz')), 'invalid ecc'
+  throws (-> encodeQR('abc', 'raw', encoding: 'numeric')), 'Unknown letter'
+  throws (-> encodeQR('x', 'raw', border: 0)), RangeError
+  throws (-> encodeQR('x', 'raw', scale: 2000)), RangeError
+  throws (-> encodeQR('x', 'raw', version: 1, scale: 50)), 'reduce border/scale'
+  throws (-> encodeQR('x', 'raw', textEncoder: -> 'no')), TypeError
+
+test "custom text encoder", ->
+  bytes = Uint8Array.from [72, 105]
+  eq rows(encodeQR('anything', 'raw', textEncoder: (-> bytes), border: 1)), rows(encodeQR('Hi', 'raw', border: 1))
+
+# ==[ Decoder ]==
+
+console.log "\nDecoder"
+
+# RGBA raster with the symbol centered on a gray field.
+raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
+  raw = encodeQR text, 'raw', { ...opts, scale, border: 4 }
+  s = raw.length
+  data = new Uint8Array(W * H * 4).fill(if invert then 40 else 200)
+  ox = (W - s) >> 1
+  oy = (H - s) >> 1
+  for y in [0...s]
+    for x in [0...s]
+      dark = raw[y][x]
+      dark = not dark if invert
+      v = if dark then 0 else 255
+      [px, py] = switch rotate
+        when 90 then [s - 1 - y, x]
+        when 180 then [s - 1 - x, s - 1 - y]
+        when 270 then [y, s - 1 - x]
+        else [x, y]
+      p = 4 * ((oy + py) * W + ox + px)
+      data[p] = data[p + 1] = data[p + 2] = v
+      data[p + 3] = 255
+  { width: W, height: H, data }
+
+toLuma = (img) ->
+  n = img.width * img.height
+  luma = new Uint8Array(n)
+  for i in [0...n]
+    p = 4 * i
+    luma[i] = (img.data[p] + 2 * img.data[p + 1] + img.data[p + 2]) >> 2
+  { width: img.width, height: img.height, data: luma }
+
+test "round trip every third version at every level", ->
+  for ver in [1..40] by 3
+    text = 'RIP'.repeat(ver)
+    for ecc in ['low', 'medium', 'quartile', 'high']
+      eq decodeQR(raster(text, { version: ver, ecc }, 3, 700, 700)), text, "v#{ver} #{ecc}"
+
+test "rotations and inverted symbols", ->
+  text = 'https://example.com/path?q=1'
+  for rotate in [0, 90, 180, 270]
+    eq decodeQR(raster(text, {}, 4, 400, 400, false, rotate)), text, "rot #{rotate}"
+  eq decodeQR(raster(text, {}, 4, 400, 400, true)), text, 'inverted'
+
+test "numeric, alphanumeric, byte and unicode payloads", ->
+  for text in ['7'.repeat(300), 'HELLO WORLD $%*+-./:', 'mixed Case 123', 'Ünïcödé 🔻 text']
+    eq decodeQR(raster(text, {}, 4, 500, 500)), text
+
+test "luma and packed formats", ->
+  img = raster 'FORMATS', {}, 4, 300, 300
+  eq decodeQR(toLuma(img), format: 'I420'), 'FORMATS'
+  eq decodeQR(img, format: 'RGBA'), 'FORMATS'
+  rgb = new Uint8Array(img.width * img.height * 3)
+  for i in [0...img.width * img.height]
+    rgb[3 * i + k] = img.data[4 * i + k] for k in [0...3]
+  eq decodeQR({ width: img.width, height: img.height, data: rgb }), 'FORMATS'
+
+test "throws when nothing decodes", ->
+  blank = { width: 200, height: 200, data: new Uint8Array(200 * 200 * 4).fill(128) }
+  throws (-> decodeQR blank), Error, 'finder'
+  eq decodeQR(raster('EFFORT', {}, 4, 300, 300), effort: Infinity, timeLimit: Infinity), 'EFFORT'
+
+test "option and image validation", ->
+  img = raster 'V', {}, 4, 200, 200
+  throws (-> decodeQR(img, effort: 0)), TypeError
+  throws (-> decodeQR(img, timeLimit: -1)), TypeError
+  throws (-> decodeQR(img, format: 'nope')), TypeError
+  throws (-> decodeQR(img, pointsOnDetect: 1)), TypeError
+  throws (-> decodeQR({ width: 0, height: 1, data: new Uint8Array(0) })), RangeError
+  throws (-> decodeQR({ width: 2, height: 2, data: new Uint8Array(5) })), RangeError
+  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })), TypeError
+
+test "pointsOnDetect reports geometry in image coordinates", ->
+  scale = 5
+  img = raster 'POINTS', {}, scale, 400, 400
+  points = null
+  result = null
+  eq decodeQR(img, pointsOnDetect: (p, r) -> [points, result] = [p, r]), 'POINTS'
+  eq result, 'POINTS'
+  ok points.tl.x < points.tr.x and points.tl.y < points.bl.y
+  for f in [points.tl, points.tr, points.bl]
+    ok Math.abs(f.moduleSize - scale) < 1, "module size #{f.moduleSize}"
+    eq f.corners.length, 4
+  box = points.boundingBox
+  size = 21 * scale
+  ok Math.abs(box.width - size) < scale and Math.abs(box.height - size) < scale, "box #{box.width}x#{box.height}"
+  ok Math.abs(box.x + box.width / 2 - 200) < scale and Math.abs(box.y + box.height / 2 - 200) < scale
+
+test "imageOnResult delivers the sampled module grid", ->
+  img = raster 'GRID', {}, 4, 300, 300
+  grid = null
+  decodeQR img, imageOnResult: (g) -> grid = g
+  eq [grid.width, grid.height], [21, 21]
+  raw = encodeQR 'GRID', 'raw', border: 1
+  dark = (x, y) -> grid.data[4 * (y * 21 + x)] is 0
+  eq (dark(x, y) for x in [0...21] for y in [0...21]), ((raw[y + 1][x + 1] for x in [0...21]) for y in [0...21])
+
+test! "decodeQRBatch finds every symbol", ->
+  two = raster 'LEFT', {}, 4, 700, 300
+  right = raster 'RIGHT', {}, 4, 300, 300
+  for y in [0...300]
+    for x in [0...300]
+      src = 4 * (y * 300 + x)
+      dst = 4 * (y * 700 + 400 + x)
+      two.data[dst + k] = right.data[src + k] for k in [0...4]
+  [results] = decodeQRBatch! [two]
+  eq results.filter((r) -> typeof r is 'string').sort(), ['LEFT', 'RIGHT']
+  eq results.at(-1) instanceof Error, true
+
+test! "scanner reuse, exclusive operations and clean", ->
+  scanner = QRScanner.new maxSize: { width: 300, height: 300 }
+  scanner.addImage raster('ONE', {}, 4, 300, 300)
+  eq scanner.decode(), ['ONE']
+  scanner.addImage raster('TWO', {}, 4, 250, 250)
+  eq scanner.decode(), ['TWO']
+  # A success excludes its region, so a staged frame decodes once; re-stage.
+  scanner.addImage raster('TWO', {}, 4, 250, 250)
+  eq scanner.decodeAsync!(), ['TWO']
+  throws (-> scanner.addImage raster('BIG', {}, 4, 400, 400)), RangeError
+  reentered = null
+  reenter = ->
+    try
+      guard.decode()
+    catch e
+      reentered = e.message
+  guard = QRScanner.new maxSize: { width: 300, height: 300 }, pointsOnDetect: reenter
+  guard.addImage raster('RE', {}, 4, 300, 300)
+  eq guard.decode(), ['RE']
+  eq reentered, 'scanner operation already in flight'
+  scanner.clean()
+  throws (-> scanner.decode()), 'expected addImage before decode'
