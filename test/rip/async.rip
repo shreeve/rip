@@ -911,3 +911,87 @@ test 'async canary - multi-hop await is tracked by runner', '''
       result
     fn()
   ''', 42
+
+# ==============================================================================
+# `yield*` — the JavaScript spelling of delegation, one meaning with `yield from`
+# ==============================================================================
+
+test "yield* delegates", '''
+  other = ->
+    yield 1
+    yield 2
+
+  main = ->
+    yield* other()
+    yield 3
+
+  [...main()]
+  ''', [1, 2, 3]
+
+test "yield* spaced before the operand delegates", '''
+  other = ->
+    yield 1
+    yield 2
+
+  main = ->
+    yield * other()
+    yield 3
+
+  [...main()]
+  ''', [1, 2, 3]
+
+test "yield* with return value", '''
+  other = ->
+    yield 1
+    return 42
+
+  main = ->
+    result = yield* other()
+    yield result
+
+  [...main()]
+  ''', [1, 42]
+
+test "yield* in a generator method", '''
+  class Bag
+    constructor: (@items) ->
+    each: -> yield* @items
+
+  [...Bag.new([7, 8]).each()]
+  ''', [7, 8]
+
+test "parenthesized yield still multiplies", '''
+  doubler = ->
+    r = (yield) * 2
+    yield r
+
+  gen = doubler()
+  gen.next()
+  gen.next(21).value
+  ''', 42
+
+test "yield ** stays exponentiation", '''
+  squarer = ->
+    r = (yield) ** 2
+    yield r
+
+  gen = squarer()
+  gen.next()
+  gen.next(5).value
+  ''', 25
+
+test "yield *{} still yields a Map", '''
+  g = ->
+    yield *{a: 1}
+
+  g().next().value.get('a')
+  ''', 1
+
+code "yield* generates yield*", '''
+  gen = ->
+    yield* other()
+  ''', '''
+  let gen = function*() {
+    return yield* other();
+  };
+  '''

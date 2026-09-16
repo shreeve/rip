@@ -6671,6 +6671,8 @@ ${baseline}`).join(`
         push("IMPORT_ALL", ch, pos, pos + 1);
       else if (ch === "*" && last()?.kind === "EXPORT")
         push("EXPORT_ALL", ch, pos, pos + 1);
+      else if (ch === "*" && last()?.kind === "YIELD" && !pendingNewLine)
+        push("FROM", ch, pos, pos + 1);
       else
         push("MATH", ch, pos, pos + 1);
       pos++;
