@@ -4,7 +4,7 @@
 
 > **QR and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.**
 
-The encoder keeps a symbol as one `Uint32Array` with 32 modules per word,
+The encoder keeps a symbol as one `Int32Array` with 32 modules per word,
 builds the function-pattern template, placement order and the eight mask
 planes once per version, and chooses a mask by XORing whole words and
 scoring the penalty rules word-parallel. The decoder binarizes a four-level
@@ -18,9 +18,9 @@ each eleven-module group to its nearest codeword in both directions and on
 both axes.
 
 **Runtime:** browser-safe (`rip.browser: true`). One file per symbology,
-`qr.rip` and `code128.rip`, each holding its encoder and reader; a root
-entry that re-exports both; the camera and canvas plumbing; and the
-ISO/IEC 18004 tables, GIF writer and image-input helpers they share.
+`qr.rip` and `code128.rip`, each holding its tables, encoder and reader; a
+root entry that re-exports both; the camera and canvas plumbing in `dom.rip`;
+and the GIF writer and image-input helpers both symbologies share.
 `rip/barcodes/qr` and `rip/barcodes/code128` import one symbology alone.
 
 ## Quick Start
@@ -33,7 +33,7 @@ p encodeQR(text, 'term')                      # print to any terminal
 svg    = encodeQR text, 'svg'                 # markup for a page
 gif    = encodeQR text, 'gif', scale: 4       # Uint8Array, a GIF file
 url    = encodeQR text, 'data-url', scale: 4  # 'data:image/gif;base64,...'
-matrix = encodeQR text, 'raw'                 # boolean[][] with the quiet zone
+matrix = encodeQR text, 'raw'                 # boolean[][], true is dark, quiet zone included
 ascii  = encodeQR text, 'ascii'               # half-height block characters
 
 # decode any RGBA raster, the shape a canvas ImageData already has
@@ -115,22 +115,23 @@ Every ASCII character encodes; the ASCII group separator (`'\x1d'`) becomes
 an FNC1 separator, and `gs1: true` opens the symbol with FNC1 for GS1-128
 application identifiers. The codeword sequence is the shortest over the
 three subsets, so `'A1234'` latches to subset C for the digit pairs while
-`'12345'` does not pay for a latch it cannot amortize. The outputs are the
-QR six with one row of modules: `raw` is a `boolean[]` including the quiet
-zone, `ascii` and `term` are one line, and `svg`, `gif` and `data-url` draw
-`height` modules of bar.
+`'123'` does not pay for a latch it cannot amortize. The outputs are the
+QR six with one row of modules: `raw` is a `boolean[]` with `true` for a bar
+and the quiet zone included, `ascii` and `term` are one line, and `svg`, `gif`
+and `data-url` draw `height` modules of bar.
 
 | option | meaning | default |
 | --- | --- | --- |
 | `scale` | pixels per module | `1` |
-| `border` | quiet-zone modules on each side | `10` |
+| `border` | quiet-zone modules on each side, `0` allowed | `10` |
 | `height` | bar height in modules for `svg`, `gif`, `data-url` | `40` |
 | `gs1` | open with FNC1 for GS1-128 | `false` |
 | `optimize` | one `<path>` instead of one `<rect>` per bar | `true` |
 
 `decodeCode128` takes the same `{ width, height, data }` as `decodeQR`,
-with the same `format` option, and returns the text or throws.
-`readCode128` returns `null` on a miss and otherwise
+with the same `format` option, and returns the text or throws
+`'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
+miss and otherwise
 `{ text, gs1, codes, line, vertical, reversed, inverted }`: the verified
 codewords and which scan line, axis, direction and polarity produced them.
 Modules must be at least one pixel wide; a printed label filling a quarter
@@ -163,9 +164,9 @@ overlay = document.querySelector 'canvas'     # positioned over the video
 canvas = QRCanvas.new { overlay }
 camera = rearCamera! video
 cancel = frameLoop ->
-  decoded = camera.readFrame canvas           # undefined until a frame decodes
+  decoded = camera.readFrame! canvas          # undefined until a frame decodes
   if decoded isnt undefined
-    console.log decoded
+    p decoded
     cancel()
     camera.stop()
 ```
@@ -174,9 +175,9 @@ cancel = frameLoop ->
 overlay, the decoded symbol, or the binarized plane onto the canvases it is
 given. `rearCamera` and `selfieCamera` open a stream into a video element;
 `camera.listDevices()` and `camera.setDevice(id)` switch cameras. When the
-browser exposes `VideoFrame`, frames are copied plane-for-plane into the
-scanner arena without a canvas round trip. `svgToPng` and `gifToPng`
-rasterize the encoder's output, and `BarcodeDetector` is a Shape Detection
+browser exposes `VideoFrame`, `camera.readFrame! canvas, true` copies
+frames plane-for-plane into the scanner arena without a canvas round trip.
+`svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and `BarcodeDetector` is a Shape Detection
 API ponyfill over `decodeQR`. Camera access needs a secure context.
 
 ## Performance
@@ -187,33 +188,33 @@ Bun 1.4.0 on an Apple M5. Each figure is the best of three processes; every
 process runs the whole sequence in this order, so each row is timed after
 the rows above it warmed the JIT, the way an application mixes symbol sizes.
 
-| Encode (µs)         |   rip | paulmillr/qr |
-|---------------------|------:|-------------:|
-| raw, version 1      |   2.7 |          2.8 |
-| raw, version 8      |  16.9 |         17.6 |
-| raw, version 18     |  51.7 |         54.7 |
-| svg, version 8      |  42.3 |         46.9 |
-| gif, version 8      |  18.1 |         18.7 |
+| Encode (µs)         |   rip | paulmillr/qr | speedup |
+|---------------------|------:|-------------:|--------:|
+| raw, version 1      |   2.4 |          3.2 |   1.33x |
+| raw, version 8      |  14.7 |         24.7 |   1.68x |
+| raw, version 18     |  46.4 |         61.8 |   1.33x |
+| svg, version 8      |  31.0 |         47.4 |   1.53x |
+| gif, version 8      |  14.6 |         18.3 |   1.25x |
 
-| Decode (µs)                |    rip | paulmillr/qr |
-|----------------------------|-------:|-------------:|
-| 132x132 raster, version 1  |   39.3 |        116.8 |
-| 1280x720 frame, one symbol |    649 |         1030 |
-| 1920x1080 frame, one symbol|   1490 |         2240 |
-| 1920x1080 noise, no symbol |  22950 |        23900 |
+| Decode (µs)                |    rip | paulmillr/qr | speedup |
+|----------------------------|-------:|-------------:|--------:|
+| 132x132 raster, version 1  |   28.5 |        114.1 |   4.00x |
+| 1280x720 frame, one symbol |    578 |         1010 |   1.75x |
+| 1920x1080 frame, one symbol|   1300 |         2210 |   1.70x |
+| 1920x1080 noise, no symbol |   6030 |        23900 |   3.96x |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
 background, plus a full-frame noise image for the miss case, which is
-dominated by the finder search both implementations run line for line.
+dominated by the finder search; this package walks it on packed words.
 
 Encode timings are sensitive to which symbol size a process sees first.
 A version 1 symbol fits one 32-bit word per row and never fills a word, so
 a JIT that meets it first specializes the encoder on small integers; the
 first larger symbol then produces full words, which JavaScript reads as
 doubles from an unsigned array, and the recompiled mixed-type code runs
-about 1.4x slower for the rest of the process. The reference implementation
-shows this in the table: warmed only on its own size, its raw version 8 and
+slower for the rest of the process. The reference implementation shows
+this in the table: warmed only on its own size, its raw version 8 and
 18 rows are 16.8 and 52.8. This package stores matrix words in an
 `Int32Array`, so a full word is an ordinary integer in every version and
 the encoder keeps one specialization whatever order the sizes arrive in.

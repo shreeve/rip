@@ -1,6 +1,7 @@
 # ==============================================================================
 # rip/barcodes tests — encoder pins generated once from the reference
-# implementation, decoder round trips over synthetic rasters, package surface
+# implementation, decoder round trips over synthetic rasters, Code 128 against
+# the published vector, package surface
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
@@ -13,18 +14,70 @@ import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/b
 import * as code128 from 'rip/barcodes/code128'
 import { readFileSync } from 'fs'
 
-{ BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } = _tests
+{ BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt, encodeData, detectType } = _tests
 
-rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')).join('\n')
+WIKIPEDIA =! [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
+
+bits =! (row) -> row.map((b) -> if b then '1' else '0').join('')
+rows =! (raw) -> raw.map(bits).join('\n')
+flat =! (W, H, value) -> { width: W, height: H, data: Uint8Array.new(W * H * 4).fill(value) }
+art  =! (picture) -> picture.split('\n').map (row) -> [...row].map (ch) -> ch is '#'
+ansi =! (picture) -> picture.replaceAll('#', '\x1b[40m  \x1b[0m').replaceAll('.', '\x1b[1;47m  \x1b[0m') + '\n'
+
+# Modules painted by an SVG, as a raw matrix: the optimized path draws each
+# module as a move, `h1v1`, a return to its left edge, and `Z`; plain output
+# draws one rect per module. Everything outside the envelope must be a module.
+svgCells =! (svg, W) ->
+  cells = ((false for x in [0...W]) for y in [0...W])
+  cell = /([Mm])(-?\d+) (-?\d+)h1v1(?:H(\d+)|h-1)Z|<rect x="(\d+)" y="(\d+)" width="1" height="1" \/>/g
+  x = 0
+  y = 0
+  for m in svg.matchAll cell
+    if m[5] isnt undefined
+      x = +m[5]
+      y = +m[6]
+    else
+      if m[1] is 'M'
+        x = +m[2]
+        y = +m[3]
+      else
+        x += +m[2]
+        y += +m[3]
+      eq +m[4], x if m[4] isnt undefined   # `H<x>` returns to the cell's own left edge
+    cells[y][x] = true
+  rest = svg.replace cell, ''
+  open = "<svg viewBox=\"0 0 #{W} #{W}\" xmlns=\"http://www.w3.org/2000/svg\">"
+  ok rest is open + '<path d=""/></svg>' or rest is open + '</svg>', rest
+  cells
+
+# Pixels of a GIF from the package's own writer: GIF87a, a 128-entry palette
+# with entry 0 white and the rest black, then an uncompressed LZW stream whose
+# every sub-block opens with a clear code and carries literal palette indices.
+gifPixels =! (gif) ->
+  eq String.fromCharCode(...gif.subarray(0, 6)), 'GIF87a'
+  width  = gif[6] | gif[7] << 8
+  height = gif[8] | gif[9] << 8
+  eq Array.from(gif.subarray(10, 16)), [0xf6, 0, 0, 255, 255, 255]
+  eq Array.from(gif.subarray(16, 397)).every((b) -> b is 0), true
+  eq Array.from(gif.subarray(397, 408)), [0x2c, 0, 0, 0, 0, gif[6], gif[7], gif[8], gif[9], 0, 7]
+  pixels = []
+  pos    = 408
+  until gif[pos] is 1 and gif[pos + 1] is 0x81
+    n = gif[pos]
+    eq gif[pos + 1], 0x80
+    pixels.push ...gif.subarray(pos + 2, pos + 1 + n)
+    pos += n + 1
+  eq Array.from(gif.subarray(pos, gif.length)), [1, 0x81, 0, 0x3b]
+  { width, height, pixels }
 
 # ==[ Package surface ]==
 
-console.log "\nPackage"
+p "\nPackage"
 
 test "exports", ->
   eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodeQR', 'readCode128']
-  eq enc.default, encodeQR
-  eq enc.decodeQR, decodeQR
+  eq enc.default,       encodeQR
+  eq enc.decodeQR,      decodeQR
   eq enc.encodeCode128, encodeCode128
   eq enc.decodeCode128, decodeCode128
   eq Object.keys(qr).sort(), ['QRScanner', '_tests', 'decodeQR', 'decodeQRBatch', 'encodeQR']
@@ -34,14 +87,14 @@ test "exports", ->
 test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
-  eq pkg.rip, { browser: true }
-  for file in ['gif.rip', 'image.rip', 'qr.rip', 'code128.rip', 'barcodes.rip', 'dom.rip']
+  eq pkg.rip,          { browser: true }
+  for file in pkg.files when file.endsWith('.rip')
     source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
 
 # ==[ Spec tables ]==
 
-console.log "\nSpec"
+p "\nSpec"
 
 test "Table 1 codeword totals", ->
   eq BYTES, [
@@ -50,27 +103,27 @@ test "Table 1 codeword totals", ->
   ]
 
 test "alignment centers", ->
-  eq alignmentPatterns(1), []
-  eq alignmentPatterns(2), [6, 18]
-  eq alignmentPatterns(7), [6, 22, 38]
+  eq alignmentPatterns(1),  []
+  eq alignmentPatterns(2),  [6, 18]
+  eq alignmentPatterns(7),  [6, 22, 38]
   eq alignmentPatterns(40), [6, 30, 58, 86, 114, 142, 170]
 
 test "format and version words", ->
   eq formatBits('medium', 0), 0b101010000010010
-  eq formatBits('low', 7), 0b110100101110110
-  eq versionBits(7), 0x07C94
+  eq formatBits('low',    7), 0b110100101110110
+  eq versionBits(7),  0x07C94
   eq versionBits(40), 0x28C69
 
 test "mask predicates and popcount", ->
   eq maskBits(0, 0), 0xff
   eq maskBits(1, 0), 0b01110010
-  eq popcnt(0), 0
+  eq popcnt(0),          0
   eq popcnt(0xffffffff), 32
   eq popcnt(0x80000001), 2
 
 # ==[ Encoder ]==
 
-console.log "\nEncoder"
+p "\nEncoder"
 
 ENCODE_DATA =! [
   ["12345678", 1, "low", "numeric", [16, 32, 123, 114, 39, 0, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 188, 247, 62, 248, 53, 170, 224]]
@@ -84,30 +137,106 @@ ENCODE_DATA =! [
 test "encodeData vectors", ->
   for [text, version, ecc, type, bytes] in ENCODE_DATA
     utf8 = if type is 'byte' then TextEncoder.new().encode(text) else undefined
-    eq Array.from(_tests.encodeData(version, ecc, text, type, utf8)), bytes, text
+    eq Array.from(encodeData(version, ecc, text, type, utf8)), bytes, text
 
 test "detectType", ->
-  eq _tests.detectType('12345678'), 'numeric'
-  eq _tests.detectType('HELLO WORLD'), 'alphanumeric'
-  eq _tests.detectType('hello'), 'byte'
-  eq _tests.detectType('🔻'), 'byte'
+  eq detectType('12345678'),    'numeric'
+  eq detectType('HELLO WORLD'), 'alphanumeric'
+  eq detectType('hello'),       'byte'
+  eq detectType('🔻'),          'byte'
 
 test "ascii", ->
-  eq encodeQR('Hello world', 'ascii'), "█████████████████████████\n██ ▄▄▄▄▄ ██▀ ▀██ ▄▄▄▄▄ ██\n██ █   █ █   ███ █   █ ██\n██ █▄▄▄█ █  █▀▄█ █▄▄▄█ ██\n██▄▄▄▄▄▄▄█ █ █▄█▄▄▄▄▄▄▄██\n██ █▄ ▄ ▄█▀▀  ▀▀     █▀██\n██ ▄▄▄ ▀▄▄▀▀▀▀  ▄█▀  ▄███\n████▄▄█▄▄▄  ▄█ ▄▄█▀▀██▄██\n██ ▄▄▄▄▄ █▀██▄█▀▄▀█▀  ▀██\n██ █   █ █  █▄▀▀  ▀▀██▄██\n██ █▄▄▄█ █▄▀▀█ ▀█▄▀▀ ████\n██▄▄▄▄▄▄▄█▄██▄▄█▄█▄██▄███\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+  eq encodeQR('Hello world', 'ascii'), """
+    █████████████████████████
+    ██ ▄▄▄▄▄ ██▀ ▀██ ▄▄▄▄▄ ██
+    ██ █   █ █   ███ █   █ ██
+    ██ █▄▄▄█ █  █▀▄█ █▄▄▄█ ██
+    ██▄▄▄▄▄▄▄█ █ █▄█▄▄▄▄▄▄▄██
+    ██ █▄ ▄ ▄█▀▀  ▀▀     █▀██
+    ██ ▄▄▄ ▀▄▄▀▀▀▀  ▄█▀  ▄███
+    ████▄▄█▄▄▄  ▄█ ▄▄█▀▀██▄██
+    ██ ▄▄▄▄▄ █▀██▄█▀▄▀█▀  ▀██
+    ██ █   █ █  █▄▀▀  ▀▀██▄██
+    ██ █▄▄▄█ █▄▀▀█ ▀█▄▀▀ ████
+    ██▄▄▄▄▄▄▄█▄██▄▄█▄█▄██▄███
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+    """
 
 test "term", ->
-  eq encodeQR('Hi', 'term', border: 1), "\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n"
+  eq encodeQR('Hi', 'term', border: 1), ansi """
+    .......................
+    .#######...##..#######.
+    .#.....#.#####.#.....#.
+    .#.###.#.##..#.#.###.#.
+    .#.###.#.#.#...#.###.#.
+    .#.###.#..####.#.###.#.
+    .#.....#..#..#.#.....#.
+    .#######.#.#.#.#######.
+    .........#####.........
+    .#.....#.###.###..###..
+    .#.##.#...##.#.#.#.....
+    ..##..###..##.#..####..
+    .##.#....#.#.....#.#...
+    .#.#..####.....#..###..
+    .........#.######.#....
+    .#######...#.#.##...#..
+    .#.....#....###.###....
+    .#.###.#..#..#..#..#...
+    .#.###.#...#.#.....#...
+    .#.###.#..##...#...###.
+    .#.....#...#.....#.#...
+    .#######.####.#..####..
+    .......................
+    """
 
 test "svg, optimized and plain", ->
-  eq encodeQR('Hello world', 'svg'), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M2 2h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 3h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 4h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 5h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 6h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 7h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 8h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM10 9h1v1h-1Zm2 0h1v1h-1ZM2 10h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 11h1v1H2Zm3 0h1v1H5Zm2 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 12h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm1 0h1v1H9Zm5 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 13h1v1H2Zm4 0h1v1H6Zm1 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM4 14h1v1H4Zm1 0h1v1H5Zm2 0h1v1H7Zm1 0h1v1H8Zm1 0h1v1H9Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm6 0h1v1h-1Zm-12 1h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 16h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm5 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 17h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm5 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 18h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm5 0h1v1h-1ZM2 19h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 20h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm4 0h1v1h-1Zm3 0h1v1h-1Zm3 0h1v1h-1ZM2 21h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 22h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Z\"/></svg>"
-  eq encodeQR('Hi', 'svg', optimize: false), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"22\" width=\"1\" height=\"1\" /></svg>"
+  raw = encodeQR 'Hello world', 'raw'
+  svg = encodeQR 'Hello world', 'svg'
+  ok svg.startsWith('<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"><path d="M2 2h1v1H2Zm1 0h1v1H3Z')
+  ok svg.includes('h-1Z')   # cells at x >= 10 return by `h-1`, the shorter command
+  eq svgCells(svg, 25), raw
+  plain = encodeQR 'Hello world', 'svg', optimize: false
+  ok plain.startsWith('<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="1" height="1" />')
+  eq svgCells(plain, 25), raw
 
 test "gif and data-url", ->
-  eq Array.from(encodeQR('Hello world', 'gif', scale: 2)), [71, 73, 70, 56, 55, 97, 50, 0, 50, 0, 246, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 44, 0, 0, 0, 0, 50, 0, 50, 0, 0, 7, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 129, 0, 59]
-  eq encodeQR('Hello world', 'data-url'), "data:image/gif;base64,R0lGODdhGQAZAPYAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwAAAAAGQAZAAAHf4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQAAAAEAAAABAQEBAQEBAAAAAAEAAAAAAAEAAAEBAQAAAQAAAAAAAQAAAAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAB/gAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAAAAQABAQEAAQABAQAAAQABAAEBAQABAAAAAAEAAAAAAAEAAQEAAQAAAQAAAAAAAQAAAAABAQEBAQEBAAEAAQABAAEBAQEBAQEAAAAAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAAAAH+AAQABAQEBAQAAAAEBAAABAQEBAQAAAAAAAAEAAAEAAQAAAQEBAQEBAQEBAQEAAQAAAAABAQEBAQABAQAAAAABAQEAAAEBAQAAAAAAAQAAAAEBAAABAQEBAQEAAAEBAQAAAAAAAAAAAQEAAQEBAQEBAAEBAQAAAAAAAQAAAAAAf4AAAAAAAAAAAQEAAAEAAAABAQAAAAAAAAABAQEBAQEBAAAAAAEAAAEAAAABAQAAAAAAAQAAAAAAAQABAAAAAAEAAQABAQEBAAAAAAEAAQEBAAEAAQEAAQAAAQEAAAAAAQAAAAABAAEBAQABAAEBAAABAQEBAQEAAAAAAAAAAQB6gAEBAQABAAEAAAABAAABAAABAAAAAAAAAQAAAAAAAQAAAQEAAQEAAAEBAQAAAAAAAAEBAQEBAQEAAQAAAQEAAQABAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgQA7"
+  raw = encodeQR 'Hello world', 'raw'
+  gif = encodeQR 'Hello world', 'gif', scale: 2
+  {width, height, pixels} = gifPixels gif
+  eq [width, height], [50, 50]
+  expected = []
+  for y in [0...50]
+    expected.push(if raw[y // 2][x // 2] then 1 else 0) for x in [0...50]
+  eq pixels, expected
+  eq encodeQR('Hello world', 'data-url'), 'data:image/gif;base64,' + Buffer.from(encodeQR('Hello world', 'gif')).toString('base64')
 
 test "raw", ->
-  eq encodeQR('Hello world', 'raw', border: 1), [[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, true, false, false, false, true, true, true, true, true, true, true, false], [false, true, false, false, false, false, false, true, false, false, true, true, true, false, false, true, false, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, false, true, false, true, true, true, false, true, false], [false, true, false, false, false, false, false, true, false, true, true, false, true, false, false, true, false, false, false, false, false, true, false], [false, true, true, true, true, true, true, true, false, true, false, true, false, true, false, true, true, true, true, true, true, true, false], [false, false, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false], [false, true, false, true, true, true, true, true, false, false, false, true, true, false, false, true, true, true, true, true, false, false, false], [false, true, false, false, true, false, true, false, false, true, true, true, true, true, true, true, true, true, true, true, false, true, false], [false, true, true, true, true, true, false, true, true, false, false, false, false, true, true, true, false, false, true, true, true, false, false], [false, true, false, false, false, true, true, false, false, true, true, true, true, true, true, false, false, true, true, true, false, false, false], [false, false, false, true, true, false, true, true, true, true, true, true, false, true, true, true, false, false, false, false, false, true, false], [false, false, false, false, false, false, false, false, false, true, true, false, false, true, false, false, false, true, true, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, false, true, false, false, true, false, false, false, true, true, false, false], [false, true, false, false, false, false, false, true, false, true, false, false, false, false, true, false, true, false, true, true, true, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, true, false, false, true, true, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, true, true, true, true, true, false, false, false, false], [false, true, false, true, true, true, false, true, false, true, false, false, false, true, false, false, true, false, false, true, false, false, false], [false, true, false, false, false, false, false, true, false, false, true, true, false, true, true, false, false, true, true, true, false, false, false], [false, true, true, true, true, true, true, true, false, true, false, false, true, true, false, true, false, true, false, false, true, false, false], [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]]
+  eq encodeQR('Hello world', 'raw', border: 1), art """
+    .......................
+    .#######...#...#######.
+    .#.....#..###..#.....#.
+    .#.###.#.###...#.###.#.
+    .#.###.#.###...#.###.#.
+    .#.###.#.##..#.#.###.#.
+    .#.....#.##.#..#.....#.
+    .#######.#.#.#.#######.
+    .........#.#...........
+    .#.#####...##..#####...
+    .#..#.#..###########.#.
+    .#####.##....###..###..
+    .#...##..######..###...
+    ...##.######.###.....#.
+    .........##..#...##....
+    .#######....#..#...##..
+    .#.....#.#....#.#.####.
+    .#.###.#.##.#..##....#.
+    .#.###.#.##..######....
+    .#.###.#.#...#..#..#...
+    .#.....#..##.##..###...
+    .#######.#..##.#.#..#..
+    .......................
+    """
 
 VERSION_HASHES =! ["15144155502040334453", "11860336336062881808", "9136085086669388644", "1193089572591710977", "7686873670648342784", "5343431842319324110", "17390098021478000837", "3840461960574158097", "4294510183992695906", "15528468463722452699", "6845340642062067951", "2863315931406977110", "1000235694808952747", "4850376682882191310", "170292611262382408", "16193601112266899915", "3021963056225426727", "17063662145875125935", "15921535972440319276", "10460739331697383771", "4104402773850033517", "6767157915294766020", "16623589994970719969", "12747355529232067061", "17235346348443545711", "11264115602249123588", "11370428948163515140", "15807326944508417556", "135482596482876342", "4755772298643999272", "17978155199721953926", "16372105395315088973", "144795419258277521", "14530093731977448862", "18060845299463144063", "3503644178110624366", "6867699886559328586", "10580509781540705", "18052239940279011487", "2543736270194563918"]
 
@@ -145,17 +274,17 @@ test "capacity boundaries", ->
   throws (-> encodeQR('x'.repeat(3000), 'raw')), 'Capacity overflow'
 
 test "argument validation", ->
-  throws (-> encodeQR(123, 'raw')), TypeError
-  throws (-> encodeQR('x', 'nope')), 'Unknown output'
-  throws (-> encodeQR('x', 'raw', version: 0)), RangeError
-  throws (-> encodeQR('x', 'raw', version: 41)), RangeError
-  throws (-> encodeQR('x', 'raw', mask: 9)), 'invalid mask'
-  throws (-> encodeQR('x', 'raw', ecc: 'zz')), 'invalid ecc'
+  throws (-> encodeQR(123, 'raw')),                        TypeError
+  throws (-> encodeQR('x', 'nope')),                       'Unknown output'
+  throws (-> encodeQR('x', 'raw', version: 0)),            RangeError
+  throws (-> encodeQR('x', 'raw', version: 41)),           RangeError
+  throws (-> encodeQR('x', 'raw', mask: 9)),               'invalid mask'
+  throws (-> encodeQR('x', 'raw', ecc: 'zz')),             'invalid ecc'
   throws (-> encodeQR('abc', 'raw', encoding: 'numeric')), 'Unknown letter'
-  throws (-> encodeQR('x', 'raw', border: 0)), RangeError
-  throws (-> encodeQR('x', 'raw', scale: 2000)), RangeError
+  throws (-> encodeQR('x', 'raw', border: 0)),             RangeError
+  throws (-> encodeQR('x', 'raw', scale: 2000)),           RangeError
   throws (-> encodeQR('x', 'raw', version: 1, scale: 50)), 'reduce border/scale'
-  throws (-> encodeQR('x', 'raw', textEncoder: -> 'no')), TypeError
+  throws (-> encodeQR('x', 'raw', textEncoder: -> 'no')),  TypeError
 
 test "custom text encoder", ->
   bytes = Uint8Array.from [72, 105]
@@ -163,22 +292,22 @@ test "custom text encoder", ->
 
 # ==[ Decoder ]==
 
-console.log "\nDecoder"
+p "\nDecoder"
 
 # RGBA raster with the symbol centered on a gray field.
-raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
-  raw = encodeQR text, 'raw', { ...opts, scale, border: 4 }
-  s = raw.length
+raster =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
+  raw  = encodeQR text, 'raw', { ...opts, scale, border: 4 }
+  s    = raw.length
   data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
-  ox = (W - s) >> 1
-  oy = (H - s) >> 1
+  ox   = (W - s) >> 1
+  oy   = (H - s) >> 1
   for y in [0...s]
     for x in [0...s]
       dark = raw[y][x]
       dark = not dark if invert
-      v = if dark then 0 else 255
+      v    = if dark then 0 else 255
       [px, py] = switch rotate
-        when 90 then [s - 1 - y, x]
+        when 90  then [s - 1 - y, x]
         when 180 then [s - 1 - x, s - 1 - y]
         when 270 then [y, s - 1 - x]
         else [x, y]
@@ -187,8 +316,8 @@ raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
       data[p + 3] = 255
   { width: W, height: H, data }
 
-toLuma = (img) ->
-  n = img.width * img.height
+toLuma =! (img) ->
+  n    = img.width * img.height
   luma = Uint8Array.new(n)
   for i in [0...n]
     p = 4 * i
@@ -211,29 +340,40 @@ test "numeric, alphanumeric, byte and unicode payloads", ->
   for text in ['7'.repeat(300), 'HELLO WORLD $%*+-./:', 'mixed Case 123', 'Ünïcödé 🔻 text']
     eq decodeQR(raster(text, {}, 4, 500, 500)), text
 
+test "small image, low contrast", ->
+  # A 25 px side is under four threshold blocks; the window folds onto the edge.
+  raw = encodeQR 'Hi', 'raw', border: 2
+  n = raw.length
+  data = Uint8Array.new(n * n)
+  for y in [0...n]
+    data[y * n + x] = (if raw[y][x] then 40 else 200) for x in [0...n]
+  eq decodeQR({ width: n, height: n, data }, format: 'I420'), 'Hi'
+
 test "luma and packed formats", ->
   img = raster 'FORMATS', {}, 4, 300, 300
   eq decodeQR(toLuma(img), format: 'I420'), 'FORMATS'
-  eq decodeQR(img, format: 'RGBA'), 'FORMATS'
+  eq decodeQR(img,         format: 'RGBA'), 'FORMATS'
   rgb = Uint8Array.new(img.width * img.height * 3)
   for i in [0...img.width * img.height]
     rgb[3 * i + k] = img.data[4 * i + k] for k in [0...3]
   eq decodeQR({ width: img.width, height: img.height, data: rgb }), 'FORMATS'
 
 test "throws when nothing decodes", ->
-  blank = { width: 200, height: 200, data: Uint8Array.new(200 * 200 * 4).fill(128) }
+  blank = flat 200, 200, 128
   throws (-> decodeQR blank), Error, 'finder'
   eq decodeQR(raster('EFFORT', {}, 4, 300, 300), effort: Infinity, timeLimit: Infinity), 'EFFORT'
 
 test "option and image validation", ->
   img = raster 'V', {}, 4, 200, 200
-  throws (-> decodeQR(img, effort: 0)), TypeError
-  throws (-> decodeQR(img, timeLimit: -1)), TypeError
-  throws (-> decodeQR(img, format: 'nope')), TypeError
-  throws (-> decodeQR(img, pointsOnDetect: 1)), TypeError
+  throws (-> decodeQR(img, effort: 0)                                  ), TypeError
+  throws (-> decodeQR(img, timeLimit: -1)                              ), TypeError
+  throws (-> decodeQR(img, format: 'nope')                             ), TypeError
+  throws (-> decodeQR(img, format: 'toString')                         ), TypeError, 'format'
+  throws (-> decodeQR(null)                                            ), TypeError, 'img'
+  throws (-> decodeQR(img, pointsOnDetect: 1)                          ), TypeError
   throws (-> decodeQR({ width: 0, height: 1, data: Uint8Array.new(0) })), RangeError
   throws (-> decodeQR({ width: 2, height: 2, data: Uint8Array.new(5) })), RangeError
-  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })), TypeError
+  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })     ), TypeError
 
 test "pointsOnDetect reports geometry in image coordinates", ->
   scale = 5
@@ -261,7 +401,7 @@ test "imageOnResult delivers the sampled module grid", ->
   eq (dark(x, y) for x in [0...21] for y in [0...21]), ((raw[y + 1][x + 1] for x in [0...21]) for y in [0...21])
 
 test! "decodeQRBatch finds every symbol", ->
-  two = raster 'LEFT', {}, 4, 700, 300
+  two   = raster 'LEFT',  {}, 4, 700, 300
   right = raster 'RIGHT', {}, 4, 300, 300
   for y in [0...300]
     for x in [0...300]
@@ -297,38 +437,38 @@ test! "scanner reuse, exclusive operations and clean", ->
 
 # ==[ Code 128 ]==
 
-console.log "\nCode 128"
+p "\nCode 128"
 
-test "Code 128 codewords: published vector, shortest subset choice, FNC1", ->
-  eq c128.codewords('Wikipedia'), [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
-  eq c128.codewords('1234'), [105, 12, 34, 82, 106]
-  eq c128.codewords('A1234'), [104, 33, 99, 12, 34, 95, 106]
+test "codewords: published vector, shortest subset choice, FNC1", ->
+  eq c128.codewords('Wikipedia'), WIKIPEDIA
+  eq c128.codewords('1234'),      [105, 12, 34, 82, 106]
+  eq c128.codewords('A1234'),     [104, 33, 99, 12, 34, 95, 106]
   eq c128.codewords('ABC123456'), [104, 33, 34, 35, 99, 12, 34, 56, 23, 106]
-  eq c128.codewords('\x01\x02'), [103, 65, 66, 94, 106]
-  eq c128.codewords('a\x01b'), [104, 65, 98, 65, 66, 0, 106]
-  eq c128.codewords('AB\x1dCD'), [104, 33, 34, 102, 35, 36, 7, 106]
+  eq c128.codewords('\x01\x02'),  [103, 65, 66, 94, 106]
+  eq c128.codewords('a\x01b'),    [104, 65, 98, 65, 66, 0, 106]
+  eq c128.codewords('AB\x1dCD'),  [104, 33, 34, 102, 35, 36, 7, 106]
   eq c128.codewords('(01)09501101530003', true), [104, 102, 8, 16, 17, 9, 99, 9, 50, 11, 1, 53, 0, 3, 8, 106]
   for text in ['Hello, World! 2026', 'L2602852147', '12345', '\x7f~ ', 'x0y1z2', '2026-09-15T12:00']
     codes = c128.codewords text
     ok codes.length <= text.length + 3, text
     sum = codes[0]
-    sum += k * codes[k] for k in [1...codes.length - 2]
-    eq sum % 103, codes[codes.length - 2], text
-    eq codes[codes.length - 1], 106
+    sum += codes[i] * i for i in [1...codes.length - 2]
+    eq codes.at(-2), sum % 103, text
+    eq codes.at(-1), 106
   throws (-> c128.codewords 'é'), Error, 'cannot encode'
-  throws (-> c128.codewords ''), Error, 'empty'
+  throws (-> c128.codewords ''),  Error, 'empty'
 
-test "Code 128 modules and outputs", ->
+test "modules and outputs", ->
   raw = encodeCode128 'Wikipedia', 'raw', border: 0
   eq raw.length, 11 * 12 + 2
-  eq raw.slice(0, 11).map((b) -> if b then 1 else 0).join(''), '11010010000'
-  eq raw.slice(-13).map((b) -> if b then 1 else 0).join(''), '1100011101011'
+  eq bits(raw.slice(0, 11)), '11010010000'
+  eq bits(raw.slice(-13)),   '1100011101011'
   eq encodeCode128('Wikipedia').length, 11 * 12 + 2 + 20
   eq encodeCode128('Wikipedia', 'raw', scale: 3, border: 1).length, 3 * (11 * 12 + 4)
   ascii = encodeCode128 'ok', 'ascii', border: 2
-  eq ascii.length, 62
+  eq ascii.length,      62
   eq ascii.slice(0, 2), '██'
-  eq ascii.at(-1), '\n'
+  eq ascii.at(-1),      '\n'
   eq encodeCode128('ok', 'svg', border: 2, height: 10), '<svg viewBox="0 0 61 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 0h2v10h-2ZM5 0h1v10h-1ZM8 0h1v10h-1ZM13 0h1v10h-1ZM17 0h4v10h-4ZM22 0h1v10h-1ZM24 0h2v10h-2ZM30 0h1v10h-1ZM33 0h1v10h-1ZM35 0h3v10h-3ZM39 0h1v10h-1ZM42 0h2v10h-2ZM46 0h2v10h-2ZM51 0h3v10h-3ZM55 0h1v10h-1ZM57 0h2v10h-2Z"/></svg>'
   eq (encodeCode128('ok', 'svg', border: 2, height: 10, optimize: false).match(/<rect /g)).length, 16
   term = encodeCode128 'ok', 'term', border: 2
@@ -338,75 +478,73 @@ test "Code 128 modules and outputs", ->
   eq gif.length, 660
   eq gif.at(-1), 0x3b
   url = encodeCode128 'ok', 'data-url', border: 2, height: 4
-  eq url.slice(0, 28), 'data:image/gif;base64,R0lGOD'
-  eq url.length, 902
-  throws (-> encodeCode128 'ok', 'png'), Error, 'Unknown output'
-  throws (-> encodeCode128 42), TypeError, 'expected string'
-  throws (-> encodeCode128 'ok', 'raw', scale: 0), RangeError, 'scale'
-  throws (-> encodeCode128 'ok', 'raw', border: -1), RangeError, 'border'
-  throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError, 'height'
-  throws (-> encodeCode128 'ok', 'raw', scale: 100), Error, 'exceeds'
+  eq url, 'data:image/gif;base64,' + btoa(String.fromCharCode(...gif))
+  throws (-> encodeCode128 'ok', 'png'),              Error,      'Unknown output'
+  throws (-> encodeCode128 42),                       TypeError,  'expected string'
+  throws (-> encodeCode128 'ok', 'raw', scale: 0),    RangeError, 'scale'
+  throws (-> encodeCode128 'ok', 'raw', border: -1),  RangeError, 'border'
+  throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError,  'height'
+  throws (-> encodeCode128 'ok', 'raw', scale: 100),  Error,      'exceeds'
 
 # RGBA raster with the bar row painted 30 pixels tall on a gray field.
-bars = (text, opts, scale, W, H, rotate = 0, invert = false) ->
-  raw = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
-  w = raw.length
-  h = 30
-  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
+bars =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
+  raw    = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
+  w      = raw.length
+  h      = 30
+  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
   turned = rotate is 90 or rotate is 270
-  ox = (W - (if turned then h else w)) >> 1
-  oy = (H - (if turned then w else h)) >> 1
+  ox     = (W - (if turned then h else w)) >> 1
+  oy     = (H - (if turned then w else h)) >> 1
   for y in [0...h]
     for x in [0...w]
       dark = raw[x]
       dark = not dark if invert
-      v = if dark then 20 else 240
-      px = x
-      py = y
-      switch rotate
-        when 90 then (px = h - 1 - y; py = x)
-        when 180 then (px = w - 1 - x; py = h - 1 - y)
-        when 270 then (px = y; py = w - 1 - x)
+      v    = if dark then 20 else 240
+      [px, py] = switch rotate
+        when 90  then [h - 1 - y, x]
+        when 180 then [w - 1 - x, h - 1 - y]
+        when 270 then [y, w - 1 - x]
+        else [x, y]
       p = 4 * ((oy + py) * W + ox + px)
       data[p] = data[p + 1] = data[p + 2] = v
       data[p + 3] = 255
   { width: W, height: H, data }
 
-test "Code 128 round trips: scales, rotations, inversion, GS1", ->
+test "round trips: scales, rotations, inversion, GS1", ->
   for scale in [1, 2, 3, 5]
     eq decodeCode128(bars('Hello, World! 2026', {}, scale, 1400, 200)), 'Hello, World! 2026', "scale #{scale}"
   for rotate in [0, 90, 180, 270]
-    hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, rotate)
-    eq hit.text, 'Wikipedia', "rotate #{rotate}"
-    eq hit.vertical, rotate is 90 or rotate is 270
+    hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, false, rotate)
+    eq hit.text,     'Wikipedia', "rotate #{rotate}"
+    eq hit.vertical, rotate is 90  or rotate is 270
     eq hit.reversed, rotate is 180 or rotate is 270
     eq hit.inverted, false
-    eq hit.codes, [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
-  hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, 0, true)
-  eq hit.text, 'Wikipedia'
+    eq hit.codes,    WIKIPEDIA
+  hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, true)
+  eq hit.text,     'Wikipedia'
   eq hit.inverted, true
   eq readCode128(bars('a\x01b\x02', {}, 2, 500, 300)).text, 'a\x01b\x02'
   eq readCode128(bars('0123456789', {}, 1, 300, 100)).text, '0123456789'
-  eq readCode128(bars('ok', {}, 1, 100, 20)).text, 'ok'
+  eq readCode128(bars('ok',         {}, 1, 100, 20)).text,  'ok'
   hit = readCode128 bars('(01)09501101530003', gs1: true, 2, 600, 300)
   eq hit.text, '(01)09501101530003'
-  eq hit.gs1, true
+  eq hit.gs1,  true
   hit = readCode128 bars('AB\x1dCD', {}, 2, 500, 300)
   eq hit.text, 'AB\x1dCD'
-  eq hit.gs1, false
+  eq hit.gs1,  false
   eq readCode128(toLuma(bars('Wikipedia', {}, 2, 500, 300)), format: 'I420').text, 'Wikipedia'
-  blank = { width: 50, height: 50, data: Uint8Array.new(50 * 50 * 4).fill(200) }
+  blank = flat 50, 50, 200
   eq readCode128(blank), null
-  throws (-> decodeCode128 blank), Error, 'not found'
+  throws (-> decodeCode128 blank),     Error,     'not found'
   throws (-> readCode128 blank, null), TypeError, 'opts'
   throws (-> readCode128 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
 
-test "Code 128 text: shifts, FNC4 high characters, latches", ->
-  text = (codes) -> c128.decodeText(codes, codes.length).text
-  eq text([104, 98, 65, 66, 0, 106]), '\x01b'
-  eq text([104, 100, 33, 34, 0, 106]), 'ÁB'
-  eq text([104, 100, 100, 33, 34, 0, 106]), 'ÁÂ'
-  eq text([104, 100, 100, 33, 100, 34, 0, 106]), 'ÁB'
+test "text: shifts, FNC4 high characters, latches", ->
+  text =! (codes) -> c128.decodeText(codes, codes.length).text
+  eq text([104, 98, 65, 66, 0, 106]),                  '\x01b'
+  eq text([104, 100, 33, 34, 0, 106]),                 'ÁB'
+  eq text([104, 100, 100, 33, 34, 0, 106]),            'ÁÂ'
+  eq text([104, 100, 100, 33, 100, 34, 0, 106]),       'ÁB'
   eq text([103, 65, 100, 65, 99, 1, 101, 66, 0, 106]), '\x01a01\x02'
-  eq text([105, 0, 100, 33, 0, 106]), '00A'
+  eq text([105, 0, 100, 33, 0, 106]),                  '00A'
   eq c128.decodeText([105, 102, 1, 102, 2, 0, 106], 7), { text: '01\x1d02', gs1: true }
