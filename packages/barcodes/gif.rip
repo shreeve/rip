@@ -4,7 +4,7 @@
 # Uncompressed LZW stream: 8-bit codes and a clear code every 126 pixels, so
 # no dictionary state exists. Palette entry 0 is white, every other entry
 # black; `rowFor(y)` returns the 0/1 byte row for output row y (identical rows
-# may return the same buffer) and each row is block-copied in spans bounded
+# may return the same buffer) and each row is copied in spans bounded
 # by the chunk boundaries.
 # ==============================================================================
 
@@ -47,7 +47,8 @@ export writeGif =! (W, H, rowFor) ->
         out[pos++] = (if rem < CHUNK then rem else CHUNK) + 1
         out[pos++] = 0x80
       n = Math.min(CHUNK - i % CHUNK, W - x)
-      out.set row.subarray(x, x + n), pos
+      # A span is at most 126 bytes; a byte loop beats a view per span.
+      out[pos + k] = row[x + k] for k in [0...n]
       pos += n
       x   += n
       i   += n
