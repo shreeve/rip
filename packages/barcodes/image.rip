@@ -53,14 +53,14 @@ export validateImage =! (img, named, layout, capacity) ->
   return RGBA if bytes.length is 4 * px
   throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
 
-export LITTLE_ENDIAN =! new Uint8Array(new Uint32Array([1]).buffer)[0] is 1
+export LITTLE_ENDIAN =! Uint8Array.new(Uint32Array.new([1]).buffer)[0] is 1
 
 # Packed four-byte pixels read as whole words: one load per pixel instead of
 # three, unrolled four wide, the same (r + 2g + b) / 4 luma. Alpha and the X
 # byte fall out of the mask, and the weights are symmetric in r and b, so
 # every RGBA/BGRA/X layout takes this path.
 copyWords =! (out, data, byteStart, n) ->
-  words = new Uint32Array(data.buffer, byteStart, n)
+  words = Uint32Array.new(data.buffer, byteStart, n)
   i = 0
   end = n - 3
   while i < end
@@ -106,7 +106,7 @@ export copyLuma =! (out, maxSize, img, named, layout) ->
 
 # RGBA image from a per-pixel dark predicate.
 export darkToImage =! (width, height, isDark) ->
-  data = new Uint8Array(width * height * 4)
+  data = Uint8Array.new(width * height * 4)
   i = 0
   for y in [0...height]
     for x in [0...width]

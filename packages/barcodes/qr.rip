@@ -39,7 +39,7 @@ fail =! (msg) -> throw Error.new msg
 
 # charCode -> Table 5 value; -1 outside the alphabet.
 ALNUM_VAL =! do ->
-  t = new Int8Array(128).fill(-1)
+  t = Int8Array.new(128).fill(-1)
   for i in [0...ALPHANUMERIC.length]
     t[ALPHANUMERIC.charCodeAt(i)] = i
   t
@@ -52,7 +52,7 @@ RS_CACHE =! []
 
 rsGenerator =! (n) ->
   {exp, log} = GF256
-  gen = new Uint8Array(n)
+  gen = Uint8Array.new(n)
   gen[n - 1] = 1
   root = 1
   for i in [0...n]
@@ -66,7 +66,7 @@ rsCached =! (n) ->
   return RS_CACHE[n] if RS_CACHE[n]
   {exp, log} = GF256
   gen = rsGenerator n
-  products = new Uint8Array(256 * n)
+  products = Uint8Array.new(256 * n)
   for f in [1...256]
     lf = log[f]
     base = f * n
@@ -80,7 +80,7 @@ rsEcc =! (data, rs) ->
   {gen, products} = rs
   n = gen.length
   last = n - 1
-  res = new Uint8Array(n)
+  res = Uint8Array.new(n)
   for i in [0...data.length]
     base = (data[i] ^ res[0]) * n
     for j in [0...last]
@@ -112,7 +112,7 @@ encodeData =! (ver, ecc, text, type, utf8) ->
   lengthBits = LENGTH_BITS[type][(ver + 7) // 17]
   dataLen = if type is 'byte' then utf8.length else text.length
   fail 'Capacity overflow' if dataLen >= 1 << lengthBits
-  bytes = new Uint8Array(cap.capacity >>> 3)
+  bytes = Uint8Array.new(cap.capacity >>> 3)
   # MSB-first accumulator flushed a byte at a time; pushes are <= 16 bits and
   # a flush keeps it below 8, so it never nears 32.
   acc = 0
@@ -163,7 +163,7 @@ encodeData =! (ver, ecc, text, type, utf8) ->
     blocks.push block
     eccs.push rsEcc(block, rs)
     pos += len
-  res = new Uint8Array(bytes.length + words * numBlocks)
+  res = Uint8Array.new(bytes.length + words * numBlocks)
   out = 0
   for i in [0..blockLen]
     for b in blocks
@@ -177,7 +177,7 @@ encodeData =! (ver, ecc, text, type, utf8) ->
 
 mat =! (size) ->
   words = (size + 31) >>> 5
-  { size, words, v: new Uint32Array(words * size) }
+  { size, words, v: Uint32Array.new(words * size) }
 
 matGet =! (m, x, y) -> (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1
 
@@ -188,7 +188,7 @@ matSet =! (m, x, y, bit) ->
   return
 
 TRANSPOSE_MASKS =! [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff]
-TRANSPOSE_TMP   =! new Uint32Array(32)
+TRANSPOSE_TMP   =! Uint32Array.new(32)
 
 # 32x32 in-place bit-matrix transpose (butterfly network).
 transpose32 =! (a) ->
@@ -352,7 +352,7 @@ symCache = null
 buildSymCache =! (ver) ->
   size = 21 + 4 * (ver - 1)
   m = mat size
-  fun = new Uint8Array(size * size)
+  fun = Uint8Array.new(size * size)
   setF = (x, y, bit) ->
     matSet m, x, y, bit
     fun[y * size + x] = 1
@@ -395,7 +395,7 @@ buildSymCache =! (ver) ->
   planes = []
   for i in [0...8]
     planes.push mat(size)
-  posBuf = new Uint16Array(size * size)
+  posBuf = Uint16Array.new(size * size)
   n = 0
   xOffset = size - 1
   dir = -1
@@ -576,7 +576,7 @@ renderSvg =! (r, optimize) ->
 renderGif =! (r) ->
   W = r.W
   {m, map} = r
-  row = new Uint8Array(W)
+  row = Uint8Array.new(W)
   prevMy = -2
   writeGif W, W, (y) ->
     my = map[y]
@@ -644,7 +644,7 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   W = (m.size + 2 * border) * scale
   maxOutputSize = if output is 'ascii' or output is 'gif' or output is 'data-url' then MAX_COMPACT_OUTPUT_SIZE else MAX_OUTPUT_SIZE
   throw RangeError.new "invalid opts: output is #{W}x#{W} (max #{maxOutputSize}), reduce border/scale" if W > maxOutputSize
-  map = new Int32Array(W)
+  map = Int32Array.new(W)
   for i in [0...W]
     f = i // scale - border
     map[i] = if f >= 0 and f < m.size then f else -1
@@ -705,15 +705,15 @@ BYTE_LENGTH_BITS         =! [8, 16, 16]
 class Payload
   constructor: (capacity) ->
     @position = 0
-    @data = new Uint8Array(0)
+    @data = Uint8Array.new(0)
     @dataLen = 0
-    @bytes = new Uint8Array(capacity)
+    @bytes = Uint8Array.new(capacity)
     @views = Array.new(capacity + 1)
 
   # A length-n window over the byte arena, created once per length so the
   # frame path never allocates after its first use.
   view: (n) ->
-    @views[n] or (@views[n] = new Uint8Array(@bytes.buffer, 0, n))
+    @views[n] or (@views[n] = Uint8Array.new(@bytes.buffer, 0, n))
 
   read: (bits) ->
     start = @position
@@ -778,7 +778,7 @@ class Payload
         length = @read BYTE_LENGTH_BITS[cls]
         return FAIL.data if length < 0 or @position + 8 * length > dataLen * 8
         if parts
-          segment = new Uint8Array(length)
+          segment = Uint8Array.new(length)
           for i in [0...length]
             segment[i] = @read(8)
           parts.push res if res
@@ -1117,7 +1117,7 @@ resizeRows =! (src, dst, width, dstWidth, from, to) ->
 # The same box filter over whole words: one word from each source row holds
 # four pixels, summed in two 16-bit lanes to produce two output pixels.
 resizeWords =! (src, dst, width, dstWidth, from, to) ->
-  words = new Uint32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2)
+  words = Uint32Array.new(src.buffer, src.byteOffset, (width * (to << 1)) >> 2)
   wordsPerRow = width >> 2
   pairs = dstWidth >> 1
   for y in [from...to]
@@ -1312,24 +1312,24 @@ export class QRScanner
     @opts = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
     @width = 0
     @height = 0
-    @luma = new Uint8Array(bytes)
+    @luma = Uint8Array.new(bytes)
     @image = { data: @luma, height: 0, width: 0 }
     @input = { data: @luma, height: 0, width: 0 }
-    @grid = new Uint8Array(177 * 177)
-    @fun = new Uint8Array(177 * 177)
-    @alignPos = new Uint8Array(7)
-    @codewords = new Uint8Array(BYTES[39])
-    @blockBytes = new Uint8Array(BYTES[39])
-    @syndromes = new Uint8Array(31)
-    @sigma = new Uint8Array(31)
-    @previous = new Uint8Array(31)
-    @next = new Uint8Array(31)
-    @candidates = new Uint32Array(16)
-    @ranks = new Float64Array(16)
-    @found = new Uint32Array(4 * 16 * 3)
-    @pick = new Float64Array(8)
-    @nodes = new Float64Array(7 * 7 * 2)
-    @located = new Float64Array((7 * 7 - 3) * 4)
+    @grid = Uint8Array.new(177 * 177)
+    @fun = Uint8Array.new(177 * 177)
+    @alignPos = Uint8Array.new(7)
+    @codewords = Uint8Array.new(BYTES[39])
+    @blockBytes = Uint8Array.new(BYTES[39])
+    @syndromes = Uint8Array.new(31)
+    @sigma = Uint8Array.new(31)
+    @previous = Uint8Array.new(31)
+    @next = Uint8Array.new(31)
+    @candidates = Uint32Array.new(16)
+    @ranks = Float64Array.new(16)
+    @found = Uint32Array.new(4 * 16 * 3)
+    @pick = Float64Array.new(8)
+    @nodes = Float64Array.new(7 * 7 * 2)
+    @located = Float64Array.new((7 * 7 - 3) * 4)
     @payload = Payload.new BYTES[39]
     @inFlight = false
     @staged = false
@@ -1341,11 +1341,11 @@ export class QRScanner
     @points = undefined
     # `map` holds the active homography; `from` and `to` are scratch, and `to`
     # doubles as the fine-plane map until the next build.
-    @map = new Float64Array(9)
-    @from = new Float64Array(9)
-    @to = new Float64Array(9)
+    @map = Float64Array.new(9)
+    @from = Float64Array.new(9)
+    @to = Float64Array.new(9)
     @alignPoint = { x: 0.1, y: 0.1 }
-    @finePlane = { d: new Uint8Array(0), cut: new Int16Array(0), W: 0, H: 0, bw: 0, sh: 0 }
+    @finePlane = { d: Uint8Array.new(0), cut: Int16Array.new(0), W: 0, H: 0, bw: 0, sh: 0 }
     @invertedProjection = false
     @decodedSize = 0
     layers = []
@@ -1356,18 +1356,18 @@ export class QRScanner
       blockWidth = Math.ceil(width / 8)
       blockHeight = Math.ceil(height / 8)
       centers = Math.ceil(width / 7) * Math.ceil(height / 7)
-      luma = if i then new Uint8Array(width * height) else @luma
-      cuts = new Int16Array(blockWidth * blockHeight)
+      luma = if i then Uint8Array.new(width * height) else @luma
+      cuts = Int16Array.new(blockWidth * blockHeight)
       layers.push
-        bitmap: new Uint32Array(Math.ceil(width / 32) * height)
+        bitmap: Uint32Array.new(Math.ceil(width / 32) * height)
         blockHeight: 0
         blockWidth: 0
-        blocks: new Uint8Array(blockWidth * blockHeight)
+        blocks: Uint8Array.new(blockWidth * blockHeight)
         cuts: cuts
         height: 0
         luma: luma
         patternCount: 0
-        patterns: new Float64Array(centers * 4)
+        patterns: Float64Array.new(centers * 4)
         used: false
         width: 0
         words: 0
@@ -1377,10 +1377,10 @@ export class QRScanner
         # Native luma offered to downscaled sampling; `r` is the layer index.
         context: { opts: @opts, scale: 1 << i, ox: 0, oy: 0, fine: (if i then { luma: @image, r: i } else undefined) }
         found: false
-        inverted: new Uint8Array(centers)
+        inverted: Uint8Array.new(centers)
         setCount: 0
         setCursor: 0
-        sets: new Float64Array(256 * 5)
+        sets: Float64Array.new(256 * 5)
         setsReady: false
         # Round-0 pick as an id bag (sum, min, max); retries skip a matching set.
         pickSum: -1

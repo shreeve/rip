@@ -62,8 +62,8 @@ charValue =! (c, subset) ->
 codewords =! (text, gs1) ->
   n = text.length
   fail 'Code 128 text is empty' unless n
-  cost = new Int32Array(3 * (n + 1))
-  move = new Uint8Array(3 * (n + 1))
+  cost = Int32Array.new(3 * (n + 1))
+  move = Uint8Array.new(3 * (n + 1))
   i = n - 1
   while i >= 0
     c = text.charCodeAt i
@@ -144,7 +144,7 @@ codewords =! (text, gs1) ->
 
 # Module row: 1 dark, 0 light, bars first within each codeword.
 modules =! (codes) ->
-  out = new Uint8Array(11 * codes.length + 2)
+  out = Uint8Array.new(11 * codes.length + 2)
   x = 0
   for code in codes
     pattern = PATTERNS[code]
@@ -186,7 +186,7 @@ raster =! (mods, scale, border, height) ->
   { W, H, bars }
 
 pixelRow =! (r) ->
-  row = new Uint8Array(r.W)
+  row = Uint8Array.new(r.W)
   for k in [0...r.bars.length] by 2
     row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1]
   row
@@ -254,7 +254,7 @@ export encodeCode128 =! (text, output = 'raw', opts = {}) ->
 
 # Widths flattened for the matcher, seven slots per value.
 WIDTHS =! do ->
-  out = new Uint8Array(7 * PATTERNS.length)
+  out = Uint8Array.new(7 * PATTERNS.length)
   for pattern, code in PATTERNS
     for k in [0...pattern.length]
       out[7 * code + k] = pattern.charCodeAt(k) - 48
@@ -437,11 +437,11 @@ export readCode128 =! (img, opts = {}) ->
   asObject opts, 'opts'
   validateImage img, opts.format
   {width, height} = img
-  luma = new Uint8Array(width * height)
+  luma = Uint8Array.new(width * height)
   copyLuma luma, undefined, img, opts.format
   side = Math.max(width, height) + 2
-  runs = new Int32Array(side)
-  rev = new Int32Array(side)
+  runs = Int32Array.new(side)
+  rev = Int32Array.new(side)
   codes = []
   vertical = false
   hit = scanLines luma, width, height, false, runs, rev, codes
