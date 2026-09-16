@@ -25,11 +25,11 @@ export FORMATS =!
 export fail =! (msg, kind = Error) -> throw kind.new msg
 
 export asString =! (value, name) ->
-  fail "\"#{name}\" expected string, got type=#{typeof value}", TypeError unless typeof value is 'string'
+  fail "#{name} expected string, got type=#{typeof value}", TypeError unless typeof value is 'string'
   value
 
 export asObject =! (value, name) ->
-  fail "\"#{name}\" expected object, got type=#{typeof value}", TypeError if value is null or typeof value isnt 'object' or Array.isArray(value)
+  fail "#{name} expected object, got type=#{typeof value}", TypeError if value is null or typeof value isnt 'object' or Array.isArray(value)
   value
 
 export validateSize =! (size, name) ->
@@ -42,9 +42,9 @@ export validateSize =! (size, name) ->
 export validateImage =! (img, named, layout, capacity) ->
   px = validateSize img, '"img"'
   if capacity and (img.width > capacity.width or img.height > capacity.height)
-    fail "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}", RangeError
+    fail "img expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}", RangeError
   bytes = img.data
-  fail "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}", TypeError unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
+  fail "img.data expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}", TypeError unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
   if named isnt undefined
     format = FORMATS[named]
     fail "invalid opts.format=#{named} (#{typeof named})", TypeError unless format
@@ -53,16 +53,16 @@ export validateImage =! (img, named, layout, capacity) ->
       row = format.step * img.width
       end = offset + (img.height - 1) * stride + row
       if not Number.isSafeInteger(offset) or not Number.isSafeInteger(stride) or offset < 0 or stride < row or end > bytes.length
-        fail "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}", RangeError
+        fail "img.data expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}", RangeError
     else
       expected = format.step * px
       planar = format.step <= 2
       if (planar and bytes.length < expected) or (not planar and bytes.length isnt expected)
-        fail "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}", RangeError
+        fail "img.data expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}", RangeError
     return format
   return RGB if bytes.length is 3 * px
   return RGBA if bytes.length is 4 * px
-  fail "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}", RangeError
+  fail "img.data expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}", RangeError
 
 export LITTLE_ENDIAN =! Uint8Array.new(Uint32Array.new([1]).buffer)[0] is 1
 

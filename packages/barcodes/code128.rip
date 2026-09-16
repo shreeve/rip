@@ -164,8 +164,8 @@ modules =! (codes) ->
 # ==[ Validation ]==
 
 asInt =! (n, title, min) ->
-  fail "\"#{title}\" expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "\"#{title}\" expected integer >= #{min}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min
+  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  fail "#{title} expected integer >= #{min}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min
   n
 
 # ==[ Renderers ]==

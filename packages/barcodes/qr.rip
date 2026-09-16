@@ -560,8 +560,8 @@ drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
 # ==[ Validation ]==
 
 asNum =! (n, title) ->
-  fail "\"#{title}\" expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "\"#{title}\" expected safe integer, got #{n}", RangeError unless Number.isSafeInteger n
+  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  fail "#{title} expected safe integer, got #{n}", RangeError unless Number.isSafeInteger n
   n
 
 asVersion =! (ver) ->
@@ -710,7 +710,7 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   else
     undefined
   if utf8 isnt undefined and not isBytes(utf8)
-    fail "\"opts.textEncoder\" expected Uint8Array, got type=#{typeof utf8}", TypeError
+    fail "opts.textEncoder expected Uint8Array, got type=#{typeof utf8}", TypeError
   dataLen = if encoding is 'byte' then utf8.length else text.length
   encodedBits = switch encoding
     when 'numeric'      then (dataLen // 3) * 10 + NUMERIC_BITS[dataLen % 3]
@@ -1407,7 +1407,7 @@ export class QRScanner
     maxSize   = Object.freeze { ...init.maxSize }
     stride    = if init.stride is undefined then 1 else init.stride
     unless Number.isSafeInteger(stride) and stride >= 1
-      fail "\"stride\" expected positive safe integer, got #{stride}", RangeError
+      fail "stride expected positive safe integer, got #{stride}", RangeError
     bytes = maxPixels * stride
     unless Number.isSafeInteger(bytes) and bytes <= MAX_ARENA_BYTES
       fail "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}", RangeError
