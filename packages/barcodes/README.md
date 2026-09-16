@@ -190,23 +190,23 @@ the rows above it warmed the JIT, the way an application mixes symbol sizes.
 
 | Encode (µs)         |   rip | paulmillr/qr |
 |---------------------|------:|-------------:|
-| raw, version 1      |   2.7 |          2.8 |
-| raw, version 8      |  16.9 |         17.6 |
-| raw, version 18     |  51.7 |         54.7 |
-| svg, version 8      |  42.3 |         46.9 |
-| gif, version 8      |  18.1 |         18.7 |
+| raw, version 1      |   2.4 |          3.2 |
+| raw, version 8      |  14.7 |         24.7 |
+| raw, version 18     |  46.4 |         61.8 |
+| svg, version 8      |  31.0 |         47.4 |
+| gif, version 8      |  14.6 |         18.3 |
 
 | Decode (µs)                |    rip | paulmillr/qr |
 |----------------------------|-------:|-------------:|
-| 132x132 raster, version 1  |   39.3 |        116.8 |
-| 1280x720 frame, one symbol |    649 |         1030 |
-| 1920x1080 frame, one symbol|   1490 |         2240 |
-| 1920x1080 noise, no symbol |  22950 |        23900 |
+| 132x132 raster, version 1  |   28.5 |        114.1 |
+| 1280x720 frame, one symbol |    578 |         1010 |
+| 1920x1080 frame, one symbol|   1300 |         2210 |
+| 1920x1080 noise, no symbol |   6030 |        23900 |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
 background, plus a full-frame noise image for the miss case, which is
-dominated by the finder search both implementations run line for line.
+dominated by the finder search; this package walks it on packed words.
 
 Encode timings are sensitive to which symbol size a process sees first.
 A version 1 symbol fits one 32-bit word per row and never fills a word, so
