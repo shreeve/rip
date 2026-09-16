@@ -17,16 +17,16 @@ dynamic programming, and the reader walks scan lines middle-out, matching
 each eleven-module group to its nearest codeword in both directions and on
 both axes.
 
-**Runtime:** browser-safe (`rip.browser: true`). Seven `.rip` files: the
-encoder entry, the decoder entry, Code 128, the camera and canvas plumbing,
-the ISO/IEC 18004 tables, and the GIF writer and image-input helpers the
-encoders and decoders share.
+**Runtime:** browser-safe (`rip.browser: true`). One file per symbology,
+`qr.rip` and `code128.rip`, each holding its encoder and reader; a root
+entry that re-exports both; the camera and canvas plumbing; and the
+ISO/IEC 18004 tables, GIF writer and image-input helpers they share.
+`rip/barcodes/qr` and `rip/barcodes/code128` import one symbology alone.
 
 ## Quick Start
 
 ```coffee
-import encodeQR from 'rip/barcodes'
-import decodeQR from 'rip/barcodes/decode'
+import encodeQR, { decodeQR } from 'rip/barcodes'
 
 text = 'Hello world'
 console.log encodeQR(text, 'term')            # print to any terminal
@@ -39,8 +39,7 @@ ascii  = encodeQR text, 'ascii'               # half-height block characters
 # decode any RGBA raster, the shape a canvas ImageData already has
 decodeQR { width, height, data }              # the text, or throws
 
-import { encodeCode128 } from 'rip/barcodes'
-import { decodeCode128 } from 'rip/barcodes/decode'
+import { encodeCode128, decodeCode128 } from 'rip/barcodes'
 
 encodeCode128 'L2602852147', 'svg', scale: 2  # a Code 128 label
 decodeCode128 { width, height, data }         # the text, or throws
@@ -107,8 +106,7 @@ failed strict pass.
 ## Code 128
 
 ```coffee
-import { encodeCode128 } from 'rip/barcodes'
-import { decodeCode128, readCode128 } from 'rip/barcodes/decode'
+import { encodeCode128, decodeCode128, readCode128 } from 'rip/barcodes'
 
 encodeCode128 text, output, opts
 ```
@@ -141,7 +139,7 @@ of a camera frame is plenty.
 ## Scanner
 
 ```coffee
-import { QRScanner } from 'rip/barcodes/decode'
+import { QRScanner } from 'rip/barcodes'
 
 scanner = QRScanner.new maxSize: { width: 1920, height: 1080 }, effort: 2
 scanner.addImage frame           # any supported format, up to maxSize

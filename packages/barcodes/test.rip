@@ -4,10 +4,10 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import encodeQR, { _tests } from 'rip/barcodes'
+import encodeQR from 'rip/barcodes'
 import * as enc from 'rip/barcodes'
-import decodeQR, { QRScanner, decodeQRBatch } from 'rip/barcodes/decode'
-import * as dec from 'rip/barcodes/decode'
+import { decodeQR, QRScanner, decodeQRBatch, _tests } from 'rip/barcodes/qr'
+import * as qr from 'rip/barcodes/qr'
 import * as dom from 'rip/barcodes/dom'
 import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
 import * as code128 from 'rip/barcodes/code128'
@@ -21,12 +21,12 @@ rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')
 console.log "\nPackage"
 
 test "exports", ->
-  eq Object.keys(enc).sort(), ['_tests', 'default', 'encodeCode128', 'encodeQR']
+  eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodeQR', 'readCode128']
   eq enc.default, encodeQR
+  eq enc.decodeQR, decodeQR
   eq enc.encodeCode128, encodeCode128
-  eq Object.keys(dec).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'readCode128']
-  eq dec.default, decodeQR
-  eq dec.decodeCode128, decodeCode128
+  eq enc.decodeCode128, decodeCode128
+  eq Object.keys(qr).sort(), ['QRScanner', '_tests', 'decodeQR', 'decodeQRBatch', 'encodeQR']
   eq Object.keys(code128).sort(), ['_tests', 'decodeCode128', 'encodeCode128', 'readCode128']
   eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
 
@@ -34,7 +34,7 @@ test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
   eq pkg.rip, { browser: true }
-  for file in ['spec.rip', 'gif.rip', 'image.rip', 'barcodes.rip', 'decode.rip', 'code128.rip', 'dom.rip']
+  for file in ['spec.rip', 'gif.rip', 'image.rip', 'qr.rip', 'code128.rip', 'barcodes.rip', 'dom.rip']
     source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
 

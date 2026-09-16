@@ -6,7 +6,7 @@
   "description": "QR and Code 128 generator and reader \u2014 packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.",
   "exports": {
     ".": "./barcodes.rip",
-    "./decode": "./decode.rip",
+    "./qr": "./qr.rip",
     "./code128": "./code128.rip",
     "./dom": "./dom.rip"
   },
@@ -21,7 +21,7 @@
     "spec.rip",
     "gif.rip",
     "image.rip",
-    "decode.rip",
+    "qr.rip",
     "code128.rip",
     "dom.rip",
     "README.md"

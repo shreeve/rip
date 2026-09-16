@@ -8,7 +8,7 @@
 # BarcodeDetector is a ponyfill over decodeQR for the Shape Detection API.
 # ==============================================================================
 
-import { QRScanner, decodeQR } from './decode.rip'
+import { QRScanner, decodeQR } from './qr.rip'
 
 Y8 =! [0, 0, 1]
 UV8 =! [1, 1, 1]

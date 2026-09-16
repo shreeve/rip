@@ -156,6 +156,14 @@ modules =! (codes) ->
 
 # ==[ Renderers ]==
 
+asString =! (s, title) ->
+  throw TypeError.new "\"#{title}\" expected string, got type=#{typeof s}" unless typeof s is 'string'
+  s
+
+asObject =! (o, title) ->
+  throw TypeError.new "\"#{title}\" expected object, got type=#{typeof o}" if o is null or typeof o isnt 'object'
+  o
+
 asInt =! (n, title, min) ->
   throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
   throw RangeError.new "\"#{title}\" expected integer >= #{min}, got #{n}" unless Number.isSafeInteger(n) and n >= min
@@ -226,10 +234,8 @@ renderGif =! (r) ->
 # ==[ Encoder ]==
 
 export encodeCode128 =! (text, output = 'raw', opts = {}) ->
-  throw TypeError.new "\"text\" expected string, got type=#{typeof text}" unless typeof text is 'string'
-  throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if opts is null or typeof opts isnt 'object'
-  for name in ['scale', 'border', 'height']
-    throw TypeError.new "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})" if opts[name] isnt undefined and typeof opts[name] isnt 'number'
+  asString text, 'text'
+  asObject opts, 'opts'
   scale = if opts.scale is undefined then 1 else asInt(opts.scale, 'scale', 1)
   border = if opts.border is undefined then QUIET_ZONE else asInt(opts.border, 'border', 0)
   height = if opts.height is undefined then DEFAULT_HEIGHT else asInt(opts.height, 'height', 1)
@@ -428,7 +434,7 @@ scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
   null
 
 export readCode128 =! (img, opts = {}) ->
-  throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if opts is null or typeof opts isnt 'object'
+  asObject opts, 'opts'
   validateImage img, opts.format
   {width, height} = img
   luma = new Uint8Array(width * height)
