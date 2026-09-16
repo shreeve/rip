@@ -1255,9 +1255,10 @@ resizeWords! =! (src, dst, width, dstWidth, from, to) ->
 # the darkest sample.
 blockRows! =! (layer, from, to) ->
   luma   = layer.luma
+  width  = layer.width
   bWidth = layer.blockWidth
   maxY   = layer.height - BLOCK
-  maxX   = layer.width - BLOCK
+  maxX   = width - BLOCK
   blocks = layer.blocks
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
@@ -1266,14 +1267,35 @@ blockRows! =! (layer, from, to) ->
       sum = 0
       min = 0xff
       max = 0
-      pos = yPos * layer.width + xPos
+      pos = yPos * width + xPos
+      # Eight pixels per block row, unrolled by hand; BLOCK is fixed at 8.
       for yy in [0...BLOCK]
-        for xx in [0...BLOCK]
-          pixel = luma[pos + xx]
-          sum += pixel
-          min = pixel if pixel < min
-          max = pixel if pixel > max
-        pos += layer.width
+        p0 = luma[pos]
+        p1 = luma[pos + 1]
+        p2 = luma[pos + 2]
+        p3 = luma[pos + 3]
+        p4 = luma[pos + 4]
+        p5 = luma[pos + 5]
+        p6 = luma[pos + 6]
+        p7 = luma[pos + 7]
+        sum += p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7
+        min = p0 if p0 < min
+        min = p1 if p1 < min
+        min = p2 if p2 < min
+        min = p3 if p3 < min
+        min = p4 if p4 < min
+        min = p5 if p5 < min
+        min = p6 if p6 < min
+        min = p7 if p7 < min
+        max = p0 if p0 > max
+        max = p1 if p1 > max
+        max = p2 if p2 > max
+        max = p3 if p3 > max
+        max = p4 if p4 > max
+        max = p5 if p5 > max
+        max = p6 if p6 > max
+        max = p7 if p7 > max
+        pos += width
       average = sum >> (2 * BLOCK_SHIFT)
       if max - min <= 24
         average = min / 2
@@ -1288,10 +1310,14 @@ blockRows! =! (layer, from, to) ->
 # Smooth thresholds over 5x5 blocks and write each block's binary pixels.
 bitmapRows! =! (layer, from, to) ->
   luma    = layer.luma
+  width   = layer.width
+  words   = layer.words
+  bitmap  = layer.bitmap
+  cuts    = layer.cuts
   bWidth  = layer.blockWidth
   bHeight = layer.blockHeight
   maxY    = layer.height - BLOCK
-  maxX    = layer.width - BLOCK
+  maxX    = width - BLOCK
   blocks  = layer.blocks
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
@@ -1308,25 +1334,31 @@ bitmapRows! =! (layer, from, to) ->
             sum += blocks[row + clamp(left + xx, 0, bWidth - 1)]
       else
         for yy in [-2..2]
-          row = bWidth * (top + yy) + left
-          for xx in [-2..2]
-            sum += blocks[row + xx]
+          row  = bWidth * (top + yy) + left
+          sum += blocks[row - 2] + blocks[row - 1] + blocks[row] + blocks[row + 1] + blocks[row + 2]
       cut = (sum / 25) | 0
-      layer.cuts[y * bWidth + x] = cut
-      pos = yPos * layer.width + xPos
-      # One block row packs to one byte, so the store below assumes BLOCK is 8.
+      cuts[y * bWidth + x] = cut
+      pos     = yPos * width + xPos
+      shift   = xPos & 31
+      word    = yPos * words + (xPos >>> 5)
+      lowMask = 0xff << shift
+      # One block row packs to one byte, so the store below assumes BLOCK is 8,
+      # as do the eight comparisons unrolled to build it.
       for yy in [0...BLOCK]
-        value = 0
-        for xx in [0...BLOCK]
-          value |= 1 << xx if luma[pos + xx] <= cut
-        shift   = xPos & 31
-        word    = (yPos + yy) * layer.words + (xPos >>> 5)
-        lowMask = 0xff << shift
-        layer.bitmap[word] = (layer.bitmap[word] & ~lowMask) | (value << shift)
+        value = (if luma[pos]     <= cut then 1   else 0) |
+                (if luma[pos + 1] <= cut then 2   else 0) |
+                (if luma[pos + 2] <= cut then 4   else 0) |
+                (if luma[pos + 3] <= cut then 8   else 0) |
+                (if luma[pos + 4] <= cut then 16  else 0) |
+                (if luma[pos + 5] <= cut then 32  else 0) |
+                (if luma[pos + 6] <= cut then 64  else 0) |
+                (if luma[pos + 7] <= cut then 128 else 0)
+        bitmap[word] = (bitmap[word] & ~lowMask) | (value << shift)
         if shift > 24
           highMask = (1 << (shift - 24)) - 1
-          layer.bitmap[word + 1] = (layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))
-        pos += layer.width
+          bitmap[word + 1] = (bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))
+        pos  += width
+        word += words
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
