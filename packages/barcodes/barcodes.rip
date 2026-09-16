@@ -1,5 +1,21 @@
 # ==============================================================================
-# rip/barcodes — root entry: both symbologies, encodeQR as the default export
+# barcodes — QR Code and Code 128 encoder and decoder for Rip
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: September 15, 2026
+#
+# Engine: packed-word symbols — a QR matrix is one Int32Array with 32 modules
+#         per word, so mask selection, penalty scoring and the decoder's
+#         finder search run on whole words with bit operations and clz32.
+#         Decoding thresholds an 8-bit luma plane in 8x8 blocks, walks the
+#         packed rows for finder patterns, projects the symbol through a
+#         homography, and corrects Reed-Solomon blocks with the encoder's
+#         own generator table. Every buffer is allocated once per scanner.
+#         Encodes to raw, ascii, term, svg, gif and data-url; reads RGB,
+#         RGBA and planar YUV frames, with a browser layer for canvas,
+#         camera and VideoFrame input. Code 128 is a one-line reader over
+#         the same luma sampling. Ported from paulmillr/qr, byte-identical
+#         on its outputs.
 # ==============================================================================
 
 import { encodeQR } from './qr.rip'
