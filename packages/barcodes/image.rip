@@ -1,0 +1,119 @@
+# ==============================================================================
+# rip/barcodes — image input
+#
+# Every decoder takes the same picture shapes: an unnamed RGB/RGBA raster
+# (detected by exact length), or a named format with an optional plane
+# layout. Validation is loud and the conversion lands in a tight 8-bit luma
+# plane the readers scan directly.
+# ==============================================================================
+
+export MAX_IMAGE_SIDE =! 4096
+
+LUMA8  =! { step: 1, bits: 8 }
+LUMA10 =! { step: 2, bits: 10 }
+LUMA12 =! { step: 2, bits: 12 }
+RGB    =! { step: 3, bits: 8 }
+# Four-byte inputs ignore the fourth byte: alpha is never composited and the
+# X formats share the storage shape.
+RGBA   =! { step: 4, bits: 8 }
+export FORMATS =!
+  RGB: RGB, RGBA: RGBA, RGBX: RGBA, BGRA: RGBA, BGRX: RGBA
+  I420: LUMA8, I420A: LUMA8, I422: LUMA8, I444: LUMA8, NV12: LUMA8
+  I420P10: LUMA10, I420P12: LUMA12
+
+export validateSize =! (size, name) ->
+  throw TypeError.new "#{name} expected safe integer width and height" unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
+  throw RangeError.new "#{name} expected positive width and height" if size.width <= 0 or size.height <= 0
+  throw RangeError.new "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}" if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
+  size.width * size.height
+
+# Returns the input format; RGB/RGBA is detected by exact length when unnamed.
+export validateImage =! (img, named, layout, capacity) ->
+  px = validateSize img, '"img"'
+  if capacity and (img.width > capacity.width or img.height > capacity.height)
+    throw RangeError.new "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}"
+  bytes = img.data
+  throw TypeError.new "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}" unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
+  if named isnt undefined
+    format = FORMATS[named]
+    throw TypeError.new "invalid opts.format=#{named} (#{typeof named})" unless format
+    if layout
+      {offset, stride} = layout
+      row = format.step * img.width
+      end = offset + (img.height - 1) * stride + row
+      if not Number.isSafeInteger(offset) or not Number.isSafeInteger(stride) or offset < 0 or stride < row or end > bytes.length
+        throw RangeError.new "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}"
+    else
+      expected = format.step * px
+      planar = format.step <= 2
+      if (planar and bytes.length < expected) or (not planar and bytes.length isnt expected)
+        throw RangeError.new "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}"
+    return format
+  return RGB if bytes.length is 3 * px
+  return RGBA if bytes.length is 4 * px
+  throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
+
+export LITTLE_ENDIAN =! new Uint8Array(new Uint32Array([1]).buffer)[0] is 1
+
+# Packed four-byte pixels read as whole words: one load per pixel instead of
+# three, unrolled four wide, the same (r + 2g + b) / 4 luma. Alpha and the X
+# byte fall out of the mask, and the weights are symmetric in r and b, so
+# every RGBA/BGRA/X layout takes this path.
+copyWords =! (out, data, byteStart, n) ->
+  words = new Uint32Array(data.buffer, byteStart, n)
+  i = 0
+  end = n - 3
+  while i < end
+    p = words[i]
+    q = words[i + 1]
+    r = words[i + 2]
+    s = words[i + 3]
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
+    out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2
+    out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2
+    out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2
+    i += 4
+  while i < n
+    p = words[i]
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
+    i++
+  return
+
+# Convert any input into the tight native luma plane.
+export copyLuma =! (out, maxSize, img, named, layout) ->
+  {step, bits} = validateImage img, named, layout, maxSize
+  {width, height, data} = img
+  stride = layout?.stride or width * step
+  offset = layout?.offset or 0
+  return if data is out and not offset and stride is width and step is 1
+  if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
+    return copyWords out, data, data.byteOffset + offset, width * height
+  for y in [0...height]
+    src = offset + y * stride
+    dst = y * width
+    if step is 1
+      for x in [0...width]
+        out[dst++] = data[src++]
+    else if step is 2
+      for x in [0...width]
+        out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8)
+        src += 2
+    else
+      for x in [0...width]
+        out[dst++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
+        src += step
+  return
+
+# RGBA image from a per-pixel dark predicate.
+export darkToImage =! (width, height, isDark) ->
+  data = new Uint8Array(width * height * 4)
+  i = 0
+  for y in [0...height]
+    for x in [0...width]
+      color = if isDark(x, y) then 0 else 255
+      data[i] = color
+      data[i + 1] = color
+      data[i + 2] = color
+      data[i + 3] = 255
+      i += 4
+  { width, height, data }

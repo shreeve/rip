@@ -1,0 +1,29 @@
+{
+  "name": "@rip/barcodes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QR and Code 128 generator and reader \u2014 packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.",
+  "exports": {
+    ".": "./barcodes.rip",
+    "./qr": "./qr.rip",
+    "./code128": "./code128.rip",
+    "./dom": "./dom.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "barcodes.rip",
+    "spec.rip",
+    "gif.rip",
+    "image.rip",
+    "qr.rip",
+    "code128.rip",
+    "dom.rip",
+    "README.md"
+  ]
+}

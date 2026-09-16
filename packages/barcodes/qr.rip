@@ -1,0 +1,2669 @@
+# ==============================================================================
+# rip/barcodes — QR (ISO/IEC 18004)
+#
+# Encoder: a symbol is a packed bit matrix, one Uint32Array with 32 modules
+# per word, LSB-first, bits at x >= size held zero (the penalty scanners
+# depend on it). Everything the version alone determines is built once and
+# cached in a single slot: the function-pattern template, the zigzag
+# placement order, and the eight mask XOR planes with their transposes. Mask
+# selection XORs whole words and scores the test form word-parallel, so the
+# eight-mask race costs one transpose per encode.
+#
+# Decoder, budgeted for live camera frames: a scanner owns a luma arena
+# sized to its maximum frame and a four-level 2x2 box-filter pyramid. Each
+# layer is binarized lazily against 8x8 block thresholds into a packed
+# one-bit bitmap, finder patterns are found by 1:1:3:1:1 run windows on
+# every second row, and the best three are projected through a homography
+# onto a module grid, corrected with Reed-Solomon, and parsed. Nothing
+# allocates on the frame path: every buffer is created once per scanner and
+# reused. Coarse layers run first; native resolution last.
+# ==============================================================================
+
+import {
+  ALPHANUMERIC, BYTES, ECC_BLOCKS, ECC_LEVELS, GF256, WORDS_PER_BLOCK,
+  alignmentPatterns, formatBits, maskBits, popcnt, versionBits,
+} from './spec.rip'
+import { gifDataUrl, writeGif } from './gif.rip'
+import { FORMATS, LITTLE_ENDIAN, copyLuma, darkToImage, validateImage, validateSize } from './image.rip'
+
+# ==[ Encoder ]==
+
+MAX_OUTPUT_SIZE         =! 1024
+MAX_COMPACT_OUTPUT_SIZE =! 4096
+
+MODE_BITS    =! { numeric: 1, alphanumeric: 2, byte: 4 }
+LENGTH_BITS  =! { numeric: [10, 12, 14], alphanumeric: [9, 11, 13], byte: [8, 16, 16] }
+NUMERIC_BITS =! [0, 4, 7, 10]
+
+fail =! (msg) -> throw Error.new msg
+
+# charCode -> Table 5 value; -1 outside the alphabet.
+ALNUM_VAL =! do ->
+  t = new Int8Array(128).fill(-1)
+  for i in [0...ALPHANUMERIC.length]
+    t[ALPHANUMERIC.charCodeAt(i)] = i
+  t
+
+# ==[ Reed-Solomon ]==
+
+# Generator polynomial (leading 1 dropped) and every coefficient*feedback
+# product, cached per parity length.
+RS_CACHE =! []
+
+rsGenerator =! (n) ->
+  {exp, log} = GF256
+  gen = new Uint8Array(n)
+  gen[n - 1] = 1
+  root = 1
+  for i in [0...n]
+    for j in [0...n]
+      c = gen[j]
+      gen[j] = (if c then exp[log[c] + log[root]] else 0) ^ (if j + 1 < n then gen[j + 1] else 0)
+    root = exp[log[root] + 1]
+  gen
+
+rsCached =! (n) ->
+  return RS_CACHE[n] if RS_CACHE[n]
+  {exp, log} = GF256
+  gen = rsGenerator n
+  products = new Uint8Array(256 * n)
+  for f in [1...256]
+    lf = log[f]
+    base = f * n
+    for j in [0...n]
+      c = gen[j]
+      products[base + j] = exp[log[c] + lf] if c
+  RS_CACHE[n] = { gen, products }
+
+# Parity via LFSR remainder.
+rsEcc =! (data, rs) ->
+  {gen, products} = rs
+  n = gen.length
+  last = n - 1
+  res = new Uint8Array(n)
+  for i in [0...data.length]
+    base = (data[i] ^ res[0]) * n
+    for j in [0...last]
+      res[j] = res[j + 1] ^ products[base + j]
+    res[last] = products[base + last]
+  res
+
+capacity =! (ver, ecc) ->
+  bytes = BYTES[ver - 1]
+  words = WORDS_PER_BLOCK[ecc][ver - 1]
+  numBlocks = ECC_BLOCKS[ecc][ver - 1]
+  blockLen = (bytes // numBlocks) - words
+  shortBlocks = numBlocks - bytes % numBlocks
+  { words, numBlocks, shortBlocks, blockLen, capacity: (bytes - words * numBlocks) * 8 }
+
+# ==[ Data codewords ]==
+
+detectType =! (str) ->
+  type = 'numeric'
+  for i in [0...str.length]
+    v = ALNUM_VAL[str.charCodeAt(i)]
+    return 'byte' unless v >= 0
+    type = 'alphanumeric' if v > 9
+  type
+
+# Segment bits, terminator, padding, then RS blocks interleaved.
+encodeData =! (ver, ecc, text, type, utf8) ->
+  cap = capacity ver, ecc
+  lengthBits = LENGTH_BITS[type][(ver + 7) // 17]
+  dataLen = if type is 'byte' then utf8.length else text.length
+  fail 'Capacity overflow' if dataLen >= 1 << lengthBits
+  bytes = new Uint8Array(cap.capacity >>> 3)
+  # MSB-first accumulator flushed a byte at a time; pushes are <= 16 bits and
+  # a flush keeps it below 8, so it never nears 32.
+  acc = 0
+  accBits = 0
+  bytePos = 0
+  push = (value, len) ->
+    acc = (acc << len) | value
+    accBits += len
+    while accBits >= 8
+      accBits -= 8
+      bytes[bytePos++] = (acc >>> accBits) & 0xff
+    return
+  push MODE_BITS[type], 4
+  push dataLen, lengthBits
+  if type is 'numeric'
+    i = 0
+    while i < dataLen
+      n = Math.min(3, dataLen - i)
+      push Number(text.slice(i, i + n)), NUMERIC_BITS[n]
+      i += 3
+  else if type is 'alphanumeric'
+    i = 0
+    while i + 1 < dataLen
+      push ALNUM_VAL[text.charCodeAt(i)] * 45 + ALNUM_VAL[text.charCodeAt(i + 1)], 11
+      i += 2
+    push ALNUM_VAL[text.charCodeAt(dataLen - 1)], 6 if dataLen & 1
+  else
+    for i in [0...utf8.length]
+      push utf8[i], 8
+  bitPos = bytePos * 8 + accBits
+  fail 'Capacity overflow' if bitPos > cap.capacity
+  bytes[bytePos] = (acc << (8 - accBits)) & 0xff if accBits
+  bitPos += Math.min(4, cap.capacity - bitPos)
+  bitPos += 8 - (bitPos & 7) if bitPos & 7
+  pad = 0
+  start = bitPos >>> 3
+  for i in [start...bytes.length]
+    bytes[i] = if pad then 0x11 else 0xec
+    pad ^= 1
+  {words, numBlocks, shortBlocks, blockLen} = cap
+  rs = rsCached words
+  blocks = []
+  eccs = []
+  pos = 0
+  for i in [0...numBlocks]
+    len = blockLen + (if i < shortBlocks then 0 else 1)
+    block = bytes.subarray pos, pos + len
+    blocks.push block
+    eccs.push rsEcc(block, rs)
+    pos += len
+  res = new Uint8Array(bytes.length + words * numBlocks)
+  out = 0
+  for i in [0..blockLen]
+    for b in blocks
+      res[out++] = b[i] if i < b.length
+  for i in [0...words]
+    for e in eccs
+      res[out++] = e[i]
+  res
+
+# ==[ Packed bit matrix ]==
+
+mat =! (size) ->
+  words = (size + 31) >>> 5
+  { size, words, v: new Uint32Array(words * size) }
+
+matGet =! (m, x, y) -> (m.v[y * m.words + (x >>> 5)] >>> (x & 31)) & 1
+
+matSet =! (m, x, y, bit) ->
+  i = y * m.words + (x >>> 5)
+  b = 1 << (x & 31)
+  m.v[i] = if bit then m.v[i] | b else m.v[i] & ~b
+  return
+
+TRANSPOSE_MASKS =! [0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff, 0x0000ffff]
+TRANSPOSE_TMP   =! new Uint32Array(32)
+
+# 32x32 in-place bit-matrix transpose (butterfly network).
+transpose32 =! (a) ->
+  for stage in [0...5]
+    m = TRANSPOSE_MASKS[stage] >>> 0
+    s = 1 << stage
+    i = 0
+    while i < 32
+      for k in [0...s]
+        x = a[i + k] >>> 0
+        y = a[i + k + s] >>> 0
+        t = ((x >>> s) ^ y) & m
+        a[i + k] = (x ^ (t << s)) >>> 0
+        a[i + k + s] = (y ^ t) >>> 0
+      i += s << 1
+  return
+
+transposeMat =! (src, dst) ->
+  {size, words, v} = src
+  tmp = TRANSPOSE_TMP
+  y0 = 0
+  while y0 < size
+    for bx in [0...words]
+      rows = Math.min(32, size - y0)
+      for r in [0...rows]
+        tmp[r] = v[(y0 + r) * words + bx]
+      tmp.fill 0, rows
+      transpose32 tmp
+      dstY = bx * 32
+      i = 0
+      while i < 32 and dstY < size
+        dst.v[dstY * dst.words + (y0 >>> 5)] = tmp[i]
+        i++
+        dstY++
+    y0 += 32
+  return
+
+# ==[ Mask penalty ]==
+
+# N1, all columns of a 32-wide stripe at once: D = row ^ next row flags
+# changes, a monochrome 5-window is four clear D bits, and a run of length L
+# contributes L-4 windows plus one run-start window counted twice.
+runsPenaltyVertical =! (m) ->
+  {size, words, v} = m
+  tail = if size & 31 then ((1 << (size & 31)) - 1) >>> 0 else 0xffffffff
+  score = 0
+  for wi in [0...words]
+    valid = if wi is words - 1 then tail else 0xffffffff
+    r3 = v[3 * words + wi]
+    dPrev = 0xffffffff
+    d0 = v[wi] ^ v[words + wi]
+    d1 = v[words + wi] ^ v[2 * words + wi]
+    d2 = v[2 * words + wi] ^ r3
+    idx = 4 * words + wi
+    for y in [0..size - 5]
+      r4 = v[idx]
+      d3 = r3 ^ r4
+      w = ~(d0 | d1 | d2 | d3) & valid
+      score += popcnt(w >>> 0) + 2 * popcnt((w & dPrev) >>> 0) if w
+      dPrev = d0
+      d0 = d1
+      d1 = d2
+      d2 = d3
+      r3 = r4
+      idx += words
+  score
+
+# N3: 1011101 with four light modules before or after, both orientations of
+# the pattern across a 32-wide stripe at once.
+finderPenaltyVertical =! (m) ->
+  {size, words, v} = m
+  tail = if size & 31 then ((1 << (size & 31)) - 1) >>> 0 else 0xffffffff
+  count = 0
+  for wi in [0...words]
+    valid = if wi is words - 1 then tail else 0xffffffff
+    for y in [0..size - 11]
+      i = y * words + wi
+      r0  = v[i]
+      r1  = v[i + words]
+      r2  = v[i + 2 * words]
+      r3  = v[i + 3 * words]
+      r4  = v[i + 4 * words]
+      r5  = v[i + 5 * words]
+      r6  = v[i + 6 * words]
+      r7  = v[i + 7 * words]
+      r8  = v[i + 8 * words]
+      r9  = v[i + 9 * words]
+      r10 = v[i + 10 * words]
+      m0 = valid & r0 & ~r1 & r2 & r3 & r4 & ~r5 & r6 & ~(r7 | r8 | r9 | r10)
+      m1 = valid & ~(r0 | r1 | r2 | r3) & r4 & ~r5 & r6 & r7 & r8 & ~r9 & r10
+      count += popcnt(m0 >>> 0) + popcnt(m1 >>> 0)
+  count
+
+# Score a symbol given both orientations. `limit` is the best score so far
+# in the mask race: every term is non-negative, so a partial sum that reaches
+# it can no longer win and the expensive N3 search is skipped.
+penaltyScore =! (m, t, limit = Infinity) ->
+  {size, words, v} = m
+  adjacent = runsPenaltyVertical(m) + runsPenaltyVertical(t)
+  return adjacent if adjacent >= limit
+  # N2: three points per overlapping 2x2 same-color box. Valid left edges in
+  # the last word: one fewer than the bits it holds.
+  tail2 = ((1 << (size - 32 * (words - 1) - 1)) - 1) >>> 0
+  boxes = 0
+  dark = 0
+  for y in [0...size]
+    for wi in [0...words]
+      a0 = v[y * words + wi]
+      dark += popcnt(a0 >>> 0)
+      continue if y is size - 1
+      a1 = v[(y + 1) * words + wi]
+      n0 = if wi + 1 < words then v[y * words + wi + 1] else 0
+      n1 = if wi + 1 < words then v[(y + 1) * words + wi + 1] else 0
+      eqV = ~(a0 ^ a1)
+      eqH0 = ~(a0 ^ ((a0 >>> 1) | (n0 << 31)))
+      eqH1 = ~(a1 ^ ((a1 >>> 1) | (n1 << 31)))
+      w = eqV & eqH0 & eqH1
+      w &= tail2 if wi is words - 1
+      boxes += popcnt(w >>> 0)
+  total = size * size
+  darkSteps = Math.ceil(Math.max(0, Math.abs(dark * 100 - total * 50) - total * 5) / (total * 5))
+  partial = adjacent + 3 * boxes + 10 * darkSteps
+  return partial if partial >= limit
+  partial + 40 * (finderPenaltyVertical(m) + finderPenaltyVertical(t))
+
+penalty =! (m, t) ->
+  transposeMat m, t
+  penaltyScore m, t
+
+# ==[ Symbol layout ]==
+
+drawInfo =! (m, ver, ecc, mask) ->
+  size = m.size
+  bits = formatBits ecc, mask
+  for i in [0...15]
+    value = (bits >> i) & 1
+    if i < 6 then matSet m, 8, i, value
+    else if i < 8 then matSet m, 8, i + 1, value
+    else if i is 8 then matSet m, 7, 8, value
+    else matSet m, 14 - i, 8, value
+    if i < 8 then matSet m, size - 1 - i, 8, value
+    else matSet m, 8, size - 15 + i, value
+  matSet m, 8, size - 8, 1
+  if ver >= 7
+    vbits = versionBits ver
+    for i in [0...18]
+      value = (vbits >> i) & 1
+      x = size - 11 + i % 3
+      y = i // 3
+      matSet m, x, y, value
+      matSet m, y, x, value
+  return
+
+# Everything the layout alone determines, built once per version: the
+# function-pattern template with the data region zero, the zigzag placement
+# order as packed (wordIndex << 5 | bitOffset) positions, the eight mask XOR
+# planes and their transposes, and four scratch matrices. Single slot:
+# workloads overwhelmingly encode one version repeatedly.
+symCache = null
+
+buildSymCache =! (ver) ->
+  size = 21 + 4 * (ver - 1)
+  m = mat size
+  fun = new Uint8Array(size * size)
+  setF = (x, y, bit) ->
+    matSet m, x, y, bit
+    fun[y * size + x] = 1
+    return
+  for [fx, fy] in [[0, 0], [size - 7, 0], [0, size - 7]]
+    for dy in [-1...8]
+      for dx in [-1...8]
+        x = fx + dx
+        y = fy + dy
+        continue if x < 0 or y < 0 or x >= size or y >= size
+        dark = dx >= 0 and dx < 7 and dy >= 0 and dy < 7 and
+          (dx is 0 or dx is 6 or dy is 0 or dy is 6 or (dx > 1 and dx < 5 and dy > 1 and dy < 5))
+        setF x, y, (if dark then 1 else 0)
+  align = alignmentPatterns ver
+  for ay in align
+    for ax in align
+      continue if fun[ay * size + ax]
+      for dy in [-2..2]
+        for dx in [-2..2]
+          dark = Math.max(Math.abs(dx), Math.abs(dy)) isnt 1
+          setF ax + dx, ay + dy, (if dark then 1 else 0)
+  for i in [0...size]
+    setF i, 6, (if i % 2 is 0 then 1 else 0) unless fun[6 * size + i]
+    setF 6, i, (if i % 2 is 0 then 1 else 0) unless fun[i * size + 6]
+  # Format, version and dark-module cells are reserved at zero: the "test
+  # form" the mask penalties are scored on.
+  for i in [0...9]
+    if i isnt 6
+      setF 8, i, 0
+      setF i, 8, 0
+    if i < 8
+      setF size - 1 - i, 8, 0
+      setF 8, size - 1 - i, 0
+  if ver >= 7
+    for i in [0...18]
+      x = size - 11 + i % 3
+      y = i // 3
+      setF x, y, 0
+      setF y, x, 0
+  planes = []
+  for i in [0...8]
+    planes.push mat(size)
+  posBuf = new Uint16Array(size * size)
+  n = 0
+  xOffset = size - 1
+  dir = -1
+  y = size - 1
+  while xOffset > 0
+    xOffset = 5 if xOffset is 6
+    loop
+      for j in [0...2]
+        x = xOffset - j
+        continue if fun[y * size + x]
+        wi = y * m.words + (x >>> 5)
+        posBuf[n++] = (wi << 5) | (x & 31)
+        mb = maskBits x, y
+        pl = 0
+        while mb
+          planes[pl].v[wi] |= 1 << (x & 31) if mb & 1
+          pl++
+          mb >>= 1
+      break if y + dir < 0 or y + dir >= size
+      y += dir
+    xOffset -= 2
+    dir = -dir
+  planesT = planes.map (pl) ->
+    t = mat size
+    transposeMat pl, t
+    t.v
+  {
+    ver
+    tpl: m.v
+    pos: posBuf.slice(0, n)
+    planes: planes.map((pl) -> pl.v)
+    planesT
+    work: [mat(size), mat(size), mat(size), mat(size)]
+  }
+
+# Template copy, data-bit scatter along the cached zigzag order, then mask
+# selection over XOR candidates; the first lowest score wins.
+drawSymbol =! (ver, ecc, data, maskIdx, test = false) ->
+  symCache = buildSymCache ver unless symCache?.ver is ver
+  {tpl, pos, planes, planesT, work} = symCache
+  [m, t, cand, candT] = work
+  m.v.set tpl
+  need = Math.min(8 * data.length, pos.length)
+  for i in [0...need]
+    if data[i >>> 3] & (0x80 >>> (i & 7))
+      q = pos[i]
+      m.v[q >>> 5] |= 1 << (q & 31)
+  mask = maskIdx
+  unless mask?
+    transposeMat m, t
+    bestScore = Infinity
+    for pl in [0...8]
+      pv = planes[pl]
+      ptv = planesT[pl]
+      for i in [0...cand.v.length]
+        cand.v[i] = m.v[i] ^ pv[i]
+        candT.v[i] = t.v[i] ^ ptv[i]
+      score = penaltyScore cand, candT, bestScore
+      if score < bestScore
+        bestScore = score
+        mask = pl
+  chosen = planes[mask]
+  for i in [0...m.v.length]
+    m.v[i] ^= chosen[i]
+  drawInfo m, ver, ecc, mask unless test
+  m
+
+# ==[ Validation ]==
+
+asVersion =! (ver) ->
+  throw TypeError.new "\"version\" expected number, got type=#{typeof ver}" unless typeof ver is 'number'
+  throw RangeError.new "\"version\" expected safe integer, got #{ver}" unless Number.isSafeInteger ver
+  throw RangeError.new "Invalid version=#{ver}. Expected number [1..40]" if ver < 1 or ver > 40
+  ver
+
+asNum =! (n, title) ->
+  throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
+  throw RangeError.new "\"#{title}\" expected safe integer, got #{n}" unless Number.isSafeInteger n
+  n
+
+asString =! (s, title) ->
+  throw TypeError.new "\"#{title}\" expected string, got type=#{typeof s}" unless typeof s is 'string'
+  s
+
+# Exact WHATWG TextEncoder byte count without encoding; lone surrogates cost
+# the three-byte replacement character.
+utf8Length =! (str) ->
+  length = 0
+  i = 0
+  while i < str.length
+    c = str.charCodeAt i
+    if c < 0x80 then length++
+    else if c < 0x800 then length += 2
+    else if c < 0xd800 or c > 0xdfff then length += 3
+    else if c <= 0xdbff and i + 1 < str.length
+      next = str.charCodeAt(i + 1)
+      if next >= 0xdc00 and next <= 0xdfff
+        length += 4
+        i++
+      else length += 3
+    else length += 3
+    i++
+  length
+
+byteCapacity =! (ver, ecc) ->
+  lengthBits = LENGTH_BITS.byte[(ver + 7) // 17]
+  Math.min((1 << lengthBits) - 1, (capacity(ver, ecc).capacity - 4 - lengthBits) // 8)
+
+# Cross-realm and Buffer views pass; JSON-shaped spoofs do not.
+isBytes =! (a) ->
+  a instanceof Uint8Array or
+    (ArrayBuffer.isView(a) and a.constructor.name is 'Uint8Array' and a.BYTES_PER_ELEMENT is 1)
+
+# ==[ Renderers ]==
+# A raster is the finished matrix plus output geometry; `map` takes an output
+# coordinate to its module index, -1 in the border.
+
+darkAt =! (r, x, y) -> r.map[x] >= 0 and r.map[y] >= 0 and matGet(r.m, r.map[x], r.map[y]) is 1
+
+renderRaw =! (r) ->
+  W = r.W
+  res = Array.new(W)
+  for y in [0...W]
+    row = Array.new(W)
+    for x in [0...W]
+      row[x] = darkAt(r, x, y)
+    res[y] = row
+  res
+
+renderAscii =! (r) ->
+  W = r.W
+  out = ''
+  y = 0
+  while y < W
+    for x in [0...W]
+      first = darkAt r, x, y
+      second = if y + 1 >= W then true else darkAt(r, x, y + 1)
+      out += if not first and not second then '█' else if not first and second then '▀' else if first and not second then '▄' else ' '
+    out += '\n'
+    y += 2
+  out
+
+renderTerm =! (r) ->
+  W = r.W
+  black = '\x1b[40m  \x1b[0m'
+  white = '\x1b[1;47m  \x1b[0m'
+  out = ''
+  for y in [0...W]
+    for x in [0...W]
+      out += (if darkAt(r, x, y) then black else white)
+    out += '\n'
+  out
+
+renderSvg =! (r, optimize) ->
+  W = r.W
+  out = '<svg viewBox="0 0 ' + W + ' ' + W + '" xmlns="http://www.w3.org/2000/svg">'
+  path = ''
+  prevX = 0
+  prevY = 0
+  hasPrev = false
+  for y in [0...W]
+    for x in [0...W]
+      continue unless darkAt(r, x, y)
+      unless optimize
+        out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" />'
+        continue
+      mv = "M#{x} #{y}"
+      if hasPrev
+        rel = "m#{x - prevX} #{y - prevY}"
+        mv = rel if rel.length <= mv.length
+      back = if x < 10 then "H#{x}" else 'h-1'
+      path += "#{mv}h1v1#{back}Z"
+      prevX = x
+      prevY = y
+      hasPrev = true
+  out += '<path d="' + path + '"/>' if optimize
+  out + '</svg>'
+renderGif =! (r) ->
+  W = r.W
+  {m, map} = r
+  row = new Uint8Array(W)
+  prevMy = -2
+  writeGif W, W, (y) ->
+    my = map[y]
+    if my isnt prevMy
+      prevMy = my
+      row.fill 0
+      if my >= 0
+        for x in [0...W]
+          row[x] = matGet(m, map[x], my) if map[x] >= 0
+    row
+
+# ==[ Public API ]==
+
+export encodeQR =! (text, output = 'raw', opts = {}) ->
+  asString text, 'text'
+  asString output, 'output'
+  throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if typeof opts isnt 'object' or opts is null or Array.isArray(opts)
+  ver = opts.version
+  ver = asVersion ver if ver isnt undefined
+  ecc = if opts.ecc is undefined then 'medium' else opts.ecc
+  fail "invalid ecc=#{ecc}" unless ECC_LEVELS.includes ecc
+  encoding = if opts.encoding is undefined then detectType(text) else opts.encoding
+  fail "invalid encoding=#{encoding}" unless LENGTH_BITS[encoding]
+  if encoding isnt 'byte'
+    alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
+    for ch in text
+      fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
+  if opts.mask isnt undefined and (asNum(opts.mask, 'opts.mask') < 0 or opts.mask > 7)
+    fail "invalid mask=#{opts.mask}"
+  textEncoder = opts.textEncoder
+  # Reject impossible built-in UTF-8 payloads before encoding duplicates a
+  # huge input; a custom encoder's output is its own source of truth.
+  if encoding is 'byte' and textEncoder is undefined
+    maxBytes = byteCapacity (if ver is undefined then 40 else ver), ecc
+    fail 'Capacity overflow' if text.length > maxBytes or utf8Length(text) > maxBytes
+  utf8 = if encoding is 'byte'
+    if textEncoder isnt undefined then textEncoder(text) else TextEncoder.new().encode(text)
+  else
+    undefined
+  if utf8 isnt undefined and not isBytes(utf8)
+    throw TypeError.new "\"opts.textEncoder\" expected Uint8Array, got type=#{typeof utf8}"
+  dataLen = if encoding is 'byte' then utf8.length else text.length
+  encodedBits = switch encoding
+    when 'numeric' then (dataLen // 3) * 10 + NUMERIC_BITS[dataLen % 3]
+    when 'alphanumeric' then (dataLen // 2) * 11 + (dataLen % 2) * 6
+    else dataLen * 8
+  if ver is undefined
+    ver = 1
+    while ver <= 40
+      lengthBits = LENGTH_BITS[encoding][(ver + 7) // 17]
+      break if dataLen < 1 << lengthBits and 4 + lengthBits + encodedBits <= capacity(ver, ecc).capacity
+      ver++
+    fail 'Capacity overflow' if ver > 40
+  else
+    lengthBits = LENGTH_BITS[encoding][(ver + 7) // 17]
+    fail 'Capacity overflow' if dataLen >= 1 << lengthBits or 4 + lengthBits + encodedBits > capacity(ver, ecc).capacity
+  data = encodeData ver, ecc, text, encoding, utf8
+  m = drawSymbol ver, ecc, data, opts.mask
+  # A quiet zone is required (§5.3.8); custom renderers wanting the borderless
+  # matrix request border 1 and slice the ring off.
+  border = if opts.border is undefined then 2 else asNum(opts.border, 'opts.border')
+  throw RangeError.new "invalid border=#{border}" if border <= 0
+  scale = if opts.scale is undefined then 1 else asNum(opts.scale, 'opts.scale')
+  throw RangeError.new "invalid scale factor: #{scale}" if scale <= 0 or scale > 1024
+  W = (m.size + 2 * border) * scale
+  maxOutputSize = if output is 'ascii' or output is 'gif' or output is 'data-url' then MAX_COMPACT_OUTPUT_SIZE else MAX_OUTPUT_SIZE
+  throw RangeError.new "invalid opts: output is #{W}x#{W} (max #{maxOutputSize}), reduce border/scale" if W > maxOutputSize
+  map = new Int32Array(W)
+  for i in [0...W]
+    f = i // scale - border
+    map[i] = if f >= 0 and f < m.size then f else -1
+  r = { m, W, map }
+  switch output
+    when 'raw' then renderRaw r
+    when 'ascii' then renderAscii r
+    when 'term' then renderTerm r
+    when 'svg' then renderSvg r, (if opts.optimize is undefined then true else opts.optimize)
+    when 'gif' then renderGif r
+    when 'data-url' then gifDataUrl renderGif(r)
+    else fail "Unknown output: #{output}"
+
+# ==[ Decoder ]==
+
+MAX_ARENA_BYTES =! 64 * 1024 * 1024
+
+# Failure values shared by every attempt; a decode returns a string or one
+# of these, never throws on the frame path.
+FAIL =! Object.freeze
+  data:      Object.freeze(Error.new 'data')
+  dimension: Object.freeze(Error.new 'dimension')
+  finder:    Object.freeze(Error.new 'finder')
+  format:    Object.freeze(Error.new 'format')
+  alignment: Object.freeze(Error.new 'alignment')
+  rs:        Object.freeze(Error.new 'rs')
+  timing:    Object.freeze(Error.new 'timing')
+  version:   Object.freeze(Error.new 'version')
+
+{exp: EXP, log: LOG} = GF256
+mul =! (a, b) -> if a and b then EXP[LOG[a] + LOG[b]] else 0
+inv =! (a) -> EXP[255 - LOG[a]]
+
+clamp =! (value, lo, hi) -> Math.max(lo, Math.min(hi, value))
+
+# ==[ Payload ]==
+
+# §7.4.3: six-digit ECI designators; an ECI stays active until another one
+# replaces it.
+ECI_ENCODINGS =!
+  1: 'iso-8859-1', 2: 'ibm437', 3: 'iso-8859-1', 4: 'iso-8859-2', 5: 'iso-8859-3'
+  6: 'iso-8859-4', 7: 'iso-8859-5', 8: 'iso-8859-6', 9: 'iso-8859-7', 10: 'iso-8859-8'
+  11: 'iso-8859-9', 13: 'iso-8859-11', 15: 'iso-8859-13', 16: 'iso-8859-14'
+  17: 'iso-8859-15', 18: 'iso-8859-16', 20: 'shift-jis', 21: 'windows-1250'
+  22: 'windows-1251', 23: 'windows-1252', 24: 'windows-1256', 25: 'utf-16be'
+  26: 'utf-8', 28: 'big5', 29: 'gbk', 30: 'euc-kr'
+
+ECI_DECODERS =! {}
+for id, name of ECI_ENCODINGS
+  ECI_DECODERS[id] = try TextDecoder.new(name) catch then undefined
+
+NUMERIC_LENGTH_BITS      =! [10, 12, 14]
+ALPHANUMERIC_LENGTH_BITS =! [9, 11, 13]
+BYTE_LENGTH_BITS         =! [8, 16, 16]
+
+# Bit reader over corrected data codewords plus a scratch byte buffer with
+# one prefix view per length, so byte segments decode without allocating.
+class Payload
+  constructor: (capacity) ->
+    @position = 0
+    @data = new Uint8Array(0)
+    @dataLen = 0
+    @bytes = new Uint8Array(capacity)
+    @views = Array.new(capacity + 1)
+
+  # A length-n window over the byte arena, created once per length so the
+  # frame path never allocates after its first use.
+  view: (n) ->
+    @views[n] or (@views[n] = new Uint8Array(@bytes.buffer, 0, n))
+
+  read: (bits) ->
+    start = @position
+    return -1 if start + bits > @dataLen * 8
+    value = 0
+    pos = start
+    for i in [0...bits]
+      value = (value << 1) | ((@data[pos >> 3] >> (7 - (pos & 7))) & 1)
+      pos++
+    @position = pos
+    value
+
+  # Returns a string, or with deferText an array of strings and [bytes, eci]
+  # parts for a caller-supplied text decoder, or FAIL.data.
+  decode: (data, dataLen, version, deferText = false) ->
+    @position = 0
+    @data = data
+    @dataLen = dataLen
+    cls = if version < 10 then 0 else if version < 27 then 1 else 2
+    eci = 26
+    res = ''
+    parts = if deferText then [] else null
+    while @position + 4 <= dataLen * 8
+      mode = @read 4
+      break unless mode
+      if mode is 7
+        b0 = @read 8
+        return FAIL.data if b0 < 0
+        if (b0 & 0x80) is 0
+          eci = b0
+        else
+          len = if (b0 & 0xc0) is 0x80 then 8 else 16
+          value = @read len
+          return FAIL.data if value < 0
+          eci = ((b0 & (if len is 8 then 0x3f else 0x1f)) << len) | value
+        continue
+      if mode is 1
+        length = @read NUMERIC_LENGTH_BITS[cls]
+        return FAIL.data if length < 0
+        while length >= 3
+          value = @read 10
+          return FAIL.data if value < 0 or value >= 1000
+          res += String(value).padStart(3, '0')
+          length -= 3
+        if length
+          value = @read(if length is 2 then 7 else 4)
+          return FAIL.data if value < 0 or value >= 10 ** length
+          res += String(value).padStart(length, '0')
+      else if mode is 2
+        length = @read ALPHANUMERIC_LENGTH_BITS[cls]
+        return FAIL.data if length < 0
+        while length >= 2
+          value = @read 11
+          return FAIL.data if value < 0 or value >= 45 * 45
+          res += ALPHANUMERIC[value // 45] + ALPHANUMERIC[value % 45]
+          length -= 2
+        if length
+          value = @read 6
+          return FAIL.data if value < 0 or value >= 45
+          res += ALPHANUMERIC[value]
+      else if mode is 4
+        length = @read BYTE_LENGTH_BITS[cls]
+        return FAIL.data if length < 0 or @position + 8 * length > dataLen * 8
+        if parts
+          segment = new Uint8Array(length)
+          for i in [0...length]
+            segment[i] = @read(8)
+          parts.push res if res
+          parts.push [segment, eci]
+          res = ''
+        else
+          encoding = ECI_ENCODINGS[eci]
+          return FAIL.data if not encoding or length >= @views.length
+          decoder = ECI_DECODERS[eci] or TextDecoder.new(encoding)
+          for i in [0...length]
+            @bytes[i] = @read(8)
+          res += decoder.decode @view(length)
+      else
+        return FAIL.data
+    return res unless parts
+    parts.push res if res
+    parts
+
+finishPayload =! (decoded, textDecoder) ->
+  return decoded if typeof decoded is 'string'
+  throw Error.new 'text decoder' unless textDecoder
+  res = ''
+  for part in decoded
+    res += if typeof part is 'string' then part else textDecoder(part[0], part[1])
+  res
+
+# ==[ Geometry ]==
+
+# Finder records are stride-4 Float64Array slots: x, y, module size, row-hit
+# confidence. `a` and `b` are element offsets.
+dist2 =! (pts, a, b) -> (pts[a] - pts[b]) ** 2 + (pts[a + 1] - pts[b + 1]) ** 2
+distance =! (first, second) -> Math.hypot(second.x - first.x, second.y - first.y)
+
+# Version 7+ carries two BCH version words; one must match the sampled
+# dimension within radius three.
+checkVersion =! (m, size) ->
+  ver = (size - 17) / 4
+  return true if ver < 7
+  v1 = 0
+  v2 = 0
+  for i in [0...18]
+    x = size - 11 + i % 3
+    y = i // 3
+    v1 |= m[y * size + x] << i
+    v2 |= m[x * size + y] << i
+  expected = versionBits ver
+  popcnt(expected ^ v1) <= 3 or popcnt(expected ^ v2) <= 3
+
+# 3x3 projective transforms, row-major in a Float64Array, applied to column
+# vectors [u, v, 1] with a perspective divide.
+squareToQuad =! (out, points) ->
+  [x1, y1, x2, y2, x3, y3, x4, y4] = points
+  dx3 = x1 - x2 + x3 - x4
+  dy3 = y1 - y2 + y3 - y4
+  if dx3 is 0 and dy3 is 0
+    out[0] = x2 - x1
+    out[1] = x3 - x2
+    out[2] = x1
+    out[3] = y2 - y1
+    out[4] = y3 - y2
+    out[5] = y1
+    out[6] = 0
+    out[7] = 0
+    out[8] = 1
+    return
+  dx1 = x2 - x3
+  dx2 = x4 - x3
+  dy1 = y2 - y3
+  dy2 = y4 - y3
+  den = dx1 * dy2 - dx2 * dy1
+  a31 = (dx3 * dy2 - dx2 * dy3) / den
+  a32 = (dx1 * dy3 - dx3 * dy1) / den
+  out[0] = x2 - x1 + a31 * x2
+  out[1] = x4 - x1 + a32 * x4
+  out[2] = x1
+  out[3] = y2 - y1 + a31 * y2
+  out[4] = y4 - y1 + a32 * y4
+  out[5] = y1
+  out[6] = a31
+  out[7] = a32
+  out[8] = 1
+
+# adj[r][c] is the (c, r) cofactor.
+adjugate =! (o, m) ->
+  for i in [0...9]
+    r = i // 3
+    c = i % 3
+    r1 = ((c + 1) % 3) * 3
+    r2 = ((c + 2) % 3) * 3
+    c1 = (r + 1) % 3
+    c2 = (r + 2) % 3
+    o[i] = m[r1 + c1] * m[r2 + c2] - m[r1 + c2] * m[r2 + c1]
+  return
+
+# One input row is cached so the product may replace its left operand.
+ptMul =! (o, a, b) ->
+  for r in [0, 3, 6]
+    a0 = a[r]
+    a1 = a[r + 1]
+    a2 = a[r + 2]
+    for c in [0...3]
+      o[r + c] = a0 * b[c] + a1 * b[c + 3] + a2 * b[c + 6]
+  return
+
+packQuad =! (quad, x0, y0, x1, y1, x2, y2, x3, y3) ->
+  quad[0] = x0
+  quad[1] = y0
+  quad[2] = x1
+  quad[3] = y1
+  quad[4] = x2
+  quad[5] = y2
+  quad[6] = x3
+  quad[7] = y3
+
+mapPoint =! (map, x, y) ->
+  den = map[6] * x + map[7] * y + map[8]
+  { x: (map[0] * x + map[1] * y + map[2]) / den, y: (map[3] * x + map[4] * y + map[5]) / den }
+
+# ==[ Input ]==
+
+validateOpts =! (opts) ->
+  throw TypeError.new "\"opts\" expected object, got type=#{typeof opts}" if opts is null or typeof opts isnt 'object' or Array.isArray(opts)
+  throw TypeError.new "invalid opts.format=#{opts.format} (#{typeof opts.format})" if opts.format isnt undefined and not FORMATS[opts.format]
+  if opts.effort isnt undefined and opts.effort isnt Infinity and (not Number.isSafeInteger(opts.effort) or opts.effort < 1)
+    throw TypeError.new "invalid opts.effort=#{opts.effort} (#{typeof opts.effort})"
+  if opts.timeLimit isnt undefined and opts.timeLimit isnt Infinity and (typeof opts.timeLimit isnt 'number' or not Number.isFinite(opts.timeLimit) or opts.timeLimit < 0)
+    throw TypeError.new "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})"
+  for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
+    throw TypeError.new "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})" if opts[name] isnt undefined and typeof opts[name] isnt 'function'
+  return
+
+# ==[ Bitmap primitives ]==
+# A layer's bitmap is packed 32 pixels per word; a set bit is a dark pixel.
+
+# -1 marks out of bounds, distinct from either polarity.
+bit =! (layer, x, y) ->
+  return -1 if x < 0 or y < 0 or x >= layer.width or y >= layer.height
+  (layer.bitmap[y * layer.words + (x >>> 5)] >>> (x & 31)) & 1
+
+# Module pitch of a tolerant 1:1:3:1:1 run, or zero when it does not fit.
+ratio =! (a, b, c, d, e) ->
+  total = a + b + c + d + e
+  return 0 if total < 7
+  ms = total / 7
+  tol = ms * 0.5
+  fits = Math.abs(ms - a) < tol and Math.abs(ms - b) < tol and Math.abs(3 * ms - c) < 3 * tol and
+    Math.abs(ms - d) < tol and Math.abs(ms - e) < tol
+  if fits then ms else 0
+
+# Consecutive `color` pixels from (x, y) inclusive stepping (dx, dy); stops on
+# mismatch, border, or once the count passes `cap` (at most floor(cap)+1).
+# Horizontal runs consume whole words through clz32; vertical runs step.
+run =! (layer, x, y, dx, dy, color, cap) ->
+  n = 0
+  if dy
+    while bit(layer, x, y) is color and n <= cap
+      n++
+      y += dy
+    return n
+  return 0 if y < 0 or y >= layer.height
+  row = y * layer.words
+  while x >= 0 and x < layer.width and n <= cap
+    shift = x & 31
+    word = layer.bitmap[row + (x >>> 5)]
+    stops = (if color then ~word else word) >>> 0
+    w = if dx > 0 then stops >>> shift else (stops << (31 - shift)) >>> 0
+    span = if dx > 0 then Math.min(32 - shift, layer.width - x) else shift + 1
+    first = if not w then 32 else if dx > 0 then 31 - Math.clz32((w & -w) >>> 0) else Math.clz32(w)
+    len = Math.min first, span
+    n += len
+    x += dx * len
+    break if first < span
+  Math.min n, Math.floor(cap) + 1
+
+# 1:1:3:1:1 cross-check from (cx, cy) along (dx, dy): the refined center
+# coordinate, the measured pitch when asked, or -1 on ratio failure.
+cross =! (layer, cx, cy, dx, dy, maxMs, inverted, measure = false) ->
+  center = if inverted then 0 else 1
+  side = if inverted then 1 else 0
+  r2 = run layer, cx, cy, -dx, -dy, center, Infinity
+  back = r2
+  r1 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, side, maxMs
+  back += r1
+  r0 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, center, maxMs
+  back += r0
+  start = (if dx then cx else cy) - back
+  forward = run layer, cx + dx, cy + dy, dx, dy, center, Infinity
+  r2 += forward
+  ahead = 1 + forward
+  r3 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, maxMs
+  ahead += r3
+  r4 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, maxMs
+  return -1 unless ratio(r0, r1, r2, r3, r4)
+  if measure then (r0 + r1 + r2 + r3 + r4) / 7 else start + 1 + r0 + r1 + r2 / 2
+
+vertical =! (layer, pattern, inverted, measure = false) ->
+  cross layer, Math.round(pattern.x), Math.round(pattern.y), 0, 1, 3 * pattern.ms, inverted, measure
+
+# Recenter vertically then horizontally; total movement, or -1 on failure.
+refinePattern =! (layer, pattern, inverted) ->
+  y = vertical layer, pattern, inverted
+  return -1 if y < 0
+  x = cross layer, Math.round(pattern.x), Math.round(y), 1, 0, 3 * pattern.ms, inverted
+  return -1 if x < 0
+  movement = Math.abs(x - pattern.x) + Math.abs(y - pattern.y)
+  pattern.x = x
+  pattern.y = y
+  movement
+
+refineTriple =! (layer, triple) ->
+  tl = refinePattern layer, triple.tl, triple.inverted
+  return false if tl < 0
+  tr = refinePattern layer, triple.tr, triple.inverted
+  return false if tr < 0
+  bl = refinePattern layer, triple.bl, triple.inverted
+  bl >= 0 and tl + tr + bl > 0
+
+# Grayscale finder-template fit, one axis at a time, over pitch scales of
+# 0.5..1.5 in tenths so measured perspective squeeze is covered.
+fitPattern =! (layer, pattern, inverted) ->
+  luma = layer.luma
+  fit = (axis) ->
+    center = if axis then pattern.y else pattern.x
+    other = if axis then pattern.x else pattern.y
+    radius = Math.ceil pattern.ms
+    lo = Math.round(center) - radius
+    hi = Math.round(center) + radius
+    best = center
+    bestScore = -Infinity
+    for candidate in [lo..hi]
+      for scale in [5..15] by 2
+        pitch = pattern.ms * scale / 10
+        crossRadius = Math.round(pitch / 2)
+        side = Math.ceil(3.5 * pitch)
+        dark = 0
+        darkCount = 0
+        light = 0
+        lightCount = 0
+        for along in [-side..side]
+          module = Math.abs(along / pitch)
+          expectedDark = module < 1.5 or module >= 2.5
+          for across in [-crossRadius..crossRadius]
+            x = Math.round(if axis then other + across else candidate + along)
+            y = Math.round(if axis then candidate + along else other + across)
+            continue if x < 0 or y < 0 or x >= layer.width or y >= layer.height
+            value = luma[y * layer.width + x]
+            if expectedDark
+              dark += value
+              darkCount++
+            else
+              light += value
+              lightCount++
+        score = light / lightCount - dark / darkCount
+        score = -score if inverted
+        if score > bestScore
+          best = candidate
+          bestScore = score
+    best
+  pattern.x = fit 0
+  pattern.y = fit 1
+
+crossPitch =! (layer, pattern, inverted) ->
+  pitch = vertical layer, pattern, inverted, true
+  if pitch < 0 then 0 else pitch
+
+# Horizontal and vertical runs combined into one perspective-tolerant pitch.
+finderPitch =! (layer, pattern) ->
+  v = crossPitch layer, pattern, false
+  if v then Math.sqrt(pattern.ms * v) else 0
+
+# Endpoint pitches averaged after projecting both run directions onto the edge.
+edgePitch =! (layer, first, second, inverted) ->
+  dx = second.x - first.x
+  dy = second.y - first.y
+  length = distance first, second
+  return 0 unless length
+  pitch = (pattern) ->
+    v = crossPitch layer, pattern, inverted
+    return 0 unless v
+    Math.sqrt(((dx / length) * pattern.ms) ** 2 + ((dy / length) * v) ** 2)
+  a = pitch first
+  b = pitch second
+  if a and b then (a + b) / 2 else 0
+
+copyPattern =! (layer, index, out) ->
+  pos = index * 4
+  out.x = layer.patterns[pos]
+  out.y = layer.patterns[pos + 1]
+  out.ms = layer.patterns[pos + 2]
+
+# Retry sets are stride-5 records: rank, inverted, and three finder indices,
+# kept as a max-heap of 256 then heapsorted ascending.
+swapSet =! (sets, a, b) ->
+  ap = a * 5
+  bp = b * 5
+  for i in [0...5]
+    value = sets[ap + i]
+    sets[ap + i] = sets[bp + i]
+    sets[bp + i] = value
+  return
+
+siftDown =! (sets, end) ->
+  index = 0
+  loop
+    left = index * 2 + 1
+    return if left >= end
+    right = left + 1
+    child = if right < end and sets[right * 5] > sets[left * 5] then right else left
+    return if sets[index * 5] >= sets[child * 5]
+    swapSet sets, index, child
+    index = child
+
+# Horner evaluation of a low-degree-first GF(256) polynomial.
+evalLow =! (poly, length, x) ->
+  value = 0
+  for i in [length - 1..0] by -1
+    value = mul(value, x) ^ poly[i]
+  value
+
+# ==[ Row stages ]==
+# Row-ranged so the cooperative scanner can yield between bounded chunks.
+
+# 2x2 box filter into the next pyramid layer.
+resizeRows =! (src, dst, width, dstWidth, from, to) ->
+  if LITTLE_ENDIAN and (width & 3) is 0 and (dstWidth & 1) is 0 and (src.byteOffset & 3) is 0
+    resizeWords src, dst, width, dstWidth, from, to
+    return
+  for y in [from...to]
+    srcPos = (y << 1) * width
+    dstPos = y * dstWidth
+    for x in [0...dstWidth]
+      dst[dstPos++] = (src[srcPos] + src[srcPos + 1] + src[srcPos + width] + src[srcPos + width + 1] + 2) >> 2
+      srcPos += 2
+  return
+
+# The same box filter over whole words: one word from each source row holds
+# four pixels, summed in two 16-bit lanes to produce two output pixels.
+resizeWords =! (src, dst, width, dstWidth, from, to) ->
+  words = new Uint32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2)
+  wordsPerRow = width >> 2
+  pairs = dstWidth >> 1
+  for y in [from...to]
+    w0 = (y << 1) * wordsPerRow
+    w1 = w0 + wordsPerRow
+    dstPos = y * dstWidth
+    for k in [0...pairs]
+      a = words[w0 + k]
+      b = words[w1 + k]
+      sum = (a & 0x00ff00ff) + (b & 0x00ff00ff) + ((a >>> 8) & 0x00ff00ff) + ((b >>> 8) & 0x00ff00ff)
+      dst[dstPos] = ((sum & 0xffff) + 2) >> 2
+      dst[dstPos + 1] = ((sum >>> 16) + 2) >> 2
+      dstPos += 2
+  return
+
+# One threshold per 8x8 block. Low-contrast blocks take the darkest sample so
+# faint modules survive, propagated from the neighbors above and left.
+blockRows =! (layer, from, to) ->
+  luma = layer.luma
+  bWidth = layer.blockWidth
+  maxY = layer.height - 8
+  maxX = layer.width - 8
+  blocks = layer.blocks
+  for y in [from...to]
+    yPos = clamp y * 8, 0, maxY
+    for x in [0...bWidth]
+      xPos = clamp x * 8, 0, maxX
+      sum = 0
+      min = 0xff
+      max = 0
+      pos = yPos * layer.width + xPos
+      for yy in [0...8]
+        for xx in [0...8]
+          pixel = luma[pos + xx]
+          sum += pixel
+          min = pixel if pixel < min
+          max = pixel if pixel > max
+        pos += layer.width
+      average = sum >> 6
+      if max - min <= 24
+        average = min / 2
+        if y > 0 and x > 0
+          top = blocks[(y - 1) * bWidth + x]
+          left = blocks[y * bWidth + x - 1]
+          topLeft = blocks[(y - 1) * bWidth + x - 1]
+          previous = (2 * top + left + topLeft) / 4
+          average = previous if min < previous
+      blocks[bWidth * y + x] = average >>> 0
+  return
+
+# Smooth thresholds over 5x5 blocks and write each block's binary pixels.
+bitmapRows =! (layer, from, to) ->
+  luma = layer.luma
+  bWidth = layer.blockWidth
+  bHeight = layer.blockHeight
+  maxY = layer.height - 8
+  maxX = layer.width - 8
+  blocks = layer.blocks
+  for y in [from...to]
+    yPos = clamp y * 8, 0, maxY
+    top = clamp y, 2, bHeight - 3
+    for x in [0...bWidth]
+      xPos = clamp x * 8, 0, maxX
+      left = clamp x, 2, bWidth - 3
+      sum = 0
+      for yy in [-2..2]
+        row = bWidth * (top + yy) + left
+        for xx in [-2..2]
+          sum += blocks[row + xx]
+      average = sum / 25
+      layer.cuts[y * bWidth + x] = Math.floor average
+      pos = yPos * layer.width + xPos
+      for yy in [0...8]
+        value = 0
+        for xx in [0...8]
+          value |= 1 << xx if luma[pos + xx] <= average
+        shift = xPos & 31
+        word = (yPos + yy) * layer.words + (xPos >>> 5)
+        lowMask = (0xff << shift) >>> 0
+        layer.bitmap[word] = ((layer.bitmap[word] & ~lowMask) | ((value << shift) >>> 0)) >>> 0
+        if shift > 24
+          highMask = (1 << (shift - 24)) - 1
+          layer.bitmap[word + 1] = ((layer.bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))) >>> 0
+        pos += layer.width
+  return
+
+# A five-run window that starts, centers and ends on a dark run: cross-check
+# it and merge into a finder record within two modules of an existing center.
+recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
+  start = x - r0 - r1 - r2 - r3 - r4
+  cx = Math.round(start + r0 + r1 + r2 / 2)
+  limit = ms * 3
+  cy = cross layer, cx, y, 0, 1, limit, inverted
+  return if cy < 0
+  refinedX = cross layer, cx, Math.round(cy), 1, 0, limit, inverted
+  return if refinedX < 0
+  patterns = layer.patterns
+  polarity = if inverted then 1 else 0
+  for i in [0...layer.patternCount]
+    pos = i * 4
+    continue if (layer.inverted[i] & 1) isnt polarity
+    continue if Math.abs(patterns[pos] - refinedX) >= 2 * ms or Math.abs(patterns[pos + 1] - cy) >= 2 * ms
+    count = patterns[pos + 3] + 1
+    patterns[pos] = (patterns[pos] * patterns[pos + 3] + refinedX) / count
+    patterns[pos + 1] = (patterns[pos + 1] * patterns[pos + 3] + cy) / count
+    patterns[pos + 2] = (patterns[pos + 2] * patterns[pos + 3] + ms) / count
+    patterns[pos + 3] = count
+    return
+  index = layer.patternCount++
+  pos = index * 4
+  throw Error.new "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
+  patterns[pos] = refinedX
+  patterns[pos + 1] = cy
+  patterns[pos + 2] = ms
+  patterns[pos + 3] = 1
+  layer.inverted[index] = polarity
+
+# Rolling run-length window over every second row; run() always advances.
+findRows =! (layer, from, to) ->
+  for y in [from...to] by 2
+    r0 = r1 = r2 = r3 = r4 = 0
+    runs = 0
+    previous = bit(layer, 0, y) is 1
+    x = 0
+    while x < layer.width
+      length = run layer, x, y, 1, 0, (if previous then 1 else 0), Infinity
+      x += length
+      r0 = r1
+      r1 = r2
+      r2 = r3
+      r3 = r4
+      r4 = length
+      runs++
+      dark = previous
+      previous = not previous
+      if runs >= 5
+        ms = ratio r0, r1, r2, r3, r4
+        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
+  return
+
+# Legal sides are 17 + 4 * version; a non-finite estimate coerces to zero and
+# fails the dimension bounds downstream.
+snapSize =! (estimate) -> (Math.round((estimate - 17) / 4) * 4 + 17) | 0
+
+runDecode =! (walk) ->
+  step = walk.next()
+  step = walk.next(0) until step.done
+  step.value
+
+nextTick =! ->
+  return scheduler.yield() if typeof scheduler isnt 'undefined' and typeof scheduler.yield is 'function'
+  Promise.new (resolve) -> setTimeout resolve, 0
+
+# Drain generator work, yielding to the host after each scheduling quantum;
+# the generator receives the milliseconds spent waiting.
+runDecodeAsync =! (walk, timeLimit) ->
+  tick = Math.min timeLimit, 8
+  started = Date.now()
+  try
+    step = walk.next()
+    loop
+      return step.value if step.done
+      waited = 0
+      if Date.now() - started >= tick
+        waiting = Date.now()
+        nextTick!
+        waited = Date.now() - waiting
+        started = Date.now()
+      step = walk.next(waited)
+  catch error
+    walk.return undefined
+    throw error
+
+# ==[ Scanner ]==
+
+# A fractional initial value keeps the fields unboxed doubles.
+makePattern =! -> { x: 0.1, y: 0.1, ms: 0.1 }
+
+# Reusable decode state. Operations are exclusive: while decodeAsync is
+# pending, staging, decoding and cleaning throw until it settles.
+export class QRScanner
+  constructor: (init) ->
+    validateOpts init
+    maxPixels = validateSize init.maxSize, '"maxSize"'
+    maxSize = Object.freeze { ...init.maxSize }
+    stride = if init.stride is undefined then 1 else init.stride
+    throw RangeError.new "\"stride\" expected positive safe integer, got #{stride}" unless Number.isSafeInteger(stride) and stride >= 1
+    bytes = maxPixels * stride
+    throw RangeError.new "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}" unless Number.isSafeInteger(bytes) and bytes <= MAX_ARENA_BYTES
+    @effort = if init.effort is undefined then 1 else init.effort
+    @timeLimit = if init.timeLimit is undefined then 1000 / 60 else init.timeLimit
+    @opts = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
+    @width = 0
+    @height = 0
+    @luma = new Uint8Array(bytes)
+    @image = { data: @luma, height: 0, width: 0 }
+    @input = { data: @luma, height: 0, width: 0 }
+    @grid = new Uint8Array(177 * 177)
+    @fun = new Uint8Array(177 * 177)
+    @alignPos = new Uint8Array(7)
+    @codewords = new Uint8Array(BYTES[39])
+    @blockBytes = new Uint8Array(BYTES[39])
+    @syndromes = new Uint8Array(31)
+    @sigma = new Uint8Array(31)
+    @previous = new Uint8Array(31)
+    @next = new Uint8Array(31)
+    @candidates = new Uint32Array(16)
+    @ranks = new Float64Array(16)
+    @found = new Uint32Array(4 * 16 * 3)
+    @pick = new Float64Array(8)
+    @nodes = new Float64Array(7 * 7 * 2)
+    @located = new Float64Array((7 * 7 - 3) * 4)
+    @payload = Payload.new BYTES[39]
+    @inFlight = false
+    @staged = false
+    @resized = false
+    @triple = { tl: makePattern(), tr: makePattern(), bl: makePattern(), inverted: false, tlIndex: 0, trIndex: 0, blIndex: 0 }
+    @blocked = 0
+    @retryStart = 0
+    @retries = 0
+    @points = undefined
+    # `map` holds the active homography; `from` and `to` are scratch, and `to`
+    # doubles as the fine-plane map until the next build.
+    @map = new Float64Array(9)
+    @from = new Float64Array(9)
+    @to = new Float64Array(9)
+    @alignPoint = { x: 0.1, y: 0.1 }
+    @finePlane = { d: new Uint8Array(0), cut: new Int16Array(0), W: 0, H: 0, bw: 0, sh: 0 }
+    @invertedProjection = false
+    @decodedSize = 0
+    layers = []
+    width = maxSize.width
+    height = maxSize.height
+    for i in [0...4]
+      break if i and Math.min(width, height) < 64
+      blockWidth = Math.ceil(width / 8)
+      blockHeight = Math.ceil(height / 8)
+      centers = Math.ceil(width / 7) * Math.ceil(height / 7)
+      luma = if i then new Uint8Array(width * height) else @luma
+      cuts = new Int16Array(blockWidth * blockHeight)
+      layers.push
+        bitmap: new Uint32Array(Math.ceil(width / 32) * height)
+        blockHeight: 0
+        blockWidth: 0
+        blocks: new Uint8Array(blockWidth * blockHeight)
+        cuts: cuts
+        height: 0
+        luma: luma
+        patternCount: 0
+        patterns: new Float64Array(centers * 4)
+        used: false
+        width: 0
+        words: 0
+        # Projection reads luma through the threshold grid; `sh` is 3 for the
+        # owning layer and grows when native luma reuses a coarser grid.
+        plane: { d: luma, cut: cuts, W: width, H: height, bw: blockWidth, sh: 3 }
+        # Native luma offered to downscaled sampling; `r` is the layer index.
+        context: { opts: @opts, scale: 1 << i, ox: 0, oy: 0, fine: (if i then { luma: @image, r: i } else undefined) }
+        found: false
+        inverted: new Uint8Array(centers)
+        setCount: 0
+        setCursor: 0
+        sets: new Float64Array(256 * 5)
+        setsReady: false
+        # Round-0 pick as an id bag (sum, min, max); retries skip a matching set.
+        pickSum: -1
+        pickLo: 0
+        pickHi: 0
+      width >>= 1
+      height >>= 1
+    @layers = layers
+
+  beginOperation!: ->
+    throw Error.new 'scanner operation already in flight' if @inFlight
+    @inFlight = true
+
+  endOperation!: ->
+    @inFlight = false
+
+  decodePayload: (data, dataLen, version) ->
+    decoded = @payload.decode data, dataLen, version, !!@opts.textDecoder
+    if decoded instanceof Error then decoded else finishPayload(decoded, @opts.textDecoder)
+
+  # Square-to-output composed with input-to-square, from `from` and `to`.
+  mapQuad!: (out) ->
+    squareToQuad out, @to
+    squareToQuad @to, @from
+    adjugate @from, @to
+    ptMul out, out, @from
+
+  # Module-to-plane map from the finder-center square; BR is the alignment inset.
+  mapFinderQuad!: (out, size, t, brX, brY) ->
+    c = 3.5
+    packQuad @from, c, c, size - c, c, size - 6.5, size - 6.5, c, size - c
+    packQuad @to, t.tl.x, t.tl.y, t.tr.x, t.tr.y, brX, brY, t.bl.x, t.bl.y
+    @mapQuad out
+
+  setAlignments: (ver) ->
+    return 0 if ver is 1
+    last = 17 + 4 * ver - 7
+    count = Math.ceil((last - 6) / 28)
+    interval = (last - 6) // count
+    if interval & 1
+      interval++
+    else if ((last - 6) % count) * 2 >= count
+      interval += 2
+    positions = @alignPos
+    positions[0] = 6
+    for i in [1...count]
+      positions[i] = last - (count - i) * interval
+    positions[count] = last
+    count + 1
+
+  addImage!: (img, format = @opts.format) ->
+    @beginOperation()
+    try
+      copyLuma @luma, @opts.maxSize, img, format
+      @stage img
+    finally
+      @endOperation()
+
+  stage!: (size) ->
+    {width, height} = size
+    @width = width
+    @image.width = width
+    @height = height
+    @image.height = height
+    aw = width
+    ah = height
+    for layer, i in @layers
+      used = not i or Math.min(aw, ah) >= 64
+      layer.used = used
+      layer.width = if used then aw else 0
+      layer.height = if used then ah else 0
+      layer.words = if used then Math.ceil(aw / 32) else 0
+      layer.blockWidth = if used then Math.ceil(aw / 8) else 0
+      layer.blockHeight = if used then Math.ceil(ah / 8) else 0
+      layer.patternCount = 0
+      layer.plane.W = layer.width
+      layer.plane.H = layer.height
+      layer.plane.bw = layer.blockWidth
+      layer.context.ox = 0
+      layer.context.oy = 0
+      layer.found = false
+      layer.setCount = 0
+      layer.setCursor = 0
+      layer.setsReady = false
+      layer.pickSum = -1
+      aw >>= 1
+      ah >>= 1
+    @staged = true
+    @resized = false
+    @blocked = 0
+    @retryStart = 0
+    @retries = 0
+
+  # Lifecycle wipe: every typed array on the scanner and its layers is zeroed.
+  clean!: ->
+    @beginOperation()
+    try
+      @payload.position = 0
+      @payload.bytes.fill 0
+      for own k, v of this
+        v.fill 0 if ArrayBuffer.isView v
+      for layer in @layers
+        for own k, v of layer
+          v.fill 0 if ArrayBuffer.isView v
+        layer.blockHeight = 0
+        layer.blockWidth = 0
+        layer.height = 0
+        layer.width = 0
+        layer.words = 0
+        layer.patternCount = 0
+        layer.setCount = 0
+        layer.setCursor = 0
+        layer.used = false
+        layer.found = false
+        layer.setsReady = false
+      @width = 0
+      @image.width = 0
+      @height = 0
+      @image.height = 0
+      @staged = false
+      @resized = false
+      @blocked = 0
+      @points = undefined
+    finally
+      @endOperation()
+
+  # Pixels an integration wrote directly into `luma`.
+  processImage!: (size, format = 'I420', layout = { offset: 0, stride: size.width * (FORMATS[format]?.step or 0) }) ->
+    @beginOperation()
+    try
+      @input.width = size.width
+      @input.height = size.height
+      copyLuma @luma, @opts.maxSize, @input, format, layout
+      @stage size
+    finally
+      @endOperation()
+
+  # Project a module center and classify its pixel against the owning
+  # threshold block; floor keeps boundary values in the containing pixel.
+  read: (s, map, mx, my) ->
+    point = mapPoint map, mx, my
+    px = Math.floor point.x
+    py = Math.floor point.y
+    return 0 if px < 0 or py < 0 or px >= s.W or py >= s.H
+    dark = s.d[py * s.W + px] <= s.cut[(py >> s.sh) * s.bw + (px >> s.sh)]
+    if dark isnt @invertedProjection then 1 else 0
+
+  # Fourth corner of a projective finder square from its three local pitches:
+  # pitch varies with the inverse 3/2 power of the homography denominator, so
+  # the 2/3 power of each pitch ratio recovers the corner weight.
+  perspective: (t, p0, p1, p2) ->
+    {tl, tr, bl} = t
+    wx = Math.cbrt(p0 / p1) ** 2
+    wy = Math.cbrt(p0 / p2) ** 2
+    cornerDen = wx + wy - 1
+    return false unless cornerDen
+    brX = (wx * tr.x + wy * bl.x - tl.x) / cornerDen
+    brY = (wx * tr.y + wy * bl.y - tl.y) / cornerDen
+    dx3 = tl.x - tr.x + brX - bl.x
+    dy3 = tl.y - tr.y + brY - bl.y
+    return false if (dx3 or dy3) and not ((tr.x - brX) * (bl.y - brY) - (bl.x - brX) * (tr.y - brY))
+    packQuad @to, tl.x, tl.y, tr.x, tr.y, brX, brY, bl.x, bl.y
+    squareToQuad @map, @to
+    true
+
+  # Best 5x5 alignment-template placement on a 7x7 offset lattice around
+  # (ox, oy). Grid tiles use half-module steps with ties toward the smallest
+  # offset; the perspective search uses unit steps, first best wins.
+  searchAlign: (s, map, scale, side, ox, oy, stepMul, tie) ->
+    bestX = 0
+    bestY = 0
+    bestErrors = if tie then Infinity else 6
+    for sy in [-3..3]
+      for sx in [-3..3]
+        dx = sx * stepMul
+        dy = sy * stepMul
+        cap = bestErrors + (if tie then 1 else 0)
+        errors = 0
+        y = -2
+        while y <= 2 and errors < cap
+          for x in [-2..2]
+            dark = @read(s, map, scale + (ox + dx + x) / side, scale + (oy + dy + y) / side) is 1
+            edge = Math.abs(x) is 2 or Math.abs(y) is 2
+            if dark isnt (edge or (x is 0 and y is 0))
+              errors++
+              break if errors >= cap
+          y++
+        continue if errors > bestErrors or (not tie and errors is bestErrors)
+        continue if errors is bestErrors and dx * dx + dy * dy >= bestX * bestX + bestY * bestY
+        bestX = dx
+        bestY = dy
+        bestErrors = errors
+    return false if bestErrors > 5
+    pt = mapPoint map, scale + (ox + bestX) / side, scale + (oy + bestY) / side
+    @alignPoint.x = pt.x
+    @alignPoint.y = pt.y
+    true
+
+  # Does a finder lie inside a QR region already decoded on any layer?
+  excluded: (layer, index) ->
+    return false unless @blocked
+    scale = layer.context.scale
+    offset = (scale - 1) / 2
+    pos = 4 * index
+    x = scale * layer.patterns[pos] + offset
+    y = scale * layer.patterns[pos + 1] + offset
+    for source in @layers
+      continue unless source.found
+      sourceScale = source.context.scale
+      sourceOffset = (sourceScale - 1) / 2
+      s = source.patterns
+      for i in [0...source.patternCount]
+        state = source.inverted[i]
+        continue unless (state & 2) and (state & 4)
+        tl = 4 * i
+        tr = 4 * s[tl + 2]
+        bl = 4 * s[tl + 3]
+        ux = sourceScale * (s[tr] - s[tl])
+        uy = sourceScale * (s[tr + 1] - s[tl + 1])
+        vx = sourceScale * (s[bl] - s[tl])
+        vy = sourceScale * (s[bl + 1] - s[tl + 1])
+        determinant = ux * vy - uy * vx
+        dx = x - (sourceScale * s[tl] + sourceOffset)
+        dy = y - (sourceScale * s[tl + 1] + sourceOffset)
+        across = (dx * vy - dy * vx) / determinant
+        down = (dy * ux - dx * uy) / determinant
+        padding = s[tr + 2]
+        return true if across >= -padding and across <= 1 + padding and down >= -padding and down <= 1 + padding
+    false
+
+  exclude!: (layer) ->
+    for i in [0...layer.patternCount]
+      continue if layer.inverted[i] & 2 or not @excluded(layer, i)
+      layer.inverted[i] |= 2
+      @blocked++
+
+  # Bounded candidate retention; equal ranks keep the earlier slot.
+  retain: (index, rank, count, capacity) ->
+    ranks = @ranks
+    if count < capacity
+      @candidates[count] = index
+      ranks[count] = rank
+      return count + 1
+    worst = 0
+    for i in [1...count]
+      worst = i if ranks[worst] < ranks[i]
+    return count if rank >= ranks[worst]
+    @candidates[worst] = index
+    ranks[worst] = rank
+    count
+
+  # Assign three finder records to TL/TR/BL by longest side, clockwise.
+  makeTriple: (layer, i0, i1, i2) ->
+    pts = layer.patterns
+    d01 = dist2 pts, i0 * 4, i1 * 4
+    d12 = dist2 pts, i1 * 4, i2 * 4
+    d02 = dist2 pts, i0 * 4, i2 * 4
+    tl = i2
+    bl = i0
+    tr = i1
+    if d12 >= d01 and d12 >= d02
+      tl = i0
+      bl = i1
+      tr = i2
+    else if d02 >= d12 and d02 >= d01
+      tl = i1
+      bl = i0
+      tr = i2
+    triple = @triple
+    copyPattern layer, tl, triple.tl
+    copyPattern layer, bl, triple.bl
+    copyPattern layer, tr, triple.tr
+    {tl: topLeft, tr: topRight, bl: bottomLeft} = triple
+    if (topRight.x - topLeft.x) * (bottomLeft.y - topLeft.y) - (topRight.y - topLeft.y) * (bottomLeft.x - topLeft.x) < 0
+      [tr, bl] = [bl, tr]
+      copyPattern layer, tr, topRight
+      copyPattern layer, bl, bottomLeft
+    triple.tlIndex = tl
+    triple.trIndex = tr
+    triple.blIndex = bl
+    triple
+
+  # Does some upper layer confirm candidate slots i, j, k with three distinct centers?
+  confirmedAbove: (lowerIndex, i, j, k) ->
+    found = @found
+    for upperIndex in [lowerIndex + 1...@layers.length]
+      first = 0
+      second = 0
+      matched = true
+      for role in [0...3]
+        slot = if role is 0 then i else if role is 1 then j else k
+        base = (upperIndex * 16 + slot) * 3
+        selected = 0
+        for rank in [0...3]
+          candidate = found[base + rank]
+          continue if not candidate or candidate is first or candidate is second
+          selected = candidate
+          break
+        unless selected
+          matched = false
+          break
+        if role is 0 then first = selected
+        else if role is 1 then second = selected
+      return true if matched
+    false
+
+  # Best triple of one polarity for the mandatory attempt, into pick[polarity*4..]
+  # as (i0, i1, i2, relative error). Raw error rejects square cross-symbol
+  # mixes in dense grids; sparse scenes use relative error minus row
+  # confidence to reject small data pseudo-squares.
+  pickPolarity: (layer, polarity) ->
+    pts = layer.patterns
+    candidates = @candidates
+    confirmed = 0
+    for i in [0...layer.patternCount]
+      state = layer.inverted[i]
+      continue if (state & 1) isnt polarity or state & 2
+      confirmed++ if pts[i * 4 + 3] >= 2
+    # With three confirmed centers, require two row hits to reject one-row data.
+    minimum = if confirmed >= 3 then 2 else 1
+    count = 0
+    for i in [0...layer.patternCount]
+      state = layer.inverted[i]
+      continue if (state & 1) isnt polarity or state & 2
+      confidence = pts[i * 4 + 3]
+      continue if confidence < minimum
+      count = @retain i, -confidence, count, 16
+    return false if count < 3
+    # Nearest scale-consistent upper-layer centers per candidate: without this
+    # rescue, perspective squeeze lost 46 of 168 perspective decodes.
+    found = @found
+    found.fill 0
+    lowerIndex = @layers.indexOf layer
+    for upperIndex in [lowerIndex + 1...@layers.length]
+      upper = @layers[upperIndex]
+      continue unless upper.used and upper.found
+      scale = upper.context.scale / layer.context.scale
+      offset = (scale - 1) / 2
+      for slot in [0...count]
+        at = 4 * candidates[slot]
+        ms = pts[at + 2]
+        b0 = b1 = b2 = -1
+        d0 = d1 = d2 = Infinity
+        for i in [0...upper.patternCount]
+          continue if (upper.inverted[i] & 1) isnt polarity or upper.inverted[i] & 2
+          pos = 4 * i
+          mappedMs = scale * upper.patterns[pos + 2]
+          smallest = Math.min ms, mappedMs
+          largest = Math.max ms, mappedMs
+          # Unrelated scales above 2:1 are rejected; with the distance gate this added +27/-0 rasters.
+          continue if largest > 2 * smallest
+          dx = scale * upper.patterns[pos] + offset - pts[at]
+          dy = scale * upper.patterns[pos + 1] + offset - pts[at + 1]
+          d = dx * dx + dy * dy
+          continue if d >= 4 * largest ** 2 or d >= d2
+          if d < d0
+            b2 = b1
+            d2 = d1
+            b1 = b0
+            d1 = d0
+            b0 = i
+            d0 = d
+          else if d < d1
+            b2 = b1
+            d2 = d1
+            b1 = i
+            d1 = d
+          else
+            b2 = i
+            d2 = d
+        base = (upperIndex * 16 + slot) * 3
+        found[base] = b0 + 1
+        found[base + 1] = b1 + 1
+        found[base + 2] = b2 + 1
+    # 1.4 is the zero-loss ambiguous-set choice; isolated 1.8 retained all 7,178 rasters.
+    moduleRatioMax = if count is 3 then 1.8 else 1.4
+    best0 = best1 = best2 = -1
+    bestScale = 0
+    bestScore = Infinity
+    bestConfidence = 0
+    rankedScore = Infinity
+    rankedConfidence = 0
+    ranked0 = ranked1 = ranked2 = -1
+    rankedRelative = Infinity
+    for i in [0...count - 2]
+      i0 = candidates[i]
+      p0 = i0 * 4
+      for j in [i + 1...count - 1]
+        i1 = candidates[j]
+        p1 = i1 * 4
+        d01 = dist2 pts, p0, p1
+        for k in [j + 1...count]
+          i2 = candidates[k]
+          p2 = i2 * 4
+          minMs = Math.min pts[p0 + 2], pts[p1 + 2], pts[p2 + 2]
+          maxMs = Math.max pts[p0 + 2], pts[p1 + 2], pts[p2 + 2]
+          nativeConfidence = Math.min pts[p0 + 3], pts[p1 + 3], pts[p2 + 3]
+          # The measured sparse ambiguity has eight eligible centers.
+          if maxMs > moduleRatioMax * minMs and (count isnt 8 or nativeConfidence < 4)
+            continue unless @confirmedAbove(lowerIndex, i, j, k)
+          d12 = dist2 pts, p1, p2
+          d02 = dist2 pts, p0, p2
+          a = Math.min d01, d12, d02
+          c = Math.max d01, d12, d02
+          b = d01 + d12 + d02 - a - c
+          geometry = Math.abs(c - 2 * b) + Math.abs(c - 2 * a)
+          confidence = pts[p0 + 3] + pts[p1 + 3] + pts[p2 + 3]
+          if geometry < bestScore
+            bestScore = geometry
+            bestScale = c
+            bestConfidence = confidence
+            best0 = i0
+            best1 = i1
+            best2 = i2
+          continue if count > 8
+          # A small row-hit weight breaks near-equal geometry toward stronger evidence.
+          score = geometry / c - 0.01 * confidence
+          continue if score >= rankedScore
+          rankedScore = score
+          rankedConfidence = confidence
+          rankedRelative = geometry / c
+          ranked0 = i0
+          ranked1 = i1
+          ranked2 = i2
+    return false if best0 < 0
+    relative = bestScore / bestScale
+    # Small candidate sets describe one symbol; crowded scenes keep raw geometry
+    # so adjacent symbols cannot mix. 0.08..0.12 is the measured ambiguous band.
+    if (count <= 7 and relative >= 0.08 and relative <= 0.12) or
+        (count > 7 and count <= 8 and rankedConfidence >= 2 * bestConfidence and rankedConfidence <= 4 * bestConfidence)
+      best0 = ranked0
+      best1 = ranked1
+      best2 = ranked2
+      relative = rankedRelative
+    base = polarity * 4
+    @pick[base] = best0
+    @pick[base + 1] = best1
+    @pick[base + 2] = best2
+    @pick[base + 3] = relative
+    true
+
+  # Reject wrong triples and dimensions from the timing tracks before full
+  # sampling: 75% agreement across the horizontal and vertical tracks.
+  timing: (s, map, size) ->
+    gh = 0
+    gv = 0
+    n = 0
+    N = size - 16
+    track = 6.5
+    for i in [8...size - 8]
+      c = i + 0.5
+      e = 1 - (i & 1)
+      gh++ if @read(s, map, c, track) is e
+      gv++ if @read(s, map, track, c) is e
+      n++
+      return false if 100 * (gh + gv + 2 * (N - n)) < 150 * N and gh isnt n and gv isnt n
+    100 * (gh + gv) >= 150 * N or gh is N or gv is N
+
+  # A dark run of about one module flanked by light near the expected
+  # bottom-right alignment center, cross-checked vertically. This reads the
+  # native bitmap even when projection later samples a fine plane.
+  findBasicAlign: (layer, ex, ey, ms) ->
+    R = Math.max Math.round(5 * ms), 8
+    found = false
+    bestD = Infinity
+    yLo = Math.max 1, Math.round(ey - R)
+    yHi = Math.min layer.height - 2, Math.round(ey + R)
+    xLo = Math.max 1, Math.round(ex - R)
+    xHi = Math.min layer.width - 2, Math.round(ex + R)
+    dark = if @invertedProjection then 0 else 1
+    capV = Math.ceil(3 * ms) - 1
+    for y in [yLo..yHi]
+      x = xLo
+      x += run(layer, x, y, 1, 0, dark, Infinity) if bit(layer, x - 1, y) is dark
+      while x <= xHi
+        x += run layer, x, y, 1, 0, 1 - dark, Infinity
+        break if x > xHi
+        w = run layer, x, y, 1, 0, dark, xHi + 1 - x
+        cx = x + w / 2
+        cxi = Math.round cx
+        x += w + 1
+        continue if w < 0.4 * ms or w > 2.5 * ms
+        up = run layer, cxi, y - 1, 0, -1, dark, capV
+        down = run layer, cxi, y + 1, 0, 1, dark, capV
+        h = up + down + 1
+        continue if h < 0.4 * ms or h > 2.5 * ms
+        cy = y - up + h / 2
+        dist = (cx - ex) * (cx - ex) + (cy - ey) * (cy - ey)
+        if dist < bestD
+          bestD = dist
+          found = true
+          @alignPoint.x = cx
+          @alignPoint.y = cy
+    found
+
+  # Detected geometry in caller coordinates for the terminal callback.
+  report!: (t, br, aligners, ms, size, ctx) ->
+    return unless ctx.opts.pointsOnDetect
+    {tl, tr, bl} = t
+    {scale, ox, oy} = ctx
+    pt = (point, moduleSize) ->
+      mapped = { x: point.x * scale + ox, y: point.y * scale + oy }
+      mapped.moduleSize = moduleSize * scale if moduleSize isnt undefined
+      mapped
+    # The located alignment center is inset from the fourth finder position;
+    # BR completes the finder-center square through the sampling homography.
+    map = @map
+    @mapFinderQuad map, size, t, br.x, br.y
+    project = (x, y) -> pt mapPoint(map, x, y)
+    quad = (left, top, right, bottom) -> [project(left, top), project(right, top), project(right, bottom), project(left, bottom)]
+    marker = (point, moduleSize, x, y, radius) ->
+      center = pt point, moduleSize
+      expected = project x, y
+      corners = quad x - radius, y - radius, x + radius, y + radius
+      # A tiled search can move a center away from the global homography;
+      # its marker keeps that local correction.
+      dx = center.x - expected.x
+      dy = center.y - expected.y
+      if dx or dy
+        for corner in corners
+          corner.x += dx
+          corner.y += dy
+      { ...center, corners }
+    c = 3.5
+    pad = 1
+    bounds = quad 0, 0, size, size
+    xs = bounds.map (pt) -> pt.x
+    ys = bounds.map (pt) -> pt.y
+    minX = Math.min ...xs
+    minY = Math.min ...ys
+    @points =
+      tl: marker(tl, tl.ms, c, c, c)
+      tr: marker(tr, tr.ms, size - c, c, c)
+      br: project(size - c, size - c)
+      bl: marker(bl, bl.ms, c, size - c, c)
+      aligners: aligners.map (a) -> marker(a.point, ms, a.x, a.y, 5 / 2)
+      bounds: bounds
+      outline: quad(-pad, -pad, size + pad, size + pad)
+      boundingBox: { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY }
+
+  # Retarget a coarse layer's homography and threshold grid to native luma.
+  # A layer pixel x sits at 2^r*x + (2^r-1)/2 in native coordinates.
+  upgrade: (p, map, ctx) ->
+    fine = ctx.fine
+    return 0 unless fine
+    sc = 1 << fine.r
+    half = (sc - 1) / 2
+    scaled = @to
+    for i in [0...6]
+      scaled[i] = sc * map[i] + half * map[6 + i % 3]
+    scaled[6] = map[6]
+    scaled[7] = map[7]
+    scaled[8] = map[8]
+    plane = @finePlane
+    sh = p.sh + fine.r
+    plane.d = fine.luma.data
+    plane.cut = p.cut
+    plane.W = Math.min fine.luma.width, p.bw << sh
+    plane.H = Math.min fine.luma.height, ((p.cut.length / p.bw) | 0) << sh
+    plane.bw = p.bw
+    plane.sh = sh
+    sc
+
+  # Berlekamp-Massey, Chien search and Forney over one block in place.
+  correctBlock: (offset, length, words) ->
+    blockBytes = @blockBytes
+    syndromes = @syndromes
+    hasError = false
+    for i in [0...words]
+      value = 0
+      for j in [0...length]
+        value = mul(value, EXP[i]) ^ blockBytes[offset + j]
+      syndromes[i] = value
+      hasError = true if value
+    return true unless hasError
+    sigma = @sigma
+    previous = @previous
+    next = @next
+    sigma.fill 0, 0, words + 1
+    previous.fill 0, 0, words + 1
+    sigma[0] = 1
+    previous[0] = 1
+    sigmaLength = 1
+    previousLength = 1
+    degree = 0
+    shift = 1
+    discrepancy = 1
+    for n in [0...words]
+      delta = syndromes[n]
+      for i in [1...degree + 1]
+        delta ^= mul(sigma[i], syndromes[n - i])
+      unless delta
+        shift++
+        continue
+      coefficient = mul delta, inv(discrepancy)
+      nextLength = Math.max sigmaLength, previousLength + shift
+      for i in [0...nextLength]
+        a = if i < sigmaLength then sigma[i] else 0
+        b = if i >= shift and i - shift < previousLength then mul(coefficient, previous[i - shift]) else 0
+        next[i] = a ^ b
+      if 2 * degree <= n
+        for i in [0...sigmaLength]
+          previous[i] = sigma[i]
+        previousLength = sigmaLength
+        degree = n + 1 - degree
+        discrepancy = delta
+        shift = 1
+      else
+        shift++
+      for i in [0...nextLength]
+        sigma[i] = next[i]
+      sigmaLength = nextLength
+    sigmaLength-- while sigmaLength > 1 and not sigma[sigmaLength - 1]
+    errors = sigmaLength - 1
+    return false if not errors or 2 * errors > words
+    # previous and next are dead now; reuse them as omega and the locations.
+    omega = previous
+    omega.fill 0, 0, words
+    for i in [0...sigmaLength]
+      j = 0
+      while i + j < words
+        omega[i + j] ^= mul(sigma[i], syndromes[j])
+        j++
+    locations = next
+    locationCount = 0
+    i = 1
+    while i < 256 and locationCount < errors
+      locations[locationCount++] = inv(i) unless evalLow(sigma, sigmaLength, i)
+      i++
+    return false if locationCount isnt errors
+    for i in [0...locationCount]
+      location = locations[i]
+      blockPos = length - 1 - LOG[location]
+      return false if blockPos < 0
+      inverse = inv location
+      denominator = 1
+      for j in [0...locationCount]
+        denominator = mul(denominator, 1 ^ mul(locations[j], inverse)) if i isnt j
+      blockBytes[offset + blockPos] ^= mul(evalLow(omega, words, inverse), inv(denominator))
+    true
+
+  # Function-cell map, zigzag unmask into codewords, deinterleave, correct
+  # every block, then parse the payload.
+  decodeFormat: (size, eccIndex, mask) ->
+    ver = (size - 17) / 4
+    fun = @fun
+    fun.fill 0, 0, size * size
+    for finder in [0...3]
+      fx = if finder is 1 then size - 7 else 0
+      fy = if finder is 2 then size - 7 else 0
+      for dy in [-1...8]
+        for dx in [-1...8]
+          x = fx + dx
+          y = fy + dy
+          fun[y * size + x] = 1 if x >= 0 and y >= 0 and x < size and y < size
+    count = @setAlignments ver
+    align = @alignPos
+    for yi in [0...count]
+      for xi in [0...count]
+        ax = align[xi]
+        ay = align[yi]
+        continue if fun[ay * size + ax]
+        for dy in [-2..2]
+          for dx in [-2..2]
+            fun[(ay + dy) * size + ax + dx] = 1
+    for i in [0...size]
+      fun[6 * size + i] = 1
+      fun[i * size + 6] = 1
+    for i in [0..8]
+      fun[i * size + 8] = 1
+      fun[8 * size + i] = 1
+      if i < 8
+        fun[8 * size + size - 1 - i] = 1
+        fun[(size - 1 - i) * size + 8] = 1
+    if ver >= 7
+      for i in [0...18]
+        x = size - 11 + i % 3
+        y = i // 3
+        fun[y * size + x] = 1
+        fun[x * size + y] = 1
+    bytes = @codewords
+    total = BYTES[ver - 1]
+    bytes.fill 0, 0, total
+    grid = @grid
+    bitIndex = 0
+    dir = -1
+    y = size - 1
+    xOffset = size - 1
+    while xOffset > 0
+      xOffset = 5 if xOffset is 6
+      loop
+        for j in [0...2]
+          x = xOffset - j
+          continue if fun[y * size + x]
+          if bitIndex < 8 * total and (grid[y * size + x] ^ ((maskBits(x, y) >> mask) & 1)) is 1
+            bytes[bitIndex >> 3] |= 0x80 >> (bitIndex & 7)
+          bitIndex++
+        break if y + dir < 0 or y + dir >= size
+        y += dir
+      dir = -dir
+      xOffset -= 2
+    ecc = ECC_LEVELS[eccIndex]
+    words = WORDS_PER_BLOCK[ecc][ver - 1]
+    blocks = ECC_BLOCKS[ecc][ver - 1]
+    shortLen = (total // blocks) - words
+    shortBlocks = blocks - total % blocks
+    blockLen = shortLen + words
+    blockBytes = @blockBytes
+    pos = 0
+    # Every data column precedes every ECC column; both phases share the walk.
+    for phase in [0...2]
+      cols = if phase then words else shortLen + 1
+      for i in [0...cols]
+        for block in [0...blocks]
+          length = blockLen + (if block >= shortBlocks then 1 else 0)
+          continue if not phase and i >= length - words
+          offset = block * blockLen + Math.max(0, block - shortBlocks)
+          blockBytes[offset + (if phase then length - words else 0) + i] = bytes[pos++]
+    dataLen = total - words * blocks
+    data = bytes
+    pos = 0
+    for block in [0...blocks]
+      offset = block * blockLen + Math.max(0, block - shortBlocks)
+      length = blockLen + (if block >= shortBlocks then 1 else 0)
+      return FAIL.rs unless @correctBlock(offset, length, words)
+      end = offset + length - words
+      for i in [offset...end]
+        data[pos++] = blockBytes[i]
+    @decodePayload data, dataLen, ver
+
+  # Both format copies within Hamming distance three; the last in-radius
+  # (ecc, mask) wins per copy, the closer copy is tried first.
+  decodeGrid: (size) ->
+    return FAIL.version unless checkVersion(@grid, size)
+    m = @grid
+    f1 = 0
+    f2 = 0
+    for i in [0...15]
+      b1 = if i < 6 then m[i * size + 8] else if i < 8 then m[(i + 1) * size + 8] else if i is 8 then m[8 * size + 7] else m[8 * size + 14 - i]
+      b2 = if i < 8 then m[8 * size + size - 1 - i] else m[(size - 15 + i) * size + 8]
+      f1 |= b1 << i
+      f2 |= b2 << i
+    aEcc = bEcc = -1
+    aMask = bMask = 0
+    aDistance = bDistance = 0
+    for ecc in [0...ECC_LEVELS.length]
+      for mask in [0...8]
+        bits = formatBits ECC_LEVELS[ecc], mask
+        d1 = popcnt(bits ^ f1)
+        d2 = popcnt(bits ^ f2)
+        if d1 <= 3
+          aEcc = ecc
+          aMask = mask
+          aDistance = d1
+        if d2 <= 3
+          bEcc = ecc
+          bMask = mask
+          bDistance = d2
+    same = aEcc is bEcc and aMask is bMask
+    firstB = bEcc >= 0 and (aEcc < 0 or (not same and bDistance < aDistance))
+    aFormat = if aEcc < 0 then -1 else (aEcc << 3) | aMask
+    bFormat = if bEcc < 0 then -1 else (bEcc << 3) | bMask
+    first = if firstB then bFormat else aFormat
+    second = if firstB then aFormat else if bEcc >= 0 and not same then bFormat else -1
+    decoded = FAIL.format
+    formatValue = first
+    while formatValue >= 0
+      decoded = @decodeFormat size, formatValue >> 3, formatValue & 7
+      break unless decoded instanceof Error
+      formatValue = if formatValue is first then second else -1
+    decoded
+
+  # One symbol or one alignment tile into the scanner grid; tiles never overlap.
+  projectQuad!: (s, map, size, left = 0, right = size, top = 0, bottom = size) ->
+    grid = @grid
+    for y in [top...bottom]
+      for x in [left...right]
+        grid[y * size + x] = @read s, map, x + 0.5, y + 0.5
+
+  projectMap: (s, map, size) ->
+    return FAIL.timing unless @timing(s, map, size)
+    @projectQuad s, map, size
+    @decodeGrid size
+
+  # Timing plus the redundant version bits alone, to gate Version 7+ tiling.
+  confirm: (s, map, size) ->
+    return false unless @timing(s, map, size)
+    grid = @grid
+    for i in [0...18]
+      x = size - 11 + i % 3
+      y = i // 3
+      grid[y * size + x] = @read s, map, x + 0.5, y + 0.5
+      grid[x * size + y] = @read s, map, y + 0.5, x + 0.5
+    checkVersion grid, size
+
+  # Version 7+: locate every alignment pattern on the lattice, then project
+  # each tile through its own homography built from the four surrounding nodes.
+  projectTiles: (sp, sm, size, version, fine, brPoint, t, ms, ctx) ->
+    sc = if fine then fine else 1
+    half = (sc - 1) / 2
+    count = @setAlignments version
+    positions = @alignPos
+    nodes = @nodes
+    located = @located
+    last = positions[count - 1]
+    c = 0.5
+    locatedCount = 0
+    tileBrX = 0
+    tileBrY = 0
+    hasTileBr = false
+    for yi in [0...count]
+      for xi in [0...count]
+        x = positions[xi]
+        y = positions[yi]
+        overlapsFinder = (x is 6 and (y is 6 or y is last)) or (x is last and y is 6)
+        node = (yi * count + xi) * 2
+        if not overlapsFinder and @searchAlign(sp, sm, c, 1, x, y, c, true)
+          pos = locatedCount * 4
+          located[pos] = @alignPoint.x
+          located[pos + 1] = @alignPoint.y
+          located[pos + 2] = x + c
+          located[pos + 3] = y + c
+          locatedCount++
+          if x is last and y is last
+            hasTileBr = true
+            tileBrX = @alignPoint.x
+            tileBrY = @alignPoint.y
+          nodes[node] = @alignPoint.x
+          nodes[node + 1] = @alignPoint.y
+        else
+          q = mapPoint sm, x + c, y + c
+          nodes[node] = q.x
+          nodes[node + 1] = q.y
+    return FAIL.alignment unless locatedCount
+    for yi in [0...count - 1]
+      for xi in [0...count - 1]
+        left = positions[xi]
+        right = positions[xi + 1]
+        top = positions[yi]
+        bottom = positions[yi + 1]
+        tlNode = (yi * count + xi) * 2
+        trNode = tlNode + 2
+        blNode = ((yi + 1) * count + xi) * 2
+        brNode = blNode + 2
+        tile = @map
+        packQuad @from, left + c, top + c, right + c, top + c, right + c, bottom + c, left + c, bottom + c
+        packQuad @to, nodes[tlNode], nodes[tlNode + 1], nodes[trNode], nodes[trNode + 1], nodes[brNode], nodes[brNode + 1], nodes[blNode], nodes[blNode + 1]
+        @mapQuad tile
+        @projectQuad sp, tile, size, (if xi then left else 0), (if xi is count - 2 then size else right), (if yi then top else 0), (if yi is count - 2 then size else bottom)
+    if ctx.opts.pointsOnDetect
+      reportAligners = []
+      for i in [0...locatedCount]
+        pos = i * 4
+        reportAligners.push { point: { x: (located[pos] - half) / sc, y: (located[pos + 1] - half) / sc }, x: located[pos + 2], y: located[pos + 3] }
+      br = if hasTileBr then { x: (tileBrX - half) / sc, y: (tileBrY - half) / sc } else brPoint
+      @report t, br, reportAligners, ms, size, ctx
+    @decodeGrid size
+
+  # One path for both polarities: inverted sampling flips read() and the
+  # aligner's dark color.
+  projectWith: (layer, triple, pitch) ->
+    @invertedProjection = triple.inverted
+    result = @projectTriple layer, triple, pitch
+    @invertedProjection = false
+    result
+
+  projectTriple: (layer, t, pitch) ->
+    inverted = t.inverted
+    plane = layer.plane
+    ctx = layer.context
+    {tl, tr, bl} = t
+    ms = (tl.ms + tr.ms + bl.ms) / 3
+    minMs = Math.min tl.ms, tr.ms, bl.ms
+    maxMs = Math.max tl.ms, tr.ms, bl.ms
+    # Perspective changes apparent pitch across finders; the matching edge's
+    # endpoint pitches are used only when that variation is material.
+    ux = tr.x - tl.x
+    uy = tr.y - tl.y
+    vx = bl.x - tl.x
+    vy = bl.y - tl.y
+    area = Math.abs(ux * vy - uy * vx)
+    span = Math.max Math.abs(uy), Math.abs(vy)
+    medianMs = tl.ms + tr.ms + bl.ms - minMs - maxMs
+    medianEst = if span > 0 and medianMs > 0 then area / (span * medianMs) + 7 else Infinity
+    length = distance tl, tr
+    # 10/9 is the best gain plateau among 1.105, 10/9, 1.125 and 1.15.
+    est = if pitch then length / pitch + 7 else if maxMs > (10 / 9) * minMs then (length * 2) / (tl.ms + tr.ms) + 7 else medianEst
+    snapped = snapSize est
+    meanEst = if span > 0 and ms > 0 then area / (span * ms) + 7 else Infinity
+    mean = snapSize meanEst
+    failed = FAIL.dimension
+    # Module-size estimates drift under rotation and blur: try the neighbor
+    # dimensions before giving up on the triple.
+    for i in [0...4]
+      size = if i is 0 then snapped else if i is 1 then mean else if i is 2 then snapped - 4 else snapped + 4
+      estimate = if i is 1 then meanEst else est
+      continue if (i > 0 and size is snapped) or (i > 1 and size is mean)
+      continue if size < 21 or size > 177 or Math.abs(size - estimate) > 6
+      @decodedSize = size
+      # A located bottom-right alignment pattern upgrades the affine BR
+      # estimate to perspective.
+      f = 1 - 3 / (size - 7)
+      brEstX = tl.x + (tr.x - tl.x + bl.x - tl.x) * f
+      brEstY = tl.y + (tr.y - tl.y + bl.y - tl.y) * f
+      found = false
+      if size >= 25
+        if inverted or not @perspective(t, tl.ms, tr.ms, bl.ms)
+          found = @findBasicAlign layer, brEstX, brEstY, ms
+        else
+          cx = tr.x + bl.x - 2 * tl.x
+          cy = tr.y + bl.y - 2 * tl.y
+          scale = (cx * (brEstX - tl.x) + cy * (brEstY - tl.y)) / (cx * cx + cy * cy)
+          map = @map
+          predictedDen = (map[6] + map[7]) * scale + map[8]
+          dx = ((map[0] + map[1]) * scale + map[2]) / predictedDen - brEstX
+          dy = ((map[3] + map[4]) * scale + map[5]) / predictedDen - brEstY
+          # Disagreement within three modules is measurement noise.
+          if dx * dx + dy * dy <= 9 * ms * ms
+            found = @findBasicAlign layer, brEstX, brEstY, ms
+          else
+            tlMs = finderPitch layer, tl
+            trMs = finderPitch layer, tr
+            blMs = finderPitch layer, bl
+            if tlMs and trMs and blMs and @perspective(t, tlMs, trMs, blMs)
+              found = @searchAlign plane, map, scale, 3 / (1 - scale), 0, 0, 1, false
+      # Data can resemble an aligner; Reed-Solomon also tries the affine estimate.
+      failed = FAIL.alignment
+      attempts = if found then 2 else 1
+      for attempt in [0...attempts]
+        align = attempt is 0 and found
+        brX = if align then @alignPoint.x else brEstX
+        brY = if align then @alignPoint.y else brEstY
+        brPoint = undefined
+        if ctx.opts.pointsOnDetect
+          brPoint = { x: brX, y: brY }
+          inset = size - 6.5
+          aligners = if align then [{ point: @alignPoint, x: inset, y: inset }] else []
+          @report t, brPoint, aligners, ms, size, ctx
+        map = @map
+        @mapFinderQuad map, size, t, brX, brY
+        version = (size - 17) / 4
+        if version < 7
+          failed = @projectMap plane, map, size
+          return failed unless failed instanceof Error
+          # Blurred Versions 1..6 still need fine-plane sampling.
+          if @upgrade(plane, map, ctx)
+            failed = @projectMap @finePlane, @to, size
+            return failed unless failed instanceof Error
+        else
+          fine = @upgrade plane, map, ctx
+          sp = if fine then @finePlane else plane
+          sm = if fine then @to else map
+          # The redundant BCH word is confirmed before paying for local searches.
+          confirmed = @confirm sp, sm, size
+          confirmed = @confirm(plane, map, size) if not confirmed and fine
+          unless confirmed
+            failed = FAIL.version
+            continue
+          failed = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
+          return failed unless failed instanceof Error
+          # A false local alignment can corrupt a valid global projection.
+          failed = @projectMap sp, sm, size
+          return failed unless failed instanceof Error
+          if fine
+            failed = @projectMap plane, map, size
+            return failed unless failed instanceof Error
+    failed
+
+  # Threshold, pack the bitmap and collect finders for one layer.
+  binarize: (layer, cooperative) ->
+    bHeight = layer.blockHeight
+    chunk = if cooperative then 16 else bHeight
+    y = 0
+    while y < bHeight
+      blockRows layer, y, Math.min(bHeight, y + chunk)
+      @retryStart += yield if cooperative and y + chunk < bHeight
+      y += chunk
+    layer.bitmap.fill 0, 0, layer.words * layer.height
+    y = 0
+    while y < bHeight
+      bitmapRows layer, y, Math.min(bHeight, y + chunk)
+      @retryStart += yield if cooperative and y + chunk < bHeight
+      y += chunk
+    @opts.imageOnBitmap darkToImage(layer.width, layer.height, (x, y) -> bit(layer, x, y) is 1) if @opts.imageOnBitmap
+    layer.patternCount = 0
+    rows = if cooperative then 32 else layer.height
+    y = 0
+    while y < layer.height
+      findRows layer, y, Math.min(layer.height, y + rows)
+      @retryStart += yield if cooperative and y + rows < layer.height
+      y += rows
+    layer.found = true
+    return
+
+  # Mandatory attempt: both polarities ranked independently, then the pick
+  # with the better geometry-times-evidence product.
+  pickTriple: (layer) ->
+    @exclude layer
+    ordinary = @pickPolarity layer, 0
+    inverted = @pickPolarity layer, 1
+    return undefined unless ordinary or inverted
+    pick = @pick
+    pts = layer.patterns
+    polarity = 0
+    if inverted
+      ordConfidence = if ordinary then pts[pick[0] * 4 + 3] + pts[pick[1] * 4 + 3] + pts[pick[2] * 4 + 3] else 0
+      invConfidence = pts[pick[4] * 4 + 3] + pts[pick[5] * 4 + 3] + pts[pick[6] * 4 + 3]
+      # Geometry alone favors well-formed false crosses; a small evidence
+      # prior keeps weak true crosses competitive.
+      polarity = 1 if not ordinary or (pick[7] + 0.1) * ordConfidence < (pick[3] + 0.1) * invConfidence
+    base = polarity * 4
+    w0 = pick[base] | 0
+    w1 = pick[base + 1] | 0
+    w2 = pick[base + 2] | 0
+    layer.pickSum = w0 + w1 + w2
+    layer.pickLo = Math.min w0, w1, w2
+    layer.pickHi = Math.max w0, w1, w2
+    triple = @makeTriple layer, w0, w1, w2
+    triple.inverted = polarity is 1
+    triple
+
+  # Push one retry set onto the bounded max-heap.
+  retainSet!: (layer, score, inverted, i, i1, i2) ->
+    sets = layer.sets
+    index = layer.setCount
+    if index < 256
+      layer.setCount++
+    else
+      return if score >= sets[0]
+      index = 0
+    pos = index * 5
+    sets[pos] = score
+    sets[pos + 1] = if inverted then 1 else 0
+    sets[pos + 2] = i
+    sets[pos + 3] = i1
+    sets[pos + 4] = i2
+    while index
+      parent = (index - 1) >> 1
+      return if sets[parent * 5] >= sets[index * 5]
+      swapSet sets, parent, index
+      index = parent
+    siftDown sets, layer.setCount
+
+  # Retry schedule for one layer: every finder's bounded neighborhood, each
+  # pair scored by compactness over row-hit evidence, heapsorted ascending.
+  buildSets: (layer, cooperative) ->
+    layer.setsReady = true
+    layer.setCount = 0
+    layer.setCursor = 0
+    eligible = 0
+    for i in [0...layer.patternCount]
+      eligible++ unless layer.inverted[i] & 2
+    return if eligible < 3
+    pts = layer.patterns
+    neighbors = @candidates
+    useFilters = eligible > 5
+    for i in [0...layer.patternCount - 2]
+      @retryStart += yield if cooperative and i and not (i & 7)
+      state = layer.inverted[i]
+      continue if state & 2
+      inverted = !!(state & 1)
+      p0 = i * 4
+      # A 1.5 scale allowance retains the largest legal perspective dimension.
+      maxDistance = pts[p0 + 2] * 177 * 1.5
+      maxDistance2 = maxDistance * maxDistance
+      count = 0
+      for index in [i + 1...layer.patternCount]
+        otherState = layer.inverted[index]
+        continue if otherState & 2 or !!(otherState & 1) isnt inverted
+        pos = index * 4
+        smallest = Math.min pts[p0 + 2], pts[pos + 2]
+        largest = Math.max pts[p0 + 2], pts[pos + 2]
+        # 2.4 preserves upper-layer-confirmed perspective triples; two pixels
+        # of slack keep an exact 2:1 ratio inside floating point.
+        continue if useFilters and largest > 2.4 * smallest + 2 / 7
+        dx = pts[p0] - pts[pos]
+        dy = pts[p0 + 1] - pts[pos + 1]
+        d = dx * dx + dy * dy
+        continue if d > maxDistance2
+        # A distant high-confidence finder can be the squeezed leg of a
+        # perspective symbol: rank by evidence-adjusted distance.
+        count = @retain index, d / pts[pos + 3], count, 15
+      for u in [0...count - 1]
+        i1 = neighbors[u]
+        p1 = i1 * 4
+        d01 = dist2 pts, p0, p1
+        for v in [u + 1...count]
+          i2 = neighbors[v]
+          p2 = i2 * 4
+          d12 = dist2 pts, p1, p2
+          d02 = dist2 pts, p0, p2
+          a = Math.min d01, d12, d02
+          c = Math.max d01, d12, d02
+          b = d01 + d12 + d02 - a - c
+          continue if not a or not b or (useFilters and (a > 4 * b or b > 4 * a))
+          da = Math.sqrt a
+          db = Math.sqrt b
+          moduleCount = (da + db) / (2 * ((pts[p0 + 2] + pts[p1 + 2] + pts[p2 + 2]) / 3)) + 7
+          # Center-line pitch can overestimate small finders: allow 0.8..1.5 scaling.
+          continue if moduleCount < 21 * 0.8 or moduleCount > 177 * 1.5
+          cosine = (a + b - c) / (2 * Math.sqrt(a * b))
+          # Finder legs spanning 60 through 120 degrees.
+          continue if useFilters and Math.abs(cosine) > 0.5
+          confidence = pts[p0 + 3] + pts[p1 + 3] + pts[p2 + 3]
+          @retainSet layer, (da + db + Math.abs(da - db)) / confidence, inverted, i, i1, i2
+    for end in [layer.setCount - 1...0] by -1
+      swapSet layer.sets, 0, end
+      siftDown layer.sets, end
+    return
+
+  # Next scheduled set that is neither excluded nor the round-0 pick.
+  nextSet: (layer) ->
+    sets = layer.sets
+    while layer.setCursor < layer.setCount
+      pos = layer.setCursor * 5
+      layer.setCursor++
+      i0 = sets[pos + 2] | 0
+      i1 = sets[pos + 3] | 0
+      i2 = sets[pos + 4] | 0
+      continue if layer.inverted[i0] & 2 or layer.inverted[i1] & 2 or layer.inverted[i2] & 2
+      continue if i0 + i1 + i2 is layer.pickSum and Math.min(i0, i1, i2) is layer.pickLo and Math.max(i0, i1, i2) is layer.pickHi
+      triple = @makeTriple layer, i0, i1, i2
+      triple.inverted = !!sets[pos + 1]
+      return triple
+    undefined
+
+  # A success retains its projected region in the dead finder records so
+  # later attempts skip finders inside it.
+  markDecoded!: (layer, triple, result) ->
+    opts = layer.context.opts
+    if opts.imageOnResult
+      size = @decodedSize
+      opts.imageOnResult darkToImage(size, size, (x, y) => @grid[y * size + x])
+    padding = 3.5 / (@decodedSize - 7)
+    pts = layer.patterns
+    tl = 4 * triple.tlIndex
+    tr = 4 * triple.trIndex
+    bl = 4 * triple.blIndex
+    pts[tl] = triple.tl.x
+    pts[tl + 1] = triple.tl.y
+    pts[tl + 2] = triple.trIndex
+    pts[tl + 3] = triple.blIndex
+    pts[tr] = triple.tr.x
+    pts[tr + 1] = triple.tr.y
+    pts[tr + 2] = padding
+    pts[bl] = triple.bl.x
+    pts[bl + 1] = triple.bl.y
+    @blocked++ unless layer.inverted[triple.tlIndex] & 2
+    @blocked++ unless layer.inverted[triple.trIndex] & 2
+    @blocked++ unless layer.inverted[triple.blIndex] & 2
+    layer.inverted[triple.tlIndex] |= 2 | 4
+    layer.inverted[triple.trIndex] |= 2 | 8
+    layer.inverted[triple.blIndex] |= 2 | 8
+    for source in @layers
+      @exclude source if source.found
+    @opts.pointsOnDetect @points, result if @points and @opts.pointsOnDetect
+
+  # Lazily build the pyramid, then one mandatory triple per layer (coarse
+  # first) followed by scheduled retries while effort and time remain.
+  scan: (cooperative) ->
+    throw Error.new 'expected addImage before decode' unless @staged
+    layers = @layers
+    @points = undefined
+    failed = FAIL.finder
+    unless @resized
+      for i in [1...layers.length]
+        layer = layers[i]
+        break unless layer.used
+        src = layers[i - 1].luma
+        width = layers[i - 1].width
+        rows = if cooperative then 64 else layer.height
+        y = 0
+        while y < layer.height
+          resizeRows src, layer.luma, width, layer.width, y, Math.min(layer.height, y + rows)
+          @retryStart += yield if cooperative and y + rows < layer.height
+          y += rows
+      @resized = true
+    mandatory = true
+    loop
+      attempted = false
+      stop = false
+      for i in [layers.length - 1..0] by -1
+        if not mandatory and (not @retries or (@timeLimit isnt Infinity and Date.now() - @retryStart >= @timeLimit))
+          stop = true
+          break
+        layer = layers[i]
+        continue unless layer.used
+        yield from @binarize(layer, cooperative) unless layer.found
+        if mandatory
+          triple = @pickTriple layer
+        else
+          yield from @buildSets(layer, cooperative) unless layer.setsReady
+          triple = @nextSet layer
+        unless triple
+          @retryStart += yield if cooperative
+          continue
+        @retries-- if not mandatory and @retries isnt Infinity
+        attempted = true
+        # Large blurred symbols get template-fit refinement first; other
+        # projection failures retry once after a cross refinement pass.
+        pitch = if not @blocked and Math.abs(triple.tr.y - triple.tl.y) > Math.abs(triple.tr.x - triple.tl.x) then edgePitch(layer, triple.tl, triple.tr, triple.inverted) else 0
+        fit = !!(pitch and distance(triple.tl, triple.tr) / pitch + 7 >= 45)
+        if fit
+          fitPattern layer, triple.tl, triple.inverted
+          fitPattern layer, triple.tr, triple.inverted
+          fitPattern layer, triple.bl, triple.inverted
+          refineTriple layer, triple
+          pitch = edgePitch layer, triple.tl, triple.tr, triple.inverted
+        result = @projectWith layer, triple, pitch
+        result = @projectWith(layer, triple, pitch) if result instanceof Error and not fit and refineTriple(layer, triple)
+        unless result instanceof Error
+          @markDecoded layer, triple, result
+          return result
+        failed = result
+        @retryStart += yield if cooperative
+      break if stop or (not mandatory and not attempted)
+      mandatory = false
+    @opts.pointsOnDetect @points, failed if @points and @opts.pointsOnDetect
+    failed
+
+  # Re-run the scan after each success for decode-all under one budget.
+  walk: (cooperative, all) ->
+    @retryStart = Date.now()
+    @retries = if @effort is Infinity then Infinity else @effort - 1
+    results = []
+    loop
+      result = yield from @scan(cooperative)
+      results.push result
+      return results unless all
+      return results if result instanceof Error
+      @retryStart += yield if cooperative
+
+  decode: (all = false) ->
+    @beginOperation()
+    results = undefined
+    try
+      results = runDecode @walk(false, all)
+    finally
+      @endOperation()
+    results
+
+  decodeAsync: (all = false) ->
+    @beginOperation()
+    results = undefined
+    try
+      results = runDecodeAsync! @walk(true, all), @timeLimit
+    finally
+      @endOperation()
+    results
+
+# ==[ Public API ]==
+
+# First QR in an image through the coarse-to-fine scan; throws when none decodes.
+export decodeQR =! (img, opts = {}) ->
+  validateOpts opts
+  validateImage img, opts.format
+  scanner = QRScanner.new { ...opts, maxSize: { height: img.height, width: img.width } }
+  result = undefined
+  try
+    scanner.addImage img, opts.format
+    result = scanner.decode()[0]
+  finally
+    scanner.clean()
+  throw Error.new result.message if result instanceof Error
+  result
+
+
+# Every QR in each image through one cooperatively scheduled scanner.
+export decodeQRBatch =! (images, opts = {}) ->
+  maxSize = opts.maxSize or { width: 3840, height: 3840 }
+  scanner = QRScanner.new { ...opts, maxSize }
+  results = []
+  try
+    for image in images
+      try
+        scanner.addImage image, opts.format
+        results.push scanner.decodeAsync!(true)
+      catch error
+        throw error unless error instanceof Error
+        results.push [error]
+  finally
+    scanner.clean()
+  results
+
+# Internals for the test suite.
+export _tests =! { mat, matGet, penalty, drawSymbol, encodeData, rsEcc, detectType }

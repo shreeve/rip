@@ -1,0 +1,939 @@
+# ==============================================================================
+# rip/barcodes — browser plumbing for camera scanning
+#
+# QRCanvas owns a reusable scanner and the optional overlay, result and bitmap
+# canvases; QRCamera feeds it frames, preferring a zero-copy VideoFrame path
+# that writes native planes straight into the scanner arena. Overlay identity
+# changes are suppressed for three frames so camera jitter never flickers.
+# BarcodeDetector is a ponyfill over decodeQR for the Shape Detection API.
+# ==============================================================================
+
+import { QRScanner, decodeQR } from './qr.rip'
+
+Y8 =! [0, 0, 1]
+UV8 =! [1, 1, 1]
+P420 =! [Y8, UV8, UV8]
+P420_16 =! [[0, 0, 2], [1, 1, 2], [1, 1, 2]]
+P_RGBA =! [[0, 0, 4]]
+# Plane descriptors per VideoFrame format: x shift, y shift, bytes per sample.
+PLANES =!
+  RGB: [[0, 0, 3]]
+  RGBA: P_RGBA
+  RGBX: P_RGBA
+  BGRA: P_RGBA
+  BGRX: P_RGBA
+  I420: P420
+  I420P10: P420_16
+  I420P12: P420_16
+  I420A: [Y8, UV8, UV8, Y8]
+  I422: [Y8, [1, 0, 1], [1, 0, 1]]
+  I444: [Y8, Y8, Y8]
+  NV12: [Y8, [1, 1, 2]]
+
+# Rendered element size from computed CSS.
+export getSize =! (elm) ->
+  css = getComputedStyle elm
+  { width: Math.floor(+css.width.split('px')[0]), height: Math.floor(+css.height.split('px')[0]) }
+
+# Setting a canvas dimension clears it even at the same size.
+setCanvasSize =! (canvas, height, width) ->
+  canvas.height = height if canvas.height isnt height
+  canvas.width = width if canvas.width isnt width
+
+getCanvasContext = (canvas) ->
+  context = canvas.getContext '2d'
+  throw Error.new 'Cannot get canvas context' if context is null
+  { canvas, context }
+
+clearCanvas =! (cc) ->
+  cc.context.clearRect 0, 0, cc.canvas.width, cc.canvas.height
+
+traceQuad =! (context, points) ->
+  context.beginPath()
+  context.moveTo points[0].x, points[0].y
+  for i in [1...points.length]
+    context.lineTo points[i].x, points[i].y
+  context.closePath()
+
+fillQuad =! (context, points) ->
+  traceQuad context, points
+  context.fill()
+
+toward = (from, to, distance) ->
+  dx = to.x - from.x
+  dy = to.y - from.y
+  scale = Math.min 0.5, distance / Math.hypot(dx, dy)
+  { x: from.x + scale * dx, y: from.y + scale * dy }
+
+traceRoundedQuad =! (context, points, radius) ->
+  starts = points.map (point, i) -> toward point, points[(i + 1) % 4], radius
+  ends = points.map (point, i) -> toward point, points[(i + 3) % 4], radius
+  context.beginPath()
+  context.moveTo starts[0].x, starts[0].y
+  for i in [1..points.length]
+    pos = i % 4
+    context.lineTo ends[pos].x, ends[pos].y
+    context.quadraticCurveTo points[pos].x, points[pos].y, starts[pos].x, starts[pos].y
+  context.closePath()
+
+OVERLAY_SWITCH_FRAMES =! 3
+
+# Half a QR side of center drift is ordinary frame-to-frame motion.
+sameOverlay = (left, right) ->
+  return false unless left
+  a = left.boundingBox
+  b = right.boundingBox
+  side = Math.max a.width, a.height, b.width, b.height
+  dx = a.x + a.width / 2 - b.x - b.width / 2
+  dy = a.y + a.height / 2 - b.y - b.height / 2
+  dx * dx + dy * dy <= (0.5 * side) ** 2
+
+sameOverlays = (left, right) ->
+  return false if left.length isnt right.length
+  for i in [0...left.length]
+    match = i
+    match++ while match < right.length and not sameOverlay(left[i], right[match])
+    return false if match is right.length
+    [right[i], right[match]] = [right[match], right[i]] if match isnt i
+  true
+
+copyOverlays =! (target, source) ->
+  target.length = source.length
+  for i in [0...source.length]
+    target[i] = source[i]
+  return
+
+# Drawing and decode options, with defaults.
+canvasDefaults = ->
+  resultBlockSize: 8
+  overlayMainColor: 'green'
+  overlayFinderColor: 'blue'
+  overlayAlignerColor: 'yellow'
+  overlaySideColor: 'black'
+  overlayTimeout: 500
+  cropToSquare: true
+  decodeAll: false
+  async: false
+  drawFailed: false
+
+export class QRCanvas
+  constructor: (elements = {}, opts = {}, Scanner = QRScanner) ->
+    {overlay, resultQR, bitmap} = elements
+    @opts = { ...canvasDefaults(), ...opts }
+    @lastDetect = 0
+    @pending = undefined
+    @task = undefined
+    @cleanPending = false
+    @generation = 0
+    @bitmapDrawn = false
+    @overlayDrawn = false
+    @overlayMatches = 0
+    @overlayCandidate = undefined
+    @overlayPoints = undefined
+    @overlayBatch = []
+    @overlayBatchFailed = undefined
+    @overlaySet = []
+    @overlayCandidates = []
+    @overlaySetMatches = 0
+    @overlayFailed = undefined
+    @overlayFailedCandidate = undefined
+    @overlayFailedCandidateSet = false
+    @overlayFailedMatches = 0
+    @overlayDeadline = 0
+    @overlayTimer = undefined
+    @rotate = false
+    @sourceHeight = 0
+    @sourceX = 0
+    @sourceY = 0
+    @inputWidth = 0
+    @inputHeight = 0
+    @frameSource = undefined
+    @main = getCanvasContext document.createElement('canvas')
+    @overlay = getCanvasContext(overlay) if overlay
+    if resultQR
+      @resultQR = getCanvasContext resultQR
+      @resultQR.context.imageSmoothingEnabled = false
+    @bitmap = getCanvasContext(bitmap) if bitmap
+    decoder = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
+    decoder.effort = @opts.effort if @opts.effort isnt undefined
+    decoder.timeLimit = @opts.timeLimit if @opts.timeLimit isnt undefined
+    decoder.pointsOnDetect = (points, result) => @onPoints points, result if @overlay
+    decoder.imageOnResult = (img) => @drawResultQr img if @resultQR
+    if @bitmap
+      decoder.imageOnBitmap = (img) =>
+        # A failing frame emits many retry planes; keep only its first.
+        return if @bitmapDrawn
+        @bitmapDrawn = true
+        @drawBitmap img
+    @scanner = new Scanner(decoder)
+    @reader =
+      clean: =>
+        @generation++
+        @task?.abort()
+        @task = undefined
+        if @pending then @cleanPending = true else @scanner.clean()
+        return
+      crop: @opts.cropToSquare
+      luma: @scanner.luma
+      frame: @opts.onVideoFrame
+      source: (source) =>
+        return if source is @frameSource
+        @frameSource = source
+        @opts.onFrameSource source if @opts.onFrameSource
+        return
+      read: (frame) =>
+        @rotate = frame.rotate
+        @sourceHeight = frame.sourceHeight
+        @sourceX = frame.sourceX
+        @sourceY = frame.sourceY
+        @inputWidth = frame.size.width
+        @inputHeight = frame.size.height
+        setCanvasSize @overlay.canvas, frame.height, frame.width if @overlay
+        @decode undefined, frame.format, frame.layout, frame.size
+
+  resetOverlay!: ->
+    @overlayPoints = undefined
+    @overlayCandidate = undefined
+    @overlaySet.length = 0
+    @overlayCandidates.length = 0
+    @overlaySetMatches = 0
+    @overlayFailed = undefined
+    @overlayFailedCandidate = undefined
+    @overlayFailedCandidateSet = false
+    @overlayFailedMatches = 0
+    @overlayMatches = 0
+
+  # Map decoder geometry from cropped, row-contiguous coded pixels into
+  # presentation coordinates; the pixels themselves were never rotated.
+  onPoints!: (points, result) ->
+    @resetOverlay() if Date.now() - @lastDetect > @opts.overlayTimeout
+    if @rotate or @sourceX or @sourceY
+      move = (point) =>
+        x = point.x + @sourceX
+        y = point.y + @sourceY
+        if @rotate
+          point.x = @sourceHeight - 1 - y
+          point.y = x
+        else
+          point.x = x
+          point.y = y
+        return
+      move point for point in [points.tl, points.tr, points.br, points.bl, ...points.aligners]
+      for marker in [points.tl, points.tr, points.bl, ...points.aligners]
+        move point for point in marker.corners
+      move point for point in [...points.bounds, ...points.outline]
+      box = points.boundingBox
+      xs = points.bounds.map (point) -> point.x
+      ys = points.bounds.map (point) -> point.y
+      box.x = Math.min ...xs
+      box.y = Math.min ...ys
+      box.width = Math.max(...xs) - box.x
+      box.height = Math.max(...ys) - box.y
+    return if result instanceof Error and not @opts.drawFailed
+    if @opts.decodeAll
+      if result instanceof Error then @overlayBatchFailed = points else @overlayBatch.push points
+      return
+    # Reject one-frame identity changes without delaying motion.
+    if not @overlayPoints or sameOverlay(@overlayPoints, points)
+      @overlayPoints = points
+      @overlayCandidate = undefined
+      @overlayMatches = 0
+    else
+      if sameOverlay(@overlayCandidate, points)
+        @overlayMatches++
+      else
+        @overlayCandidate = points
+        @overlayMatches = 1
+      return if @overlayMatches < OVERLAY_SWITCH_FRAMES
+      @overlayPoints = points
+      @overlayCandidate = undefined
+      @overlayMatches = 0
+    @drawOverlay points, @overlayDrawn, result instanceof Error
+    @overlayDrawn = true
+    now = Date.now()
+    @lastDetect = now
+    # This runs inside measured decode time, so it only refreshes the
+    # deadline; decode() arms the timer afterwards.
+    @overlayDeadline = now + @opts.overlayTimeout
+
+  drawOverlayBatch!: ->
+    # No terminal geometry is not evidence the displayed set changed; retain
+    # it until the ordinary deadline expires.
+    return unless @overlayBatch.length or @overlayBatchFailed
+    redraw = false
+    if (not @overlaySet.length and @overlayBatch.length) or sameOverlays(@overlaySet, @overlayBatch)
+      copyOverlays @overlaySet, @overlayBatch
+      @overlayCandidates.length = 0
+      @overlaySetMatches = 0
+      redraw = !!@overlaySet.length
+    else
+      if sameOverlays(@overlayCandidates, @overlayBatch)
+        @overlaySetMatches++
+      else
+        copyOverlays @overlayCandidates, @overlayBatch
+        @overlaySetMatches = 1
+      if @overlaySetMatches is OVERLAY_SWITCH_FRAMES
+        copyOverlays @overlaySet, @overlayBatch
+        @overlayCandidates.length = 0
+        @overlaySetMatches = 0
+        redraw = true
+    failed = @overlayBatchFailed
+    if not @overlayFailed and failed
+      @overlayFailed = failed
+      @overlayFailedCandidateSet = false
+      @overlayFailedMatches = 0
+      redraw = true
+    else if @overlayFailed and failed and sameOverlay(@overlayFailed, failed)
+      @overlayFailed = failed
+      @overlayFailedCandidateSet = false
+      @overlayFailedMatches = 0
+      redraw = true
+    else if @overlayFailed or failed
+      sameCandidate = (not @overlayFailedCandidate and not failed) or
+        (!!@overlayFailedCandidate and !!failed and sameOverlay(@overlayFailedCandidate, failed))
+      if @overlayFailedCandidateSet and sameCandidate
+        @overlayFailedMatches++
+      else
+        @overlayFailedCandidate = failed
+        @overlayFailedCandidateSet = true
+        @overlayFailedMatches = 1
+      if @overlayFailedMatches is OVERLAY_SWITCH_FRAMES
+        @overlayFailed = failed
+        @overlayFailedCandidate = undefined
+        @overlayFailedCandidateSet = false
+        @overlayFailedMatches = 0
+        redraw = true
+    return unless redraw
+    @overlayDrawn = false
+    for points in @overlaySet
+      @drawOverlay points, @overlayDrawn, false
+      @overlayDrawn = true
+    if @overlayFailed
+      @drawOverlay @overlayFailed, @overlayDrawn, true
+      @overlayDrawn = true
+    now = Date.now()
+    @lastDetect = now
+    @overlayDeadline = now + @opts.overlayTimeout
+
+  expireOverlay!: ->
+    remaining = @overlayDeadline - Date.now()
+    if remaining > 0
+      @overlayTimer = setTimeout (=> @expireOverlay()), remaining
+      return
+    @overlayTimer = undefined
+    @overlayDeadline = 0
+    @overlayDrawn = false
+    @resetOverlay()
+    @drawOverlay()
+
+  # Sized to the plane, often a downscaled rung; CSS scales it over the preview.
+  drawBitmap!: (img) ->
+    return unless @bitmap
+    {data, height, width} = img
+    if @rotate
+      out = new Uint8ClampedArray(data.length)
+      for y in [0...height]
+        for x in [0...width]
+          src = 4 * (y * width + x)
+          dst = 4 * (x * height + height - 1 - y)
+          for k in [0...4]
+            out[dst + k] = data[src + k]
+      [width, height] = [height, width]
+    else
+      out = Uint8ClampedArray.from data
+    setCanvasSize @bitmap.canvas, height, width
+    @bitmap.context.putImageData ImageData.new(out, width, height), 0, 0
+
+  drawResultQr!: (img) ->
+    return unless @resultQR
+    {data, height, width} = img
+    blockSize = @opts.resultBlockSize
+    setCanvasSize @resultQR.canvas, height, width
+    @resultQR.context.putImageData ImageData.new(Uint8ClampedArray.from(data), width, height), 0, 0
+    # Scaled modules blur under default smoothing; the result canvas owns this style.
+    @resultQR.canvas.style = "image-rendering: pixelated; width: #{blockSize * width}px; height: #{blockSize * height}px"
+
+  drawOverlay!: (points, append = false, failed = false) ->
+    return unless @overlay
+    ctx = @overlay.context
+    height = @overlay.canvas.height
+    width = @overlay.canvas.width
+    unless append
+      if @opts.cropToSquare and height isnt width
+        cropWidth = @inputWidth or Math.min(height, width)
+        cropHeight = @inputHeight or Math.min(height, width)
+        x = if @inputWidth then @sourceX else Math.floor((width - cropWidth) / 2)
+        y = if @inputHeight then @sourceY else Math.floor((height - cropHeight) / 2)
+        if @rotate and @inputWidth
+          # The crop rect was applied to coded pixels; rotate it into player coordinates.
+          [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth]
+        ctx.clearRect x, y, cropWidth, cropHeight
+        ctx.fillStyle = @opts.overlaySideColor
+        right = x + cropWidth
+        bottom = y + cropHeight
+        ctx.fillRect 0, 0, width, y if y
+        ctx.fillRect 0, bottom, width, height - bottom if bottom < height
+        ctx.fillRect 0, y, x, cropHeight if x
+        ctx.fillRect right, y, width - right, cropHeight if right < width
+      else
+        ctx.clearRect 0, 0, width, height
+    return unless points
+    {tl, tr, br, bl} = points
+    # The four points are logical finder-center positions, so the polygon
+    # keeps the decoder's projective geometry.
+    ctx.fillStyle = if failed then 'red' else @opts.overlayMainColor
+    fillQuad ctx, [tl, tr, br, bl]
+    moduleSize = (tl.moduleSize + tr.moduleSize + bl.moduleSize) / 3
+    ctx.strokeStyle = @opts.overlayAlignerColor
+    ctx.lineWidth = moduleSize / 2
+    traceRoundedQuad ctx, points.outline, 9
+    ctx.stroke()
+    ctx.fillStyle = @opts.overlayFinderColor
+    fillQuad ctx, finder.corners for finder in [tl, tr, bl]
+    ctx.fillStyle = @opts.overlayAlignerColor
+    fillQuad ctx, aligner.corners for aligner in points.aligners
+
+  # Camera-frame decoding is fail-soft: a failed frame is a miss, never a throw.
+  finish: (res) ->
+    failures = undefined
+    if res and @opts.decodeAll
+      failures = res
+      for result in res
+        return res if typeof result is 'string'
+    else if res and typeof res[0] is 'string'
+      return res[0]
+    @drawOverlay() if @overlay and Date.now() - @lastDetect > @opts.overlayTimeout
+    failures
+
+  endDecode!: ->
+    @drawOverlayBatch() if @opts.decodeAll
+    if @overlayDeadline and @overlayTimer is undefined
+      @overlayTimer = setTimeout (=> @expireOverlay()), @opts.overlayTimeout
+
+  decode: (image, format, layout, size) ->
+    return if @pending
+    @bitmapDrawn = false
+    @overlayDrawn = false
+    @overlayBatch.length = 0
+    @overlayBatchFailed = undefined
+    try
+      if image then @scanner.addImage image, format
+      else if size and format and layout then @scanner.processImage size, format, layout
+      else throw Error.new 'expected image or scanner-owned frame'
+    catch
+      @endDecode()
+      return @finish()
+    unless @opts.async
+      res = undefined
+      try
+        res = @scanner.decode @opts.decodeAll
+      catch
+        res = undefined
+      finally
+        @endDecode()
+      return @finish res
+    decodeAsync = @scanner.decodeAsync
+    unless decodeAsync
+      @endDecode()
+      return @finish()
+    generation = @generation
+    task = if typeof TaskController is 'function' and typeof scheduler?.postTask is 'function' then TaskController.new() else undefined
+    @task = task
+    work = if task then scheduler.postTask((=> decodeAsync.call @scanner, @opts.decodeAll), { signal: task.signal }) else decodeAsync.call(@scanner, @opts.decodeAll)
+    onDone = (res) =>
+      return if generation isnt @generation
+      @endDecode()
+      @finish res
+    onFail = =>
+      return if generation isnt @generation
+      @endDecode()
+      @finish()
+    settle = =>
+      @pending = undefined if @pending is pending
+      @task = undefined if @task is task
+      if @cleanPending
+        @cleanPending = false
+        @scanner.clean()
+      return
+    pending = work.then(onDone, onFail).finally(settle)
+    @pending = pending
+    pending
+
+  drawImage: (image, height, width) ->
+    @rotate = false
+    @sourceHeight = height
+    side = Math.min width, height
+    cropped = @opts.cropToSquare and width isnt height
+    inputWidth = if cropped then side else width
+    inputHeight = if cropped then side else height
+    @sourceX = if cropped then (width - side) >> 1 else 0
+    @sourceY = if cropped then (height - side) >> 1 else 0
+    @inputWidth = inputWidth
+    @inputHeight = inputHeight
+    # The working canvas holds only the selected source rect; the overlay
+    # keeps presentation dimensions.
+    setCanvasSize @main.canvas, inputHeight, inputWidth
+    setCanvasSize @overlay.canvas, height, width if @overlay
+    {context} = @main
+    context.drawImage image, -@sourceX, -@sourceY, width, height
+    @decode context.getImageData(0, 0, inputWidth, inputHeight)
+
+  clear!: ->
+    @reader.clean()
+    @sourceX = @sourceY = 0
+    @inputWidth = @inputHeight = 0
+    clearTimeout @overlayTimer if @overlayTimer isnt undefined
+    @overlayTimer = undefined
+    @overlayDeadline = 0
+    @overlayDrawn = false
+    @resetOverlay()
+    @overlayBatch.length = 0
+    @overlayBatchFailed = undefined
+    clearCanvas @main
+    clearCanvas @overlay if @overlay
+    clearCanvas @resultQR if @resultQR
+    clearCanvas @bitmap if @bitmap
+
+# Reads frames from a video player and optionally owns its camera stream.
+# With only a player it replays file-backed video: VideoFrame reads the
+# decoded player surface, no captured stream needed.
+export class QRCamera
+  constructor: (player, streamOrOpts = {}, init = {}) ->
+    @player = player
+    stream = if 'getTracks' of streamOrOpts then streamOrOpts else undefined
+    opts = if stream then init else streamOrOpts
+    @opts = { format: 'auto', ...opts }
+    @stream = undefined
+    @reader = undefined
+    @planes = ({ offset: 0, stride: 0 } for i in [0...4])
+    @layouts = (@planes.slice(0, n) for n in [1..4])
+    @rect = { x: 0, y: 0, width: 0, height: 0 }
+    @nativeCopy = { rect: @rect }
+    @convertedCopy = { format: 'RGBA', rect: @rect }
+    @scanned = { format: 'I420', layout: { offset: 0, stride: 0 }, rotate: false, size: { width: 0, height: 0 }, sourceHeight: 0, sourceX: 0, sourceY: 0, width: 0, height: 0 }
+    @videoFrame = undefined
+    @nativeOnly = false
+    @reported = false
+    @reading = false
+    @source = 0
+    @validateFormat @opts.format
+    @setStream stream if stream
+
+  validateFormat!: (format) ->
+    return if format is 'auto' or format is 'canvas'
+    return if format isnt 'RGB' and PLANES[format]
+    throw TypeError.new "invalid opts.format=#{format} (#{typeof format})"
+
+  # Native auto-detection, forced canvas, or one VideoFrame output format.
+  setFormat!: (format) ->
+    @validateFormat format
+    return if format is @opts.format
+    @opts.format = format
+    @source++
+    @videoFrame = undefined
+    @nativeOnly = false
+    @reported = false
+    @resetFrame()
+
+  resetFrame!: ->
+    s = @scanned
+    s.layout.offset = 0
+    s.layout.stride = 0
+    s.rotate = false
+    s.size.width = 0
+    s.size.height = 0
+    s.sourceHeight = 0
+    s.sourceX = 0
+    s.sourceY = 0
+    s.width = 0
+    s.height = 0
+
+  cleanFrame!: ->
+    @reader.clean() if @reader
+    @reader = undefined
+    @resetFrame()
+
+  # Plane offsets and strides for a copy of the given format; returns the total bytes.
+  setLayout: (copy, format, width, height) ->
+    planes = PLANES[format]
+    throw Error.new "Unsupported VideoFrame format=#{format}" unless planes
+    offset = 0
+    for [xShift, yShift, bytes], i in planes
+      planeWidth = (width + (1 << xShift) - 1) >> xShift
+      planeHeight = (height + (1 << yShift) - 1) >> yShift
+      plane = @planes[i]
+      plane.offset = offset
+      plane.stride = planeWidth * bytes
+      offset += plane.stride * planeHeight
+    copy.layout = @layouts[planes.length - 1]
+    offset
+
+  # Copy one frame's coded pixels into the reader's arena; the canvas path
+  # handles frames whose visible and display dimensions differ.
+  scan: (frame, reader, rotate) ->
+    visible = frame.visibleRect
+    width = visible?.width or frame.displayWidth
+    height = visible?.height or frame.displayHeight
+    unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width is frame.displayWidth and height is frame.displayHeight
+      throw Error.new 'Unsupported VideoFrame dimensions'
+    selected = if @opts.format is 'auto' or @nativeOnly then frame.format else @opts.format
+    throw Error.new "Unsupported VideoFrame format=#{selected}" if not selected or selected is 'canvas'
+    planes = PLANES[selected]
+    throw Error.new "Unsupported VideoFrame format=#{selected}" unless planes
+    sourceWidth = width
+    sourceHeight = height
+    sourceX = 0
+    sourceY = 0
+    if reader.crop and width isnt height
+      side = Math.min width, height
+      xShift = 0
+      yShift = 0
+      for plane in planes
+        xShift = Math.max xShift, plane[0]
+        yShift = Math.max yShift, plane[1]
+      side -= side % (1 << Math.max(xShift, yShift))
+      sourceWidth = sourceHeight = side
+      sourceX = (width - side) >> 1
+      sourceY = (height - side) >> 1
+      sourceX -= sourceX % (1 << xShift)
+      sourceY -= sourceY % (1 << yShift)
+    @rect.x = (visible?.x or 0) + sourceX
+    @rect.y = (visible?.y or 0) + sourceY
+    @rect.width = sourceWidth
+    @rect.height = sourceHeight
+    # Chromium rejects an explicit non-RGB format even when it equals the
+    # native one; omitting it requests the native planes directly.
+    copy = if selected is frame.format then @nativeCopy else @convertedCopy
+    copy.format = selected if copy is @convertedCopy
+    required = @setLayout copy, selected, sourceWidth, sourceHeight
+    size = frame.allocationSize copy
+    unless Number.isSafeInteger(size) and size >= required and size <= reader.luma.length
+      throw Error.new "Invalid VideoFrame allocation size=#{size}, expected #{required}..#{reader.luma.length}"
+    [layout] = frame.copyTo!(reader.luma, copy)
+    throw Error.new 'Missing VideoFrame plane layout' unless layout
+    scanned = @scanned
+    scanned.format = selected
+    scanned.layout.offset = layout.offset
+    scanned.layout.stride = layout.stride
+    scanned.rotate = rotate
+    scanned.size.width = sourceWidth
+    scanned.size.height = sourceHeight
+    scanned.sourceHeight = height
+    scanned.sourceX = sourceX
+    scanned.sourceY = sourceY
+    scanned.width = if rotate then height else width
+    scanned.height = if rotate then width else height
+    scanned
+
+  setStream!: (stream) ->
+    @stream = stream
+    @source++
+    @videoFrame = undefined
+    @nativeOnly = false
+    @reported = false
+    @cleanFrame()
+    player = @player
+    # Inline autoplay on mobile must be set before the stream attaches.
+    player.setAttribute 'autoplay', ''
+    player.setAttribute 'muted', ''
+    player.setAttribute 'playsinline', ''
+    player.srcObject = stream
+
+  # Available only after the first getUserMedia request.
+  listDevices: ->
+    throw Error.new 'Media Devices not supported' unless navigator.mediaDevices?.enumerateDevices
+    devices = navigator.mediaDevices.enumerateDevices!
+    devices.filter((device) -> device.kind is 'videoinput').map (d) -> { deviceId: d.deviceId, label: d.label or "Camera #{d.deviceId}" }
+
+  # Stop first so constrained camera hardware is released before the
+  # replacement stream is requested.
+  setDevice: (deviceId) ->
+    @stop()
+    source = @source
+    stream = navigator.mediaDevices.getUserMedia! video: { deviceId: { exact: deviceId } }
+    # A later request may resolve first; never attach or leak a stale stream.
+    if source isnt @source
+      track.stop() for track in stream.getTracks()
+      return
+    @setStream stream
+    return
+
+  draw: (canvas, fullSize) ->
+    player = @player
+    # drawImage throws while a newly attached video has no decoded frame.
+    return if player.readyState < 2 or not player.videoWidth or not player.videoHeight
+    canvas.reader.source 'canvas'
+    # The rendered player box keeps overlay coordinates aligned with the
+    # preview; fullSize opts into intrinsic frame pixels.
+    return canvas.drawImage(player, player.videoHeight, player.videoWidth) if fullSize
+    size = getSize player
+    canvas.drawImage player, size.height, size.width
+
+  readFrame: (canvas, fullSize = false) ->
+    reader = canvas.reader
+    @reader = reader
+    return @draw(canvas, fullSize) if not fullSize or @opts.format is 'canvas' or @videoFrame is false
+    if typeof VideoFrame isnt 'function'
+      @videoFrame = false
+      return @draw(canvas, fullSize)
+    return if @reading
+    @reading = true
+    source = @source
+    frame = undefined
+    try
+      frame = VideoFrame.new @player
+    catch
+      @videoFrame = false
+      @reading = false
+      return @draw(canvas, fullSize)
+    try
+      if not @reported and reader.frame
+        @reported = true
+        reader.frame frame
+      {videoWidth, videoHeight} = @player
+      # copyTo exposes coded pixels while the player shows presentation
+      # geometry; exactly swapped dimensions are the implicit portrait rotation.
+      aligned = frame.displayWidth is videoWidth and frame.displayHeight is videoHeight
+      rotate = frame.displayWidth is videoHeight and frame.displayHeight is videoWidth
+      # An unsupported shape is a per-frame fallback, not a capability failure.
+      return @draw(canvas, fullSize) if (videoWidth > 0 and videoHeight > 0 and not aligned and not rotate) or frame.rotation or frame.flip
+      scanned = undefined
+      try
+        scanned = @scan! frame, reader, rotate
+      catch error
+        converted = not @nativeOnly and @opts.format isnt 'auto' and @opts.format isnt frame.format
+        throw error unless converted
+        # A browser may copy native YUV but reject YUV conversion; cache only
+        # the failed conversion and keep the direct native path.
+        @nativeOnly = true
+        @resetFrame()
+        scanned = @scan! frame, reader, rotate
+      if source isnt @source
+        @resetFrame()
+        return
+      # Never publish coordinates prepared for stale player geometry.
+      return if @player.videoWidth isnt videoWidth or @player.videoHeight isnt videoHeight
+      @videoFrame = true
+      reader.source 'VideoFrame'
+      return reader.read(scanned)
+    catch
+      @resetFrame()
+      return if source isnt @source
+      # A constructor can exist while copyTo support does not; only the
+      # first frame of a source pays for finding out.
+      @videoFrame = false
+      return @draw(canvas, fullSize)
+    finally
+      frame.close()
+      @reading = false
+
+  stop!: ->
+    @source++
+    @videoFrame = undefined
+    @nativeOnly = false
+    @reported = false
+    @cleanFrame()
+    if @stream
+      track.stop() for track in @stream.getTracks()
+    @stream = undefined
+
+# Media Capture terms: 'environment' is rear-facing, 'user' is the selfie camera.
+openCamera = (player, facingMode, opts = {}) ->
+  stream = navigator.mediaDevices.getUserMedia! video: { height: { ideal: window.screen.height }, width: { ideal: window.screen.width }, facingMode }
+  QRCamera.new player, stream, opts
+
+export rearCamera =! (player, opts = {}) ->
+  openCamera! player, 'environment', opts
+
+export selfieCamera =! (player, opts = {}) ->
+  openCamera! player, 'user', opts
+
+# Run a callback per presented frame; returns a canceller.
+export frameLoop =! (cb, video) ->
+  useVideo = !!video and typeof video.requestVideoFrameCallback is 'function' and typeof video.cancelVideoFrameCallback is 'function'
+  active = true
+  handle = undefined
+  loopFn = (ts) ->
+    # Check active after the callback: it may cancel the loop from inside.
+    cb ts
+    handle = request() if active
+    return
+  request = -> if useVideo then video.requestVideoFrameCallback(loopFn) else requestAnimationFrame(loopFn)
+  cancel = (id) -> if useVideo then video.cancelVideoFrameCallback(id) else cancelAnimationFrame(id)
+  handle = request()
+  ->
+    return unless active
+    active = false
+    cancel handle if handle isnt undefined
+    handle = undefined
+    return
+
+# SVG markup to a PNG data URL through an image element and a canvas.
+export svgToPng =! (svgData, width, height) ->
+  Promise.new (resolve, reject) ->
+    unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width < 8192 and height < 8192
+      return reject(Error.new "invalid width and height: #{width} #{height}")
+    doc = DOMParser.new().parseFromString svgData, 'image/svg+xml'
+    svgElement = doc.documentElement
+    svgElement.setAttribute 'width', String(width)
+    svgElement.setAttribute 'height', String(height)
+    rect = doc.createElementNS 'http://www.w3.org/2000/svg', 'rect'
+    rect.setAttribute 'width', '100%'
+    rect.setAttribute 'height', '100%'
+    rect.setAttribute 'fill', 'white'
+    svgElement.insertBefore rect, svgElement.firstChild
+    source = XMLSerializer.new().serializeToString doc
+    img = Image.new()
+    # Handlers are registered before src so a fast decode cannot complete first.
+    img.onload = ->
+      canvas = document.createElement 'canvas'
+      canvas.width = width
+      canvas.height = height
+      ctx = canvas.getContext '2d'
+      return reject(Error.new 'was not able to create 2d context') unless ctx
+      ctx.drawImage img, 0, 0, width, height
+      resolve canvas.toDataURL('image/png')
+    img.onerror = reject
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(source)
+
+export gifToPng =! (gifBytes) ->
+  blob = Blob.new [gifBytes], { type: 'image/gif' }
+  bitmap = createImageBitmap! blob
+  try
+    canvas = OffscreenCanvas.new bitmap.width, bitmap.height
+    ctx = canvas.getContext 'bitmaprenderer', { alpha: false }
+    throw Error.new 'was not able to create bitmaprenderer context' unless ctx
+    ctx.transferFromImageBitmap bitmap
+    return canvas.convertToBlob!({ type: 'image/png' })
+  finally
+    bitmap.close()
+
+# ==[ BarcodeDetector ]==
+# Ponyfill: importing has no side effects; assign it to the global name to
+# install it. Only qr_code is detected, at most one per image, and
+# cornerPoints are the decoder's projected bounds.
+
+BARCODE_FORMATS =! ['aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix', 'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'unknown', 'upc_a', 'upc_e']
+
+# Cross-realm brand check; instanceof fails across iframes.
+kindOf = (o) -> Object.prototype.toString.call(o).slice(8, -1)
+invalidState = (msg) -> DOMException.new msg, 'InvalidStateError'
+
+prefixed = (e, prefix) ->
+  return DOMException.new("#{prefix}: #{e.message}", e.name) if e instanceof DOMException
+  return new e.constructor("#{prefix}: #{e.message}") if e instanceof Error
+  Error.new "#{prefix}: #{e}"
+
+createCanvas = (width, height) ->
+  return OffscreenCanvas.new(width, height) if typeof OffscreenCanvas isnt 'undefined'
+  canvas = document.createElement 'canvas'
+  canvas.width = width
+  canvas.height = height
+  canvas
+
+readPixels = (ctx, width, height) ->
+  try
+    ctx.getImageData 0, 0, width, height
+  catch
+    throw DOMException.new 'Source would taint origin.', 'SecurityError'
+
+drawSource = (src, width, height) ->
+  return null if width is 0 or height is 0
+  canvas = createCanvas width, height
+  ctx = canvas.getContext '2d'
+  throw DOMException.new('Canvas 2D context unavailable.', 'NotSupportedError') if ctx is null
+  ctx.drawImage src, 0, 0
+  readPixels ctx, width, height
+
+# Every ImageBitmapSource kind to ImageData; null is a zero-sized source.
+toImageData = (image) ->
+  kind = kindOf image
+  if kind is 'Blob'
+    bitmap = undefined
+    try
+      bitmap = createImageBitmap! image
+    catch
+      throw invalidState('Failed to load or decode Blob.')
+    try
+      return drawSource(bitmap, bitmap.width, bitmap.height)
+    finally
+      bitmap.close()
+  if kind is 'ImageData'
+    throw invalidState('The image data has been detached.') if image.data.buffer.byteLength is 0
+    if kindOf(image.data) is 'Float16Array'
+      # rgba-float16 channels use a 0..1 scale; the decoder wants bytes.
+      pixels = Uint8ClampedArray.from image.data, (value) -> value * 255
+      return { width: image.width, height: image.height, data: pixels }
+    return image
+  if kind is 'HTMLCanvasElement' or kind is 'OffscreenCanvas'
+    {width, height} = image
+    return null if width is 0 or height is 0
+    # A WebGL canvas returns null here; draw it onto a scratch canvas instead.
+    ctx = image.getContext '2d'
+    return if ctx isnt null then readPixels(ctx, width, height) else drawSource(image, width, height)
+  if kind is 'HTMLImageElement'
+    try
+      image.decode!
+    catch
+      throw invalidState('Failed to load or decode HTMLImageElement.')
+    return drawSource(image, image.naturalWidth, image.naturalHeight)
+  if kind is 'SVGImageElement'
+    try
+      await image.decode?()
+    catch
+      throw invalidState('Failed to load or decode SVGImageElement.')
+    return drawSource(image, image.width.baseVal.value, image.height.baseVal.value)
+  if kind is 'HTMLVideoElement'
+    throw invalidState('Invalid element or state.') if image.readyState < 2
+    return drawSource(image, image.videoWidth, image.videoHeight)
+  if kind is 'ImageBitmap'
+    throw invalidState('The image source is detached.') if image.width is 0 and image.height is 0
+    return drawSource(image, image.width, image.height)
+  if kind is 'VideoFrame'
+    throw invalidState('VideoFrame is closed.') if image.format is null
+    return drawSource(image, image.displayWidth, image.displayHeight)
+  throw TypeError.new "The provided value is not of type '(Blob or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or ImageData or OffscreenCanvas or SVGImageElement or VideoFrame)'."
+
+# Top-left, top-right, bottom-right, bottom-left in image space, rotated
+# from the decoder's clockwise projected boundary.
+symbolCorners = (p) ->
+  points = p.bounds.map (pt) -> { x: pt.x, y: pt.y }
+  first = 0
+  for i in [1...points.length]
+    first = i if points[i].y < points[first].y or (points[i].y is points[first].y and points[i].x < points[first].x)
+  points.map (_, i) -> points[(first + i) % points.length]
+
+export class BarcodeDetector
+  constructor: (options = {}) ->
+    try
+      # WebIDL dictionaries treat null as empty and reject primitives.
+      type = typeof options
+      throw TypeError.new('The provided value is not a dictionary.') if options isnt null and type isnt 'object' and type isnt 'function'
+      dictionary = if options is null then {} else options
+      # 'unknown' is dropped rather than rejected, as in Chromium.
+      formats = if dictionary.formats is undefined then undefined else [...dictionary.formats].filter (f) -> f isnt 'unknown'
+      throw TypeError.new('Hint option provided, but is empty.') if formats isnt undefined and formats.length is 0
+      for format in formats or []
+        unless BARCODE_FORMATS.includes format
+          throw TypeError.new "Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value '#{format}' is not a valid enum value of type BarcodeFormat."
+      @formats = formats or []
+    catch e
+      throw prefixed(e, "Failed to construct 'BarcodeDetector'")
+
+  @getSupportedFormats: -> Promise.resolve ['qr_code']
+
+  detect: (image) ->
+    try
+      data = toImageData! image
+      return [] if data is null
+      return [] if @formats.length isnt 0 and not @formats.includes('qr_code')
+      points = undefined
+      rawValue = undefined
+      try
+        rawValue = decodeQR data, pointsOnDetect: (p, result) -> points = p if typeof result is 'string'
+      catch
+        return []
+      box = points.boundingBox
+      [{ boundingBox: DOMRectReadOnly.new(box.x, box.y, box.width, box.height), rawValue, format: 'qr_code', cornerPoints: symbolCorners(points) }]
+    catch e
+      throw prefixed(e, "Failed to execute 'detect' on 'BarcodeDetector'")

@@ -1,0 +1,461 @@
+# ==============================================================================
+# rip/barcodes — Code 128 (ISO/IEC 15417)
+#
+# A symbol is a start code, data codewords, a mod-103 check and the stop
+# pattern; every codeword is three bars and three spaces spanning eleven
+# modules, and the stop adds a two-module termination bar. The encoder picks
+# the shortest codeword sequence over the three subsets by dynamic
+# programming. The reader walks scan lines: a per-line threshold, run
+# lengths, a start code behind a quiet zone, nearest-pattern matching of each
+# eleven-module group, then stop, check and the subset state machine. Both
+# reading directions and both axes are tried.
+# ==============================================================================
+
+import { gifDataUrl, writeGif } from './gif.rip'
+import { MAX_IMAGE_SIDE, copyLuma, validateImage } from './image.rip'
+
+# Bar/space widths for values 0..106; 106 is Stop with its termination bar.
+PATTERNS =! %w[
+  212222 222122 222221 121223 121322 131222 122213 122312 132212 221213
+  221312 231212 112232 122132 122231 113222 123122 123221 223211 221132
+  221231 213212 223112 312131 311222 321122 321221 312212 322112 322211
+  212123 212321 232121 111323 131123 131321 112313 132113 132311 211313
+  231113 231311 112133 112331 132131 113123 113321 133121 313121 211331
+  231131 213113 213311 213131 311123 311321 331121 312113 312311 332111
+  314111 221411 431111 111224 111422 121124 121421 141122 141221 112214
+  112412 122114 122411 142112 142211 241211 221114 413111 241112 134111
+  111242 121142 121241 114212 124112 124211 411212 421112 421211 212141
+  214121 412121 111143 111341 131141 114113 114311 411113 411311 113141
+  114131 311141 411131 211412 211214 211232 2331112
+]
+
+CODE_C  =! 99
+CODE_B  =! 100
+CODE_A  =! 101
+SHIFT   =! 98
+FNC1    =! 102
+START_A =! 103
+STOP    =! 106
+GS      =! 29
+
+QUIET_ZONE     =! 10
+DEFAULT_HEIGHT =! 40
+
+fail =! (msg) -> throw Error.new msg
+
+# ==[ Codewords ]==
+
+# Subset membership by char code: A takes 0..95, B takes 32..127; the ASCII
+# group separator is FNC1 in every subset.
+inA =! (c) -> c < 96 and c isnt GS
+inB =! (c) -> c >= 32 and c < 128
+isDigit =! (c) -> c >= 48 and c <= 57
+
+charValue =! (c, subset) ->
+  return FNC1 if c is GS
+  if c < 32 then c + 64 else c - 32
+
+# Shortest codeword sequence. cost[i][s] is the cheapest tail from position i
+# while latched in subset s (0 A, 1 B, 2 C); a switch is always paired with
+# the codeword it enables, so no move is free. Ties keep the earliest move:
+# stay, pair in C, latch C, shift, latch across.
+codewords =! (text, gs1) ->
+  n = text.length
+  fail 'Code 128 text is empty' unless n
+  cost = new Int32Array(3 * (n + 1))
+  move = new Uint8Array(3 * (n + 1))
+  i = n - 1
+  while i >= 0
+    c = text.charCodeAt i
+    fnc = c is GS
+    pair = i + 1 < n and isDigit(c) and isDigit(text.charCodeAt(i + 1))
+    a = inA c
+    b = inB c
+    next = 3 * (i + 1)
+    skip = 3 * (i + 2)
+    for s in [0...3]
+      best = 0x7fffffff
+      pick = 0
+      if s is 2
+        if fnc
+          best = 1 + cost[next + 2]
+        if pair and 1 + cost[skip + 2] < best
+          best = 1 + cost[skip + 2]
+          pick = 1
+        if a and 2 + cost[next] < best
+          best = 2 + cost[next]
+          pick = 2
+        if b and 2 + cost[next + 1] < best
+          best = 2 + cost[next + 1]
+          pick = 3
+      else
+        inside = if s is 0 then a else b
+        other = if s is 0 then b else a
+        if fnc or inside
+          best = 1 + cost[next + s]
+        if pair and 2 + cost[skip + 2] < best
+          best = 2 + cost[skip + 2]
+          pick = 4
+        if other and not inside and 2 + cost[next + s] < best
+          best = 2 + cost[next + s]
+          pick = 5
+        if other and 2 + cost[next + 1 - s] < best
+          best = 2 + cost[next + 1 - s]
+          pick = 3 - s
+      fail "Code 128 cannot encode #{JSON.stringify text[i]}" if best is 0x7fffffff
+      cost[3 * i + s] = best
+      move[3 * i + s] = pick
+    i--
+  s = 1
+  s = 2 if cost[2] < cost[s]
+  s = 0 if cost[0] < cost[s]
+  codes = [START_A + s]
+  codes.push FNC1 if gs1
+  i = 0
+  while i < n
+    c = text.charCodeAt i
+    switch move[3 * i + s]
+      when 0
+        codes.push (if s is 2 then FNC1 else charValue(c, s))
+        i++
+      when 1
+        codes.push 10 * (c - 48) + text.charCodeAt(i + 1) - 48
+        i += 2
+      when 2
+        s = 0
+        codes.push CODE_A, charValue(c, s)
+        i++
+      when 3
+        s = 1
+        codes.push CODE_B, charValue(c, s)
+        i++
+      when 4
+        s = 2
+        codes.push CODE_C, 10 * (c - 48) + text.charCodeAt(i + 1) - 48
+        i += 2
+      else
+        codes.push SHIFT, charValue(c, 1 - s)
+        i++
+  sum = codes[0]
+  for k in [1...codes.length]
+    sum += k * codes[k]
+  codes.push sum % 103, STOP
+  codes
+
+# Module row: 1 dark, 0 light, bars first within each codeword.
+modules =! (codes) ->
+  out = new Uint8Array(11 * codes.length + 2)
+  x = 0
+  for code in codes
+    pattern = PATTERNS[code]
+    for k in [0...pattern.length]
+      w = pattern.charCodeAt(k) - 48
+      out.fill 1, x, x + w if (k & 1) is 0
+      x += w
+  out
+
+# ==[ Renderers ]==
+
+asString =! (s, title) ->
+  throw TypeError.new "\"#{title}\" expected string, got type=#{typeof s}" unless typeof s is 'string'
+  s
+
+asObject =! (o, title) ->
+  throw TypeError.new "\"#{title}\" expected object, got type=#{typeof o}" if o is null or typeof o isnt 'object'
+  o
+
+asInt =! (n, title, min) ->
+  throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
+  throw RangeError.new "\"#{title}\" expected integer >= #{min}, got #{n}" unless Number.isSafeInteger(n) and n >= min
+  n
+
+# A raster is the module row plus output geometry; `bars` is the dark-run
+# list [x, width, ...] in output pixels, the shape every output consumes.
+raster =! (mods, scale, border, height) ->
+  W = (mods.length + 2 * border) * scale
+  H = height * scale
+  fail "Code 128 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}" if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
+  bars = []
+  x = 0
+  while x < mods.length
+    x++ while x < mods.length and mods[x] is 0
+    break if x is mods.length
+    start = x
+    x++ while x < mods.length and mods[x] is 1
+    bars.push (border + start) * scale, (x - start) * scale
+  { W, H, bars }
+
+pixelRow =! (r) ->
+  row = new Uint8Array(r.W)
+  for k in [0...r.bars.length] by 2
+    row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1]
+  row
+
+renderRaw =! (r) ->
+  row = pixelRow r
+  out = Array.new(r.W)
+  for x in [0...r.W]
+    out[x] = row[x] is 1
+  out
+
+renderAscii =! (r) ->
+  row = pixelRow r
+  out = ''
+  for x in [0...r.W]
+    out += (if row[x] then ' ' else '█')
+  out + '\n'
+
+renderTerm =! (r) ->
+  row = pixelRow r
+  black = '\x1b[40m  \x1b[0m'
+  white = '\x1b[1;47m  \x1b[0m'
+  out = ''
+  for x in [0...r.W]
+    out += (if row[x] then black else white)
+  out + '\n'
+
+renderSvg =! (r, optimize) ->
+  out = '<svg viewBox="0 0 ' + r.W + ' ' + r.H + '" xmlns="http://www.w3.org/2000/svg">'
+  path = ''
+  for k in [0...r.bars.length] by 2
+    x = r.bars[k]
+    w = r.bars[k + 1]
+    if optimize
+      path += "M#{x} 0h#{w}v#{r.H}h-#{w}Z"
+    else
+      out += '<rect x="' + x + '" y="0" width="' + w + '" height="' + r.H + '" />'
+  out += '<path d="' + path + '"/>' if optimize
+  out + '</svg>'
+
+renderGif =! (r) ->
+  row = pixelRow r
+  writeGif r.W, r.H, (y) -> row
+
+# ==[ Encoder ]==
+
+export encodeCode128 =! (text, output = 'raw', opts = {}) ->
+  asString text, 'text'
+  asObject opts, 'opts'
+  scale = if opts.scale is undefined then 1 else asInt(opts.scale, 'scale', 1)
+  border = if opts.border is undefined then QUIET_ZONE else asInt(opts.border, 'border', 0)
+  height = if opts.height is undefined then DEFAULT_HEIGHT else asInt(opts.height, 'height', 1)
+  codes = codewords text, opts.gs1 is true
+  r = raster modules(codes), scale, border, height
+  switch output
+    when 'raw' then renderRaw r
+    when 'ascii' then renderAscii r
+    when 'term' then renderTerm r
+    when 'svg' then renderSvg r, (if opts.optimize is undefined then true else opts.optimize)
+    when 'gif' then renderGif r
+    when 'data-url' then gifDataUrl renderGif(r)
+    else fail "Unknown output: #{output}"
+
+# ==[ Reader ]==
+
+# Widths flattened for the matcher, seven slots per value.
+WIDTHS =! do ->
+  out = new Uint8Array(7 * PATTERNS.length)
+  for pattern, code in PATTERNS
+    for k in [0...pattern.length]
+      out[7 * code + k] = pattern.charCodeAt(k) - 48
+  out
+
+# Nearest value in lo..hi to the six runs at `at`, or -1: every run within
+# 0.7 module of its ideal and the summed error under a quarter of the width.
+nearest =! (runs, at, lo, hi) ->
+  total = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
+  return -1 if total < 11
+  unit = total / 11
+  limit = unit * 0.7
+  best = total * 0.25
+  code = -1
+  for c in [lo..hi]
+    base = 7 * c
+    v = 0
+    for k in [0...6]
+      d = runs[at + k] - WIDTHS[base + k] * unit
+      d = -d if d < 0
+      if d > limit
+        v = best
+        break
+      v += d
+    if v < best
+      best = v
+      code = c
+  code
+
+# Run lengths of one thresholded scan line: even slots light, odd dark, the
+# first possibly zero. Returns the run count, zero for a flat line.
+runLengths =! (luma, start, step, count, runs) ->
+  lo = 255
+  hi = 0
+  p = start
+  for k in [0...count]
+    v = luma[p]
+    lo = v if v < lo
+    hi = v if v > hi
+    p += step
+  return 0 if hi - lo < 32
+  threshold = (lo + hi) >> 1
+  n = 0
+  dark = false
+  len = 0
+  p = start
+  for k in [0...count]
+    isDark = luma[p] < threshold
+    if isDark isnt dark
+      runs[n++] = len
+      len = 0
+      dark = isDark
+    len++
+    p += step
+  runs[n++] = len
+  n
+
+# The same line read right to left, light run first.
+reverseRuns =! (runs, n, out) ->
+  m = 0
+  out[m++] = 0 if (n & 1) is 0
+  k = n - 1
+  while k >= 0
+    out[m++] = runs[k--]
+  m
+
+# Codewords from a start at `at` through stop, check verified; the count, or 0.
+readFrom =! (runs, n, at, start, codes) ->
+  len = 0
+  codes[len++] = start
+  at += 6
+  loop
+    return 0 if at + 6 >= n
+    code = nearest runs, at, 0, STOP
+    return 0 if code < 0 or (code >= START_A and code < STOP)
+    codes[len++] = code
+    if code is STOP
+      width = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
+      bar = runs[at + 6] * 11
+      return 0 if bar < width or bar > 4 * width
+      return 0 unless at + 7 >= n or 2 * runs[at + 7] >= width
+      break
+    at += 6
+  return 0 if len < 4
+  sum = codes[0]
+  for k in [1...len - 2]
+    sum += k * codes[k]
+  return 0 unless sum % 103 is codes[len - 2]
+  len
+
+# Every start code behind a quiet zone, left to right; `first` is the slot
+# of the first dark run, 1 as recorded and 0 to read the line inverted.
+readRuns =! (runs, n, codes, first) ->
+  at = first
+  while at + 5 < n
+    start = nearest runs, at, START_A, STOP - 1
+    if start >= 0
+      width = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
+      if at is first or 2 * runs[at - 1] >= width
+        len = readFrom runs, n, at, start, codes
+        return len if len
+    at += 2
+  0
+
+# Text from verified codewords, tracking latches, shifts, FNC1 and FNC4.
+decodeText =! (codes, len) ->
+  subset = codes[0] - START_A
+  shifted = -1
+  high = false
+  highNext = false
+  lastFnc4 = false
+  gs1 = false
+  out = ''
+  k = 1
+  while k < len - 2
+    code = codes[k++]
+    current = if shifted >= 0 then shifted else subset
+    shifted = -1
+    fnc4 = false
+    if current is 2
+      if code < 100
+        out += (if code < 10 then '0' else '') + code
+      else if code is CODE_B then subset = 1
+      else if code is CODE_A then subset = 0
+      else if k is 2 then gs1 = true
+      else out += '\x1d'
+    else if code < 96
+      c = if code < 64 then code + 32 else if current is 0 then code - 64 else code + 32
+      c += 128 if high isnt highNext
+      highNext = false
+      out += String.fromCharCode c
+    else switch code
+      when 96, 97 then null
+      when SHIFT then shifted = 1 - current
+      when CODE_C then subset = 2
+      when CODE_B
+        if current is 0 then subset = 1 else fnc4 = true
+      when CODE_A
+        if current is 1 then subset = 0 else fnc4 = true
+      when FNC1
+        if k is 2 then gs1 = true else out += '\x1d'
+    if fnc4
+      if lastFnc4
+        high = not high
+        highNext = false
+        lastFnc4 = false
+      else
+        highNext = true
+        lastFnc4 = true
+    else
+      lastFnc4 = false
+  { text: out, gs1 }
+
+# Scan lines middle-out at a stride that covers the axis in about 32 lines.
+scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
+  lines = if vertical then width else height
+  count = if vertical then height else width
+  step = if vertical then width else 1
+  stride = Math.max 1, lines >> 5
+  middle = lines >> 1
+  k = 0
+  loop
+    offset = stride * ((k + 1) >> 1)
+    line = if (k & 1) is 0 then middle + offset else middle - offset
+    break if line < 0 and middle + offset >= lines
+    k++
+    continue if line < 0 or line >= lines
+    n = runLengths luma, (if vertical then line else line * width), step, count, runs
+    continue if n < 13
+    m = reverseRuns runs, n, rev
+    for inverted in [false, true]
+      first = if inverted then 0 else 1
+      len = readRuns runs, n, codes, first
+      return { line, reversed: false, inverted, len } if len
+      len = readRuns rev, m, codes, first
+      return { line, reversed: true, inverted, len } if len
+  null
+
+export readCode128 =! (img, opts = {}) ->
+  asObject opts, 'opts'
+  validateImage img, opts.format
+  {width, height} = img
+  luma = new Uint8Array(width * height)
+  copyLuma luma, undefined, img, opts.format
+  side = Math.max(width, height) + 2
+  runs = new Int32Array(side)
+  rev = new Int32Array(side)
+  codes = []
+  vertical = false
+  hit = scanLines luma, width, height, false, runs, rev, codes
+  unless hit
+    vertical = true
+    hit = scanLines luma, width, height, true, runs, rev, codes
+  return null unless hit
+  {text, gs1} = decodeText codes, hit.len
+  { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, vertical, reversed: hit.reversed, inverted: hit.inverted }
+
+export decodeCode128 =! (img, opts = {}) ->
+  hit = readCode128 img, opts
+  throw Error.new 'Code 128 not found' unless hit
+  hit.text
+
+# Internals for the test suite.
+export _tests =! { codewords, modules, decodeText, PATTERNS }
