@@ -36,6 +36,10 @@ let nested = function(a) {
   inner(a);
   return;
 };
+const settle = (function(q) {
+  q.drain();
+  return;
+});
 let alias = wipe = function() {
   reset();
   return;

@@ -283,8 +283,8 @@ export function tagCompoundKeys(tokens) {
 // decides — the LALR table cannot (an `Identifier . DAMMIT` state would
 // need the token AFTER the bang to choose between the dammit reduce
 // and a definition shift):
-//   - assign definition: DAMMIT directly before a `=` token
-//     (`save! = ->`; a spaced `!` never lexes DAMMIT, `!=` after a
+//   - assign definition: DAMMIT directly before a `=` or `=!` token
+//     (`save! = ->`, `save! =! ->`; a spaced `!` never lexes DAMMIT, `!=` after a
 //     name is a scan-time rejection, `==` lexes COMPARE whole)
 //   - def definition: DEF Identifier DAMMIT (`def save!(x)`), or the
 //     static DEF @ Property DAMMIT (`def @save!(x)`)
@@ -295,7 +295,7 @@ export function tagVoidMarkers(tokens) {
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     if (tokens[i].kind !== 'DAMMIT') continue;
-    if (tokens[i + 1]?.kind === '=' ||
+    if (tokens[i + 1]?.kind === '=' || tokens[i + 1]?.kind === 'READONLY_ASSIGN' ||
         (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF') ||
         (tokens[i - 1]?.kind === 'PROPERTY' && tokens[i - 2]?.kind === '@' && tokens[i - 3]?.kind === 'DEF')) {
       tokens[i].kind = 'VOID_MARKER';

@@ -42,6 +42,8 @@ const controlRule = grammar.patterns.find((p) =>
   p.name === 'keyword.control.rip' && p.match?.includes('finally'));
 const vimSyntax = readFileSync(
   path.resolve(import.meta.dir, '..', '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
+const readonlyRule = grammar.patterns.find((p) =>
+  typeof p.match === 'string' && p.match.endsWith('(=!)'));
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
   test('the grammar alternation is BOOLEAN_ATTRS minus the parse-reserved words', () => {
@@ -130,5 +132,29 @@ describe('inline try/finally lockstep (editor grammars ⇄ compiler)', () => {
 
   test('Vim carries both clause words in its control-keyword group', () => {
     expect(vimSyntax).toMatch(/syn keyword ripKeyword\s+try catch finally/);
+  });
+});
+
+
+describe('void readonly definition lockstep (editor grammars ⇄ compiler)', () => {
+  const source = 'wipe! =! -> 1';
+
+  test('TextMate names the constant, scopes the bang as the void marker, and the source compiles void', () => {
+    const match = new RegExp(readonlyRule.match).exec(source);
+    expect(match.slice(1)).toEqual(['wipe', '!', '=!']);
+    expect(readonlyRule.captures['1'].name).toBe('variable.other.constant.rip');
+    expect(readonlyRule.captures['2'].name).toBe('storage.modifier.rip');
+    expect(readonlyRule.captures['3'].name).toBe('keyword.operator.assignment.readonly.rip');
+    expect(compile(source, { runtimeDelivery: 'none' }).code)
+      .toBe('const wipe = (function() {\n  1;\n  return;\n});');
+  });
+
+  test('a plain readonly binding leaves the void-marker capture empty', () => {
+    expect(new RegExp(readonlyRule.match).exec('limit =! 100').slice(1))
+      .toEqual(['limit', undefined, '=!']);
+  });
+
+  test('Vim admits the bang between the constant name and the glyph', () => {
+    expect(vimSyntax).toMatch(/syn match\s+ripReadonlyName\s+\/\^\\s\*\\zs\[a-zA-Z_\$\]\[a-zA-Z0-9_\$\]\*\\ze!\\\?/);
   });
 });

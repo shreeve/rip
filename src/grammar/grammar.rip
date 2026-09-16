@@ -34,7 +34,7 @@
 #     builds) is discriminated by the declaration node's semanticKind —
 #     the locked-head convention. Invented heads are hyphenated or
 #     glyph-shaped (`typed-var`, `dammit!`, `.{}`) so no call can forge
-#     them. The void family (`void-assign`, `void-def`, `void-pair`)
+#     them. The void family (`void-assign`, `void-readonly`, `void-def`, `void-pair`)
 #     takes a word-form head, so its `=`/`:` token carries the operator
 #     label instead.
 #   - "THE EMITTER REJECTS": the shape parses on purpose so the emitter
@@ -231,6 +231,9 @@ grammar =
     # Exported void definition (`export save! = ->`): the Assign row's
     # void twin, flat for the same role-carrying reason.
     o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                                                                  , '["void-assign", @target, @value]', 'assign: _, target, value'       , prec: 'REACTIVE_ASSIGN'
+    # Exported void readonly definition (`export save! =! ->`): the
+    # readonly row's void twin, flat for the same reason.
+    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"                                                    , '["void-readonly", @target, @value]', 'readonly: _, target, value'   , prec: 'REACTIVE_ASSIGN'
     # Exported TYPED reactive declarations (`export count: number := 0`):
     # after `EXPORT Identifier` the parser shifts a TYPE into these flat
     # rows (the typed ExportAssign path), so the reactive twins must
@@ -384,6 +387,10 @@ grammar =
     # Plain-name targets only — the lexer mints VOID_MARKER solely before
     # `=` — and the emitter requires a function value.
     o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                , '["void-assign", @target, @value]', 'assign: _, target, value'
+    # Void readonly definition (`save! =! ->`): the void marker and the
+    # readonly glyph compose — a function that never changes and never
+    # returns a value.
+    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"  , '["void-readonly", @target, @value]', 'readonly: _, target, value'
   ]
 
   Assignable: [
@@ -1514,7 +1521,7 @@ kinds =
   'presence':      ['value']
   'program':       ['body']
   'range':         ['from', 'operator', 'to']
-  'readonly':      ['annotation', 'operator', 'optionalMarker', 'target', 'value']
+  'readonly':      ['annotation', 'operator', 'optionalMarker', 'target', 'value', 'voidMarker']
   'regexindex':    ['capture', 'key', 'object']
   'relation':      ['left', 'operator', 'right']
   'render':        ['body']

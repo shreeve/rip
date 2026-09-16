@@ -292,3 +292,41 @@ fail 'a synthesized compound slice assignment rejects', 'a[1..2] //= v', 'plain 
 fail 'a compound slice assignment has no value form either', 'x = (a[1..2] += v)', 'plain assignment only'
 fail 'a chained slice assignment has no value form', 'x = a[1..2] = v', 'no value form'
 code 'a tail-position slice assignment stays a statement', 'g = ->\n  a[1..2] = v', 'let g = function() {\n  a.splice(1, 2, ...[].concat(v));\n};'
+
+# ==============================================================================
+# Void readonly definition: the bang and the readonly glyph compose
+# ==============================================================================
+
+test "void readonly function returns undefined", '''
+  log = []
+  wipe! =! (xs) ->
+    for x in xs
+      log.push x
+  [wipe([1, 2]), log]
+  ''', [undefined, [1, 2]]
+
+test "void readonly single-line body", "tick! =! -> 1 + 1\ntick()", undefined
+
+test "void readonly fat arrow", "tick! =! => 1 + 1\ntick()", undefined
+
+code "void readonly compiles to a const void function", '''
+  wipe! =! (xs) ->
+    for x in xs
+      x.reset()
+  ''', '''
+  const wipe = (function(xs) {
+    for (let x of xs) {
+      x.reset();
+    }
+    return;
+  });
+  '''
+
+code "exported void readonly", '''
+  export flush! =! -> drain()
+  ''', '''
+  export const flush = (function() {
+    drain();
+    return;
+  });
+  '''

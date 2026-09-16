@@ -462,7 +462,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // exists to surface (the effect-handle shape, not the reactive
   // `{ value: T }` one).
   const isReadonlyDecl = (stmt) => {
-    if (!isNode(stmt) || stmt[0] !== 'readonly' || stmt.length !== 3) return false;
+    if (!isNode(stmt) || (stmt[0] !== 'readonly' && stmt[0] !== 'void-readonly') || stmt.length !== 3) return false;
     const id = stores.idOf(stmt);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'readonly';
   };
@@ -523,7 +523,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const STMT_HEADS = new Set([
     '=', 'void-assign', 'class', 'enum', 'type-decl', 'typed-var',
     'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
-    'readonly', 'gate', 'component', 'schema',
+    'readonly', 'void-readonly', 'gate', 'component', 'schema',
   ]);
   const isIdent = (s) => typeof s === 'string' && /^[A-Za-z_$][\w$]*$/.test(s);
   const isExportList = (x) =>
