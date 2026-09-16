@@ -53,6 +53,32 @@ export validateImage =! (img, named, layout, capacity) ->
   return RGBA if bytes.length is 4 * px
   throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
 
+export LITTLE_ENDIAN =! new Uint8Array(new Uint32Array([1]).buffer)[0] is 1
+
+# Packed four-byte pixels read as whole words: one load per pixel instead of
+# three, unrolled four wide, the same (r + 2g + b) / 4 luma. Alpha and the X
+# byte fall out of the mask, and the weights are symmetric in r and b, so
+# every RGBA/BGRA/X layout takes this path.
+copyWords =! (out, data, byteStart, n) ->
+  words = new Uint32Array(data.buffer, byteStart, n)
+  i = 0
+  end = n - 3
+  while i < end
+    p = words[i]
+    q = words[i + 1]
+    r = words[i + 2]
+    s = words[i + 3]
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
+    out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2
+    out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2
+    out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2
+    i += 4
+  while i < n
+    p = words[i]
+    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
+    i++
+  return
+
 # Convert any input into the tight native luma plane.
 export copyLuma =! (out, maxSize, img, named, layout) ->
   {step, bits} = validateImage img, named, layout, maxSize
@@ -60,6 +86,8 @@ export copyLuma =! (out, maxSize, img, named, layout) ->
   stride = layout?.stride or width * step
   offset = layout?.offset or 0
   return if data is out and not offset and stride is width and step is 1
+  if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
+    return copyWords out, data, data.byteOffset + offset, width * height
   for y in [0...height]
     src = offset + y * stride
     dst = y * width

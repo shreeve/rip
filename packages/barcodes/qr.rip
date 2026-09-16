@@ -24,7 +24,7 @@ import {
   alignmentPatterns, formatBits, maskBits, popcnt, versionBits,
 } from './spec.rip'
 import { gifDataUrl, writeGif } from './gif.rip'
-import { FORMATS, copyLuma, darkToImage, validateImage, validateSize } from './image.rip'
+import { FORMATS, LITTLE_ENDIAN, copyLuma, darkToImage, validateImage, validateSize } from './image.rip'
 
 # ==[ Encoder ]==
 
@@ -392,7 +392,9 @@ buildSymCache =! (ver) ->
       y = i // 3
       setF x, y, 0
       setF y, x, 0
-  planes = (mat(size) for i in [0...8])
+  planes = []
+  for i in [0...8]
+    planes.push mat(size)
   posBuf = new Uint16Array(size * size)
   n = 0
   xOffset = size - 1
@@ -706,7 +708,12 @@ class Payload
     @data = new Uint8Array(0)
     @dataLen = 0
     @bytes = new Uint8Array(capacity)
-    @views = (new Uint8Array(@bytes.buffer, 0, i) for i in [0..capacity])
+    @views = Array.new(capacity + 1)
+
+  # A length-n window over the byte arena, created once per length so the
+  # frame path never allocates after its first use.
+  view: (n) ->
+    @views[n] or (@views[n] = new Uint8Array(@bytes.buffer, 0, n))
 
   read: (bits) ->
     start = @position
@@ -783,7 +790,7 @@ class Payload
           decoder = ECI_DECODERS[eci] or TextDecoder.new(encoding)
           for i in [0...length]
             @bytes[i] = @read(8)
-          res += decoder.decode @views[length]
+          res += decoder.decode @view(length)
       else
         return FAIL.data
     return res unless parts
@@ -1096,12 +1103,34 @@ evalLow =! (poly, length, x) ->
 
 # 2x2 box filter into the next pyramid layer.
 resizeRows =! (src, dst, width, dstWidth, from, to) ->
+  if LITTLE_ENDIAN and (width & 3) is 0 and (dstWidth & 1) is 0 and (src.byteOffset & 3) is 0
+    resizeWords src, dst, width, dstWidth, from, to
+    return
   for y in [from...to]
     srcPos = (y << 1) * width
     dstPos = y * dstWidth
     for x in [0...dstWidth]
       dst[dstPos++] = (src[srcPos] + src[srcPos + 1] + src[srcPos + width] + src[srcPos + width + 1] + 2) >> 2
       srcPos += 2
+  return
+
+# The same box filter over whole words: one word from each source row holds
+# four pixels, summed in two 16-bit lanes to produce two output pixels.
+resizeWords =! (src, dst, width, dstWidth, from, to) ->
+  words = new Uint32Array(src.buffer, src.byteOffset, (width * (to << 1)) >> 2)
+  wordsPerRow = width >> 2
+  pairs = dstWidth >> 1
+  for y in [from...to]
+    w0 = (y << 1) * wordsPerRow
+    w1 = w0 + wordsPerRow
+    dstPos = y * dstWidth
+    for k in [0...pairs]
+      a = words[w0 + k]
+      b = words[w1 + k]
+      sum = (a & 0x00ff00ff) + (b & 0x00ff00ff) + ((a >>> 8) & 0x00ff00ff) + ((b >>> 8) & 0x00ff00ff)
+      dst[dstPos] = ((sum & 0xffff) + 2) >> 2
+      dst[dstPos + 1] = ((sum >>> 16) + 2) >> 2
+      dstPos += 2
   return
 
 # One threshold per 8x8 block. Low-contrast blocks take the darkest sample so
@@ -1177,9 +1206,7 @@ bitmapRows =! (layer, from, to) ->
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
-recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, inverted) ->
-  ms = ratio r0, r1, r2, r3, r4
-  return unless ms
+recordFinder =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   start = x - r0 - r1 - r2 - r3 - r4
   cx = Math.round(start + r0 + r1 + r2 / 2)
   limit = ms * 3
@@ -1226,7 +1253,9 @@ findRows =! (layer, from, to) ->
       runs++
       dark = previous
       previous = not previous
-      recordFinder layer, y, x, r0, r1, r2, r3, r4, (not dark) if runs >= 5
+      if runs >= 5
+        ms = ratio r0, r1, r2, r3, r4
+        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
   return
 
 # Legal sides are 17 + 4 * version; a non-finite estimate coerces to zero and
