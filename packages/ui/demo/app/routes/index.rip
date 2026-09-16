@@ -2,7 +2,7 @@ import { COMPONENTS } from '../components.rip'
 
 export Home = component
   render
-    div class: 'mx-auto max-w-2xl px-8 py-10'
+    div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
       h1 class: 'text-2xl font-semibold', 'Rip UI'
       p class: 'mt-2 text-secondary', 'Unstyled, composable UI components built on native browser features.'
       ul class: 'mt-8 grid gap-4'

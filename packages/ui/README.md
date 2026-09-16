@@ -49,6 +49,10 @@ body:has(dialog:modal) { overflow: hidden; }
 
 Transitions are `@starting-style` with discrete transitions on `display` and `overlay`; in Tailwind that is `transition-[opacity,overlay,display] transition-discrete starting:open:opacity-0 open:opacity-100 opacity-0`.
 
+## Drawer
+
+`Drawer` is the Dialog with a side. The root offers `open` and `side` (`left` by default, or `right`, `top`, `bottom`), and `DrawerTrigger`, `DrawerTitle`, `DrawerDescription`, and `DrawerClose` are the Dialog parts. `DrawerPopup` is the `<dialog>` with everything `DialogPopup` carries, plus `data-side`, and a swipe: a press inside the panel that travels toward its side drags the panel along with the transition off, and releasing past a quarter of the panel's size or with speed closes it, while a shorter release lets the transition carry it back. The pointer is captured once a drag is past the slop, so a link under a swipe is not clicked when it ends. The swipe runs for every pointer type, mouse included, and only while `closedby` is `any`. The panel's placement and slide are the consumer's classes, as the demo shows; the popup sets `touch-action` along the other axis so content inside still scrolls.
+
 ## Demo
 
 ```bash

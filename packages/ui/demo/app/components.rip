@@ -2,4 +2,6 @@ export type Entry = { href: RoutePath, name: string, description: string }
 
 export DIALOG: Entry = { href: '/dialog', name: 'Dialog', description: 'A modal that opens on top of the entire page.' }
 
-export COMPONENTS: Entry[] = [DIALOG]
+export DRAWER: Entry = { href: '/drawer', name: 'Drawer', description: 'A panel that slides in from an edge and swipes away.' }
+
+export COMPONENTS: Entry[] = [DIALOG, DRAWER]

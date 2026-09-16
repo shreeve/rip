@@ -17,6 +17,7 @@
   "files": [
     "ui.rip",
     "dialog.rip",
+    "drawer.rip",
     "README.md"
   ]
 }

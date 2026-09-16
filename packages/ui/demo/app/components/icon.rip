@@ -2,6 +2,7 @@
 # To add one: paste its path/shape data into the switch and add its name to IconName.
 
 export type IconName =
+  | 'menu'
   | 'moon'
   | 'sun'
 
@@ -21,6 +22,10 @@ export Icon = component
       aria-hidden: 'true'
       class: classes
       switch name
+        when 'menu'
+          path d: 'M4 5h16'
+          path d: 'M4 12h16'
+          path d: 'M4 19h16'
         when 'moon'
           path d: 'M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'
         when 'sun'

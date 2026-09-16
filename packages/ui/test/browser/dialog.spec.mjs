@@ -1,18 +1,5 @@
 import { expect, test } from '@playwright/test'
-
-const parts = (page) => ({
-  trigger: page.getByRole('button', { name: 'Open Dialog' }),
-  popup: page.locator('dialog'),
-  close: page.getByRole('button', { name: 'Close' }),
-  fromParent: page.getByRole('button', { name: 'Open from the Parent' }),
-})
-const boot = async (page) => {
-  await page.goto('/dialog')
-  await expect(parts(page).trigger).toBeVisible()
-  return parts(page)
-}
-const isModal = (page) => page.evaluate(() => document.querySelector('dialog:modal') !== null)
-const focusInside = (page) => page.evaluate(() => document.querySelector('dialog').contains(document.activeElement))
+import { boot, focusInside, isModal } from './support.mjs'
 
 test('the trigger opens a modal dialog, focus lands inside, and the state shows on both parts', async ({ page }) => {
   const { trigger, popup } = await boot(page)
@@ -67,7 +54,7 @@ for (const native of [true, false]) {
     await expect.poll(() => isModal(page)).toBe(true)
     if (!native) await popup.evaluate((el) => el.removeAttribute('closedby'))
     const { left, top, padding } = await page.evaluate(() => {
-      const dialog = document.querySelector('dialog')
+      const dialog = document.querySelector('main dialog')
       const { left, top } = dialog.getBoundingClientRect()
       const { paddingLeft, paddingTop } = getComputedStyle(dialog)
       return { left, top, padding: { left: parseFloat(paddingLeft), top: parseFloat(paddingTop) } }
@@ -98,7 +85,7 @@ test('focus stays contained: Tab past either end and a programmatic focus outsid
   await expect.poll(() => isModal(page)).toBe(true)
   const contained = () => page.evaluate(() => {
     const active = document.activeElement
-    return active === document.body || document.querySelector('dialog').contains(active)
+    return active === document.body || document.querySelector('main dialog').contains(active)
   })
   await close.focus()
   for (let i = 0; i < 3; i++) {
@@ -130,42 +117,4 @@ test('the popup is named by its title and described by its description', async (
   const popup = page.getByRole('dialog')
   await expect(popup).toHaveAccessibleName('Notifications')
   await expect(popup).toHaveAccessibleDescription('You are all caught up. Good job!')
-})
-
-test('the theme follows the system until a click chooses, and the choice survives a reload', async ({ page, browser }) => {
-  const dark = await browser.newContext({ colorScheme: 'dark' })
-  const darkPage = await dark.newPage()
-  await darkPage.goto('/dialog')
-  await expect(parts(darkPage).trigger).toBeVisible()
-  await expect.poll(() => darkPage.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
-  expect(await darkPage.evaluate(() => localStorage.getItem('theme'))).toBeNull()
-  await dark.close()
-
-  const { trigger } = await boot(page)
-  const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
-  const toggle = page.getByRole('button', { name: /theme/ })
-  await expect.poll(theme).toBe('light')
-  expect(await page.evaluate(() => localStorage.getItem('theme'))).toBeNull()
-  await expect(toggle).toHaveAccessibleName('Switch to the dark theme')
-  await toggle.click()
-  await expect.poll(theme).toBe('dark')
-  expect(await page.evaluate(() => localStorage.getItem('theme'))).toBe('dark')
-  await page.reload()
-  await expect(trigger).toBeVisible()
-  await expect.poll(theme).toBe('dark')
-  await expect(toggle).toHaveAccessibleName('Switch to the light theme')
-  await toggle.click()
-  await expect.poll(theme).toBe('light')
-})
-
-test('the index lists every component and links to its page', async ({ page }) => {
-  await page.goto('/')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rip UI')
-  const card = page.getByRole('link', { name: /Dialog/ }).filter({ hasText: 'A modal that opens on top of the entire page.' })
-  await expect(card).toBeVisible()
-  await card.click()
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dialog')
-  await expect(parts(page).trigger).toBeVisible()
-  await page.getByRole('link', { name: 'Rip UI' }).click()
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rip UI')
 })

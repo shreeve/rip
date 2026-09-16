@@ -1,3 +1,4 @@
+import { Drawer, DrawerPopup, DrawerTitle, DrawerTrigger } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 import { Icon } from '../components/icon.rip'
 
@@ -5,41 +6,59 @@ type Theme = 'light' | 'dark'
 
 export Layout = component
   theme: Theme := preferred()
+  drawer := false
 
   ~>
     document.documentElement.dataset.theme = theme
     return
 
-  preferred = (): Theme ->
-    stored = localStorage.getItem('theme')
-    return stored if stored is 'dark' or stored is 'light'
-    if matchMedia('(prefers-color-scheme: dark)').matches then 'dark' else 'light'
+  mounted: ->
+    @router.onNavigate -> drawer = false
+    matchMedia('(min-width: 48rem)').addEventListener 'change', (e) -> drawer = false if e.matches
+
+  preferred = (): Theme -> if localStorage.getItem('theme') is 'dark' then 'dark' else 'light'
 
   switchTheme: ->
     theme = if theme is 'dark' then 'light' else 'dark'
     localStorage.setItem('theme', theme)
 
   render
-    div class: 'grid h-screen grid-cols-[260px_1fr]'
-      aside class: 'flex min-h-0 flex-col border-r border-surface'
-        div class: 'flex h-15 shrink-0 items-center justify-between pr-2.5 pl-5'
-          a href: '/', class: 'text-sm-plus font-semibold', 'Rip UI'
-          button
-            type: 'button'
-            class: 'flex size-8 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
-            aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
-            @click: switchTheme
-            Icon name: if theme is 'dark' then 'sun' else 'moon', classes: 'size-4.5'
-        div class: 'flex flex-1 flex-col overflow-y-auto p-2.5'
-          div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Components'
-          nav class: 'flex flex-col'
-            for entry in COMPONENTS
-              a
-                href: entry.href
-                class: [
-                  'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary'
-                  'hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
-                ]
-                entry.name
-      main class: 'min-h-0 overflow-y-auto'
+    div class: 'grid h-dvh grid-rows-[auto_1fr] md:grid-cols-[260px_1fr]'
+      header class: 'flex h-14 items-center gap-1 border-b border-surface px-2.5 md:h-15 md:border-r md:border-b-0 md:pl-5'
+        Drawer open <=> drawer
+          DrawerTrigger
+            class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary md:hidden'
+            aria-label: 'Open navigation'
+            Icon name: 'menu', classes: 'size-4.5'
+          DrawerPopup
+            class: [
+              'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full bg-background p-2.5 shadow-xl transition-[translate,overlay,display] transition-discrete duration-200'
+              'open:translate-x-0 starting:open:-translate-x-full'
+              'backdrop:bg-black/20 backdrop:opacity-0 backdrop:duration-200 open:backdrop:opacity-100 starting:open:backdrop:opacity-0'
+            ]
+            DrawerTitle class: 'sr-only', 'Navigation'
+            Nav
+        a href: '/', class: 'flex-1 px-2 text-base font-semibold md:px-0', 'Rip UI'
+        button
+          type: 'button'
+          class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
+          aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
+          @click: switchTheme
+          Icon name: (if theme is 'dark' then 'sun' else 'moon'), classes: 'size-4.5'
+      aside class: 'hidden min-h-0 flex-col overflow-y-auto border-r border-surface p-2.5 md:flex'
+        Nav
+      main class: 'min-h-0 overflow-y-auto md:col-start-2 md:row-span-2 md:row-start-1'
         div id: 'content'
+
+Nav = component
+  render
+    div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Components'
+    nav class: 'flex flex-col'
+      for entry in COMPONENTS
+        a
+          href: entry.href
+          class: [
+            'flex items-center rounded-md px-2.5 py-2 text-sm font-medium text-secondary'
+            'hover:bg-surface-hover hover:text-primary aria-[current=page]:bg-surface-active aria-[current=page]:text-primary'
+          ]
+          entry.name

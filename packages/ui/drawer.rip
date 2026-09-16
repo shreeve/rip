@@ -1,0 +1,111 @@
+import type { CSSProperties } from 'rip/app'
+import { DialogClose, DialogDescription, DialogTitle, DialogTrigger } from './dialog.rip'
+
+type Side = 'left' | 'right' | 'top' | 'bottom'
+
+export Drawer = component
+  offer @open := false
+  offer @side := 'left' as Side
+  offer labelledBy := ''
+  offer describedBy := ''
+  render
+    slot
+
+export DrawerTrigger = DialogTrigger
+export DrawerTitle = DialogTitle
+export DrawerDescription = DialogDescription
+export DrawerClose = DialogClose
+
+# DrawerPopup carries DialogPopup's mechanics verbatim, since an extends
+# component cannot render another component as its root; a change to
+# one belongs in both. The effect's first run happens before the
+# mounted tree reaches the document, and showModal throws on a
+# disconnected element, so a drawer that starts open would fail its
+# mount. Opening waits a microtask.
+export DrawerPopup = component extends dialog
+  accept open
+  accept side
+  accept labelledBy
+  accept describedBy
+  el: HTMLDialogElement | null := null
+  closedBy ~= @rest.closedby ?? 'any'
+
+  # Stable Safari and every iOS browser ignore closedby, so a press that
+  # starts and ends on the backdrop closes here and Escape is refused
+  # under none; where the attribute works the browser does both. Goes
+  # when Safari ships it.
+  pressed = false
+  onBackdrop = (e: PointerEvent): boolean ->
+    return false unless e.target is e.currentTarget
+    r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
+    e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
+
+  # A press inside the panel that travels toward the panel's side drags
+  # it along, and releasing past a quarter of its size or with speed
+  # dismisses it. The pointer is captured once the drag is past the
+  # slop, so a link under a swipe is not clicked when it ends, and the
+  # browser's own drag of a link or image is refused while a press is
+  # tracked, since it would cancel the pointer sequence first.
+  horizontal ~= side is 'left' or side is 'right'
+  toward ~= if side is 'left' or side is 'top' then -1 else 1
+  along = (e: PointerEvent): number -> if horizontal then e.clientX else e.clientY
+  drag: { id: number, start: number, at: number } | null = null
+  offset := 0
+  swiping := false
+  swipeStyle ~=
+    s = { touchAction: (if horizontal then 'pan-y' else 'pan-x') } as CSSProperties
+    s.translate = (if horizontal then "#{offset * toward}px 0" else "0 #{offset * toward}px") if offset
+    s.transition = 'none' if swiping
+    s
+
+  down = (e: PointerEvent) ->
+    pressed = onBackdrop(e)
+    drag = if pressed or closedBy isnt 'any' then null else { id: e.pointerId, start: along(e), at: performance.now() }
+  move = (e: PointerEvent) ->
+    return unless drag and e.pointerId is drag.id
+    travel = (along(e) - drag.start) * toward
+    unless swiping
+      return if Math.abs(travel) < 8
+      swiping = true
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    offset = Math.max(0, travel)
+  up = (e: PointerEvent) ->
+    open = false if pressed and onBackdrop(e) and closedBy is 'any'
+    return unless drag
+    dialog = e.currentTarget as HTMLDialogElement
+    size = if horizontal then dialog.offsetWidth else dialog.offsetHeight
+    speed = offset / (performance.now() - drag.at)
+    open = false if swiping and (offset > size / 4 or speed > 0.4)
+    settle()
+  settle = ->
+    drag = null
+    swiping = false
+    offset = 0
+  refuseDrag = (e: DragEvent) -> e.preventDefault() if drag
+
+  ~>
+    dialog = el
+    return unless dialog
+    if open
+      queueMicrotask -> dialog.showModal() if open and not dialog.open and dialog.isConnected
+    else
+      dialog.close() if dialog.open
+  render
+    dialog
+      ref: el
+      closedby: closedBy
+      style: swipeStyle
+      data-side: side
+      data-open: open or undefined
+      data-closed: not open or undefined
+      data-swiping: swiping or undefined
+      aria-labelledby: labelledBy or undefined
+      aria-describedby: describedBy or undefined
+      @pointerdown: down
+      @pointermove: move
+      @pointerup: up
+      @pointercancel: settle
+      @dragstart: refuseDrag
+      @cancel: (e) -> e.preventDefault() if closedBy is 'none'
+      @close: (-> open = false)
+      slot
