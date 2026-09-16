@@ -4,7 +4,7 @@
 
 > **QR and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, scan-line Code 128, zero dependencies.**
 
-The encoder keeps a symbol as one `Uint32Array` with 32 modules per word,
+The encoder keeps a symbol as one `Int32Array` with 32 modules per word,
 builds the function-pattern template, placement order and the eight mask
 planes once per version, and chooses a mask by XORing whole words and
 scoring the penalty rules word-parallel. The decoder binarizes a four-level
@@ -18,9 +18,9 @@ each eleven-module group to its nearest codeword in both directions and on
 both axes.
 
 **Runtime:** browser-safe (`rip.browser: true`). One file per symbology,
-`qr.rip` and `code128.rip`, each holding its encoder and reader; a root
-entry that re-exports both; the camera and canvas plumbing; and the
-ISO/IEC 18004 tables, GIF writer and image-input helpers they share.
+`qr.rip` and `code128.rip`, each holding its tables, encoder and reader; a
+root entry that re-exports both; the camera and canvas plumbing in `dom.rip`;
+and the GIF writer and image-input helpers both symbologies share.
 `rip/barcodes/qr` and `rip/barcodes/code128` import one symbology alone.
 
 ## Quick Start
@@ -33,7 +33,7 @@ p encodeQR(text, 'term')                      # print to any terminal
 svg    = encodeQR text, 'svg'                 # markup for a page
 gif    = encodeQR text, 'gif', scale: 4       # Uint8Array, a GIF file
 url    = encodeQR text, 'data-url', scale: 4  # 'data:image/gif;base64,...'
-matrix = encodeQR text, 'raw'                 # boolean[][] with the quiet zone
+matrix = encodeQR text, 'raw'                 # boolean[][], true is dark, quiet zone included
 ascii  = encodeQR text, 'ascii'               # half-height block characters
 
 # decode any RGBA raster, the shape a canvas ImageData already has
@@ -116,21 +116,22 @@ an FNC1 separator, and `gs1: true` opens the symbol with FNC1 for GS1-128
 application identifiers. The codeword sequence is the shortest over the
 three subsets, so `'A1234'` latches to subset C for the digit pairs while
 `'12345'` does not pay for a latch it cannot amortize. The outputs are the
-QR six with one row of modules: `raw` is a `boolean[]` including the quiet
-zone, `ascii` and `term` are one line, and `svg`, `gif` and `data-url` draw
-`height` modules of bar.
+QR six with one row of modules: `raw` is a `boolean[]` with `true` for a bar
+and the quiet zone included, `ascii` and `term` are one line, and `svg`, `gif`
+and `data-url` draw `height` modules of bar.
 
 | option | meaning | default |
 | --- | --- | --- |
 | `scale` | pixels per module | `1` |
-| `border` | quiet-zone modules on each side | `10` |
+| `border` | quiet-zone modules on each side, `0` allowed | `10` |
 | `height` | bar height in modules for `svg`, `gif`, `data-url` | `40` |
 | `gs1` | open with FNC1 for GS1-128 | `false` |
 | `optimize` | one `<path>` instead of one `<rect>` per bar | `true` |
 
 `decodeCode128` takes the same `{ width, height, data }` as `decodeQR`,
-with the same `format` option, and returns the text or throws.
-`readCode128` returns `null` on a miss and otherwise
+with the same `format` option, and returns the text or throws
+`'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
+miss and otherwise
 `{ text, gs1, codes, line, vertical, reversed, inverted }`: the verified
 codewords and which scan line, axis, direction and polarity produced them.
 Modules must be at least one pixel wide; a printed label filling a quarter

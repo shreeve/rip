@@ -1,3 +1,7 @@
+# ==============================================================================
+# rip/barcodes — root entry: both symbologies, encodeQR as the default export
+# ==============================================================================
+
 import { encodeQR } from './qr.rip'
 
 export { encodeQR, decodeQR, decodeQRBatch, QRScanner } from './qr.rip'
