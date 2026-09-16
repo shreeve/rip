@@ -359,7 +359,7 @@ postScriptName = (dv, bytes, name) ->
     at   = strings + dv.getUint16(p + 10)
     continue unless id is 6
     s = if plat is 3
-      (String.fromCharCode dv.getUint16(at + j * 2) for j in [0...len / 2]).join ''
+      (String.fromCharCode dv.getUint16(at + j * 2) for j in [0...len >> 1]).join ''
     else
       (String.fromCharCode bytes[at + j] for j in [0...len]).join ''
     s = s.replace /[^A-Za-z0-9+-]/g, ''

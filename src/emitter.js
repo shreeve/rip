@@ -6430,53 +6430,68 @@ class Emitter {
     return names;
   }
 
-  // Ranged for with a BY step. Literal steps take static-direction
-  // headers (a positive literal ascends toward TO, a negative one
-  // descends); every other step binds ONCE and the header tests its
-  // sign, so both directions terminate and a zero step iterates
-  // nothing (a zero LITERAL rejects — it never advances). Impure
-  // bounds bind once beside the counter.
-  rangedByHeader(node, markVar, vars, iter, step) {
+  // Ranged for, every form. Direction: a literal step's sign decides
+  // (positive ascends, negative descends, zero rejects — it never
+  // advances); a variable step binds ONCE and the header tests its
+  // sign; with no step, two literal bounds decide statically and any
+  // variable bound ascends (`by -1` descends). Impure bounds bind once
+  // beside the counter. A second loop variable is the iteration index.
+  rangedHeader(node, markVar, vars, iter, step) {
     const [dots, from, to] = iter;
     const cmpUp = dots === '..' ? '<=' : '<';
     const cmpDown = dots === '..' ? '>=' : '>';
     const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
-    const posLit = numText(step) ??
-      (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
-    const negLit = isNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
-    if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
+    const signedText = (x) => numText(x) ??
+      (isNode(x) && (x[0] === '+' || x[0] === '-') && x.length === 2 && numText(x[1]) !== null
+        ? `${x[0] === '-' ? '-' : ''}${numText(x[1])}`
+        : null);
+    const literal = (x) => {
+      const text = signedText(x);
+      return text === null ? null : Number(text.replace(/_/g, ''));
+    };
+    const stepLit = step === null ? null : literal(step);
+    if (stepLit === 0) {
       throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
     }
+    const fromLit = literal(from);
+    const toLit = literal(to);
+    const descends = step === null
+      ? fromLit !== null && toLit !== null && fromLit > toLit
+      : stepLit !== null && stepLit < 0;
     const v = vars[0];
-    const toRef = this.singleReadIterable(to) ? null : this.loopTempName('_ref');
-    const stepRef = posLit !== null || negLit !== null ? null : this.loopTempName('_step');
+    const idx = vars.length === 2 ? vars[1] : null;
+    const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.loopTempName('_ref');
+    const stepRef = step === null || stepLit !== null ? null : this.loopTempName('_step');
     this.b.emit('for (let ');
     markVar(v);
     this.b.emit(' = ');
     this.expr(from);
     if (toRef !== null) { this.b.emit(`, ${toRef} = `); this.expr(to); }
     if (stepRef !== null) { this.b.emit(`, ${stepRef} = `); this.mark(node, 'step', () => this.expr(step)); }
+    if (idx !== null) { this.b.emit(', '); markVar(idx); this.b.emit(' = 0'); }
     const toText = () => { if (toRef !== null) this.b.emit(toRef); else this.expr(to); };
+    const advance = () => {
+      if (stepRef !== null) this.b.emit(`${v} += ${stepRef}`);
+      else if (step === null) this.b.emit(descends ? `${v}--` : `${v}++`);
+      else {
+        this.b.emit(`${v} ${descends ? '-=' : '+='} `);
+        this.mark(node, 'step', () => this.b.emit(String(Math.abs(stepLit))));
+      }
+      if (idx !== null) this.b.emit(`, ${idx}++`);
+    };
     this.b.emit('; ');
     if (stepRef !== null) {
       this.b.emit(`${stepRef} > 0 ? ${v} ${cmpUp} `);
       toText();
       this.b.emit(` : ${v} ${cmpDown} `);
       toText();
-      this.b.emit(`; ${v} += ${stepRef})`);
-    } else if (negLit !== null) {
-      this.b.emit(`${v} ${cmpDown} `);
-      toText();
-      this.b.emit(`; ${v} -= `);
-      this.mark(node, 'step', () => this.b.emit(negLit));
-      this.b.emit(')');
     } else {
-      this.b.emit(`${v} ${cmpUp} `);
+      this.b.emit(`${v} ${descends ? cmpDown : cmpUp} `);
       toText();
-      this.b.emit(`; ${v} += `);
-      this.mark(node, 'step', () => this.b.emit(posLit));
-      this.b.emit(')');
     }
+    this.b.emit('; ');
+    advance();
+    this.b.emit(')');
   }
 
   forIn(node, ind) {
@@ -6497,26 +6512,8 @@ class Emitter {
       if (isNode(vars[0]) && (isRange(iter) || step !== null)) {
         throw this.positionedError(node, 'emitter: pattern loop variables with ranges or BY steps are not supported yet');
       }
-      if (isRange(iter) && step === null) {
-        const [dots, from, to] = iter;
-        // The condition re-reads TO each iteration: an impure bound
-        // binds once in the init (a pure one keeps its bytes).
-        const toRef = this.singleReadIterable(to) ? null : this.loopTempName('_ref');
-        this.b.emit('for (let ');
-        markVar(vars[0]);
-        this.b.emit(' = ');
-        this.expr(from);
-        if (toRef) {
-          this.b.emit(`, ${toRef} = `);
-          this.expr(to);
-        }
-        this.b.emit(`; ${vars[0]} ${dots === '..' ? '<=' : '<'} `);
-        if (toRef) this.b.emit(toRef);
-        else this.expr(to);
-        this.b.emit(`; ${vars[0]}++) `);
-        this.guardedBlock(body, guard, ind);
-      } else if (isRange(iter)) {
-        this.rangedByHeader(node, markVar, vars, iter, step);
+      if (isRange(iter)) {
+        this.rangedHeader(node, markVar, vars, iter, step);
         this.b.emit(' ');
         this.guardedBlock(body, guard, ind);
       } else if (step !== null) {
@@ -6859,8 +6856,8 @@ class Emitter {
     if (isNode(vars[0]) && (isRange(iter) || step !== null)) {
       throw this.positionedError(node, 'emitter: pattern loop variables with ranges or BY steps are not supported yet');
     }
-    if (isRange(iter) && step !== null) {
-      this.rangedByHeader(node, markVar, vars, iter, step);
+    if (isRange(iter)) {
+      this.rangedHeader(node, markVar, vars, iter, step);
       return setups;
     }
     if (step !== null) {
