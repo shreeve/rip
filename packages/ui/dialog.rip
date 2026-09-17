@@ -1,6 +1,3 @@
-counter = 0
-mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
-
 export Dialog = component
   offer @open := false
   offer labelledBy := ''
@@ -103,3 +100,13 @@ export DialogClose = component extends button
       type: 'button'
       @click: (-> open = false)
       slot
+
+counter = 0
+mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
+
+# A modal holds a scroller behind it still, but not the document's own
+# scroll or its overscroll bounce, so the document adopts one rule that
+# hides the root's overflow while any modal dialog is open.
+scrollLock = new CSSStyleSheet()
+scrollLock.replaceSync(':root:has(dialog:modal) { overflow: hidden; }')
+document.adoptedStyleSheets.push(scrollLock)

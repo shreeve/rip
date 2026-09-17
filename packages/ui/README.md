@@ -29,7 +29,7 @@ The `open <=> confirming` binding is optional. A dialog nobody observes is the s
 
 ## Dialog
 
-Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives the top layer, modality, an inert background, Escape, focus containment, and focus restore to the trigger. No JavaScript positioning, focus trap, or scroll lock ships. Containment is not wrapping: past the last focusable, Chromium and WebKit hand focus to the browser's own chrome and the next Tab re-enters the dialog, and Firefox leaves focus where it is; focus never reaches page content outside the modal on any of them.
+Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives the top layer, modality, an inert background, Escape, focus containment, and focus restore to the trigger. No JavaScript positioning or focus trap ships. Containment is not wrapping: past the last focusable, Chromium and WebKit hand focus to the browser's own chrome and the next Tab re-enters the dialog, and Firefox leaves focus where it is; focus never reaches page content outside the modal on any of them.
 
 - `Dialog` — the root. Owns `open` (default `false`) and renders only its children.
 - `DialogTrigger` — a `<button>` that opens it. Carries `aria-haspopup="dialog"`, `aria-expanded`, and `data-popup-open` while open.
@@ -40,14 +40,9 @@ Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives
 
 The attributes are present while true and absent otherwise, so Tailwind's `data-open:` and `data-popup-open:` variants style them directly.
 
-Two things stay with the application's stylesheet, because they are CSS:
+The document does not scroll while a modal dialog is open, with nothing in the application's stylesheet. A modal already holds a scroller behind it still, but not the document's own scroll or its overscroll bounce, so loading the package adopts one stylesheet for the document, `:root:has(dialog:modal) { overflow: hidden; }`. The rule has only the `:has()` selector's specificity, so any rule of the application's overrides it. `:has()` does not see into a shadow root, so a popup rendered inside one does not lock the document.
 
-```css
-/* scroll lock while any modal dialog is open */
-body:has(dialog:modal) { overflow: hidden; }
-```
-
-Transitions key on `data-open`, never on `[open]`, which stays set through the exit: `@starting-style` for the entry and the attribute's removal for the exit. In Tailwind that is `opacity-0 transition-opacity data-open:opacity-100 starting:data-open:opacity-0`. Discrete transitions on `display` and `overlay` do not substitute: Firefox and WebKit hide a closed dialog at once regardless. The close waits on the popup's own animations and not its `::backdrop`'s, so a backdrop transition longer than the popup's is cut off when the dialog closes.
+The transitions stay with the application's stylesheet. They key on `data-open`, never on `[open]`, which stays set through the exit: `@starting-style` for the entry and the attribute's removal for the exit. In Tailwind that is `opacity-0 transition-opacity data-open:opacity-100 starting:data-open:opacity-0`. Discrete transitions on `display` and `overlay` do not substitute: Firefox and WebKit hide a closed dialog at once regardless. The close waits on the popup's own animations and not its `::backdrop`'s, so a backdrop transition longer than the popup's is cut off when the dialog closes.
 
 ## Drawer
 
@@ -67,4 +62,4 @@ bun run demo
 bun run test
 ```
 
-Playwright specs in `test/browser/` drive the demo on Chromium, Firefox, and WebKit, on a server of their own that the config starts, or on the running Sites instance with `RIP_UI_URL=https://ui.local/ bun run test`. They assert platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes and focus returns to the trigger, focus stays contained past either end, and the scroll-lock rule holds while a modal is open.
+Playwright specs in `test/browser/` drive the demo on Chromium, Firefox, and WebKit, on a server of their own that the config starts, or on the running Sites instance with `RIP_UI_URL=https://ui.local/ bun run test`. They assert platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes and focus returns to the trigger, focus stays contained past either end, and the document does not scroll while a modal is open.

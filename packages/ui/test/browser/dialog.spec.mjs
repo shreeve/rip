@@ -15,14 +15,27 @@ test('the trigger opens a modal dialog, focus lands inside, and the state shows 
   await expect(page.getByText('open: true')).toBeVisible()
 })
 
-test('the stylesheet locks scroll while a modal is open', async ({ page }) => {
-  const { trigger } = await boot(page)
-  const overflow = () => page.evaluate(() => getComputedStyle(document.body).overflow)
-  await expect.poll(overflow).toBe('visible')
+// The demo scrolls inside main, which a modal already holds still, so
+// the page grows past the viewport to give the document a scroll of its
+// own: that one a modal does not stop.
+test('the document does not scroll while a modal is open, with no stylesheet of the app\'s', async ({ page }) => {
+  const { trigger, popup } = await boot(page)
+  await page.evaluate(() => document.body.append(Object.assign(document.createElement('div'), { style: 'height: 200vh' })))
+  const scrolled = () => page.evaluate(() => scrollY)
+  const wheel = async () => {
+    await page.mouse.move(8, 8)
+    await page.mouse.wheel(0, 400)
+    await page.waitForTimeout(100)
+  }
   await trigger.click()
-  await expect.poll(overflow).toBe('hidden')
+  await expect.poll(() => isModal(page)).toBe(true)
+  await wheel()
+  expect(await scrolled()).toBe(0)
   await page.keyboard.press('Escape')
-  await expect.poll(overflow).toBe('visible')
+  await expect.poll(() => isModal(page)).toBe(false)
+  await expect(popup).toBeHidden()
+  await wheel()
+  await expect.poll(scrolled).toBeGreaterThan(0)
 })
 
 // Opened from the keyboard: WebKit does not focus a button on a mouse

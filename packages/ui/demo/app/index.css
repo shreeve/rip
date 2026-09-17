@@ -87,10 +87,6 @@ html[data-theme="dark"] {
     @apply bg-background text-primary antialiased;
   }
 
-  body:has(dialog:modal) {
-    overflow: hidden;
-  }
-
   button:not(:disabled) {
     @apply cursor-pointer;
   }
