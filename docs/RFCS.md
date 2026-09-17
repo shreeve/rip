@@ -4,13 +4,13 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 
 |    # | RFC                                                                                  | Tags                   | Status      |
 | ---: | ------------------------------------------------------------------------------------ | ---------------------- | ----------- |
-|    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟡 Proposed |
+|    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟢 Implemented |
 
 ---
 
 ## RFC 1: Split `rip/ui` into headless components and `rip/email`
 
-> **Status: Proposed.**
+> **Status: Implemented.** `rip/ui` opened with Dialog and a Drawer, the Dialog with a side and a swipe to dismiss. Two things landed differently from the text below: the boolean data attributes are present as `true` rather than bare, since presence is all a selector sees, and focus is contained rather than wrapped, since no engine wraps Tab inside a modal dialog.
 
 `packages/ui` is rewritten from scratch, in one change, as two packages. `rip/ui`, still under `packages/ui`, is headless compound components, opening with `Dialog`, a demo route, and a real-browser spec. `rip/email`, new under `packages/email`, is email templates authored as components and rendered to a string on the server; the `rip email` CLI is the one thing carried over. Tailwind leaves both.
 
