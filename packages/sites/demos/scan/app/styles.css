@@ -13,10 +13,19 @@ body { margin: 0; padding: 12px 16px 16px; font: 16px/1.4 system-ui, sans-serif;
 .history { list-style: none; margin: 0; padding: 0; }
 .history li { padding: 6px 0; border-top: 1px solid #333; word-break: break-all; }
 .at { float: right; color: #777; font-size: 12px; }
-/* A card-shaped guide: nearly the full width in portrait, most of the
-   height in landscape. Closer is better, up to where the lens still focuses. */
-.aimer { position: absolute; left: 50%; top: 50%; width: 90%; aspect-ratio: 1.586; transform: translate(-50%, -50%); border: 1.5px solid rgba(255, 255, 255, 0.5); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.4); pointer-events: none; }
-@media (orientation: landscape) { .aimer { width: 72%; } }
+/* Corner ticks mark the scanned area, which is the whole viewfinder and a
+   little beyond; the lock shows what was found. Closer is better, up to
+   where the lens still focuses. */
+.aimer { --tick: 28px; --line: 2px; --ink: rgba(255, 255, 255, 0.6); position: absolute; inset: 4%; pointer-events: none;
+  background:
+    linear-gradient(var(--ink), var(--ink)) left top / var(--tick) var(--line) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) left top / var(--line) var(--tick) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) right top / var(--tick) var(--line) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) right top / var(--line) var(--tick) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) left bottom / var(--tick) var(--line) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) left bottom / var(--line) var(--tick) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) right bottom / var(--tick) var(--line) no-repeat,
+    linear-gradient(var(--ink), var(--ink)) right bottom / var(--line) var(--tick) no-repeat; }
 .stats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 8px; font: 12px/1.4 ui-monospace, monospace; color: #8a8; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .controls button { padding: 6px 12px; border: 1px solid #555; border-radius: 6px; background: #222; color: #eee; font: inherit; }

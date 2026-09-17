@@ -76,11 +76,14 @@ traceRoundedQuad =! (context, points, radius) ->
   context.closePath()
 
 # The largest centered region of a frame with `aspect` (width over height),
+# grown by `margin` of its size beyond each edge where the frame has pixels,
 # its edges kept on the planes' subsampling grid.
-cropRect =! (width, height, aspect, xShift = 0, yShift = 0) ->
+cropRect =! (width, height, aspect, margin = 0, xShift = 0, yShift = 0) ->
   w = width
   h = height
   if width / height > aspect then w = Math.round(height * aspect) else h = Math.round(width / aspect)
+  w  = Math.min width,  Math.round(w * (1 + 2 * margin))
+  h  = Math.min height, Math.round(h * (1 + 2 * margin))
   w -= w % (1 << xShift)
   h -= h % (1 << yShift)
   x  = (width  - w) >> 1
@@ -126,6 +129,7 @@ canvasDefaults =! ->
   overlaySideColor:    'black'
   overlayTimeout:      500
   crop:                1         # aspect of the centered region scanned; null for the whole frame
+  margin:              0         # fraction of that region scanned beyond each edge, where the frame has pixels
   decodeAll:           false
   async:               false
   drawFailed:          false
@@ -195,7 +199,8 @@ export class QRCanvas
         @task?.abort()
         @task = undefined
         if @pending then @cleanPending = true else @scanner.clean()
-      crop:  @opts.crop
+      crop:   @opts.crop
+      margin: @opts.margin
       luma:  @scanner.luma
       busy:  => !!@pending
       frame: @opts.onVideoFrame
@@ -533,7 +538,7 @@ export class QRCanvas
   drawImage: (image, height, width) ->
     @rotate       = false
     @sourceHeight = height
-    rect = if @opts.crop then cropRect(width, height, @opts.crop) else { x: 0, y: 0, width, height }
+    rect = if @opts.crop then cropRect(width, height, @opts.crop, @opts.margin) else { x: 0, y: 0, width, height }
     inputWidth  = rect.width
     inputHeight = rect.height
     @sourceX     = rect.x
@@ -549,10 +554,12 @@ export class QRCanvas
     @decode context.getImageData(0, 0, inputWidth, inputHeight)
 
   # Scan a different centered region from the next frame on, such as the
-  # part of the frame a viewfinder shows.
-  cropTo!: (aspect) ->
-    @opts.crop   = aspect
-    @reader.crop = aspect
+  # part of the frame a viewfinder shows and a little beyond its edges.
+  cropTo!: (aspect, margin = @opts.margin) ->
+    @opts.crop     = aspect
+    @opts.margin   = margin
+    @reader.crop   = aspect
+    @reader.margin = margin
 
   clear!: ->
     @reader.clean()
@@ -674,7 +681,7 @@ export class QRCamera
         xShift = Math.max xShift, plane[0]
         yShift = Math.max yShift, plane[1]
       # The aspect is the player's; coded pixels of a portrait stream lie sideways.
-      rect = cropRect width, height, (if rotate then 1 / reader.crop else reader.crop), xShift, yShift
+      rect = cropRect width, height, (if rotate then 1 / reader.crop else reader.crop), reader.margin, xShift, yShift
       sourceWidth  = rect.width
       sourceHeight = rect.height
       sourceX      = rect.x

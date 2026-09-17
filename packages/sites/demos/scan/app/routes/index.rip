@@ -55,9 +55,10 @@ export Home = component
     failed = error.message
     status = "Error: #{error.message}"
 
-  # Scan only the part of the frame the viewfinder shows.
+  # Scan the part of the frame the viewfinder shows and a tenth beyond each
+  # edge, since a symbol centered by eye can poke past the edge.
   fit: ->
-    canvas.cropTo finder.clientWidth / finder.clientHeight if finder?.clientHeight
+    canvas.cropTo finder.clientWidth / finder.clientHeight, 0.1 if finder?.clientHeight
 
   # What the track settled on, and the controls it offers.
   describe: ->
