@@ -87,6 +87,22 @@ for (const native of [true, false]) {
   })
 }
 
+for (const how of ['mouse', 'keyboard']) {
+  test(`opened by ${how}, the focused close part ${how === 'mouse' ? 'shows no' : 'shows a'} focus ring`, async ({ page }) => {
+    const { trigger, close } = await boot(page)
+    if (how === 'mouse') {
+      const box = await trigger.boundingBox()
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    } else {
+      await trigger.focus()
+      await page.keyboard.press('Enter')
+    }
+    await expect.poll(() => isModal(page)).toBe(true)
+    await expect(close).toBeFocused()
+    expect(await close.evaluate((el) => el.matches(':focus-visible'))).toBe(how === 'keyboard')
+  })
+}
+
 // Focus never reaches page content outside the modal. Past the last
 // focusable, Chromium and WebKit hand focus to the document (the
 // browser's own chrome in a real window) and the next Tab re-enters the

@@ -81,7 +81,14 @@ export DrawerPopup = component extends dialog
     dialog = el
     return unless dialog
     if open
-      queueMicrotask -> dialog.showModal() if open and not dialog.open and dialog.isConnected
+      queueMicrotask ->
+        return unless open and not dialog.open and dialog.isConnected
+        visible = document.activeElement?.matches(':focus-visible')
+        dialog.showModal()
+        focused = document.activeElement as HTMLElement | null
+        if focused and not visible and focused.matches(':focus-visible')
+          focused.blur()
+          focused.focus({ focusVisible: false })
     else if dialog.open
       queueMicrotask ->
         exits = dialog.getAnimations().map (a) -> a.finished

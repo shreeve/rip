@@ -19,6 +19,10 @@ export DialogTrigger = component extends button
 # showModal throws until the mounted tree reaches the document, so opening
 # waits a microtask. Firefox and WebKit hide a closed dialog at once, so
 # close() waits for the exit animations, and Escape closes through the cell.
+#
+# TODO: wrap Tab and Shift+Tab at the popup's ends, per the WAI-ARIA modal
+# dialog pattern; showModal keeps focus off the page but lets it reach the
+# browser's own UI.
 export DialogPopup = component extends dialog
   accept open
   accept labelledBy
@@ -44,7 +48,16 @@ export DialogPopup = component extends dialog
     dialog = el
     return unless dialog
     if open
-      queueMicrotask -> dialog.showModal() if open and not dialog.open and dialog.isConnected
+      queueMicrotask ->
+        return unless open and not dialog.open and dialog.isConnected
+        # Safari rings the element showModal focuses even after a click, and
+        # only refocusing it with focusVisible: false clears that.
+        visible = document.activeElement?.matches(':focus-visible')
+        dialog.showModal()
+        focused = document.activeElement as HTMLElement | null
+        if focused and not visible and focused.matches(':focus-visible')
+          focused.blur()
+          focused.focus({ focusVisible: false })
     else if dialog.open
       queueMicrotask ->
         exits = dialog.getAnimations().map (a) -> a.finished
