@@ -163,7 +163,7 @@ MAX_OUTPUT_SIZE         =! 1024
 MAX_COMPACT_OUTPUT_SIZE =! 4096
 
 MODE_BITS    =! { numeric: 1, alphanumeric: 2, byte: 4 }
-LENGTH_BITS  =! { numeric: [10, 12, 14], alphanumeric: [9, 11, 13], byte: [8, 16, 16] }
+LENGTH_BITS  =! { numeric: [10, 12, 14], alphanumeric: [9, 11, 13], byte: [8, 16, 16], kanji: [8, 10, 12] }
 NUMERIC_BITS =! [0, 4, 7, 10]
 
 # charCode -> Table 5 value; -1 outside the alphabet.
@@ -799,6 +799,10 @@ FAIL =! Object.freeze
   timing:    Object.freeze(Error.new 'timing')
   version:   Object.freeze(Error.new 'version')
 
+# How far an attempt got; a decode reports its deepest failure.
+DEPTH  =! { finder: 0, dimension: 1, timing: 2, version: 3, alignment: 4, format: 5, rs: 6, data: 7 }
+deeper =! (a, b) -> if DEPTH[b.message] > DEPTH[a.message] then b else a
+
 mul   =! (a, b)          -> if a and b then EXP[LOG[a] + LOG[b]] else 0
 inv   =! (a)             -> EXP[255 - LOG[a]]
 clamp =! (value, lo, hi) -> Math.max(lo, Math.min(hi, value))
@@ -903,6 +907,33 @@ class Payload
           decoder = if named then ECI_DECODERS[eci] else guessDecoder(@view length)
           return FAIL.data unless decoder
           res += decoder.decode @view(length)
+      else if mode is 8 or mode is 13
+        # Kanji (Shift JIS) and Hanzi (GB 2312) segments pack one double-byte
+        # character into 13 bits; Hanzi names its subset first.
+        hanzi = mode is 13
+        return FAIL.data if hanzi and @read(4) isnt 1
+        length = @read LENGTH_BITS.kanji[cls]
+        return FAIL.data if length < 0 or @position + 13 * length > dataLen * 8
+        decoder = ECI_DECODERS[if hanzi then 29 else 20]
+        return FAIL.data unless decoder
+        chunk = (@views.length - 1) & ~1
+        n = 0
+        for i in [0...length]
+          value = @read 13
+          code  = if hanzi then ((value // 0x60) << 8) | (value % 0x60) else ((value // 0xc0) << 8) | (value % 0xc0)
+          code += if hanzi then (if code < 0x0a00 then 0xa1a1 else 0xa6a1) else (if code < 0x1f00 then 0x8140 else 0xc140)
+          @bytes[n++] = code >> 8
+          @bytes[n++] = code & 0xff
+          if n is chunk or i is length - 1
+            res += decoder.decode @view(n)
+            n = 0
+      else if mode is 3
+        # Structured append: sequence, total and parity are not part of the text.
+        return FAIL.data if @read(16) < 0
+      else if mode is 5 or mode is 9
+        # FNC1 framing leaves the text as is; the second position carries an
+        # application indicator.
+        return FAIL.data if mode is 9 and @read(8) < 0
       else
         return FAIL.data
     return res unless parts
@@ -1324,6 +1355,8 @@ bitmapRows! =! (layer, from, to) ->
   maxY    = layer.height - BLOCK
   maxX    = width - BLOCK
   blocks  = layer.blocks
+  # Four pixels per word when rows keep word alignment.
+  lumaWords = if LITTLE_ENDIAN and (width & 3) is 0 and (luma.byteOffset & 3) is 0 then layer.lumaWords else null
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
     top  = clamp y, 2, bHeight - 3
@@ -1347,17 +1380,31 @@ bitmapRows! =! (layer, from, to) ->
       shift   = xPos & 31
       word    = yPos * words + (xPos >>> 5)
       lowMask = 0xff << shift
-      # One block row packs to one byte, so the store below assumes BLOCK is 8,
-      # as do the eight comparisons unrolled to build it.
+      # One block row packs to one byte, so the store below assumes BLOCK is 8.
+      # A word-aligned row compares four pixels per word in two 16-bit lanes:
+      # (cut + 256) - v sets lane bit 8 exactly when v <= cut, and no lane
+      # borrows because every difference stays positive.
+      swar = lumaWords and (pos & 3) is 0
+      lanes = ((cut + 256) << 16) | (cut + 256)
       for yy in [0...BLOCK]
-        value = (if luma[pos]     <= cut then 1   else 0) |
-                (if luma[pos + 1] <= cut then 2   else 0) |
-                (if luma[pos + 2] <= cut then 4   else 0) |
-                (if luma[pos + 3] <= cut then 8   else 0) |
-                (if luma[pos + 4] <= cut then 16  else 0) |
-                (if luma[pos + 5] <= cut then 32  else 0) |
-                (if luma[pos + 6] <= cut then 64  else 0) |
-                (if luma[pos + 7] <= cut then 128 else 0)
+        if swar
+          w0 = lumaWords[pos >> 2]
+          w1 = lumaWords[(pos >> 2) + 1]
+          a  = lanes - (w0 & 0x00ff00ff)
+          b  = lanes - ((w0 >>> 8) & 0x00ff00ff)
+          c  = lanes - (w1 & 0x00ff00ff)
+          d  = lanes - ((w1 >>> 8) & 0x00ff00ff)
+          value = ((a >>> 8) & 1) | ((b >>> 7) & 2) | ((a >>> 22) & 4) | ((b >>> 21) & 8) |
+                  ((c >>> 4) & 16) | ((d >>> 3) & 32) | ((c >>> 18) & 64) | ((d >>> 17) & 128)
+        else
+          value = (if luma[pos]     <= cut then 1   else 0) |
+                  (if luma[pos + 1] <= cut then 2   else 0) |
+                  (if luma[pos + 2] <= cut then 4   else 0) |
+                  (if luma[pos + 3] <= cut then 8   else 0) |
+                  (if luma[pos + 4] <= cut then 16  else 0) |
+                  (if luma[pos + 5] <= cut then 32  else 0) |
+                  (if luma[pos + 6] <= cut then 64  else 0) |
+                  (if luma[pos + 7] <= cut then 128 else 0)
         bitmap[word] = (bitmap[word] & ~lowMask) | (value << shift)
         if shift > 24
           highMask = (1 << (shift - 24)) - 1
@@ -1447,7 +1494,9 @@ findRows! =! (layer, from, to, loose) ->
       runs++
       dark     = previous
       previous = not previous
-      if runs >= 5
+      # A strict center run exceeds 1.5 modules and its neighbors fall
+      # short of 1.5, so a center no longer than a neighbor never fits.
+      if runs >= 5 and (loose or (r2 > r1 and r2 > r3))
         ms = ratio r0, r1, r2, r3, r4, loose
         recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark), loose if ms
 
@@ -1553,6 +1602,7 @@ export class QRScanner
     @map        = Float64Array.new(9)
     @from       = Float64Array.new(9)
     @to         = Float64Array.new(9)
+    @jitter     = Float64Array.new(9)
     @alignPoint = { x: 0.1, y: 0.1 }
     # Bottom-right alignment candidates of one dimension attempt, (x, y) pairs.
     @brPoints   = Float64Array.new(8)
@@ -1578,6 +1628,7 @@ export class QRScanner
         cuts: cuts
         height: 0
         luma: luma
+        lumaWords: Int32Array.new(luma.buffer, luma.byteOffset, luma.length >> 2)
         patternCount: 0
         patterns: Float64Array.new(centers * 4)
         looseCount: 0
@@ -2220,14 +2271,14 @@ export class QRScanner
       boundingBox: { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY }
 
   # Retarget a coarse layer's homography and threshold grid to native luma.
-  # A layer pixel x sits at 2^r*x + (2^r-1)/2 in native coordinates.
+  # Coordinates are edge-based (pixel i spans [i, i + 1)), so a coarse
+  # coordinate scales by 2^r with no offset.
   upgrade: (p, map, ctx) ->
     fine = ctx.fine
     return 0 unless fine
     sc     = 1 << fine.r
-    half   = (sc - 1) / 2
     scaled = @to
-    scaled[i] = sc * map[i] + half * map[6 + i % 3] for i in [0...6]
+    scaled[i] = sc * map[i] for i in [0...6]
     scaled[6] = map[6]
     scaled[7] = map[7]
     scaled[8] = map[8]
@@ -2464,7 +2515,22 @@ export class QRScanner
   projectMap: (s, map, size) ->
     return FAIL.timing unless @timing(s, map, size)
     @projectQuad s, map, size
-    @decodeGrid size
+    result = @decodeGrid size
+    return result unless result is FAIL.rs
+    # A grid on the correction boundary can land its errors in other
+    # codewords a quarter module away: retry the sampling offset four ways.
+    jitter = @jitter
+    for k in [0...4]
+      jx = if k < 2 then (if k then -0.25 else 0.25) else 0
+      jy = if k < 2 then 0 else (if k is 2 then 0.25 else -0.25)
+      for r in [0, 3, 6]
+        jitter[r]     = map[r]
+        jitter[r + 1] = map[r + 1]
+        jitter[r + 2] = map[r] * jx + map[r + 1] * jy + map[r + 2]
+      @projectQuad s, jitter, size
+      result = @decodeGrid size
+      return result unless result instanceof Error
+    FAIL.rs
 
   # Timing plus the redundant version bits alone, to gate Version 7+ tiling.
   confirm: (s, map, size) ->
@@ -2481,7 +2547,6 @@ export class QRScanner
   # each tile through its own homography built from the four surrounding nodes.
   projectTiles: (sp, sm, size, version, fine, brPoint, t, ms, ctx) ->
     sc           = if fine then fine else 1
-    half         = (sc - 1) / 2
     count        = @setAlignments version
     positions    = @alignPos
     nodes        = @nodes
@@ -2540,11 +2605,11 @@ export class QRScanner
       reportAligners = for i in [0...locatedCount]
         pos = i * 4
         {
-          point: { x: (located[pos] - half) / sc, y: (located[pos + 1] - half) / sc }
+          point: { x: located[pos] / sc, y: located[pos + 1] / sc }
           x: located[pos + 2]
           y: located[pos + 3]
         }
-      br = if hasTileBr then { x: (tileBrX - half) / sc, y: (tileBrY - half) / sc } else brPoint
+      br = if hasTileBr then { x: tileBrX / sc, y: tileBrY / sc } else brPoint
       @report t, br, reportAligners, ms, size, ctx
     @decodeGrid size
 
@@ -2653,12 +2718,14 @@ export class QRScanner
         @mapFinderQuad map, size, t, brX, brY
         version = versionOf size
         if version < 7
-          failed = @projectMap plane, map, size
-          return failed unless failed instanceof Error
+          result = @projectMap plane, map, size
+          return result unless result instanceof Error
+          failed = deeper failed, result
           # Blurred Versions 1..6 still need fine-plane sampling.
           if @upgrade(plane, map, ctx)
-            failed = @projectMap @finePlane, @to, size
-            return failed unless failed instanceof Error
+            result = @projectMap @finePlane, @to, size
+            return result unless result instanceof Error
+            failed = deeper failed, result
         else
           fine = @upgrade plane, map, ctx
           sp   = if fine then @finePlane else plane
@@ -2667,20 +2734,23 @@ export class QRScanner
           confirmed = @confirm sp, sm, size
           confirmed = @confirm(plane, map, size) if not confirmed and fine
           unless confirmed
-            failed = FAIL.version
+            failed = deeper failed, FAIL.version
             continue
-          failed = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
-          return failed unless failed instanceof Error
+          result = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
+          return result unless result instanceof Error
+          failed = deeper failed, result
           # A false local alignment can corrupt a valid global projection.
           # The tiles built their homographies in the same matrices, so the
           # global map and its fine-plane form are derived again.
           @mapFinderQuad map, size, t, brX, brY
           fine   = @upgrade plane, map, ctx
-          failed = @projectMap (if fine then @finePlane else plane), (if fine then @to else map), size
-          return failed unless failed instanceof Error
+          result = @projectMap (if fine then @finePlane else plane), (if fine then @to else map), size
+          return result unless result instanceof Error
+          failed = deeper failed, result
           if fine
-            failed = @projectMap plane, map, size
-            return failed unless failed instanceof Error
+            result = @projectMap plane, map, size
+            return result unless result instanceof Error
+            failed = deeper failed, result
     failed
 
   # Threshold, pack the bitmap and collect finders for one layer.
@@ -2940,7 +3010,7 @@ export class QRScanner
         unless result instanceof Error
           @markDecoded layer, triple, result
           return result
-        failed = result
+        failed = deeper failed, result
         @retryStart += yield if cooperative
       break if stop or (not mandatory and not attempted)
       mandatory = false

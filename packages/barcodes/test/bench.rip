@@ -81,7 +81,7 @@ hd    = qrRaster 'https://example.com/some/path?with=query', 8, 1280, 720
 fhd   = qrRaster t8, 6, 1920, 1080
 row 'QR v1 132x132',    time -> decodeQR small
 row 'QR 720p',          time -> decodeQR hd
-row 'QR v8 1080p',      time -> decodeQR fhd
+row 'QR v10 1080p',     time -> decodeQR fhd
 bars  = barsRaster 'Hello, World! 2026', 3, 120, 1920, 1080
 stack = stackRaster 'Hello, World! 2026', 3, 1920, 1080
 row 'Code 128 1080p',   time -> readCode128 bars
