@@ -13,7 +13,8 @@
   },
   "scripts": {
     "test": "rip test.rip",
-    "corpus": "rip test/corpus.rip"
+    "corpus": "rip test/corpus.rip",
+    "bench": "rip test/bench.rip"
   },
   "rip": {
     "browser": true

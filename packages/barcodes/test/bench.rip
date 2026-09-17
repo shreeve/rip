@@ -1,0 +1,104 @@
+# The package's timing contract: `rip test/bench.rip`. Encoders, then each
+# reader on a clean raster (the hit path) and on frames with no symbol
+# (the miss path, which a camera runs thirty times a second) at 1080p and
+# at the arena a phone's viewfinder scans, 2160x2592 as I420 luma. Every
+# figure is a mean over repeated runs after warm-up.
+import { encodeQR, decodeQR } from '../qr.rip'
+import { encodeCode128, readCode128 } from '../code128.rip'
+import { encodePDF417, readPDF417 } from '../pdf417.rip'
+
+time =! (fn, ms = 400) ->
+  fn() for i in [0...3]
+  t0 = performance.now()
+  n  = 0
+  while performance.now() - t0 < ms
+    fn()
+    n++
+  us = (performance.now() - t0) * 1000 / n
+  if us >= 1000 then "#{(us / 1000).toFixed 2} ms" else "#{us.toFixed 0} µs"
+
+row =! (name, value) -> p "#{name.padEnd 34} #{value}"
+
+# RGBA rasters of each symbol on a gray field.
+rgba =! (W, H, fill = 200) ->
+  data = Uint8Array.new(W * H * 4).fill fill
+  data[i] = 255 for i in [3...data.length] by 4
+  { width: W, height: H, data }
+
+place =! (img, rows, ox, oy) ->
+  for y in [0...rows.length]
+    for x in [0...rows[y].length]
+      v = if rows[y][x] then 20 else 240
+      q = 4 * ((oy + y) * img.width + ox + x)
+      img.data[q] = img.data[q + 1] = img.data[q + 2] = v
+  img
+
+qrRaster =! (text, scale, W, H) ->
+  raw = encodeQR text, 'raw', { scale, border: 4 }
+  place rgba(W, H), raw, (W - raw.length) >> 1, (H - raw.length) >> 1
+
+barsRaster =! (text, scale, h, W, H) ->
+  raw = encodeCode128 text, 'raw', { scale, height: 1 }
+  place rgba(W, H), (raw for y in [0...h]), (W - raw.length) >> 1, (H - h) >> 1
+
+stackRaster =! (text, scale, W, H) ->
+  raw = encodePDF417 text, 'raw', { scale }
+  place rgba(W, H), raw, (W - raw[0].length) >> 1, (H - raw.length) >> 1
+
+# Luma-only frames with no symbol: a soft desk, a printed page, noise, and
+# a fine weave that looks like modules everywhere.
+luma =! (W, H, at) ->
+  data = Uint8Array.new W * H
+  seed = 7
+  for y in [0...H]
+    for x in [0...W]
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      data[y * W + x] = at x, y, seed >> 16
+  { width: W, height: H, data }
+
+scenes =! (W, H) ->
+  desk:  luma W, H, (x, y, r) -> 120 + ((x + y) % 97) / 97 * 60 + (r & 15)
+  text:  luma W, H, (x, y) -> if y % 28 < 12 and x % 18 < 12 then 40 else 235
+  noise: luma W, H, (x, y, r) -> r & 255
+  weave: luma W, H, (x, y) -> ((y * W + x) * 7919) & 0xff
+
+miss =! (fn) -> -> try fn() catch then null
+
+t8  = 'x'.repeat 192
+t18 = 'x'.repeat 768
+p 'Encode'
+row 'QR raw v1',   time -> encodeQR 'Hello world', 'raw'
+row 'QR raw v8',   time -> encodeQR t8, 'raw'
+row 'QR raw v18',  time -> encodeQR t18, 'raw'
+row 'QR svg v8',   time -> encodeQR t8, 'svg'
+row 'QR gif v8',   time -> encodeQR t8, 'gif'
+row 'Code 128',    time -> encodeCode128 'Hello, World! 2026', 'raw'
+row 'PDF417',      time -> encodePDF417 'Hello, World! 2026', 'raw'
+
+p '\nRead a clean raster'
+small = qrRaster 'Hello world', 4, 132, 132
+hd    = qrRaster 'https://example.com/some/path?with=query', 8, 1280, 720
+fhd   = qrRaster t8, 6, 1920, 1080
+row 'QR v1 132x132',    time -> decodeQR small
+row 'QR 720p',          time -> decodeQR hd
+row 'QR v8 1080p',      time -> decodeQR fhd
+row 'Code 128 1080p',   time -> readCode128 barsRaster('Hello, World! 2026', 3, 120, 1920, 1080)
+row 'PDF417 1080p',     time -> readPDF417 stackRaster('Hello, World! 2026', 3, 1920, 1080)
+
+p '\nMiss at 1080p (I420)'
+s = scenes 1920, 1080
+for name in ['desk', 'text', 'noise', 'weave']
+  row "QR #{name}", time miss -> decodeQR s[name], format: 'I420'
+row 'Code 128 desk',  time -> readCode128 s.desk, format: 'I420'
+row 'PDF417 desk',    time -> readPDF417 s.desk, format: 'I420'
+
+p '\nMiss at the phone arena 2160x2592 (I420)'
+s = scenes 2160, 2592
+for name in ['desk', 'text', 'noise', 'weave']
+  row "QR #{name}", time miss -> decodeQR s[name], format: 'I420'
+row 'QR desk, nativeLimit 1500', time miss -> decodeQR s.desk, format: 'I420', nativeLimit: 1500
+row 'Code 128 desk',  time -> readCode128 s.desk,  format: 'I420'
+row 'Code 128 text',  time -> readCode128 s.text,  format: 'I420'
+row 'Code 128 noise', time -> readCode128 s.noise, format: 'I420'
+row 'PDF417 desk',    time -> readPDF417 s.desk,   format: 'I420'
+row 'PDF417 noise',   time -> readPDF417 s.noise,  format: 'I420'
