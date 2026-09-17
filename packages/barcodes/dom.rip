@@ -128,7 +128,7 @@ canvasDefaults =! ->
   overlayFailedColor:  '#f87171'
   overlaySideColor:    'black'
   overlayTimeout:      500
-  overlayEase:         0.35      # of the way to a lock's new corners per frame; 1 snaps
+  overlayEase:         0.3       # of the way to a lock's new corners per display frame; 1 snaps
   crop:                1         # aspect of the centered region scanned; null for the whole frame
   margin:              0         # fraction of that region scanned beyond each edge, where the frame has pixels
   decodeAll:           false
@@ -165,7 +165,13 @@ export class QRCanvas
     @overlayFailedMatches      = 0
     @overlayDeadline           = 0
     @overlayTimer              = undefined
+    # The lock on screen, where it is headed, and its animation frame.
     @lockQuad                  = undefined
+    @lockTarget                = undefined
+    @lockFailed                = false
+    @lockAlpha                 = 1
+    @lockFading                = false
+    @lockFrame                 = undefined
 
     # Source geometry of the frame being decoded.
     @rotate       = false
@@ -221,7 +227,6 @@ export class QRCanvas
         @decode undefined, frame.format, frame.layout, frame.size
 
   resetOverlay!: ->
-    @lockQuad                  = undefined
     @overlayPoints             = undefined
     @overlayCandidate          = undefined
     @overlaySet.length         = 0
@@ -381,54 +386,101 @@ export class QRCanvas
     # Scaled modules blur under default smoothing; the result canvas owns this style.
     @resultQR.canvas.style = "image-rendering: pixelated; width: #{blockSize * width}px; height: #{blockSize * height}px"
 
+  # Without points: the lock on screen begins to fade. With points, in
+  # batch mode: drawn where they are. Otherwise the lock glides there.
   drawOverlay!: (points, append = false, failed = false) ->
     return unless @overlay
+    unless points
+      @fade()
+      return
+    if @opts.decodeAll
+      @clearOverlay() unless append
+      @drawLock @overlay.context, points.outline, failed
+      return
+    @aim points.outline, failed
+
+  # Clear the overlay, dimming whatever lies outside the scanned region.
+  clearOverlay!: ->
     ctx = @overlay.context
     height = @overlay.canvas.height
     width  = @overlay.canvas.width
-    unless append
-      cropWidth  = @inputWidth
-      cropHeight = @inputHeight
-      x = @sourceX
-      y = @sourceY
-      # The crop rect was applied to coded pixels; rotate it into player coordinates.
-      [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth] if @rotate
-      if cropWidth and cropHeight and (cropWidth isnt width or cropHeight isnt height)
-        ctx.clearRect x, y, cropWidth, cropHeight
-        ctx.fillStyle = @opts.overlaySideColor
-        right  = x + cropWidth
-        bottom = y + cropHeight
-        ctx.fillRect 0,     0,      width,         y               if y
-        ctx.fillRect 0,     bottom, width,         height - bottom if bottom < height
-        ctx.fillRect 0,     y,      x,             cropHeight      if x
-        ctx.fillRect right, y,      width - right, cropHeight      if right < width
-      else
-        ctx.clearRect 0, 0, width, height
-    @drawLock ctx, (if append then points.outline else @eased points.outline), failed if points
+    cropWidth  = @inputWidth
+    cropHeight = @inputHeight
+    x = @sourceX
+    y = @sourceY
+    # The crop rect was applied to coded pixels; rotate it into player coordinates.
+    [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth] if @rotate
+    if cropWidth and cropHeight and (cropWidth isnt width or cropHeight isnt height)
+      ctx.clearRect x, y, cropWidth, cropHeight
+      ctx.fillStyle = @opts.overlaySideColor
+      right  = x + cropWidth
+      bottom = y + cropHeight
+      ctx.fillRect 0,     0,      width,         y               if y
+      ctx.fillRect 0,     bottom, width,         height - bottom if bottom < height
+      ctx.fillRect 0,     y,      x,             cropHeight      if x
+      ctx.fillRect right, y,      width - right, cropHeight      if right < width
+    else
+      ctx.clearRect 0, 0, width, height
 
-  # The lock's corners glide toward each frame's estimate, which steadies
-  # the decoder's wobble; a symbol more than half a side away snaps.
-  eased: (quad) ->
-    ease = @opts.overlayEase
-    last = @lockQuad
-    return @lockQuad = quad if ease >= 1 or not last
-    side = 0
-    dx = 0
-    dy = 0
-    for i in [0...4]
-      side += Math.hypot quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y
-      dx   += quad[i].x - last[i].x
-      dy   += quad[i].y - last[i].y
-    return @lockQuad = quad if dx * dx + dy * dy > side * side
-    for i in [0...4]
-      last[i].x += (quad[i].x - last[i].x) * ease
-      last[i].y += (quad[i].y - last[i].y) * ease
-    last
+  # ==[ Lock animation ]==
+  # The lock glides at display rate toward the newest estimate, which
+  # steadies the decoder's wobble and bridges frames that did not decode,
+  # and fades out when it expires. A symbol more than half a side away
+  # snaps.
+
+  aim!: (quad, failed) ->
+    target = ({ x: p.x, y: p.y } for p in quad)
+    last   = @lockQuad
+    if last and @opts.overlayEase < 1
+      side = 0
+      dx   = 0
+      dy   = 0
+      for i in [0...4]
+        side += Math.hypot target[(i + 1) % 4].x - target[i].x, target[(i + 1) % 4].y - target[i].y
+        dx   += target[i].x - last[i].x
+        dy   += target[i].y - last[i].y
+      last = undefined if dx * dx + dy * dy > side * side
+    @lockQuad   = last or ({ x: p.x, y: p.y } for p in target)
+    @lockTarget = target
+    @lockFailed = failed
+    @lockAlpha  = 1
+    @lockFading = false
+    @tick()
+
+  fade!: ->
+    return unless @lockQuad
+    @lockFading = true
+    @schedule()
+
+  schedule!: ->
+    @lockFrame = requestAnimationFrame(=> @tick()) if @lockFrame is undefined
+
+  tick!: ->
+    @lockFrame = undefined
+    return unless @lockQuad and @overlay
+    ease   = @opts.overlayEase
+    quad   = @lockQuad
+    moving = false
+    for corner, i in quad
+      dx = @lockTarget[i].x - corner.x
+      dy = @lockTarget[i].y - corner.y
+      corner.x += dx * ease
+      corner.y += dy * ease
+      moving = true if Math.abs(dx) + Math.abs(dy) > 0.5
+    @lockAlpha = Math.max 0, @lockAlpha - 0.12 if @lockFading
+    @clearOverlay()
+    if @lockAlpha is 0
+      @lockQuad   = undefined
+      @lockTarget = undefined
+      @lockFading = false
+      return
+    @drawLock @overlay.context, quad, @lockFailed, @lockAlpha
+    @schedule() if moving or @lockFading
 
   # A lock on a quad: a faint tint and hairline inside a rounded outline,
   # then a bracket over each corner. Sizes follow the frame, not the
   # symbol, so the mark reads the same at every stream size and distance.
-  drawLock!: (ctx, quad, failed) ->
+  drawLock!: (ctx, quad, failed, alpha = 1) ->
     unit   = Math.max 2, ctx.canvas.width / 320
     side   = 0
     side  += Math.hypot(quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y) for i in [0...4]
@@ -441,12 +493,12 @@ export class QRCanvas
     ctx.fillStyle   = color
     ctx.strokeStyle = color
     traceRoundedQuad ctx, quad, radius
-    ctx.globalAlpha = 0.12
+    ctx.globalAlpha = 0.12 * alpha
     ctx.fill()
-    ctx.globalAlpha = 0.5
+    ctx.globalAlpha = 0.5 * alpha
     ctx.lineWidth   = unit
     ctx.stroke()
-    ctx.globalAlpha = 1
+    ctx.globalAlpha = alpha
     ctx.lineWidth   = 2.5 * unit
     ctx.beginPath()
     for corner, i in quad
@@ -461,6 +513,7 @@ export class QRCanvas
       ctx.quadraticCurveTo corner.x, corner.y, out.x, out.y
       ctx.lineTo end.x, end.y
     ctx.stroke()
+    ctx.globalAlpha = 1
 
   # The same lock on four image-space corners another reader found on the
   # frame `lastFrame()` handed it, pushed out from the symbol's edge as the
@@ -585,6 +638,12 @@ export class QRCanvas
 
   clear!: ->
     @reader.clean()
+    cancelAnimationFrame @lockFrame if @lockFrame isnt undefined
+    @lockFrame  = undefined
+    @lockQuad   = undefined
+    @lockTarget = undefined
+    @lockFading = false
+    @clearOverlay() if @overlay
     @sourceX    = @sourceY     = 0
     @inputWidth = @inputHeight = 0
     clearTimeout @overlayTimer if @overlayTimer isnt undefined
