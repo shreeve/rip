@@ -43,24 +43,37 @@ export Home = component
     armedAt = performance.now()
     describe()
     player.addEventListener 'loadedmetadata', (-> describe()), once: true
-    cancel = frameLoop (-> scan()), player
+    cancel = frameLoop (-> scan().catch (error) -> report error), player
+
+  # A failure anywhere in the loop lands in the status line, since a phone
+  # shows no console.
+  failed := ''
+  report: (error) ->
+    return if failed is error.message
+    failed = error.message
+    status = "Error: #{error.message}"
 
   # What the track settled on, and the controls it offers.
   describe: ->
-    s = camera.settings()
-    stream = "#{s.width}x#{s.height}#{if s.frameRate then ' @' + Math.round(s.frameRate) else ''}"
-    caps = camera.capabilities()
-    zoomRange = if caps.zoom then { min: caps.zoom.min, max: Math.min(caps.zoom.max, 5), step: caps.zoom.step or 0.1 } else null
-    torchable = !!caps.torch
-    setZoom 2 if zoomRange
+    try
+      s = camera.settings()
+      w = s.width  or player.videoWidth
+      h = s.height or player.videoHeight
+      stream = "#{w}x#{h}#{if s.frameRate then ' @' + Math.round(s.frameRate) else ''}"
+      caps = camera.capabilities()
+      zoomRange = if caps.zoom then { min: caps.zoom.min, max: Math.min(caps.zoom.max, 5), step: caps.zoom.step or 0.1 } else null
+      torchable = !!caps.torch
+      setZoom 2 if zoomRange and zoom is 1
+    catch error
+      report error
 
   setZoom: (value) ->
     zoom = value
-    camera.zoom! value
+    camera.zoom(value).catch (error) -> report error
 
   toggleTorch: ->
     torch = not torch
-    camera.torch! torch
+    camera.torch(torch).catch (error) -> report error
 
   # Reopen at another size to measure what resolution buys.
   setQuality: (name) ->

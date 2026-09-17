@@ -4,21 +4,22 @@
 # Runs the three readers over the QR, PDF417, Code 128 and false-positive
 # image sets in a ZXing checkout at misc/zxing and prints, per set and
 # rotation, how many images read against how many ZXing's own tests expect.
-# Reads the PNGs itself, so nothing beyond the runtime is needed.
+# Reads the PNGs itself, so nothing beyond the runtime is needed. Lives under
+# test/ because it imports the file system, which never travels to the browser.
 #
-#   rip corpus.rip [sets] [rotations] [-v]
-#   rip corpus.rip pdf417,code128 0,180 -v
+#   rip test/corpus.rip [sets] [rotations] [-v]
+#   rip test/corpus.rip pdf417,code128 0,180 -v
 #
 # Sets are name prefixes; rotations are degrees. -v lists every miss.
 # ==============================================================================
 
 import { readFileSync, readdirSync, existsSync } from 'fs'
 import { inflateSync } from 'zlib'
-import { decodeQR } from './qr.rip'
-import { readCode128 } from './code128.rip'
-import { readPDF417 } from './pdf417.rip'
+import { decodeQR } from '../qr.rip'
+import { readCode128 } from '../code128.rip'
+import { readPDF417 } from '../pdf417.rip'
 
-ROOT =! "#{import.meta.dir}/../../misc/zxing/core/src/test/resources/blackbox/"
+ROOT =! "#{import.meta.dir}/../../../misc/zxing/core/src/test/resources/blackbox/"
 
 # ==[ PNG ]==
 
