@@ -26,7 +26,7 @@
 import { ECI_DECODERS, guessDecoder } from './eci.rip'
 import { gifDataUrl, writeGif } from './gif.rip'
 import {
-  FORMATS, LITTLE_ENDIAN, asObject, asString, copyLuma, darkToImage, fail,
+  FORMATS, LITTLE_ENDIAN, asInt, asObject, asString, copyLuma, darkToImage, fail,
   validateImage, validateSize,
 } from './image.rip'
 
@@ -575,16 +575,6 @@ drawSymbol =! (ver, ecc, data, maskIdx) ->
 
 # ==[ Validation ]==
 
-asNum =! (n, title) ->
-  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "#{title} expected safe integer, got #{n}", RangeError unless Number.isSafeInteger n
-  n
-
-asVersion =! (ver) ->
-  asNum ver, 'version'
-  fail "Invalid version=#{ver}. Expected number [1..40]", RangeError if ver < 1 or ver > 40
-  ver
-
 # Exact WHATWG TextEncoder byte count without encoding; lone surrogates cost
 # the three-byte replacement character.
 utf8Length =! (str) ->
@@ -711,18 +701,16 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
-  ver = opts.version
-  ver = asVersion ver if ver isnt undefined
+  ver = if opts.version is undefined then undefined else asInt(opts.version, 'opts.version', 1, 40)
   ecc = if opts.ecc is undefined then 'medium' else opts.ecc
   fail "invalid ecc=#{ecc}" unless ECC_LEVELS.includes ecc
   encoding = if opts.encoding is undefined then detectType(text) else opts.encoding
-  fail "invalid encoding=#{encoding}" unless LENGTH_BITS[encoding]
+  fail "invalid encoding=#{encoding}" unless Object.hasOwn LENGTH_BITS, encoding
   if encoding isnt 'byte'
     alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
     for ch in text
       fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
-  if opts.mask isnt undefined and (asNum(opts.mask, 'opts.mask') < 0 or opts.mask > 7)
-    fail "invalid mask=#{opts.mask}"
+  mask = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
   textEncoder = opts.textEncoder
   # Reject impossible built-in UTF-8 payloads before encoding duplicates a
   # huge input; a custom encoder's output is its own source of truth.
@@ -750,13 +738,11 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   else
     fail 'Capacity overflow' unless fits ver
   data = encodeData ver, ecc, text, encoding, utf8
-  m = drawSymbol ver, ecc, data, opts.mask
+  m = drawSymbol ver, ecc, data, mask
   # A quiet zone is required (§5.3.8); custom renderers wanting the borderless
   # matrix request border 1 and slice the ring off.
-  border = if opts.border is undefined then 2 else asNum(opts.border, 'opts.border')
-  fail "invalid border=#{border}", RangeError if border <= 0
-  scale = if opts.scale is undefined then 1 else asNum(opts.scale, 'opts.scale')
-  fail "invalid scale factor: #{scale}", RangeError if scale <= 0 or scale > 1024
+  border = if opts.border is undefined then 2 else asInt(opts.border, 'opts.border', 1)
+  scale  = if opts.scale  is undefined then 1 else asInt(opts.scale,  'opts.scale',  1, 1024)
   W = (m.size + 2 * border) * scale
   compact = output is 'ascii' or output is 'gif' or output is 'data-url'
   maxOutputSize = if compact then MAX_COMPACT_OUTPUT_SIZE else MAX_OUTPUT_SIZE

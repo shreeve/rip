@@ -68,10 +68,10 @@ t8  = 'x'.repeat 192
 t18 = 'x'.repeat 768
 p 'Encode'
 row 'QR raw v1',   time -> encodeQR 'Hello world', 'raw'
-row 'QR raw v8',   time -> encodeQR t8, 'raw'
-row 'QR raw v18',  time -> encodeQR t18, 'raw'
-row 'QR svg v8',   time -> encodeQR t8, 'svg'
-row 'QR gif v8',   time -> encodeQR t8, 'gif'
+row 'QR raw v10',  time -> encodeQR t8, 'raw'
+row 'QR raw v22',  time -> encodeQR t18, 'raw'
+row 'QR svg v10',  time -> encodeQR t8, 'svg'
+row 'QR gif v10',  time -> encodeQR t8, 'gif'
 row 'Code 128',    time -> encodeCode128 'Hello, World! 2026', 'raw'
 row 'PDF417',      time -> encodePDF417 'Hello, World! 2026', 'raw'
 

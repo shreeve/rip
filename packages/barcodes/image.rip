@@ -33,6 +33,12 @@ export asObject =! (value, name) ->
   fail "#{name} expected object, got type=#{typeof value}", TypeError if value is null or typeof value isnt 'object' or Array.isArray(value)
   value
 
+export asInt =! (n, title, min, max = Infinity) ->
+  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  range = if max is Infinity then ">= #{min}" else "in #{min}..#{max}"
+  fail "#{title} expected integer #{range}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min and n <= max
+  n
+
 export validateSize =! (size, name) ->
   fail "#{name} expected safe integer width and height", TypeError unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
   fail "#{name} expected positive width and height", RangeError if size.width <= 0 or size.height <= 0
@@ -175,6 +181,103 @@ export runLengths =! (luma, count, runs) ->
       dark = isDark
     len++
   runs[n++] = len
+  n
+
+# Run lengths of one line, even slots light and odd dark, from the edges
+# between local extrema: an extremum counts once the luma has swung a
+# `fraction`th of the line's range away from the last one, and each edge
+# sits where the luma crosses the midpoint of its own valley and peak,
+# placed between samples by interpolation. Blur leaves a narrow space short
+# of paper white and print gain widens every bar; both move the midpoint
+# crossing far less than they move a fixed threshold, and the fractional
+# positions carry sub-pixel width, which two-pixel modules need. Returns
+# the run count, zero for a flat line; `contrast.range` holds the line's
+# luma range for the caller's scoring.
+export contrast =! { range: 0 }
+
+export edgeRuns =! (luma, count, runs, fraction) ->
+  lo = 255
+  hi = 0
+  for k in [0...count]
+    v = luma[k]
+    lo = v if v < lo
+    hi = v if v > hi
+  contrast.range = hi - lo
+  return 0 if hi - lo < 32
+  swing = (hi - lo) / fraction
+  # Until the first swing the direction is unknown: track both extremes.
+  minV  = luma[0]
+  maxV  = luma[0]
+  minAt = 0
+  maxAt = 0
+  k = 1
+  while k < count
+    v = luma[k]
+    if v < minV
+      minV  = v
+      minAt = k
+    else if v > maxV
+      maxV  = v
+      maxAt = k
+    break if maxV - minV >= swing
+    k++
+  return 0 if k is count
+  rising = minAt < maxAt
+  n = 0
+  runs[n++] = 0 if rising    # the line opens dark
+  if rising
+    at     = minAt
+    value  = minV
+    best   = maxV
+    bestAt = maxAt
+  else
+    at     = maxAt
+    value  = maxV
+    best   = minV
+    bestAt = minAt
+  last = 0
+  # The edge between the extremum at `at` and the candidate at `bestAt`.
+  edge = ->
+    level = (value + best) / 2
+    i = at
+    if rising
+      i++ while luma[i] < level
+    else
+      i++ while luma[i] > level
+    # Cross between samples i - 1 and i.
+    a = luma[i - 1]
+    b = luma[i]
+    pos = i - 1 + (level - a) / (b - a)
+    runs[n++] = pos - last
+    last = pos
+  k++
+  while k < count
+    v = luma[k]
+    if rising
+      if v > best
+        best   = v
+        bestAt = k
+      else if v <= best - swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = false
+    else
+      if v < best
+        best   = v
+        bestAt = k
+      else if v >= best + swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = true
+    k++
+  edge() if Math.abs(best - value) >= swing
+  runs[n++] = count - last
   n
 
 # The same line read right to left, light run first.

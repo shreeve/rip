@@ -17,7 +17,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asObject, asString, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -166,13 +166,6 @@ modules =! (codes) ->
       x += w
   out
 
-# ==[ Validation ]==
-
-asInt =! (n, title, min) ->
-  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "#{title} expected integer >= #{min}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min
-  n
-
 # ==[ Renderers ]==
 
 # A raster is the module row plus output geometry; `bars` is the dark-run
@@ -180,7 +173,7 @@ asInt =! (n, title, min) ->
 raster =! (mods, scale, border, height) ->
   W = (mods.length + 2 * border) * scale
   H = height * scale
-  fail "Code 128 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}" if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
+  fail "Code 128 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}", RangeError if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
   bars = []
   x = 0
   while x < mods.length
@@ -261,105 +254,10 @@ WIDTHS =! do ->
     out[7 * code + k] = pattern.charCodeAt(k) - 48 for k in [0...pattern.length]
   out
 
-# Run lengths of one scan line, even slots light and odd dark, from the
-# edges between local extrema: an extremum counts once the luma has swung a
-# fifth of the line's range away from the last one, and each edge sits where
-# the luma crosses the midpoint of its own valley and peak, placed between
-# samples by interpolation. Blur leaves a narrow space short of paper white
-# and print gain widens every bar; both move the midpoint crossing far less
-# than they move a fixed threshold, and the fractional positions carry
-# sub-pixel width, which two-pixel modules need. Returns the run count, zero
-# for a flat line.
-contrast =! { range: 0 }
-lineRuns =! (luma, count, runs) ->
-  lo = 255
-  hi = 0
-  for k in [0...count]
-    v = luma[k]
-    lo = v if v < lo
-    hi = v if v > hi
-  contrast.range = hi - lo
-  return 0 if hi - lo < 32
-  swing = (hi - lo) / 5
-  # Until the first swing the direction is unknown: track both extremes.
-  minV  = luma[0]
-  maxV  = luma[0]
-  minAt = 0
-  maxAt = 0
-  k = 1
-  while k < count
-    v = luma[k]
-    if v < minV
-      minV  = v
-      minAt = k
-    else if v > maxV
-      maxV  = v
-      maxAt = k
-    break if maxV - minV >= swing
-    k++
-  return 0 if k is count
-  rising = minAt < maxAt
-  n = 0
-  runs[n++] = 0 if rising    # the line opens dark
-  if rising
-    at     = minAt
-    value  = minV
-    best   = maxV
-    bestAt = maxAt
-  else
-    at     = maxAt
-    value  = maxV
-    best   = minV
-    bestAt = minAt
-  last = 0
-  # The edge between the extremum at `at` and the candidate at `bestAt`.
-  edge = ->
-    level = (value + best) / 2
-    i = at
-    if rising
-      i++ while luma[i] < level
-    else
-      i++ while luma[i] > level
-    # Cross between samples i - 1 and i.
-    a = luma[i - 1]
-    b = luma[i]
-    pos = i - 1 + (level - a) / (b - a)
-    runs[n++] = pos - last
-    last = pos
-  k++
-  while k < count
-    v = luma[k]
-    if rising
-      if v > best
-        best   = v
-        bestAt = k
-      else if v <= best - swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = false
-    else
-      if v < best
-        best   = v
-        bestAt = k
-      else if v >= best + swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = true
-    k++
-  edge() if Math.abs(best - value) >= swing
-  runs[n++] = count - last
-  n
-
 # Runs of the same line through a sharpened global threshold: a 32-bucket
 # histogram, the threshold at the valley between its two dominant peaks, and
 # each sample compared as (4c - l - r) / 2. Blur that folds a one-module
-# space into a shoulder fourteen levels high leaves no extremum for lineRuns,
+# space into a shoulder fourteen levels high leaves no extremum for edgeRuns,
 # but the sharpen doubles the shoulder and the valley threshold splits it.
 # Integer runs, even slots light; zero for a line without two peaks.
 buckets =! Int32Array.new(32)
@@ -571,7 +469,7 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
     k++
     continue if line < 0 or line >= lines
     sampleLine luma, data, (if vertical then line * format.step else line * row), advance, count, format
-    n = lineRuns luma, count, runs
+    n = edgeRuns luma, count, runs, 5
     # Enough runs for a symbol: should the line not read, it may cross a
     # tilted label and leave its bars before the stop. Scored before the
     # sharpened retry rewrites the runs.
@@ -831,7 +729,7 @@ readAt =! (img, format, angle, o, luma, runs, rev, codes) ->
   dy = Math.sin angle
   count = sampleAlong luma, data, width, height, format, width / 2 - o * dy, height / 2 + o * dx, dx, dy
   return null if count < 13
-  hit = readLine runs, lineRuns(luma, count, runs), rev, codes
+  hit = readLine runs, edgeRuns(luma, count, runs, 5), rev, codes
   hit = readLine runs, sharpRuns(luma, count, runs), rev, codes unless hit
   return null unless hit
   hit.t0 = clip.start + hit.from

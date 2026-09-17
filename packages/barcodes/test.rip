@@ -328,20 +328,33 @@ test "single-slot symbol cache survives version changes", ->
   eq rows(encodeQR('MASK', 'raw', border: 1)), a
   eq rows(encodeQR('MASK', 'raw', mask: 3, border: 1)), MASKS[3]
 
+# ISO/IEC 18004 Table 7, level L: the longest message of each mode per
+# version. Pins version selection at every boundary, including the three
+# character-count-indicator bands.
+CAPACITY_LOW =!
+  numeric:      [41, 77, 127, 187, 255, 322, 370, 461, 552, 652, 772, 883, 1022, 1101, 1250, 1408, 1548, 1725, 1903, 2061, 2232, 2409, 2620, 2812, 3057, 3283, 3517, 3669, 3909, 4158, 4417, 4686, 4965, 5253, 5529, 5836, 6153, 6479, 6743, 7089]
+  alphanumeric: [25, 47, 77, 114, 154, 195, 224, 279, 335, 395, 468, 535, 619, 667, 758, 854, 938, 1046, 1153, 1249, 1352, 1460, 1588, 1704, 1853, 1990, 2132, 2223, 2369, 2520, 2677, 2840, 3009, 3183, 3351, 3537, 3729, 3927, 4087, 4296]
+  byte:         [17, 32, 53, 78, 106, 134, 154, 192, 230, 271, 321, 367, 425, 458, 520, 586, 644, 718, 792, 858, 929, 1003, 1091, 1171, 1273, 1367, 1465, 1528, 1628, 1732, 1840, 1952, 2068, 2188, 2303, 2431, 2563, 2699, 2809, 2953]
+
 test "capacity boundaries", ->
   ok encodeQR('x'.repeat(17), 'raw', version: 1, ecc: 'low')
   throws (-> encodeQR('x'.repeat(18), 'raw', version: 1, ecc: 'low')), 'Capacity overflow'
   ok encodeQR('7'.repeat(7089), 'ascii', ecc: 'low')
   throws (-> encodeQR('7'.repeat(7090), 'ascii', ecc: 'low')), 'Capacity overflow'
   throws (-> encodeQR('x'.repeat(3000), 'raw')), 'Capacity overflow'
+  for encoding, ch of { numeric: '7', alphanumeric: 'A', byte: 'x' }
+    for n, i in CAPACITY_LOW[encoding]
+      eq encodeQR(ch.repeat(n), 'raw', { ecc: 'low', border: 1 }).length, 17 + 4 * (i + 1) + 2, "#{encoding} v#{i + 1}"
+      throws (-> encodeQR(ch.repeat(n + 1), 'raw', { ecc: 'low', border: 1, version: i + 1 })), 'Capacity overflow'
 
 test "argument validation", ->
   throws (-> encodeQR(123, 'raw')),                        TypeError
   throws (-> encodeQR('x', 'nope')),                       'Unknown output'
   throws (-> encodeQR('x', 'raw', version: 0)),            RangeError
   throws (-> encodeQR('x', 'raw', version: 41)),           RangeError
-  throws (-> encodeQR('x', 'raw', mask: 9)),               'invalid mask'
+  throws (-> encodeQR('x', 'raw', mask: 9)),               RangeError
   throws (-> encodeQR('x', 'raw', ecc: 'zz')),             'invalid ecc'
+  throws (-> encodeQR('x', 'raw', encoding: 'constructor')), 'invalid encoding'
   throws (-> encodeQR('abc', 'raw', encoding: 'numeric')), 'Unknown letter'
   throws (-> encodeQR('x', 'raw', border: 0)),             RangeError
   throws (-> encodeQR('x', 'raw', scale: 2000)),           RangeError
