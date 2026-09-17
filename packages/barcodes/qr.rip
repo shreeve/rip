@@ -23,7 +23,7 @@
 # reused. Coarse layers run first; native resolution last.
 # ==============================================================================
 
-import { ECI_DECODERS } from './eci.rip'
+import { ECI_DECODERS, guessDecoder } from './eci.rip'
 import { gifDataUrl, writeGif } from './gif.rip'
 import {
   FORMATS, LITTLE_ENDIAN, asObject, asString, copyLuma, darkToImage, fail,
@@ -855,6 +855,7 @@ class Payload
     @dataLen  = dataLen
     cls       = lengthClass version
     eci       = 26
+    named     = false
     res       = ''
     parts     = if deferText then [] else null
     while @position + 4 <= dataLen * 8
@@ -870,6 +871,7 @@ class Payload
           value = @read len
           return FAIL.data if value < 0
           eci = ((b0 & (if len is 8 then 0x3f else 0x1f)) << len) | value
+        named = true
         continue
       if mode is 1
         length = @read LENGTH_BITS.numeric[cls]
@@ -905,9 +907,11 @@ class Payload
           parts.push [segment, eci]
           res = ''
         else
-          decoder = ECI_DECODERS[eci]
-          return FAIL.data if not decoder or length >= @views.length
+          return FAIL.data if length >= @views.length
           @bytes[i] = @read(8) for i in [0...length]
+          # A segment under no ECI is read the way readers in the wild do.
+          decoder = if named then ECI_DECODERS[eci] else guessDecoder(@view length)
+          return FAIL.data unless decoder
           res += decoder.decode @view(length)
       else
         return FAIL.data
