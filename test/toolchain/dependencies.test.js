@@ -30,13 +30,17 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
-  // Dev graph: TypeScript from the catalog, plus the exact Tailwind
-  // browser pin consumed only by scripts/tailwind-bundle.mjs.
+  // Dev graph: TypeScript from the catalog, the exact Tailwind browser
+  // pin consumed only by scripts/tailwind-bundle.mjs, and the host types
+  // the checker serves to EVERY project from this checkout — pinned to
+  // the Bun the toolchain targets, since no project can know which bun
+  // runs it.
   expect(Object.keys(pkg.devDependencies ?? {}).sort()).toEqual(
-    ['@tailwindcss/browser', 'typescript'].sort(),
+    ['@tailwindcss/browser', '@types/bun', 'typescript'].sort(),
   );
   expect(pkg.devDependencies.typescript).toBe('catalog:');
   expect(pkg.devDependencies['@tailwindcss/browser']).toMatch(/^\d/);
+  expect(pkg.devDependencies['@types/bun']).toBe(readFileSync(join(ROOT, '.bun-version'), 'utf8').trim());
   // The TypeScript version — the ONE place it is spelled — is an exact pin.
   expect(pkg.catalog?.typescript).toMatch(/^\d/); // no range sigils
   // The root is the workspace root (owner decision: in-tree rip/*

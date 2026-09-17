@@ -797,11 +797,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
   // The hidden-diagnostics summary is the mode's ledger: three lines,
   // one per family, because the remedies differ — annotate a
-  // declaration, flip `rip.strict`, install declarations. The lines
-  // spell the strict remedy IDENTICALLY (a summary that words the same
-  // lever two ways reads as two levers), and the missing-types advisory
-  // NAMES the declarations it is about — "install the @types package"
-  // with no noun sends the user hunting through their own imports.
+  // declaration, flip `rip.strict`, import the test runner's
+  // declarations. The lines spell the strict remedy IDENTICALLY (a
+  // summary that words the same lever two ways reads as two levers), and
+  // the missing-types advisory NAMES the declarations it is about — a
+  // remedy with no noun sends the user hunting through their own code.
+  // Host names (`require`, `process`) are typed by the checkout's
+  // `@types/bun` and never reach the advisory.
   test('the hidden-diagnostics summary: consistent remedies, and the missing declarations are named', () => {
     const dir = workspace({
       'app.rip': [
@@ -809,9 +811,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'bad = n.toUpperCase()',      // real error, held → scope family
         'def shout(msg)',             // implicitly-any parameter → annotation family
         '  msg',
-        "describe 'adds', ->",        // known-typings globals, no types installed —
+        "describe 'adds', ->",        // a test-runner global used bare — the advisory names it
         '  console.log bad, shout',
-        "fsMod = require('fs')",      // …each advisory names ITS missing declaration
+        "fsMod = require('fs')",      // a host name, typed from the checkout — nothing to name
         'console.log fsMod',
       ].join('\n') + '\n',
     });
@@ -821,7 +823,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(out).toMatch(/\d+ annotation diagnostics? hidden — set `rip\.strict` in package\.json to see where annotations are missing/);
       // In the home project the line stays placeless; foreign projects (a
       // closure's dependencies) add `(dirs)` and point the remedy there.
-      expect(out).toMatch(/\d+ missing-types advisor(y|ies) hidden — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
+      expect(out).toMatch(/\d+ missing-types advisor(y|ies) hidden — no declarations for `describe` \(import it from `bun:test`\)/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
@@ -2928,22 +2930,24 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   }, 90_000);
 
   // A nested package that sets `rip.strict` becomes its own program, the
-  // same auto boundary a globals-declaring package gets: floors are
-  // per-PROGRAM, and without the boundary the root program's floor keeps
-  // answering `any` for a package that asked for complaints.
-  test('a nested rip.strict package refuses the floors: its own program, its own posture', () => {
+  // same auto boundary a globals-declaring package gets: the null
+  // posture is per-PROGRAM, and without the boundary the root program's
+  // loose base keeps admitting `null` for a package that asked for
+  // complaints. Host modules are not the discriminator: `bun:sqlite`
+  // resolves from the checkout's `@types/bun` in both programs.
+  test('a nested rip.strict package is its own program, with its own posture', () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
       'packages/lib/package.json': JSON.stringify({ name: '@t/lib', rip: { strict: true } }),
-      'packages/lib/lib.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+      'packages/lib/lib.rip': "import { Database } from 'bun:sqlite'\nx: string = null\nconsole.log Database, x\n",
       'packages/loose/package.json': JSON.stringify({ name: '@t/loose' }),
-      'packages/loose/loose.rip': "import { Database } from 'bun:sqlite'\nconsole.log Database\n",
+      'packages/loose/loose.rip': "import { Database } from 'bun:sqlite'\nx: string = null\nconsole.log Database, x\n",
     });
     try {
       const diags = JSON.parse(check(dir, ['--json']).stdout);
-      // The strict package: floor refused, the defect publishes.
-      expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toContain(2307);
-      // The gradual sibling: floored `any`, still quiet.
+      // The strict package: the null refused, and the host module resolved.
+      expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toEqual([2322]);
+      // The gradual sibling: the loose base admits it, still quiet.
       expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -4168,20 +4172,37 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // Bun's builtin MODULES ride the floor too: `import { Database } from
-  // 'bun:sqlite'` is ordinary Bun code, and without installed host types
-  // the import is a cannot-find DEFECT on a module that demonstrably
-  // exists at runtime. One wildcard shorthand (`declare module "bun:*"`)
-  // floors them as `any`, with the floor's own gates: installed types
-  // outrank it, and strict refuses it — the defect returns until the
-  // project declares real host types.
-  test('bun:* builtin modules ride the host floor: `any` under gradual, the defect under strict', () => {
+  // A pin is hover text, and hover spells a type by the short name its
+  // declaration file uses: `Stats` for a statSync result, visible inside
+  // @types/node's `fs` module and nowhere else. Written onto the hoist
+  // line, that spelling is a cannot-find on a line the author never
+  // wrote. The probe verifies each answer where the pin will live and
+  // refuses the ones that do not resolve there — the binding stays an
+  // evolving `any`, the round's status quo.
+  test('a pin spelled in vocabulary the face cannot resolve is refused, not written', () => {
+    const dir = workspace({
+      // Written in two scopes, so the binding stays hoisted at the outer
+      // one and is read from the inner — the pinnable shape.
+      'walk.rip': "import { statSync } from 'fs'\nexport scan = (paths) ->\n  walk = (p) ->\n    stat = statSync p\n    stat.size\n  for p in paths\n    stat = statSync p\n    walk p if stat.isDirectory()\n",
+    });
+    try {
+      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  // Bun's builtin MODULES are typed from the checkout's `@types/bun` in
+  // every program: `import { Database } from 'bun:sqlite'` is ordinary Bun
+  // code, and a project that installs nothing gets the real declaration
+  // — under gradual and strict alike — never a floored `any` (which
+  // would let the misassignment below through) and never a cannot-find
+  // defect on a module that demonstrably exists at runtime.
+  test('bun:* builtin modules are typed from the checkout\'s host types in every mode', () => {
     const dir = freshProject({ withTypes: false });
     try {
-      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb = new Database(':memory:')\nconsole.log db\n");
-      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb: number = new Database(':memory:')\nconsole.log db\n");
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2322]);
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', rip: { strict: true } }));
-      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toContain(2307);
+      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2322]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
@@ -4192,21 +4213,22 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  // An import TypeScript cannot type is `any` — it says so itself, and
+  // A name TypeScript cannot type is `any` — it says so itself, and
   // says it TWICE: TS7016 for a .js module with no declarations, which
-  // gradual has always suppressed, and TS2580 for a well-known @types
-  // package that is not installed, which it did not. Same situation, same
-  // posture. The binding is `any` either way, so nothing downstream
-  // changes; what changes is whether the advisory is shouted at a project
-  // that did not ask for it.
-  test('a missing @types package is advisory in gradual mode, an error under strict', () => {
-    const files = { 'app.rip': "import { readFileSync } from 'fs'\nconsole.log readFileSync('/x')\n" };
+  // gradual has always suppressed, and TS2582 for a test-runner global
+  // used bare, which it did not. Same situation, same posture. The
+  // binding is `any` either way, so nothing downstream changes; what
+  // changes is whether the advisory is shouted at a project that did not
+  // ask for it. (Node's modules are not a case here any more: `fs` is
+  // typed from the checkout's `@types/bun`.)
+  test('a missing test-runner declaration is advisory in gradual mode, an error under strict', () => {
+    const files = { 'app.rip': "describe 'adds', ->\n  1\n" };
     const gradual = workspace(files);
     const strict = workspace(files, { strict: true });
     try {
       expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
       // Strict still says it, so the suppression is a MODE, not a deletion.
-      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2580]);
+      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2582]);
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
@@ -4307,19 +4329,22 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('the missing-types line names foreign projects, and sends the install "there" only when the count is wholly theirs', () => {
+  // Foreign projects (a closure's dependencies) are named on the line;
+  // the home project stays unnamed. The remedy is an import wherever the
+  // name is used, so it never points anywhere.
+  test('the missing-types line names foreign projects, and the remedy is the import', () => {
     const dep = {
       'pkg/package.json': '{}',
       'pkg/b.rip': "describe 'adds', ->\n  1\nexport ok = 1\n",
       'a.rip': "import { ok } from './pkg/b.rip'\nconsole.log ok\n",
     };
     const foreign = workspace(dep);
-    const mixed = workspace({ ...dep, 'a.rip': "import { ok } from './pkg/b.rip'\nfsMod = require('fs')\nconsole.log ok, fsMod\n" });
+    const mixed = workspace({ ...dep, 'a.rip': "import { ok } from './pkg/b.rip'\nit 'runs', ->\n  1\nconsole.log ok\n" });
     try {
       const f = check(foreign).stdout;
-      expect(f).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe` \(try `bun add -d @types\/bun` there\)/);
+      expect(f).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe` \(import it from `bun:test`\)/);
       const m = check(mixed).stdout;
-      expect(m).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe`, `require` \(try `bun add -d @types\/bun`\)/);
+      expect(m).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe`, `it` \(import them from `bun:test`\)/);
     } finally {
       fs.rmSync(foreign, { recursive: true, force: true });
       fs.rmSync(mixed, { recursive: true, force: true });
@@ -4373,7 +4398,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
     // Both postures are exercised: per file (an unannotated read the gate
     // would hold, an implicit-any parameter) and per program (a null the
-    // loosened posture admits, a host name the floor would declare `any`),
+    // loosened posture admits, a host name typed from the checkout's
+    // `@types/bun` in both),
     // and across a package boundary (a nested package with its own
     // rip.strict beside a gradual root — the mode flip that earns its own
     // program). Rows compare whole: file, position, severity, code,
@@ -4393,7 +4419,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(rows(plain).map((d) => d.file)).toEqual(['pkg/b.rip']);
       expect(forced.status).toBe(1);
       expect(rows(forced)).toEqual(rows(real));           // --strict ≡ rip.strict, row for row
-      expect(rows(forced).map((d) => d.code)).toEqual(expect.arrayContaining([2339, 7006, 2322, 2580]));
+      expect(rows(forced).map((d) => d.code)).toEqual(expect.arrayContaining([2339, 7006, 2322]));
       expect(fs.readFileSync(path.join(gradual, 'package.json'), 'utf8')).toBe('{}');
       expect(forced.stderr).toBe('');
       // The text report says the posture was forced; the plain one does not.

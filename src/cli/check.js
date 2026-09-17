@@ -27,11 +27,11 @@ import { compile } from '../compile.js';
 import { readProjectConfig } from '../config.js';
 import { identifierRunAt } from '../ident.js';
 import { startTsgo } from '../../packages/vscode/src/tsgo.js';
-import { buildProbe, parseProbeHover } from '../../packages/vscode/src/pins.js';
+import { buildProbe, parseProbeHover, buildVerify, refusedByVerify } from '../../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf } from '../../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, checkoutNodeModules } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
@@ -691,6 +691,13 @@ let hiddenScope = 0;
 // "install the @types package" without a noun sends the user hunting
 // through their imports for which declaration is absent.
 const missingTypeNames = new Set();
+// Whether any of them is a HOST name (`process`, `require` — the codes
+// that ask for @types/node). The checkout's `@types/bun` declares those
+// for every program, so one missing means the checkout's install is,
+// and the remedy is `bun install` there — not in the project, which
+// declares no host types of its own. The other codes are test-runner
+// globals, which `@types/bun` declares only inside `bun:test`.
+let missingHostTypes = false;
 // The `@types/bun` a project resolves: the package.json that DECLARES it
 // (the file an upgrade edits) and the version actually installed. Walks
 // like node resolution — nearest declaration, nearest node_modules.
@@ -1046,6 +1053,17 @@ if (compiled.size > 0) {
           const hovers = await Promise.all(entry.pinnables.map((_, i) => (positions[i]
             ? paced(() => tsgo.request('textDocument/hover', { textDocument: { uri: probeUri }, position: positions[i] })).then(parseProbeHover, () => null)
             : Promise.resolve(null))));
+          // Every answer is tried where the pin will live before it is
+          // written (buildVerify). A pull that fails verifies nothing and
+          // the answers stand — the hover round's own outcome.
+          const { text: verifyText, lineOf } = buildVerify(text, hovers);
+          if (lineOf.size) {
+            fs.writeFileSync(probePath, verifyText);
+            tsgo.notify('textDocument/didChange', { textDocument: { uri: probeUri, version: 2 }, contentChanges: [{ text: verifyText }] });
+            let items = null;
+            try { items = (await paced(() => tsgo.request('textDocument/diagnostic', { textDocument: { uri: probeUri } }, { timeoutMs: 60000 })))?.items ?? []; } catch { items = null; }
+            if (items !== null) for (const i of refusedByVerify(items, lineOf)) hovers[i] = null;
+          }
           hovers.forEach((type, i) => { if (type !== null) pins.set(entry.pinnables[i].key, type); });
           tsgo.notify('textDocument/didClose', { textDocument: { uri: probeUri } });
         } finally {
@@ -1442,6 +1460,7 @@ if (compiled.size > 0) {
               hiddenMissingTypesDirs.add(proj);
               const name = /Cannot find name '([^']+)'/.exec(d.message)?.[1];
               if (name) missingTypeNames.add(name);
+              if (d.code === 2580 || d.code === 2591) missingHostTypes = true;
             }
             // Held by the declaration-scope gate: the author annotated
             // nothing here, so nothing is asked of them.
@@ -1665,6 +1684,21 @@ if (asJson) {
       hostMismatches.set(`${at} ${from}`, { where, installed: host.installed });
     }
   }
+  // The checkout's own copy binds for every project that declares none,
+  // so its version apart from the running Bun is every project's
+  // mismatch at once — said once, and not in `bun add` terms: the pin
+  // rides .bun-version, so the cure is running the Bun the checkout
+  // targets, or a checkout that targets this one.
+  let checkoutTypes = null;
+  try {
+    checkoutTypes = JSON.parse(fs.readFileSync(path.join(checkoutNodeModules(), '@types', 'bun', 'package.json'), 'utf8')).version ?? null;
+  } catch { /* not installed in the checkout — the missing-types advisory covers absence */ }
+  if (runtimeBun !== null && checkoutTypes !== null && checkoutTypes !== runtimeBun) {
+    console.log('');
+    console.log(claim(`\`@types/bun\` ${checkoutTypes} in the rip checkout does not match the running Bun ${runtimeBun}`,
+      ` — \`Bun\`, \`process\`, and the rest are typed from the wrong version for every project `
+      + `(the checkout pins it to its .bun-version; run that Bun, or a checkout that targets this one)`));
+  }
   if (hostMismatches.size > 0) {
     const sites = [...hostMismatches.keys()].sort();
     const shown = sites.slice(0, 3)
@@ -1756,14 +1790,15 @@ if (asJson) {
     const shown = names.slice(0, 4).map((n) => `\`${n}\``).join(', ');
     const more = names.length > 4 ? ` and ${names.length - 4} more` : '';
     const about = names.length ? ` — no declarations for ${shown}${more}` : '';
-    // Named projects earn the deictic — and only when the count is WHOLLY
-    // theirs: with none shown the missing declarations are the home
-    // project's own, and a count the home project shares must not send
-    // the install elsewhere.
+    // The remedy is never an install in the project: host names come from
+    // the checkout's `@types/bun`, and a test-runner global is declared
+    // by `bun:test`, to be imported where it is used.
     const where = inProjects(hiddenMissingTypesDirs);
-    const wholly = where !== '' && !hiddenMissingTypesDirs.has('.');
+    const remedy = missingHostTypes
+      ? '`@types/bun` is served from the rip checkout — run `bun install` there'
+      : `import ${names.length === 1 ? 'it' : 'them'} from \`bun:test\``;
     console.log(dim(`${hiddenMissingTypes} missing-types advisor${hiddenMissingTypes === 1 ? 'y' : 'ies'} hidden${where}`
-      + `${about} (try \`bun add -d @types/bun\`${wholly ? ' there' : ''})`));
+      + `${about} (${remedy})`));
   }
   // A forced posture says so: a `--strict` report is otherwise
   // indistinguishable from a package failing its own gate.

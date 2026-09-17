@@ -339,7 +339,7 @@ more. What inference produces over unannotated Rip is dominated by
 confident errors about correct code: a parameter is typed from its
 `= {}` default, so every legitimate `opts.foo` reads as "does not exist
 on type `{}`"; an object built by spread reads as closed to the key set
-it was built with; a Bun API is unknown for want of `@types/bun`. Those
+it was built with. Those
 land exactly where the author declined to annotate, and no edit but an
 annotation answers them. The case the other side would catch —
 `answer = 42` later misused as a string — is genuine but was not found
@@ -394,9 +394,17 @@ its own program in the mirror (the same automatic boundary a
 globals-declaring package gets): host floors and null posture are
 per-program, so the package's own mode governs them. The flip cuts both
 ways — a strict package inside a gradual workspace gets its complaints
-(an unresolvable `bun:sqlite` instead of a floored `any`), and a
-gradual package inside a strict workspace keeps its loose base instead
-of riding strict nulls and refused floors.
+(`null` refused where the loose base admits it), and a gradual package
+inside a strict workspace keeps its loose base instead of riding strict
+nulls and refused floors.
+
+Host types are the toolchain's, not a project's: the rip checkout
+declares `@types/bun` once, pinned to its `.bun-version`, and its
+`node_modules/@types` is a type root of every program the checker
+builds. A project installs nothing to type `Bun`, `process`, or a
+`bun:*` module. A project's own `node_modules/@types` still comes first
+for any name both hold, so a pinned install of its own wins the way it
+does at run time.
 
 Configuration changes refresh open editor documents without a window
 reload. `rip check [paths...]` applies the same project configuration,

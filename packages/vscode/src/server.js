@@ -60,7 +60,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startTsgo } from './tsgo.js';
-import { buildProbe, parseProbeHover } from './pins.js';
+import { buildProbe, parseProbeHover, buildVerify, refusedByVerify } from './pins.js';
 import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
@@ -2176,10 +2176,11 @@ async function refresh(document) {
 }
 
 // One probe round for a document: splice probe declarations into a
-// sibling mirror file, hover each, cache verdicts, clean up, and
-// re-refresh when anything new pinned. The probe file is never pulled
-// for diagnostics (pull-model: only open rip mirrors are requested)
-// and exports nothing, so it is invisible to the user.
+// sibling mirror file, hover each, verify the answers where they will
+// be written, cache verdicts, clean up, and re-refresh when anything
+// new pinned. The probe file is pulled once, for the verify round, and
+// its diagnostics are never published; it exports nothing, so it is
+// invisible to the user.
 async function probePinsFor(document, state, result) {
   if (state.probing || !tsgo) return;
   const wanted = result.pinnables.filter((p) => !state.pinCache.has(p.key));
@@ -2194,9 +2195,9 @@ async function probePinsFor(document, state, result) {
     tsgo.client.notify('textDocument/didOpen', {
       textDocument: { uri: probeUri, languageId: 'typescript', version: 1, text },
     });
-    let pinned = 0;
+    const answers = [];
     for (let i = 0; i < wanted.length; i++) {
-      if (!positions[i]) { state.pinCache.set(wanted[i].key, null); continue; }
+      if (!positions[i]) { answers.push(null); continue; }
       let type = null;
       try {
         const hover = await tsgo.client.request('textDocument/hover', {
@@ -2204,8 +2205,24 @@ async function probePinsFor(document, state, result) {
         });
         type = parseProbeHover(hover);
       } catch { /* dead tsgo or timeout: fall through to null */ }
-      state.pinCache.set(wanted[i].key, type);
-      if (type !== null) pinned++;
+      answers.push(type);
+    }
+    // Every answer is tried where the pin will live before it is cached
+    // (buildVerify). A pull that fails verifies nothing and the answers
+    // stand — the hover round's own outcome.
+    const { text: verifyText, lineOf } = buildVerify(text, answers);
+    if (lineOf.size) {
+      writeMirror(probePath, verifyText);
+      tsgo.client.notify('textDocument/didChange', { textDocument: { uri: probeUri, version: 2 }, contentChanges: [{ text: verifyText }] });
+      try {
+        const pulled = await tsgo.client.request('textDocument/diagnostic', { textDocument: { uri: probeUri } }, { timeoutMs: 60000 });
+        for (const i of refusedByVerify(pulled?.items ?? [], lineOf)) answers[i] = null;
+      } catch { /* dead tsgo or timeout: unverified answers stand */ }
+    }
+    let pinned = 0;
+    for (let i = 0; i < wanted.length; i++) {
+      state.pinCache.set(wanted[i].key, answers[i]);
+      if (answers[i] !== null) pinned++;
     }
     tsgo.client.notify('textDocument/didClose', { textDocument: { uri: probeUri } });
     if (pinned > 0) {

@@ -134,3 +134,36 @@ export function parseProbeHover(hover) {
   if (type.includes(PROBE_PREFIX)) return null;
   return type;
 }
+
+// Hover spells a type by the SHORT name its declaration file uses —
+// `Stats` for a statSync result — a name visible inside @types/node's
+// `fs` module and nowhere the pin will be written. The hover cannot say
+// so; only the face can, so every answer is tried WHERE IT WILL LIVE
+// before it is written: one `declare let` per answer, appended to the
+// probe at top level (an outer-scope type name is visible in every inner
+// scope, so top level over-refuses at most a function's own type
+// parameter — which lands on the round's status quo, no pin). A pull
+// over the probe then names the lines that fail, and those answers are
+// refused. ANY diagnostic on a verify line refuses it: the spelling is
+// wrong there, whatever the code says about why.
+export const VERIFY_PREFIX = '__rip_verify_';
+export function buildVerify(probeText, answers) {
+  let text = probeText.endsWith('\n') ? probeText : probeText + '\n';
+  let line = (text.match(/\n/g) ?? []).length;
+  const lineOf = new Map();
+  answers.forEach((type, i) => {
+    if (type == null) return;
+    text += `declare let ${VERIFY_PREFIX}${i}: ${type};\n`;
+    lineOf.set(line, i);
+    line++;
+  });
+  return { text, lineOf };
+}
+export function refusedByVerify(items, lineOf) {
+  const refused = new Set();
+  for (const d of items ?? []) {
+    const i = lineOf.get(d?.range?.start?.line);
+    if (i !== undefined) refused.add(i);
+  }
+  return refused;
+}

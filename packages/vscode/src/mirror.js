@@ -531,6 +531,32 @@ const ancestorHas = (fromDir, pkgs) => {
     if (path.dirname(dir) === dir) return false;
   }
 };
+// The rip checkout's own node_modules: host types (`@types/bun`) are
+// declared ONCE, by the toolchain, pinned to the bun it targets — a
+// project cannot know which bun runs it, so a per-project pin can only
+// agree or disagree with the binary. Every program this process serves
+// reads them from here.
+export const checkoutNodeModules = () => path.join(path.dirname(realStdlibDir), 'node_modules');
+const checkoutHas = (pkgs) => pkgs.some((p) => fs.existsSync(path.join(checkoutNodeModules(), p)));
+// The ambient roots of a program rooted at `fromDir`: every ancestor
+// `node_modules/@types` (TypeScript's own default walk, restated because
+// an explicit typeRoots REPLACES it), then the checkout's. Order is
+// precedence for a name both hold: a project's own pinned install wins
+// over the toolchain's copy, as it does for runtime imports.
+export function ambientTypeRoots(fromDir) {
+  const roots = [];
+  if (fromDir) {
+    for (let dir = fromDir; ; dir = path.dirname(dir)) {
+      const p = path.join(dir, 'node_modules', '@types');
+      if (nonEmptyDir(p)) roots.push(p);
+      if (path.dirname(dir) === dir) break;
+    }
+  }
+  const checkoutTypes = path.join(checkoutNodeModules(), '@types');
+  if (nonEmptyDir(checkoutTypes) && !roots.includes(checkoutTypes)) roots.push(checkoutTypes);
+  return roots;
+}
+const ambientOverrides = (fromDir) => ({ types: ['*'], typeRoots: ambientTypeRoots(fromDir) });
 // `userSetsTypes`: the chain sets compilerOptions.types — the user's
 // COMPLETE ambient manifest, the same signal that stops the types:["*"]
 // injection — and floors defer to it wholesale. The file is written even
@@ -548,9 +574,9 @@ export function hostFloorDts(typesRoot, { userSetsTypes = false, strict = false 
   if (strict) {
     return head + '// Inactive: strict posture (rip.strict, or rip check --strict) — missing host types are complaints, not `any`s.\n';
   }
-  const active = HOST_FLOORS.filter(({ suppliedBy }) => !(typesRoot && ancestorHas(typesRoot, suppliedBy)));
+  const active = HOST_FLOORS.filter(({ suppliedBy }) => !((typesRoot && ancestorHas(typesRoot, suppliedBy)) || checkoutHas(suppliedBy)));
   if (active.length === 0) {
-    return head + '// Inactive: the workspace installs its own host types.\n';
+    return head + '// Inactive: the workspace or the rip checkout installs host types.\n';
   }
   return head + active.map(({ text }) => text + '\n').join('');
 }
@@ -631,7 +657,7 @@ export function projectWrapper({ wrapperDir, sourceTsconfig, sourceDir: sourceDi
   }
   chain.clear();
   const setsTypes = anchor !== null && chainSetsTypes(anchor, chain, onUnresolved);
-  if (!setsTypes) overrides.types = ['*'];
+  if (!setsTypes) Object.assign(overrides, ambientOverrides(sourceDir));
   const reachUp = posix(path.relative(wrapperDir, sourceDir));
   const tsconfig = {
     compilerOptions: overrides,
@@ -685,7 +711,7 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
   if (userConfig && fs.existsSync(userConfig)) {
     chain.clear();
     const setsTypes = chainSetsTypes(userConfig, chain, onUnresolved);
-    if (!setsTypes) overrides.types = ['*'];
+    if (!setsTypes) Object.assign(overrides, ambientOverrides(workspaceRoot));
     return {
       tsconfig: { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude },
       hostFloorDts: hostFloorDts(floorRoot, { userSetsTypes: setsTypes, strict: strictHere }),
@@ -696,7 +722,7 @@ export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = n
     tsconfig: {
       compilerOptions: {
         target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'],
-        types: ['*'],
+        ...ambientOverrides(floorRoot),
         ...overrides,
       },
       include,
