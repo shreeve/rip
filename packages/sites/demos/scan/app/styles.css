@@ -9,3 +9,10 @@ p { margin: 0 0 12px; color: #aaa; }
 .history { list-style: none; margin: 0; padding: 0; }
 .history li { padding: 6px 0; border-top: 1px solid #333; word-break: break-all; }
 .at { float: right; color: #777; font-size: 12px; }
+.aimer { position: absolute; left: 50%; top: 50%; width: 70%; aspect-ratio: 1.586; transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 6px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35); pointer-events: none; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0; font: 13px/1.4 ui-monospace, monospace; color: #9c9; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.controls button { padding: 6px 12px; border: 1px solid #555; border-radius: 6px; background: #222; color: #eee; font: inherit; }
+.controls button.on { border-color: #2f5; color: #2f5; }
+.controls label { display: flex; align-items: center; gap: 8px; color: #aaa; font-size: 13px; }
+.controls input[type=range] { width: 140px; }

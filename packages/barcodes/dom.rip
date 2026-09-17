@@ -126,7 +126,8 @@ export class QRCanvas
     {overlay, resultQR, bitmap} = elements
     @opts = { ...canvasDefaults(), ...opts }
 
-    # Decode in flight.
+    # Decode in flight, and a count of the frames that have landed.
+    @frames       = 0
     @lastDetect   = 0
     @pending      = undefined
     @task         = undefined
@@ -422,6 +423,7 @@ export class QRCanvas
 
   decode: (image, format, layout, size) ->
     return if @pending
+    @frames++
     @bitmapDrawn         = false
     @overlayDrawn        = false
     @overlayBatch.length = 0
@@ -467,6 +469,13 @@ export class QRCanvas
     pending = work.then(onDone, onFail).finally(settle)
     @pending = pending
     pending
+
+  # The luma of the last frame decoded, in the scanner's arena, for the
+  # other readers: `readCode128 canvas.lastFrame(), format: 'I420'`. Valid
+  # until the next frame lands, which raises `id`; null before the first.
+  lastFrame: ->
+    {width, height, luma} = @scanner
+    if width and height then { width, height, data: luma, id: @frames } else null
 
   drawImage: (image, height, width) ->
     @rotate       = false
@@ -514,6 +523,7 @@ export class QRCamera
     stream = if 'getTracks' of streamOrOpts then streamOrOpts else undefined
     opts   = if stream then init else streamOrOpts
     @opts          = { format: 'auto', ...opts }
+    @video         = {}
     @stream        = undefined
     @reader        = undefined
     @planes        = ({ offset: 0, stride: 0 } for i in [0...4])
@@ -660,16 +670,45 @@ export class QRCamera
     devices.filter((device) -> device.kind is 'videoinput').map (d) -> { deviceId: d.deviceId, label: d.label or "Camera #{d.deviceId}" }
 
   # Stop first so constrained camera hardware is released before the
-  # replacement stream is requested.
-  setDevice!: (deviceId) ->
+  # replacement stream is requested; the new constraints layer over the
+  # ones the camera opened with.
+  reopen!: (video) ->
     @stop()
     source = @source
-    stream = navigator.mediaDevices.getUserMedia! video: { deviceId: { exact: deviceId } }
+    @video = { ...@video, ...video }
+    stream = navigator.mediaDevices.getUserMedia! video: @video
     # A later request may resolve first; never attach or leak a stale stream.
     if source isnt @source
       track.stop() for track in stream.getTracks()
       return
     @setStream stream
+
+  setDevice!: (deviceId) ->
+    @reopen! deviceId: { exact: deviceId }
+
+  # The live video track and what the browser lets a page do with it.
+  track: -> @stream?.getVideoTracks()[0]
+  capabilities: -> @track()?.getCapabilities?() or {}
+  settings:     -> @track()?.getSettings?() or {}
+
+  # One advanced constraint applied to the live track, when the capability
+  # exists: zoom is a sensor crop that gives a code more pixels per module,
+  # torch lights a dark scene, and Android also takes focusMode and
+  # exposure settings. Resolves to whether anything was applied.
+  apply: (constraint) ->
+    track = @track()
+    caps  = @capabilities()
+    return false unless track and Object.keys(constraint).every (name) -> caps[name] isnt undefined
+    track.applyConstraints! advanced: [constraint]
+    true
+
+  zoom: (value) ->
+    range = @capabilities().zoom
+    return false unless range
+    @apply! zoom: Math.min(range.max, Math.max(range.min, value))
+
+  torch: (lit = true) ->
+    @apply! torch: lit
 
   draw: (canvas, fullSize) ->
     player = @player
@@ -748,10 +787,18 @@ export class QRCamera
       track.stop() for track in @stream.getTracks()
     @stream = undefined
 
-# Media Capture terms: 'environment' is rear-facing, 'user' is the selfie camera.
+# Media Capture terms: 'environment' is rear-facing, 'user' is the selfie
+# camera. The stream is asked for at the sensor's full size: a symbol's
+# modules must reach a pixel or two in the frame the readers see, and a
+# phone's screen size, the browsers' default, gives a driver's license no
+# distance at which it both focuses and resolves. `opts.video` layers
+# further constraints over these.
 openCamera =! (player, facingMode, opts = {}) ->
-  stream = navigator.mediaDevices.getUserMedia! video: { height: { ideal: window.screen.height }, width: { ideal: window.screen.width }, facingMode }
-  QRCamera.new player, stream, opts
+  video  = { facingMode, width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 30 }, ...opts.video }
+  stream = navigator.mediaDevices.getUserMedia! video: video
+  camera = QRCamera.new player, stream, opts
+  camera.video = video
+  camera
 
 export rearCamera =! (player, opts = {}) ->
   openCamera! player, 'environment', opts

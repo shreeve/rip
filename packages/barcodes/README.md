@@ -256,10 +256,23 @@ cancel = frameLoop ->
 
 `QRCanvas` decodes frames through one reusable scanner and paints a finder
 overlay, the decoded symbol, or the binarized plane onto the canvases it is
-given. `rearCamera` and `selfieCamera` open a stream into a video element;
-`camera.listDevices()` and `camera.setDevice(id)` switch cameras. When the
-browser exposes `VideoFrame`, `camera.readFrame! canvas, true` copies
-frames plane-for-plane into the scanner arena without a canvas round trip.
+given. `rearCamera` and `selfieCamera` open a stream into a video element,
+asking for the sensor's full size (3840x2160 ideal at 30 frames per
+second, with `opts.video` layering further constraints), since a symbol's
+modules must reach a pixel or two in the frame the readers see; the
+browsers' default of the screen size gives a driver's license no distance
+at which it both focuses and resolves. `camera.settings()` reports what
+the track delivered and `camera.capabilities()` what it can change;
+`camera.zoom! 2` crops the sensor for twice the pixels per module,
+`camera.torch! true` lights the scene, `camera.apply! { focusMode:
+'continuous' }` sets any other advanced constraint the browser offers
+(iOS exposes zoom and torch, Android also focus and exposure), and
+`camera.reopen! { width: { ideal: 1920 } }` restarts the stream under new
+constraints. `camera.listDevices()` and `camera.setDevice(id)` switch
+cameras. When the browser exposes `VideoFrame`,
+`camera.readFrame! canvas, true` copies frames plane-for-plane into the
+scanner arena without a canvas round trip, and `canvas.lastFrame()` hands
+that luma to the other readers as `format: 'I420'` without another copy.
 `svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and
 `BarcodeDetector` is a Shape Detection API ponyfill over `decodeQR` and
 `readPDF417` that reports `qr_code` and `pdf417`. Camera access needs a
