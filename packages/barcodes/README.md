@@ -263,47 +263,67 @@ video = document.querySelector 'video'
 overlay = document.querySelector 'canvas'     # positioned over the video
 canvas = QRCanvas.new { overlay }
 camera = rearCamera! video
-cancel = frameLoop ->
+cancel = frameLoop (->
   decoded = camera.readFrame! canvas, true    # undefined until a frame decodes
   if decoded isnt undefined
     p decoded
     cancel()
     camera.stop()
+), video                                      # paced by the video's presented frames
 ```
 
-`QRCanvas` decodes frames through one reusable scanner, scanning the
-largest centered region of the frame with the aspect ratio `crop` gives
-(1 by default; `null` scans the whole frame, `margin` adds a fraction of
-the region beyond each edge where the frame has pixels, and
-`canvas.cropTo! aspect, margin` changes both later, so a page scans what
-its viewfinder shows plus a little past its edges, and the copy out of the
-video frame stays that small), and paints a lock
-around a decoded symbol (a tinted, bracketed outline in `overlayColor`, or
-`overlayFailedColor` with `drawFailed` for a symbol found but not read,
-gliding `overlayEase` of the way to each estimate per display frame and fading out when it expires),
-the decoded symbol, or the binarized plane onto the canvases it is given;
-`canvas.mark! corners` draws the same lock on four image-space corners
-another reader found on `canvas.lastFrame()`, such as a PDF417 hit's
-`corners`. `rearCamera` and `selfieCamera` open a stream into a video element,
+`QRCanvas.new elements, opts` decodes frames through one reusable scanner.
+`elements` names the canvases it paints: `overlay` for the lock around a
+decoded symbol, `resultQR` for the sampled module grid (scaled by
+`resultBlockSize`, 8), `bitmap` for the binarized plane of each frame.
+
+| option | meaning | default |
+| --- | --- | --- |
+| `crop` | aspect (width over height) of the largest centered region scanned; `null` scans the whole frame | `1` |
+| `margin` | fraction of that region scanned beyond each edge, where the frame has pixels | `0` |
+| `async` | decode with `decodeAsync`, yielding to the host between chunks | `false` |
+| `decodeAll` | decode every symbol on the frame and draw every lock | `false` |
+| `effort`, `timeLimit`, `nativeLimit`, `textDecoder` | passed to the scanner (see [Decoding](#decoding)) | |
+| `nativeEvery` | with `nativeLimit`: the frame interval at which the native layer is searched regardless | `1` |
+| `overlayColor`, `overlayFailedColor` | the lock, and the lock with `drawFailed` on a symbol found but not read | green, red |
+| `overlaySideColor` | dims the frame outside the scanned region | `black` |
+| `overlayEase` | of the way to a lock's new corners per display frame; `1` snaps | `0.3` |
+| `overlayTimeout` | milliseconds a lock outlives its last sighting before fading | `500` |
+| `drawFailed` | draw a lock on a symbol that was found but did not decode | `false` |
+| `onVideoFrame` | `(frame) ->` the first `VideoFrame` of each source, borrowed: it is closed after the call | |
+| `onFrameSource` | `(source) ->` `'VideoFrame'` or `'canvas'` when the frame path changes | |
+
+`canvas.cropTo! aspect, margin` changes the scanned region from the next
+frame on, so a page scans what its viewfinder shows plus a little past its
+edges, and the copy out of the video frame stays that small.
+`canvas.lastFrame()` hands the luma of the last decoded frame to the other
+readers as `format: 'I420'` without another copy; it is `null` before the
+first frame and while the next copy is landing. `canvas.mark! corners`
+draws the lock on four image-space corners another reader found on that
+frame, such as a PDF417 hit's `corners`. `canvas.clear!` stops the decode
+in flight, zeroes the scanner and clears every canvas.
+
+`rearCamera` and `selfieCamera` open a stream into a video element,
 asking for the sensor's full size (3840x2160 ideal at 30 frames per
 second, with `opts.video` layering further constraints), since a symbol's
 modules must reach a pixel or two in the frame the readers see; the
 browsers' default of the screen size gives a driver's license no distance
-at which it both focuses and resolves. `camera.settings()` reports what
-the track delivered and `camera.capabilities()` what it can change;
-`camera.zoom! 2` crops the sensor for twice the pixels per module,
-`camera.torch! true` lights the scene, `camera.apply! { focusMode:
-'continuous' }` sets any other advanced constraint the browser offers
-(iOS exposes zoom and torch, Android also focus and exposure), and
-`camera.reopen! { width: { ideal: 1920 } }` restarts the stream under new
-constraints. `camera.listDevices!` and `camera.setDevice! id` switch
-cameras. `camera.readFrame! canvas, true` reads the frame at the sensor's
-own size, plane-for-plane into the scanner arena when the browser exposes
-`VideoFrame` and through a canvas otherwise; without `true` the frame is
-drawn at the video element's rendered size, so a page that styles the
-player small scans a small picture. `canvas.lastFrame()` hands the luma
-of the last frame to the other readers as `format: 'I420'` without another
-copy.
+at which it both focuses and resolves. `camera.readFrame! canvas, true`
+copies the presented frame plane-for-plane into the scanner arena through
+`VideoFrame` where the browser has it, falling back to a canvas draw;
+without `true` it draws the player at its rendered size, which is only
+for a page whose overlay must live in CSS pixels. `opts.format` is
+`'auto'` (the native planes), `'canvas'` (never `VideoFrame`) or one
+`VideoFrame` pixel format to convert to; `camera.setFormat format`
+changes it. `camera.settings()` reports what the track delivered and
+`camera.capabilities()` what it can change; `camera.zoom! 2` crops the
+sensor for twice the pixels per module, `camera.torch! true` lights the
+scene, `camera.apply! { focusMode: 'continuous' }` sets any other
+advanced constraint the browser offers (iOS exposes zoom and torch,
+Android also focus and exposure), and `camera.reopen! { width: { ideal:
+1920 } }` restarts the stream under new constraints. `camera.listDevices!`
+and `camera.setDevice! id` switch cameras; `camera.stop()` releases the
+camera. `getSize element` is an element's rendered size in CSS pixels.
 `svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and
 `BarcodeDetector` is a Shape Detection API ponyfill over `decodeQR` and
 `readPDF417` that reports `qr_code` and `pdf417`. Camera access needs a
