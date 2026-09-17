@@ -567,7 +567,7 @@ test "corners span the bars and follow a tilt", ->
     hit = readCode128 turned
     eq hit?.text, 'Wikipedia', "#{degrees} degrees"
     # The axes alone read within about fifteen degrees of either one.
-    eq readCode128(turned, angles: 2)?.text, (if degrees <= 12 or degrees >= 75 then 'Wikipedia' else undefined), "#{degrees} degrees, axes only"
+    eq readCode128(turned, tilt: false)?.text, (if degrees <= 12 or degrees >= 75 then 'Wikipedia' else undefined), "#{degrees} degrees, axes only"
     [tl, tr, br, bl] = hit.corners
     edge   = Math.atan2 bl.x - tl.x, bl.y - tl.y
     height = Math.hypot bl.x - tl.x, bl.y - tl.y

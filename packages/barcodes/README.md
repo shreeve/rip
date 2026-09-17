@@ -160,12 +160,13 @@ the verified codewords, the direction of the scan line that read them
 and polarity, the symbol's span along that line in pixels, and its four
 corners in image space, fit to the lines that read the same codewords
 along the bars' own direction, so a tilted label gives a tilted quad of
-its full height. Lines run along both axes first and then, unless the
-axes crossed no bar-like runs at all, along `angles` evenly spaced
-directions in a half turn (8 by default, every 22.5 degrees, so a label
-reads at any angle; 2 is the axes only) on about `lines` lines each (16).
-The sweep costs about as much again as the axis passes, so a camera loop
-may run it on alternate frames.
+its full height. Lines run along both axes; a tilted label crosses an
+axis line with enough runs for a symbol yet does not read, and its tilt
+shows as a shift of the bar pattern between that line and one six lines
+over, so the reader correlates the two, reads along the estimated
+direction through the crossing, and so reads a label at any angle for a
+fraction of a millisecond more per frame. `tilt: false` reads the axes
+only.
 Modules must be at least one pixel wide; a printed label filling a quarter
 of a camera frame is plenty.
 
