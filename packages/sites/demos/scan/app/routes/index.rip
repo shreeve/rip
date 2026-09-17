@@ -48,6 +48,7 @@ export Home = component
     fit()
     player.addEventListener 'loadedmetadata', (-> describe()), once: true
     window.addEventListener 'resize', fit
+    document.addEventListener 'visibilitychange', wake
     cancel = frameLoop (-> scan().catch (error) -> report error), player
 
   # A failure anywhere in the loop lands in the status line, since a phone
@@ -87,13 +88,33 @@ export Home = component
     torch = not torch
     camera.torch(torch).catch (error) -> report error
 
-  # Reopen at another size to measure what resolution buys.
+  # Reopen at another size to measure what resolution buys. The old stream
+  # is already stopped when a request fails, so the failure is the status.
   setQuality: (name) ->
     quality = name
     size = if name is '4k' then { width: { ideal: 3840 }, height: { ideal: 2160 } } else if name is '1080p' then { width: { ideal: 1920 }, height: { ideal: 1080 } } else { width: { ideal: 1280 }, height: { ideal: 720 } }
-    camera.reopen! size
+    try
+      camera.reopen! size
+    catch error
+      report error
+      return
     describe()
     clear()
+
+  # A phone ends or pauses the track while the page is hidden. Shown again,
+  # a track that is no longer live is reopened under the same constraints
+  # and a paused player is resumed.
+  wake: ->
+    return unless document.visibilityState is 'visible' and camera
+    track = camera.track()
+    if track and track.readyState is 'live'
+      player.play()?.catch (-> undefined)
+      return
+    try
+      camera.reopen! {}
+      describe()
+    catch error
+      report error
 
   # The reset button: the stream at 4K, torch off, zoom at 2x, and a clear
   # page. A stream change only clears the page.
@@ -156,6 +177,7 @@ export Home = component
     cancel?()
     camera?.stop()
     window.removeEventListener 'resize', fit
+    document.removeEventListener 'visibilitychange', wake
 
   render
     div class: 'stats'
@@ -167,21 +189,21 @@ export Home = component
     p class: 'status', status if status
     div class: 'viewfinder', ref: finder
       video ref: player, playsinline: true, muted: true
-      canvas ref: overlay
-      div class: 'aimer'
+      canvas ref: overlay, 'aria-hidden': 'true'
+      div class: 'aimer', 'aria-hidden': 'true'
       div class: 'hint', 'QR · PDF417 · Code 128' unless latest?
-    if latest?
-      div class: 'latest'
+    div class: 'latest', 'aria-live': 'polite', role: 'status'
+      if latest?
         span class: 'kind', latest.kind
         code latest.text
     div class: 'controls'
       for name in ['720p', '1080p', '4k']
-        button class: (if quality is name then 'on' else ''), @click: (-> setQuality name), name
+        button class: (if quality is name then 'on' else ''), 'aria-pressed': (quality is name), @click: (-> setQuality name), name
       if zoomRange?
         label "zoom #{zoom.toFixed 1}x"
           input type: 'range', min: zoomRange.min, max: zoomRange.max, step: zoomRange.step, value: zoom, @input: (e) -> setZoom Number(e.target.value)
       if torchable
-        button class: (if torch then 'on' else ''), @click: (-> toggleTorch()), 'torch'
+        button class: (if torch then 'on' else ''), 'aria-pressed': torch, @click: (-> toggleTorch()), 'torch'
       button @click: (-> reset()), 'reset'
     ul class: 'history'
       for hit in history
