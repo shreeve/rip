@@ -461,6 +461,9 @@ readFrom =! (runs, n, at, start, codes) ->
 
 # Every start code behind a quiet zone, left to right; `first` is the slot
 # of the first dark run, 1 as recorded and 0 to read the line inverted.
+# On a hit, the codeword count and where the symbol lies along the line:
+# the runs before the start code, then the codewords and the stop with its
+# termination bar.
 readRuns =! (runs, n, codes, first) ->
   for at in [first...n - 5] by 2
     start = nearest runs, at, START_A, STOP - 1
@@ -469,8 +472,13 @@ readRuns =! (runs, n, codes, first) ->
       # A quiet zone of at least half a codeword, or the edge of the line.
       if at is first or 2 * runs[at - 1] >= width
         len = readFrom runs, n, at, start, codes
-        return len if len
-  0
+        if len
+          from = 0
+          from += runs[k] for k in [0...at]
+          to = from
+          to += runs[k] for k in [at...at + 6 * (len - 1) + 7]
+          return { len, from, to }
+  null
 
 # Text from verified codewords, tracking latches, shifts, FNC1 and FNC4. One
 # FNC4 adds 128 to the next character; two in a row toggle the high half
@@ -522,17 +530,21 @@ decodeText =! (codes, len) ->
       lastFnc4 = false
   { text: out, gs1 }
 
-# One line's runs through both directions and polarities.
+# One line's runs through both directions and polarities; a span found on
+# the reversed runs is mirrored back into line order.
 readLine =! (runs, n, rev, codes) ->
   # A start code and one codeword need thirteen runs.
   return null if n < 13
   m = reverseRuns runs, n, rev
   for inverted in [false, true]
     first = if inverted then 0 else 1
-    len = readRuns runs, n, codes, first
-    return { reversed: false, inverted, len } if len
-    len = readRuns rev, m, codes, first
-    return { reversed: true, inverted, len } if len
+    hit = readRuns runs, n, codes, first
+    return { reversed: false, inverted, len: hit.len, from: hit.from, to: hit.to } if hit
+    hit = readRuns rev, m, codes, first
+    if hit
+      total = 0
+      total += rev[k] for k in [0...m]
+      return { reversed: true, inverted, len: hit.len, from: total - hit.to, to: total - hit.from }
   null
 
 # Scan lines middle-out at a stride that covers the axis in about 32 lines,
@@ -576,7 +588,7 @@ export readCode128 =! (img, opts = {}) ->
     hit = scanLines img, format, true, luma, runs, rev, codes
   return null unless hit
   {text, gs1} = decodeText codes, hit.len
-  { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, vertical, reversed: hit.reversed, inverted: hit.inverted }
+  { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, from: hit.from, to: hit.to, vertical, reversed: hit.reversed, inverted: hit.inverted }
 
 # Text only; throws on a miss.
 export decodeCode128 =! (img, opts = {}) ->

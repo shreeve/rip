@@ -153,8 +153,9 @@ and `data-url` draw `height` modules of bar.
 with the same `format` option, and returns the text or throws
 `'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
 miss and otherwise
-`{ text, gs1, codes, line, vertical, reversed, inverted }`: the verified
-codewords and which scan line, axis, direction and polarity produced them.
+`{ text, gs1, codes, line, from, to, vertical, reversed, inverted }`: the
+verified codewords, which scan line, axis, direction and polarity produced
+them, and the symbol's span along that line in pixels.
 Modules must be at least one pixel wide; a printed label filling a quarter
 of a camera frame is plenty.
 
@@ -254,9 +255,13 @@ cancel = frameLoop ->
     camera.stop()
 ```
 
-`QRCanvas` decodes frames through one reusable scanner and paints a finder
-overlay, the decoded symbol, or the binarized plane onto the canvases it is
-given. `rearCamera` and `selfieCamera` open a stream into a video element,
+`QRCanvas` decodes frames through one reusable scanner and paints a lock
+around a decoded symbol (a tinted, bracketed outline in `overlayColor`, or
+`overlayFailedColor` with `drawFailed` for a symbol found but not read),
+the decoded symbol, or the binarized plane onto the canvases it is given;
+`canvas.mark! corners` draws the same lock on four image-space corners
+another reader found on `canvas.lastFrame()`, such as a PDF417 hit's
+`corners`. `rearCamera` and `selfieCamera` open a stream into a video element,
 asking for the sensor's full size (3840x2160 ideal at 30 frames per
 second, with `opts.video` layering further constraints), since a symbol's
 modules must reach a pixel or two in the frame the readers see; the

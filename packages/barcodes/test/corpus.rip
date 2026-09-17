@@ -34,13 +34,13 @@ readPng =! (file) ->
   head  = null
   while at < bytes.length
     size = bytes.readUInt32BE at
-    kind = bytes.toString 'latin1', at + 4, at + 8
+    type = bytes.toString 'latin1', at + 4, at + 8
     body = bytes.subarray at + 8, at + 8 + size
-    switch kind
+    switch type
       when 'IHDR' then head = { width: body.readUInt32BE(0), height: body.readUInt32BE(4), depth: body[8], color: body[9], interlace: body[12] }
       when 'PLTE' then plte = body
       when 'IDAT' then idat.push body
-    break if kind is 'IEND'
+    break if type is 'IEND'
     at += 12 + size
   {width, height, depth, color, interlace} = head
   fail "#{file}: interlaced PNG" if interlace

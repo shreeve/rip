@@ -1,15 +1,21 @@
 body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; background: #111; color: #eee; }
 h1 { margin: 0 0 4px; font-size: 20px; }
 p { margin: 0 0 12px; color: #aaa; }
-.viewfinder { position: relative; width: 100%; max-width: 720px; background: #000; border-radius: 8px; overflow: hidden; }
-.viewfinder video { display: block; width: 100%; height: auto; }
-.viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* The video and its overlay share one box and one cover crop, so the lock
+   stays on the symbol; the readers see the whole frame either way. */
+.viewfinder { position: relative; width: 100%; max-width: 720px; aspect-ratio: 3 / 4; max-height: 70vh; background: #000; border-radius: 12px; overflow: hidden; }
+.viewfinder video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+@media (orientation: landscape) { .viewfinder { aspect-ratio: 16 / 9; max-width: none; } }
 .latest { margin: 12px 0; padding: 12px; background: #1e2a1e; border: 1px solid #2f5; border-radius: 8px; font-size: 20px; word-break: break-all; }
 .kind { display: inline-block; margin-right: 8px; padding: 2px 6px; border-radius: 4px; background: #345; color: #cde; font-size: 12px; vertical-align: middle; }
 .history { list-style: none; margin: 0; padding: 0; }
 .history li { padding: 6px 0; border-top: 1px solid #333; word-break: break-all; }
 .at { float: right; color: #777; font-size: 12px; }
-.aimer { position: absolute; left: 50%; top: 50%; width: 70%; aspect-ratio: 1.586; transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 6px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35); pointer-events: none; }
+/* A card-shaped guide: nearly the full width in portrait, most of the
+   height in landscape. Closer is better, up to where the lens still focuses. */
+.aimer { position: absolute; left: 50%; top: 50%; width: 90%; aspect-ratio: 1.586; transform: translate(-50%, -50%); border: 1.5px solid rgba(255, 255, 255, 0.5); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.4); pointer-events: none; }
+@media (orientation: landscape) { .aimer { width: 72%; } }
 .stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0; font: 13px/1.4 ui-monospace, monospace; color: #9c9; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .controls button { padding: 6px 12px; border: 1px solid #555; border-radius: 6px; background: #222; color: #eee; font: inherit; }

@@ -58,10 +58,6 @@ traceQuad =! (context, points) ->
   context.lineTo points[i].x, points[i].y for i in [1...points.length]
   context.closePath()
 
-fillQuad =! (context, points) ->
-  traceQuad context, points
-  context.fill()
-
 toward =! (from, to, distance) ->
   dx = to.x - from.x
   dy = to.y - from.y
@@ -111,9 +107,8 @@ copyOverlays! =! (target, source) ->
 # Drawing and decode options, with defaults.
 canvasDefaults =! ->
   resultBlockSize:     8
-  overlayMainColor:    'green'
-  overlayFinderColor:  'blue'
-  overlayAlignerColor: 'yellow'
+  overlayColor:        '#4ade80'
+  overlayFailedColor:  '#f87171'
   overlaySideColor:    'black'
   overlayTimeout:      500
   cropToSquare:        true
@@ -216,20 +211,20 @@ export class QRCanvas
     @overlayFailedMatches      = 0
     @overlayMatches            = 0
 
-  # Map decoder geometry from cropped, row-contiguous coded pixels into
-  # presentation coordinates; the pixels themselves were never rotated.
+  # Decoder geometry lives in cropped, row-contiguous coded pixels, which
+  # were never rotated; the overlay is in presentation coordinates.
+  view: (point) ->
+    x = point.x + @sourceX
+    y = point.y + @sourceY
+    if @rotate then { x: @sourceHeight - 1 - y, y: x } else { x, y }
+
   onPoints!: (points, result) ->
     @resetOverlay() if Date.now() - @lastDetect > @opts.overlayTimeout
     if @rotate or @sourceX or @sourceY
       move! = (point) =>
-        x = point.x + @sourceX
-        y = point.y + @sourceY
-        if @rotate
-          point.x = @sourceHeight - 1 - y
-          point.y = x
-        else
-          point.x = x
-          point.y = y
+        {x, y} = @view point
+        point.x = x
+        point.y = y
       move point for point in [points.tl, points.tr, points.br, points.bl, ...points.aligners]
       for marker in [points.tl, points.tr, points.bl, ...points.aligners]
         move point for point in marker.corners
@@ -388,21 +383,66 @@ export class QRCanvas
         ctx.fillRect right, y,      width - right, cropHeight      if right < width
       else
         ctx.clearRect 0, 0, width, height
-    return unless points
-    {tl, tr, br, bl} = points
-    # The four points are logical finder-center positions, so the polygon
-    # keeps the decoder's projective geometry.
-    ctx.fillStyle = if failed then 'red' else @opts.overlayMainColor
-    fillQuad ctx, [tl, tr, br, bl]
-    moduleSize = (tl.moduleSize + tr.moduleSize + bl.moduleSize) / 3
-    ctx.strokeStyle = @opts.overlayAlignerColor
-    ctx.lineWidth   = moduleSize / 2
-    traceRoundedQuad ctx, points.outline, 9
+    @drawLock ctx, points.outline, failed if points
+
+  # A lock on a quad: a faint tint and hairline inside a rounded outline,
+  # then a bracket over each corner. Sizes follow the frame, not the
+  # symbol, so the mark reads the same at every stream size and distance.
+  drawLock!: (ctx, quad, failed) ->
+    unit   = Math.max 2, ctx.canvas.width / 320
+    side   = 0
+    side  += Math.hypot(quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y) for i in [0...4]
+    side  /= 4
+    radius = side * 0.08
+    arm    = Math.min side * 0.25, 48 * unit
+    color  = if failed then @opts.overlayFailedColor else @opts.overlayColor
+    ctx.lineCap     = 'round'
+    ctx.lineJoin    = 'round'
+    ctx.fillStyle   = color
+    ctx.strokeStyle = color
+    traceRoundedQuad ctx, quad, radius
+    ctx.globalAlpha = 0.12
+    ctx.fill()
+    ctx.globalAlpha = 0.5
+    ctx.lineWidth   = unit
     ctx.stroke()
-    ctx.fillStyle = @opts.overlayFinderColor
-    fillQuad ctx, finder.corners for finder in [tl, tr, bl]
-    ctx.fillStyle = @opts.overlayAlignerColor
-    fillQuad ctx, aligner.corners for aligner in points.aligners
+    ctx.globalAlpha = 1
+    ctx.lineWidth   = 2.5 * unit
+    ctx.beginPath()
+    for corner, i in quad
+      prev  = quad[(i + 3) % 4]
+      next  = quad[(i + 1) % 4]
+      into  = toward corner, prev, radius
+      out   = toward corner, next, radius
+      start = toward corner, prev, arm
+      end   = toward corner, next, arm
+      ctx.moveTo start.x, start.y
+      ctx.lineTo into.x, into.y
+      ctx.quadraticCurveTo corner.x, corner.y, out.x, out.y
+      ctx.lineTo end.x, end.y
+    ctx.stroke()
+
+  # The same lock on four image-space corners another reader found on the
+  # frame `lastFrame()` handed it, pushed out from the symbol's edge as the
+  # QR outline is; it expires like a QR overlay.
+  mark!: (corners, failed = false) ->
+    return unless @overlay
+    quad = (@view point for point in corners)
+    cx   = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4
+    cy   = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4
+    pad  = Math.max 2, @overlay.canvas.width / 320 * 4
+    for point in quad
+      dx = point.x - cx
+      dy = point.y - cy
+      d  = Math.hypot(dx, dy) or 1
+      point.x += dx / d * pad
+      point.y += dy / d * pad
+    @drawOverlay { outline: quad }, false, failed
+    @overlayDrawn = true
+    now = Date.now()
+    @lastDetect      = now
+    @overlayDeadline = now + @opts.overlayTimeout
+    @overlayTimer    = setTimeout (=> @expireOverlay()), @opts.overlayTimeout if @overlayTimer is undefined
 
   # Camera-frame decoding is fail-soft: a failed frame is a miss, never a throw.
   finish: (res) ->

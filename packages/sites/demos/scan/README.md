@@ -7,9 +7,10 @@ phone can use its camera.
 
 `app/routes/index.rip` opens the rear camera with `rearCamera` at the
 sensor's full size, runs `frameLoop`, and hands every frame to a
-`QRCanvas`, which decodes QR through the `VideoFrame` path and paints the
-finder overlay. The luma that lands in the scanner's arena goes on to
-`readCode128` and then `readPDF417` with no further copy. A hit is
+`QRCanvas`, which decodes QR through the `VideoFrame` path and paints a
+lock around the symbol. The luma that lands in the scanner's arena goes on
+to `readCode128` and then `readPDF417` with no further copy, and their
+hits get the same lock through `canvas.mark!`. A hit is
 announced once until a different code appears; the last twenty stay in a
 list.
 
