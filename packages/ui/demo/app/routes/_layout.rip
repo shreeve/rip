@@ -32,9 +32,9 @@ export Layout = component
             Icon name: 'menu', classes: 'size-4.5'
           DrawerPopup
             class: [
-              'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-background p-2.5 shadow-xl transition-[translate] duration-200'
-              'data-open:translate-x-0 starting:data-open:-translate-x-full'
-              'backdrop:bg-black/20 backdrop:opacity-0 backdrop:duration-200 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+              'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-background p-2.5 shadow-xl transition-[translate] duration-300 ease-drawer'
+              'data-open:translate-x-0 data-open:duration-450 starting:data-open:-translate-x-full'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             DrawerTitle class: 'sr-only', 'Navigation'
             Nav

@@ -15,9 +15,9 @@ export DrawerPage = component
             'Open Drawer'
           DrawerPopup
             class: [
-              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-background p-6 shadow-xl transition-[translate] duration-200'
-              'data-open:translate-x-0 starting:data-open:translate-x-full'
-              'backdrop:bg-black/20 backdrop:opacity-0 backdrop:duration-200 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-background p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
+              'data-open:translate-x-0 data-open:duration-450 starting:data-open:translate-x-full'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             DrawerTitle class: 'text-lg font-semibold', 'Settings'
             DrawerDescription class: 'mt-2 text-secondary', 'Swipe the panel to the right to dismiss it, or use the button.'

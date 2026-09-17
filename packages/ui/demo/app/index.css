@@ -18,6 +18,7 @@
   --color-bg-accent:         var(--color-neutral-900);
   --color-bg-accent-hover:   oklch(from var(--color-bg-accent) calc(l + 0.1) c h);
   --color-bg-accent-active:  oklch(from var(--color-bg-accent-hover) calc(l + 0.05) c h);
+  --color-bg-backdrop:       color-mix(in oklab, var(--color-black) 20%, transparent);
 
   --color-border-surface:     var(--color-neutral-200);
   --color-border-input:       oklch(from var(--color-border-surface) calc(l - 0.02) c h);
@@ -42,6 +43,7 @@ html[data-theme="dark"] {
   --color-bg-accent:         var(--color-neutral-100);
   --color-bg-accent-hover:   oklch(from var(--color-bg-accent) calc(l - 0.05) c h);
   --color-bg-accent-active:  oklch(from var(--color-bg-accent-hover) calc(l - 0.05) c h);
+  --color-bg-backdrop:       color-mix(in oklab, var(--color-black) 40%, transparent);
 
   --color-border-surface: var(--color-neutral-800);
   --color-border-input:   oklch(from var(--color-border-surface) calc(l + 0.04) c h);
@@ -70,10 +72,14 @@ html[data-theme="dark"] {
   --background-color-accent:         var(--color-bg-accent);
   --background-color-accent-hover:   var(--color-bg-accent-hover);
   --background-color-accent-active:  var(--color-bg-accent-active);
+  --background-color-backdrop:       var(--color-bg-backdrop);
 
   --border-color-surface: var(--color-border-surface);
   --border-color-input:   var(--color-border-input);
   --border-color-input-hover: var(--color-border-input-hover);
+
+  --ease-dialog: cubic-bezier(0.35, 0.91, 0.33, 0.97);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @layer base {
