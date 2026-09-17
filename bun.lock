@@ -133,6 +133,10 @@
         "rip-tray-build": "./build.rip",
       },
     },
+    "packages/ui": {
+      "name": "@rip/ui",
+      "version": "0.0.0",
+    },
     "packages/utils": {
       "name": "@rip/utils",
       "version": "4.0.0",
@@ -219,6 +223,8 @@
     "@rip/time": ["@rip/time@workspace:packages/time"],
 
     "@rip/tray": ["@rip/tray@workspace:packages/tray"],
+
+    "@rip/ui": ["@rip/ui@workspace:packages/ui"],
 
     "@rip/utils": ["@rip/utils@workspace:packages/utils"],
 
