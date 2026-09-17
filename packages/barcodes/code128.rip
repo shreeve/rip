@@ -5,14 +5,15 @@
 # pattern; every codeword is three bars and three spaces spanning eleven
 # modules, and the stop adds a two-module termination bar. The encoder picks
 # the shortest codeword sequence over the three subsets by dynamic
-# programming. The reader walks scan lines: a per-line threshold, run
-# lengths, a start code behind a quiet zone, nearest-pattern matching of each
-# eleven-module group, then stop, check and the subset state machine. Both
-# reading directions and both axes are tried.
+# programming. The reader walks scan lines: sub-pixel run lengths from the
+# edges between local extrema, a start code behind a quiet zone,
+# nearest-pattern matching of each eleven-module group, then stop, check and
+# the subset state machine. Both reading directions and both axes are tried,
+# and a line that fails is tried once more through a sharpened binarizer.
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asObject, asString, fail, reverseRuns, runLengths, sampleLine, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asObject, asString, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -256,6 +257,155 @@ WIDTHS =! do ->
     out[7 * code + k] = pattern.charCodeAt(k) - 48 for k in [0...pattern.length]
   out
 
+# Run lengths of one scan line, even slots light and odd dark, from the
+# edges between local extrema: an extremum counts once the luma has swung a
+# fifth of the line's range away from the last one, and each edge sits where
+# the luma crosses the midpoint of its own valley and peak, placed between
+# samples by interpolation. Blur leaves a narrow space short of paper white
+# and print gain widens every bar; both move the midpoint crossing far less
+# than they move a fixed threshold, and the fractional positions carry
+# sub-pixel width, which two-pixel modules need. Returns the run count, zero
+# for a flat line.
+lineRuns =! (luma, count, runs) ->
+  lo = 255
+  hi = 0
+  for k in [0...count]
+    v = luma[k]
+    lo = v if v < lo
+    hi = v if v > hi
+  return 0 if hi - lo < 32
+  swing = (hi - lo) / 5
+  # Until the first swing the direction is unknown: track both extremes.
+  minV  = luma[0]
+  maxV  = luma[0]
+  minAt = 0
+  maxAt = 0
+  k = 1
+  while k < count
+    v = luma[k]
+    if v < minV
+      minV  = v
+      minAt = k
+    else if v > maxV
+      maxV  = v
+      maxAt = k
+    break if maxV - minV >= swing
+    k++
+  return 0 if k is count
+  rising = minAt < maxAt
+  n = 0
+  runs[n++] = 0 if rising    # the line opens dark
+  if rising
+    at     = minAt
+    value  = minV
+    best   = maxV
+    bestAt = maxAt
+  else
+    at     = maxAt
+    value  = maxV
+    best   = minV
+    bestAt = minAt
+  last = 0
+  # The edge between the extremum at `at` and the candidate at `bestAt`.
+  edge = ->
+    level = (value + best) / 2
+    i = at
+    if rising
+      i++ while luma[i] < level
+    else
+      i++ while luma[i] > level
+    # Cross between samples i - 1 and i.
+    a = luma[i - 1]
+    b = luma[i]
+    pos = i - 1 + (level - a) / (b - a)
+    runs[n++] = pos - last
+    last = pos
+  k++
+  while k < count
+    v = luma[k]
+    if rising
+      if v > best
+        best   = v
+        bestAt = k
+      else if v <= best - swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = false
+    else
+      if v < best
+        best   = v
+        bestAt = k
+      else if v >= best + swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = true
+    k++
+  edge() if Math.abs(best - value) >= swing
+  runs[n++] = count - last
+  n
+
+# Runs of the same line through a sharpened global threshold: a 32-bucket
+# histogram, the threshold at the valley between its two dominant peaks, and
+# each sample compared as (4c - l - r) / 2. Blur that folds a one-module
+# space into a shoulder fourteen levels high leaves no extremum for lineRuns,
+# but the sharpen doubles the shoulder and the valley threshold splits it.
+# Integer runs, even slots light; zero for a line without two peaks.
+buckets =! Int32Array.new(32)
+sharpRuns =! (luma, count, runs) ->
+  buckets.fill 0
+  buckets[luma[k] >> 3]++ for k in [0...count]
+  first     = 0
+  firstSize = 0
+  for x in [0...32]
+    if buckets[x] > firstSize
+      first     = x
+      firstSize = buckets[x]
+  second      = 0
+  secondScore = 0
+  for x in [0...32]
+    d = x - first
+    score = d * d * buckets[x]
+    if score > secondScore
+      second      = x
+      secondScore = score
+  if first > second
+    t = first
+    first  = second
+    second = t
+  return 0 if second - first <= 2
+  valley      = second - 1
+  valleyScore = -1
+  for x in [second - 1..first + 1] by -1
+    d = x - first
+    score = d * d * (second - x) * (firstSize - buckets[x])
+    if score > valleyScore
+      valley      = x
+      valleyScore = score
+  threshold = valley << 3
+  n      = 0
+  dark   = false
+  len    = 0
+  left   = luma[0]
+  center = luma[1]
+  for x in [1...count - 1]
+    right = luma[x + 1]
+    isDark = ((center << 2) - left - right) >> 1 < threshold
+    if isDark isnt dark
+      runs[n++] = len
+      len = 0
+      dark = isDark
+    len++
+    left   = center
+    center = right
+  runs[n++] = len
+  n
+
 # Eleven-module width of the six runs at `at`.
 groupWidth =! (runs, at) -> runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
 
@@ -298,9 +448,10 @@ readFrom =! (runs, n, at, start, codes) ->
       # The termination bar is two modules; accept one to four.
       bar = runs[at + 6] * 11
       return 0 if bar < width or bar > 4 * width
-      # A quiet zone of at least half a codeword, or the edge of the line,
-      # which a reversed line that opened dark carries as an empty run.
-      return 0 unless at + 7 >= n or runs[at + 7] is 0 or 2 * runs[at + 7] >= width
+      # A quiet zone of at least half a codeword, or the edge of the line:
+      # a light run that reaches the edge counts whatever its length, and a
+      # reversed line that opened dark carries the edge as an empty run.
+      return 0 unless at + 8 >= n or runs[at + 7] is 0 or 2 * runs[at + 7] >= width
       break
     at += 6
   # Start, at least one data codeword, check, stop.
@@ -371,6 +522,19 @@ decodeText =! (codes, len) ->
       lastFnc4 = false
   { text: out, gs1 }
 
+# One line's runs through both directions and polarities.
+readLine =! (runs, n, rev, codes) ->
+  # A start code and one codeword need thirteen runs.
+  return null if n < 13
+  m = reverseRuns runs, n, rev
+  for inverted in [false, true]
+    first = if inverted then 0 else 1
+    len = readRuns runs, n, codes, first
+    return { reversed: false, inverted, len } if len
+    len = readRuns rev, m, codes, first
+    return { reversed: true, inverted, len } if len
+  null
+
 # Scan lines middle-out at a stride that covers the axis in about 32 lines,
 # each sampled from the source as it is reached.
 scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
@@ -389,16 +553,11 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
     k++
     continue if line < 0 or line >= lines
     sampleLine luma, data, (if vertical then line * format.step else line * row), advance, count, format
-    n = runLengths luma, count, runs
-    # A start code and one codeword need thirteen runs.
-    continue if n < 13
-    m = reverseRuns runs, n, rev
-    for inverted in [false, true]
-      first = if inverted then 0 else 1
-      len = readRuns runs, n, codes, first
-      return { line, reversed: false, inverted, len } if len
-      len = readRuns rev, m, codes, first
-      return { line, reversed: true, inverted, len } if len
+    hit = readLine runs, lineRuns(luma, count, runs), rev, codes
+    hit = readLine runs, sharpRuns(luma, count, runs), rev, codes unless hit
+    if hit
+      hit.line = line
+      return hit
   null
 
 # First Code 128 on any scan line and where it was read; null on a miss.
@@ -407,8 +566,8 @@ export readCode128 =! (img, opts = {}) ->
   format = validateImage img, opts.format
   side  = Math.max(img.width, img.height) + 2
   luma  = Uint8Array.new(side)
-  runs  = Int32Array.new(side)
-  rev   = Int32Array.new(side)
+  runs  = Float64Array.new(side)
+  rev   = Float64Array.new(side)
   codes = []
   vertical = false
   hit = scanLines img, format, false, luma, runs, rev, codes
