@@ -1522,9 +1522,10 @@ export class QRScanner
     @timeLimit   = if init.timeLimit   is undefined then 1000 / 60 else init.timeLimit
     # Finder search skips the native layer once the shorter side exceeds
     # this; a large frame's symbols are found on the half layer and their
-    # modules still sampled from native luma.
+    # modules still sampled from native luma. Settable between frames, so
+    # a camera loop can search native every few frames.
     @nativeLimit = if init.nativeLimit is undefined then Infinity  else init.nativeLimit
-    @opts        = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit, nativeLimit: @nativeLimit }
+    @opts        = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
     @width      = 0
     @height     = 0
     @luma       = Uint8Array.new(bytes)

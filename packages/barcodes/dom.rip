@@ -129,6 +129,7 @@ canvasDefaults =! ->
   overlaySideColor:    'black'
   overlayTimeout:      500
   overlayEase:         0.3       # of the way to a lock's new corners per display frame; 1 snaps
+  nativeEvery:         1         # with nativeLimit: frames between full-resolution finder searches
   crop:                1         # aspect of the centered region scanned; null for the whole frame
   margin:              0         # fraction of that region scanned beyond each edge, where the frame has pixels
   decodeAll:           false
@@ -558,6 +559,10 @@ export class QRCanvas
   decode: (image, format, layout, size) ->
     return if @pending
     @frames++
+    # Every nativeEvery-th frame searches the native layer regardless, so a
+    # small symbol on a large frame is still found within a few frames.
+    if @opts.nativeLimit isnt undefined
+      @scanner.nativeLimit = if @frames % @opts.nativeEvery then @opts.nativeLimit else Infinity
     @bitmapDrawn         = false
     @overlayDrawn        = false
     @overlayBatch.length = 0

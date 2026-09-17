@@ -39,9 +39,10 @@ export Home = component
     catch error
       status = "Camera unavailable: #{error.message}"
       return
-    # Above 1080p a QR's finders are found at half resolution: the same
-    # reads at a quarter of the search.
-    canvas = QRCanvas.new { overlay }, async: true, nativeLimit: 1500
+    # Above 1080p a QR's finders are found at half resolution on two frames
+    # in three, and at full resolution on the third, so a small or distant
+    # code is still found within a tenth of a second.
+    canvas = QRCanvas.new { overlay }, async: true, nativeLimit: 1500, nativeEvery: 3
     armedAt = performance.now()
     describe()
     fit()
