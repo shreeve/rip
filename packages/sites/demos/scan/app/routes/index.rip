@@ -11,6 +11,7 @@ import { readPDF417 } from 'rip/barcodes/pdf417'
 export Home = component
   player  := null
   overlay := null
+  finder  := null      # the viewfinder element; the readers scan what it shows
   status  := ''        # shown only when something fails
   latest  := null
   history := []
@@ -38,10 +39,12 @@ export Home = component
     catch error
       status = "Camera unavailable: #{error.message}"
       return
-    canvas = QRCanvas.new { overlay }, cropToSquare: false, async: true
+    canvas = QRCanvas.new { overlay }, async: true
     armedAt = performance.now()
     describe()
+    fit()
     player.addEventListener 'loadedmetadata', (-> describe()), once: true
+    window.addEventListener 'resize', fit
     cancel = frameLoop (-> scan().catch (error) -> report error), player
 
   # A failure anywhere in the loop lands in the status line, since a phone
@@ -51,6 +54,10 @@ export Home = component
     return if failed is error.message
     failed = error.message
     status = "Error: #{error.message}"
+
+  # Scan only the part of the frame the viewfinder shows.
+  fit: ->
+    canvas.cropTo finder.clientWidth / finder.clientHeight if finder?.clientHeight
 
   # What the track settled on, and the controls it offers.
   describe: ->
@@ -145,6 +152,7 @@ export Home = component
   beforeUnmount: ->
     cancel?()
     camera?.stop()
+    window.removeEventListener 'resize', fit
 
   render
     div class: 'stats'
@@ -154,7 +162,7 @@ export Home = component
       span "reads #{reads}/#{frames}"
       span (if firstMs? then "first #{(firstMs / 1000).toFixed 2} s" else 'no read yet')
     p class: 'status', status if status
-    div class: 'viewfinder'
+    div class: 'viewfinder', ref: finder
       video ref: player, playsinline: true, muted: true
       canvas ref: overlay
       div class: 'aimer'

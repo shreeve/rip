@@ -255,7 +255,11 @@ cancel = frameLoop ->
     camera.stop()
 ```
 
-`QRCanvas` decodes frames through one reusable scanner and paints a lock
+`QRCanvas` decodes frames through one reusable scanner, scanning the
+largest centered region of the frame with the aspect ratio `crop` gives
+(1 by default; `null` scans the whole frame, and `canvas.cropTo! aspect`
+changes it later, so a page scans exactly what its viewfinder shows and
+the copy out of the video frame stays that small), and paints a lock
 around a decoded symbol (a tinted, bracketed outline in `overlayColor`, or
 `overlayFailedColor` with `drawFailed` for a symbol found but not read),
 the decoded symbol, or the binarized plane onto the canvases it is given;

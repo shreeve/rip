@@ -75,6 +75,20 @@ traceRoundedQuad =! (context, points, radius) ->
     context.quadraticCurveTo points[pos].x, points[pos].y, starts[pos].x, starts[pos].y
   context.closePath()
 
+# The largest centered region of a frame with `aspect` (width over height),
+# its edges kept on the planes' subsampling grid.
+cropRect =! (width, height, aspect, xShift = 0, yShift = 0) ->
+  w = width
+  h = height
+  if width / height > aspect then w = Math.round(height * aspect) else h = Math.round(width / aspect)
+  w -= w % (1 << xShift)
+  h -= h % (1 << yShift)
+  x  = (width  - w) >> 1
+  y  = (height - h) >> 1
+  x -= x % (1 << xShift)
+  y -= y % (1 << yShift)
+  { x, y, width: w, height: h }
+
 # ==[ Overlay identity ]==
 
 OVERLAY_SWITCH_FRAMES =! 3
@@ -111,7 +125,7 @@ canvasDefaults =! ->
   overlayFailedColor:  '#f87171'
   overlaySideColor:    'black'
   overlayTimeout:      500
-  cropToSquare:        true
+  crop:                1         # aspect of the centered region scanned; null for the whole frame
   decodeAll:           false
   async:               false
   drawFailed:          false
@@ -181,7 +195,7 @@ export class QRCanvas
         @task?.abort()
         @task = undefined
         if @pending then @cleanPending = true else @scanner.clean()
-      crop:  @opts.cropToSquare
+      crop:  @opts.crop
       luma:  @scanner.luma
       busy:  => !!@pending
       frame: @opts.onVideoFrame
@@ -365,14 +379,13 @@ export class QRCanvas
     height = @overlay.canvas.height
     width  = @overlay.canvas.width
     unless append
-      if @opts.cropToSquare and height isnt width
-        cropWidth  = @inputWidth  or Math.min(height, width)
-        cropHeight = @inputHeight or Math.min(height, width)
-        x = if @inputWidth  then @sourceX else Math.floor((width - cropWidth) / 2)
-        y = if @inputHeight then @sourceY else Math.floor((height - cropHeight) / 2)
-        if @rotate and @inputWidth
-          # The crop rect was applied to coded pixels; rotate it into player coordinates.
-          [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth]
+      cropWidth  = @inputWidth
+      cropHeight = @inputHeight
+      x = @sourceX
+      y = @sourceY
+      # The crop rect was applied to coded pixels; rotate it into player coordinates.
+      [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth] if @rotate
+      if cropWidth and cropHeight and (cropWidth isnt width or cropHeight isnt height)
         ctx.clearRect x, y, cropWidth, cropHeight
         ctx.fillStyle = @opts.overlaySideColor
         right  = x + cropWidth
@@ -520,12 +533,11 @@ export class QRCanvas
   drawImage: (image, height, width) ->
     @rotate       = false
     @sourceHeight = height
-    side = Math.min width, height
-    cropped = @opts.cropToSquare and width isnt height
-    inputWidth  = if cropped then side else width
-    inputHeight = if cropped then side else height
-    @sourceX = if cropped then (width - side) >> 1 else 0
-    @sourceY = if cropped then (height - side) >> 1 else 0
+    rect = if @opts.crop then cropRect(width, height, @opts.crop) else { x: 0, y: 0, width, height }
+    inputWidth  = rect.width
+    inputHeight = rect.height
+    @sourceX     = rect.x
+    @sourceY     = rect.y
     @inputWidth  = inputWidth
     @inputHeight = inputHeight
     # The working canvas holds only the selected source rect; the overlay
@@ -535,6 +547,12 @@ export class QRCanvas
     {context} = @main
     context.drawImage image, -@sourceX, -@sourceY, width, height
     @decode context.getImageData(0, 0, inputWidth, inputHeight)
+
+  # Scan a different centered region from the next frame on, such as the
+  # part of the frame a viewfinder shows.
+  cropTo!: (aspect) ->
+    @opts.crop   = aspect
+    @reader.crop = aspect
 
   clear!: ->
     @reader.clean()
@@ -649,19 +667,18 @@ export class QRCamera
     sourceHeight = height
     sourceX      = 0
     sourceY      = 0
-    if reader.crop and width isnt height
-      side = Math.min width, height
+    if reader.crop
       xShift = 0
       yShift = 0
       for plane in planes
         xShift = Math.max xShift, plane[0]
         yShift = Math.max yShift, plane[1]
-      side -= side % (1 << Math.max(xShift, yShift))
-      sourceWidth = sourceHeight = side
-      sourceX = (width - side) >> 1
-      sourceY = (height - side) >> 1
-      sourceX -= sourceX % (1 << xShift)
-      sourceY -= sourceY % (1 << yShift)
+      # The aspect is the player's; coded pixels of a portrait stream lie sideways.
+      rect = cropRect width, height, (if rotate then 1 / reader.crop else reader.crop), xShift, yShift
+      sourceWidth  = rect.width
+      sourceHeight = rect.height
+      sourceX      = rect.x
+      sourceY      = rect.y
     @rect.x      = (visible?.x or 0) + sourceX
     @rect.y      = (visible?.y or 0) + sourceY
     @rect.width  = sourceWidth
