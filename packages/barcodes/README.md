@@ -165,8 +165,11 @@ axis line with enough runs for a symbol yet does not read, and its tilt
 shows as a shift of the bar pattern between that line and one six lines
 over, so the reader correlates the two, reads along the estimated
 direction through the crossing, and so reads a label at any angle for a
-fraction of a millisecond more per frame. `tilt: false` reads the axes
-only.
+fraction of a millisecond more per frame. A label leaning a little still
+reads on an axis line; its lean is measured the same way from that line
+and the corners tracked along it, since across a wide label few axis
+lines read and a fit through them alone cannot tell the lean. `tilt:
+false` reads the axes only.
 Modules must be at least one pixel wide; a printed label filling a quarter
 of a camera frame is plenty.
 

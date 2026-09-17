@@ -599,6 +599,7 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
 # axis line crossed the bars.
 
 TILT_GAP    =! 6              # lines between the pair
+TILT_WIDE   =! 24             # the pair around a line that read: leaning less
 TILT_SHIFT  =! 17             # widest shift tried: the gap times tan(70°)
 TILT_WINDOW =! 1024           # widest stretch of the line correlated
 TILT_LINES  =! 4              # candidate lines tried per axis pass
@@ -697,52 +698,67 @@ barShift =! (luma, luma2, lo, hi) ->
 
 sides =! { near: Uint8Array.new(0), far: Uint8Array.new(0) }
 
-# Read along the estimated tilt through the candidate lines of one axis
-# pass, best score first.
-scanTilt =! (img, format, vertical, luma, runs, rev, codes) ->
+# The tilt of the bars crossing an axis line at `line` around `center`,
+# from their shift on the lines `gap` apart to either side, or NaN when
+# the two shifts are weak or disagree. A wider gap resolves the angle
+# finer but needs the label taller than the pair. Leaves `luma` holding
+# the line. Returns the scan angle: the bars' normal, which the vertical
+# pass turns a quarter turn. `lean.mid` is where along the line the match
+# centered.
+lean =! { mid: 0 }
+tiltAt =! (img, format, vertical, line, center, luma, gap = TILT_GAP) ->
   {width, height, data} = img
   lines   = if vertical then width  else height
   count   = if vertical then height else width
   row     = width * format.step
   advance = if vertical then row else format.step
-  stride  = Math.max 1, lines >> 5
+  return NaN if line < gap or line + gap >= lines
   if sides.near.length < count
     sides.near = Uint8Array.new count
     sides.far  = Uint8Array.new count
   {near, far} = sides
+  at = (l) -> if vertical then l * format.step else l * row
+  sampleLine luma, data, at(line),       advance, count, format
+  sampleLine near, data, at(line + gap), advance, count, format
+  sampleLine far,  data, at(line - gap), advance, count, format
+  # The stretch of the line around the densest edges.
+  lo = Math.max TILT_SHIFT, Math.round(center - (TILT_WINDOW >> 1))
+  hi = Math.min count - TILT_SHIFT - 1, lo + TILT_WINDOW
+  lo = Math.max TILT_SHIFT, hi - TILT_WINDOW
+  return NaN if hi - lo < 64
+  up   = barShift luma, near, lo, hi
+  upC  = peak.center
+  down = barShift luma, far, lo, hi
+  return NaN if Number.isNaN(up) or Number.isNaN(down)
+  # The pattern moves back as much on the far side as forward on the near.
+  return NaN if Math.abs(up + down) > 1.5
+  s = (up - down) / 2
+  lean.mid = (upC + peak.center) / 2
+  # Bars run along (-s, gap) across the axis line; the scan direction is
+  # its normal.
+  if vertical then Math.atan2(gap, s) else Math.atan2(s, gap)
+
+# The offset of the line along `angle` through the point (`line`, `mid`)
+# of an axis pass.
+offsetAt =! (img, vertical, line, mid, angle) ->
+  px = (if vertical then line else mid) - img.width  / 2
+  py = (if vertical then mid else line) - img.height / 2
+  py * Math.cos(angle) - px * Math.sin(angle)
+
+# Read along the estimated tilt through the candidate lines of one axis
+# pass, best score first.
+scanTilt =! (img, format, vertical, luma, runs, rev, codes) ->
+  lines  = if vertical then img.width else img.height
+  stride = Math.max 1, lines >> 5
   candidates.sort (a, b) -> b[0] - a[0]
   tried = 0
   for [score, line, center] in candidates
     break if tried is TILT_LINES
     continue if line < TILT_GAP or line + TILT_GAP >= lines
     tried++
-    at = (l) -> if vertical then l * format.step else l * row
-    sampleLine luma, data, at(line),            advance, count, format
-    sampleLine near, data, at(line + TILT_GAP), advance, count, format
-    sampleLine far,  data, at(line - TILT_GAP), advance, count, format
-    # The stretch of the line around the densest edges.
-    lo = Math.max TILT_SHIFT, Math.round(center - (TILT_WINDOW >> 1))
-    hi = Math.min count - TILT_SHIFT - 1, lo + TILT_WINDOW
-    lo = Math.max TILT_SHIFT, hi - TILT_WINDOW
-    continue if hi - lo < 64
-    up   = barShift luma, near, lo, hi
-    upM  = peak.match
-    upC  = peak.center
-    down = barShift luma, far, lo, hi
-    continue if Number.isNaN up
-    continue if Number.isNaN down
-    # The pattern moves back as much on the far side as forward on the near.
-    continue if Math.abs(up + down) > 1.5
-    s = (up - down) / 2
-    mid = (upC + peak.center) / 2
-    # Bars run along (-s, gap) across the axis line; the scan direction is
-    # its normal, which the vertical pass turns a quarter turn.
-    angle = if vertical then Math.atan2(TILT_GAP, s) else Math.atan2(s, TILT_GAP)
-    dx = Math.cos angle
-    dy = Math.sin angle
-    px = (if vertical then line else mid) - width  / 2
-    py = (if vertical then mid else line) - height / 2
-    o  = -px * dy + py * dx
+    angle = tiltAt img, format, vertical, line, center, luma
+    continue if Number.isNaN angle
+    o = offsetAt img, vertical, line, lean.mid, angle
     for k in [0, 1, -1]
       hit = readAt img, format, angle, o + k * (stride >> 2), luma, runs, rev, codes
       if hit
@@ -894,6 +910,25 @@ export readCode128 =! (img, opts = {}) ->
     candidates.length = 0
     hit = scanLines img, format, true, luma, runs, rev, codes
     hit = scanTilt img, format, true, luma, runs, rev, codes if tilt and not hit
+  if hit and hit.angle is undefined
+    # An axis line reads a label leaning up to about fifteen degrees, and
+    # a tall one further still. Its lean, measured as the tilt passes do
+    # but over a wider pair for a finer angle, turns the hit onto a line
+    # along the bars when that line reads the same symbol, so the corners
+    # follow the bars.
+    if tilt
+      more  = []
+      mid   = (hit.from + hit.to) / 2
+      angle = tiltAt img, format, vertical, hit.line, mid, luma, TILT_WIDE
+      angle = tiltAt img, format, vertical, hit.line, mid, luma if Number.isNaN angle
+      axis  = if vertical then Math.PI / 2 else 0
+      if not Number.isNaN(angle) and Math.abs(angle - axis) >= 0.005
+        o = offsetAt img, vertical, hit.line, mid, angle
+        h = readAt img, format, angle, o, luma, runs, rev, more
+        if h and h.len is hit.len and more.every((code, k) -> code is codes[k])
+          h.angle = angle
+          h.o     = o
+          hit     = h
   if hit and hit.angle is undefined
     # The hit in the shared geometry: its row or column as an offset from
     # the center line, and its span as distances along the line.

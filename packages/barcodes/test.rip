@@ -530,6 +530,39 @@ test "round trips: scales, rotations, inversion, GS1", ->
   eq hit.text,     'Wikipedia'
   eq hit.inverted, true
 
+# `img` turned counterclockwise by `degrees` about its center, sampled
+# bilinearly, as a lens delivers a turned label: smooth edges, not the
+# staircase of nearest pixels. Square images only.
+turn =! (img, degrees) ->
+  size   = img.width
+  angle  = degrees * Math.PI / 180
+  c      = size / 2
+  turned = { width: size, height: size, data: Uint8Array.new(size * size * 4).fill(240) }
+  at     = (x, y) -> img.data[4 * (y * size + x)]
+  for y in [0...size]
+    for x in [0...size]
+      dx = x - c
+      dy = y - c
+      sx = c + dx * Math.cos(angle) + dy * Math.sin(angle)
+      sy = c - dx * Math.sin(angle) + dy * Math.cos(angle)
+      continue unless sx >= 0 and sx < size - 1 and sy >= 0 and sy < size - 1
+      x0 = sx | 0
+      y0 = sy | 0
+      fx = sx - x0
+      fy = sy - y0
+      v  = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
+      q  = 4 * (y * size + x)
+      turned.data[q] = turned.data[q + 1] = turned.data[q + 2] = Math.round v
+  turned
+
+# The quad's start edge leans by `degrees` and spans `height`.
+leans =! (hit, degrees, height) ->
+  [tl, tr, br, bl] = hit.corners
+  edge = Math.atan2 bl.x - tl.x, bl.y - tl.y
+  span = Math.hypot bl.x - tl.x, bl.y - tl.y
+  ok Math.abs(edge + degrees * Math.PI / 180) < 0.03, "#{degrees} degrees: edge leans #{(-edge * 180 / Math.PI).toFixed 1}"
+  ok Math.abs(span - height) < 10, "#{degrees} degrees: height #{span.toFixed 1}"
+
 test "corners span the bars and follow a tilt", ->
   img = bars 'Wikipedia', {}, 2, 500, 300
   hit = readCode128 img
@@ -541,38 +574,25 @@ test "corners span the bars and follow a tilt", ->
   ok Math.abs(Math.min(...xs) - hit.from) < 1 and Math.abs(Math.max(...xs) - hit.to) < 1, 'width'
   ok Math.abs(Math.min(...eys) - ys[0]) <= 4 and Math.abs(Math.max(...eys) - ys.at(-1) - 1) <= 4, "height #{Math.min(...eys)}..#{Math.max(...eys)} vs #{ys[0]}..#{ys.at(-1)}"
   # A taller label turned counterclockwise: to twelve degrees a row still
-  # crosses every bar, beyond that only the diagonal sweep reads it. The
+  # crosses every bar, beyond that only the tilt estimate reads it. The
   # start edge leans left going down by the angle, and the quad spans the
   # label's full height, not just the lines that read.
   img = bars 'Wikipedia', {}, 3, 700, 700, false, 0, 120
   for degrees in [5, 12, 30, 45, 60, 75]
-    angle  = degrees * Math.PI / 180
-    turned = { width: 700, height: 700, data: Uint8Array.new(700 * 700 * 4).fill(240) }
-    # Sampled bilinearly, as a lens delivers a turned label: smooth edges,
-    # not the staircase of nearest pixels.
-    for y in [0...700]
-      for x in [0...700]
-        dx = x - 350
-        dy = y - 350
-        sx = 350 + dx * Math.cos(angle) + dy * Math.sin(angle)
-        sy = 350 - dx * Math.sin(angle) + dy * Math.cos(angle)
-        continue unless sx >= 0 and sx < 699 and sy >= 0 and sy < 699
-        x0 = sx | 0
-        y0 = sy | 0
-        fx = sx - x0
-        fy = sy - y0
-        at = (xx, yy) -> img.data[4 * (yy * 700 + xx)]
-        v  = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
-        turned.data[4 * (y * 700 + x)] = turned.data[4 * (y * 700 + x) + 1] = turned.data[4 * (y * 700 + x) + 2] = Math.round v
-    hit = readCode128 turned
+    turned = turn img, degrees
+    hit    = readCode128 turned
     eq hit?.text, 'Wikipedia', "#{degrees} degrees"
     # The axes alone read within about fifteen degrees of either one.
     eq readCode128(turned, tilt: false)?.text, (if degrees <= 12 or degrees >= 75 then 'Wikipedia' else undefined), "#{degrees} degrees, axes only"
-    [tl, tr, br, bl] = hit.corners
-    edge   = Math.atan2 bl.x - tl.x, bl.y - tl.y
-    height = Math.hypot bl.x - tl.x, bl.y - tl.y
-    ok Math.abs(edge + angle) < 0.03, "#{degrees} degrees: edge leans #{(edge * 180 / Math.PI).toFixed 1}"
-    ok Math.abs(height - 120) < 10, "#{degrees} degrees: height #{height.toFixed 1}"
+    leans hit, degrees, 120
+  # A wide, short label at a shallow lean: a row still reads it, yet only
+  # one or two rows do, too few for a fit through them to find the lean.
+  # The corners must lean with the bars all the same.
+  img = bars 'DR2039', {}, 5, 700, 700, false, 0, 130
+  for degrees in [4, 8, 12, 16, 20]
+    hit = readCode128 turn(img, degrees)
+    eq hit?.text, 'DR2039', "wide #{degrees} degrees"
+    leans hit, degrees, 130
 
 test "text: shifts, FNC4 high characters, latches", ->
   text =! (codes) -> c128.decodeText(codes, codes.length).text
