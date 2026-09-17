@@ -20,9 +20,9 @@ export DialogTrigger = component extends button
 # waits a microtask. Firefox and WebKit hide a closed dialog at once, so
 # close() waits for the exit animations, and Escape closes through the cell.
 #
-# TODO: wrap Tab and Shift+Tab at the popup's ends, per the WAI-ARIA modal
-# dialog pattern; showModal keeps focus off the page but lets it reach the
-# browser's own UI.
+# TODO: wrap Tab and Shift+Tab at the popup's ends (WAI-ARIA modal dialog pattern).
+# TODO: let the app see a close's reason and cancel it, for close confirmation.
+# TODO: tell the app when a close has finished, after the exit animations.
 export DialogPopup = component extends dialog
   accept open
   accept labelledBy
