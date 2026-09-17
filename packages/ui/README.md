@@ -2,184 +2,64 @@
 
 # Rip UI
 
-> **First-party UI infrastructure — email components, shared utilities, and Tailwind compilation.**
+> **Unstyled, composable UI components built on native browser features.**
 
-Named-export surfaces for browser and email UI. Ownership is split so each
-boundary stays clear:
+One exported part per concept, unstyled, composed by the application, with state exposed as data attributes. A root owns its state cell and offers it; the parts projected into it accept it and write it; a parent binds the cell with `<=>` only when it needs to observe or drive it. Each part `extends` the tag it renders, so the application's classes and attributes land on the real element.
 
-- `email/` — synchronous server-side email DOM, rendering, and components
-- `shared/` — utilities genuinely shared by browser and email surfaces
-- `tailwind/` — the sole boundary for Tailwind compilation and CSS parsing
+**Runtime:** browser-safe (`rip.browser: true`). `ui.rip` is the entry; each component is one file beside it.
 
-**Runtime:** email rendering is server-side (Bun); `browser/` and `shared/`
-are for browser consumers. Dependency budget is `css-tree` and `tailwindcss`
-(exact pins in this package's `package.json`; the repo-root `bun.lock` owns
-resolution under the hoisted workspace). The Rip compiler itself remains
-dependency-free.
-
-## Email
-
-Applications import the component catalog and renderers from the single public
-entry point:
+## Quick Start
 
 ```coffee
-import {
-  toHTML
-  Email, Head, Body, Preview, Container
-  Heading, Text, Link, Divider
-} from 'rip/ui/email'
+import { Dialog, DialogTrigger, DialogPopup, DialogTitle, DialogDescription, DialogClose } from 'rip/ui'
 
-WelcomeEmail = component
-  @name =! 'World'
+Orders = component
+  confirming := false
   render
-    Email
-      Head
-      Preview text: 'Welcome aboard'
-      Body
-        Container
-          Heading "Welcome, #{@name}!"
-          Text 'Thanks for signing up.'
-          Link href: 'https://example.com'
-            'Get started'
-          Divider
-          Text 'See you soon.'
-
-html = toHTML WelcomeEmail, name: 'Alice'
+    Dialog open <=> confirming
+      DialogTrigger class: 'btn', 'Delete order'
+      DialogPopup class: 'rounded-lg p-6 backdrop:bg-black/40'
+        DialogTitle 'Delete this order?'
+        DialogDescription 'This cannot be undone.'
+        DialogClose class: 'btn', 'Cancel'
+        button class: 'btn-danger', @click: (-> remove(); confirming = false), 'Delete'
 ```
 
-`rip/ui/email/dom`, `/compat`, and `/render` expose focused substrate
-APIs for framework and tooling code. Application email templates should use
-`rip/ui/email`.
+The `open <=> confirming` binding is optional. A dialog nobody observes is the same tree with no props on the root.
 
-### Styles
+## Dialog
 
-Every component's `style` takes a string or an object, and so does a native
-tag inside a render block. The object's keys are camelCased CSS property
-names, closed over the ones the DOM library knows (a misspelled key is a type
-error with a suggestion), plus `--custom` properties. Values are written as
-given: no unit is appended, so a number is admitted only on the properties
-CSS reads bare, such as `lineHeight`, `opacity`, and `zIndex`, and as `0`
-anywhere. `fontSize: 14` is a type error; `fontSize: '14px'` is the spelling.
+Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives the top layer, modality, an inert background, Escape, focus containment, and focus restore to the trigger. No JavaScript positioning or focus trap ships. Containment is not wrapping: past the last focusable, Chromium and WebKit hand focus to the browser's own chrome and the next Tab re-enters the dialog, and Firefox leaves focus where it is; focus never reaches page content outside the modal on any of them.
 
-A component merges its own defaults under the caller's style by key, in
-either spelling, so a caller's `margin` beats the default `margin`:
+- `Dialog` — the root. Owns `open` (default `false`) and renders only its children.
+- `DialogTrigger` — a `<button>` that opens it. Carries `aria-haspopup="dialog"`, `aria-expanded`, and `data-popup-open` while open.
+- `DialogPopup` — the `<dialog>`. Carries `data-open` while open and `data-closed` otherwise, and `aria-labelledby` and `aria-describedby` pointing at the title and description parts when they are present. Carries `closedby="any"` unless the consumer passes its own, so a click on the backdrop closes it as Escape does; `closedby: 'closerequest'` keeps Escape only. Stable Safari and every iOS browser ignore the attribute, so the popup itself closes on a press that starts and ends on the backdrop while the value is `any` and refuses Escape while it is `none`; those handlers go when Safari ships `closedby`. Escape is canceled and writes the cell, and the element's own `close` event writes it too, so Escape, a backdrop click, a close part, and a programmatic close all read the same. Closing keeps the `<dialog>` open and modal until the popup's own animations finish, then calls `close()`, so an exit transition plays on every engine.
+- `DialogTitle` — an `<h2>` with a minted id, or the `id` you pass.
+- `DialogDescription` — a `<p>` with a minted id, or the `id` you pass.
+- `DialogClose` — a `<button>` that closes it.
 
-```coffee
-import type { CSSProperties } from 'rip/ui/email'
+The attributes are present while true and absent otherwise, so Tailwind's `data-open:` and `data-popup-open:` variants style them directly.
 
-styles: Record<string, CSSProperties> =
-  section: { background: '#fff', border: '1px solid #e5e5e5', borderRadius: '12px', padding: '32px' }
-  text: { color: '#262626', fontSize: '15px', lineHeight: '22px', margin: 0 }
+The document does not scroll while a modal dialog is open, with nothing in the application's stylesheet. A modal already holds a scroller behind it still, but not the document's own scroll or its overscroll bounce, so loading the package adopts one stylesheet for the document, `:root:has(dialog:modal) { overflow: hidden; }`. The rule has only the `:has()` selector's specificity, so any rule of the application's overrides it. `:has()` does not see into a shadow root, so a popup rendered inside one does not lock the document.
 
-Section style: styles.section
-  Text style: styles.text
-    'Hello'
-```
+The transitions stay with the application's stylesheet. They key on `data-open`, never on `[open]`, which stays set through the exit: `@starting-style` for the entry and the attribute's removal for the exit. In Tailwind that is `opacity-0 transition-opacity data-open:opacity-100 starting:data-open:opacity-0`. Discrete transitions on `display` and `overlay` do not substitute: Firefox and WebKit hide a closed dialog at once regardless. The close waits on the popup's own animations and not its `::backdrop`'s, so a backdrop transition longer than the popup's is cut off when the dialog closes.
 
-`mergeStyles` and `parseStyle` are exported for a layout's own components
-that wrap these. Outlook's `mso-*` properties are not DOM properties, so
-they are spelled in the string form.
+## Drawer
 
-### Where a style lands
+`Drawer` is the Dialog with a side. The root offers `open` and `side` (`left` by default, or `right`, `top`, `bottom`), and `DrawerTrigger`, `DrawerTitle`, `DrawerDescription`, and `DrawerClose` are the Dialog parts. `DrawerPopup` is the `<dialog>` with everything `DialogPopup` carries, plus `data-side`, and a swipe: a press inside the panel that travels toward its side drags the panel along with the transition off, and releasing past a quarter of the panel's size or with speed closes it, while a shorter release lets the transition carry it back. The pointer is captured once a drag is past the slop, so a link under a swipe is not clicked when it ends. The swipe runs for every pointer type, mouse included, and only while `closedby` is `any`. The panel's placement and slide are the consumer's classes, as the demo shows; the popup sets `touch-action` along the other axis so content inside still scrolls. A slide built from Tailwind's `translate-x-*` or `translate-y-*` utilities needs the other axis set on the element too (`translate-y-0` for a left or right drawer, `translate-x-0` for a top or bottom one): WebKit does not substitute an unset registered property's initial value inside `@starting-style`, so without it the entry transition starts from `translate: none` and the panel appears without sliding.
 
-`Body`, `Container`, and `Section` each render a table with one cell, and
-a `style` on any of them is split between the two. Padding lands on the
-cell: Outlook and Klaviyo drop padding on a table and honor it on a `td`.
-Everything else stays on the table. `Body` also carries its background on
-the `body` element, so the ground fills the viewport past the content, and
-zeroes that element's margin always and its padding whenever the style sets
-one, since the cell carries the box:
-
-```coffee
-Section style: 'background:#eee;padding:20px 8px'
-# <table style="background:#eee" …><tbody><tr><td style="padding:20px 8px">
-```
-
-A template that styles padding on `Container` or `Section` renders that
-padding on the cell, not the table.
-
-Email rendering is synchronous. The default Tailwind configuration is prepared
-when the package loads. Prepare a custom configuration once before passing the
-same object to `Tailwind`:
-
-```coffee
-import { prepareConfig } from 'rip/ui/tailwind'
-import { Tailwind, Text, toHTML } from 'rip/ui/email'
-
-config = theme: extend: colors: brand: '#123456'
-prepareConfig! config
-
-BrandedEmail = component
-  render
-    Tailwind config: config
-      Text class: 'text-brand', 'Prepared once, rendered synchronously.'
-
-html = toHTML BrandedEmail
-```
-
-## Preview and export (`rip email`)
-
-`rip email` is the package's CLI, the counterpart of react-email's
-`email dev`. A template is a `.rip` file under a directory that exports
-one component; its address is the file path without the extension. The
-directory defaults to `./emails`, or to the current directory when that
-is itself named `emails`; it is never the bare current directory, since
-from a project root that would import every `.rip` file in the tree.
+## Demo
 
 ```bash
-rip email dev api/emails                       # live preview at https://email.local/
-rip email dev api/emails --open                # --open launches the browser
-rip email dev api/emails --host mail.local     # another name, if email.local is taken (.local, .via.rip, or .localhost)
-rip email export api/emails --out out --text   # out/<file>.html and .txt
+bun run demo
 ```
 
-`dev` runs the preview as a Rip Site under the edge, so Janus must be
-running, as it is wherever a Rip app is served. The launcher writes a
-transient project whose app is this package's page and whose entry is
-this package's API, runs the Sites manager on it in the foreground, and
-removes the project when the manager exits.
-
-A file led by an underscore is shared by templates and is not one:
-`_layout.rip` holds the layout and the vocabulary the emails are written
-in, the same convention the app router uses for its layouts.
-
-The preview page lists every template, shows it as an inbox row above
-the rendered message at desktop or mobile width, in light or a forcing
-client's dark mode, and can show the plain-text twin or the raw HTML. A
-save under the template directory refetches the page in place; an edit
-to the page's own source hot-reloads through the manager.
-
-A `subject` static, a function of the same props, gives the message's
-subject line; the preview shows it in an inbox row above the message, and
-an application's mailer can read it so the envelope and the body never
-disagree:
-
-```coffee
-SignInCode.subject = (props) -> "Use code #{props.code} to sign in"
-```
-
-A `previewProps` static on the component supplies the props previews
-and exports render with; without one the component's defaults apply:
-
-```coffee
-export SignInCode = component
-  @code: string := ''
-  render
-    ...
-
-SignInCode.previewProps = code: '482913'
-```
-
-Every listing and render runs in a fresh child process, so a save is
-seen whole — edits to modules a template imports included — and a
-template that throws shows its error in place of the frame. The bin is
-`email/cli.rip` itself (`rip-email`); `rip email` reaches it from any
-directory.
+`demo/` is a Sites project: the manager serves it under the edge at https://ui.local/ with live update on save, one route per component, styled with Tailwind classes through the vendored browser runtime.
 
 ## Test
 
-```sh
+```bash
 bun run test
 ```
 
-Root battery rows exercise package/compiler/runtime integration.
+Playwright specs in `test/browser/` drive the demo on Chromium, Firefox, and WebKit, on a server of their own that the config starts, or on the running Sites instance with `RIP_UI_URL=https://ui.local/ bun run test`. They assert platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes and focus returns to the trigger, focus stays contained past either end, and the document does not scroll while a modal is open.

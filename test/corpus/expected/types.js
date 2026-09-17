@@ -24,6 +24,8 @@ let total = (((clamp(12) + scale(2, 9, 9)) + pair()) + double(4)) + pick(1);
 let cast1 = total;
 let cast2 = cast1 + 1;
 let list = [1, 2, 3];
+let checked1 = {a: 1, b: 2};
+let checked2 = cast1 + 1;
 let sum = 0;
 for (let n of list) {
   sum += n;

@@ -143,6 +143,11 @@ const CLEAN_ROWS = [
     // casts: the assertion reaches the checker — `items`
     // evolves to string[] from the cast, so the member chain types
  'raw = JSON.parse("[]")\nitems = raw as string[]\nk = items[0].length\nk = 2',
+    // satisfies: the check leaves the value's own type standing —
+    // the key stays a known member and a literal field against a
+    // literal union keeps its literal type, where a `Record<string,
+    // Entry>` annotation would widen both
+ 'type Path = "/d" | "/e"\ntype Entry = { href: Path, name: string }\nentries = { dialog: { href: "/d", name: "Dialog" } } satisfies Record<string, Entry>\nn: number = entries.dialog.name.length\nhere: "/d" = entries.dialog.href\nn = 2',
     // TS directive comments: each row carries a REAL violation
     // beneath its directive, so a clean check proves the directive
     // landed on the diagnostic-bearing line (the self-checking
@@ -387,6 +392,21 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
       expect(status, `tsc accepted a violated return annotation:\n${faced.code}`).not.toBe(0);
       expect(output).toContain('TS2322');
     }
+  }, TSC_TIMEOUT);
+
+  test('satisfies has teeth: a missing field FAILS the check (TS2741) and a misspelled key stays a miss (TS2551)', () => {
+    // `as Entry` would let the missing field through; `satisfies`
+    // reports it, on the value's own line.
+    const missing = compile('type Entry = { href: string, name: string }\nx = { href: "/a" } satisfies Entry\n', { runtimeDelivery: 'none', face: 'ts' });
+    const mismatch = tscRun({ 'mod.ts': `${missing.code}\nexport {};\n` });
+    expect(mismatch.status).not.toBe(0);
+    expect(mismatch.output).toContain('mod.ts(2,');
+    expect(mismatch.output).toContain('TS2741');
+    // no key union in the type, and the checker still knows the keys
+    const typo = compile('type Entry = { href: string, name: string }\nentries = { dialog: { href: "/d", name: "Dialog" } } satisfies Record<string, Entry>\nk = entries.dailog\n', { runtimeDelivery: 'none', face: 'ts' });
+    const miss = tscRun({ 'mod.ts': `${typo.code}\nexport {};\n` });
+    expect(miss.status).not.toBe(0);
+    expect(miss.output).toContain('TS2551');
   }, TSC_TIMEOUT);
 
   test('casts have teeth: an `as` assertion the erased face would hide FAILS the check (TS2322)', () => {

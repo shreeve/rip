@@ -119,6 +119,20 @@ const PAIRS = [
   ['y = x as typeof w', 'y = x'],
   ['s = "a as b"', 's = "a as b"'],
   ['w = "#{n as T}"', 'w = "#{n}"'],
+  // satisfies: the same erasure as the cast, from the same token shape
+  ['y = x satisfies MyType', 'y = x'],
+  ['y = x satisfies Map<K, V>\ny2 = 3', 'y = x\ny2 = 3'],
+  ['y = { a: 1 } satisfies Record<string, number>', 'y = { a: 1 }'],
+  ['y = (f 1) satisfies A as B', 'y = (f 1)'],
+  ['y = x as unknown satisfies T', 'y = x'],
+  ['z = a satisfies N + 1', 'z = a + 1'],
+  ['y = [1, x satisfies T, 2]', 'y = [1, x, 2]'],
+  ['y = f a satisfies T, b', 'y = f a, b'],
+  ['y = x satisfies T if c', 'y = x if c'],
+  ['y = a ? x satisfies T : b', 'y = a ? x : b'],
+  ['satisfies = 2', 'satisfies = 2'],
+  ['o = { satisfies: 1 }', 'o = { satisfies: 1 }'],
+  ['s = "a satisfies b"', 's = "a satisfies b"'],
   ['abc = do (x: number = 5) -> x', 'abc = do (x = 5) -> x'],
   // composition: typed everything at once
   [
@@ -155,7 +169,7 @@ describe('sexpr erasure: a typed program parses to its stripped twin\'s tree', (
     return x.map(canon);
   };
   for (const [typed, plain] of PAIRS) {
-    if (typed.includes(' as ')) continue; // casts are REAL nodes on both sides
+    if (typed.includes(' as ') || typed.includes(' satisfies ')) continue; // casts and satisfies are REAL nodes on both sides
     test(JSON.stringify(typed), () => {
       const t = parser.parse(typed);
       const p = parser.parse(plain);
@@ -255,7 +269,7 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
   });
 });
 
-describe('token fixtures: TYPE/CAST tokens carry the annotation extent', () => {
+describe('token fixtures: TYPE/CAST/SATISFIES tokens carry the annotation extent', () => {
   const kinds = (src) => tokenize(src).tokens.map((t) => `${t.kind}`).join(' ');
   const find = (src, kind) => tokenize(src).tokens.find((t) => t.kind === kind);
 
@@ -282,6 +296,24 @@ describe('token fixtures: TYPE/CAST tokens carry the annotation extent', () => {
   test('generic cast at line end: the scanner-suppressed TERMINATOR is restored', () => {
     const toks = tokenize('y = x as Map<K, V>\ny2 = 3').tokens.map((t) => t.kind);
     expect(toks).toEqual(['IDENTIFIER', '=', 'IDENTIFIER', 'CAST', 'TERMINATOR', 'IDENTIFIER', '=', 'NUMBER']);
+  });
+
+  test('satisfies: `satisfies Type` collapses to one SATISFIES token from the word through the type', () => {
+    expect(kinds('y = x satisfies MyType')).toBe('IDENTIFIER = IDENTIFIER SATISFIES');
+    const t = find('y = x satisfies MyType', 'SATISFIES');
+    expect(t.value).toBe('MyType');
+    expect([t.start, t.end]).toEqual([6, 22]); // `satisfies MyType`
+    const toks = tokenize('y = x satisfies Map<K, V>\ny2 = 3').tokens.map((t) => t.kind);
+    expect(toks).toEqual(['IDENTIFIER', '=', 'IDENTIFIER', 'SATISFIES', 'TERMINATOR', 'IDENTIFIER', '=', 'NUMBER']);
+    // chains collapse one operator at a time, in either order
+    expect(kinds('y = x satisfies A as B')).toBe('IDENTIFIER = IDENTIFIER SATISFIES CAST');
+    expect(kinds('y = x as A satisfies B')).toBe('IDENTIFIER = IDENTIFIER CAST SATISFIES');
+  });
+
+  test('satisfies stays a name outside the postfix position', () => {
+    expect(kinds('satisfies = 2')).toBe('IDENTIFIER = NUMBER');
+    expect(kinds('o = { satisfies: 1 }')).toBe('IDENTIFIER = { PROPERTY : NUMBER }');
+    expect(kinds('p = o.satisfies')).toBe('IDENTIFIER = IDENTIFIER . PROPERTY');
   });
 
   test('generic return type at line end: the def still opens its body block', () => {
@@ -361,6 +393,15 @@ describe('side tables carry type spans', () => {
     const role = stores.role(cast.nodeId, 'annotation');
     expect(src.slice(role.sourceStart, role.sourceEnd)).toBe('as MyType');
   });
+
+  test('satisfies: the node is real; its annotation role spans `satisfies T`', () => {
+    const src = 'y = x satisfies MyType';
+    const { stores } = compile(src);
+    const [node] = stores.nodesByKind('satisfies');
+    expect(src.slice(node.sourceStart, node.sourceEnd)).toBe('x satisfies MyType');
+    const role = stores.role(node.nodeId, 'annotation');
+    expect(src.slice(role.sourceStart, role.sourceEnd)).toBe('satisfies MyType');
+  });
 });
 
 describe('mapping: erased type spans round-trip through bestAtSource as COVER rows', () => {
@@ -381,6 +422,15 @@ describe('mapping: erased type spans round-trip through bestAtSource as COVER ro
     const src = 'y = x as MyType';
     const { code, mappings } = compile(src);
     const row = mappings.bestAtSource(8); // inside `as MyType`
+    expect(row.role).toBe('annotation');
+    expect(row.mappingKind).toBe('cover');
+    expect(code.slice(row.generatedStart, row.generatedEnd)).toBe('x');
+  });
+
+  test('satisfies: an offset inside `satisfies T` resolves to the erased value\'s generated span', () => {
+    const src = 'y = x satisfies MyType';
+    const { code, mappings } = compile(src);
+    const row = mappings.bestAtSource(18); // inside `satisfies MyType`
     expect(row.role).toBe('annotation');
     expect(row.mappingKind).toBe('cover');
     expect(code.slice(row.generatedStart, row.generatedEnd)).toBe('x');

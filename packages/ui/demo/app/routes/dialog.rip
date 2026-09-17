@@ -1,0 +1,38 @@
+import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from 'rip/ui'
+import { COMPONENTS } from '../components.rip'
+
+export DialogPage = component
+  open := false
+  render
+    div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
+      h1 class: 'text-2xl font-semibold', COMPONENTS.dialog.name
+      p class: 'mt-2 text-secondary', COMPONENTS.dialog.description
+
+      div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
+        Dialog open <=> open
+          DialogTrigger
+            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+            'Open Dialog'
+          DialogPopup
+            class: [
+              'm-auto w-96 max-w-[calc(100vw-2.5rem)] scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
+              'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-dialog data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+            ]
+            DialogTitle class: 'text-lg font-semibold', 'Notifications'
+            DialogDescription class: 'mt-2 text-secondary', 'You are all caught up. Good job!'
+            div class: 'mt-6 flex justify-end'
+              DialogClose
+                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+                'Close'
+
+      section class: 'mt-8 rounded-xl border border-surface p-5'
+        h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
+        p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
+        div class: 'mt-4 flex items-center gap-4'
+          code class: 'rounded bg-surface px-2 py-1 font-mono text-sm', "open: #{open}"
+          button
+            type: 'button'
+            class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
+            @click: (-> open = true)
+            'Open from the Parent'

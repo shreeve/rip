@@ -145,12 +145,11 @@ test('the shipped compiler imports no package — src/ and bin/ carry only relat
   expect(violations, `the compiler source imports a package:\n${violations.join('\n')}`).toEqual([]);
 });
 
-test('packages/ui isolates an exact Tailwind dependency budget', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/ui/package.json'), 'utf8'));
-  const deps = pkg.dependencies ?? {};
-  expect(Object.keys(deps).sort()).toEqual(['css-tree', 'tailwindcss']);
-  for (const version of Object.values(deps)) expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-  for (const field of ['devDependencies', 'peerDependencies', 'optionalDependencies']) {
+// rip/ui's browser specs share the Playwright that test/browser installs
+// and declare nothing of their own.
+test.each(['email', 'ui'])('packages/%s declares no dependencies', (name) => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, `../../packages/${name}/package.json`), 'utf8'));
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
 });

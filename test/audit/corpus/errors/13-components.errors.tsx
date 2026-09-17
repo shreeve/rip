@@ -1,4 +1,4 @@
-// 13-components.errors.tsx — the line-aligned twin: tsgo's diagnostics derive each expected code and position; the bind and ref rows stay quiet here and are pinned on the rip side, and the Gated class spells the mount: never contract the gated lowering mints.
+// 13-components.errors.tsx — the line-aligned twin: tsgo's diagnostics derive each expected code and position; the bind and ref rows stay quiet here and are pinned on the rip side, the Gated class spells the mount: never contract the gated lowering mints, and the loop over a missing list annotates its item `any` — the type a `for…of` binding takes from an error-typed iterable with no report of its own, where a bare `.map` parameter would add an arrow-parameter TS7006 the render loop never publishes.
 // @ts-nocheck
 
 type ChipProps = {
@@ -56,7 +56,7 @@ function Heads() {
     {
     missingSwitch === 1 && <span>s</span>}
     {
-    missingList.map((item) => <span>{item}</span>)}
+    missingList.map((item: any) => <span>{item}</span>)}
     {
     missingExpr}
   </div> }

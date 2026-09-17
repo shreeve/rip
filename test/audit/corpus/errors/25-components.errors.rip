@@ -72,3 +72,12 @@ Gauge = component
 gauge = new Gauge({})
 wrongWidth: string = gauge.width.value
 gauge.cap = 4
+
+Hinge = component
+  @open := false
+
+  render null
+
+Door = component
+  render
+    Hinge open: 2

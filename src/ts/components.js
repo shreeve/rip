@@ -12,10 +12,10 @@
 //     `{ value: T }`, the reactive convention; a computed's
 //     container is `{ readonly value: T }`; readonly/plain members
 //     and accept handles type the raw value.
-//   - unannotated members type `{ value: any }` / `any` — the
-//     CONTAINER shape is the lowering's own fact, the value type is
-//     TypeScript's honest unknown-ness; the face never invents a
-//     value type.
+//   - an unannotated member types from its initializer where the form
+//     table can spell one (`false` → boolean, a module name → its
+//     `typeof`), on the instance and props surfaces alike; anything
+//     else types `{ value: any }` / `any`.
 //   - the PROPS surface: a prop accepts a snapshot OR a container
 //     (`T | { value: T }` — the #135 sharing contract admits both),
 //     with a `__bind_x__` slot for the `<=>` channel; `@x: T`
@@ -88,7 +88,10 @@ const yieldsIn = (x) => {
 // `behavior` names the face's per-component behavior object, or is
 // null on the road that has none (dts). Every member carries it, so
 // the segment assembly can read a computed's type through the body.
-export function componentTypeInfo(stores, source, node, behavior = null) {
+// `spellable`, when given, decides which module names a `typeof`
+// spelling may root at — the declaration road passes the names its own
+// file binds; a refused root types the member `any`.
+export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === 'string' ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
@@ -228,7 +231,7 @@ export function componentTypeInfo(stores, source, node, behavior = null) {
   // initializer rooted at another member cannot spell module-scope
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
-  for (const m of members) { m.siblings = siblings; m.behavior = behavior; }
+  for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; }
   return {
     extendsTag,
     behavior,
@@ -411,7 +414,8 @@ export const syntacticLiteralType = (v) => {
 // `store ~= cart` declares `typeof cart` (the module binding's full
 // inferred type); `ref ~= new X({})` declares `InstanceType<typeof X>`.
 // Only entity paths — plain identifiers, dotted identifier chains, and
-// new-expressions over them — spell; anything else stays null.
+// new-expressions over them — spell; anything else stays null, and so
+// does a path whose root name `spellable` refuses.
 const entityPath = (v) => {
   if (typeof v === 'string') {
     return /^[A-Za-z_$][\w$]*$/.test(v) &&
@@ -423,12 +427,14 @@ const entityPath = (v) => {
   }
   return null;
 };
-const typeofSpelling = (v) => {
+const typeofSpelling = (v, spellable = null) => {
   const path = entityPath(v);
-  if (path !== null) return `typeof ${path}`;
+  if (path !== null) {
+    return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
+  }
   if (Array.isArray(v) && v[0] === 'new' && v.length === 2 &&
       Array.isArray(v[1]) && typeof v[1][0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(v[1][0])) {
-    return `InstanceType<typeof ${v[1][0]}>`;
+    return spellable === null || spellable(v[1][0]) ? `InstanceType<typeof ${v[1][0]}>` : null;
   }
   return null;
 };
@@ -463,7 +469,7 @@ export const formTableType = (m) => {
   const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
   return m.annotation ??
     (m.hasDefault && !siblingRooted && init !== undefined
-      ? (syntacticLiteralType(init) ?? typeofSpelling(init))
+      ? (syntacticLiteralType(init) ?? typeofSpelling(init, m.spellable ?? null))
       : null);
 };
 
@@ -529,7 +535,7 @@ const memberTypeSegments = (m, lead, info = null) => {
     // PUBLIC is the line, not the kind: a member the caller can reach
     // takes whatever container arrives on its bind channel, and a
     // defaulted prop (`@step: number = 1`) carries kind 'state' while
-    // `_init` still reads `props.__bind_step__` first. A private member
+    // `_init` still reads `__given.__bind_step__` first. A private member
     // is minted here and nowhere else.
     const notify = m.isPublic ? TAKEN : MINTED;
     return [
@@ -647,7 +653,7 @@ export const propsParamOptional = (info) => !publicProps(info).some(isRequiredPr
 // surface and its index signature), then one union arm per REQUIRED
 // prop making it non-optional — passable as the plain slot or the
 // container slot (the base keeps both keys optional so _init's
-// `props.x` / `props.__bind_x__` reads type on every arm).
+// `__given.x` / `__given.__bind_x__` reads type on every arm).
 // The projection channel's type. The union is the runtime's admission
 // and is what the .d.ts road spells inline (a declaration file owes its
 // reader a self-contained type); the FACE road names it through the
@@ -722,16 +728,19 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
   };
   for (const m of props) {
     used.add(m.name);
-    const t = m.annotation;
+    const t = formTableType(m);
     sep();
     segs.push(
       { text: m.name, node: m.nameNode, role: m.nameRole },
       { text: '?', node: m.node, role: 'optionalMarker' },
     );
     const wide = t !== null && widensToUndefined(m) ? `${t} | undefined` : t;
+    const typed = m.annotation !== null
+      ? { text: `: ${t}`, node: m.node, role: 'annotation' }
+      : { text: `: ${t}` };
     if (t === null) segs.push({ text: ': any' });
-    else if (containerish(m)) segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' }, { text: ` | ${containerType(wide)}` });
-    else segs.push({ text: `: ${t}`, node: m.node, role: 'annotation' });
+    else if (containerish(m)) segs.push(typed, { text: ` | ${containerType(wide)}` });
+    else segs.push(typed);
     if (containerish(m)) {
       segs.push({ text: `; __bind_${m.name}__?: ${containerType(wide ?? 'any')}` });
     }

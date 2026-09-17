@@ -317,7 +317,7 @@ code "a component member shadows an exported name", '''
 ''', '''
   export const flag = 1;
   let Widget = class extends __Component {
-    _init(props) {
+    _init(__given) {
       this.flag = __state(0);
     }
     tick() {

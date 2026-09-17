@@ -129,6 +129,41 @@ describe('child adoption across a parent patch', () => {
     parent.unmount();
   });
 
+  test('children inside another child\'s projection are adopted from the pool of the view that built it', () => {
+    const src = BASE
+      .replace('export C = component', "Card = component\n  render\n    div class: 'card'\n      slot\nexport C = component")
+      .replace("      Kid label: 'a'\n", "      Card\n        Kid label: 'a'\n        Grand\n");
+    const mod = load(src);
+    const target = document.createElement('main');
+    const parent = new mod.C({});
+    parent.mount(target);
+    const kid = parent._children.find((c) => c instanceof mod.Kid);
+    const grand = parent._children.find((c) => c instanceof mod.Grand);
+    const card = parent._children.find((c) => !(c instanceof mod.Kid) && !(c instanceof mod.Grand));
+    expect(kid._parent).toBe(card);
+    expect(grand._parent).toBe(card);
+    expect(kid._owner).toBe(parent);
+    expect(grand._owner).toBe(parent);
+    kid.count.value = 7;
+    grand.n.value = 3;
+
+    componentRuntime.__hmrPatch(parent, load(src.replace("h1 'v1'", "h1 'v2'")).C);
+
+    expect(kid._state).toBe('mounted');
+    expect(grand._state).toBe('mounted');
+    expect(kid.count.value).toBe(7);
+    expect(grand.n.value).toBe(3);
+    expect(parent._children).toContain(kid);
+    expect(parent._children).toContain(grand);
+    expect(parent._children).toContain(card);
+    expect(kid._parent).toBe(card);
+    expect(grand._parent).toBe(card);
+    expect(serialize(target)).toContain('<b>7</b>');
+    expect(serialize(target)).toContain('<i data-part="Grand">3</i>');
+    expect(parent._hmrOrphans).toBeNull();
+    parent.unmount();
+  });
+
   test('two released children of one shape are ambiguous: both construct fresh', () => {
     const src = BASE.replace("      Kid label: 'a'\n", "      Kid label: 'a'\n      Kid label: 'b'\n");
     const { target, parent } = mountParent(src);

@@ -37,9 +37,9 @@ rules don't cover comes up, decide with these, in this order:
 5. **Lightweight by default.** Mold packages ship zero runtime
    dependencies. External packages appear as test oracles (dayjs),
    quarantined bench competitors, or — when a surface honestly needs
-   them — named earned deps (`print` → highlight.js, `ui` →
-   css-tree/tailwindcss, `sites` / `vscode` → their real stacks). The
-   shared harness stays tiny (~110 lines, five exports) and grows only
+   them — named earned deps (`print` → highlight.js, `sites` /
+   `vscode` → their real stacks). The shared harness stays tiny
+   (~110 lines, five exports) and grows only
    when a concrete test cannot be written without it.
 6. **Cookie-cutter edges, honest middles.** The frame (README top LAF,
    package.json key order for mold packages, test anatomy) stays
@@ -124,7 +124,8 @@ one-file mold trees. Prefer the package README (and any package-local
 |---------|-----------------------------|
 | `sites` | System edge / manager / workers / demos — see [docs/SERVER.md](../docs/SERVER.md) |
 | `app` | Multi-module application substrate (`index.rip` + surface modules, `test/`) |
-| `ui` | Ownership split: `email/` / `shared/` / `tailwind/` / `browser/` |
+| `email` | Library beside its CLI and the CLI's preview app (`preview/`), a host-heavy `test/` |
+| `ui` | One file per component behind the entry, beside its demo app (`demo/`) and the real-browser specs that drive it (`test/browser/`) |
 | `tray` | Rip provider + macOS SwiftUI host (`macos/`) |
 | `ai` | MCP server entry plus `lib/` |
 | `highlight` | Single highlight.js grammar module (`.js` entry, not `.rip`) |
@@ -260,7 +261,7 @@ All shell fences use `bash`. No `## License` footer.
 - Start the suite with a "Package surface" section pinning the export
   names, dependency posture, and (when claimed) browser safety.
 - Run with `bun run test` from the package directory.
-- Host-heavy suites (`sites`, `app`, `ui`, `vscode`) may use Bun test
+- Host-heavy suites (`sites`, `app`, `email`, `vscode`) may use Bun test
   and/or a `test/` tree until a natural Rip shape fits — that is the
   exception. Prefer `"test": "rip test"` when the CLI subcommand wraps
   `bun test` with the `.rip` loader preloaded and a 15000ms default

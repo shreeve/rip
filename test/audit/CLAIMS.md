@@ -77,6 +77,7 @@ What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across e
 | method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | 25-components.rip:tallied | 25-components.errors.rip:wrongStep |
 | `component extends <tag>` forwards use-site intrinsics typed from the element | 25-components.rip:Prompt | 25-components.errors.rip:Swatch |
 | a literal-union prop keeps its union at the use site rather than widening to its base type | 25-components.rip:Ribbon | 25-components.errors.rip:Tint |
+| an unannotated prop types its use site from its default — `@open := false` takes a boolean and rejects a number | 25-components.rip:Latch | 25-components.errors.rip:Hinge |
 | a generic component's constraint violation rejects at the use site | 25-components.rip:Palette | 25-components.errors.rip:Palettes |
 | ref-cell nullability: a non-nullable cell rejects, an Element-or-null cell accepts any tag | 25-components.rip:Anchors | 25-components.errors.rip:Shell |
 | a render-head typo beyond `if` (unless, switch, for, `=`) rejects at the head line, on the NAME | 13-components.rip:Roster | 13-components.errors.rip:Heads |

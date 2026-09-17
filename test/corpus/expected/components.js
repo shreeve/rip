@@ -1,10 +1,10 @@
 let Counter = class extends __Component {
   static __props = ['label', 'opt', 'step'];
-  _init(props) {
+  _init(__given) {
     this.count = __state(0);
-    this.label = __state(props.__bind_label__ ?? props.label);
-    this.opt = __state(props.__bind_opt__ ?? props.opt);
-    this.step = __state(props.__bind_step__ ?? props.step ?? 1);
+    this.label = __state(__given.__bind_label__ ?? __given.label);
+    this.opt = __state(__given.__bind_opt__ ?? __given.opt);
+    this.step = __state(__given.__bind_step__ ?? __given.step ?? 1);
     this.limit = 100;
     this.note = "plain";
     this.total = __computed(() => (this.count.value * 2));
@@ -48,7 +48,7 @@ let Counter = class extends __Component {
   }
 };
 let Panel = class extends __Component {
-  _init(props) {
+  _init(__given) {
     this.active = __state(true);
   }
   _create() {
@@ -96,12 +96,12 @@ let Panel = class extends __Component {
 };
 let Badge = class extends __Component {
   static __props = ['size', 'step', 'name', 'nick', 'label'];
-  _init(props) {
-    this.size = __state(props.__bind_size__ ?? props.size);
-    this.label = props.label ?? "x";
-    this.step = __state(props.__bind_step__ ?? props.step ?? 1);
-    this.name = __state(props.__bind_name__ ?? props.name ?? "anon");
-    this.nick = __state(props.__bind_nick__ ?? props.nick ?? "nn");
+  _init(__given) {
+    this.size = __state(__given.__bind_size__ ?? __given.size);
+    this.label = __given.label ?? "x";
+    this.step = __state(__given.__bind_step__ ?? __given.step ?? 1);
+    this.name = __state(__given.__bind_name__ ?? __given.name ?? "anon");
+    this.nick = __state(__given.__bind_nick__ ?? __given.nick ?? "nn");
   }
   onClick() {
     return 1;
@@ -125,7 +125,7 @@ let Badge = class extends __Component {
   }
 };
 let Two = class extends __Component {
-  _init(props) {
+  _init(__given) {
   }
   _create() {
     this._frag0 = document.createDocumentFragment();
@@ -142,7 +142,7 @@ let Two = class extends __Component {
   }
 };
 let Roster = class extends __Component {
-  _init(props) {
+  _init(__given) {
     this.items = __state([{id: 1, name: "a"}]);
     this.vis = __state(true);
     this.sel = __state("");
@@ -290,7 +290,7 @@ let Roster = class extends __Component {
   }
 };
 let Chooser = class extends __Component {
-  _init(props) {
+  _init(__given) {
     this.n = __state(1);
   }
   _create() {
@@ -452,7 +452,7 @@ let Chooser = class extends __Component {
   }
 };
 let Chart = class extends __Component {
-  _init(props) {
+  _init(__given) {
   }
   _create() {
     this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -468,8 +468,8 @@ let Chart = class extends __Component {
 };
 let Chip = class extends __Component {
   static __props = ['label'];
-  _init(props) {
-    this.label = __state(props.__bind_label__ ?? props.label ?? "c");
+  _init(__given) {
+    this.label = __state(__given.__bind_label__ ?? __given.label ?? "c");
   }
   fire() {
     return this.emit("pick", this.label.value);
@@ -487,7 +487,7 @@ let Chip = class extends __Component {
   }
 };
 let Deck = class extends __Component {
-  _init(props) {
+  _init(__given) {
     this.name = __state("n");
   }
   onPick(e) {
@@ -656,8 +656,49 @@ let Deck = class extends __Component {
     };
   }
 };
+let StaticRows = class extends __Component {
+  _init(__given) {
+  }
+  _create() {
+    this._el0 = document.createElement('ul');
+    this._el0.setAttribute('data-part', 'StaticRows');
+    this._anchor1 = document.createComment('for');
+    this._el0.appendChild(this._anchor1);
+    return this._el0;
+  }
+  _setup() {
+    {
+      const __s = { blocks: [], keys: [] };
+      __effect(() => {
+        __reconcile(this._anchor1, __s, [{name: "a"}, {name: "b"}], this, this.create_block_0, null);
+      });
+      __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
+    }
+  }
+  create_block_0(ctx, entry, i) {
+    let _el2, _t0;
+    return {
+      _s: true,
+      c() {
+        _el2 = document.createElement('li');
+        _el2.className = "row";
+        _t0 = document.createTextNode(String(`${i}: ${entry.name}`));
+        _el2.appendChild(_t0);
+        this._first = _el2;
+      },
+      m(target, anchor) {
+        if (target) target.insertBefore(_el2, anchor);
+      },
+      p() {
+      },
+      d(detaching) {
+        if (detaching) __detach(_el2);
+      }
+    };
+  }
+};
 let Frame = class extends __Component {
-  _init(props) {
+  _init(__given) {
   }
   _create() {
     this._el0 = document.createElement('div');
@@ -669,24 +710,29 @@ let Frame = class extends __Component {
   }
 };
 let Holder = class extends __Component {
-  _init(props) {
+  _init(__given) {
   }
   _create() {
-    this._el2 = document.createElement('p');
-    this._t0 = document.createTextNode("projected");
-    this._el2.appendChild(this._t0);
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst0 = new Frame({ children: this._el2 });
+    this._inst0 = new Frame({});
     if (this._inst0 && this._inst0._initFailed) {
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-init-failed: Frame');
-    } else if (this._inst0._mountCreate()) {
+    } else {
+    { const __kid = this._inst0._beginProjection(this); try {
+    this._el2 = document.createElement('p');
+    this._t0 = document.createTextNode("projected");
+    this._el2.appendChild(this._t0);
+    } finally { this._inst0._endProjection(__kid); } }
+    this._inst0._setChildren(this._el2);
+    if (this._inst0._mountCreate()) {
       this._el1 = this._inst0._root;
       (this._children || (this._children = [])).push(this._inst0);
     } else {
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-error: Frame');
+    }
     }
     } catch (__childErr) {
       console.error('[Rip] Frame construction failed:', __childErr);
@@ -705,8 +751,8 @@ let Holder = class extends __Component {
 let FancyBtn = class extends __Component {
   static __props = ['label'];
   static __extends = 'button';
-  _init(props) {
-    this.label = __state(props.__bind_label__ ?? props.label ?? "go");
+  _init(__given) {
+    this.label = __state(__given.__bind_label__ ?? __given.label ?? "go");
   }
   _create() {
     this._el0 = document.createElement('button');
@@ -723,7 +769,7 @@ let FancyBtn = class extends __Component {
 };
 let GatedOrder = class extends __Component {
   static __gates = [{ path: 'orders', key: (params, query) => params.id }];
-  _init(props) {
+  _init(__given) {
     this.order = __gateBind(this, 0);
     this.snapshot = __state(this.order.value);
   }

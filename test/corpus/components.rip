@@ -1,5 +1,5 @@
 # Components: declarations, the member model, the static
-# render DSL. Component member declarations lower into _init(props) in
+# render DSL. Component member declarations lower into _init(__given) in
 # fixed order; render lowers to _create()/_setup() with one __effect
 # per dynamic binding.
 
@@ -129,6 +129,13 @@ Deck = component
       ul
         for item, i in ["a", "b"]
           Chip key: item, label: item
+
+# A loop whose body reads the row and binds nothing reactive: a static block.
+StaticRows = component
+  render
+    ul
+      for entry, i in [{ name: "a" }, { name: "b" }]
+        li class: "row", "#{i}: #{entry.name}"
 
 Frame = component
   render

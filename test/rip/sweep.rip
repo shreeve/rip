@@ -139,8 +139,8 @@ code "export generic component", '''
   ''', '''
   export const Chip = class extends __Component {
     static __props = ['label'];
-    _init(props) {
-      this.label = __state(props.__bind_label__ ?? props.label);
+    _init(__given) {
+      this.label = __state(__given.__bind_label__ ?? __given.label);
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -409,8 +409,8 @@ code "generic component", '''
   ''', '''
   let Chip = class extends __Component {
     static __props = ['label'];
-    _init(props) {
-      this.label = __state(props.__bind_label__ ?? props.label);
+    _init(__given) {
+      this.label = __state(__given.__bind_label__ ?? __given.label);
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -513,8 +513,8 @@ code "optional state member", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['n'];
-    _init(props) {
-      this.n = __state(props.__bind_n__ ?? props.n ?? 1);
+    _init(__given) {
+      this.n = __state(__given.__bind_n__ ?? __given.n ?? 1);
     }
   };
   '''
@@ -526,8 +526,8 @@ code "optional computed member", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['a'];
-    _init(props) {
-      this.a = __state(props.__bind_a__ ?? props.a ?? 1);
+    _init(__given) {
+      this.a = __state(__given.__bind_a__ ?? __given.a ?? 1);
       this.n = __computed(() => (this.a.value * 2));
     }
   };
@@ -540,8 +540,8 @@ code "optional typed computed member", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['a'];
-    _init(props) {
-      this.a = __state(props.__bind_a__ ?? props.a ?? 1);
+    _init(__given) {
+      this.a = __state(__given.__bind_a__ ?? __given.a ?? 1);
       this.n = __computed(() => (this.a.value * 2));
     }
   };
@@ -553,8 +553,8 @@ code "optional readonly member", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['n'];
-    _init(props) {
-      this.n = props.n ?? 1;
+    _init(__given) {
+      this.n = __given.n ?? 1;
     }
   };
   '''
@@ -565,8 +565,8 @@ code "optional typed readonly member", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['n'];
-    _init(props) {
-      this.n = props.n ?? 1;
+    _init(__given) {
+      this.n = __given.n ?? 1;
     }
   };
   '''
@@ -577,7 +577,7 @@ code "gate with an empty call", '''
   ''', '''
   let C = class extends __Component {
     static __gates = ['user'];
-    _init(props) {
+    _init(__given) {
       this.user = __gateBind(this, 0);
     }
   };
@@ -589,7 +589,7 @@ code "typed gate with an empty call", '''
   ''', '''
   let C = class extends __Component {
     static __gates = ['user'];
-    _init(props) {
+    _init(__given) {
       this.user = __gateBind(this, 0);
     }
   };
@@ -601,7 +601,7 @@ code "typed keyed gate", '''
   ''', '''
   let C = class extends __Component {
     static __gates = [{ path: 'order', key: (params, query) => params.id }];
-    _init(props) {
+    _init(__given) {
       this.order = __gateBind(this, 0);
     }
   };
@@ -962,8 +962,8 @@ code "component body with a trailing blank line", '''
   ''', '''
   let C = class extends __Component {
     static __props = ['n'];
-    _init(props) {
-      this.n = __state(props.__bind_n__ ?? props.n ?? 1);
+    _init(__given) {
+      this.n = __state(__given.__bind_n__ ?? __given.n ?? 1);
     }
   };
   '''

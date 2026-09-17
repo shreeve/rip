@@ -72,3 +72,14 @@ class Gauge {
 const gauge = new Gauge()
 const wrongWidth: string = gauge.width
 gauge.cap = 4
+
+function Hinge({ open = false }) {
+  return <div>{String(open)}</div>
+}
+
+
+function Door() {
+  return (
+    <Hinge open={2} />
+  )
+}

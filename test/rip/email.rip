@@ -1,90 +1,82 @@
 # Public email authoring surface.
 
-import { test, code, fail, type } from '../support/testing.js'
+import { test } from '../support/testing.js'
 
 test 'Email renders html tag with lang and dir', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email } = email
+  { toEmail, Email } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('lang="en"') and result.includes('dir="ltr"') and result.includes('<html')
 ''', true
 
 test 'Head renders meta tags', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Head } = email
+  { toEmail, Email, Head } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Head
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('charset=UTF-8') and result.includes('x-apple-disable-message-reformatting')
 ''', true
 
 test 'Body renders table wrapper', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body } = email
+  { toEmail, Email, Body } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body
           p "content"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('role="presentation"') and result.includes('<p>content</p>')
 ''', true
 
 test 'Preview renders hidden div with padding', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Preview } = email
+  { toEmail, Preview } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Preview text: "Hello preview"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('display:none') and result.includes('Hello preview')
 ''', true
 
 test 'Container renders centered table', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Container } = email
+  { toEmail, Container } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Container
         p "inside"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('max-width:37.5em') and result.includes('role="presentation"') and result.includes('<p>inside</p>')
 ''', true
 
 test 'Section moves padding onto its cell and keeps the rest on the table', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Section } = email
+  { toEmail, Email, Body, Section } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body
           Section style: "background:#eee;padding:20px 8px;border-radius:4px;padding-top:1px"
             p "x"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('<table style="background:#eee;border-radius:4px" data-part="Section"') and result.includes('<td style="padding:20px 8px;padding-top:1px">')
 ''', true
 
 test 'Container moves padding onto its cell under the max-width', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Container } = email
+  { toEmail, Email, Body, Container } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body
           Container style: "padding:32px;max-width:400px"
             p "x"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('<table style="max-width:400px" data-part="Container"') and result.includes('<td style="padding:32px">')
 ''', true
 
 test 'Section and Container without padding leave the cell bare', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Section, Container } = email
+  { toEmail, Email, Body, Section, Container } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
@@ -92,13 +84,12 @@ test 'Section and Container without padding leave the cell bare', '''
           Container
             Section style: "background:#eee"
               p "x"
-  result = toHTML(E)
+  result = toEmail(E).html
   not result.includes('<td style=')
 ''', true
 
 test 'toEmail answers the inbox preview line, raw, beside html and text', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toEmail, Email, Body, Preview, Text } = email
+  { toEmail, Email, Body, Preview, Text } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
@@ -110,8 +101,7 @@ test 'toEmail answers the inbox preview line, raw, beside html and text', '''
 ''', true
 
 test 'toEmail answers a null preview when the message renders no Preview', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toEmail, Email, Body, Text } = email
+  { toEmail, Email, Body, Text } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
@@ -121,496 +111,90 @@ test 'toEmail answers a null preview when the message renders no Preview', '''
 ''', true
 
 test 'Body carries its background on the body element and zeroes the box the cell owns', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body } = email
+  { toEmail, Email, Body } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body style: "background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px"
           p "x"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('<body style="background:#fafafa;margin:0;padding:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px;margin-top:4px">')
 ''', true
 
 test 'Body without a style still zeroes the body element margin', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body } = email
+  { toEmail, Email, Body } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body
           p "x"
-  toHTML(E).includes('<body style="margin:0" data-part="Body">')
-''', true
-
-test 'Section renders full-width table', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Section } = email
-  E = component
-    render
-      Section
-        p "section content"
-  result = toHTML(E)
-  result.includes('role="presentation"') and result.includes('<p>section content</p>')
-''', true
-
-test 'Row renders table row', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Row } = email
-  E = component
-    render
-      Row
-        td "cell"
-  result = toHTML(E)
-  result.includes('<tr') and result.includes('<td>cell</td>')
-''', true
-
-test 'Column renders td', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Column } = email
-  E = component
-    render
-      table
-        tr
-          Column
-            "cell content"
-  result = toHTML(E)
-  result.includes('<td') and result.includes('cell content')
+  toEmail(E).html.includes('<body style="margin:0" data-part="Body">')
 ''', true
 
 test 'Heading renders h1 by default', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Heading } = emailPkg
+  { toEmail, Heading } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Heading
         "Title"
-  toHTML(E).includes('<h1')
+  toEmail(E).html.includes('<h1')
 ''', true
 
 test 'Heading renders h1 with style', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Heading } = emailPkg
+  { toEmail, Heading } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Heading style: "color:red"
         "Subtitle"
-  toHTML(E).includes('color:red')
+  toEmail(E).html.includes('color:red')
 ''', true
 
 test 'Heading renders h2 with as prop', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Heading } = emailPkg
+  { toEmail, Heading } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Heading as: "h2"
         "Subtitle"
-  toHTML(E).includes('<h2')
+  toEmail(E).html.includes('<h2')
 ''', true
 
 test 'Text renders p with defaults', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Text } = emailPkg
+  { toEmail, Text } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Text
         "paragraph"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('<p') and result.includes('font-size:14px') and result.includes('paragraph')
 ''', true
 
 test 'Link renders anchor with defaults', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Link } = emailPkg
+  { toEmail, Link } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Link href: "https://example.com"
         "click"
-  result = toHTML(E)
+  result = toEmail(E).html
   result.includes('href="https://example.com"') and result.includes('target="_blank"') and result.includes('click')
 ''', true
 
-test 'Image renders img with safe defaults', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Image } = emailPkg
+test 'Link fails closed on an unknown scheme', '''
+  { toEmail, Link } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
-      Image src: "logo.png", alt: "Logo"
-  result = toHTML(E)
-  result.includes('src="logo.png"') and result.includes('display:block')
+      Link href: "javascript:alert(1)"
+        "click"
+  toEmail(E).html.includes('href="#"')
 ''', true
 
-test 'Divider renders hr with border', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Divider } = emailPkg
-  E = component
-    render
-      Divider
-  result = toHTML(E)
-  result.includes('<hr') and result.includes('border-top:1px solid #eaeaea')
-''', true
-
-test 'Button renders anchor with MSO conditionals', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Button } = emailPkg
-  E = component
-    render
-      Button href: "https://example.com", style: "padding:12px 20px;background:#111;color:#fff"
-        "Click me"
-  result = toHTML(E)
-  result.includes('href="https://example.com"') and result.includes('Click me') and result.includes('mso-font-width')
-''', true
-
-test 'Markdown renders paragraphs', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Markdown } = emailPkg
-  E = component
-    render
-      Markdown text: "Hello world"
-  toHTML(E).includes('<p>Hello world</p>')
-''', true
-
-test 'Markdown renders bold and italic', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Markdown } = emailPkg
-  E = component
-    render
-      Markdown text: "This is **bold** and *italic*"
-  result = toHTML(E)
-  result.includes('<strong>bold</strong>') and result.includes('<em>italic</em>')
-''', true
-
-test 'Markdown renders headings', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Markdown } = emailPkg
-  E = component
-    render
-      Markdown text: "# Title"
-  toHTML(E).includes('<h1>Title</h1>')
-''', true
-
-test 'Markdown renders links', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Markdown } = emailPkg
-  E = component
-    render
-      Markdown text: "Visit [Example](https://example.com)"
-  toHTML(E).includes('<a href="https://example.com"')
-''', true
-
-test 'Markdown renders unordered lists', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Markdown } = emailPkg
-  E = component
-    render
-      Markdown text: "- one\\n- two\\n- three"
-  result = toHTML(E)
-  result.includes('<ul>') and result.includes('<li>one</li>')
-''', true
-
-test 'CodeBlock renders pre with code', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { CodeBlock } = emailPkg
-  E = component
-    render
-      CodeBlock code: "x = 42"
-  result = toHTML(E)
-  result.includes('<pre') and result.includes('x = 42')
-''', true
-
-test 'CodeBlock escapes HTML in code', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { CodeBlock } = emailPkg
-  E = component
-    render
-      CodeBlock code: "<div>hi</div>"
-  result = toHTML(E)
-  result.includes('&lt;div&gt;')
-''', true
-
-test 'CodeInline renders code with Orange.fr workaround', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { CodeInline } = emailPkg
-  E = component
-    render
-      CodeInline
-        "hello"
-  result = toHTML(E)
-  result.includes('class="cino"') and result.includes('class="cio"') and result.split('hello').length is 3
-''', true
-
-test 'Tailwind injects generated CSS for raw HTML tag classes', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Email, Head, Tailwind } = emailPkg
-  E = component
-    render
-      Email
-        Head
-        Tailwind
-          p class: "text-gray-400 bg-gray-100 px-4 py-2 rounded-lg"
-            "styled"
-  result = toHTML(E)
-  result.includes('color:oklch(70.7% 0.022 261.325)') and result.includes('background-color:oklch(96.7% 0.003 264.542)') and result.includes('padding-inline:calc(0.25rem*4)') and result.includes('padding-block:calc(0.25rem*2)') and result.includes('border-radius:0.5rem')
-''', true
-
-test 'Tailwind injects generated CSS for PascalCase component classes', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Email, Head, Tailwind, Text, Button } = emailPkg
-  E = component
-    render
-      Email
-        Head
-        Tailwind
-          Text class: "text-center text-gray-600"
-            "hello"
-          Button class: "rounded-full bg-black text-white", href: "https://example.com", style: "padding:12px 20px"
-            "go"
-  result = toHTML(E)
-  result.includes('text-align:center') and result.includes('color:oklch(44.6% 0.03 256.802)') and result.includes('background-color:#000') and result.includes('color:#fff') and result.includes('border-radius:calc(infinity*1px)')
-''', true
-
-test 'Tailwind keeps unsupported classes', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Email, Head, Tailwind } = emailPkg
-  E = component
-    render
-      Email
-        Head
-        Tailwind
-          div class: "sm:text-lg custom-class"
-            "x"
-  result = toHTML(E)
-  result.includes('class="sm:text-lg custom-class"') and result.includes('@media') and result.includes('text-lg')
-''', true
-
-test 'full email renders correctly', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = emailPkg
-  { Email, Head, Body, Preview, Container, Heading, Text, Link, Divider } = emailPkg
-  WelcomeEmail = component
-    @name =! "World"
-    render
-      Email
-        Head
-        Preview text: "Welcome aboard"
-        Body
-          Container
-            Heading "Welcome, #{@name}!"
-            Text "Thanks for signing up."
-            Link href: "https://example.com"
-              "Get started"
-            Divider
-            Text "See you soon."
-  result = toHTML(WelcomeEmail, name: "Alice")
-  result.includes('<!DOCTYPE') and result.includes('Welcome, Alice!') and result.includes('charset=UTF-8') and result.includes('max-width:37.5em') and result.includes('Get started') and result.includes('border-top:1px solid')
-''', true
-
-test 'full email plain text', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toText } = emailPkg
-  { Email, Head, Body, Container, Heading, Text, Link, Divider } = emailPkg
-  WelcomeEmail = component
-    @name =! "World"
-    render
-      Email
-        Head
-        Body
-          Container
-            Heading "Welcome, #{@name}!"
-            Text "Thanks for signing up."
-            Link href: "https://example.com"
-              "Get started"
-  result = toText(WelcomeEmail, name: "Bob")
-  result.includes('Welcome, Bob!') and result.includes('Get started (https://example.com)')
-''', true
-
-test 'toEmail with conditional', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toEmail } = emailPkg
-  TestEmail = component
-    @show =! true
-    render
-      div
-        if @show
-          p "visible"
-  { html } = toEmail(TestEmail, show: true)
-  html.includes('<p>visible</p>')
-''', true
-
-test 'toEmail with nested native tags', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toEmail } = emailPkg
-  TestEmail = component
-    render
-      table role: "presentation", border: "0", cellpadding: "0", cellspacing: "0"
-        tbody
-          tr
-            td
-              p "content"
-  { html } = toEmail(TestEmail)
-  html.includes('<table') and html.includes('<td><p>content</p></td>')
-''', true
-
-test 'toEmail plain text output', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toEmail } = emailPkg
-  TestEmail = component
-    render
-      div
-        h1 "Title"
-        p "Body text"
-        a href: "https://example.com", "Click"
-  { text } = toEmail(TestEmail)
-  text.includes('Title') and text.includes('Body text') and text.includes('Click (https://example.com)')
-''', true
-
-test 'a nested slot under a component forwards the received children', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Section } = emailPkg
-  Frame = component
-    render
-      Section style: 'background:#eee'
-        slot
+test 'the text twin keeps a link address beside its text', '''
+  { toEmail, Email, Body, Text, Link } = import!("#{process.cwd()}/packages/email/email.rip")
   E = component
     render
       Email
         Body
-          Frame
-            p "inside"
-  html = toHTML(E)
-  html.includes('data-part="Section"') and html.includes('<td><p>inside</p></td>')
-''', true
-
-test 'a declared @children with no initializer forwards the content, not its cell', '''
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Section } = emailPkg
-  Frame = component
-    @children
-    render
-      Section style: 'background:#eee'
-        slot
-  E = component
-    render
-      Email
-        Body
-          Frame
-            p "inside"
-  html = toHTML(E)
-  html.includes('<td><p>inside</p></td>') and not html.includes('[object Object]')
-''', true
-
-test 'a style object serializes numbers as written: bare on unitless properties and as 0', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = email
-  E = component
-    render
-      div style: { lineHeight: 1.4, fontWeight: 700, opacity: 0.5, zIndex: 2, margin: 0, fontSize: '14px' }
-  toHTML(E).includes('<div style="line-height:1.4;font-weight:700;opacity:0.5;z-index:2;margin:0;font-size:14px"')
-''', true
-
-test 'a style object serializes custom properties as written and prefixes webkit keys', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML } = email
-  E = component
-    render
-      div style: { '--brand': '#0069a8', webkitLineClamp: 2, color: 'var(--brand)' }
-  toHTML(E).includes('<div style="--brand:#0069a8;-webkit-line-clamp:2;color:var(--brand)"')
-''', true
-
-test 'Section takes a style object and splits padding onto its cell by key', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Section } = email
-  E = component
-    render
-      Email
-        Body
-          Section style: { background: '#eee', padding: '20px 8px', borderRadius: '4px', paddingTop: '1px' }
-            p 'x'
-  result = toHTML(E)
-  result.includes('<table style="background:#eee;border-radius:4px" data-part="Section"') and result.includes('<td style="padding:20px 8px;padding-top:1px">')
-''', true
-
-test 'Container takes a style object and keeps the max-width default under the caller', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Container } = email
-  E = component
-    render
-      Email
-        Body
-          Container style: { padding: '32px', maxWidth: '400px' }
-            p 'x'
-  result = toHTML(E)
-  result.includes('<table style="max-width:400px" data-part="Container"') and result.includes('<td style="padding:32px">')
-''', true
-
-test 'Body takes a style object: background on the body element, the box zeroed', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body } = email
-  E = component
-    render
-      Email
-        Body style: { background: '#fafafa', fontFamily: 'Inter', padding: '40px 20px' }
-          p 'x'
-  result = toHTML(E)
-  result.includes('<body style="background:#fafafa;margin:0;padding:0" data-part="Body">') and result.includes('<td style="background:#fafafa;font-family:Inter;padding:40px 20px">')
-''', true
-
-test "a caller's margin beats Text's default margin in both spellings, in the default's position", '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Text } = email
-  E = component
-    render
-      Email
-        Body
-          Text style: { margin: 0, color: '#262626' }
-            'a'
-          Text style: 'margin:0;color:#262626'
-            'b'
-  result = toHTML(E)
-  expected = '<p style="font-size:14px;line-height:24px;margin:0;color:#262626" data-part="Text">'
-  result.split(expected).length is 3
-''', true
-
-test 'Heading merges its margin props under a style object', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Heading } = email
-  E = component
-    render
-      Email
-        Body
-          Heading as: 'h2', mx: '8px', mt: '4px', style: { color: 'red', marginTop: '2px' }
-            'x'
-  toHTML(E).includes('<h2 style="margin-left:8px;margin-right:8px;margin-top:2px;color:red" data-part="EmailHeadingH2">')
-''', true
-
-test 'Button reads its padding from a style object', '''
-  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
-  { toHTML, Email, Body, Button } = email
-  E = component
-    render
-      Email
-        Body
-          Button href: 'https://example.com', style: { padding: '12px 20px', background: '#111' }
-            'Go'
-  result = toHTML(E)
-  result.includes('mso-padding-alt:0px;padding:12px 20px;background:#111"') and result.includes('mso-text-raise:18')
-''', true
+          Text
+            "Visit "
+            Link href: "https://example.com", "Example"
+  toEmail(E).text
+''', 'Visit Example (https://example.com)'

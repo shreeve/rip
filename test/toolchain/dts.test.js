@@ -491,6 +491,28 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('__bind_size__?: { value: number; read(): number; touch?(): void }');
   });
 
+  test('a member default spells `typeof` at a declared, imported, or global root; a module-private root ships `any`', () => {
+    const d = compile([
+      "import { Store } from './store'",
+      'seed = 3',
+      '{ lid } = seed',
+      'export Cfg: { n: number } = { n: 1 }',
+      'Tag = component',
+      '  @a := seed',
+      '  @b := lid',
+      '  @c := Cfg.n',
+      '  @d := new Store()',
+      '  @e := Math.PI',
+      '',
+    ].join('\n')).declarations;
+    expect(d).toContain('a: { value: any; read(): any; touch?(): void };');
+    expect(d).toContain('b: { value: any; read(): any; touch?(): void };');
+    expect(d).toContain('c: { value: typeof Cfg.n; read(): typeof Cfg.n; touch?(): void };');
+    expect(d).toContain('d: { value: InstanceType<typeof Store>; read(): InstanceType<typeof Store>; touch?(): void };');
+    expect(d).toContain('e: { value: typeof Math.PI; read(): typeof Math.PI; touch?(): void };');
+    expect(d).toContain("import { Store } from './store';");
+  });
+
   test('extends: the attribute surface for the extended tag, the index signature, the rest view', () => {
     const d = compile('Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
     // The rest view holds the passthrough object itself, spelled inline in a

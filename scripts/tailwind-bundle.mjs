@@ -1,9 +1,9 @@
 // Vendor the Tailwind browser runtime into dist/@rip as the production
 // IIFE plus a Brotli sidecar. Upstream @tailwindcss/browser already
-// ships minified (same major/minor as packages/ui's tailwindcss), so
-// there is no separate unminified twin — only tailwind.min.js and
-// tailwind.min.js.br. Clients request /@rip/tailwind.min.js; Janus may
-// serve the .br sidecar when Accept-Encoding includes br.
+// ships minified, so there is no separate unminified twin — only
+// tailwind.min.js and tailwind.min.js.br. Clients request
+// /@rip/tailwind.min.js; Janus may serve the .br sidecar when
+// Accept-Encoding includes br.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';

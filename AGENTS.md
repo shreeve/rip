@@ -456,8 +456,7 @@ the affected final gates again.
  freshness gate in `test:all` catches a stale bundle.
 - `bun run tailwind` — vendor `@tailwindcss/browser` into
  `dist/@rip/tailwind.min.js` (+ `.br`). Upstream is already minified;
- there is no separate `tailwind.js`. Pin stays in lockstep with
- `packages/ui`'s `tailwindcss` version.
+ there is no separate `tailwind.js`.
 - `bun run audit` — the typed-editor scoreboard, and NOT `bun audit`,
   which is Bun's dependency scanner. Six lanes (grammar, mapping, type,
   diagnostics, hover, token); no flag runs EVERY lane, and a lane's

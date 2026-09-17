@@ -1,0 +1,24 @@
+{
+  "name": "@rip/email",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Email templates as components, rendered to HTML and a text twin on the server.",
+  "exports": {
+    ".": "./email.rip"
+  },
+  "bin": {
+    "rip-email": "./cli.rip"
+  },
+  "scripts": {
+    "test": "rip test"
+  },
+  "files": [
+    "email.rip",
+    "dom.rip",
+    "render.rip",
+    "cli.rip",
+    "preview/",
+    "README.md"
+  ]
+}

@@ -1,0 +1,8 @@
+import { toEmail } from 'rip/email'
+import { BasicEmail } from './basic-email.rip'
+
+# A compiled component satisfies toEmail's Template parameter, and the
+# result is the typed triple.
+out: { html: string, text: string, preview: string | null } = toEmail BasicEmail, message: 'typed'
+
+export html: string = out.html

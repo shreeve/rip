@@ -3,30 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "rip-email": "./email/cli.rip"
-  },
+  "description": "Unstyled, composable UI components built on native browser features.",
   "exports": {
-    "./browser": "./browser/browser.rip",
-    "./email": "./email/email.rip",
-    "./email/components": "./email/components.rip",
-    "./email/dom": "./email/dom.rip",
-    "./email/compat": "./email/compat.rip",
-    "./email/render": "./email/render.rip",
-    "./tailwind": "./tailwind/tailwind.rip"
+    ".": "./ui.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "playwright test --config test/browser/playwright.config.mjs",
+    "demo": "rip sites run demo"
+  },
+  "rip": {
+    "browser": true
   },
   "files": [
-    "browser/",
-    "email/",
-    "shared/",
-    "tailwind/",
+    "ui.rip",
+    "dialog.rip",
+    "drawer.rip",
     "README.md"
-  ],
-  "dependencies": {
-    "css-tree": "3.2.1",
-    "tailwindcss": "4.3.3"
-  }
+  ]
 }

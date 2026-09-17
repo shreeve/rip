@@ -9,7 +9,7 @@ import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isIm
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
   insertionAboveAttachedDirectives, wholeImportLinesEdit,
-  exactSpanMapper, staleOffsetMap,
+  exactSpanMapper, staleOffsetMap, generatedCopiesOfSpan,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor, noUserSymbolSpans, inNoUserSymbolSpan, memberDeclKind,
   SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover, nearestSpelling,
@@ -356,6 +356,41 @@ describe('generated → source (the diagnostics direction)', () => {
   });
 });
 
+describe('generatedCopiesOfSpan', () => {
+  const source = [
+    'ROWS = [{ id: 1 }]',
+    'export P = component',
+    '  render',
+    '    ul',
+    '      for row in ROWS',
+    '        li key: row.id, row.id',
+    '',
+  ].join('\n');
+  const { code, mappings } = compile(source, { face: 'ts', path: 'p.rip' });
+  const generatedOf = (offset) => sourceOffsetToGeneratedExact(mappings, offset, source, code);
+
+  test('a keyed loop variable is copied into its keyed callback and its block factory, and each copy finds both', () => {
+    const at = generatedOf(source.indexOf('row in'));
+    const copies = generatedCopiesOfSpan(mappings, at, at + 3, source, code).sort((a, b) => a - b);
+    expect(copies).toHaveLength(2);
+    expect(copies).toContain(at);
+    for (const copy of copies) expect(code.slice(copy, copy + 3)).toBe('row');
+    for (const copy of copies) expect(generatedCopiesOfSpan(mappings, copy, copy + 3, source, code).sort((a, b) => a - b)).toEqual(copies);
+  });
+
+  test('a name the lowering spells once is its own only copy', () => {
+    const at = generatedOf(source.indexOf('ROWS', source.indexOf('in ')));
+    expect(generatedCopiesOfSpan(mappings, at, at + 4, source, code)).toEqual([at]);
+  });
+
+  test('a span with no verbatim source answers no copies', () => {
+    const scaffold = code.indexOf('create_block_0(');
+    expect(generatedCopiesOfSpan(mappings, scaffold, scaffold + 'create_block_0'.length, source, code)).toEqual([]);
+    const at = generatedOf(source.indexOf('row in'));
+    expect(generatedCopiesOfSpan(mappings, at, at, source, code)).toEqual([]);
+  });
+});
+
 describe('TS-face artifact filters', () => {
   test('scaffolding labels: the __ runtime namespace and the _ref temp family, nothing else', () => {
     expect(isScaffoldingLabel('__state')).toBe(true);
@@ -364,6 +399,9 @@ describe('TS-face artifact filters', () => {
     expect(isScaffoldingLabel('_ref12')).toBe(true);
     expect(isScaffoldingLabel('_refx')).toBe(false);
     expect(isScaffoldingLabel('_private')).toBe(false);
+    expect(isScaffoldingLabel('create_block_3')).toBe(true);
+    expect(isScaffoldingLabel('create_block_3_iter')).toBe(true);
+    expect(isScaffoldingLabel('create_block_3_items')).toBe(false);
     expect(isScaffoldingLabel('answer')).toBe(false);
   });
 
@@ -828,6 +866,19 @@ describe('flattenHover', () => {
   test('an empty or fence-only body flattens to the empty string, not null', () => {
     expect(flattenHover('')).toBe('');
     expect(flattenHover('```ts\n```')).toBe('');
+  });
+});
+
+describe('hoverableSpans', () => {
+  test('the words of a cast\'s and a satisfies\' type answer, like an annotation\'s; the operator word does not', () => {
+    const source = 'a = x as Map<K, V>\nb = y satisfies Wide\n';
+    const tokens = [
+      { kind: 'CAST', start: 6, end: 18, value: 'Map<K, V>' },
+      { kind: 'SATISFIES', start: 25, end: 39, value: 'Wide' },
+    ];
+    const spans = hoverableSpans({ tokens, trivia: [] }, source);
+    const words = spans.map(([a, b]) => source.slice(a, b));
+    expect(words).toEqual(['Map', 'K', 'V', 'Wide']);
   });
 });
 

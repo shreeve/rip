@@ -137,6 +137,17 @@ let veiled = payload as unknown as { deep: boolean }
 
 console.log('cast:', text.length, count, typeof veiled)
 
+// ── satisfies: the value is checked against the type and keeps its own ──
+
+type Route = { path: string, label: string }
+
+let routes = { home: { path: '/', label: 'Home' }, about: { path: '/about', label: 'About' } } satisfies Record<string, Route>
+let homeLabel = routes.home.label satisfies string
+let routeCount = (Object.keys(routes) satisfies string[]).length
+let checkedThenCast = payload satisfies unknown as string
+
+console.log('satisfies:', routes.about.path, homeLabel, routeCount, checkedThenCast.length)
+
 // ── keyword types: the primitive vocabulary an annotation can name ──
 
 type Loose = any

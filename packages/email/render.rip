@@ -1,0 +1,70 @@
+# One synchronous render on Bun. The compiled output hardcodes `document`
+# and `Node`, so the host installs the server DOM on the global for the
+# render and restores the prior descriptors after, a throw included.
+
+import { Node, Document } from './dom.rip'
+
+# What a template is to the host: a class constructed with its props,
+# mounted into a node, and unmounted without touching the DOM it built.
+# Every compiled `component` has this shape; the class exists to name it.
+export class Template
+  constructor: (props?: Record<string, unknown>) ->
+  mount: (target?: unknown): this -> this
+  unmount!: (options?: { removeDOM?: boolean }) ->
+
+export interface Template
+  _state?: string
+
+class SVGElementStub extends Node
+
+restoreGlobal = (host, key: string, descriptor) ->
+  if descriptor
+    Object.defineProperty host, key, descriptor
+  else
+    delete host[key]
+
+installGlobal = (host, key: string, value) ->
+  Object.defineProperty host, key,
+    configurable: true
+    enumerable: true
+    writable: true
+    value: value
+
+export def renderOnce<T>(Component: typeof Template, props: Record<string, unknown>, consume: (root: Node) => T): T
+  host = globalThis as typeof globalThis & { document?: { __ripRenderActive?: boolean } }
+  if host.document?.__ripRenderActive
+    throw Error.new 'nested or concurrent Rip email rendering is not supported — complete the active synchronous render first'
+
+  documentDescriptor = Object.getOwnPropertyDescriptor host, 'document'
+  nodeDescriptor = Object.getOwnPropertyDescriptor host, 'Node'
+  svgDescriptor = Object.getOwnPropertyDescriptor host, 'SVGElement'
+  instance = null
+  try
+    document = Document.new()
+    document.__ripRenderActive = true
+    installGlobal host, 'document', document
+    installGlobal host, 'Node', Node
+    installGlobal host, 'SVGElement', SVGElementStub
+    root = document.createElement '__root'
+    instance = Component.new props
+    instance.mount root
+    unless instance._state is 'mounted'
+      throw Error.new "#{Component.name ?? 'component'} did not complete its synchronous mount"
+    output = consume root
+    if output instanceof Promise
+      throw Error.new 'Rip email consumers must be synchronous'
+    output
+  finally
+    cleanupError = null
+    try
+      instance.unmount(removeDOM: false) if instance? and instance._state is 'mounted'
+    catch error
+      cleanupError = error
+    try
+      restoreGlobal host, 'document', documentDescriptor
+    finally
+      try
+        restoreGlobal host, 'Node', nodeDescriptor
+      finally
+        restoreGlobal host, 'SVGElement', svgDescriptor
+    throw cleanupError if cleanupError

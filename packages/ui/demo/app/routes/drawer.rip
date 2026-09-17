@@ -1,0 +1,32 @@
+import { Drawer, DrawerClose, DrawerDescription, DrawerPopup, DrawerTitle, DrawerTrigger } from 'rip/ui'
+import { COMPONENTS } from '../components.rip'
+
+export DrawerPage = component
+  open := false
+  render
+    div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
+      h1 class: 'text-2xl font-semibold', COMPONENTS.drawer.name
+      p class: 'mt-2 text-secondary', COMPONENTS.drawer.description
+
+      div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
+        Drawer open <=> open, side: 'right'
+          DrawerTrigger
+            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+            'Open Drawer'
+          DrawerPopup
+            class: [
+              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-background p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
+              'data-open:translate-x-0 data-open:duration-450 starting:data-open:translate-x-full'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+            ]
+            DrawerTitle class: 'text-lg font-semibold', 'Settings'
+            DrawerDescription class: 'mt-2 text-secondary', 'Swipe the panel to the right to dismiss it, or use the button.'
+            div class: 'mt-6 flex justify-end'
+              DrawerClose
+                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
+                'Close'
+
+      section class: 'mt-8 rounded-xl border border-surface p-5'
+        h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
+        p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
+        code class: 'mt-4 inline-block rounded bg-surface px-2 py-1 font-mono text-sm', "open: #{open}"

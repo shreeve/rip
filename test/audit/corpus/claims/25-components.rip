@@ -121,3 +121,18 @@ meterCap: number = meter.cap
 meterNote: string = meter.note
 
 console.log('members:', meterWidth, meterSpan, meterLabel, meterCap, meterNote)
+
+# ── An unannotated prop types its use site from its default ──
+
+Latch = component
+  @open := false
+
+  render
+    span 'latch'
+
+Porch = component
+  render
+    div
+      Latch open: true
+
+console.log('defaults:', typeof Latch, typeof Porch)

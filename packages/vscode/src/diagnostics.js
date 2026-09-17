@@ -191,6 +191,9 @@ export function mapTsDiagnostic(good, d) {
   // (a batch `tsc` run carries none), so VS Code renders the unused/
   // deprecated classes faded/struck, never underlined.
   const tags = d.tags ?? diagnosticTagsFor(d.code);
+  // An unused claim on one copy of a loop variable the source reads —
+  // each block the lowering threads it through declares its own.
+  if (tags.includes(1) && good.readLoopVarDecls?.some(([a, b]) => a === s && b === e)) return null;
   // Suggestion-class rendering needs an EXACT span: a fade/strike paints
   // its whole range, and a COVER-mapped range would paint bytes the user
   // never wrote. Error-class diagnostics keep the cover fallback (a

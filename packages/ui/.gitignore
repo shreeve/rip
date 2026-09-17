@@ -1,0 +1,3 @@
+demo/dist/
+test/browser/test-results/
+test/browser/playwright-report/

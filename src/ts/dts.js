@@ -102,7 +102,6 @@ const importBoundNames = (node) => {
 
 export function emitDeclarations({ sexpr, stores, source }) {
   if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
-  const lines = [];
 
   // The schema type story: module-level named schema
   // declarations project their shapes — the intrinsic block prepends
@@ -120,7 +119,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const schemaByNode = new Map();
   const schemaDerivedByNode = new Map();
   if (schemaStory) {
-    lines.push(...schemaStory.intrinsicLines);
     for (const s of schemaStory.stories) schemaByNode.set(s.decl.node, s);
     for (const d of schemaStory.derivations) schemaDerivedByNode.set(d.decl.node, d);
   }
@@ -131,9 +129,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // user surface — parse/safe reject on it by design).
   const schemaDecl = (story, exported) => {
     const exp = exported ? 'export ' : '';
-    for (const line of story.aliasLines) lines.push(`${exp}${line}`);
+    for (const line of story.aliasLines) pass.lines.push(`${exp}${line}`);
     if (story.constType !== null) {
-      lines.push(`${exp}declare const ${story.decl.name}: ${story.constType};`);
+      pass.lines.push(`${exp}declare const ${story.decl.name}: ${story.constType};`);
     }
   };
 
@@ -206,12 +204,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const [head, name, params] = node;
     const returnType = returnTypeOf(node, node[3], head === 'void-def');
     if (returnType === null && !params.some(paramTyped)) return;
-    lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   const defSigDecl = (node) => {
     const [, name, params, returnType] = node;
-    lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
+    pass.lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
   };
 
   const assignDecl = (node, exported) => {
@@ -220,13 +218,13 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const exp = exported ? 'export ' : '';
     const annotation = roleType(node, 'annotation');
     if (annotation !== null) {
-      lines.push(`${exp}declare let ${target}: ${annotation};`);
+      pass.lines.push(`${exp}declare let ${target}: ${annotation};`);
       return;
     }
     if (!isFunc(value)) return;
     const returnType = returnTypeOf(value, value[2], head === 'void-assign');
     if (returnType === null && !value[1].some(paramTyped)) return;
-    lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(value[1], isOptionalParam))}: ${returnType ?? 'any'};`);
+    pass.lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(value[1], isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   const classDecl = (node, exported) => {
@@ -360,9 +358,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
       }
       ext = ` extends ${parent}`;
     }
-    lines.push(`${exported ? 'export ' : ''}declare class ${name}${ext} {`);
-    for (const m of members) lines.push(`  ${m}`);
-    lines.push('}');
+    pass.lines.push(`${exported ? 'export ' : ''}declare class ${name}${ext} {`);
+    for (const m of members) pass.lines.push(`  ${m}`);
+    pass.lines.push('}');
   };
 
   // Enum members re-render from the tree (the emitter already
@@ -373,14 +371,14 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const items = isNode(body) && body[0] === 'block' ? body.slice(1) : [body];
     const memberText = (v) => (isNode(v) && v[0] === '-' ? `-${v[1]}` : v);
     const resolved = resolveEnumMembers(items);
-    lines.push(`${exported ? 'export ' : ''}declare enum ${name} {`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare enum ${name} {`);
     resolved.forEach((m, i) => {
       if (m.name === null || m.value === null) {
         throw new DtsError(`declaration emission: enum '${name}' member has no resolvable value`);
       }
-      lines.push(`  ${m.name} = ${memberText(m.value)}${i < resolved.length - 1 ? ',' : ''}`);
+      pass.lines.push(`  ${m.name} = ${memberText(m.value)}${i < resolved.length - 1 ? ',' : ''}`);
     });
-    lines.push('}');
+    pass.lines.push('}');
   };
 
   // A typed reactive declaration declares its CONTAINER: the module's
@@ -396,7 +394,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
     const ro = node[0] === 'computed' ? 'readonly ' : '';
-    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
 
   const isReactiveDecl = (stmt) => {
@@ -405,6 +403,10 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
   };
+
+  // Which module names a member's `typeof` spelling may root at — set by
+  // the declaring pass below, read at each component declaration.
+  let spellable = null;
 
   // A component declaration: the component is a STRUCTURAL
   // construct — like an enum it declares without carrying an
@@ -421,7 +423,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   };
 
   const componentDecl = (node, name, exported, stmt) => {
-    const info = componentTypeInfo(stores, source, node);
+    const info = componentTypeInfo(stores, source, node, null, { spellable });
     const exp = exported ? 'export ' : '';
     // A GENERIC component: the members already reference the parameter,
     // so the list has to reach both shipped declarations or the file
@@ -432,12 +434,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
     // same split the face's own companion makes.
     const typeParams = typeParamsOf(stmt);
     const self = `${name}${selfArgsOf(typeParams)}`;
-    lines.push(`${exp}interface ${name}${typeParams} {`);
-    for (const l of rendered(() => instanceTypeLines(info, self))) lines.push(`  ${segmentsText(l.segs)}`);
-    lines.push('}');
-    lines.push(`${exp}declare let ${name}: {`);
-    for (const m of componentCtorMembers(info, name, typeParams, self)) lines.push(`  ${m}`);
-    lines.push('};');
+    pass.lines.push(`${exp}interface ${name}${typeParams} {`);
+    for (const l of rendered(() => instanceTypeLines(info, self))) pass.lines.push(`  ${segmentsText(l.segs)}`);
+    pass.lines.push('}');
+    pass.lines.push(`${exp}declare let ${name}: {`);
+    for (const m of componentCtorMembers(info, name, typeParams, self)) pass.lines.push(`  ${m}`);
+    pass.lines.push('};');
   };
 
   // A typed BOUND effect (`h: T ~> body`) declares its dispose handle
@@ -453,7 +455,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     if (typeof node[1] !== 'string') return;
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
-    lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${annotation};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${annotation};`);
   };
 
   // A typed readonly declaration (`x: T =! e`) declares a plain
@@ -474,9 +476,18 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // re-exports all carry through. Dropping an edge makes a consumer's
   // type-check lie — a declaration referencing an unimported name
   // (TS2304), or a module face missing exports the runtime has.
-  const pendingImports = [];     // import nodes, source order
-  const pendingDefaults = [];    // identifier default exports
-  const pendingExportLists = []; // bare `export { … }` specifier lists
+  // Everything the declaring pass accumulates, created together: a
+  // rerun starts from a fresh object, so nothing the first run
+  // collected outlives it.
+  let pass = null;
+  const startPass = () => {
+    pass = {
+      lines: [],
+      pendingImports: [],     // import nodes, source order
+      pendingDefaults: [],    // identifier default exports
+      pendingExportLists: [], // bare `export { … }` specifier lists
+    };
+  };
 
   const specListText = (list) =>
     list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
@@ -535,25 +546,25 @@ export function emitDeclarations({ sexpr, stores, source }) {
     if (!isNode(stmt)) return;
     const head = stmt[0];
     if (head === 'export') {
-      if (stmt[1] !== '{}' && isExportList(stmt[1])) pendingExportLists.push(stmt[1]);
+      if (stmt[1] !== '{}' && isExportList(stmt[1])) pass.pendingExportLists.push(stmt[1]);
       else stmtDecl(stmt[1], true);
       return;
     }
     if (isModuleImport(stmt)) {
-      pendingImports.push(stmt);
+      pass.pendingImports.push(stmt);
       return;
     }
     if (head === 'export-all') {
-      lines.push(`export * ${stmt.length === 3 ? `as ${stmt[2]} ` : ''}from ${moduleSourceText(stmt[1])};`);
+      pass.lines.push(`export * ${stmt.length === 3 ? `as ${stmt[2]} ` : ''}from ${moduleSourceText(stmt[1])};`);
       return;
     }
     if (head === 'export-from') {
       const spec = stmt[1] === '{}' ? '{}' : `{ ${specListText(stmt[1])} }`;
-      lines.push(`export ${spec} from ${moduleSourceText(stmt[2])};`);
+      pass.lines.push(`export ${spec} from ${moduleSourceText(stmt[2])};`);
       return;
     }
     if (head === 'export-default') {
-      if (typeof stmt[1] === 'string') pendingDefaults.push(stmt[1]);
+      if (typeof stmt[1] === 'string') pass.pendingDefaults.push(stmt[1]);
       // A non-identifier default carries no annotation, so it
       // contributes no declaration (the untyped-export rule).
       return;
@@ -566,9 +577,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
       effectDecl(stmt, exported);
       return;
     }
-    if (head === 'type-decl') lines.push(...rendered(() => renderTypeDecl(stmt[1])));
+    if (head === 'type-decl') pass.lines.push(...rendered(() => renderTypeDecl(stmt[1])));
     else if (head === 'typed-var' && typeof stmt[1] === 'string') {
-      lines.push(`declare let ${stmt[1]}: ${tidyType(stmt[2])};`);
+      pass.lines.push(`declare let ${stmt[1]}: ${tidyType(stmt[2])};`);
     }     else if (head === 'def-sig') defSigDecl(stmt);
     else if (isDefHead(head) && stmt.length === 4) defDecl(stmt, exported);
     else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
@@ -588,7 +599,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       const proto = protoMemberTarget(stmt);
       const t = roleType(stmt, 'annotation');
       if (t !== null && !moduleHeads.has(proto.head)) {
-        lines.push(`declare global { interface ${proto.head}${PROTO_GENERIC_PARAMS[proto.head] ?? ''} { ${proto.member}: ${t} } }`);
+        pass.lines.push(`declare global { interface ${proto.head}${PROTO_GENERIC_PARAMS[proto.head] ?? ''} { ${proto.member}: ${t} } }`);
       }
     } else if ((head === '=' || head === 'void-assign') && stmt.length === 3) assignDecl(stmt, exported);
     else if (head === 'class') classDecl(stmt, exported);
@@ -605,7 +616,50 @@ export function emitDeclarations({ sexpr, stores, source }) {
          t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
   }
 
+  // The module-scope names the source binds, a destructuring pattern
+  // walked to its leaves.
+  const BINDING_HEADS = new Set(['=', 'void-assign', 'state', 'computed', 'readonly', 'effect',
+    'def', 'void-def', 'class', 'enum', 'typed-var', 'def-sig']);
+  const patternNames = (p, out) => {
+    if (typeof p === 'string') { out.add(p); return; }
+    if (!isNode(p)) return;
+    if (p[0] === 'array') { for (const el of p.slice(1)) patternNames(el, out); return; }
+    if (p[0] === '=' || p[0] === '...') { patternNames(p[1], out); return; }
+    if (p[0] !== 'object') return;
+    for (const pair of p.slice(1)) {
+      if (!isNode(pair)) continue;
+      if (pair[0] === null || pair[0] === ':') patternNames(pair[2], out);
+      else if (pair[0] === '=' || pair[0] === '...') patternNames(pair[1], out);
+    }
+  };
+  const sourceBinds = new Set();
+  for (const s of sexpr.slice(1)) {
+    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
+    if (isNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[1], sourceBinds);
+  }
+
+  // A member's `typeof` names a module binding, and this file declares
+  // only its typed bindings: a root the source binds that no
+  // declaration here spells is TS2304 for every consumer, so such a
+  // member ships `any`. A root the source never binds is a global,
+  // which the consumer's own lib resolves. Which names get declared is
+  // known only once the pass has run and never depends on how a member
+  // is typed, so the pass runs once recording the roots and, if any
+  // fail to resolve, again with those roots refused.
+  startPass();
+  const roots = new Set();
+  spellable = (name) => { roots.add(name); return true; };
   for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+  const passText = pass.lines.join('\n');
+  const refused = new Set([...roots].filter((name) => sourceBinds.has(name) &&
+    !new RegExp(`\\b(?:let|const|function|class|enum) ${name.replace(/[$]/g, '\\$&')}\\b`).test(passText)));
+  if (refused.size > 0) {
+    startPass();
+    spellable = (name) => !refused.has(name);
+    for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+  }
+  const lines = [...(schemaStory?.intrinsicLines ?? []), ...pass.lines];
+  const { pendingImports, pendingDefaults, pendingExportLists } = pass;
 
   // Deferred edges resolve against the FULL declaration text: a
   // default export or bare export list names a binding whose

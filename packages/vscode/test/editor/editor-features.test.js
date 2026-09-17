@@ -122,7 +122,7 @@ async function inWorkspace(files, fn) {
     resolveItem: (item) => client.request('completionItem/resolve', item),
     definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
     typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
-    references: (rel, line, character) => client.request('textDocument/references', { ...at(rel, line, character), context: { includeDeclaration: true } }),
+    references: (rel, line, character, includeDeclaration = true) => client.request('textDocument/references', { ...at(rel, line, character), context: { includeDeclaration } }),
     signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
     prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
     rename: (rel, line, character, newName) => client.request('textDocument/rename', { ...at(rel, line, character), newName }),
@@ -1168,6 +1168,47 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
     });
   }, 30000);
 
+  test('a render loop renames whole: the iterable\'s names across plain, keyed, call, and nested loops, and the loop variable from any of its uses', async () => {
+    // Every loop row's face type restates its iterable — a `typeof` over
+    // a path, or a thunk over a call — and a restatement is no place a
+    // rename may land or be refused over. The loop variable is a separate
+    // TypeScript symbol in its keyed callback and in each nested block,
+    // and renames as the one name the author wrote wherever it starts.
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', [
+        "ROWS = [{ id: 1, tags: ['p'] }]",          // 0
+        'export Panel = component',                 // 1
+        '  render',                                 // 2
+        '    ul',                                   // 3
+        '      for row in ROWS',                    // 4
+        '        li key: row.id, row.id',           // 5
+        '      for row in ROWS.slice(0)',           // 6
+        '        li row.id',                        // 7
+        '      for row in ROWS',                    // 8
+        '        for tag in row.tags.map((t) -> t)', // 9
+        '          li tag',                         // 10
+        '      for row in ROWS',                    // 11
+        '        if row.id',                        // 12
+        '          li row.id',                      // 13
+        '',
+      ].join('\n'));
+      const spans = async (line, character) => {
+        const edit = await api.rename('app.rip', line, character, 'renamed');
+        const edits = edit.changes[api.uriOf('app.rip')];
+        for (const e of edits) expect(e.newText).toBe('renamed');
+        return edits.map((e) => [e.range.start.line, e.range.start.character, e.range.end.character])
+          .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      };
+      expect(await spans(0, 1)).toEqual([[0, 0, 4], [4, 17, 21], [6, 17, 21], [8, 17, 21], [11, 17, 21]]);
+      const keyed = [[4, 10, 13], [5, 16, 19], [5, 24, 27]];
+      for (const [line, character] of [[4, 10], [5, 16], [5, 24]]) expect(await spans(line, character)).toEqual(keyed);
+      expect(await spans(6, 10)).toEqual([[6, 10, 13], [7, 11, 14]]);
+      expect(await spans(8, 10)).toEqual([[8, 10, 13], [9, 19, 22]]);
+      const branched = [[11, 10, 13], [12, 11, 14], [13, 13, 16]];
+      for (const [line, character] of [[11, 10], [12, 11], [13, 13]]) expect(await spans(line, character)).toEqual(branched);
+    });
+  }, 60000);
+
   test('the cursor at a name\'s END boundary renames it — double-click then F2 leaves the caret exactly there', async () => {
     // Mapping rows are end-exclusive, so the position one past a name's
     // last character sits in no row. Every editor gesture that selects a
@@ -1237,6 +1278,105 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
       expect(api.rename('util.rip', 0, 10, 'total')).rejects.toThrow(/rename refused.*app\.rip/);
     });
   }, 30000);
+});
+
+describe.skipIf(!tsgoAvailable)('render loop variables', () => {
+  test('references answer for the loop variable from any of its uses: a keyed callback and a nested block', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', [
+        'ROWS = [{ id: 1 }]',           // 0
+        'export Panel = component',     // 1
+        '  render',                     // 2
+        '    ul',                       // 3
+        '      for row in ROWS',        // 4
+        '        li key: row.id, row.id', // 5
+        '      for item in ROWS',       // 6
+        '        if item.id',           // 7
+        '          li item.id',         // 8
+        '',
+      ].join('\n'));
+      const spans = async (line, character, includeDeclaration) => (await api.references('app.rip', line, character, includeDeclaration))
+        .map((l) => [l.range.start.line, l.range.start.character, l.range.end.character])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const keyed = [[4, 10, 13], [5, 16, 19], [5, 24, 27]];
+      for (const [line, character] of [[4, 10], [5, 16], [5, 24]]) expect(await spans(line, character)).toEqual(keyed);
+      expect(await spans(4, 10, false)).toEqual(keyed.slice(1));
+      const branched = [[6, 10, 14], [7, 11, 15], [8, 13, 17]];
+      for (const [line, character] of [[6, 10], [7, 11], [8, 13]]) expect(await spans(line, character)).toEqual(branched);
+    });
+  }, 60000);
+
+  test('names the lowering spells into several places still answer exactly their own references and rename edits', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', [
+        'export Field = component',                          // 0
+        '  count := 0',                                      // 1
+        "  value := ''",                                     // 2
+        '  doubled ~= count * 2',                            // 3
+        '  render',                                          // 4
+        '    div',                                           // 5
+        '      input value <=> value',                       // 6
+        '      button @click: (-> count += 1), doubled',     // 7
+        'total = 1',                                         // 8
+        'total = total + 1',                                 // 9
+        '',
+      ].join('\n'));
+      const order = (a, b) => a[0] - b[0] || a[1] - b[1];
+      const refs = async (line, character) => (await api.references('app.rip', line, character))
+        .map((l) => [l.range.start.line, l.range.start.character, l.range.end.character]).sort(order);
+      const renames = async (line, character) => (await api.rename('app.rip', line, character, 'renamed')).changes[api.uriOf('app.rip')]
+        .map((e) => [e.range.start.line, e.range.start.character, e.range.end.character]).sort(order);
+      const names = {
+        count: { at: [[1, 2], [7, 26]], spans: [[1, 2, 7], [3, 13, 18], [7, 25, 30]] },
+        value: { at: [[2, 2], [6, 22]], spans: [[2, 2, 7], [6, 22, 27]] },
+        doubled: { at: [[3, 2], [7, 39]], spans: [[3, 2, 9], [7, 38, 45]] },
+        total: { at: [[8, 0], [9, 8]], spans: [[8, 0, 5], [9, 0, 5], [9, 8, 13]] },
+      };
+      for (const { at, spans } of Object.values(names)) {
+        for (const [line, character] of at) {
+          expect(await refs(line, character)).toEqual(spans);
+          expect(await renames(line, character)).toEqual(spans);
+        }
+      }
+    });
+  }, 60000);
+
+  test('the unused fade marks a loop variable the source never reads, never one a nested block merely receives', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', [
+        'ROWS = [{ id: 1, tags: [\'p\'] }]', // 0
+        "OTHER = ['x']",                  // 1
+        'export Panel = component',       // 2
+        '  render',                       // 3
+        '    ul',                         // 4
+        '      for row in ROWS',          // 5
+        '        li row.id',              // 6
+        '        for x in OTHER',         // 7
+        '          li x',                 // 8
+        '      for row in ROWS',          // 9
+        '        picked = row.tags',      // 10
+        '        for early in picked',    // 11
+        '          li early',             // 12
+        '      for row, k in ROWS',       // 13
+        '        li key: k, row.id',      // 14
+        '      for unused in ROWS',       // 15
+        "        li 'flat'",              // 16
+        '      for idle in ROWS',         // 17
+        '        for y in OTHER',         // 18
+        '          li y',                 // 19
+        '      for shadowed in ROWS',     // 20
+        "        button @click: ((shadowed) -> console.log(shadowed)), 'go'", // 21
+        '        for z in OTHER',         // 22
+        '          li z',                 // 23
+        '',
+      ].join('\n'));
+      const faded = api.diagnostics('app.rip')
+        .filter((d) => d.tags?.includes(1))
+        .map((d) => [d.range.start.line, d.range.start.character, d.range.end.character])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      expect(faded).toEqual([[15, 10, 16], [17, 10, 14], [20, 10, 18]]);
+    });
+  }, 60000);
 });
 
 describe.skipIf(!tsgoAvailable)('source.* code actions', () => {

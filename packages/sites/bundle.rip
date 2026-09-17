@@ -9,7 +9,7 @@ import { extractClientProjections } from '../../src/projections.js'
 
 RUNTIME_RE =! /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/
 VERB_FILES =! Set.new ['test.rip', 'demo.rip', 'bench.rip']
-SKIP_DIRS =! Set.new ['node_modules', 'test', 'bench']
+SKIP_DIRS =! Set.new ['node_modules', 'test', 'bench', 'demo']
 
 unquote = (specifier) -> specifier.slice 1, -1
 

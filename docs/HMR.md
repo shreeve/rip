@@ -68,9 +68,12 @@ releasing parent. A construction that matches exactly one pooled child
 a signature the patch tier accepts — gets that instance back: released
 the same way (its own children pooled, so adoption recurses), wired to
 the new props the way `_init` read them (a container shares, a plain
-value writes the member, `children` is the new projection, `extends`
-rest is replaced), computeds and effects rebound, and mounted by the
-parent's ordinary create/setup path. `_init` does not re-run, so
+value writes the member, `extends` rest is replaced), handed the
+rebuilt body projection, computeds and effects rebound, and mounted by
+the parent's ordinary create/setup path. A projection is built under
+the instance receiving it, so a child constructed inside it has that
+instance on its parent chain; the view that built the projection owns
+the child, and its pool is where the child is adopted from. `_init` does not re-run, so
 `createMutation` members survive with the `:=` slots. Two pooled
 children of one shape are ambiguous and both construct fresh; a
 construction whose prop keys changed constructs fresh; whatever the

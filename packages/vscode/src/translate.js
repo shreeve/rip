@@ -945,6 +945,30 @@ export function insertionAboveAttachedDirectives(mappings, at, source) {
   }
 }
 
+// The generated offsets of every verbatim copy of the source bytes an
+// exact row maps generated [start, end) onto, that position itself
+// included — empty when the span maps to no source verbatim. A lowering
+// that declares or reads one Rip name at several face positions (a render
+// loop variable is a parameter of every block it is threaded through)
+// makes each copy its own TypeScript symbol; these are the positions a
+// symbol request must also ask at to answer for the name.
+export function generatedCopiesOfSpan(mappings, start, end, source, code) {
+  const width = end - start;
+  if (width <= 0) return [];
+  const row = mappings.atGenerated(start).find((r) => r.mappingKind === 'exact' && r.generatedEnd >= end);
+  if (!row) return [];
+  const srcStart = row.sourceStart + (start - row.generatedStart);
+  const text = code.slice(start, end);
+  if (source.slice(srcStart, srcStart + width) !== text) return [];
+  const copies = new Set();
+  for (const r of mappings.atSource(srcStart)) {
+    if (r.mappingKind !== 'exact' || r.sourceEnd < srcStart + width) continue;
+    const at = r.generatedStart + (srcStart - r.sourceStart);
+    if (at + width <= r.generatedEnd && code.slice(at, at + width) === text) copies.add(at);
+  }
+  return [...copies];
+}
+
 // Exact-row lookup for ASCENDING generated-span queries (semantic
 // tokens arrive in generated order). Any exact row containing the whole
 // span maps it linearly — exact rows correspond verbatim, so nested
@@ -975,7 +999,8 @@ export function exactSpanMapper(mappings) {
 // dodge every user identifier, and the runtime ships under `__`.
 // The lowering's own names never surface as completion items: the `__`
 // runtime helpers, the `_ref` temps, the render locals (`_el3`, `_t1`,
-// `_inst9`, `_factoryChildren`), the block factories (`create_block_5`),
+// `_inst9`, `_factoryChildren`), the block factories (`create_block_5`)
+// and their loop-iterable thunks (`create_block_5_iter`),
 // and the component runtime's private surface (`_init`, `_teardown`,
 // `_mountSetup`, …). A `_`-prefixed name the SOURCE spells is the
 // author's own and stays offered.
@@ -985,7 +1010,7 @@ const RUNTIME_PRIVATE = new Set([
 ]);
 export function isScaffoldingLabel(label, source = '') {
   if (/^__/.test(label) || /^_ref\d*$/.test(label)) return true;
-  if (!/^_(?:el|t|inst|frag|anchor|empty|slot)\d+$|^_factory[A-Za-z]*$|^create_block_\d+$/.test(label) && !RUNTIME_PRIVATE.has(label)) return false;
+  if (!/^_(?:el|t|inst|frag|anchor|empty|slot)\d+$|^_factory[A-Za-z]*$|^create_block_\d+(?:_iter)?$/.test(label) && !RUNTIME_PRIVATE.has(label)) return false;
   return !source.includes(label);
 }
 
@@ -1166,8 +1191,9 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
       if (!(t.kind === 'PROPERTY' && prevWord === '.' && prevPrev === 'NEW_TARGET')) {
         spans.push([t.start, t.end]);
       }
-    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL') && source !== null) {
-      // An annotation or a type/interface DECLARATION is one opaque
+    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL' || t.kind === 'CAST' || t.kind === 'SATISFIES') && source !== null) {
+      // An annotation, a type/interface DECLARATION, or a postfix
+      // operator's type (`as T` / `satisfies T`) is one opaque
       // token; its WORDS answer (tsgo resolves the names) while its
       // punctuation, spaces, and quote bytes decline like everyone
       // else's. The words come off the SOURCE slice — the token's
@@ -1178,6 +1204,8 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
       // an echo of the bytes under the cursor.
       const slice = source.slice(t.start, t.end);
       const veiled = [...comments.map((c) => [c.start - t.start, c.end - t.start])];
+      // The operator word itself is a keyword, and declines like `if`.
+      if (t.kind === 'CAST' || t.kind === 'SATISFIES') veiled.push([0, slice.match(/^\w+/)[0].length]);
       for (const q of slice.matchAll(/'[^'\n]*'|"[^"\n]*"/g)) {
         veiled.push([q.index, q.index + q[0].length]);
       }

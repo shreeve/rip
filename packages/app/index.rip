@@ -52,3 +52,5 @@ export { createWorkspace } from './workspace.rip'
 export { connectFeed } from './feed.rip'
 export { createApply } from './apply.rip'
 export { rash, check } from './rash.rip'
+import { CSSProperties as __CSSProperties } from './styles.rip'
+export type CSSProperties = __CSSProperties

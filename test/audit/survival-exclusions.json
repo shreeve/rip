@@ -29,10 +29,10 @@
     "54:23:hubTheme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03"
   },
   "11-types.rip": {
-    "174:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
-    "190:14:first": "labeled tuple element — a label, not an identifier with a symbol",
-    "190:29:second": "labeled tuple element — a label, not an identifier with a symbol",
-    "198:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
+    "184:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
+    "200:14:first": "labeled tuple element — a label, not an identifier with a symbol",
+    "200:29:second": "labeled tuple element — a label, not an identifier with a symbol",
+    "208:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
   },
   "13-components.rip": {
     "13:4:span": "lowered into a string — the face holds these bytes inside a literal",
@@ -147,7 +147,9 @@
     "71:4:input": "lowered into a string — the face holds these bytes inside a literal",
     "71:10:ref": "component `ref` prop — lowers to `this`-rooted wiring; the face holds no such identifier at this position",
     "77:4:div": "lowered into a string — the face holds these bytes inside a literal",
-    "78:13:inner": "channel spelling (`<=>`) — rip-native; the lowering leaves no tokenizable identifier at this position"
+    "78:13:inner": "channel spelling (`<=>`) — rip-native; the lowering leaves no tokenizable identifier at this position",
+    "131:4:span": "lowered into a string — the face holds these bytes inside a literal",
+    "135:4:div": "lowered into a string — the face holds these bytes inside a literal"
   },
   "26-schema.rip": {
     "23:6:datetime": "lowered into a string — the face holds these bytes inside a literal",

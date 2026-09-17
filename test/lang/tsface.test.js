@@ -88,6 +88,7 @@ const REGION_SHAPES = [
   /^__ripNarrow\(.*\);$/su,                                // branch-narrowing assertions (statement form) a block's effect opens with
   /^\(__ripNarrow\(.*\),$/su,                              // the expression form's opener (a loop's batched reconcile)
   /^\)+$/u,                                                // the expression form's closers
+  /^create_block_\d+_iter\(ctx: this.*\) \{ return .*; \}$/su, // a render loop's iterable thunk (the element type a call iterable reaches through)
   /^declare function __ripNarrow<T>\(v: T\): asserts v is NonNullable<T>;$/u, // the narrowing helper declare
 ];
 
@@ -971,6 +972,21 @@ describe('TS-face emission pins', () => {
     expect(stripFace(call.code, call.tsRegions)).toBe('let r = f(1);');
   });
 
+  test('satisfies spells into the face as TS-only `(value satisfies T)`, the cast\'s shape; stripping restores the bare value', () => {
+    const faced = ts('v = data satisfies Widget\n');
+    expect(faced.code).toBe('let v = (data satisfies Widget);' + MARKER);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js('v = data satisfies Widget\n').code);
+    const member = ts('n = (data satisfies Widget).name\n');
+    expect(member.code).toBe('let n = (data satisfies Widget).name;' + MARKER);
+    expect(stripFace(member.code, member.tsRegions)).toBe('let n = data.name;');
+    const literal = ts('m = { a: 1 } satisfies Record<string, number>\n');
+    expect(literal.code).toBe('let m = (({a: 1}) satisfies Record<string, number>);' + MARKER);
+    expect(stripFace(literal.code, literal.tsRegions)).toBe('let m = {a: 1};');
+    const chained = ts('c = x as A satisfies B\n');
+    expect(chained.code).toBe('let c = ((x as A) satisfies B);' + MARKER);
+    expect(stripFace(chained.code, chained.tsRegions)).toBe('let c = x;');
+  });
+
   test('a non-primary cast value takes its own TS-only parens — TS `as` binds tighter than the bare JS bytes', () => {
     // `a && b as boolean` would parse in TS as `a && (b as boolean)`;
     // the face groups the value so the assertion covers what Rip cast.
@@ -1057,6 +1073,17 @@ describe('TS-face emission pins', () => {
     expect(faced.code.slice(row.generatedStart, row.generatedEnd)).toBe('as Widget');
     expect(row.mappingKind).toBe('exact');
     const plain = js('v = data as Widget\n');
+    const cover = plain.mappings.rows.find((m) => m.role === 'annotation');
+    expect(cover.mappingKind).toBe('cover');
+    expect(plain.code.slice(cover.generatedStart, cover.generatedEnd)).toBe('data');
+  });
+
+  test('the satisfies annotation row maps EXACT onto its `satisfies T` face bytes; JS mode keeps the cover over the value', () => {
+    const faced = ts('v = data satisfies Widget\n');
+    const row = faced.mappings.rows.find((m) => m.role === 'annotation');
+    expect(faced.code.slice(row.generatedStart, row.generatedEnd)).toBe('satisfies Widget');
+    expect(row.mappingKind).toBe('exact');
+    const plain = js('v = data satisfies Widget\n');
     const cover = plain.mappings.rows.find((m) => m.role === 'annotation');
     expect(cover.mappingKind).toBe('cover');
     expect(plain.code.slice(cover.generatedStart, cover.generatedEnd)).toBe('data');
@@ -1297,6 +1324,17 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     expect(rows.some((m) => m.mappingKind === 'cover')).toBe(true);
   });
 
+  test('a `style:` key owns an EXACT row on its own bytes, static and reactive', () => {
+    for (const value of ["'color: red'", '"color: #{tone}"']) {
+      const src = `C = component\n  tone := 'red'\n  render\n    span style: ${value}\n`;
+      const r = ts(src);
+      const key = src.indexOf('style');
+      const exact = r.mappings.rows.find((m) => m.mappingKind === 'exact' && m.sourceStart === key);
+      expect(exact).toBeDefined();
+      expect(r.code.slice(exact.generatedStart, exact.generatedEnd)).toBe('style');
+    }
+  });
+
   test('a typed param annotation is an EXACT row; the param name stays exact too', () => {
     const src = 'f = (a: string) -> a\n';
     const r = ts(src);
@@ -1419,8 +1457,8 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('_init carries the same props annotation (TS-only)', () => {
     const code = ts(FIXTURE).code;
-    const init = code.slice(code.indexOf('_init(props'));
-    expect(init.slice(0, 200)).toContain('_init(props: {');
+    const init = code.slice(code.indexOf('_init(__given'));
+    expect(init.slice(0, 200)).toContain('_init(__given: {');
   });
 
   test('an all-optional props surface takes `props?:`', () => {
@@ -1444,7 +1482,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
-      'let Chip!: { new (props?: { label?: any; __bind_label__?: { value: any; read(): any; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
+      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
     );
     // Whole-line TS syntax: stripping restores the bare hoist.
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
@@ -1524,6 +1562,37 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // quieting `as any` (custom events keep that: no claim to check).
     expect(faced.code).toContain(`((this.onClick) as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
     expect(faced.code).toContain('(this as any)._first = ');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
+  test('every render loop types its item through its iterable thunk, a name iterable like a call', () => {
+    // One road: the thunk is a face-only method whose return type is the
+    // iterable's, and `typeof ctx.<thunk>` is an entity name the header
+    // and the keyFn can both spell, each through its own name for the
+    // instance. The thunk, both annotations, and the outer-argument
+    // threading are echoes, and the whole spelling strips.
+    const src = [
+      'Roster = component',
+      '  items := [1]',
+      '  render',
+      '    ul',
+      '      for item in items',
+      '        li key: item',
+      '          = item',
+      '      for other in items.map((x) -> x * 2)',
+      '        li other',
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    const itemType = (self, thunk) => `NonNullable<ReturnType<typeof ${self}.${thunk}>> extends readonly (infer __E)[] ? __E : any`;
+    expect(faced.code).toContain('  create_block_0_iter(ctx: this) { return ctx.items.value; }\n');
+    expect(faced.code).toContain(`create_block_0(ctx: this, item: ${itemType('ctx', 'create_block_0_iter')}, i: number) {`);
+    expect(faced.code).toContain(`(item: ${itemType('this', 'create_block_0_iter')}, i: number) => `);
+    expect(faced.code).toContain('  create_block_1_iter(ctx: this) { return ctx.items.value.map(x => (x * 2)); }\n');
+    expect(faced.code).toContain(`create_block_1(ctx: this, other: ${itemType('ctx', 'create_block_1_iter')}, i: number) {`);
+    const echoes = faced.echoSpans.map(([a, b]) => faced.code.slice(a, b).trim());
+    expect(echoes.filter((s) => s.startsWith('create_block_') && s.includes('_iter('))).toHaveLength(2);
+    expect(echoes.filter((s) => s.startsWith(': NonNullable<ReturnType<'))).toHaveLength(3);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
