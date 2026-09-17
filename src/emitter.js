@@ -11658,10 +11658,15 @@ class Emitter {
     const self = () => this.renderSelf ?? 'this';
     // Inside another component's projection the receiver stays current
     // and the emitting component stays owner; outside, the emitting
-    // component is both.
-    const host = this.projectionHost;
-    line(() => this.b.emit(host !== null
-      ? `{ const ${prevV} = ${host}._beginProjection(${self()}); try {`
+    // component is both. A receiver held on the component is reached
+    // through the current self: inside a block the component is `ctx`,
+    // and `this` there is the block.
+    // The lines below replay later, under the self of wherever they land,
+    // so the spelling is taken at replay.
+    const held = this.projectionHost;
+    const host = () => held !== null && held.startsWith('this.') ? `${self()}.${held.slice(5)}` : held;
+    line(() => this.b.emit(held !== null
+      ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {`
       : `{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
     line(() => this.b.emit('try {'));
     line(() => {
@@ -11786,8 +11791,8 @@ class Emitter {
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
-    line(() => this.b.emit(host !== null
-      ? `} finally { ${host}._endProjection(${prevV}); } }`
+    line(() => this.b.emit(held !== null
+      ? `} finally { ${host()}._endProjection(${prevV}); } }`
       : `} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
 
     // Event bindings on the child's root; the listener
