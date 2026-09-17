@@ -109,6 +109,6 @@ counter = 0
 mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
 
 # A modal doesn't stop the document's own scroll or overscroll bounce.
-scrollLock = new CSSStyleSheet()
+scrollLock = CSSStyleSheet.new()
 scrollLock.replaceSync(':root:has(dialog:modal) { overflow: hidden; }')
 document.adoptedStyleSheets.push(scrollLock)
