@@ -1,0 +1,62 @@
+# The QR race against paulmillr/qr, the implementation this package was
+# ported from: `rip test/compare.rip`, with Paul's package checked out at
+# misc/qr in the repository root (`git clone https://github.com/paulmillr/qr
+# misc/qr`). Both run in one process on the same inputs, this package first
+# on each row; a row is the best of three means over 400 ms windows. The
+# rows are the README's Performance table.
+import { encodeQR, decodeQR } from '../qr.rip'
+import { encodeQR as encodeRef } from '../../../misc/qr/src/index.ts'
+import { decodeQR as decodeRef } from '../../../misc/qr/src/decode.ts'
+
+time =! (fn) ->
+  fn() for i in [0...5]
+  best = Infinity
+  for rep in [0...3]
+    t0 = performance.now()
+    n  = 0
+    while performance.now() - t0 < 400
+      fn()
+      n++
+    best = Math.min best, (performance.now() - t0) * 1000 / n
+  best
+
+row =! (name, ours, theirs) ->
+  a = time ours
+  b = time theirs
+  us = (v) -> if v >= 100 then v.toFixed(0) else v.toFixed(1)
+  p "| #{name.padEnd 27} | #{us(a).padStart 6} | #{us(b).padStart 12} | #{(b / a).toFixed(2).padStart 6}x |"
+
+raster =! (text, scale, W, H) ->
+  raw  = encodeQR text, 'raw', { scale, border: 4 }
+  data = Uint8Array.new(W * H * 4).fill 200
+  ox   = (W - raw.length) >> 1
+  oy   = (H - raw.length) >> 1
+  for y in [0...raw.length]
+    for x in [0...raw.length]
+      q = 4 * ((oy + y) * W + ox + x)
+      data[q] = data[q + 1] = data[q + 2] = if raw[y][x] then 0 else 255
+      data[q + 3] = 255
+  { width: W, height: H, data }
+
+miss =! (fn, img) -> -> try fn(img) catch then null
+
+t10 = 'x'.repeat 192
+t22 = 'x'.repeat 768
+p '| Encode (µs)                 |    rip | paulmillr/qr | speedup |'
+p '|-----------------------------|-------:|-------------:|--------:|'
+row 'raw, version 1',  (-> encodeQR 'Hello world', 'raw'), (-> encodeRef 'Hello world', 'raw')
+row 'raw, version 10', (-> encodeQR t10, 'raw'),           (-> encodeRef t10, 'raw')
+row 'raw, version 22', (-> encodeQR t22, 'raw'),           (-> encodeRef t22, 'raw')
+row 'svg, version 10', (-> encodeQR t10, 'svg'),           (-> encodeRef t10, 'svg')
+row 'gif, version 10', (-> encodeQR t10, 'gif'),           (-> encodeRef t10, 'gif')
+small = raster 'Hello world', 4, 132, 132
+hd    = raster 'https://example.com/some/path?with=query', 8, 1280, 720
+fhd   = raster t10, 6, 1920, 1080
+noise = { width: 1920, height: 1080, data: Uint8Array.new(1920 * 1080 * 4).map((_, i) -> if (i & 3) is 3 then 255 else (i * 7919) & 0xff) }
+p ''
+p '| Decode (µs)                 |    rip | paulmillr/qr | speedup |'
+p '|-----------------------------|-------:|-------------:|--------:|'
+row '132x132 raster, version 1',  (-> decodeQR small), (-> decodeRef small)
+row '1280x720 frame, one symbol', (-> decodeQR hd),    (-> decodeRef hd)
+row '1920x1080 frame, one symbol',(-> decodeQR fhd),   (-> decodeRef fhd)
+row '1920x1080 weave, no symbol', miss(decodeQR, noise), miss(decodeRef, noise)

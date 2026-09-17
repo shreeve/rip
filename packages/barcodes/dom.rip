@@ -2,9 +2,14 @@
 # rip/barcodes — browser plumbing for camera scanning
 #
 # QRCanvas owns a reusable scanner and the optional overlay, result and bitmap
-# canvases; QRCamera feeds it frames, preferring a zero-copy VideoFrame path
-# that writes native planes straight into the scanner arena. Overlay identity
-# changes are suppressed for three frames so camera jitter never flickers.
+# canvases, scans a centered crop of each frame (`crop`, `margin`, `cropTo!`),
+# hands the last frame's luma to the other readers (`lastFrame()`), and paints
+# one lock around a decoded symbol or any four corners (`mark!`), eased
+# between estimates and faded on expiry. QRCamera feeds it frames, preferring
+# a zero-copy VideoFrame path that writes native planes straight into the
+# scanner arena, opens the stream at the sensor's full size, and exposes
+# zoom, torch and other track constraints. Overlay identity changes are
+# suppressed for three frames so camera jitter never flickers.
 # BarcodeDetector is a ponyfill over decodeQR and readPDF417 for the Shape
 # Detection API.
 # ==============================================================================
@@ -52,16 +57,6 @@ getCanvasContext =! (canvas) ->
 clearCanvas =! (cc) ->
   cc.context.clearRect 0, 0, cc.canvas.width, cc.canvas.height
 
-traceQuad =! (context, points) ->
-  context.beginPath()
-  context.moveTo points[0].x, points[0].y
-  context.lineTo points[i].x, points[i].y for i in [1...points.length]
-  context.closePath()
-
-fillQuad =! (context, points) ->
-  traceQuad context, points
-  context.fill()
-
 toward =! (from, to, distance) ->
   dx = to.x - from.x
   dy = to.y - from.y
@@ -78,6 +73,23 @@ traceRoundedQuad =! (context, points, radius) ->
     context.lineTo ends[pos].x, ends[pos].y
     context.quadraticCurveTo points[pos].x, points[pos].y, starts[pos].x, starts[pos].y
   context.closePath()
+
+# The largest centered region of a frame with `aspect` (width over height),
+# grown by `margin` of its size beyond each edge where the frame has pixels,
+# its edges kept on the planes' subsampling grid.
+cropRect =! (width, height, aspect, margin = 0, xShift = 0, yShift = 0) ->
+  w = width
+  h = height
+  if width / height > aspect then w = Math.round(height * aspect) else h = Math.round(width / aspect)
+  w  = Math.min width,  Math.round(w * (1 + 2 * margin))
+  h  = Math.min height, Math.round(h * (1 + 2 * margin))
+  w -= w % (1 << xShift)
+  h -= h % (1 << yShift)
+  x  = (width  - w) >> 1
+  y  = (height - h) >> 1
+  x -= x % (1 << xShift)
+  y -= y % (1 << yShift)
+  { x, y, width: w, height: h }
 
 # ==[ Overlay identity ]==
 
@@ -111,12 +123,14 @@ copyOverlays! =! (target, source) ->
 # Drawing and decode options, with defaults.
 canvasDefaults =! ->
   resultBlockSize:     8
-  overlayMainColor:    'green'
-  overlayFinderColor:  'blue'
-  overlayAlignerColor: 'yellow'
+  overlayColor:        '#4ade80'
+  overlayFailedColor:  '#f87171'
   overlaySideColor:    'black'
   overlayTimeout:      500
-  cropToSquare:        true
+  overlayEase:         0.3       # of the way to a lock's new corners per display frame; 1 snaps
+  nativeEvery:         1         # with nativeLimit: frames between full-resolution finder searches
+  crop:                1         # aspect of the centered region scanned; null for the whole frame
+  margin:              0         # fraction of that region scanned beyond each edge, where the frame has pixels
   decodeAll:           false
   async:               false
   drawFailed:          false
@@ -126,7 +140,8 @@ export class QRCanvas
     {overlay, resultQR, bitmap} = elements
     @opts = { ...canvasDefaults(), ...opts }
 
-    # Decode in flight.
+    # Decode in flight, and a count of the frames that have landed.
+    @frames       = 0
     @lastDetect   = 0
     @pending      = undefined
     @task         = undefined
@@ -150,6 +165,13 @@ export class QRCanvas
     @overlayFailedMatches      = 0
     @overlayDeadline           = 0
     @overlayTimer              = undefined
+    # The lock on screen, where it is headed, and its animation frame.
+    @lockQuad                  = undefined
+    @lockTarget                = undefined
+    @lockFailed                = false
+    @lockAlpha                 = 1
+    @lockFading                = false
+    @lockFrame                 = undefined
 
     # Source geometry of the frame being decoded.
     @rotate       = false
@@ -166,8 +188,9 @@ export class QRCanvas
       @resultQR.context.imageSmoothingEnabled = false
     @bitmap = getCanvasContext(bitmap) if bitmap
     decoder = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
-    decoder.effort         = @opts.effort    if @opts.effort    isnt undefined
-    decoder.timeLimit      = @opts.timeLimit if @opts.timeLimit isnt undefined
+    decoder.effort         = @opts.effort      if @opts.effort      isnt undefined
+    decoder.timeLimit      = @opts.timeLimit   if @opts.timeLimit   isnt undefined
+    decoder.nativeLimit    = @opts.nativeLimit if @opts.nativeLimit isnt undefined
     decoder.pointsOnDetect = ((points, result) => @onPoints points, result) if @overlay
     decoder.imageOnResult  = ((img) => @drawResultQr img) if @resultQR
     if @bitmap
@@ -179,29 +202,37 @@ export class QRCanvas
     @scanner = Scanner.new(decoder)
 
     # The frame reader QRCamera drives: clean, crop, luma, frame, source, read.
+    # `landing` is set while a copy into the arena is in flight.
     @reader =
       clean!: =>
         @generation++
         @task?.abort()
         @task = undefined
         if @pending then @cleanPending = true else @scanner.clean()
-      crop:  @opts.cropToSquare
-      luma:  @scanner.luma
-      busy:  => !!@pending
-      frame: @opts.onVideoFrame
+      crop:    @opts.crop
+      margin:  @opts.margin
+      luma:    @scanner.luma
+      landing: false
+      busy:    => !!@pending
+      frame:   @opts.onVideoFrame
       source!: (source) =>
         return if source is @frameSource
         @frameSource = source
         @opts.onFrameSource source if @opts.onFrameSource
       read: (frame) =>
-        @rotate       = frame.rotate
-        @sourceHeight = frame.sourceHeight
-        @sourceX      = frame.sourceX
-        @sourceY      = frame.sourceY
-        @inputWidth   = frame.size.width
-        @inputHeight  = frame.size.height
-        setCanvasSize @overlay.canvas, frame.width, frame.height if @overlay
+        @land frame
         @decode undefined, frame.format, frame.layout, frame.size
+
+  # Geometry of the frame about to decode: the crop rect in coded pixels and
+  # the presentation size the overlay takes.
+  land!: (frame) ->
+    @rotate       = frame.rotate
+    @sourceHeight = frame.sourceHeight
+    @sourceX      = frame.sourceX
+    @sourceY      = frame.sourceY
+    @inputWidth   = frame.size.width
+    @inputHeight  = frame.size.height
+    setCanvasSize @overlay.canvas, frame.width, frame.height if @overlay
 
   resetOverlay!: ->
     @overlayPoints             = undefined
@@ -215,20 +246,20 @@ export class QRCanvas
     @overlayFailedMatches      = 0
     @overlayMatches            = 0
 
-  # Map decoder geometry from cropped, row-contiguous coded pixels into
-  # presentation coordinates; the pixels themselves were never rotated.
+  # Decoder geometry lives in cropped, row-contiguous coded pixels, which
+  # were never rotated; the overlay is in presentation coordinates.
+  view: (point) ->
+    x = point.x + @sourceX
+    y = point.y + @sourceY
+    if @rotate then { x: @sourceHeight - 1 - y, y: x } else { x, y }
+
   onPoints!: (points, result) ->
     @resetOverlay() if Date.now() - @lastDetect > @opts.overlayTimeout
     if @rotate or @sourceX or @sourceY
       move! = (point) =>
-        x = point.x + @sourceX
-        y = point.y + @sourceY
-        if @rotate
-          point.x = @sourceHeight - 1 - y
-          point.y = x
-        else
-          point.x = x
-          point.y = y
+        {x, y} = @view point
+        point.x = x
+        point.y = y
       move point for point in [points.tl, points.tr, points.br, points.bl, ...points.aligners]
       for marker in [points.tl, points.tr, points.bl, ...points.aligners]
         move point for point in marker.corners
@@ -261,11 +292,9 @@ export class QRCanvas
       @overlayMatches   = 0
     @drawOverlay points, @overlayDrawn, result instanceof Error
     @overlayDrawn = true
-    now = Date.now()
-    @lastDetect = now
     # This runs inside measured decode time, so it only refreshes the
     # deadline; decode() arms the timer afterwards.
-    @overlayDeadline = now + @opts.overlayTimeout
+    @stamp()
 
   drawOverlayBatch!: ->
     # No terminal geometry is not evidence the displayed set changed; retain
@@ -322,9 +351,15 @@ export class QRCanvas
     if @overlayFailed
       @drawOverlay @overlayFailed, @overlayDrawn, true
       @overlayDrawn = true
-    now = Date.now()
-    @lastDetect = now
-    @overlayDeadline = now + @opts.overlayTimeout
+    @stamp()
+
+  # A symbol is on screen now; the overlay lives another overlayTimeout.
+  stamp!: ->
+    @lastDetect      = Date.now()
+    @overlayDeadline = @lastDetect + @opts.overlayTimeout
+
+  arm!: ->
+    @overlayTimer = setTimeout (=> @expireOverlay()), @opts.overlayTimeout if @overlayTimer is undefined
 
   expireOverlay!: ->
     remaining = @overlayDeadline - Date.now()
@@ -363,45 +398,157 @@ export class QRCanvas
     # Scaled modules blur under default smoothing; the result canvas owns this style.
     @resultQR.canvas.style = "image-rendering: pixelated; width: #{blockSize * width}px; height: #{blockSize * height}px"
 
+  # Without points: the lock on screen begins to fade. With points, in
+  # batch mode: drawn where they are. Otherwise the lock glides there.
   drawOverlay!: (points, append = false, failed = false) ->
     return unless @overlay
+    unless points
+      @fade()
+      return
+    if @opts.decodeAll
+      @clearOverlay() unless append
+      @drawLock @overlay.context, points.outline, failed
+      return
+    @aim points.outline, failed
+
+  # Clear the overlay, dimming whatever lies outside the scanned region.
+  clearOverlay!: ->
     ctx = @overlay.context
     height = @overlay.canvas.height
     width  = @overlay.canvas.width
-    unless append
-      if @opts.cropToSquare and height isnt width
-        cropWidth  = @inputWidth  or Math.min(height, width)
-        cropHeight = @inputHeight or Math.min(height, width)
-        x = if @inputWidth  then @sourceX else Math.floor((width - cropWidth) / 2)
-        y = if @inputHeight then @sourceY else Math.floor((height - cropHeight) / 2)
-        if @rotate and @inputWidth
-          # The crop rect was applied to coded pixels; rotate it into player coordinates.
-          [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth]
-        ctx.clearRect x, y, cropWidth, cropHeight
-        ctx.fillStyle = @opts.overlaySideColor
-        right  = x + cropWidth
-        bottom = y + cropHeight
-        ctx.fillRect 0,     0,      width,         y               if y
-        ctx.fillRect 0,     bottom, width,         height - bottom if bottom < height
-        ctx.fillRect 0,     y,      x,             cropHeight      if x
-        ctx.fillRect right, y,      width - right, cropHeight      if right < width
-      else
-        ctx.clearRect 0, 0, width, height
-    return unless points
-    {tl, tr, br, bl} = points
-    # The four points are logical finder-center positions, so the polygon
-    # keeps the decoder's projective geometry.
-    ctx.fillStyle = if failed then 'red' else @opts.overlayMainColor
-    fillQuad ctx, [tl, tr, br, bl]
-    moduleSize = (tl.moduleSize + tr.moduleSize + bl.moduleSize) / 3
-    ctx.strokeStyle = @opts.overlayAlignerColor
-    ctx.lineWidth   = moduleSize / 2
-    traceRoundedQuad ctx, points.outline, 9
+    cropWidth  = @inputWidth
+    cropHeight = @inputHeight
+    x = @sourceX
+    y = @sourceY
+    # The crop rect was applied to coded pixels; rotate it into player coordinates.
+    [x, y, cropWidth, cropHeight] = [@sourceHeight - y - cropHeight, x, cropHeight, cropWidth] if @rotate
+    if cropWidth and cropHeight and (cropWidth isnt width or cropHeight isnt height)
+      ctx.clearRect x, y, cropWidth, cropHeight
+      ctx.fillStyle = @opts.overlaySideColor
+      right  = x + cropWidth
+      bottom = y + cropHeight
+      ctx.fillRect 0,     0,      width,         y               if y
+      ctx.fillRect 0,     bottom, width,         height - bottom if bottom < height
+      ctx.fillRect 0,     y,      x,             cropHeight      if x
+      ctx.fillRect right, y,      width - right, cropHeight      if right < width
+    else
+      ctx.clearRect 0, 0, width, height
+
+  # ==[ Lock animation ]==
+  # The lock glides at display rate toward the newest estimate, which
+  # steadies the decoder's wobble and bridges frames that did not decode,
+  # and fades out when it expires. A symbol more than half a side away
+  # snaps. Every draw happens in the one animation frame `schedule`
+  # keeps, so aiming inside a decode costs the decode nothing.
+
+  aim!: (quad, failed) ->
+    target = ({ x: p.x, y: p.y } for p in quad)
+    last   = @lockQuad
+    if last and @opts.overlayEase < 1
+      side = 0
+      dx   = 0
+      dy   = 0
+      for i in [0...4]
+        side += Math.hypot target[(i + 1) % 4].x - target[i].x, target[(i + 1) % 4].y - target[i].y
+        dx   += target[i].x - last[i].x
+        dy   += target[i].y - last[i].y
+      # `side` sums four sides and the deltas sum four corners: this is
+      # a shift of half a side.
+      last = undefined if dx * dx + dy * dy > side * side / 4
+    @lockQuad   = last or ({ x: p.x, y: p.y } for p in target)
+    @lockTarget = target
+    @lockFailed = failed
+    @lockAlpha  = 1
+    @lockFading = false
+    @schedule()
+
+  fade!: ->
+    return unless @lockQuad
+    @lockFading = true
+    @schedule()
+
+  schedule!: ->
+    @lockFrame = requestAnimationFrame(=> @tick()) if @lockFrame is undefined
+
+  tick!: ->
+    @lockFrame = undefined
+    return unless @lockQuad and @overlay
+    ease   = @opts.overlayEase
+    quad   = @lockQuad
+    moving = false
+    for corner, i in quad
+      dx = @lockTarget[i].x - corner.x
+      dy = @lockTarget[i].y - corner.y
+      corner.x += dx * ease
+      corner.y += dy * ease
+      moving = true if Math.abs(dx) + Math.abs(dy) > 0.5
+    @lockAlpha = Math.max 0, @lockAlpha - 0.12 if @lockFading
+    @clearOverlay()
+    if @lockAlpha is 0
+      @lockQuad   = undefined
+      @lockTarget = undefined
+      @lockFading = false
+      return
+    @drawLock @overlay.context, quad, @lockFailed, @lockAlpha
+    @schedule() if moving or @lockFading
+
+  # A lock on a quad: a faint tint and hairline inside a rounded outline,
+  # then a bracket over each corner. Sizes follow the frame, not the
+  # symbol, so the mark reads the same at every stream size and distance.
+  drawLock!: (ctx, quad, failed, alpha = 1) ->
+    unit   = Math.max 2, ctx.canvas.width / 320
+    side   = 0
+    side  += Math.hypot(quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y) for i in [0...4]
+    side  /= 4
+    radius = side * 0.08
+    arm    = Math.min side * 0.25, 48 * unit
+    color  = if failed then @opts.overlayFailedColor else @opts.overlayColor
+    ctx.lineCap     = 'round'
+    ctx.lineJoin    = 'round'
+    ctx.fillStyle   = color
+    ctx.strokeStyle = color
+    traceRoundedQuad ctx, quad, radius
+    ctx.globalAlpha = 0.12 * alpha
+    ctx.fill()
+    ctx.globalAlpha = 0.5 * alpha
+    ctx.lineWidth   = unit
     ctx.stroke()
-    ctx.fillStyle = @opts.overlayFinderColor
-    fillQuad ctx, finder.corners for finder in [tl, tr, bl]
-    ctx.fillStyle = @opts.overlayAlignerColor
-    fillQuad ctx, aligner.corners for aligner in points.aligners
+    ctx.globalAlpha = alpha
+    ctx.lineWidth   = 2.5 * unit
+    ctx.beginPath()
+    for corner, i in quad
+      prev  = quad[(i + 3) % 4]
+      next  = quad[(i + 1) % 4]
+      into  = toward corner, prev, radius
+      out   = toward corner, next, radius
+      start = toward corner, prev, arm
+      end   = toward corner, next, arm
+      ctx.moveTo start.x, start.y
+      ctx.lineTo into.x, into.y
+      ctx.quadraticCurveTo corner.x, corner.y, out.x, out.y
+      ctx.lineTo end.x, end.y
+    ctx.stroke()
+    ctx.globalAlpha = 1
+
+  # The same lock on four image-space corners another reader found on the
+  # frame `lastFrame()` handed it, pushed out from the symbol's edge as the
+  # QR outline is; it expires like a QR overlay.
+  mark!: (corners, failed = false) ->
+    return unless @overlay
+    quad = (@view point for point in corners)
+    cx   = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4
+    cy   = (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4
+    pad  = Math.max 2, @overlay.canvas.width / 320 * 4
+    for point in quad
+      dx = point.x - cx
+      dy = point.y - cy
+      d  = Math.hypot(dx, dy) or 1
+      point.x += dx / d * pad
+      point.y += dy / d * pad
+    @drawOverlay { outline: quad }, false, failed
+    @overlayDrawn = true
+    @stamp()
+    @arm()
 
   # Camera-frame decoding is fail-soft: a failed frame is a miss, never a throw.
   finish: (res) ->
@@ -417,11 +564,15 @@ export class QRCanvas
 
   endDecode!: ->
     @drawOverlayBatch() if @opts.decodeAll
-    if @overlayDeadline and @overlayTimer is undefined
-      @overlayTimer = setTimeout (=> @expireOverlay()), @opts.overlayTimeout
+    @arm() if @overlayDeadline
 
   decode: (image, format, layout, size) ->
     return if @pending
+    @frames++
+    # Every nativeEvery-th frame searches the native layer regardless, so a
+    # small symbol on a large frame is still found within a few frames.
+    if @opts.nativeLimit isnt undefined
+      @scanner.nativeLimit = if @frames % @opts.nativeEvery then @opts.nativeLimit else Infinity
     @bitmapDrawn         = false
     @overlayDrawn        = false
     @overlayBatch.length = 0
@@ -468,27 +619,41 @@ export class QRCanvas
     @pending = pending
     pending
 
+  # The luma of the last frame decoded, in the scanner's arena, for the
+  # other readers: `readCode128 canvas.lastFrame(), format: 'I420'`. Valid
+  # until the next frame lands, which raises `id`; null before the first
+  # and while the next copy is writing the arena.
+  lastFrame: ->
+    return null if @reader.landing
+    {width, height, luma} = @scanner
+    if width and height then { width, height, data: luma, id: @frames } else null
+
   drawImage: (image, height, width) ->
-    @rotate       = false
-    @sourceHeight = height
-    side = Math.min width, height
-    cropped = @opts.cropToSquare and width isnt height
-    inputWidth  = if cropped then side else width
-    inputHeight = if cropped then side else height
-    @sourceX = if cropped then (width - side) >> 1 else 0
-    @sourceY = if cropped then (height - side) >> 1 else 0
-    @inputWidth  = inputWidth
-    @inputHeight = inputHeight
+    rect = if @opts.crop then cropRect(width, height, @opts.crop, @opts.margin) else { x: 0, y: 0, width, height }
+    @land { rotate: false, sourceHeight: height, sourceX: rect.x, sourceY: rect.y, size: rect, width, height }
     # The working canvas holds only the selected source rect; the overlay
     # keeps presentation dimensions.
-    setCanvasSize @main.canvas, inputWidth, inputHeight
-    setCanvasSize @overlay.canvas, width, height if @overlay
+    setCanvasSize @main.canvas, rect.width, rect.height
     {context} = @main
-    context.drawImage image, -@sourceX, -@sourceY, width, height
-    @decode context.getImageData(0, 0, inputWidth, inputHeight)
+    context.drawImage image, -rect.x, -rect.y, width, height
+    @decode context.getImageData(0, 0, rect.width, rect.height)
+
+  # Scan a different centered region from the next frame on, such as the
+  # part of the frame a viewfinder shows and a little beyond its edges.
+  cropTo!: (aspect, margin = @opts.margin) ->
+    @opts.crop     = aspect
+    @opts.margin   = margin
+    @reader.crop   = aspect
+    @reader.margin = margin
 
   clear!: ->
     @reader.clean()
+    cancelAnimationFrame @lockFrame if @lockFrame isnt undefined
+    @lockFrame  = undefined
+    @lockQuad   = undefined
+    @lockTarget = undefined
+    @lockFading = false
+    @clearOverlay() if @overlay
     @sourceX    = @sourceY     = 0
     @inputWidth = @inputHeight = 0
     clearTimeout @overlayTimer if @overlayTimer isnt undefined
@@ -514,6 +679,7 @@ export class QRCamera
     stream = if 'getTracks' of streamOrOpts then streamOrOpts else undefined
     opts   = if stream then init else streamOrOpts
     @opts          = { format: 'auto', ...opts }
+    @video         = {}
     @stream        = undefined
     @reader        = undefined
     @planes        = ({ offset: 0, stride: 0 } for i in [0...4])
@@ -595,23 +761,20 @@ export class QRCamera
     fail "Unsupported VideoFrame format=#{selected}" if not selected or selected is 'canvas'
     planes = PLANES[selected]
     fail "Unsupported VideoFrame format=#{selected}" unless planes
-    sourceWidth  = width
-    sourceHeight = height
-    sourceX      = 0
-    sourceY      = 0
-    if reader.crop and width isnt height
-      side = Math.min width, height
-      xShift = 0
-      yShift = 0
-      for plane in planes
-        xShift = Math.max xShift, plane[0]
-        yShift = Math.max yShift, plane[1]
-      side -= side % (1 << Math.max(xShift, yShift))
-      sourceWidth = sourceHeight = side
-      sourceX = (width - side) >> 1
-      sourceY = (height - side) >> 1
-      sourceX -= sourceX % (1 << xShift)
-      sourceY -= sourceY % (1 << yShift)
+    xShift = 0
+    yShift = 0
+    for plane in planes
+      xShift = Math.max xShift, plane[0]
+      yShift = Math.max yShift, plane[1]
+    # The aspect is the player's; coded pixels of a portrait stream lie
+    # sideways. Without a crop the whole frame is copied, still on the
+    # subsampling grid, which an odd-sized frame needs.
+    aspect       = if reader.crop then (if rotate then 1 / reader.crop else reader.crop) else width / height
+    rect         = cropRect width, height, aspect, (if reader.crop then reader.margin else 0), xShift, yShift
+    sourceWidth  = rect.width
+    sourceHeight = rect.height
+    sourceX      = rect.x
+    sourceY      = rect.y
     @rect.x      = (visible?.x or 0) + sourceX
     @rect.y      = (visible?.y or 0) + sourceY
     @rect.width  = sourceWidth
@@ -647,11 +810,15 @@ export class QRCamera
     @resetSource()
     @cleanFrame()
     player = @player
-    # Inline autoplay on mobile must be set before the stream attaches.
+    # Inline autoplay on mobile must be set before the stream attaches;
+    # the muted attribute is only a default, the property is the state.
     player.setAttribute 'autoplay',    ''
     player.setAttribute 'muted',       ''
     player.setAttribute 'playsinline', ''
+    player.muted     = true
     player.srcObject = stream
+    # A swapped stream on a paused element (a page shown again) needs play.
+    player.play?()?.catch(->)
 
   # Labels are empty until the first getUserMedia grant.
   listDevices: ->
@@ -660,16 +827,45 @@ export class QRCamera
     devices.filter((device) -> device.kind is 'videoinput').map (d) -> { deviceId: d.deviceId, label: d.label or "Camera #{d.deviceId}" }
 
   # Stop first so constrained camera hardware is released before the
-  # replacement stream is requested.
-  setDevice!: (deviceId) ->
+  # replacement stream is requested; the new constraints layer over the
+  # ones the camera opened with.
+  reopen!: (video) ->
     @stop()
     source = @source
-    stream = navigator.mediaDevices.getUserMedia! video: { deviceId: { exact: deviceId } }
+    @video = { ...@video, ...video }
+    stream = navigator.mediaDevices.getUserMedia! video: @video
     # A later request may resolve first; never attach or leak a stale stream.
     if source isnt @source
       track.stop() for track in stream.getTracks()
       return
     @setStream stream
+
+  setDevice!: (deviceId) ->
+    @reopen! deviceId: { exact: deviceId }
+
+  # The live video track and what the browser lets a page do with it.
+  track: -> @stream?.getVideoTracks()[0]
+  capabilities: -> @track()?.getCapabilities?() or {}
+  settings:     -> @track()?.getSettings?() or {}
+
+  # One advanced constraint applied to the live track, when the capability
+  # exists: zoom is a sensor crop that gives a code more pixels per module,
+  # torch lights a dark scene, and Android also takes focusMode and
+  # exposure settings. Resolves to whether anything was applied.
+  apply: (constraint) ->
+    track = @track()
+    caps  = @capabilities()
+    return false unless track and Object.keys(constraint).every (name) -> caps[name] isnt undefined
+    track.applyConstraints! advanced: [constraint]
+    true
+
+  zoom: (value) ->
+    range = @capabilities().zoom
+    return false unless range
+    @apply! zoom: Math.min(range.max, Math.max(range.min, value))
+
+  torch: (lit = true) ->
+    @apply! torch: lit
 
   draw: (canvas, fullSize) ->
     player = @player
@@ -689,6 +885,9 @@ export class QRCamera
     if typeof VideoFrame isnt 'function'
       @videoFrame = false
       return @draw(canvas, fullSize)
+    # Before the first decoded frame the constructor throws, which would
+    # read as missing support; the frame is simply not here yet.
+    return if @player.readyState < 2
     # An async decode still reads the arena; a new frame must not land in it.
     return if @reading or reader.busy()
     @reading = true
@@ -701,6 +900,7 @@ export class QRCamera
       @reading = false
       return @draw(canvas, fullSize)
     try
+      reader.landing = true
       if not @reported and reader.frame
         @reported = true
         reader.frame frame
@@ -739,7 +939,8 @@ export class QRCamera
       @draw canvas, fullSize
     finally
       frame.close()
-      @reading = false
+      @reading       = false
+      reader.landing = false
 
   stop!: ->
     @resetSource()
@@ -748,10 +949,18 @@ export class QRCamera
       track.stop() for track in @stream.getTracks()
     @stream = undefined
 
-# Media Capture terms: 'environment' is rear-facing, 'user' is the selfie camera.
+# Media Capture terms: 'environment' is rear-facing, 'user' is the selfie
+# camera. The stream is asked for at the sensor's full size: a symbol's
+# modules must reach a pixel or two in the frame the readers see, and a
+# phone's screen size, the browsers' default, gives a driver's license no
+# distance at which it both focuses and resolves. `opts.video` layers
+# further constraints over these.
 openCamera =! (player, facingMode, opts = {}) ->
-  stream = navigator.mediaDevices.getUserMedia! video: { height: { ideal: window.screen.height }, width: { ideal: window.screen.width }, facingMode }
-  QRCamera.new player, stream, opts
+  video  = { facingMode, width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 30 }, ...opts.video }
+  stream = navigator.mediaDevices.getUserMedia! video: video
+  camera = QRCamera.new player, stream, opts
+  camera.video = video
+  camera
 
 export rearCamera =! (player, opts = {}) ->
   openCamera! player, 'environment', opts

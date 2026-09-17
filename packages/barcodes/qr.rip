@@ -23,10 +23,10 @@
 # reused. Coarse layers run first; native resolution last.
 # ==============================================================================
 
-import { ECI_DECODERS } from './eci.rip'
+import { ECI_DECODERS, guessDecoder } from './eci.rip'
 import { gifDataUrl, writeGif } from './gif.rip'
 import {
-  FORMATS, LITTLE_ENDIAN, asObject, asString, copyLuma, darkToImage, fail,
+  FORMATS, LITTLE_ENDIAN, asInt, asObject, asString, copyLuma, darkToImage, fail,
   validateImage, validateSize,
 } from './image.rip'
 
@@ -163,7 +163,7 @@ MAX_OUTPUT_SIZE         =! 1024
 MAX_COMPACT_OUTPUT_SIZE =! 4096
 
 MODE_BITS    =! { numeric: 1, alphanumeric: 2, byte: 4 }
-LENGTH_BITS  =! { numeric: [10, 12, 14], alphanumeric: [9, 11, 13], byte: [8, 16, 16] }
+LENGTH_BITS  =! { numeric: [10, 12, 14], alphanumeric: [9, 11, 13], byte: [8, 16, 16], kanji: [8, 10, 12] }
 NUMERIC_BITS =! [0, 4, 7, 10]
 
 # charCode -> Table 5 value; -1 outside the alphabet.
@@ -575,16 +575,6 @@ drawSymbol =! (ver, ecc, data, maskIdx) ->
 
 # ==[ Validation ]==
 
-asNum =! (n, title) ->
-  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  fail "#{title} expected safe integer, got #{n}", RangeError unless Number.isSafeInteger n
-  n
-
-asVersion =! (ver) ->
-  asNum ver, 'version'
-  fail "Invalid version=#{ver}. Expected number [1..40]", RangeError if ver < 1 or ver > 40
-  ver
-
 # Exact WHATWG TextEncoder byte count without encoding; lone surrogates cost
 # the three-byte replacement character.
 utf8Length =! (str) ->
@@ -711,18 +701,16 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
-  ver = opts.version
-  ver = asVersion ver if ver isnt undefined
+  ver = if opts.version is undefined then undefined else asInt(opts.version, 'opts.version', 1, 40)
   ecc = if opts.ecc is undefined then 'medium' else opts.ecc
   fail "invalid ecc=#{ecc}" unless ECC_LEVELS.includes ecc
   encoding = if opts.encoding is undefined then detectType(text) else opts.encoding
-  fail "invalid encoding=#{encoding}" unless LENGTH_BITS[encoding]
+  fail "invalid encoding=#{encoding}" unless Object.hasOwn LENGTH_BITS, encoding
   if encoding isnt 'byte'
     alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
     for ch in text
       fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
-  if opts.mask isnt undefined and (asNum(opts.mask, 'opts.mask') < 0 or opts.mask > 7)
-    fail "invalid mask=#{opts.mask}"
+  mask        = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
   textEncoder = opts.textEncoder
   # Reject impossible built-in UTF-8 payloads before encoding duplicates a
   # huge input; a custom encoder's output is its own source of truth.
@@ -750,13 +738,11 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   else
     fail 'Capacity overflow' unless fits ver
   data = encodeData ver, ecc, text, encoding, utf8
-  m = drawSymbol ver, ecc, data, opts.mask
+  m = drawSymbol ver, ecc, data, mask
   # A quiet zone is required (§5.3.8); custom renderers wanting the borderless
   # matrix request border 1 and slice the ring off.
-  border = if opts.border is undefined then 2 else asNum(opts.border, 'opts.border')
-  fail "invalid border=#{border}", RangeError if border <= 0
-  scale = if opts.scale is undefined then 1 else asNum(opts.scale, 'opts.scale')
-  fail "invalid scale factor: #{scale}", RangeError if scale <= 0 or scale > 1024
+  border = if opts.border is undefined then 2 else asInt(opts.border, 'opts.border', 1)
+  scale  = if opts.scale  is undefined then 1 else asInt(opts.scale,  'opts.scale',  1, 1024)
   W = (m.size + 2 * border) * scale
   compact = output is 'ascii' or output is 'gif' or output is 'data-url'
   maxOutputSize = if compact then MAX_COMPACT_OUTPUT_SIZE else MAX_OUTPUT_SIZE
@@ -784,6 +770,9 @@ MAX_SIZE        =! 177              # version 40 side in modules
 MAX_CODEWORDS   =! BYTES.at(-1)     # version 40 codeword count
 MAX_CANDIDATES  =! 16               # finder records ranked per polarity
 MAX_SETS        =! 256              # retry triples scheduled per layer
+MAX_LOOSE       =! 64               # loose finder records admitted per layer
+MAX_LOOSE_WINDOWS =! 4096         # loose-pass windows cross-checked per layer; a texture fits every window
+LOOSE_PITCH     =! 6                # loose windows only below this pitch; wider rings survive blur within half a pitch
 BLOCK           =! 8                # threshold block side in pixels
 BLOCK_SHIFT     =! 3                # log2 BLOCK
 BATCH_MAX_SIDE  =! 3840             # decodeQRBatch default arena side
@@ -793,6 +782,7 @@ FINDER_INSET    =! 7                # finder centers sit 3.5 modules in from eac
 POLARITY =! 1                       # set for light-on-dark finders
 DEAD     =! 2                       # consumed by a decode or inside a decoded region
 ANCHOR   =! 4                       # a decoded symbol's TL record; slots 2..3 hold its TR and BL indices
+STRICT   =! 8                       # some row fit the finder ratios within half a pitch
 
 # Failure values shared by every attempt; a decode returns a string or one
 # of these. The frame path throws only when a layer's finder storage
@@ -808,6 +798,10 @@ FAIL =! Object.freeze
   rs:        Object.freeze(Error.new 'rs')
   timing:    Object.freeze(Error.new 'timing')
   version:   Object.freeze(Error.new 'version')
+
+# How far an attempt got; a decode reports its deepest failure.
+DEPTH  =! { finder: 0, dimension: 1, timing: 2, version: 3, alignment: 4, format: 5, rs: 6, data: 7 }
+deeper =! (a, b) -> if DEPTH[b.message] > DEPTH[a.message] then b else a
 
 mul   =! (a, b)          -> if a and b then EXP[LOG[a] + LOG[b]] else 0
 inv   =! (a)             -> EXP[255 - LOG[a]]
@@ -855,6 +849,7 @@ class Payload
     @dataLen  = dataLen
     cls       = lengthClass version
     eci       = 26
+    named     = false
     res       = ''
     parts     = if deferText then [] else null
     while @position + 4 <= dataLen * 8
@@ -870,6 +865,7 @@ class Payload
           value = @read len
           return FAIL.data if value < 0
           eci = ((b0 & (if len is 8 then 0x3f else 0x1f)) << len) | value
+        named = true
         continue
       if mode is 1
         length = @read LENGTH_BITS.numeric[cls]
@@ -905,10 +901,39 @@ class Payload
           parts.push [segment, eci]
           res = ''
         else
-          decoder = ECI_DECODERS[eci]
-          return FAIL.data if not decoder or length >= @views.length
+          return FAIL.data if length >= @views.length
           @bytes[i] = @read(8) for i in [0...length]
+          # A segment under no ECI is read the way readers in the wild do.
+          decoder = if named then ECI_DECODERS[eci] else guessDecoder(@view length)
+          return FAIL.data unless decoder
           res += decoder.decode @view(length)
+      else if mode is 8 or mode is 13
+        # Kanji (Shift JIS) and Hanzi (GB 2312) segments pack one double-byte
+        # character into 13 bits; Hanzi names its subset first.
+        hanzi = mode is 13
+        return FAIL.data if hanzi and @read(4) isnt 1
+        length = @read LENGTH_BITS.kanji[cls]
+        return FAIL.data if length < 0 or @position + 13 * length > dataLen * 8
+        decoder = ECI_DECODERS[if hanzi then 29 else 20]
+        return FAIL.data unless decoder
+        chunk = (@views.length - 1) & ~1
+        n     = 0
+        for i in [0...length]
+          value = @read 13
+          code  = if hanzi then ((value // 0x60) << 8) | (value % 0x60) else ((value // 0xc0) << 8) | (value % 0xc0)
+          code += if hanzi then (if code < 0x0a00 then 0xa1a1 else 0xa6a1) else (if code < 0x1f00 then 0x8140 else 0xc140)
+          @bytes[n++] = code >> 8
+          @bytes[n++] = code & 0xff
+          if n is chunk or i is length - 1
+            res += decoder.decode @view(n)
+            n = 0
+      else if mode is 3
+        # Structured append: sequence, total and parity are not part of the text.
+        return FAIL.data if @read(16) < 0
+      else if mode is 5 or mode is 9
+        # FNC1 framing leaves the text as is; the second position carries an
+        # application indicator.
+        return FAIL.data if mode is 9 and @read(8) < 0
       else
         return FAIL.data
     return res unless parts
@@ -1023,6 +1048,9 @@ validateOpts! =! (opts) ->
   if opts.timeLimit isnt undefined and opts.timeLimit isnt Infinity and
       (typeof opts.timeLimit isnt 'number' or not Number.isFinite(opts.timeLimit) or opts.timeLimit < 0)
     fail "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})", TypeError
+  if opts.nativeLimit isnt undefined and opts.nativeLimit isnt Infinity and
+      (typeof opts.nativeLimit isnt 'number' or not Number.isFinite(opts.nativeLimit) or opts.nativeLimit < 0)
+    fail "invalid opts.nativeLimit=#{opts.nativeLimit} (#{typeof opts.nativeLimit})", TypeError
   for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
     if opts[name] isnt undefined and typeof opts[name] isnt 'function'
       fail "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})", TypeError
@@ -1038,14 +1066,22 @@ bit =! (layer, x, y) ->
 # ==[ Finder patterns ]==
 
 # Module pitch of a tolerant 1:1:3:1:1 run, or zero when it does not fit.
-ratio =! (a, b, c, d, e) ->
+# With `loose`, a window under LOOSE_PITCH that fits within six tenths of
+# its pitch (a blurred ring thins one run of a small finder) returns the
+# pitch negated.
+ratio =! (a, b, c, d, e, loose = false) ->
   total = a + b + c + d + e
   return 0 if total < 7
   ms  = total / 7
   tol = ms * 0.5
   fits = Math.abs(ms - a) < tol and Math.abs(ms - b) < tol and Math.abs(3 * ms - c) < 3 * tol and
     Math.abs(ms - d) < tol and Math.abs(ms - e) < tol
-  if fits then ms else 0
+  return ms if fits
+  return 0 if not loose or ms >= LOOSE_PITCH
+  tol = ms * 0.6
+  fits = Math.abs(ms - a) < tol and Math.abs(ms - b) < tol and Math.abs(3 * ms - c) < 3 * tol and
+    Math.abs(ms - d) < tol and Math.abs(ms - e) < tol
+  if fits then -ms else 0
 
 # Consecutive `color` pixels from (x, y) inclusive stepping (dx, dy); stops on
 # mismatch, border, or once the count passes `cap` (at most floor(cap)+1).
@@ -1073,8 +1109,9 @@ run =! (layer, x, y, dx, dy, color, cap) ->
   Math.min n, Math.floor(cap) + 1
 
 # 1:1:3:1:1 cross-check from (cx, cy) along (dx, dy): the refined center
-# coordinate, the measured pitch when asked, or -1 on ratio failure.
-cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false) ->
+# coordinate, the measured pitch when asked, or -1 on ratio failure; a
+# loose check accepts the looser fit too.
+cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false, loose = false) ->
   center = if inverted then 0 else 1
   side   = if inverted then 1 else 0
   r2 = run layer, cx, cy, -dx, -dy, center, Infinity
@@ -1090,7 +1127,7 @@ cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false) ->
   r3 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, cap
   ahead += r3
   r4 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, cap
-  return -1 unless ratio(r0, r1, r2, r3, r4)
+  return -1 unless ratio(r0, r1, r2, r3, r4, loose)
   if measure then (r0 + r1 + r2 + r3 + r4) / 7 else start + 1 + r0 + r1 + r2 / 2
 
 vertical =! (layer, pattern, inverted, measure = false) ->
@@ -1181,6 +1218,10 @@ edgePitch =! (layer, first, second, inverted) ->
   a = pitch first
   b = pitch second
   if a and b then (a + b) / 2 else 0
+
+# A record without a strict row hit needs three row hits to anchor a triple.
+looseRecord =! (layer, index) ->
+  not (layer.inverted[index] & STRICT) and layer.patterns[index * 4 + 3] < 3
 
 copyPattern! =! (layer, index, out) ->
   pos = index * 4
@@ -1314,6 +1355,8 @@ bitmapRows! =! (layer, from, to) ->
   maxY    = layer.height - BLOCK
   maxX    = width - BLOCK
   blocks  = layer.blocks
+  # Four pixels per word when rows keep word alignment.
+  lumaWords = if LITTLE_ENDIAN and (width & 3) is 0 and (luma.byteOffset & 3) is 0 then layer.lumaWords else null
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
     top  = clamp y, 2, bHeight - 3
@@ -1337,17 +1380,31 @@ bitmapRows! =! (layer, from, to) ->
       shift   = xPos & 31
       word    = yPos * words + (xPos >>> 5)
       lowMask = 0xff << shift
-      # One block row packs to one byte, so the store below assumes BLOCK is 8,
-      # as do the eight comparisons unrolled to build it.
+      # One block row packs to one byte, so the store below assumes BLOCK is 8.
+      # A word-aligned row compares four pixels per word in two 16-bit lanes:
+      # (cut + 256) - v sets lane bit 8 exactly when v <= cut, and no lane
+      # borrows because every difference stays positive.
+      swar  = lumaWords and (pos & 3) is 0
+      lanes = ((cut + 256) << 16) | (cut + 256)
       for yy in [0...BLOCK]
-        value = (if luma[pos]     <= cut then 1   else 0) |
-                (if luma[pos + 1] <= cut then 2   else 0) |
-                (if luma[pos + 2] <= cut then 4   else 0) |
-                (if luma[pos + 3] <= cut then 8   else 0) |
-                (if luma[pos + 4] <= cut then 16  else 0) |
-                (if luma[pos + 5] <= cut then 32  else 0) |
-                (if luma[pos + 6] <= cut then 64  else 0) |
-                (if luma[pos + 7] <= cut then 128 else 0)
+        if swar
+          w0 = lumaWords[pos >> 2]
+          w1 = lumaWords[(pos >> 2) + 1]
+          a  = lanes - (w0 & 0x00ff00ff)
+          b  = lanes - ((w0 >>> 8) & 0x00ff00ff)
+          c  = lanes - (w1 & 0x00ff00ff)
+          d  = lanes - ((w1 >>> 8) & 0x00ff00ff)
+          value = ((a >>> 8) & 1) | ((b >>> 7) & 2) | ((a >>> 22) & 4) | ((b >>> 21) & 8) |
+                  ((c >>> 4) & 16) | ((d >>> 3) & 32) | ((c >>> 18) & 64) | ((d >>> 17) & 128)
+        else
+          value = (if luma[pos]     <= cut then 1   else 0) |
+                  (if luma[pos + 1] <= cut then 2   else 0) |
+                  (if luma[pos + 2] <= cut then 4   else 0) |
+                  (if luma[pos + 3] <= cut then 8   else 0) |
+                  (if luma[pos + 4] <= cut then 16  else 0) |
+                  (if luma[pos + 5] <= cut then 32  else 0) |
+                  (if luma[pos + 6] <= cut then 64  else 0) |
+                  (if luma[pos + 7] <= cut then 128 else 0)
         bitmap[word] = (bitmap[word] & ~lowMask) | (value << shift)
         if shift > 24
           highMask = (1 << (shift - 24)) - 1
@@ -1357,14 +1414,27 @@ bitmapRows! =! (layer, from, to) ->
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
-recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
-  start = x - r0 - r1 - r2 - r3 - r4
-  cx    = Math.round(start + r0 + r1 + r2 / 2)
-  cap   = ms * 3
-  cy    = cross layer, cx, y, 0, 1, cap, inverted
-  return if cy < 0
-  refinedX = cross layer, cx, Math.round(cy), 1, 0, cap, inverted
-  return if refinedX < 0
+recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
+  layer.looseWindows++ if loose
+  strict = if ms > 0 then STRICT else 0
+  ms     = Math.abs ms
+  start  = x - r0 - r1 - r2 - r3 - r4
+  cx     = Math.round(start + r0 + r1 + r2 / 2)
+  cap    = ms * 3
+  cy     = -1
+  refinedX = -1
+  if strict
+    cy       = cross layer, cx, y, 0, 1, cap, inverted
+    refinedX = cross(layer, cx, Math.round(cy), 1, 0, cap, inverted) if cy >= 0
+    # The mandatory pass counted every window that cross-checks strictly.
+    return if loose and refinedX >= 0
+  if refinedX < 0
+    return unless loose
+    strict   = 0
+    cy       = cross layer, cx, y, 0, 1, cap, inverted, false, true
+    return if cy < 0
+    refinedX = cross layer, cx, Math.round(cy), 1, 0, cap, inverted, false, true
+    return if refinedX < 0
   patterns = layer.patterns
   polarity = if inverted then 1 else 0
   for i in [0...layer.patternCount]
@@ -1376,7 +1446,10 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
     patterns[pos + 1] = (patterns[pos + 1] * patterns[pos + 3] + cy) / count
     patterns[pos + 2] = (patterns[pos + 2] * patterns[pos + 3] + ms) / count
     patterns[pos + 3] = count
+    layer.inverted[i] |= strict
     return
+  return if not strict and layer.looseCount >= MAX_LOOSE
+  layer.looseCount++ unless strict
   index = layer.patternCount++
   pos   = index * 4
   fail "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
@@ -1384,12 +1457,13 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   patterns[pos + 1] = cy
   patterns[pos + 2] = ms
   patterns[pos + 3] = 1
-  layer.inverted[index] = polarity
+  layer.inverted[index] = polarity | strict
 
-# Rolling run-length window over every second row. Each run is measured
-# straight off the packed row: the word's opposite-color bits are isolated
-# with clz32 and whole words are consumed until a stop or the row's end.
-findRows! =! (layer, from, to) ->
+# Rolling run-length window over every second row; the loose pass admits
+# loose windows with loose cross-checks. Each run is measured straight off
+# the packed row: the word's opposite-color bits are isolated with clz32
+# and whole words are consumed until a stop or the row's end.
+findRows! =! (layer, from, to, loose) ->
   width  =! layer.width
   words  =! layer.words
   bitmap =! layer.bitmap
@@ -1420,9 +1494,11 @@ findRows! =! (layer, from, to) ->
       runs++
       dark     = previous
       previous = not previous
-      if runs >= 5
-        ms = ratio r0, r1, r2, r3, r4
-        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
+      # A strict center run exceeds 1.5 modules and its neighbors fall
+      # short of 1.5, so a center no longer than a neighbor never fits.
+      if runs >= 5 and (loose or (r2 > r1 and r2 > r3))
+        ms = ratio r0, r1, r2, r3, r4, loose
+        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark), loose if ms
 
 # ==[ Decode drivers ]==
 
@@ -1477,9 +1553,14 @@ export class QRScanner
     bytes = maxPixels * stride
     unless Number.isSafeInteger(bytes) and bytes <= MAX_ARENA_BYTES
       fail "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}", RangeError
-    @effort     = if init.effort    is undefined then 1         else init.effort
-    @timeLimit  = if init.timeLimit is undefined then 1000 / 60 else init.timeLimit
-    @opts       = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
+    @effort      = if init.effort      is undefined then 1         else init.effort
+    @timeLimit   = if init.timeLimit   is undefined then 1000 / 60 else init.timeLimit
+    # Finder search skips the native layer once the shorter side exceeds
+    # this; a large frame's symbols are found on the half layer and their
+    # modules still sampled from native luma. Settable between frames, so
+    # a camera loop can search native every few frames.
+    @nativeLimit = if init.nativeLimit is undefined then Infinity  else init.nativeLimit
+    @opts        = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
     @width      = 0
     @height     = 0
     @luma       = Uint8Array.new(bytes)
@@ -1521,7 +1602,11 @@ export class QRScanner
     @map        = Float64Array.new(9)
     @from       = Float64Array.new(9)
     @to         = Float64Array.new(9)
+    @jitter     = Float64Array.new(9)
     @alignPoint = { x: 0.1, y: 0.1 }
+    # Bottom-right alignment candidates of one dimension attempt, (x, y) pairs.
+    @brPoints   = Float64Array.new(8)
+    @brCount    = 0
     @finePlane  = { d: Uint8Array.new(0), cut: Int16Array.new(0), W: 0, H: 0, bw: 0, bh: 0, sh: 0 }
     @invertedProjection = false
     @decodedSize = 0
@@ -1543,9 +1628,14 @@ export class QRScanner
         cuts: cuts
         height: 0
         luma: luma
+        lumaWords: Int32Array.new(luma.buffer, luma.byteOffset, luma.length >> 2)
         patternCount: 0
         patterns: Float64Array.new(centers * 4)
+        looseCount: 0
+        looseWindows: 0
+        loosened: false
         used: false
+        search: false
         width: 0
         words: 0
         # Projection reads luma through the threshold grid; `sh` is 3 for
@@ -1628,12 +1718,16 @@ export class QRScanner
     for layer, i in @layers
       used = not i or Math.min(aw, ah) >= 64
       layer.used         = used
+      layer.search       = used and (i > 0 or Math.min(aw, ah) <= @nativeLimit)
       layer.width        = if used then aw else 0
       layer.height       = if used then ah else 0
       layer.words        = if used then Math.ceil(aw / 32) else 0
       layer.blockWidth   = if used then Math.ceil(aw / BLOCK) else 0
       layer.blockHeight  = if used then Math.ceil(ah / BLOCK) else 0
       layer.patternCount = 0
+      layer.looseCount   = 0
+      layer.looseWindows = 0
+      layer.loosened     = false
       layer.plane.W      = layer.width
       layer.plane.H      = layer.height
       layer.plane.bw     = layer.blockWidth
@@ -1670,6 +1764,9 @@ export class QRScanner
         layer.width        = 0
         layer.words        = 0
         layer.patternCount = 0
+        layer.looseCount   = 0
+        layer.looseWindows = 0
+        layer.loosened     = false
         layer.setCount     = 0
         layer.setCursor    = 0
         layer.used         = false
@@ -1697,14 +1794,35 @@ export class QRScanner
     finally
       @endOperation()
 
-  # Project a module center and classify its pixel against the owning
-  # threshold block; floor keeps boundary values in the containing pixel.
+  # Project a module center and classify its bilinear luma against the
+  # threshold interpolated between the four nearest block centers.
   read: (s, map, mx, my) ->
     point = mapPoint map, mx, my
-    px = Math.floor point.x
-    py = Math.floor point.y
-    return 0 if px < 0 or py < 0 or px >= s.W or py >= s.H
-    dark = s.d[py * s.W + px] <= s.cut[(py >> s.sh) * s.bw + (px >> s.sh)]
+    W  = s.W
+    x  = point.x - 0.5
+    y  = point.y - 0.5
+    return 0 if x < 0 or y < 0 or x >= W - 1 or y >= s.H - 1
+    x0 = x | 0
+    y0 = y | 0
+    fx = x - x0
+    fy = y - y0
+    d  = s.d
+    i  = y0 * W + x0
+    value = (d[i] * (1 - fx) + d[i + 1] * fx) * (1 - fy) + (d[i + W] * (1 - fx) + d[i + W + 1] * fx) * fy
+    half = (1 << s.sh) / 2
+    u   = Math.min Math.max((point.x - half) / (2 * half), 0), s.bw - 1
+    v   = Math.min Math.max((point.y - half) / (2 * half), 0), s.bh - 1
+    u0  = u | 0
+    v0  = v | 0
+    u1  = Math.min u0 + 1, s.bw - 1
+    v1  = Math.min v0 + 1, s.bh - 1
+    gu  = u - u0
+    gv  = v - v0
+    cut = s.cut
+    r0  = v0 * s.bw
+    r1  = v1 * s.bw
+    threshold = (cut[r0 + u0] * (1 - gu) + cut[r0 + u1] * gu) * (1 - gv) + (cut[r1 + u0] * (1 - gu) + cut[r1 + u1] * gu) * gv
+    dark = value <= threshold
     if dark isnt @invertedProjection then 1 else 0
 
   # Fourth corner of a projective finder square from its three local pitches:
@@ -1756,6 +1874,56 @@ export class QRScanner
     @alignPoint.x = pt.x
     @alignPoint.y = pt.y
     true
+
+  # Best 5x5 alignment-template placement on a half-module lattice within
+  # `reach` modules of (ox, oy) through `map`; ties go to the placement
+  # nearest the estimate. False unless some placement fits within `maxErrors`.
+  searchAlignWide: (s, map, ox, oy, reach, maxErrors) ->
+    bestX      = 0
+    bestY      = 0
+    bestErrors = maxErrors + 1
+    bestD      = Infinity
+    steps      = 2 * reach
+    for sy in [-steps..steps]
+      dy = sy / 2
+      for sx in [-steps..steps]
+        dx = sx / 2
+        d  = dx * dx + dy * dy
+        # Ties are counted in full so the nearer placement can win them.
+        errors = 0
+        for y in [-2..2]
+          break if errors > bestErrors
+          for x in [-2..2]
+            dark = @read(s, map, ox + dx + x, oy + dy + y) is 1
+            edge = Math.abs(x) is 2 or Math.abs(y) is 2
+            if dark isnt (edge or (x is 0 and y is 0))
+              errors++
+              break if errors > bestErrors
+        continue if errors > bestErrors or (errors is bestErrors and d >= bestD)
+        bestX      = dx
+        bestY      = dy
+        bestErrors = errors
+        bestD      = d
+    return false if bestErrors > maxErrors
+    pt = mapPoint map, ox + bestX, oy + bestY
+    @alignPoint.x = pt.x
+    @alignPoint.y = pt.y
+    true
+
+  # Queue a bottom-right candidate unless one within half a module is queued.
+  offerBr!: (x, y, ms) ->
+    points = @brPoints
+    for i in [0...@brCount]
+      return if Math.abs(points[2 * i] - x) + Math.abs(points[2 * i + 1] - y) < ms / 2
+    points[2 * @brCount]     = x
+    points[2 * @brCount + 1] = y
+    @brCount++
+
+  # A template hit through `map`, recentered on its dark center module's runs.
+  offerTemplate!: (layer, s, map, size, ms, reach) ->
+    return unless @searchAlignWide s, map, size - 6.5, size - 6.5, reach, 5
+    @findBasicAlign layer, @alignPoint.x, @alignPoint.y, ms, Math.max(Math.round(ms), 2)
+    @offerBr @alignPoint.x, @alignPoint.y, ms
 
   # Does a finder lie inside a QR region already decoded on any layer?
   excluded: (layer, index) ->
@@ -1874,14 +2042,14 @@ export class QRScanner
     confirmed  = 0
     for i in [0...layer.patternCount]
       state = layer.inverted[i]
-      continue if (state & POLARITY) isnt polarity or state & DEAD
+      continue if (state & POLARITY) isnt polarity or state & DEAD or looseRecord(layer, i)
       confirmed++ if pts[i * 4 + 3] >= 2
     # With three confirmed centers, require two row hits to reject one-row data.
     minimum = if confirmed >= 3 then 2 else 1
     count   = 0
     for i in [0...layer.patternCount]
       state = layer.inverted[i]
-      continue if (state & POLARITY) isnt polarity or state & DEAD
+      continue if (state & POLARITY) isnt polarity or state & DEAD or looseRecord(layer, i)
       confidence = pts[i * 4 + 3]
       continue if confidence < minimum
       count = @retain i, -confidence, count, MAX_CANDIDATES
@@ -2023,8 +2191,7 @@ export class QRScanner
   # A dark run of about one module flanked by light near the expected
   # bottom-right alignment center, cross-checked vertically. This reads the
   # native bitmap even when projection later samples a fine s.
-  findBasicAlign: (layer, ex, ey, ms) ->
-    R     = Math.max Math.round(5 * ms), 8
+  findBasicAlign: (layer, ex, ey, ms, R = Math.max(Math.round(5 * ms), 8)) ->
     found = false
     bestD = Infinity
     yLo   = Math.max 1, Math.round(ey - R)
@@ -2104,14 +2271,14 @@ export class QRScanner
       boundingBox: { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY }
 
   # Retarget a coarse layer's homography and threshold grid to native luma.
-  # A layer pixel x sits at 2^r*x + (2^r-1)/2 in native coordinates.
+  # Coordinates are edge-based (pixel i spans [i, i + 1)), so a coarse
+  # coordinate scales by 2^r with no offset.
   upgrade: (p, map, ctx) ->
     fine = ctx.fine
     return 0 unless fine
     sc     = 1 << fine.r
-    half   = (sc - 1) / 2
     scaled = @to
-    scaled[i] = sc * map[i] + half * map[6 + i % 3] for i in [0...6]
+    scaled[i] = sc * map[i] for i in [0...6]
     scaled[6] = map[6]
     scaled[7] = map[7]
     scaled[8] = map[8]
@@ -2348,7 +2515,22 @@ export class QRScanner
   projectMap: (s, map, size) ->
     return FAIL.timing unless @timing(s, map, size)
     @projectQuad s, map, size
-    @decodeGrid size
+    result = @decodeGrid size
+    return result unless result is FAIL.rs
+    # A grid on the correction boundary can land its errors in other
+    # codewords a quarter module away: retry the sampling offset four ways.
+    jitter = @jitter
+    for k in [0...4]
+      jx = if k < 2 then (if k then -0.25 else 0.25) else 0
+      jy = if k < 2 then 0 else (if k is 2 then 0.25 else -0.25)
+      for r in [0, 3, 6]
+        jitter[r]     = map[r]
+        jitter[r + 1] = map[r + 1]
+        jitter[r + 2] = map[r] * jx + map[r + 1] * jy + map[r + 2]
+      @projectQuad s, jitter, size
+      result = @decodeGrid size
+      return result unless result instanceof Error
+    FAIL.rs
 
   # Timing plus the redundant version bits alone, to gate Version 7+ tiling.
   confirm: (s, map, size) ->
@@ -2365,7 +2547,6 @@ export class QRScanner
   # each tile through its own homography built from the four surrounding nodes.
   projectTiles: (sp, sm, size, version, fine, brPoint, t, ms, ctx) ->
     sc           = if fine then fine else 1
-    half         = (sc - 1) / 2
     count        = @setAlignments version
     positions    = @alignPos
     nodes        = @nodes
@@ -2424,11 +2605,11 @@ export class QRScanner
       reportAligners = for i in [0...locatedCount]
         pos = i * 4
         {
-          point: { x: (located[pos] - half) / sc, y: (located[pos + 1] - half) / sc }
+          point: { x: located[pos] / sc, y: located[pos + 1] / sc }
           x: located[pos + 2]
           y: located[pos + 3]
         }
-      br = if hasTileBr then { x: (tileBrX - half) / sc, y: (tileBrY - half) / sc } else brPoint
+      br = if hasTileBr then { x: tileBrX / sc, y: tileBrY / sc } else brPoint
       @report t, br, reportAligners, ms, size, ctx
     @decodeGrid size
 
@@ -2482,7 +2663,8 @@ export class QRScanner
       f      = 1 - 3 / (size - FINDER_INSET)
       brEstX = tl.x + (tr.x - tl.x + bl.x - tl.x) * f
       brEstY = tl.y + (tr.y - tl.y + bl.y - tl.y) * f
-      found  = false
+      found    = false
+      @brCount = 0
       if size >= 25
         if inverted or not @perspective(t, tl.ms, tr.ms, bl.ms)
           found = @findBasicAlign layer, brEstX, brEstY, ms
@@ -2503,12 +2685,29 @@ export class QRScanner
             blMs = finderPitch layer, bl
             if tlMs and trMs and blMs and @perspective(t, tlMs, trMs, blMs)
               found = @searchAlign plane, map, scale, 3 / (1 - scale), 0, 0, 1, false
+        @offerBr @alignPoint.x, @alignPoint.y, ms if found
+        # Data modules near the estimate can pass a run test; a template
+        # search through the map ranks the true pattern first. Under
+        # perspective the finder pitches predict the fourth corner, and the
+        # search runs there too when that prediction leaves the estimate.
+        map = @map
+        if not inverted and @perspective(t, tl.ms, tr.ms, bl.ms)
+          predicted = mapPoint map, f, f
+          if (predicted.x - brEstX) ** 2 + (predicted.y - brEstY) ** 2 > ms * ms
+            @mapFinderQuad map, size, t, predicted.x, predicted.y
+            @offerTemplate layer, plane, map, size, ms, 3
+        @mapFinderQuad map, size, t, brEstX, brEstY
+        @offerTemplate layer, plane, map, size, ms, 4
       # Data can resemble an aligner; Reed-Solomon also tries the affine estimate.
-      attempts = if found then 2 else 1
+      located  = @brCount
+      attempts = located + 1
       for attempt in [0...attempts]
-        align   = attempt is 0 and found
-        brX     = if align then @alignPoint.x else brEstX
-        brY     = if align then @alignPoint.y else brEstY
+        align = attempt < located
+        brX   = if align then @brPoints[2 * attempt]     else brEstX
+        brY   = if align then @brPoints[2 * attempt + 1] else brEstY
+        if align
+          @alignPoint.x = brX
+          @alignPoint.y = brY
         brPoint = undefined
         if ctx.opts.pointsOnDetect
           brPoint = { x: brX, y: brY }
@@ -2519,12 +2718,14 @@ export class QRScanner
         @mapFinderQuad map, size, t, brX, brY
         version = versionOf size
         if version < 7
-          failed = @projectMap plane, map, size
-          return failed unless failed instanceof Error
+          result = @projectMap plane, map, size
+          return result unless result instanceof Error
+          failed = deeper failed, result
           # Blurred Versions 1..6 still need fine-plane sampling.
           if @upgrade(plane, map, ctx)
-            failed = @projectMap @finePlane, @to, size
-            return failed unless failed instanceof Error
+            result = @projectMap @finePlane, @to, size
+            return result unless result instanceof Error
+            failed = deeper failed, result
         else
           fine = @upgrade plane, map, ctx
           sp   = if fine then @finePlane else plane
@@ -2533,20 +2734,23 @@ export class QRScanner
           confirmed = @confirm sp, sm, size
           confirmed = @confirm(plane, map, size) if not confirmed and fine
           unless confirmed
-            failed = FAIL.version
+            failed = deeper failed, FAIL.version
             continue
-          failed = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
-          return failed unless failed instanceof Error
+          result = @projectTiles sp, sm, size, version, fine, brPoint, t, ms, ctx
+          return result unless result instanceof Error
+          failed = deeper failed, result
           # A false local alignment can corrupt a valid global projection.
           # The tiles built their homographies in the same matrices, so the
           # global map and its fine-plane form are derived again.
           @mapFinderQuad map, size, t, brX, brY
           fine   = @upgrade plane, map, ctx
-          failed = @projectMap (if fine then @finePlane else plane), (if fine then @to else map), size
-          return failed unless failed instanceof Error
+          result = @projectMap (if fine then @finePlane else plane), (if fine then @to else map), size
+          return result unless result instanceof Error
+          failed = deeper failed, result
           if fine
-            failed = @projectMap plane, map, size
-            return failed unless failed instanceof Error
+            result = @projectMap plane, map, size
+            return result unless result instanceof Error
+            failed = deeper failed, result
     failed
 
   # Threshold, pack the bitmap and collect finders for one layer.
@@ -2564,9 +2768,23 @@ export class QRScanner
     layer.patternCount = 0
     rows = if cooperative then 32 else layer.height
     for y in [0...layer.height] by rows
-      findRows layer, y, Math.min(layer.height, y + rows)
+      findRows layer, y, Math.min(layer.height, y + rows), false
       @retryStart += yield if cooperative and y + rows < layer.height
     layer.found = true
+
+  # Retry tier: admit loose finder windows, bounded by the time limit and
+  # the per-layer window and record caps, then rebuild the retry sets.
+  loosen!: (layer, cooperative) ->
+    layer.loosened  = true
+    layer.setsReady = false
+    # Textured rows are dense in loose windows: small chunks keep the
+    # bounds fine-grained.
+    rows = 4
+    for y in [0...layer.height] by rows
+      break if layer.looseCount >= MAX_LOOSE or layer.looseWindows >= MAX_LOOSE_WINDOWS
+      break if @timeLimit isnt Infinity and Date.now() - @retryStart >= @timeLimit
+      findRows layer, y, Math.min(layer.height, y + rows), true
+      @retryStart += yield if cooperative and y + rows < layer.height
 
   # Mandatory attempt: both polarities ranked independently, then the pick
   # with the better geometry-times-evidence product.
@@ -2624,7 +2842,7 @@ export class QRScanner
     layer.setCount  = 0
     layer.setCursor = 0
     eligible = 0
-    eligible++ for i in [0...layer.patternCount] when not (layer.inverted[i] & DEAD)
+    eligible++ for i in [0...layer.patternCount] when not (layer.inverted[i] & DEAD) and not looseRecord(layer, i)
     return if eligible < 3
     pts        = layer.patterns
     neighbors  = @candidates
@@ -2632,7 +2850,7 @@ export class QRScanner
     for i in [0...layer.patternCount - 2]
       @retryStart += yield if cooperative and i and not (i & 7)
       state = layer.inverted[i]
-      continue if state & DEAD
+      continue if state & DEAD or looseRecord(layer, i)
       inverted = !!(state & POLARITY)
       p0 = i * 4
       # A 1.5 scale allowance retains the largest legal perspective dimension.
@@ -2641,7 +2859,7 @@ export class QRScanner
       count        = 0
       for index in [i + 1...layer.patternCount]
         otherState = layer.inverted[index]
-        continue if otherState & DEAD or !!(otherState & POLARITY) isnt inverted
+        continue if otherState & DEAD or !!(otherState & POLARITY) isnt inverted or looseRecord(layer, index)
         pos      = index * 4
         smallest = Math.min pts[p0 + 2], pts[pos + 2]
         largest  = Math.max pts[p0 + 2], pts[pos + 2]
@@ -2761,11 +2979,12 @@ export class QRScanner
           stop = true
           break
         layer = layers[i]
-        continue unless layer.used
+        continue unless layer.search
         yield* @binarize(layer, cooperative) unless layer.found
         if mandatory
           triple = @pickTriple layer
         else
+          yield* @loosen(layer, cooperative) unless layer.loosened
           yield* @buildSets(layer, cooperative) unless layer.setsReady
           triple = @nextSet layer
         unless triple
@@ -2791,7 +3010,7 @@ export class QRScanner
         unless result instanceof Error
           @markDecoded layer, triple, result
           return result
-        failed = result
+        failed = deeper failed, result
         @retryStart += yield if cooperative
       break if stop or (not mandatory and not attempted)
       mandatory = false

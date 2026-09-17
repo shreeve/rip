@@ -22,7 +22,7 @@
 
 import { gifDataUrl, writeGif } from './gif.rip'
 import { ECI_DECODERS } from './eci.rip'
-import { MAX_IMAGE_SIDE, asObject, asString, fail, reverseRuns, runLengths, sampleLine, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # ==[ Spec tables ]==
 
@@ -617,14 +617,6 @@ modules =! (data, columns, rows, level, compact) ->
     out.push row
   out
 
-# ==[ Validation ]==
-
-asInt =! (n, title, min, max = Infinity) ->
-  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
-  range = if max is Infinity then ">= #{min}" else "in #{min}..#{max}"
-  fail "#{title} expected integer #{range}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min and n <= max
-  n
-
 # ==[ Renderers ]==
 
 # A raster is the module rows plus output geometry: `bars` holds each module
@@ -634,7 +626,7 @@ raster =! (mods, rowHeight, scale, border) ->
   cols = mods[0].length
   W    = (cols + 2 * border) * scale
   H    = (mods.length * rowHeight + 2 * border) * scale
-  fail "PDF417 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}" if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
+  fail "PDF417 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}", RangeError if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
   bars = for row in mods
     runs = []
     x    = 0
@@ -945,99 +937,6 @@ sampleChecked! =! (luma, img, format, x, y, dx, dy, from, to) ->
       luma[n] = if step is 1 then data[at]
       else if step is 2 then (data[at] | (data[at + 1] << 8)) >>> shift
       else (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
-
-# Run lengths of one ray, even slots light and odd dark, from the edges
-# between local extrema: an extremum counts once the luma has swung a
-# third of the ray's range away from the last one, and each edge sits
-# where the luma crosses the midpoint of its own valley and peak, placed
-# between samples by interpolation. Blur leaves a narrow space short of
-# paper white and print gain widens every bar; both move the midpoint
-# crossing far less than they move a fixed threshold, and the fractional
-# positions carry sub-pixel width. Returns the run count, zero for a flat
-# ray.
-edgeRuns =! (luma, count, runs) ->
-  lo = 255
-  hi = 0
-  for k in [0...count]
-    v = luma[k]
-    lo = v if v < lo
-    hi = v if v > hi
-  return 0 if hi - lo < 32
-  swing = (hi - lo) / 3
-  # Until the first swing the direction is unknown: track both extremes.
-  minV  = luma[0]
-  maxV  = luma[0]
-  minAt = 0
-  maxAt = 0
-  k = 1
-  while k < count
-    v = luma[k]
-    if v < minV
-      minV  = v
-      minAt = k
-    else if v > maxV
-      maxV  = v
-      maxAt = k
-    break if maxV - minV >= swing
-    k++
-  return 0 if k is count
-  rising = minAt < maxAt
-  n = 0
-  runs[n++] = 0 if rising    # the ray opens dark
-  if rising
-    at     = minAt
-    value  = minV
-    best   = maxV
-    bestAt = maxAt
-  else
-    at     = maxAt
-    value  = maxV
-    best   = minV
-    bestAt = minAt
-  last = 0
-  # The edge between the extremum at `at` and the candidate at `bestAt`.
-  edge = ->
-    level = (value + best) / 2
-    i = at
-    if rising
-      i++ while luma[i] < level
-    else
-      i++ while luma[i] > level
-    # Cross between samples i - 1 and i.
-    a = luma[i - 1]
-    b = luma[i]
-    pos = i - 1 + (level - a) / (b - a)
-    runs[n++] = pos - last
-    last = pos
-  k++
-  while k < count
-    v = luma[k]
-    if rising
-      if v > best
-        best   = v
-        bestAt = k
-      else if v <= best - swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = false
-    else
-      if v < best
-        best   = v
-        bestAt = k
-      else if v >= best + swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = true
-    k++
-  edge() if Math.abs(best - value) >= swing
-  runs[n++] = count - last
-  n
 
 # Anchor pattern on a sampled ray whose leading edge lies nearest `expect`
 # pixels along it, within `slack`; returns the run index or -1.
@@ -1444,7 +1343,7 @@ trackEdge =! (s, x, y, dx, dy, sx, sy, unit, first, sign, edge, mode) ->
   loop
     t += sign
     sampleRay rluma, img, format, x + t * sx + (u - margin) * dx + 0.5, y + t * sy + (u - margin) * dy + 0.5, dx, dy, length
-    m = edgeRuns rluma, length, rruns
+    m = edgeRuns rluma, length, rruns, s.fraction
     at = if m < 8 then -1 else anchorNear(rruns, m, first, margin, slack, mode)
     if at < 0
       break if ++misses > allow
@@ -1517,6 +1416,9 @@ edgeEnds =! (s, x, y, dx, dy, sx, sy, unit, first, mode) ->
 # One located anchor pattern through to a decoded symbol, or null.
 tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   {img, format, rluma, rruns, cells, rayRow, rayT, votes} = s
+  # Hysteresis for the rays: a fifth of the range keeps the one-module
+  # swings blur leaves, a third rejects the noise between sub-2px samples.
+  s.fraction = if unit >= 2 then 5 else 3
   # Rows stack a quarter turn from the symbol's reading direction, which a
   # mirrored read runs against.
   flip = if mode.mirror then -1 else 1
@@ -1564,7 +1466,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
     rayRow[rays] = -1
     rays++
     sampleRay rluma, img, format, top.x + ux * t - rx * margin + 0.5, top.y + uy * t - ry * margin + 0.5, rx, ry, length
-    m = edgeRuns rluma, length, rruns
+    m = edgeRuns rluma, length, rruns, s.fraction
     count = 0
     if m >= 16
       at = anchorNear rruns, m, first, margin, slack, mode
@@ -1773,7 +1675,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
 # decode.
 scanLine =! (s, vertical, line, count) ->
   {runs, rev} = s
-  n = runLengths s.luma, count, runs
+  n = edgeRuns s.luma, count, runs, 5
   # A start pattern and an indicator need sixteen runs.
   return null if n < 16
   m = reverseRuns runs, n, rev
@@ -1841,8 +1743,8 @@ buffers =! (side) ->
   maxRays = 4 * side
   state.side      = side
   state.luma      = Uint8Array.new(side)
-  state.runs      = Int32Array.new(side)
-  state.rev       = Int32Array.new(side)
+  state.runs      = Float64Array.new(side)
+  state.rev       = Float64Array.new(side)
   state.rluma     = Uint8Array.new(2 * side)
   state.rruns     = Float64Array.new(2 * side + 2)
   state.cells     = Int16Array.new(maxRays * MAX_CELLS)
