@@ -1,0 +1,98 @@
+# ==============================================================================
+# vim tests: the indent file, driven through a headless Vim or Neovim
+#
+# Each case is a correctly indented program. It is flattened to column
+# zero, reindented by `gg=G` under indent/rip.vim, and must come back as
+# written. A `then` and an `else` read two ways in Rip — the tail of a
+# conditional, or a loose `and` / `or` below assignment — and the indent
+# file must open a block for the first and never for the second.
+# ==============================================================================
+
+import { test, eq } from 'rip/testing'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+VIM = Bun.which('vim') or Bun.which('nvim')
+PKG = import.meta.dir
+
+reindent = (src) ->
+  dir = mkdtempSync join(tmpdir(), 'rip-vim-')
+  try
+    input  = join dir, 'in.rip'
+    output = join dir, 'out.rip'
+    writeFileSync input, src
+    result = Bun.spawnSync [VIM, '-N', '-u', 'NONE', '-i', 'NONE', '-es',
+      '-c', "set rtp^=#{PKG}", '-c', 'filetype plugin indent on',
+      '-c', "e #{input}", '-c', 'set ft=rip', '-c', 'normal gg=G',
+      '-c', "w! #{output}", '-c', 'qa!'], { stdout: 'pipe', stderr: 'pipe' }
+    throw Error.new("vim exited #{result.exitCode}: #{result.stderr.toString()}") unless result.exitCode is 0
+    readFileSync output, 'utf8'
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+flush = (text) -> text.split('\n').map((line) -> line.trimStart()).join('\n')
+lines = (list) -> list.join('\n') + '\n'
+
+cases = [
+  ['a block tail dedents to its if and its body indents', lines [
+    'if x'
+    '  a'
+    'else'
+    '  b'
+  ]]
+  ['an inline else body opens no block', lines [
+    'if x'
+    '  a'
+    'else p 1'
+    'w = 3'
+  ]]
+  ['else if and else unless chain', lines [
+    'if x'
+    '  a'
+    'else if y'
+    '  b'
+    'else unless z'
+    '  c'
+    'else'
+    '  d'
+  ]]
+  ['a tail after an inline conditional keeps its level', lines [
+    'g = ->'
+    '  if x then a'
+    '  else b'
+    '  h = 1'
+  ]]
+  ['a switch else after an inline arm keeps its level', lines [
+    'switch v'
+    '  when 1 then a = 1'
+    '  else a = 2'
+  ]]
+  ['a connector else on its own line continues the statement above', lines [
+    'f = ->'
+    '  y = get()'
+    '  else fallback()'
+    '  z = 1'
+  ]]
+  ['same-line connectors open no block', lines [
+    'k = ->'
+    "  str = String(str).trim() else return []"
+    '  user = findUser(id) then return user'
+    '  found else return found'
+    '  done = 1'
+  ]]
+  ['catch and finally dedent to their try', lines [
+    'try'
+    '  a'
+    'catch e'
+    '  b'
+    'finally'
+    '  c'
+  ]]
+]
+
+unless VIM?
+  console.log 'vim: no vim or nvim on PATH — indent cases not run'
+else
+  for [name, expected] in cases
+    test name, -> eq reindent(flush expected), expected

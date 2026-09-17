@@ -568,7 +568,7 @@
       "name": "variable.language.super.rip"
     },
     {
-      "comment": "`offer`/`accept` sit beside `export`/`import` on purpose: they are the same construct across a different boundary. `export theme := 'dark'` emits `export const theme = __state(…)` and `offer theme := 'dark'` emits the state plus `setContext(…)` — each prefixes a declaration to also publish it — while `accept theme` receives one through `getContext(…)` exactly as an import receives one from a module. Filing them as declaration keywords would say they declare the way `component` does, when what they actually do is carry a binding across a boundary.",
+      "comment": "`offer`/`accept` sit beside `export`/`import` on purpose: they are the same construct across a different boundary. `export theme := 'dark'` emits `export const theme = __state(…)` and `offer theme := 'dark'` emits the state plus `setContext(…)` — each prefixes a declaration to also publish it — while `accept theme` receives one through `getContext(…)` exactly as an import receives one from a module. Filing them as declaration keywords would say they declare the way `component` does, when what they actually do is carry a binding across a boundary. `then` and `else` also read as loose `and` / `or` below assignment (`x = get() else fallback()`); they keep keyword.control there rather than the logical-operator scope, because a regex cannot tell that reading from a conditional's tail (`if x then a else b`) and one word wearing one color is the honest answer.",
       "match": "\\b(return|throw|break|continue|switch|when|then|if|else|unless|for|by|as|while|until|loop|do|try|catch|finally|yield|await|import|export|offer|accept|render|slot|from|default|use|own|it)\\b",
       "name": "keyword.control.rip"
     },

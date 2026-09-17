@@ -22,7 +22,9 @@ Vim plugin for the [Rip](https://github.com/shreeve/rip) programming language.
 - **Type annotations** — single-colon `name: Type` and `type Name =` (`::` is prototype access, e.g. `String::trim`)
 - **Regular expressions** — `/regex/` and `///heregex///` with interpolation, with Rip's regex-vs-division rule
 - **Render blocks** — `#id` element shorthand reads as an id, not a comment
-- **Auto-indentation** — indent/dedent for offside-rule blocks
+- **Auto-indentation** — indent/dedent for offside-rule blocks; an inline
+  tail (`else p 1`) and a `then` / `else` connector (`x = get() else
+  fallback()`, or `else fallback()` on its own line) open no block
 - **Filetype settings** — 2-space soft tabs, fold-by-indent, `gf` navigation
 
 Render-block tags, attributes and component names, and the schema DSL's field

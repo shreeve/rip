@@ -33,7 +33,11 @@
   },
   "onEnterRules": [
     {
-      "beforeText": "^\\s*(?!.*\\bthen\\b)(?:def|class|render|if|unless|else|for|while|until|loop|switch|when|try|catch|finally|enum|interface)\\b.*$",
+      "beforeText": "^\\s*(?!.*\\bthen\\b)(?:def|class|render|if|unless|for|while|until|loop|switch|when|try|catch|finally|enum|interface)\\b.*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^\\s*else\\s*(?:(?:if|unless)\\b(?!.*\\bthen\\b).*)?$",
       "action": { "indent": "indent" }
     },
     {
@@ -49,7 +53,7 @@
       "action": { "indent": "indent" }
     },
     {
-      "beforeText": "^\\s*(?!.*\\bthen\\b)(?!(?:import|export|from|return|throw|yield|await|delete|new|typeof|void|do|type|const|let|var|function)\\b)[A-Za-z][\\w-]*(?:[ \\t]+(?![-=<>~:!&|^%+*/?]).*)?$",
+      "beforeText": "^\\s*(?!.*\\b(?:then|else)\\b)(?!(?:import|export|from|return|throw|yield|await|delete|new|typeof|void|do|type|const|let|var|function)\\b)[A-Za-z][\\w-]*(?:[ \\t]+(?![-=<>~:!&|^%+*/?]).*)?$",
       "action": { "indent": "indent" }
     }
   ],
