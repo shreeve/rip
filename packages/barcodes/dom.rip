@@ -769,8 +769,8 @@ export class QRCamera
     # The aspect is the player's; coded pixels of a portrait stream lie
     # sideways. Without a crop the whole frame is copied, still on the
     # subsampling grid, which an odd-sized frame needs.
-    aspect = if reader.crop then (if rotate then 1 / reader.crop else reader.crop) else width / height
-    rect   = cropRect width, height, aspect, (if reader.crop then reader.margin else 0), xShift, yShift
+    aspect       = if reader.crop then (if rotate then 1 / reader.crop else reader.crop) else width / height
+    rect         = cropRect width, height, aspect, (if reader.crop then reader.margin else 0), xShift, yShift
     sourceWidth  = rect.width
     sourceHeight = rect.height
     sourceX      = rect.x
@@ -939,7 +939,7 @@ export class QRCamera
       @draw canvas, fullSize
     finally
       frame.close()
-      @reading = false
+      @reading       = false
       reader.landing = false
 
   stop!: ->

@@ -710,7 +710,7 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
     alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
     for ch in text
       fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
-  mask = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
+  mask        = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
   textEncoder = opts.textEncoder
   # Reject impossible built-in UTF-8 payloads before encoding duplicates a
   # huge input; a custom encoder's output is its own source of truth.
@@ -917,7 +917,7 @@ class Payload
         decoder = ECI_DECODERS[if hanzi then 29 else 20]
         return FAIL.data unless decoder
         chunk = (@views.length - 1) & ~1
-        n = 0
+        n     = 0
         for i in [0...length]
           value = @read 13
           code  = if hanzi then ((value // 0x60) << 8) | (value % 0x60) else ((value // 0xc0) << 8) | (value % 0xc0)
@@ -1384,7 +1384,7 @@ bitmapRows! =! (layer, from, to) ->
       # A word-aligned row compares four pixels per word in two 16-bit lanes:
       # (cut + 256) - v sets lane bit 8 exactly when v <= cut, and no lane
       # borrows because every difference stays positive.
-      swar = lumaWords and (pos & 3) is 0
+      swar  = lumaWords and (pos & 3) is 0
       lanes = ((cut + 256) << 16) | (cut + 256)
       for yy in [0...BLOCK]
         if swar
