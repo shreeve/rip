@@ -263,7 +263,8 @@ the region beyond each edge where the frame has pixels, and
 its viewfinder shows plus a little past its edges, and the copy out of the
 video frame stays that small), and paints a lock
 around a decoded symbol (a tinted, bracketed outline in `overlayColor`, or
-`overlayFailedColor` with `drawFailed` for a symbol found but not read),
+`overlayFailedColor` with `drawFailed` for a symbol found but not read,
+its corners gliding `overlayEase` of the way to each frame's estimate),
 the decoded symbol, or the binarized plane onto the canvases it is given;
 `canvas.mark! corners` draws the same lock on four image-space corners
 another reader found on `canvas.lastFrame()`, such as a PDF417 hit's

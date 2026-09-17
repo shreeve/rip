@@ -128,6 +128,7 @@ canvasDefaults =! ->
   overlayFailedColor:  '#f87171'
   overlaySideColor:    'black'
   overlayTimeout:      500
+  overlayEase:         0.35      # of the way to a lock's new corners per frame; 1 snaps
   crop:                1         # aspect of the centered region scanned; null for the whole frame
   margin:              0         # fraction of that region scanned beyond each edge, where the frame has pixels
   decodeAll:           false
@@ -164,6 +165,7 @@ export class QRCanvas
     @overlayFailedMatches      = 0
     @overlayDeadline           = 0
     @overlayTimer              = undefined
+    @lockQuad                  = undefined
 
     # Source geometry of the frame being decoded.
     @rotate       = false
@@ -219,6 +221,7 @@ export class QRCanvas
         @decode undefined, frame.format, frame.layout, frame.size
 
   resetOverlay!: ->
+    @lockQuad                  = undefined
     @overlayPoints             = undefined
     @overlayCandidate          = undefined
     @overlaySet.length         = 0
@@ -401,7 +404,26 @@ export class QRCanvas
         ctx.fillRect right, y,      width - right, cropHeight      if right < width
       else
         ctx.clearRect 0, 0, width, height
-    @drawLock ctx, points.outline, failed if points
+    @drawLock ctx, (if append then points.outline else @eased points.outline), failed if points
+
+  # The lock's corners glide toward each frame's estimate, which steadies
+  # the decoder's wobble; a symbol more than half a side away snaps.
+  eased: (quad) ->
+    ease = @opts.overlayEase
+    last = @lockQuad
+    return @lockQuad = quad if ease >= 1 or not last
+    side = 0
+    dx = 0
+    dy = 0
+    for i in [0...4]
+      side += Math.hypot quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y
+      dx   += quad[i].x - last[i].x
+      dy   += quad[i].y - last[i].y
+    return @lockQuad = quad if dx * dx + dy * dy > side * side
+    for i in [0...4]
+      last[i].x += (quad[i].x - last[i].x) * ease
+      last[i].y += (quad[i].y - last[i].y) * ease
+    last
 
   # A lock on a quad: a faint tint and hairline inside a rounded outline,
   # then a bracket over each corner. Sizes follow the frame, not the
