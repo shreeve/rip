@@ -115,7 +115,7 @@ export Home = component
       c128 = readCode128 frame, format: 'I420'
       if c128
         hit = { kind: 'Code 128', text: c128.text }
-        canvas.mark! band(c128)
+        canvas.mark! c128.corners
       else
         pdf = readPDF417 frame, format: 'I420'
         if pdf
@@ -129,15 +129,6 @@ export Home = component
       reads++
       firstMs = t0 - armedAt if firstMs is null
       found hit.kind, hit.text
-
-  # A Code 128 hit is a span on one scan line; lock a band around it a
-  # quarter as tall as it is wide.
-  band: ({line, from, to, vertical}) ->
-    half = (to - from) / 8
-    if vertical
-      [{ x: line - half, y: from }, { x: line + half, y: from }, { x: line + half, y: to }, { x: line - half, y: to }]
-    else
-      [{ x: from, y: line - half }, { x: to, y: line - half }, { x: to, y: line + half }, { x: from, y: line + half }]
 
   # Frames per second over the last second.
   tick: (now) ->

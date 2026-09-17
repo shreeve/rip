@@ -490,10 +490,9 @@ test "modules and outputs", ->
   throws (-> encodeCode128 'ok', 'raw', scale: 100),  Error,      'exceeds'
 
 # RGBA raster with the bar row painted 30 pixels tall on a gray field.
-bars =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
+bars =! (text, opts, scale, W, H, invert = false, rotate = 0, h = 30) ->
   raw    = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
   w      = raw.length
-  h      = 30
   data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
   turned = rotate is 90 or rotate is 270
   ox     = (W - (if turned then h else w)) >> 1
@@ -530,6 +529,36 @@ test "round trips: scales, rotations, inversion, GS1", ->
   hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, true)
   eq hit.text,     'Wikipedia'
   eq hit.inverted, true
+
+test "corners span the bars and follow a tilt", ->
+  img = bars 'Wikipedia', {}, 2, 500, 300
+  hit = readCode128 img
+  # The bars' true extent, from the image itself, down the first bar.
+  x   = Math.floor hit.from + 1
+  ys  = (y for y in [0...300] when img.data[4 * (y * 500 + x)] < 128)
+  xs  = hit.corners.map (c) -> c.x
+  eys = hit.corners.map (c) -> c.y
+  ok Math.abs(Math.min(...xs) - hit.from) < 1 and Math.abs(Math.max(...xs) - hit.to) < 1, 'width'
+  ok Math.abs(Math.min(...eys) - ys[0]) <= 4 and Math.abs(Math.max(...eys) - ys.at(-1) - 1) <= 4, "height #{Math.min(...eys)}..#{Math.max(...eys)} vs #{ys[0]}..#{ys.at(-1)}"
+  # A taller label tilted eight degrees: the start edge leans by the tangent.
+  img    = bars 'Wikipedia', {}, 2, 500, 300, false, 0, 120
+  angle  = 8 * Math.PI / 180
+  turned = { width: 500, height: 300, data: Uint8Array.new(500 * 300 * 4).fill(240) }
+  for y in [0...300]
+    for x in [0...500]
+      dx = x - 250
+      dy = y - 150
+      sx = Math.round 250 + dx * Math.cos(angle) + dy * Math.sin(angle)
+      sy = Math.round 150 - dx * Math.sin(angle) + dy * Math.cos(angle)
+      continue unless sx >= 0 and sx < 500 and sy >= 0 and sy < 300
+      turned.data[4 * (y * 500 + x)] = turned.data[4 * (y * 500 + x) + 1] = turned.data[4 * (y * 500 + x) + 2] = img.data[4 * (sy * 500 + sx)]
+  hit = readCode128 turned
+  eq hit.text, 'Wikipedia'
+  # The sampling above turns the label counterclockwise, so its start edge
+  # leans left going down.
+  [tl, tr, br, bl] = hit.corners
+  lean = (bl.x - tl.x) / (bl.y - tl.y)
+  ok Math.abs(lean + Math.tan(angle)) < 0.03, "lean #{lean.toFixed 3} vs #{(-Math.tan(angle)).toFixed 3}"
   eq readCode128(bars('a\x01b\x02', {}, 2, 500, 300)).text, 'a\x01b\x02'
   eq readCode128(bars('0123456789', {}, 1, 300, 100)).text, '0123456789'
   eq readCode128(bars('ok',         {}, 1, 100, 20)).text,  'ok'

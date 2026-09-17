@@ -153,9 +153,11 @@ and `data-url` draw `height` modules of bar.
 with the same `format` option, and returns the text or throws
 `'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
 miss and otherwise
-`{ text, gs1, codes, line, from, to, vertical, reversed, inverted }`: the
-verified codewords, which scan line, axis, direction and polarity produced
-them, and the symbol's span along that line in pixels.
+`{ text, gs1, codes, line, from, to, corners, vertical, reversed, inverted }`:
+the verified codewords, which scan line, axis, direction and polarity
+produced them, the symbol's span along that line in pixels, and its four
+corners in image space, fit to the lines that read the same codewords, so
+a tilted label gives a tilted quad.
 Modules must be at least one pixel wide; a printed label filling a quarter
 of a camera frame is plenty.
 

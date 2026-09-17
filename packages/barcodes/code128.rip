@@ -572,7 +572,62 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
       return hit
   null
 
-# First Code 128 on any scan line and where it was read; null on a miss.
+# The symbol's corners. From the hit line, step outward through the bars
+# reading each line and keeping those that give the same codewords, until
+# two in a row do not; the start and end edges are then fit to the lines
+# kept, so a tilted label gives a tilted quad spanning the bars' height.
+trackEdges =! (img, format, vertical, luma, runs, rev, hit, codes) ->
+  {width, height, data} = img
+  lines   = if vertical then width  else height
+  count   = if vertical then height else width
+  row     = width * format.step
+  advance = if vertical then row else format.step
+  step    = Math.max 1, Math.round((hit.to - hit.from) / 64)
+  more    = []
+  same    = (line) ->
+    sampleLine luma, data, (if vertical then line * format.step else line * row), advance, count, format
+    h = readLine runs, lineRuns(luma, count, runs), rev, more
+    h = readLine runs, sharpRuns(luma, count, runs), rev, more unless h
+    return null unless h and h.len is hit.len
+    for k in [0...hit.len]
+      return null if more[k] isnt codes[k]
+    h
+  # Least-squares lines for the start and end edges against the line index.
+  n = sy = syy = sf = syf = st = syt = 0
+  top = bottom = hit.line
+  add = (line, from, to) ->
+    n++
+    sy  += line
+    syy += line * line
+    sf  += from
+    syf += line * from
+    st  += to
+    syt += line * to
+    top    = line if line < top
+    bottom = line if line > bottom
+  add hit.line, hit.from, hit.to
+  for dir in [-1, 1]
+    misses = 0
+    line   = hit.line + dir * step
+    while line >= 0 and line < lines and misses < 2
+      h = same line
+      if h then (add line, h.from, h.to; misses = 0) else misses++
+      line += dir * step
+  det = n * syy - sy * sy
+  bf  = if det then (n * syf - sy * sf) / det else 0
+  bt  = if det then (n * syt - sy * st) / det else 0
+  af  = (sf - bf * sy) / n
+  at  = (st - bt * sy) / n
+  # The last line kept lies within a step of the bars' edge.
+  y0 = Math.max 0, top - step / 2
+  y1 = Math.min lines, bottom + step / 2
+  if vertical
+    [{ x: y0, y: af + bf * y0 }, { x: y1, y: af + bf * y1 }, { x: y1, y: at + bt * y1 }, { x: y0, y: at + bt * y0 }]
+  else
+    [{ x: af + bf * y0, y: y0 }, { x: at + bt * y0, y: y0 }, { x: at + bt * y1, y: y1 }, { x: af + bf * y1, y: y1 }]
+
+# First Code 128 on any scan line, where it was read and its corners; null
+# on a miss.
 export readCode128 =! (img, opts = {}) ->
   asObject opts, 'opts'
   format = validateImage img, opts.format
@@ -588,7 +643,9 @@ export readCode128 =! (img, opts = {}) ->
     hit = scanLines img, format, true, luma, runs, rev, codes
   return null unless hit
   {text, gs1} = decodeText codes, hit.len
-  { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, from: hit.from, to: hit.to, vertical, reversed: hit.reversed, inverted: hit.inverted }
+  codes   = codes.slice 0, hit.len
+  corners = trackEdges img, format, vertical, luma, runs, rev, hit, codes
+  { text, gs1, codes, line: hit.line, from: hit.from, to: hit.to, corners, vertical, reversed: hit.reversed, inverted: hit.inverted }
 
 # Text only; throws on a miss.
 export decodeCode128 =! (img, opts = {}) ->
