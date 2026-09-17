@@ -595,6 +595,14 @@ class Emitter {
     // is a parameter in the source too and is never recorded — the scope
     // walk decides, never the spelling.
     this.loopVars = [];
+    // A render loop variable's declaring parameters — every block factory
+    // and keyed callback that carries it — each with the loop's factory
+    // record and which of its variables it declares. Each copy is its own
+    // TypeScript symbol, so a copy the lowering merely threads through
+    // draws TS6133 while the author's variable is read. `emit` keeps the
+    // spans of variables some emitted read resolved to (the record's
+    // `readVars`), and the editor drops the unused hint on exactly those.
+    this.loopVarDecls = [];
     // Generated `[start, end]` spans of RENDER ATTRIBUTE names — a
     // component call's prop keys, every spelling. A plain key survives
     // into the ctor object verbatim, so its `property` token maps and
@@ -1540,6 +1548,34 @@ class Emitter {
   // `bound` because a factory frame carries its loop bindings in BOTH: an
   // inner frame that re-binds the spelling (a handler's parameter) still
   // answers no before the walk reaches the loop's own frame.
+  // Marks the loop variable a read of `name` resolves to as read, on its
+  // loop's factory record — the same scope walk as isRenderLoopName, so a
+  // handler parameter or nested loop that re-binds the spelling shadows it.
+  noteLoopVarRead(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.loopVars !== undefined && f.loopVars.has(name)) {
+        const binding = f.loopBindings?.get(name);
+        if (binding !== undefined) binding.owner.readVars.add(binding.which);
+        return;
+      }
+      if (f.reactive.has(name) || f.bound.has(name)) return;
+      if (f.members !== undefined && f.members.has(name)) return;
+    }
+  }
+
+  // A factory record's loop variables by their visible names, each with
+  // the factory record of the loop that declares it.
+  static loopBindingsOf(rec) {
+    const bindings = new Map();
+    for (const entry of rec.loopStack) {
+      if (entry.owner === undefined) continue;
+      bindings.set(entry.itemVar, { owner: entry.owner, which: 'item' });
+      bindings.set(entry.indexVar, { owner: entry.owner, which: 'index' });
+    }
+    return bindings;
+  }
+
   isRenderLoopName(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -1855,7 +1891,11 @@ class Emitter {
     if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
-    if (this.isRenderLoopName(value)) { this.loopVars.push([start, this.b.offset]); return; }
+    if (this.isRenderLoopName(value)) {
+      this.loopVars.push([start, this.b.offset]);
+      this.noteLoopVarRead(value);
+      return;
+    }
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
@@ -2808,7 +2848,7 @@ class Emitter {
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
     const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
-      'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls'];
+      'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
     try {
@@ -2821,69 +2861,49 @@ class Emitter {
     }
   }
 
-  // A node `typeof` can take: an identifier or a plain `.` member
-  // spine over one — the entity-name grammar of a `typeof` query.
-  // Optional chains, calls, indexing and every computed shape fall
-  // outside.
-  static isTypeofPathNode(x) {
-    if (typeof x === 'string') return isIdentifierName(x);
-    return isNode(x) && x[0] === '.' && x.length === 3 && typeof x[2] === 'string' &&
-      isIdentifierName(x[2]) && Emitter.isTypeofPathNode(x[1]);
+  // A render-loop item's face type — the element type of its loop's
+  // iterable thunk (tsIterThunkName), spelled through `self`, the
+  // consumer's own name for the component instance — or null when the
+  // loop has no thunk (the param then stays bare: an implicit `any` the
+  // strict gauge still reports, never a silencing `any`). `NonNullable`
+  // first (an optional prop iterates as `T[] | undefined`), then a
+  // conditional infer rather than `[number]` — a non-array iterable
+  // must fall to `any`, never to a face error on a line the user
+  // cannot see.
+  tsLoopItemTypeText(entry, self) {
+    const thunk = this.tsIterThunkName(entry);
+    return thunk === null ? null : `NonNullable<ReturnType<typeof ${self}.${thunk}>> extends readonly (infer __E)[] ? __E : any`;
   }
 
-  // A render-loop item's face type — the iterable's element type via
-  // `typeof` over its emitted form — or null when no honest spelling
-  // exists (the param then stays bare: an implicit `any` the strict
-  // gauge still reports, never a silencing `any`).
-  //
-  // Two consumers annotate an item param, in two scopes: the block
-  // factory's header (the iterable re-emits inside the factory while
-  // the value is evaluated at the reconcile call site one scope up)
-  // and the loop keyFn's params (same scope as the reconcile call).
-  // Each passes its own guards:
-  //
-  //   `unsafeNames` — source names that bind differently where the
-  //   annotation lands than where the iterable evaluates (a later
-  //   loop var, the minted self param, either side of a threading
-  //   rename — see walkFactory, — or the keyFn's own params, which
-  //   would make the annotation self-referential). A leaf hit
-  //   refuses.
-  //
-  //   `resolvableRoots` — names the emitted text's ROOT may open with,
-  //   beyond the enclosing scope chain. An unresolvable root would
-  //   re-spell the author's typo inside a face-only annotation,
-  //   duplicating a TS2552 at positions no source directive governs.
-  //
-  // The emitted text must land on `typeof`'s entity-name grammar —
-  // the regex is the final arbiter after reactive reads rewrite
-  // (`opts` → `ctx.opts.value`). `NonNullable` first (an optional
-  // prop iterates as `T[] | undefined`), then a conditional infer
-  // rather than `[number]` — a non-array iterable must fall to `any`,
-  // never to a face error on a line the user cannot see.
-  tsIterElementTypeText(iter, unsafeNames, resolvableRoots) {
-    if (!this.ts || iter === undefined || !Emitter.isTypeofPathNode(iter)) return null;
+  // The face-only method a render loop's iterable re-emits into: its
+  // return type is the iterable's type, and `typeof ctx.<thunk>` is an
+  // entity name every consumer can spell, where `typeof` over the
+  // iterable itself takes an entity name alone (never a call, an
+  // index, or a literal). The header that types the loop's item is a
+  // class method the value never reaches — the iterable evaluates at
+  // the reconcile call one scope up — so a declaration the header can
+  // name is the one bridge. Null where the method would not see what
+  // the evaluation sees: the loop's own vars, the self param, a rename
+  // hazard, a render local of the enclosing block, or an async or
+  // generator context; the item then stays bare, an implicit `any` the
+  // strict gauge reports, where a name the method cannot see would
+  // type it `any` silently. A misspelled name is not such a case: the
+  // thunk re-spells it as an echo, the real copy at the reconcile call
+  // reports it, and the item takes `any` from the error type as a
+  // `for…of` binding would. Decided from the entry alone, so the
+  // header, the keyFn, and every nested factory threading the entry
+  // agree; each consumer runs after the walk, when the enclosing
+  // block's render locals are all known.
+  tsIterThunkName(entry) {
+    const rec = entry.owner;
+    const { iter } = entry;
+    if (!this.ts || rec === undefined || iter === undefined) return null;
+    if (containsAwait(iter) || containsYield(iter)) return null;
+    if (referencesNames(iter, rec.parent.locals)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
-    for (const n of leaves) if (unsafeNames.has(n)) return null;
-    const text = this.capturedExprText(() => this.expr(iter), { source: this.b.source });
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text)) return null;
-    const root = text.split('.', 1)[0];
-    if (!resolvableRoots.has(root) && !this.scopes.some((s) => s.has(root))) return null;
-    return `NonNullable<typeof ${text}> extends readonly (infer __E)[] ? __E : any`;
-  }
-
-  // The factory-header consumer: entry j's iterable ran where only
-  // entries 0..j-1's vars existed, so every later entry's vars (its
-  // own included) are unsafe, as are the self param and the rename
-  // hazards. The root may open at the self param or any loop param.
-  tsLoopItemTypeText(entry, rec, entryIndex) {
-    if (!this.ts || entry.iter === undefined) return null;
-    const unsafe = new Set([rec.self, ...rec.renameHazardNames]);
-    for (let i = entryIndex; i < rec.loopStack.length; i++) {
-      unsafe.add(rec.loopStack[i].itemVar);
-      unsafe.add(rec.loopStack[i].indexVar);
-    }
-    return this.tsIterElementTypeText(entry.iter, unsafe, new Set([rec.self, ...rec.paramNames]));
+    for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames]) if (leaves.has(n)) return null;
+    return `${rec.name}_iter`;
   }
 
   // The face type of a DOM event handler's parameter, or null for an
@@ -10298,7 +10318,7 @@ class Emitter {
     // (own plus threaded outer; the class record's is empty), so the same
     // set feeds both roles: `bound` shadows outer names, `loopVars` marks
     // the emissions the token correction records (see noteNameSpan).
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       fn();
     } finally {
@@ -10393,12 +10413,13 @@ class Emitter {
 
   newBlockName() {
     // Block factories are class methods — a member spelling the next
-    // name would collide, so numbering skips it (compiler-owned names;
-    // the member model never minted them).
+    // name, or the face's `_iter` thunk beside it (tsIterThunkName),
+    // would collide, so numbering skips it (compiler-owned names; the
+    // member model never minted them).
     let name;
     do {
       name = `create_block_${this.rstate.blockCount++}`;
-    } while (this.rstate.frame.members.has(name));
+    } while (this.rstate.frame.members.has(name) || this.rstate.frame.members.has(`${name}_iter`));
     return name;
   }
 
@@ -12768,9 +12789,9 @@ class Emitter {
     // Rename hazards accumulate DOWN the factory chain: once a loop
     // name is remapped anywhere above, both spellings are ambiguous in
     // every deeper scope (the original resolves to the wrong binding,
-    // the minted name may capture an unrelated one) — the loop-item
-    // face typing (tsLoopItemTypeText) refuses an iterable that spells
-    // either, so a `typeof` never lands on a crosswise binding.
+    // the minted name may capture an unrelated one) — the loop's
+    // iterable thunk (tsIterThunkName) refuses an iterable that spells
+    // either, so its re-emission never lands on a crosswise binding.
     const renameHazardNames = new Set(parent.renameHazardNames ?? []);
     const remap = (n) => {
       if (!headerSet.has(n)) {
@@ -12802,11 +12823,15 @@ class Emitter {
       refs: [], loopStack, stmts: [],
       forceNonStatic: false, root: null, isStatic: false, originNode,
       hasKids: false, kidsVar: null, renameHazardNames,
+      // Which of this loop's own variables ('item', 'index') an emitted
+      // read resolved to (noteLoopVarRead).
+      readVars: new Set(),
       // The chains this block's reads may treat as non-null on the TS
       // face: every enclosing branch's tested chains plus this one's.
       narrowed: [...(parent.narrowed ?? []), ...(this._narrowNext ?? [])],
     };
     this._narrowNext = null;
+    if (loopEntry !== null) loopEntry.owner = rec;
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === 'branch' ? { record: rec, el: null } : null;
@@ -12814,7 +12839,7 @@ class Emitter {
     // Same double duty as withRecordContext's frame: `bindings` is exactly
     // the loop item/index names, bound for shadowing, loopVars for the
     // token correction's recording.
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings });
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       let stmts;
       if (isBlock(part)) {
@@ -13169,12 +13194,21 @@ class Emitter {
     return null;
   }
 
+  // The threaded outer loop variables a nested block's factory and p()
+  // receive, as an echo: the names restate the enclosing factory's own
+  // params, so a rename of the loop variable drops their edits rather
+  // than refusing over them.
+  emitOuterLoopArgs(outer) {
+    if (outer.length === 0) return;
+    this.b.emit(', ');
+    this.b.echo(() => this.b.emit(outer.join(', ')));
+  }
+
   // The conditional swap block
   // block teardown on scope close rides an `__ownerFrame().add(…)`
   // disposer.
   emitCondSetup(pad, markNode, node, anchorVar, thenRec, elseRec, hasRef, outer) {
     const self = this.renderSelf ?? 'this';
-    const outerExtra = outer.length > 0 ? `, ${outer.join(', ')}` : '';
     const p2 = pad + '  ';
     const p3 = p2 + '  ';
     // The swap's scaffold consts mint against every name the block
@@ -13192,10 +13226,14 @@ class Emitter {
     const leaving = Emitter.mintName('leaving', used);
     const transition = this.runtimeName('__transition');
     const armLines = (rec) => {
-      this.b.emit(`${p3}  ${cur} = ${self}.${rec.name}(${self}${outerExtra});\n`);
+      this.b.emit(`${p3}  ${cur} = ${self}.${rec.name}(${self}`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(');\n');
       this.b.emit(`${p3}  ${cur}.c();\n`);
       this.b.emit(`${p3}  if (${anchor}.parentNode) ${cur}.m(${anchor}.parentNode, ${anchor}.nextSibling);\n`);
-      this.b.emit(`${p3}  ${cur}.p(${self}${outerExtra});\n`);
+      this.b.emit(`${p3}  ${cur}.p(${self}`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(');\n');
       this.b.emit(`${p3}  if (${cur}._t) ${transition}(${cur}._first, ${cur}._t, 'enter', undefined);\n`);
     };
     const emitBody = () => {
@@ -13250,7 +13288,6 @@ class Emitter {
   // close.
   emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer, keySpan = null) {
     const self = this.renderSelf ?? 'this';
-    const outerExtra = outer.length > 0 ? `, ${outer.join(', ')}` : '';
     const p2 = pad + '  ';
     const p3 = p2 + '  ';
     // The reconcile scaffold mints against the block's bare emissions:
@@ -13274,15 +13311,11 @@ class Emitter {
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        // The keyFn emits in the SAME scope as the reconcile call, so
-        // its item param takes the same element-type spelling as the
-        // factory's (bare when none exists — an honest implicit any).
-        // Its own params are the one unsafe set (a `typeof` through
-        // them would be self-referential); the factory's rename
-        // hazards ride along as a conservative superset of the
-        // parent's. The index is the reconciler's counter.
-        const keyItemType = this.tsIterElementTypeText(iter,
-          new Set([itemVar, indexVar, ...rec.renameHazardNames]), new Set([self, ...outer]));
+        // The keyFn's item param takes the same element type as the
+        // factory's, through the loop's thunk spelled from this scope's
+        // own self (bare when the loop has none — an honest implicit
+        // any). The index is the reconciler's counter.
+        const keyItemType = this.tsLoopItemTypeText(rec.loopStack.at(-1), self);
         {
           // The key function's parameter is the loop variable: it marks the
           // head's declaration of it, so a definition from the key's read
@@ -13299,9 +13332,10 @@ class Emitter {
             const at = this.b.offset;
             this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
             this.loopVars.push([at, this.b.offset]);
+            this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: 'item' });
           } else this.b.emit(itemVar);
         }
-        if (keyItemType !== null) this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
+        if (keyItemType !== null) this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${keyItemType}`)));
         this.b.emit(`, ${indexVar}`);
         if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
         this.b.emit(') => ');
@@ -13310,7 +13344,10 @@ class Emitter {
         // manifestation of the binding that maps back to the loop HEAD —
         // without it the token correction reaches every position but the
         // binding's own.
-        this.rframes.push({ reactive: new Set(), bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]) });
+        this.rframes.push({
+          reactive: new Set(), bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]),
+          loopBindings: new Map([[itemVar, { owner: rec, which: 'item' }], [indexVar, { owner: rec, which: 'index' }]]),
+        });
         try {
           this.withExpression(() => {
             const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
@@ -13342,7 +13379,8 @@ class Emitter {
       } else {
         this.b.emit('null');
       }
-      this.b.emit(`${outerExtra})`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(')');
       if (hasRef) this.narrowGuardClose(guarded);
       if (hasRef) this.b.emit(')');
       this.b.emit(';\n');
@@ -13383,19 +13421,20 @@ class Emitter {
     // the block body type-check against the real member surface. The
     // handle's p() is an object-literal method where a `this` type is
     // illegal, so a face-only alias carries the instance type in. Loop
-    // item params take the iterable's element type where an honest
-    // `typeof` spelling exists (tsLoopItemTypeText; bare otherwise —
-    // an implicit `any` the strict gauge keeps reporting), index
-    // params are the reconciler's counter, and the c/m/p/d plumbing
-    // plus the block's node slots stay explicit `any` (tsScaffoldAny's
-    // posture: scaffold state, not user code).
+    // item params take their loop's element type through its thunk
+    // (tsLoopItemTypeText; bare where the loop has none — an implicit
+    // `any` the strict gauge keeps reporting), index params are the
+    // reconciler's counter, and the c/m/p/d plumbing plus the block's
+    // node slots stay explicit `any` (tsScaffoldAny's posture: scaffold
+    // state, not user code).
     const ctxType = this.ts ? Emitter.mintName('__Ctx', used) : null;
     const paramTypes = new Map();
     // A loop-derived param marks with ITS loop's node, so a diagnostic
-    // on it (an uninferrable item's implicit any, a face error in its
-    // type text) maps to the loop head the author wrote — the line a
-    // directive there governs — never to the render statement the
-    // factory's outer cover would collapse it onto.
+    // on it (an uninferrable item's implicit any) maps to the loop head
+    // the author wrote — the line a directive there governs — never to
+    // the render statement the factory's outer cover would collapse it
+    // onto. Its type text is an echo: an error there restates the
+    // iterable's own, which reports at the reconcile call.
     const paramNodes = new Map();
     rec.loopStack.forEach((entry) => {
       if (entry.node !== undefined) {
@@ -13404,13 +13443,11 @@ class Emitter {
       }
     });
     if (this.ts) {
-      this.withRecordContext(rec, () => {
-        rec.loopStack.forEach((entry, i) => {
-          const t = this.tsLoopItemTypeText(entry, rec, i);
-          if (t !== null) paramTypes.set(entry.itemVar, t);
-          paramTypes.set(entry.indexVar, 'number');
-        });
-      });
+      for (const entry of rec.loopStack) {
+        const t = this.tsLoopItemTypeText(entry, rec.self);
+        if (t !== null) paramTypes.set(entry.itemVar, t);
+        paramTypes.set(entry.indexVar, 'number');
+      }
     }
     // A loop variable's DECLARATION is the `for` head's own occurrence of
     // it; the factory parameter that carries it marks that span, so a
@@ -13423,7 +13460,7 @@ class Emitter {
       for (const v of [entry.itemVar, entry.indexVar]) {
         if (typeof v !== 'string' || declSpans.has(v)) continue;
         const hit = this.stores.primitiveSpans(v, r.sourceStart, r.sourceEnd)[0] ?? null;
-        if (hit) declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd });
+        if (hit) declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd, owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
       }
     }
     const emitTypedParams = (names, selfType, typeOf) => {
@@ -13441,16 +13478,28 @@ class Emitter {
             const at = this.b.offset;
             this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
             if (this.isRenderLoopName(n)) this.loopVars.push([at, this.b.offset]);
+            if (decl.owner !== undefined) this.loopVarDecls.push({ span: [at, this.b.offset], owner: decl.owner, which: decl.which });
           } else this.emitPrimitive(n);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
-          if (t != null) this.b.tsOnly(() => this.b.emit(`: ${t}`));
+          if (t != null) this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${t}`)));
         };
         const owner = paramNodes.get(n);
         if (owner !== undefined) this.mark(owner, '$self', emitOne);
         else emitOne();
       });
     };
+    const ownEntry = rec.kind === 'loop' ? rec.loopStack.at(-1) : null;
+    const thunkName = ownEntry !== null ? this.tsIterThunkName(ownEntry) : null;
+    if (thunkName !== null) {
+      const outerNames = rec.paramNames.slice(2);
+      let text;
+      this.withRecordContext(rec, () => {
+        text = this.capturedExprText(() => this.expr(ownEntry.iter), { source: this.b.source });
+      });
+      const params = [`${self}: this`, ...outerNames.map((n) => paramTypes.has(n) ? `${n}: ${paramTypes.get(n)}` : n)];
+      this.b.tsOnly(() => this.b.echo(() => this.b.emit(`${pad}${thunkName}(${params.join(', ')}) { return ${text}; }\n`)));
+    }
     this.mark(renderNode, '$self', () => {
       this.withRecordContext(rec, () => {
         this.b.emit(`${pad}${rec.name}(`);
@@ -13546,7 +13595,9 @@ class Emitter {
         if (needsP) emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
         this.b.emit(') {\n');
         if (needsP && rec.paramNames.length > 0) {
-          this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(' ')}\n`);
+          this.b.emit(p4);
+          this.b.echo(() => this.b.emit(rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(' ')));
+          this.b.emit('\n');
         }
         if (hasFrame) {
           this.b.emit(`${p4}if (${frameVar}) ${frameVar}.dispose();\n`);
@@ -18588,7 +18639,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

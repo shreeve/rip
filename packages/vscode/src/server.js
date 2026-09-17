@@ -65,6 +65,7 @@ import { hashText, cacheIdentityOf } from './hash.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated, generatedSpanToSource,
+  generatedCopiesOfSpan,
   generatedEditSpanToSource, generatedInsertionToSource, insertionAboveAttachedDirectives,
   isNocheckDirectiveRow, wholeImportLinesEdit, importLineSpanEdit, exactSpanMapper,
   staleOffsetMap, isScaffoldingLabel, isMirrorImportItem, scrubFaceArtifacts, presentType, presentOutgoing, isImportFixTitle, ripImportText,
@@ -1933,6 +1934,9 @@ async function refresh(document) {
     // Render-loop binding names — parameters in the face's block factory,
     // loop variables in the source (see ripSemanticTokens).
     loopVars: result.loopVars ?? [],
+    // Generated spans of a read render loop variable's declaring
+    // parameters — the diagnostic mapper drops the unused hint there.
+    readLoopVarDecls: result.readLoopVarDecls ?? [],
     // Render attribute names — prop keys of component calls, whose
     // semantic tokens are suppressed so every attribute reads through the
     // TextMate attribute scope (see ripSemanticTokens).
@@ -3587,13 +3591,69 @@ connection.onReferences(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
   if (!ctx || ctx.genExactPosition === null) return null;
-  const result = await tsgoRequest('textDocument/references', {
+  const ask = (includeDeclaration) => (position) => tsgoRequest('textDocument/references', {
     textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
-    context: params.context ?? { includeDeclaration: true },
+    position,
+    context: { includeDeclaration },
   }, 'references');
-  return ripLocations(result);
+  // Copies are found through their declarations, so the walk always asks
+  // with them; a request without declarations re-asks at each copy.
+  const found = await acrossNameCopies(ctx, ask(true), flattenLocations);
+  const answers = params.context?.includeDeclaration === false
+    ? await Promise.all(found.map(({ position }) => ask(false)(position)))
+    : found.map(({ answer }) => answer);
+  // Copies of one name map back onto one Rip span, so the answers dedupe
+  // after mapping.
+  const seen = new Set();
+  return ripLocations(answers.flatMap(flattenLocations)).filter(({ uri, range }) => {
+    const key = `${uri}\0${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 });
+
+// The most copies one symbol request asks at before it answers with what
+// it has.
+const NAME_COPY_LIMIT = 32;
+
+// One Rip name can be several TypeScript symbols: a render loop variable
+// is a parameter of its block factory, of its keyed callback, and of every
+// nested block the lowering threads it through. A symbol request answers
+// for the NAME by also asking at every other copy of a position its
+// answers reach in this face, until no unasked copy remains. A copy
+// already among the answers belongs to a symbol already asked about and
+// is never asked again.
+async function acrossNameCopies(ctx, ask, locationsOf) {
+  const face = ctx.good;
+  const here = fsPathOfUri(ctx.state.tsUri);
+  const known = new Set([ctx.genExact]);
+  const queue = [ctx.genExact];
+  const found = [];
+  while (queue.length > 0 && found.length < NAME_COPY_LIMIT) {
+    const at = queue.shift();
+    const position = offsetToPosition(face.genLineStarts, at);
+    const answer = await ask(position);
+    if (!answer) continue;
+    found.push({ position, answer });
+    const spans = [];
+    for (const { uri, range } of locationsOf(answer)) {
+      if (here === null || fsPathOfUri(uri) !== here) continue;
+      const s = positionToOffset(face.genLineStarts, face.code.length, range.start);
+      const e = positionToOffset(face.genLineStarts, face.code.length, range.end);
+      known.add(s);
+      spans.push([s, e]);
+    }
+    for (const [s, e] of spans) {
+      for (const copy of generatedCopiesOfSpan(face.mappings, s, e, face.source, face.code)) {
+        if (known.has(copy)) continue;
+        known.add(copy);
+        queue.push(copy);
+      }
+    }
+  }
+  return found;
+}
 
 // ---- completions: the context position travels Rip → TS with CURSOR
 // semantics (a cursor one past `msg.sub` maps one past the generated
@@ -4834,6 +4894,39 @@ function mapWorkspaceEditToRip(edit, { atomic = true, derived = false } = {}) {
   return { changes };
 }
 
+// A WorkspaceEdit's text edits as {uri, range} locations.
+function workspaceEditLocations(edit) {
+  const out = [];
+  for (const [uri, edits] of Object.entries(edit?.changes ?? {})) for (const e of edits) out.push({ uri, range: e.range });
+  for (const change of edit?.documentChanges ?? []) {
+    if (change.textDocument) for (const e of change.edits) out.push({ uri: change.textDocument.uri, range: e.range });
+  }
+  return out;
+}
+
+// Several WorkspaceEdits as one, an edit two of them spell identically
+// kept once. A file operation keeps its place in `documentChanges`, where
+// the Rip mapping refuses it.
+function mergeWorkspaceEdits(edits) {
+  const changes = {};
+  const seen = new Set();
+  const add = (uri, e) => {
+    const key = `${uri}\0${e.range.start.line}:${e.range.start.character}-${e.range.end.line}:${e.range.end.character}\0${e.newText}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    (changes[uri] ??= []).push(e);
+  };
+  const documentChanges = [];
+  for (const edit of edits) {
+    for (const [uri, list] of Object.entries(edit?.changes ?? {})) for (const e of list) add(uri, e);
+    for (const change of edit?.documentChanges ?? []) {
+      if (change.textDocument) for (const e of change.edits) add(change.textDocument.uri, e);
+      else documentChanges.push(change);
+    }
+  }
+  return documentChanges.length > 0 ? { changes, documentChanges } : { changes };
+}
+
 connection.onPrepareRename(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -4867,13 +4960,13 @@ connection.onRenameRequest(async (params) => {
     refuse('the buffer does not compile — fix the parse error and retry');
   }
   if (ctx.genExactPosition === null) refuse('the position does not map to the compiled document');
-  const result = await tsgoRequest('textDocument/rename', {
+  const found = await acrossNameCopies(ctx, (position) => tsgoRequest('textDocument/rename', {
     textDocument: { uri: ctx.state.tsUri },
-    position: ctx.genExactPosition,
+    position,
     newName: params.newName,
-  }, 'rename');
-  if (!result) return null;
-  const { changes, failure } = mapWorkspaceEditToRip(result, { derived: true });
+  }, 'rename'), workspaceEditLocations);
+  if (found.length === 0) return null;
+  const { changes, failure } = mapWorkspaceEditToRip(mergeWorkspaceEdits(found.map(({ answer }) => answer)), { derived: true });
   if (failure) refuse(failure);
   return { changes };
 });

@@ -324,6 +324,11 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // face, so tsgo classifies it `parameter`; the editor repaints the
     // construct the author declared. TS face only.
     loopVars: emitted.loopVars,
+    // Generated spans of a render loop variable's declaring parameters,
+    // every copy, for a variable some read in the program resolves to. The
+    // editor drops the unused hint there: a copy the lowering only threads
+    // through is no evidence the author's variable is unused. TS face only.
+    readLoopVarDecls: emitted.readLoopVarDecls,
     // Generated spans of RENDER ATTRIBUTE names — a component call's prop
     // keys. The editor suppresses semantic tokens on exactly these, so a
     // plain prop and a two-way-bound prop read alike (the TextMate

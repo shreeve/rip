@@ -9160,6 +9160,7 @@ class Emitter {
     this.classDecls = [];
     this.pinSpans = [];
     this.loopVars = [];
+    this.loopVarDecls = [];
     this.attrNames = [];
     this.importedRefs = [];
     this.strict = strict;
@@ -9721,6 +9722,31 @@ class Emitter {
     }
     return false;
   }
+  noteLoopVarRead(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.loopVars !== undefined && f.loopVars.has(name)) {
+        const binding = f.loopBindings?.get(name);
+        if (binding !== undefined)
+          binding.owner.readVars.add(binding.which);
+        return;
+      }
+      if (f.reactive.has(name) || f.bound.has(name))
+        return;
+      if (f.members !== undefined && f.members.has(name))
+        return;
+    }
+  }
+  static loopBindingsOf(rec) {
+    const bindings = new Map;
+    for (const entry of rec.loopStack) {
+      if (entry.owner === undefined)
+        continue;
+      bindings.set(entry.itemVar, { owner: entry.owner, which: "item" });
+      bindings.set(entry.indexVar, { owner: entry.owner, which: "index" });
+    }
+    return bindings;
+  }
   isRenderLoopName(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
       const f = this.rframes[i];
@@ -9962,6 +9988,7 @@ class Emitter {
     }
     if (this.isRenderLoopName(value)) {
       this.loopVars.push([start, this.b.offset]);
+      this.noteLoopVarRead(value);
       return;
     }
     const imported = this.importSpecOf(value);
@@ -10622,7 +10649,8 @@ class Emitter {
       "silences",
       "memberDecls",
       "importSpans",
-      "pendingTypeDecls"
+      "pendingTypeDecls",
+      "loopVarDecls"
     ];
     const saved = {};
     for (const k of channels) {
@@ -10639,36 +10667,25 @@ class Emitter {
         this[k] = saved[k];
     }
   }
-  static isTypeofPathNode(x) {
-    if (typeof x === "string")
-      return isIdentifierName(x);
-    return isNode(x) && x[0] === "." && x.length === 3 && typeof x[2] === "string" && isIdentifierName(x[2]) && Emitter.isTypeofPathNode(x[1]);
+  tsLoopItemTypeText(entry, self) {
+    const thunk = this.tsIterThunkName(entry);
+    return thunk === null ? null : `NonNullable<ReturnType<typeof ${self}.${thunk}>> extends readonly (infer __E)[] ? __E : any`;
   }
-  tsIterElementTypeText(iter, unsafeNames, resolvableRoots) {
-    if (!this.ts || iter === undefined || !Emitter.isTypeofPathNode(iter))
+  tsIterThunkName(entry) {
+    const rec = entry.owner;
+    const { iter } = entry;
+    if (!this.ts || rec === undefined || iter === undefined)
+      return null;
+    if (containsAwait(iter) || containsYield(iter))
+      return null;
+    if (referencesNames(iter, rec.parent.locals))
       return null;
     const leaves = new Set;
     Emitter.collectLeafNames(iter, leaves);
-    for (const n of leaves)
-      if (unsafeNames.has(n))
+    for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames])
+      if (leaves.has(n))
         return null;
-    const text = this.capturedExprText(() => this.expr(iter), { source: this.b.source });
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text))
-      return null;
-    const root = text.split(".", 1)[0];
-    if (!resolvableRoots.has(root) && !this.scopes.some((s) => s.has(root)))
-      return null;
-    return `NonNullable<typeof ${text}> extends readonly (infer __E)[] ? __E : any`;
-  }
-  tsLoopItemTypeText(entry, rec, entryIndex) {
-    if (!this.ts || entry.iter === undefined)
-      return null;
-    const unsafe = new Set([rec.self, ...rec.renameHazardNames]);
-    for (let i = entryIndex;i < rec.loopStack.length; i++) {
-      unsafe.add(rec.loopStack[i].itemVar);
-      unsafe.add(rec.loopStack[i].indexVar);
-    }
-    return this.tsIterElementTypeText(entry.iter, unsafe, new Set([rec.self, ...rec.paramNames]));
+    return `${rec.name}_iter`;
   }
   tsEventTypeText(events, hostType = null) {
     const known = events.filter((e) => DOM_EVENTS.has(e));
@@ -16318,7 +16335,7 @@ ${pad ?? ""}`);
     const prevRecord = this.renderRecord;
     this.renderSelf = rec.self;
     this.renderRecord = rec;
-    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings });
+    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       fn();
     } finally {
@@ -16405,7 +16422,7 @@ ${pad ?? ""}`);
     let name;
     do {
       name = `create_block_${this.rstate.blockCount++}`;
-    } while (this.rstate.frame.members.has(name));
+    } while (this.rstate.frame.members.has(name) || this.rstate.frame.members.has(`${name}_iter`));
     return name;
   }
   renderEffect(node, fn, checkExpr) {
@@ -18132,14 +18149,17 @@ ${this.replayPad}}` : " }");
       hasKids: false,
       kidsVar: null,
       renameHazardNames,
+      readVars: new Set,
       narrowed: [...parent.narrowed ?? [], ...this._narrowNext ?? []]
     };
     this._narrowNext = null;
+    if (loopEntry !== null)
+      loopEntry.owner = rec;
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
     R.transitionSlot = kind === "branch" ? { record: rec, el: null } : null;
     R.sink = rec;
-    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings });
+    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       let stmts;
       if (isBlock(part)) {
@@ -18407,9 +18427,14 @@ ${this.replayPad}}` : " }");
     }
     return null;
   }
+  emitOuterLoopArgs(outer) {
+    if (outer.length === 0)
+      return;
+    this.b.emit(", ");
+    this.b.echo(() => this.b.emit(outer.join(", ")));
+  }
   emitCondSetup(pad, markNode, node, anchorVar, thenRec, elseRec, hasRef, outer) {
     const self = this.renderSelf ?? "this";
-    const outerExtra = outer.length > 0 ? `, ${outer.join(", ")}` : "";
     const p2 = pad + "  ";
     const p3 = p2 + "  ";
     const used = new Set([self, ...outer]);
@@ -18422,13 +18447,17 @@ ${this.replayPad}}` : " }");
     const leaving = Emitter.mintName("leaving", used);
     const transition = this.runtimeName("__transition");
     const armLines = (rec) => {
-      this.b.emit(`${p3}  ${cur} = ${self}.${rec.name}(${self}${outerExtra});
+      this.b.emit(`${p3}  ${cur} = ${self}.${rec.name}(${self}`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(`);
 `);
       this.b.emit(`${p3}  ${cur}.c();
 `);
       this.b.emit(`${p3}  if (${anchor}.parentNode) ${cur}.m(${anchor}.parentNode, ${anchor}.nextSibling);
 `);
-      this.b.emit(`${p3}  ${cur}.p(${self}${outerExtra});
+      this.b.emit(`${p3}  ${cur}.p(${self}`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(`);
 `);
       this.b.emit(`${p3}  if (${cur}._t) ${transition}(${cur}._first, ${cur}._t, 'enter', undefined);
 `);
@@ -18506,7 +18535,6 @@ ${this.replayPad}}` : " }");
   }
   emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer, keySpan = null) {
     const self = this.renderSelf ?? "this";
-    const outerExtra = outer.length > 0 ? `, ${outer.join(", ")}` : "";
     const p2 = pad + "  ";
     const p3 = p2 + "  ";
     const used = new Set([self, itemVar, indexVar, ...outer]);
@@ -18532,7 +18560,7 @@ ${this.replayPad}}` : " }");
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        const keyItemType = this.tsIterElementTypeText(iter, new Set([itemVar, indexVar, ...rec.renameHazardNames]), new Set([self, ...outer]));
+        const keyItemType = this.tsLoopItemTypeText(rec.loopStack.at(-1), self);
         {
           const headId = this.stores.idOf(node);
           const headVars = headId !== null ? this.stores.role(headId, "vars") : null;
@@ -18542,16 +18570,22 @@ ${this.replayPad}}` : " }");
             const at = this.b.offset;
             this.b.markSpan(headId, "identifier", decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
             this.loopVars.push([at, this.b.offset]);
+            this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: "item" });
           } else
             this.b.emit(itemVar);
         }
         if (keyItemType !== null)
-          this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
+          this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${keyItemType}`)));
         this.b.emit(`, ${indexVar}`);
         if (this.ts)
           this.b.tsOnly(() => this.b.emit(": number"));
         this.b.emit(") => ");
-        this.rframes.push({ reactive: new Set, bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]) });
+        this.rframes.push({
+          reactive: new Set,
+          bound: new Set([itemVar, indexVar]),
+          loopVars: new Set([itemVar, indexVar]),
+          loopBindings: new Map([[itemVar, { owner: rec, which: "item" }], [indexVar, { owner: rec, which: "index" }]])
+        });
         try {
           this.withExpression(() => {
             const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
@@ -18583,7 +18617,8 @@ ${this.replayPad}}` : " }");
       } else {
         this.b.emit("null");
       }
-      this.b.emit(`${outerExtra})`);
+      this.emitOuterLoopArgs(outer);
+      this.b.emit(")");
       if (hasRef)
         this.narrowGuardClose(guarded);
       if (hasRef)
@@ -18624,14 +18659,12 @@ ${this.replayPad}}` : " }");
       }
     });
     if (this.ts) {
-      this.withRecordContext(rec, () => {
-        rec.loopStack.forEach((entry, i) => {
-          const t = this.tsLoopItemTypeText(entry, rec, i);
-          if (t !== null)
-            paramTypes.set(entry.itemVar, t);
-          paramTypes.set(entry.indexVar, "number");
-        });
-      });
+      for (const entry of rec.loopStack) {
+        const t = this.tsLoopItemTypeText(entry, rec.self);
+        if (t !== null)
+          paramTypes.set(entry.itemVar, t);
+        paramTypes.set(entry.indexVar, "number");
+      }
     }
     const declSpans = new Map;
     for (const entry of rec.loopStack) {
@@ -18644,7 +18677,7 @@ ${this.replayPad}}` : " }");
           continue;
         const hit = this.stores.primitiveSpans(v, r.sourceStart, r.sourceEnd)[0] ?? null;
         if (hit)
-          declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd });
+          declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd, owner: entry.owner, which: v === entry.itemVar ? "item" : "index" });
       }
     }
     const emitTypedParams = (names, selfType, typeOf) => {
@@ -18658,13 +18691,15 @@ ${this.replayPad}}` : " }");
             this.b.markSpan(decl.id, "identifier", decl.start, decl.end, () => this.b.emit(n));
             if (this.isRenderLoopName(n))
               this.loopVars.push([at, this.b.offset]);
+            if (decl.owner !== undefined)
+              this.loopVarDecls.push({ span: [at, this.b.offset], owner: decl.owner, which: decl.which });
           } else
             this.emitPrimitive(n);
           if (!this.ts)
             return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null)
-            this.b.tsOnly(() => this.b.emit(`: ${t}`));
+            this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${t}`)));
         };
         const owner = paramNodes.get(n);
         if (owner !== undefined)
@@ -18673,6 +18708,18 @@ ${this.replayPad}}` : " }");
           emitOne();
       });
     };
+    const ownEntry = rec.kind === "loop" ? rec.loopStack.at(-1) : null;
+    const thunkName = ownEntry !== null ? this.tsIterThunkName(ownEntry) : null;
+    if (thunkName !== null) {
+      const outerNames = rec.paramNames.slice(2);
+      let text;
+      this.withRecordContext(rec, () => {
+        text = this.capturedExprText(() => this.expr(ownEntry.iter), { source: this.b.source });
+      });
+      const params = [`${self}: this`, ...outerNames.map((n) => paramTypes.has(n) ? `${n}: ${paramTypes.get(n)}` : n)];
+      this.b.tsOnly(() => this.b.echo(() => this.b.emit(`${pad}${thunkName}(${params.join(", ")}) { return ${text}; }
+`)));
+    }
     this.mark(renderNode, "$self", () => {
       this.withRecordContext(rec, () => {
         this.b.emit(`${pad}${rec.name}(`);
@@ -18771,7 +18818,9 @@ ${this.replayPad}}` : " }");
         this.b.emit(`) {
 `);
         if (needsP && rec.paramNames.length > 0) {
-          this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(" ")}
+          this.b.emit(p4);
+          this.b.echo(() => this.b.emit(rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(" ")));
+          this.b.emit(`
 `);
         }
         if (hasFrame) {
@@ -22580,7 +22629,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -22781,6 +22830,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     enums: emitted.enums,
     classDecls: emitted.classDecls,
     loopVars: emitted.loopVars,
+    readLoopVarDecls: emitted.readLoopVarDecls,
     attrNames: emitted.attrNames,
     routeWraps: emitted.routeWraps,
     memberInits: emitted.memberInits,

@@ -691,6 +691,25 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('completion: a loop over a call never offers the face\'s iterable thunk', async () => {
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'ROWS = [{ id: 1 }]',          // 0
+        'export Panel = component',    // 1
+        '  count := 0',                // 2
+        '  render',                    // 3
+        '    ul',                      // 4
+        '      for row in ROWS.slice(0)', // 5
+        '        li count',            // 6
+        '',
+      ].join('\n');
+      await api.open('panel.rip', src);
+      const labels = ((await api.completion('panel.rip', 6, 12))?.items ?? []).map((i) => i.label);
+      expect(labels).toContain('count');
+      expect(labels.filter((l) => /^create_block_/.test(l))).toEqual([]);
+    });
+  });
+
   test('hover: a hyphenated key answers on every road — never the effect machinery', async () => {
     // A hyphenated key's stored primitive keeps the lexer's quotes, so
     // its claim must go through the stored spelling; without the exact

@@ -3430,6 +3430,51 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  test('a loop over a call types its row from the call\'s element type — top level, keyed, and nested', () => {
+    // `typeof` takes only an entity path, so a call iterable reaches the
+    // row through the loop's face-only thunk. The misspelled call reports
+    // once, at the loop head. A render local — declared before the loop
+    // or after it — is out of the thunk's reach, so those rows stay bare.
+    const src = [
+      "ROWS = [{ id: 1, tags: ['p', 'q'] }]",
+      '',
+      'export Rows = component',
+      '  render',
+      '    ul',
+      '      for row in ROWS.slice(0, 1)',
+      '        li row.bogusRow',
+      '      for row in ROWS.filter((r) -> r.id > 0)',
+      '        li key: row.id, row.bogusKeyed',
+      '      for row in ROWS',
+      '        for tag in row.tags.map((t) -> t.trim())',
+      '          li tag.bogusTag()',
+      '      for row in ROWS.slize(0)',
+      '        li row',
+      '      for row in ROWS',
+      '        picked = row.tags',
+      '        for early in picked.slice(0)',
+      '          li early',
+      '        for late in later.slice(0)',
+      '          li late',
+      '        later = row.tags',
+      '',
+    ].join('\n');
+    const dir = workspace({ 'c.rip': src });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      const strict = check(dir, ['--strict']).stdout;
+      expect(strict.match(/TS7006/g)).toHaveLength(2);
+      expect(strict).toContain("c.rip:17:13 - error TS7006: Parameter 'early'");
+      expect(strict).toContain("c.rip:19:13 - error TS7006: Parameter 'late'");
+      expect(r.stdout).not.toContain('TS2304');
+      expect(r.stdout).toContain("c.rip:7:16 - error TS2339: Property 'bogusRow' does not exist on type '{ id: number; tags: string[]; }'");
+      expect(r.stdout).toContain("c.rip:9:29 - error TS2339: Property 'bogusKeyed' does not exist on type '{ id: number; tags: string[]; }'");
+      expect(r.stdout).toContain("c.rip:12:18 - error TS2339: Property 'bogusTag' does not exist on type 'string'");
+      expect(r.stdout.match(/'slize'/g)).toHaveLength(1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('event handler params carry the event type — inline and named-method refs alike', () => {
     // The face types both handler shapes from HTMLElementEventMap: a
     // literal ≤1-param handler through the typed cast on the handler

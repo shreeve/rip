@@ -88,6 +88,7 @@ const REGION_SHAPES = [
   /^__ripNarrow\(.*\);$/su,                                // branch-narrowing assertions (statement form) a block's effect opens with
   /^\(__ripNarrow\(.*\),$/su,                              // the expression form's opener (a loop's batched reconcile)
   /^\)+$/u,                                                // the expression form's closers
+  /^create_block_\d+_iter\(ctx: this.*\) \{ return .*; \}$/su, // a render loop's iterable thunk (the element type a call iterable reaches through)
   /^declare function __ripNarrow<T>\(v: T\): asserts v is NonNullable<T>;$/u, // the narrowing helper declare
 ];
 
@@ -1535,6 +1536,37 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // quieting `as any` (custom events keep that: no claim to check).
     expect(faced.code).toContain(`((this.onClick) as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
     expect(faced.code).toContain('(this as any)._first = ');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
+  test('every render loop types its item through its iterable thunk, a name iterable like a call', () => {
+    // One road: the thunk is a face-only method whose return type is the
+    // iterable's, and `typeof ctx.<thunk>` is an entity name the header
+    // and the keyFn can both spell, each through its own name for the
+    // instance. The thunk, both annotations, and the outer-argument
+    // threading are echoes, and the whole spelling strips.
+    const src = [
+      'Roster = component',
+      '  items := [1]',
+      '  render',
+      '    ul',
+      '      for item in items',
+      '        li key: item',
+      '          = item',
+      '      for other in items.map((x) -> x * 2)',
+      '        li other',
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    const itemType = (self, thunk) => `NonNullable<ReturnType<typeof ${self}.${thunk}>> extends readonly (infer __E)[] ? __E : any`;
+    expect(faced.code).toContain('  create_block_0_iter(ctx: this) { return ctx.items.value; }\n');
+    expect(faced.code).toContain(`create_block_0(ctx: this, item: ${itemType('ctx', 'create_block_0_iter')}, i: number) {`);
+    expect(faced.code).toContain(`(item: ${itemType('this', 'create_block_0_iter')}, i: number) => `);
+    expect(faced.code).toContain('  create_block_1_iter(ctx: this) { return ctx.items.value.map(x => (x * 2)); }\n');
+    expect(faced.code).toContain(`create_block_1(ctx: this, other: ${itemType('ctx', 'create_block_1_iter')}, i: number) {`);
+    const echoes = faced.echoSpans.map(([a, b]) => faced.code.slice(a, b).trim());
+    expect(echoes.filter((s) => s.startsWith('create_block_') && s.includes('_iter('))).toHaveLength(2);
+    expect(echoes.filter((s) => s.startsWith(': NonNullable<ReturnType<'))).toHaveLength(3);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
