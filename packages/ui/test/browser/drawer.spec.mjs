@@ -1,6 +1,29 @@
 import { expect, test } from '@playwright/test'
 import { isModal } from './support.mjs'
 
+const entries = [
+  { name: 'the demo drawer', path: '/drawer', popup: 'main dialog', trigger: 'Open Drawer', from: '100%' },
+  { name: 'the navigation drawer', path: '/', popup: 'header dialog', trigger: 'Open navigation', from: '-100%', phone: true },
+]
+for (const { name, path, popup: selector, trigger, from, phone } of entries) {
+  test(`opening slides ${name} in from off-screen`, async ({ page }) => {
+    if (phone) await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(path)
+    const popup = page.locator(selector)
+    await popup.evaluate((el) => {
+      window.entering = new Promise((resolve) => {
+        new MutationObserver((_, observer) => {
+          if (!el.open) return
+          observer.disconnect()
+          requestAnimationFrame(() => resolve(el.getAnimations().map((a) => a.effect.getKeyframes()[0].translate)))
+        }).observe(el, { attributeFilter: ['open'] })
+      })
+    })
+    await page.getByRole('button', { name: trigger }).click()
+    expect(await page.evaluate(() => window.entering)).toEqual([from])
+  })
+}
+
 // The demo's drawer sits on the right, so a swipe to the right dismisses.
 test('a swipe toward the drawer\'s side dismisses it, and a short one settles back', async ({ page }) => {
   await page.goto('/drawer')
