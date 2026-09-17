@@ -29,11 +29,8 @@ plumbing in `dom.rip`; and the GIF writer, ECI table and image-input helpers
 the symbologies share. `rip/barcodes/qr`, `rip/barcodes/pdf417` and
 `rip/barcodes/code128` import one symbology alone.
 
-**Origin:** the QR encoder, decoder and browser layer are a port of
-[paulmillr/qr](https://github.com/paulmillr/qr) by Paul Miller, itself
-derived from ZXing, rewritten in Rip with the same algorithms and
-byte-identical output on every format. The PDF417 and Code 128 symbologies
-are original to this package. See [Credits](#credits).
+**Origin:** the QR half is a port of [paulmillr/qr](https://github.com/paulmillr/qr);
+PDF417 and Code 128 are original to this package. See [Credits](#credits).
 
 ## Quick Start
 
@@ -61,27 +58,6 @@ import { encodePDF417, decodePDF417 } from 'rip/barcodes'
 encodePDF417 'Hello PDF417', 'svg', scale: 2  # a stacked symbol
 decodePDF417 { width, height, data }          # the text, or throws
 ```
-
-## Features
-
-- Every version 1..40, every error-correction level, numeric, alphanumeric
-  and byte modes, automatic version and mask selection, explicit overrides
-- Six outputs: `raw`, `ascii`, `term`, `svg`, `gif`, `data-url`
-- Decoding from RGB, RGBA, packed BGRA/X variants, and planar luma formats
-  including 10- and 12-bit I420
-- ECI-aware byte segments, inverted symbols, arbitrary rotation
-- A reusable `QRScanner` for camera loops, with an `effort` tier, a
-  `timeLimit` budget, and a cooperative `decodeAsync` that yields between
-  bounded work units
-- `decodeQRBatch` finds every symbol in each image
-- Code 128 with subsets A, B and C, shortest-sequence subset selection,
-  GS1-128 FNC1, the same six outputs, and a reader that handles both
-  directions, both axes and inverted symbols
-- PDF417 with text, byte and numeric compaction, nine error-correction
-  levels, 1..30 columns and 3..90 rows, compact symbols, UTF-8 behind an
-  ECI, the same six outputs, and a reader that recovers from tilt, skew,
-  rotation, inversion, damaged rows, a cropped start pattern and holes,
-  and reads Macro PDF417 segment metadata
 
 ## QR
 
@@ -127,6 +103,23 @@ For photos and uploads pass `effort: Infinity, timeLimit: Infinity`.
 Successful decodes cost the same in every tier; retries only run after a
 failed strict pass.
 
+### Scanner
+
+```coffee
+import { QRScanner } from 'rip/barcodes'
+
+scanner = QRScanner.new maxSize: { width: 1920, height: 1080 }, effort: 2
+scanner.addImage frame           # any supported format, up to maxSize
+results = scanner.decode()       # [string] or [Error]
+results = scanner.decodeAsync!   # same, yielding to the host between chunks
+scanner.clean()                  # zero every buffer when the source is released
+```
+
+One scanner serves a whole camera session: its luma arena, pyramid, threshold
+grids, bitmaps and finder tables are allocated in the constructor and reused
+for every frame. Operations are exclusive; a call made while `decodeAsync`
+is pending throws.
+
 ## Code 128
 
 ```coffee
@@ -154,15 +147,23 @@ and `data-url` draw `height` modules of bar.
 
 `decodeCode128` takes the same `{ width, height, data }` as `decodeQR`,
 with the same `format` option, and returns the text or throws
-`'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
-miss and otherwise
-`{ text, gs1, codes, angle, line, from, to, corners, vertical, reversed, inverted }`:
-the verified codewords, the direction of the scan line that read them
-(0 along rows, a quarter turn along columns), which line, axis, direction
-and polarity, the symbol's span along that line in pixels, and its four
-corners in image space, fit to the lines that read the same codewords
-along the bars' own direction, so a tilted label gives a tilted quad of
-its full height. Lines run along both axes; a tilted label crosses an
+`'Code 128 not found'`. `readCode128` returns `null` on a miss and otherwise
+
+```coffee
+{ text, gs1, codes, angle, line, from, to, corners, vertical, reversed, inverted }
+```
+
+`gs1` is whether the symbol opened with FNC1, `codes` the verified
+codewords, `angle` the direction of the scan line that read them (0 along
+rows, a quarter turn along columns, anything between along a tilt), `line`
+the row or column of an axis read or the offset of a tilted line from the
+image's center, `from` and `to` the symbol's span along it in pixels, `vertical`, `reversed` and `inverted` the axis,
+direction and polarity of the read, and `corners` the four corners in
+image space, fit to the lines that read the same codewords along the
+bars' own direction, so a tilted label gives a tilted quad of its full
+height.
+
+Lines run along both axes; a tilted label crosses an
 axis line with enough runs for a symbol yet does not read, and its tilt
 shows as a shift of the bar pattern between that line and one six lines
 over, so the reader correlates the two, reads along the estimated
@@ -171,9 +172,8 @@ fraction of a millisecond more per frame. A label leaning a little still
 reads on an axis line; its lean is measured the same way from that line
 and the corners tracked along it, since across a wide label few axis
 lines read and a fit through them alone cannot tell the lean. `tilt:
-false` reads the axes only.
-Modules must be at least one pixel wide; a printed label filling a quarter
-of a camera frame is plenty.
+false` reads the axes only. Modules must be at least one pixel wide; a
+printed label filling a quarter of a camera frame is plenty.
 
 ## PDF417
 
@@ -236,23 +236,6 @@ side, whose rows stay level while the edges lean, reads as well as a
 rotated one. Against ZXing's PDF417 blackbox photo sets 1 to 3 it decodes
 all 58 images at each of four rotations. Its Macro set decodes one segment
 per image; images holding several symbols return the first found.
-
-### Scanner
-
-```coffee
-import { QRScanner } from 'rip/barcodes'
-
-scanner = QRScanner.new maxSize: { width: 1920, height: 1080 }, effort: 2
-scanner.addImage frame           # any supported format, up to maxSize
-results = scanner.decode()       # [string] or [Error]
-results = scanner.decodeAsync!   # same, yielding to the host between chunks
-scanner.clean()                  # zero every buffer when the source is released
-```
-
-One scanner serves a whole camera session: its luma arena, pyramid, threshold
-grids, bitmaps and finder tables are allocated in the constructor and reused
-for every frame. Operations are exclusive; a call made while `decodeAsync`
-is pending throws.
 
 ## Camera
 
@@ -401,23 +384,6 @@ reference implementation, is a friend of mine and wickedly smart. Coming
 even close to what he built took invoking the greatest AI frontier model
 in the world, and a great deal of measuring.
 
-## Credits
-
-The QR half of this package is a port of [paulmillr/qr](https://github.com/paulmillr/qr)
-0.7.0 by [Paul Miller](https://paulmillr.com), released under MIT OR
-Apache-2.0 and derived in turn from the ZXing project. The QR tables,
-encoder, decoder pipeline, scanner, camera plumbing and `BarcodeDetector`
-ponyfill follow his design; the port keeps his algorithms, restructures
-them for Rip, and verifies itself against his implementation with an
-oracle that compares every output format byte for byte and every decode
-result on synthetic frames. The performance work described above is on top
-of that foundation. Code 128 and PDF417 are original to this package and
-share only the image input, ECI table and GIF writer. The PDF417 encoder
-is checked against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp),
-which decodes its output byte for byte across compaction modes, levels,
-shapes and scales, and the reader against the photographs in ZXing's
-PDF417 blackbox corpus.
-
 ## Test
 
 ```bash
@@ -439,3 +405,20 @@ output, errors-and-erasures correction to its limit, and decompaction
 including Macro PDF417, then round-trips rasters across scales, row
 heights, rotations, inversion, compact and extreme shapes, skew, cropped
 and torn start columns and holes.
+
+## Credits
+
+The QR half of this package is a port of [paulmillr/qr](https://github.com/paulmillr/qr)
+0.7.0 by [Paul Miller](https://paulmillr.com), released under MIT OR
+Apache-2.0 and derived in turn from the ZXing project. The QR tables,
+encoder, decoder pipeline, scanner, camera plumbing and `BarcodeDetector`
+ponyfill follow his design; the port keeps his algorithms, restructures
+them for Rip, and verifies itself against his implementation with an
+oracle that compares every output format byte for byte and every decode
+result on synthetic frames. The performance work described above is on top
+of that foundation. Code 128 and PDF417 are original to this package and
+share only the image input, ECI table and GIF writer. The PDF417 encoder
+is checked against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp),
+which decodes its output byte for byte across compaction modes, levels,
+shapes and scales, and the reader against the photographs in ZXing's
+PDF417 blackbox corpus.
