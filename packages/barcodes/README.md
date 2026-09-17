@@ -154,11 +154,18 @@ and `data-url` draw `height` modules of bar.
 with the same `format` option, and returns the text or throws
 `'Code 128 not found'`. `readCode128 img, format: 'I420'` returns `null` on a
 miss and otherwise
-`{ text, gs1, codes, line, from, to, corners, vertical, reversed, inverted }`:
-the verified codewords, which scan line, axis, direction and polarity
-produced them, the symbol's span along that line in pixels, and its four
-corners in image space, fit to the lines that read the same codewords, so
-a tilted label gives a tilted quad.
+`{ text, gs1, codes, angle, line, from, to, corners, vertical, reversed, inverted }`:
+the verified codewords, the direction of the scan line that read them
+(0 along rows, a quarter turn along columns), which line, axis, direction
+and polarity, the symbol's span along that line in pixels, and its four
+corners in image space, fit to the lines that read the same codewords
+along the bars' own direction, so a tilted label gives a tilted quad of
+its full height. Lines run along both axes first and then, unless the
+axes crossed no bar-like runs at all, along `angles` evenly spaced
+directions in a half turn (8 by default, every 22.5 degrees, so a label
+reads at any angle; 2 is the axes only) on about `lines` lines each (16).
+The sweep costs about as much again as the axis passes, so a camera loop
+may run it on alternate frames.
 Modules must be at least one pixel wide; a printed label filling a quarter
 of a camera frame is plenty.
 

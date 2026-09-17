@@ -123,7 +123,9 @@ export Home = component
       hit = { kind: 'QR', text }
     else if frame and frame.id isnt seen
       seen = frame.id
-      c128 = readCode128 frame, format: 'I420'
+      # Every other frame also sweeps the diagonals, so a label reads at
+      # any angle for about half the sweep's cost on average.
+      c128 = readCode128 frame, format: 'I420', angles: (if frames & 1 then 8 else 2)
       if c128
         hit = { kind: 'Code 128', text: c128.text }
         canvas.mark! c128.corners
