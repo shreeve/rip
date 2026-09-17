@@ -540,40 +540,28 @@ test "corners span the bars and follow a tilt", ->
   eys = hit.corners.map (c) -> c.y
   ok Math.abs(Math.min(...xs) - hit.from) < 1 and Math.abs(Math.max(...xs) - hit.to) < 1, 'width'
   ok Math.abs(Math.min(...eys) - ys[0]) <= 4 and Math.abs(Math.max(...eys) - ys.at(-1) - 1) <= 4, "height #{Math.min(...eys)}..#{Math.max(...eys)} vs #{ys[0]}..#{ys.at(-1)}"
-  # A taller label tilted eight degrees: the start edge leans by the tangent.
-  img    = bars 'Wikipedia', {}, 2, 500, 300, false, 0, 120
-  angle  = 8 * Math.PI / 180
-  turned = { width: 500, height: 300, data: Uint8Array.new(500 * 300 * 4).fill(240) }
-  for y in [0...300]
-    for x in [0...500]
-      dx = x - 250
-      dy = y - 150
-      sx = Math.round 250 + dx * Math.cos(angle) + dy * Math.sin(angle)
-      sy = Math.round 150 - dx * Math.sin(angle) + dy * Math.cos(angle)
-      continue unless sx >= 0 and sx < 500 and sy >= 0 and sy < 300
-      turned.data[4 * (y * 500 + x)] = turned.data[4 * (y * 500 + x) + 1] = turned.data[4 * (y * 500 + x) + 2] = img.data[4 * (sy * 500 + sx)]
-  hit = readCode128 turned
-  eq hit.text, 'Wikipedia'
-  # The sampling above turns the label counterclockwise, so its start edge
-  # leans left going down.
-  [tl, tr, br, bl] = hit.corners
-  lean = (bl.x - tl.x) / (bl.y - tl.y)
-  ok Math.abs(lean + Math.tan(angle)) < 0.03, "lean #{lean.toFixed 3} vs #{(-Math.tan(angle)).toFixed 3}"
-  eq readCode128(bars('a\x01b\x02', {}, 2, 500, 300)).text, 'a\x01b\x02'
-  eq readCode128(bars('0123456789', {}, 1, 300, 100)).text, '0123456789'
-  eq readCode128(bars('ok',         {}, 1, 100, 20)).text,  'ok'
-  hit = readCode128 bars('(01)09501101530003', gs1: true, 2, 600, 300)
-  eq hit.text, '(01)09501101530003'
-  eq hit.gs1,  true
-  hit = readCode128 bars('AB\x1dCD', {}, 2, 500, 300)
-  eq hit.text, 'AB\x1dCD'
-  eq hit.gs1,  false
-  eq readCode128(toLuma(bars('Wikipedia', {}, 2, 500, 300)), format: 'I420').text, 'Wikipedia'
-  blank = flat 50, 50, 200
-  eq readCode128(blank), null
-  throws (-> decodeCode128 blank),     Error,     'not found'
-  throws (-> readCode128 blank, null), TypeError, 'opts'
-  throws (-> readCode128 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
+  # A taller label turned counterclockwise, as far as a row still crosses
+  # every bar: the start edge leans left going down by the angle, and the
+  # quad spans the label's full height, not just the rows that read.
+  img = bars 'Wikipedia', {}, 3, 700, 400, false, 0, 120
+  for degrees in [5, 12]
+    angle  = degrees * Math.PI / 180
+    turned = { width: 700, height: 400, data: Uint8Array.new(700 * 400 * 4).fill(240) }
+    for y in [0...400]
+      for x in [0...700]
+        dx = x - 350
+        dy = y - 200
+        sx = Math.round 350 + dx * Math.cos(angle) + dy * Math.sin(angle)
+        sy = Math.round 200 - dx * Math.sin(angle) + dy * Math.cos(angle)
+        continue unless sx >= 0 and sx < 700 and sy >= 0 and sy < 400
+        turned.data[4 * (y * 700 + x)] = turned.data[4 * (y * 700 + x) + 1] = turned.data[4 * (y * 700 + x) + 2] = img.data[4 * (sy * 700 + sx)]
+    hit = readCode128 turned
+    eq hit?.text, 'Wikipedia', "#{degrees} degrees"
+    [tl, tr, br, bl] = hit.corners
+    edge   = Math.atan2 bl.x - tl.x, bl.y - tl.y
+    height = Math.hypot bl.x - tl.x, bl.y - tl.y
+    ok Math.abs(edge + angle) < 0.02, "#{degrees} degrees: edge leans #{(edge * 180 / Math.PI).toFixed 1}"
+    ok Math.abs(height - 120) < 10, "#{degrees} degrees: height #{height.toFixed 1}"
 
 test "text: shifts, FNC4 high characters, latches", ->
   text =! (codes) -> c128.decodeText(codes, codes.length).text

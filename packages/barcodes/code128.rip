@@ -572,59 +572,118 @@ scanLines =! (img, format, vertical, luma, runs, rev, codes) ->
       return hit
   null
 
+# ==[ Corners ]==
+# A scan line is a point on the image's center line across the bars and a
+# direction along them: p(o, t) = c + o * n + t * d, with d the unit scan
+# direction at `angle`, n its normal and c the image center. The axis
+# passes are the angles 0 and a quarter turn; the geometry below serves
+# every hit, at any angle.
+
+# Byte offsets of the samples on the line at `o`, clipped to the image;
+# `clip.start` is the t of its first sample, and the count is returned.
+clip =! { start: 0 }
+pathOffsets =! (ats, width, height, format, ox, oy, dx, dy) ->
+  t0 = -Infinity
+  t1 = Infinity
+  # Slab clipping against each edge; a direction parallel to an axis is
+  # inside or outside for every t.
+  for [origin, delta, limit] in [[ox, dx, width - 1], [oy, dy, height - 1]]
+    if Math.abs(delta) < 1e-9
+      return 0 if origin < 0 or origin > limit
+    else
+      a = (0 - origin) / delta
+      b = (limit - origin) / delta
+      [a, b] = [b, a] if a > b
+      t0 = a if a > t0
+      t1 = b if b < t1
+  return 0 if t1 <= t0
+  count = Math.floor(t1 - t0) + 1
+  row   = width * format.step
+  step  = format.step
+  clip.start = t0
+  for i in [0...count]
+    t = t0 + i
+    ats[i] = Math.round(oy + t * dy) * row + Math.round(ox + t * dx) * step
+  count
+
+# Luma at precomputed offsets, as sampleLine reads a row.
+sampleOffsets! =! (luma, data, ats, count, format) ->
+  switch format.step
+    when 1
+      luma[k] = data[ats[k]] for k in [0...count]
+    when 2
+      shift = format.bits - 8
+      luma[k] = (data[ats[k]] | (data[ats[k] + 1] << 8)) >>> shift for k in [0...count]
+    else
+      for k in [0...count]
+        at = ats[k]
+        luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
+
+# Read one line at `o` along `angle`; a hit carries t0 and t1, where the
+# symbol starts and ends along the line.
+readAt =! (img, format, angle, o, luma, ats, runs, rev, codes) ->
+  {width, height, data} = img
+  dx = Math.cos angle
+  dy = Math.sin angle
+  count = pathOffsets ats, width, height, format, width / 2 - o * dy, height / 2 + o * dx, dx, dy
+  return null if count < 13
+  sampleOffsets luma, data, ats, count, format
+  hit = readLine runs, lineRuns(luma, count, runs), rev, codes
+  hit = readLine runs, sharpRuns(luma, count, runs), rev, codes unless hit
+  return null unless hit
+  hit.t0 = clip.start + hit.from
+  hit.t1 = clip.start + hit.to
+  hit
+
 # The symbol's corners. From the hit line, step outward through the bars
 # reading each line and keeping those that give the same codewords, until
-# two in a row do not; the start and end edges are then fit to the lines
-# kept, so a tilted label gives a tilted quad spanning the bars' height.
-trackEdges =! (img, format, vertical, luma, runs, rev, hit, codes) ->
-  {width, height, data} = img
-  lines   = if vertical then width  else height
-  count   = if vertical then height else width
-  row     = width * format.step
-  advance = if vertical then row else format.step
-  step    = Math.max 1, Math.round((hit.to - hit.from) / 64)
-  more    = []
-  same    = (line) ->
-    sampleLine luma, data, (if vertical then line * format.step else line * row), advance, count, format
-    h = readLine runs, lineRuns(luma, count, runs), rev, more
-    h = readLine runs, sharpRuns(luma, count, runs), rev, more unless h
+# four in a row do not (a line can fail on noise inside the bars); the
+# start and end edges are then fit to the lines kept, so a tilted label
+# gives a tilted quad spanning the bars' height.
+trackEdges =! (img, format, hit, codes, luma, ats, runs, rev) ->
+  {width, height} = img
+  {angle} = hit
+  dx   = Math.cos angle
+  dy   = Math.sin angle
+  step = Math.max 1, Math.round((hit.t1 - hit.t0) / 64)
+  more = []
+  same = (o) ->
+    h = readAt img, format, angle, o, luma, ats, runs, rev, more
     return null unless h and h.len is hit.len
     for k in [0...hit.len]
       return null if more[k] isnt codes[k]
     h
-  # Least-squares lines for the start and end edges against the line index.
-  n = sy = syy = sf = syf = st = syt = 0
-  top = bottom = hit.line
-  add = (line, from, to) ->
+  # Least-squares lines for the start and end edges against the offset.
+  n = so = soo = s0 = so0 = s1 = so1 = 0
+  low = high = hit.o
+  add = (o, t0, t1) ->
     n++
-    sy  += line
-    syy += line * line
-    sf  += from
-    syf += line * from
-    st  += to
-    syt += line * to
-    top    = line if line < top
-    bottom = line if line > bottom
-  add hit.line, hit.from, hit.to
+    so  += o
+    soo += o * o
+    s0  += t0
+    so0 += o * t0
+    s1  += t1
+    so1 += o * t1
+    low  = o if o < low
+    high = o if o > high
+  add hit.o, hit.t0, hit.t1
   for dir in [-1, 1]
     misses = 0
-    line   = hit.line + dir * step
-    while line >= 0 and line < lines and misses < 2
-      h = same line
-      if h then (add line, h.from, h.to; misses = 0) else misses++
-      line += dir * step
-  det = n * syy - sy * sy
-  bf  = if det then (n * syf - sy * sf) / det else 0
-  bt  = if det then (n * syt - sy * st) / det else 0
-  af  = (sf - bf * sy) / n
-  at  = (st - bt * sy) / n
+    o      = hit.o + dir * step
+    while misses < 4
+      h = same o
+      if h then (add o, h.t0, h.t1; misses = 0) else misses++
+      o += dir * step
+  det = n * soo - so * so
+  b0  = if det then (n * so0 - so * s0) / det else 0
+  b1  = if det then (n * so1 - so * s1) / det else 0
+  a0  = (s0 - b0 * so) / n
+  a1  = (s1 - b1 * so) / n
   # The last line kept lies within a step of the bars' edge.
-  y0 = Math.max 0, top - step / 2
-  y1 = Math.min lines, bottom + step / 2
-  if vertical
-    [{ x: y0, y: af + bf * y0 }, { x: y1, y: af + bf * y1 }, { x: y1, y: at + bt * y1 }, { x: y0, y: at + bt * y0 }]
-  else
-    [{ x: af + bf * y0, y: y0 }, { x: at + bt * y0, y: y0 }, { x: at + bt * y1, y: y1 }, { x: af + bf * y1, y: y1 }]
+  point = (o, t) -> { x: width / 2 - o * dy + t * dx, y: height / 2 + o * dx + t * dy }
+  oa = low - step / 2
+  ob = high + step / 2
+  [point(oa, a0 + b0 * oa), point(oa, a1 + b1 * oa), point(ob, a1 + b1 * ob), point(ob, a0 + b0 * ob)]
 
 # First Code 128 on any scan line, where it was read and its corners; null
 # on a miss.
@@ -643,9 +702,44 @@ export readCode128 =! (img, opts = {}) ->
     hit = scanLines img, format, true, luma, runs, rev, codes
   return null unless hit
   {text, gs1} = decodeText codes, hit.len
-  codes   = codes.slice 0, hit.len
-  corners = trackEdges img, format, vertical, luma, runs, rev, hit, codes
-  { text, gs1, codes, line: hit.line, from: hit.from, to: hit.to, corners, vertical, reversed: hit.reversed, inverted: hit.inverted }
+  codes = codes.slice 0, hit.len
+  ats   = Int32Array.new 2 * side
+  # The hit in the shared geometry: its row or column as an offset from the
+  # center line, and its span as distances along the line.
+  if vertical
+    hit.angle = Math.PI / 2
+    hit.o     = img.width / 2 - hit.line
+    hit.t0    = hit.from - img.height / 2
+    hit.t1    = hit.to   - img.height / 2
+  else
+    hit.angle = 0
+    hit.o     = hit.line - img.height / 2
+    hit.t0    = hit.from - img.width / 2
+    hit.t1    = hit.to   - img.width / 2
+  corners = trackEdges img, format, hit, codes, luma, ats, runs, rev
+  # Across a tilted label the axis lines that read are fewer than its
+  # height: near its top and bottom a line leaves the bars at one end. The
+  # fit's lean gives the bars' direction; tracking again along it spans
+  # the label, and once more if the first pass was itself short.
+  angle = hit.angle
+  for pass in [0...2]
+    [tl, tr, br, bl] = corners
+    across = Math.atan2 tl.x - bl.x, bl.y - tl.y
+    across += Math.PI if across < 0
+    turn = Math.abs across - angle
+    turn = Math.PI - turn if turn > Math.PI / 2
+    break if turn < 0.005
+    cx   = (tl.x + tr.x + br.x + bl.x) / 4 - img.width  / 2
+    cy   = (tl.y + tr.y + br.y + bl.y) / 4 - img.height / 2
+    more = []
+    o    = -cx * Math.sin(across) + cy * Math.cos(across)
+    h    = readAt img, format, across, o, luma, ats, runs, rev, more
+    break unless h and h.len is hit.len and more.every((code, k) -> code is codes[k])
+    h.angle = across
+    h.o     = o
+    angle   = across
+    corners = trackEdges img, format, h, codes, luma, ats, runs, rev
+  { text, gs1, codes, angle, line: hit.line, from: hit.from, to: hit.to, corners, vertical, reversed: hit.reversed, inverted: hit.inverted }
 
 # Text only; throws on a miss.
 export decodeCode128 =! (img, opts = {}) ->
