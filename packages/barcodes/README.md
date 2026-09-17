@@ -130,7 +130,8 @@ encodeCode128 text, output, opts
 
 Every ASCII character encodes; the ASCII group separator (`'\x1d'`) becomes
 an FNC1 separator, and `gs1: true` opens the symbol with FNC1 for GS1-128
-application identifiers. The codeword sequence is the shortest over the
+application identifiers. A separator in first position is that opening
+FNC1, so `'\x1dAB'` reads back as `'AB'` with `gs1` set. The codeword sequence is the shortest over the
 three subsets, so `'A1234'` latches to subset C for the digit pairs while
 `'123'` does not pay for a latch it cannot amortize. The outputs are the
 QR six with one row of modules: `raw` is a `boolean[]` with `true` for a bar
@@ -150,18 +151,18 @@ with the same `format` option, and returns the text or throws
 `'Code 128 not found'`. `readCode128` returns `null` on a miss and otherwise
 
 ```coffee
-{ text, gs1, codes, angle, line, from, to, corners, vertical, reversed, inverted }
+{ text, gs1, codes, angle, o, t0, t1, corners, vertical, reversed, inverted }
 ```
 
-`gs1` is whether the symbol opened with FNC1, `codes` the verified
-codewords, `angle` the direction of the scan line that read them (0 along
-rows, a quarter turn along columns, anything between along a tilt), `line`
-the row or column of an axis read or the offset of a tilted line from the
-image's center, `from` and `to` the symbol's span along it in pixels, `vertical`, `reversed` and `inverted` the axis,
-direction and polarity of the read, and `corners` the four corners in
-image space, fit to the lines that read the same codewords along the
-bars' own direction, so a tilted label gives a tilted quad of its full
-height.
+`gs1` is whether the symbol opened with FNC1 and `codes` the verified
+codewords. The scan line that read them is `angle` (0 along rows, a
+quarter turn along columns, anything between along a tilt) and `o`, its
+signed distance from the image center along the normal, and the symbol
+spans `t0` to `t1` along it, in pixels from the line's foot at the
+center. `vertical`, `reversed` and `inverted` are the axis, direction and
+polarity of the read, and `corners` the four corners in image space, fit
+to the lines that read the same codewords along the bars' own direction,
+so a tilted label gives a tilted quad of its full height.
 
 Lines run along both axes; a tilted label crosses an
 axis line with enough runs for a symbol yet does not read, and its tilt

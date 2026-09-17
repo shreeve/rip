@@ -615,11 +615,13 @@ test "corners span the bars and follow a tilt", ->
   img = bars 'Wikipedia', {}, 2, 500, 300
   hit = readCode128 img
   # The bars' true extent, from the image itself, down the first bar.
-  x   = Math.floor hit.from + 1
+  x0  = 250 + hit.t0
+  x1  = 250 + hit.t1
+  x   = Math.floor x0 + 1
   ys  = (y for y in [0...300] when img.data[4 * (y * 500 + x)] < 128)
   xs  = hit.corners.map (c) -> c.x
   eys = hit.corners.map (c) -> c.y
-  ok Math.abs(Math.min(...xs) - hit.from) < 1 and Math.abs(Math.max(...xs) - hit.to) < 1, 'width'
+  ok Math.abs(Math.min(...xs) - x0) < 1 and Math.abs(Math.max(...xs) - x1) < 1, 'width'
   ok Math.abs(Math.min(...eys) - ys[0]) <= 4 and Math.abs(Math.max(...eys) - ys.at(-1) - 1) <= 4, "height #{Math.min(...eys)}..#{Math.max(...eys)} vs #{ys[0]}..#{ys.at(-1)}"
   # A taller label turned counterclockwise: to twelve degrees a row still
   # crosses every bar, beyond that only the tilt estimate reads it. The
@@ -637,10 +639,25 @@ test "corners span the bars and follow a tilt", ->
   # one or two rows do, too few for a fit through them to find the lean.
   # The corners must lean with the bars all the same.
   img = bars 'DR2039', {}, 5, 700, 700, false, 0, 130
-  for degrees in [4, 8, 12, 16, 20]
+  for degrees in [4, 8, 12, 16, 20, -4, -12, -20]
     hit = readCode128 turn(img, degrees)
     eq hit?.text, 'DR2039', "wide #{degrees} degrees"
     leans hit, degrees, 130
+  # Leaning the other way: the fit's edge has no direction of its own, and
+  # the corners must keep their order rather than turn a half turn.
+  img = bars 'Wikipedia', {}, 3, 700, 700, false, 0, 120
+  for degrees in [-12, -30, -45]
+    hit = readCode128 turn(img, degrees)
+    eq hit?.text, 'Wikipedia', "#{degrees} degrees"
+    leans hit, degrees, 120
+
+test "ink gain: bars a pixel wider on each side", ->
+  # Print gain widens every bar by what it narrows the next space; the
+  # distances from one bar's start to the next hold where the widths drift.
+  for text in ['Wikipedia', '42094043']
+    raw = encodeCode128 text, 'raw', { scale: 3, height: 1 }
+    fat = raw.map (dark, i) -> dark or raw[i - 1] or raw[i + 1]
+    eq readCode128(paint((fat for y in [0...40]), 900, 120))?.text, text, text
 
 test "text: shifts, FNC4 high characters, latches", ->
   text =! (codes) -> c128.decodeText(codes, codes.length).text
