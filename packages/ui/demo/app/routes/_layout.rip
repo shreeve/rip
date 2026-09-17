@@ -8,9 +8,7 @@ export Layout = component
   theme: Theme := preferred()
   drawer := false
 
-  ~>
-    document.documentElement.dataset.theme = theme
-    return
+  ~> document.documentElement.setAttribute('data-theme', theme)
 
   mounted: ->
     @router.onNavigate -> drawer = false
@@ -53,7 +51,7 @@ export Layout = component
 Nav = component
   render
     div class: 'flex items-center px-2.5 py-2 text-xs-plus font-medium text-tertiary', 'Components'
-    nav class: 'flex flex-col'
+    nav class: 'mt-0.5 flex flex-col gap-y-0.5'
       for entry in COMPONENTS
         a
           href: entry.href

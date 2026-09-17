@@ -11,7 +11,7 @@
   --color-bg-background:     var(--color-white);
   --color-bg-surface:        var(--color-neutral-50);
   --color-bg-surface-hover:  oklch(from var(--color-bg-surface) calc(l - 0.015) c h);
-  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l - 0.03) c h);
+  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l - 0.02) c h);
   --color-bg-input:          var(--color-white);
   --color-bg-input-hover:    var(--color-neutral-50);
   --color-bg-input-active:   oklch(from var(--color-bg-input-hover) calc(l - 0.015) c h);
@@ -36,7 +36,7 @@ html[data-theme="dark"] {
   --color-bg-background:     var(--color-neutral-950);
   --color-bg-surface:        var(--color-neutral-900);
   --color-bg-surface-hover:  oklch(from var(--color-bg-surface) calc(l + 0.02) c h);
-  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l + 0.06) c h);
+  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l + 0.04) c h);
   --color-bg-input:          var(--color-black);
   --color-bg-input-hover:    oklch(from var(--color-bg-input) calc(l + 0.2) c h);
   --color-bg-input-active:   oklch(from var(--color-bg-input-hover) calc(l + 0.03) c h);
