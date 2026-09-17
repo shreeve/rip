@@ -20,3 +20,6 @@ tmp-*
 /test/browser/test-results
 
 notes.txt
+
+# Reference checkouts the benchmarks race against (test/compare.rip)
+/misc/
