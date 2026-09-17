@@ -2,35 +2,40 @@
 
 # Rip Barcodes
 
-> **QR, PDF417 and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, ray-voted PDF417, scan-line Code 128, zero dependencies.**
+> **Generate and read QR, PDF417 and Code 128 barcodes, in the browser or on the server, with no dependencies.**
 
-The encoder keeps a symbol as one `Int32Array` with 32 modules per word,
-builds the function-pattern template, placement order and the eight mask
-planes once per version, and chooses a mask by XORing whole words and
-scoring the penalty rules word-parallel. The decoder binarizes a four-level
-image pyramid against 8x8 block thresholds, finds finder patterns with
-run-length windows that consume a word at a time, projects the best triple
-through a homography, and corrects with Reed-Solomon, all inside buffers
-allocated once per scanner so a camera frame never allocates. Code 128
-lives in one file: the encoder chooses the shortest subset sequence by
-dynamic programming, and the reader walks scan lines middle-out, matching
-each eleven-module group to its nearest codeword in both directions and on
-both axes. PDF417 compacts text, bytes and digits the way the specification
-recommends and lays the stream into stacked rows with GF(929) parity; its
-reader finds a start or stop pattern on a scan line, tracks both edges up
-and down the stack, samples rays across every row along the direction
-between them, votes each codeword into the cell its row indicators and
-cluster name, and corrects erasures and errors together.
+Rip Barcodes is a barcode library written in [Rip](https://github.com/shreeve/rip).
+It makes barcodes and it reads them back, from a still image or from a live
+camera, fast enough to scan on a phone at thirty frames a second.
 
-**Runtime:** browser-safe (`rip.browser: true`). One file per symbology,
-`qr.rip`, `pdf417.rip` and `code128.rip`, each holding its tables, encoder
-and reader; a root entry that re-exports all three; the camera and canvas
-plumbing in `dom.rip`; and the GIF writer, ECI table and image-input helpers
-the symbologies share. `rip/barcodes/qr`, `rip/barcodes/pdf417` and
-`rip/barcodes/code128` import one symbology alone.
+**What it does**
 
-**Origin:** the QR half is a port of [paulmillr/qr](https://github.com/paulmillr/qr);
-PDF417 and Code 128 are original to this package. See [Credits](#credits).
+- **Generates** QR codes, PDF417 stacks and Code 128 labels as SVG, GIF,
+  a data URL, a module matrix, ASCII art, or straight to the terminal.
+- **Reads** all three from any raster: a canvas `ImageData`, an RGB or RGBA
+  buffer, or the planar YUV frames a camera delivers.
+- **Scans** from a phone's camera through a small browser layer that opens
+  the stream at full sensor size, copies frames into the reader without
+  a canvas round trip, and draws a lock around what it finds.
+
+**Why you might want it**
+
+- **It reads photographs well.** On ZXing's own test photographs it reads
+  more symbols than ZXing's tests require, in every set, with no false
+  reads: 684 QR against 611, 96 Code 128 against 90, and every PDF417.
+  Code 128 reads at any angle; PDF417 reads a driver's license at arm's
+  length.
+- **It is fast.** A 1080p frame with no symbol in it costs a few
+  milliseconds for QR and under two for the linear and stacked readers, so
+  a camera loop never falls behind. It reads QR 1.5 to 4x faster than
+  the TypeScript library it was ported from.
+- **It is small and self-contained.** Plain code, no WebAssembly, no native
+  module, nothing to install beyond the package. One import gives you all
+  three symbologies; `rip/barcodes/qr`, `rip/barcodes/pdf417` and
+  `rip/barcodes/code128` give you one.
+- **It is measured.** The test suite, a scorecard against ZXing's corpus,
+  and a timing benchmark live in the package, and every number in this
+  README comes from them.
 
 ## Quick Start
 
@@ -431,6 +436,35 @@ output, errors-and-erasures correction to its limit, and decompaction
 including Macro PDF417, then round-trips rasters across scales, row
 heights, rotations, inversion, compact and extreme shapes, skew, cropped
 and torn start columns and holes.
+
+## Design
+
+The QR encoder keeps a symbol as one `Int32Array` with 32 modules per word,
+builds the function-pattern template, placement order and the eight mask
+planes once per version, and chooses a mask by XORing whole words and
+scoring the penalty rules word-parallel. The decoder binarizes a four-level
+image pyramid against 8x8 block thresholds, finds finder patterns with
+run-length windows that consume a word at a time, projects the best triple
+through a homography, and corrects with Reed-Solomon, all inside buffers
+allocated once per scanner so a camera frame never allocates. The Code 128
+encoder chooses the shortest subset sequence by dynamic programming, and
+its reader walks scan lines along both axes and along a label's measured
+tilt, naming each codeword by its edge-to-edge distances and tracking the
+label's corners along its bars. PDF417 compacts text, bytes and digits the
+way the specification recommends and lays the stream into stacked rows
+with GF(929) parity; its reader finds a start or stop pattern on a scan
+line, tracks both edges up and down the stack, samples rays across every
+row along the direction between them, votes each codeword into the cell
+its row indicators and cluster name, and corrects erasures and errors
+together.
+
+One file per symbology, `qr.rip`, `pdf417.rip` and `code128.rip`, each
+holding its tables, encoder and reader; a root entry that re-exports all
+three; the camera and canvas plumbing in `dom.rip`; and the GIF writer, ECI
+table and image-input helpers the symbologies share. The package is
+browser-safe (`rip.browser: true`). The QR half is a port of
+[paulmillr/qr](https://github.com/paulmillr/qr); PDF417 and Code 128 are
+original to this package.
 
 ## Credits
 
