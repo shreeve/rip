@@ -6,7 +6,7 @@ export Home = component
       h1 class: 'text-2xl font-semibold', 'Rip UI'
       p class: 'mt-2 text-secondary', 'Unstyled, composable UI components built on native browser features.'
       ul class: 'mt-8 grid gap-4'
-        for entry in COMPONENTS
+        for entry in Object.values(COMPONENTS)
           li
             a href: entry.href, class: 'block rounded-xl border border-surface bg-surface p-5 hover:bg-surface-hover'
               h2 class: 'font-medium', entry.name
