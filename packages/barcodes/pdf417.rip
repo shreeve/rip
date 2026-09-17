@@ -22,7 +22,7 @@
 
 import { gifDataUrl, writeGif } from './gif.rip'
 import { ECI_DECODERS } from './eci.rip'
-import { MAX_IMAGE_SIDE, asInt, asObject, asString, edgeRuns, fail, reverseRuns, runLengths, sampleLine, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # ==[ Spec tables ]==
 
@@ -1343,7 +1343,7 @@ trackEdge =! (s, x, y, dx, dy, sx, sy, unit, first, sign, edge, mode) ->
   loop
     t += sign
     sampleRay rluma, img, format, x + t * sx + (u - margin) * dx + 0.5, y + t * sy + (u - margin) * dy + 0.5, dx, dy, length
-    m = edgeRuns rluma, length, rruns, 3
+    m = edgeRuns rluma, length, rruns, s.fraction
     at = if m < 8 then -1 else anchorNear(rruns, m, first, margin, slack, mode)
     if at < 0
       break if ++misses > allow
@@ -1416,6 +1416,9 @@ edgeEnds =! (s, x, y, dx, dy, sx, sy, unit, first, mode) ->
 # One located anchor pattern through to a decoded symbol, or null.
 tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
   {img, format, rluma, rruns, cells, rayRow, rayT, votes} = s
+  # Hysteresis for the rays: a fifth of the range keeps the one-module
+  # swings blur leaves, a third rejects the noise between sub-2px samples.
+  s.fraction = if unit >= 2 then 5 else 3
   # Rows stack a quarter turn from the symbol's reading direction, which a
   # mirrored read runs against.
   flip = if mode.mirror then -1 else 1
@@ -1463,7 +1466,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
     rayRow[rays] = -1
     rays++
     sampleRay rluma, img, format, top.x + ux * t - rx * margin + 0.5, top.y + uy * t - ry * margin + 0.5, rx, ry, length
-    m = edgeRuns rluma, length, rruns, 3
+    m = edgeRuns rluma, length, rruns, s.fraction
     count = 0
     if m >= 16
       at = anchorNear rruns, m, first, margin, slack, mode
@@ -1672,7 +1675,7 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
 # decode.
 scanLine =! (s, vertical, line, count) ->
   {runs, rev} = s
-  n = runLengths s.luma, count, runs
+  n = edgeRuns s.luma, count, runs, 5
   # A start pattern and an indicator need sixteen runs.
   return null if n < 16
   m = reverseRuns runs, n, rev
@@ -1740,8 +1743,8 @@ buffers =! (side) ->
   maxRays = 4 * side
   state.side      = side
   state.luma      = Uint8Array.new(side)
-  state.runs      = Int32Array.new(side)
-  state.rev       = Int32Array.new(side)
+  state.runs      = Float64Array.new(side)
+  state.rev       = Float64Array.new(side)
   state.rluma     = Uint8Array.new(2 * side)
   state.rruns     = Float64Array.new(2 * side + 2)
   state.cells     = Int16Array.new(maxRays * MAX_CELLS)

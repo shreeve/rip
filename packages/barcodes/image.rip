@@ -158,31 +158,6 @@ export sampleLine! =! (luma, data, at, advance, count, format) ->
         luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
         at += advance
 
-# Run lengths of one thresholded scan line: even slots light, odd dark, the
-# first possibly zero. Returns the run count, zero for a flat line.
-export runLengths =! (luma, count, runs) ->
-  lo = 255
-  hi = 0
-  for k in [0...count]
-    v = luma[k]
-    lo = v if v < lo
-    hi = v if v > hi
-  # Under 32 levels of contrast the line is flat.
-  return 0 if hi - lo < 32
-  threshold = (lo + hi) >> 1
-  n    = 0
-  dark = false
-  len  = 0
-  for k in [0...count]
-    isDark = luma[k] < threshold
-    if isDark isnt dark
-      runs[n++] = len
-      len = 0
-      dark = isDark
-    len++
-  runs[n++] = len
-  n
-
 # Run lengths of one line, even slots light and odd dark, from the edges
 # between local extrema: an extremum counts once the luma has swung a
 # `fraction`th of the line's range away from the last one, and each edge

@@ -726,6 +726,13 @@ test "Reed-Solomon over GF(929)", ->
   eq Array.from(c), Array.from(data)
   [c, e] = scramble 4, 8                              # 2*4 + 8 = 16: nothing left to detect with
   eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 1, 13                             # 2*1 + 13 = 15, the last that corrects
+  eq p417.correct(c, n, k, e, e.length), 1
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 1, 14
+  eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 0, 16
+  eq p417.correct(c, n, k, e, e.length), -1
   [c, e] = scramble 0, 17
   eq p417.correct(c, n, k, e, e.length), -1
   c = Int32Array.from data
