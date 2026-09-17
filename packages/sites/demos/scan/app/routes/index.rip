@@ -90,14 +90,16 @@ export Home = component
     size = if name is '4k' then { width: { ideal: 3840 }, height: { ideal: 2160 } } else if name is '1080p' then { width: { ideal: 1920 }, height: { ideal: 1080 } } else { width: { ideal: 1280 }, height: { ideal: 720 } }
     camera.reopen! size
     describe()
-    reset()
+    clear()
 
-  # Back to a fresh page: the stream at 4K, torch off, zoom at 2x, and the
-  # counters, result, history and lock cleared.
+  # The reset button: the stream at 4K, torch off, zoom at 2x, and a clear
+  # page. A stream change only clears the page.
   reset: ->
-    return setQuality '4k' if quality isnt '4k'   # reopens the stream, then lands here again
     toggleTorch() if torch
     setZoom 2 if zoomRange and zoom isnt 2
+    if quality is '4k' then clear() else setQuality '4k'
+
+  clear: ->
     frames  = 0
     reads   = 0
     firstMs = null
