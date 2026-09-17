@@ -118,3 +118,27 @@ test('the popup is named by its title and described by its description', async (
   await expect(popup).toHaveAccessibleName('Notifications')
   await expect(popup).toHaveAccessibleDescription('You are all caught up. Good job!')
 })
+
+for (const how of ['the close part', 'Escape']) {
+  test(`closing by ${how} keeps the popup modal and rendered through its exit transition`, async ({ page }) => {
+    const { trigger, popup, close } = await boot(page)
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => isModal(page)).toBe(true)
+    await popup.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+    await popup.evaluate((el) => {
+      window.exiting = new Promise((resolve) => {
+        const sample = () => requestAnimationFrame(() => requestAnimationFrame(() => {
+          resolve({ modal: el.matches(':modal'), display: getComputedStyle(el).display, running: el.getAnimations().length > 0 })
+        }))
+        el.addEventListener('keyup', sample, { once: true })
+        el.addEventListener('click', sample, { once: true })
+      })
+    })
+    if (how === 'Escape') await page.keyboard.press('Escape')
+    else await close.click()
+    expect(await page.evaluate(() => window.exiting)).toEqual({ modal: true, display: 'block', running: true })
+    await expect.poll(() => isModal(page)).toBe(false)
+    await expect(popup).toBeHidden()
+  })
+}

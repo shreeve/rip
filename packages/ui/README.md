@@ -33,7 +33,7 @@ Native first: `DialogPopup` is a `<dialog>` opened with `showModal`, which gives
 
 - `Dialog` — the root. Owns `open` (default `false`) and renders only its children.
 - `DialogTrigger` — a `<button>` that opens it. Carries `aria-haspopup="dialog"`, `aria-expanded`, and `data-popup-open` while open.
-- `DialogPopup` — the `<dialog>`. Carries `data-open` while open and `data-closed` otherwise, and `aria-labelledby` and `aria-describedby` pointing at the title and description parts when they are present. Carries `closedby="any"` unless the consumer passes its own, so a click on the backdrop closes it as Escape does; `closedby: 'closerequest'` keeps Escape only. Stable Safari and every iOS browser ignore the attribute, so the popup itself closes on a press that starts and ends on the backdrop while the value is `any` and refuses Escape while it is `none`; those handlers go when Safari ships `closedby`. The element's own `close` event writes the cell, so Escape, a backdrop click, a close part, and a programmatic close all read the same.
+- `DialogPopup` — the `<dialog>`. Carries `data-open` while open and `data-closed` otherwise, and `aria-labelledby` and `aria-describedby` pointing at the title and description parts when they are present. Carries `closedby="any"` unless the consumer passes its own, so a click on the backdrop closes it as Escape does; `closedby: 'closerequest'` keeps Escape only. Stable Safari and every iOS browser ignore the attribute, so the popup itself closes on a press that starts and ends on the backdrop while the value is `any` and refuses Escape while it is `none`; those handlers go when Safari ships `closedby`. Escape is canceled and writes the cell, and the element's own `close` event writes it too, so Escape, a backdrop click, a close part, and a programmatic close all read the same. Closing keeps the `<dialog>` open and modal until the popup's own animations finish, then calls `close()`, so an exit transition plays on every engine.
 - `DialogTitle` — an `<h2>` with a minted id, or the `id` you pass.
 - `DialogDescription` — a `<p>` with a minted id, or the `id` you pass.
 - `DialogClose` — a `<button>` that closes it.
@@ -47,7 +47,7 @@ Two things stay with the application's stylesheet, because they are CSS:
 body:has(dialog:modal) { overflow: hidden; }
 ```
 
-Transitions are `@starting-style` with discrete transitions on `display` and `overlay`; in Tailwind that is `transition-[opacity,overlay,display] transition-discrete starting:open:opacity-0 open:opacity-100 opacity-0`.
+Transitions key on `data-open`, never on `[open]`, which stays set through the exit: `@starting-style` for the entry and the attribute's removal for the exit. In Tailwind that is `opacity-0 transition-opacity data-open:opacity-100 starting:data-open:opacity-0`. Discrete transitions on `display` and `overlay` do not substitute: Firefox and WebKit hide a closed dialog at once regardless. The close waits on the popup's own animations and not its `::backdrop`'s, so a backdrop transition longer than the popup's is cut off when the dialog closes.
 
 ## Drawer
 
