@@ -5,14 +5,19 @@
 # pattern; every codeword is three bars and three spaces spanning eleven
 # modules, and the stop adds a two-module termination bar. The encoder picks
 # the shortest codeword sequence over the three subsets by dynamic
-# programming. The reader walks scan lines: a per-line threshold, run
-# lengths, a start code behind a quiet zone, nearest-pattern matching of each
-# eleven-module group, then stop, check and the subset state machine. Both
-# reading directions and both axes are tried.
+# programming. The reader walks scan lines: sub-pixel run lengths from the
+# edges between local extrema, a start code behind a quiet zone,
+# nearest-pattern matching of each eleven-module group, then stop, check and
+# the subset state machine. Both reading directions are tried on lines
+# along both axes; a line that crosses bars without reading gives the
+# label's tilt from the shift of its pattern a few lines over, and lines
+# along that tilt read it, so a label lies at any angle. A line that fails
+# is tried once more through a sharpened binarizer. A hit is then tracked
+# line by line along the bars' direction to the four corners of the label.
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, copyLuma, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -40,41 +45,51 @@ GS      =! 29
 
 QUIET_ZONE     =! 10
 DEFAULT_HEIGHT =! 40
-
-fail =! (msg) -> throw Error.new msg
+UNREACHABLE    =! 0x7fffffff
 
 # ==[ Codewords ]==
 
 # Subset membership by char code: A takes 0..95, B takes 32..127; the ASCII
 # group separator is FNC1 in every subset.
-inA =! (c) -> c < 96 and c isnt GS
-inB =! (c) -> c >= 32 and c < 128
+inA     =! (c) -> c <  96 and c isnt GS
+inB     =! (c) -> c >= 32 and c < 128
 isDigit =! (c) -> c >= 48 and c <= 57
 
-charValue =! (c, subset) ->
+# Codeword for one character in subset A or B; the value is the same in both.
+charValue =! (c) ->
   return FNC1 if c is GS
   if c < 32 then c + 64 else c - 32
+
+# Subset C codeword for the digit pair at i.
+pairValue =! (text, i) -> 10 * (text.charCodeAt(i) - 48) + text.charCodeAt(i + 1) - 48
+
+# Mod-103 check over the start code and the data codewords.
+checksum =! (codes, len) ->
+  sum = codes[0]
+  sum += k * codes[k] for k in [1...len]
+  sum % 103
 
 # Shortest codeword sequence. cost[i][s] is the cheapest tail from position i
 # while latched in subset s (0 A, 1 B, 2 C); a switch is always paired with
 # the codeword it enables, so no move is free. Ties keep the earliest move:
 # stay, pair in C, latch C, shift, latch across.
+#
+# move: 0 stay, 1 digit pair in C, 2 latch A, 3 latch B, 4 latch C, 5 shift.
 codewords =! (text, gs1) ->
   n = text.length
   fail 'Code 128 text is empty' unless n
   cost = Int32Array.new(3 * (n + 1))
   move = Uint8Array.new(3 * (n + 1))
-  i = n - 1
-  while i >= 0
-    c = text.charCodeAt i
-    fnc = c is GS
+  for i in [n - 1..0] by -1
+    c    = text.charCodeAt i
+    fnc  = c is GS
     pair = i + 1 < n and isDigit(c) and isDigit(text.charCodeAt(i + 1))
-    a = inA c
-    b = inB c
+    a    = inA c
+    b    = inB c
     next = 3 * (i + 1)
     skip = 3 * (i + 2)
     for s in [0...3]
-      best = 0x7fffffff
+      best = UNREACHABLE
       pick = 0
       if s is 2
         if fnc
@@ -89,23 +104,23 @@ codewords =! (text, gs1) ->
           best = 2 + cost[next + 1]
           pick = 3
       else
-        inside = if s is 0 then a else b
+        own   = if s is 0 then a else b
         other = if s is 0 then b else a
-        if fnc or inside
+        if fnc or own
           best = 1 + cost[next + s]
         if pair and 2 + cost[skip + 2] < best
           best = 2 + cost[skip + 2]
           pick = 4
-        if other and not inside and 2 + cost[next + s] < best
+        if other and not own and 2 + cost[next + s] < best
           best = 2 + cost[next + s]
           pick = 5
         if other and 2 + cost[next + 1 - s] < best
           best = 2 + cost[next + 1 - s]
           pick = 3 - s
-      fail "Code 128 cannot encode #{JSON.stringify text[i]}" if best is 0x7fffffff
+      fail "Code 128 cannot encode #{JSON.stringify text[i]}" if best is UNREACHABLE
       cost[3 * i + s] = best
       move[3 * i + s] = pick
-    i--
+  # Cheapest start subset; ties prefer B, then C, then A.
   s = 1
   s = 2 if cost[2] < cost[s]
   s = 0 if cost[0] < cost[s]
@@ -116,30 +131,27 @@ codewords =! (text, gs1) ->
     c = text.charCodeAt i
     switch move[3 * i + s]
       when 0
-        codes.push (if s is 2 then FNC1 else charValue(c, s))
+        codes.push (if s is 2 then FNC1 else charValue(c))
         i++
       when 1
-        codes.push 10 * (c - 48) + text.charCodeAt(i + 1) - 48
+        codes.push pairValue(text, i)
         i += 2
       when 2
         s = 0
-        codes.push CODE_A, charValue(c, s)
+        codes.push CODE_A, charValue(c)
         i++
       when 3
         s = 1
-        codes.push CODE_B, charValue(c, s)
+        codes.push CODE_B, charValue(c)
         i++
       when 4
         s = 2
-        codes.push CODE_C, 10 * (c - 48) + text.charCodeAt(i + 1) - 48
+        codes.push CODE_C, pairValue(text, i)
         i += 2
       else
-        codes.push SHIFT, charValue(c, 1 - s)
+        codes.push SHIFT, charValue(c)
         i++
-  sum = codes[0]
-  for k in [1...codes.length]
-    sum += k * codes[k]
-  codes.push sum % 103, STOP
+  codes.push checksum(codes, codes.length), STOP
   codes
 
 # Module row: 1 dark, 0 light, bars first within each codeword.
@@ -156,25 +168,12 @@ modules =! (codes) ->
 
 # ==[ Renderers ]==
 
-asString =! (s, title) ->
-  throw TypeError.new "\"#{title}\" expected string, got type=#{typeof s}" unless typeof s is 'string'
-  s
-
-asObject =! (o, title) ->
-  throw TypeError.new "\"#{title}\" expected object, got type=#{typeof o}" if o is null or typeof o isnt 'object'
-  o
-
-asInt =! (n, title, min) ->
-  throw TypeError.new "\"#{title}\" expected number, got type=#{typeof n}" unless typeof n is 'number'
-  throw RangeError.new "\"#{title}\" expected integer >= #{min}, got #{n}" unless Number.isSafeInteger(n) and n >= min
-  n
-
 # A raster is the module row plus output geometry; `bars` is the dark-run
 # list [x, width, ...] in output pixels, the shape every output consumes.
 raster =! (mods, scale, border, height) ->
   W = (mods.length + 2 * border) * scale
   H = height * scale
-  fail "Code 128 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}" if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
+  fail "Code 128 output #{W}x#{H} exceeds #{MAX_IMAGE_SIDE}", RangeError if W > MAX_IMAGE_SIDE or H > MAX_IMAGE_SIDE
   bars = []
   x = 0
   while x < mods.length
@@ -187,22 +186,17 @@ raster =! (mods, scale, border, height) ->
 
 pixelRow =! (r) ->
   row = Uint8Array.new(r.W)
-  for k in [0...r.bars.length] by 2
-    row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1]
+  row.fill 1, r.bars[k], r.bars[k] + r.bars[k + 1] for k in [0...r.bars.length] by 2
   row
 
 renderRaw =! (r) ->
   row = pixelRow r
-  out = Array.new(r.W)
-  for x in [0...r.W]
-    out[x] = row[x] is 1
-  out
+  (row[x] is 1 for x in [0...r.W])
 
 renderAscii =! (r) ->
   row = pixelRow r
   out = ''
-  for x in [0...r.W]
-    out += (if row[x] then ' ' else '█')
+  out += (if row[x] then ' ' else '█') for x in [0...r.W]
   out + '\n'
 
 renderTerm =! (r) ->
@@ -210,8 +204,7 @@ renderTerm =! (r) ->
   black = '\x1b[40m  \x1b[0m'
   white = '\x1b[1;47m  \x1b[0m'
   out = ''
-  for x in [0...r.W]
-    out += (if row[x] then black else white)
+  out += (if row[x] then black else white) for x in [0...r.W]
   out + '\n'
 
 renderSvg =! (r, optimize) ->
@@ -234,41 +227,125 @@ renderGif =! (r) ->
 # ==[ Encoder ]==
 
 export encodeCode128 =! (text, output = 'raw', opts = {}) ->
-  asString text, 'text'
-  asObject opts, 'opts'
-  scale = if opts.scale is undefined then 1 else asInt(opts.scale, 'scale', 1)
-  border = if opts.border is undefined then QUIET_ZONE else asInt(opts.border, 'border', 0)
-  height = if opts.height is undefined then DEFAULT_HEIGHT else asInt(opts.height, 'height', 1)
-  codes = codewords text, opts.gs1 is true
+  asString text,   'text'
+  asString output, 'output'
+  asObject opts,   'opts'
+  scale  = if opts.scale  is undefined then 1              else asInt(opts.scale,  'opts.scale',  1)
+  border = if opts.border is undefined then QUIET_ZONE     else asInt(opts.border, 'opts.border', 0)
+  height = if opts.height is undefined then DEFAULT_HEIGHT else asInt(opts.height, 'opts.height', 1)
+  codes = codewords text, !!opts.gs1
   r = raster modules(codes), scale, border, height
   switch output
-    when 'raw' then renderRaw r
-    when 'ascii' then renderAscii r
-    when 'term' then renderTerm r
-    when 'svg' then renderSvg r, (if opts.optimize is undefined then true else opts.optimize)
-    when 'gif' then renderGif r
+    when 'raw'      then renderRaw r
+    when 'ascii'    then renderAscii r
+    when 'term'     then renderTerm r
+    when 'svg'      then renderSvg r, (if opts.optimize is undefined then true else opts.optimize)
+    when 'gif'      then renderGif r
     when 'data-url' then gifDataUrl renderGif(r)
     else fail "Unknown output: #{output}"
 
 # ==[ Reader ]==
 
-# Widths flattened for the matcher, seven slots per value.
+# Widths flattened for the matcher, seven slots per value; only Stop fills
+# the seventh, with its termination bar.
 WIDTHS =! do ->
   out = Uint8Array.new(7 * PATTERNS.length)
   for pattern, code in PATTERNS
-    for k in [0...pattern.length]
-      out[7 * code + k] = pattern.charCodeAt(k) - 48
+    out[7 * code + k] = pattern.charCodeAt(k) - 48 for k in [0...pattern.length]
   out
 
-# Nearest value in lo..hi to the six runs at `at`, or -1: every run within
-# 0.7 module of its ideal and the summed error under a quarter of the width.
+# Runs of the same line through a sharpened global threshold: a 32-bucket
+# histogram, the threshold at the valley between its two dominant peaks, and
+# each sample compared as (4c - l - r) / 2. Blur that folds a one-module
+# space into a shoulder fourteen levels high leaves no extremum for edgeRuns,
+# but the sharpen doubles the shoulder and the valley threshold splits it.
+# Integer runs, even slots light; zero for a line without two peaks.
+buckets =! Int32Array.new(32)
+sharpRuns =! (luma, count, runs) ->
+  buckets.fill 0
+  buckets[luma[k] >> 3]++ for k in [0...count]
+  first     = 0
+  firstSize = 0
+  for x in [0...32]
+    if buckets[x] > firstSize
+      first     = x
+      firstSize = buckets[x]
+  second      = 0
+  secondScore = 0
+  for x in [0...32]
+    d = x - first
+    score = d * d * buckets[x]
+    if score > secondScore
+      second      = x
+      secondScore = score
+  if first > second
+    t = first
+    first  = second
+    second = t
+  return 0 if second - first <= 2
+  valley      = second - 1
+  valleyScore = -1
+  for x in [second - 1..first + 1] by -1
+    d = x - first
+    score = d * d * (second - x) * (firstSize - buckets[x])
+    if score > valleyScore
+      valley      = x
+      valleyScore = score
+  threshold = valley << 3
+  n      = 0
+  dark   = false
+  len    = 0
+  left   = luma[0]
+  center = luma[1]
+  for x in [1...count - 1]
+    right = luma[x + 1]
+    isDark = ((center << 2) - left - right) >> 1 < threshold
+    if isDark isnt dark
+      runs[n++] = len
+      len = 0
+      dark = isDark
+    len++
+    left   = center
+    center = right
+  runs[n++] = len
+  n
+
+# Edge-to-edge distances of every value, bar start to bar start and space
+# start to space start across the six runs: four sums of neighbouring
+# runs, each two to seven modules, keyed as one number. Ink spread widens
+# each bar by what it narrows the next space, so these distances hold
+# where the run widths drift.
+E2E =! do ->
+  out = Int16Array.new(8000).fill -1
+  for pattern, code in PATTERNS
+    key = 0
+    for k in [0...4]
+      key = 10 * key + pattern.charCodeAt(k) - 48 + pattern.charCodeAt(k + 1) - 48
+    out[key] = code
+  out
+
+# Eleven-module width of the six runs at `at`.
+groupWidth =! (runs, at) -> runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
+
+# Value in lo..hi of the six runs at `at`, or -1. The edge-to-edge
+# distances, rounded to modules, name a value exactly; when they name
+# none, the nearest value by run width: every run within 0.7 module of
+# its ideal and the summed error under a quarter of the width.
 nearest =! (runs, at, lo, hi) ->
   total = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
   return -1 if total < 11
   unit = total / 11
+  key  = 0
+  for k in [0...4]
+    e = Math.round((runs[at + k] + runs[at + k + 1]) / unit)
+    (key = -1; break) if e < 2 or e > 7
+    key = 10 * key + e
+  if key >= 0
+    code = E2E[key]
+    return code if code >= lo and code <= hi
   limit = unit * 0.7
-  best = total * 0.25
-  code = -1
+  best  = total * 0.25
+  code  = -1
   for c in [lo..hi]
     base = 7 * c
     v = 0
@@ -284,43 +361,6 @@ nearest =! (runs, at, lo, hi) ->
       code = c
   code
 
-# Run lengths of one thresholded scan line: even slots light, odd dark, the
-# first possibly zero. Returns the run count, zero for a flat line.
-runLengths =! (luma, start, step, count, runs) ->
-  lo = 255
-  hi = 0
-  p = start
-  for k in [0...count]
-    v = luma[p]
-    lo = v if v < lo
-    hi = v if v > hi
-    p += step
-  return 0 if hi - lo < 32
-  threshold = (lo + hi) >> 1
-  n = 0
-  dark = false
-  len = 0
-  p = start
-  for k in [0...count]
-    isDark = luma[p] < threshold
-    if isDark isnt dark
-      runs[n++] = len
-      len = 0
-      dark = isDark
-    len++
-    p += step
-  runs[n++] = len
-  n
-
-# The same line read right to left, light run first.
-reverseRuns =! (runs, n, out) ->
-  m = 0
-  out[m++] = 0 if (n & 1) is 0
-  k = n - 1
-  while k >= 0
-    out[m++] = runs[k--]
-  m
-
 # Codewords from a start at `at` through stop, check verified; the count, or 0.
 readFrom =! (runs, n, at, start, codes) ->
   len = 0
@@ -332,73 +372,86 @@ readFrom =! (runs, n, at, start, codes) ->
     return 0 if code < 0 or (code >= START_A and code < STOP)
     codes[len++] = code
     if code is STOP
-      width = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
+      width = groupWidth runs, at
+      # The termination bar is two modules; accept one to four.
       bar = runs[at + 6] * 11
       return 0 if bar < width or bar > 4 * width
-      return 0 unless at + 7 >= n or 2 * runs[at + 7] >= width
+      # A quiet zone of at least half a codeword, or the edge of the line:
+      # a light run that reaches the edge counts whatever its length, and a
+      # reversed line that opened dark carries the edge as an empty run.
+      return 0 unless at + 8 >= n or runs[at + 7] is 0 or 2 * runs[at + 7] >= width
       break
     at += 6
+  # Start, at least one data codeword, check, stop.
   return 0 if len < 4
-  sum = codes[0]
-  for k in [1...len - 2]
-    sum += k * codes[k]
-  return 0 unless sum % 103 is codes[len - 2]
+  return 0 unless checksum(codes, len - 2) is codes[len - 2]
   len
 
 # Every start code behind a quiet zone, left to right; `first` is the slot
 # of the first dark run, 1 as recorded and 0 to read the line inverted.
+# On a hit, the codeword count and where the symbol lies along the line:
+# the runs before the start code, then the codewords and the stop with its
+# termination bar.
 readRuns =! (runs, n, codes, first) ->
-  at = first
-  while at + 5 < n
+  for at in [first...n - 5] by 2
+    # Every start code opens with a two-module bar over a one-module space
+    # and bar, behind a quiet zone of at least half a codeword or the edge
+    # of the line; both are settled before the match.
+    continue unless runs[at] > runs[at + 1] and runs[at] > runs[at + 2]
+    width = groupWidth runs, at
+    continue unless at is first or 2 * runs[at - 1] >= width
     start = nearest runs, at, START_A, STOP - 1
     if start >= 0
-      width = runs[at] + runs[at + 1] + runs[at + 2] + runs[at + 3] + runs[at + 4] + runs[at + 5]
-      if at is first or 2 * runs[at - 1] >= width
-        len = readFrom runs, n, at, start, codes
-        return len if len
-    at += 2
-  0
+      len = readFrom runs, n, at, start, codes
+      if len
+        from = 0
+        from += runs[k] for k in [0...at]
+        to = from
+        to += runs[k] for k in [at...at + 6 * (len - 1) + 7]
+        return { len, from, to }
+  null
 
-# Text from verified codewords, tracking latches, shifts, FNC1 and FNC4.
+# Text from verified codewords, tracking latches, shifts, FNC1 and FNC4. One
+# FNC4 adds 128 to the next character; two in a row toggle the high half
+# until the next pair.
 decodeText =! (codes, len) ->
-  subset = codes[0] - START_A
-  shifted = -1
-  high = false
+  subset   = codes[0] - START_A
+  shifted  = -1
+  high     = false
   highNext = false
   lastFnc4 = false
-  gs1 = false
-  out = ''
-  k = 1
-  while k < len - 2
-    code = codes[k++]
+  gs1      = false
+  out      = ''
+  for k in [1...len - 2]
+    code = codes[k]
     current = if shifted >= 0 then shifted else subset
     shifted = -1
-    fnc4 = false
+    fnc4    = false
     if current is 2
       if code < 100
-        out += (if code < 10 then '0' else '') + code
+        out += String(code).padStart(2, '0')
       else if code is CODE_B then subset = 1
       else if code is CODE_A then subset = 0
-      else if k is 2 then gs1 = true
+      else if k is 1 then gs1 = true
       else out += '\x1d'
     else if code < 96
-      c = if code < 64 then code + 32 else if current is 0 then code - 64 else code + 32
+      c = if code >= 64 and current is 0 then code - 64 else code + 32
       c += 128 if high isnt highNext
       highNext = false
       out += String.fromCharCode c
     else switch code
-      when 96, 97 then null
-      when SHIFT then shifted = 1 - current
+      when 96, 97 then null   # FNC3, FNC2: no text
+      when SHIFT  then shifted = 1 - current
       when CODE_C then subset = 2
       when CODE_B
         if current is 0 then subset = 1 else fnc4 = true
       when CODE_A
         if current is 1 then subset = 0 else fnc4 = true
       when FNC1
-        if k is 2 then gs1 = true else out += '\x1d'
+        if k is 1 then gs1 = true else out += '\x1d'
     if fnc4
       if lastFnc4
-        high = not high
+        high     = not high
         highNext = false
         lastFnc4 = false
       else
@@ -408,54 +461,429 @@ decodeText =! (codes, len) ->
       lastFnc4 = false
   { text: out, gs1 }
 
-# Scan lines middle-out at a stride that covers the axis in about 32 lines.
-scanLines =! (luma, width, height, vertical, runs, rev, codes) ->
-  lines = if vertical then width else height
-  count = if vertical then height else width
-  step = if vertical then width else 1
-  stride = Math.max 1, lines >> 5
-  middle = lines >> 1
+# One line's runs through both directions and polarities; a span found on
+# the reversed runs is mirrored back into line order.
+readLine =! (runs, n, rev, codes) ->
+  # A start code and one codeword need thirteen runs.
+  return null if n < 13
+  m = reverseRuns runs, n, rev
+  for inverted in [false, true]
+    first = if inverted then 0 else 1
+    hit = readRuns runs, n, codes, first
+    return { reversed: false, inverted, len: hit.len, from: hit.from, to: hit.to } if hit
+    hit = readRuns rev, m, codes, first
+    if hit
+      total = 0
+      total += rev[k] for k in [0...m]
+      return { reversed: true, inverted, len: hit.len, from: total - hit.to, to: total - hit.from }
+  null
+
+# Scan lines middle-out across the image along `angle`, an axis, at a
+# stride that covers it in about 32 lines; the first that reads is the hit.
+scanLines =! (img, format, angle, luma, runs, rev, codes) ->
+  vertical = angle isnt 0
+  extent   = if vertical then img.width else img.height
+  stride   = Math.max 1, extent >> 5
+  middle   = extent >> 1
   k = 0
   loop
     offset = stride * ((k + 1) >> 1)
-    line = if (k & 1) is 0 then middle + offset else middle - offset
-    break if line < 0 and middle + offset >= lines
+    line   = if (k & 1) is 0 then middle + offset else middle - offset
+    break if line < 0 and middle + offset >= extent
     k++
-    continue if line < 0 or line >= lines
-    n = runLengths luma, (if vertical then line else line * width), step, count, runs
-    continue if n < 13
-    m = reverseRuns runs, n, rev
-    for inverted in [false, true]
-      first = if inverted then 0 else 1
-      len = readRuns runs, n, codes, first
-      return { line, reversed: false, inverted, len } if len
-      len = readRuns rev, m, codes, first
-      return { line, reversed: true, inverted, len } if len
+    continue if line < 0 or line >= extent
+    o   = if vertical then img.width / 2 - line else line - img.height / 2
+    hit = readAt img, format, angle, o, luma, runs, rev, codes, true
+    return hit if hit
   null
 
+# ==[ Tilt ]==
+
+# A tilted label crosses an axis line with enough runs for a symbol yet
+# does not read: the line leaves the bars before the stop. The tilt shows
+# as a shift of the bar pattern between that line and one a few lines
+# over, tan(tilt) = shift / gap. The shift is the peak of the correlation
+# of the two lines' luma gradients over the run-dense stretch of the line,
+# placed between whole shifts by a parabola through the peak and its
+# neighbours; the pair on each side must agree and the peak must be a
+# strong match, or the line crosses texture rather than bars. Lines are
+# then read along the estimated direction through the point where the
+# axis line crossed the bars.
+
+TILT_GAP    =! 6              # lines between the pair
+TILT_WIDE   =! 24             # the pair around a line that read: leaning less
+TILT_SHIFT  =! 17             # widest shift tried: the gap times tan(70°)
+TILT_WINDOW =! 1024           # widest stretch of the line correlated
+TILT_LINES  =! 4              # candidate lines tried per axis pass
+
+# Failing axis lines with enough runs for a symbol, per pass: [score, o,
+# center], the score contrast times edge density and the center the t of
+# the densest stretch of edges.
+candidates =! []
+
+# The most edges within TILT_STRETCH of each other along the runs, and
+# the center of that stretch: bars pack edges, texture scatters them.
+TILT_STRETCH =! 128
+dense =! { center: 0 }
+densest =! (runs, n) ->
+  best  = 0
+  at    = runs[0]
+  j     = 0
+  to    = at
+  for k in [0...n - 1]
+    at += runs[k] if k
+    while j < n - 2 and to + runs[j + 1] - at <= TILT_STRETCH
+      j++
+      to += runs[j]
+    if j - k + 1 > best
+      best = j - k + 1
+      dense.center = (at + to) / 2
+  best
+
+gradA =! Int16Array.new TILT_WINDOW + 2 * TILT_SHIFT + 1
+gradB =! Int16Array.new TILT_WINDOW
+corr  =! Float64Array.new 2 * TILT_SHIFT + 1
+block =! Float64Array.new TILT_WINDOW >> 5
+
+# The shift of the bars on luma2 relative to luma over [lo, hi), or NaN
+# when the peak is weak, at the edge of the range, or not clear of the
+# rest of the correlation. `peak.match` reports the normalized peak and
+# `peak.center` where along the line the match concentrates: the middle
+# of the stretch of 32-sample blocks that carry the peak, which is the
+# label's extent on the line.
+peak =! { match: 0, center: 0 }
+barShift =! (luma, luma2, lo, hi) ->
+  span = hi - lo
+  for k in [0...span + 2 * TILT_SHIFT]
+    x = lo - TILT_SHIFT + k
+    gradA[k] = luma[x + 1] - luma[x]
+  for k in [0...span]
+    x = lo + k
+    gradB[k] = luma2[x + 1] - luma2[x]
+  best   = -Infinity
+  bestAt = 0
+  for s in [0..2 * TILT_SHIFT]
+    sum = 0
+    sum += gradA[k + s] * gradB[k] for k in [0...span]
+    corr[s] = sum
+    if sum > best
+      best   = sum
+      bestAt = s
+  return NaN if bestAt is 0 or bestAt is 2 * TILT_SHIFT
+  # Normalize the peak against the energy of the two stretches.
+  ea = 0
+  eb = 0
+  for k in [0...span]
+    ea += gradA[k + bestAt] * gradA[k + bestAt]
+    eb += gradB[k] * gradB[k]
+  return NaN unless ea and eb
+  peak.match = best / Math.sqrt(ea * eb)
+  return NaN if peak.match < 0.5
+  # The peak must stand clear of every shift three or more away.
+  other = -Infinity
+  for s in [0..2 * TILT_SHIFT] when Math.abs(s - bestAt) >= 3
+    other = corr[s] if corr[s] > other
+  return NaN if other > 0.8 * best
+  # Where the match lives: the blocks around the strongest one that carry
+  # at least a tenth of its energy.
+  blocks = span >> 5
+  top    = 0
+  topAt  = 0
+  for b in [0...blocks]
+    sum = 0
+    sum += gradA[k + bestAt] * gradB[k] for k in [b << 5...(b + 1) << 5]
+    block[b] = sum
+    if sum > top
+      top   = sum
+      topAt = b
+  from = topAt
+  to   = topAt
+  from-- while from > 0 and block[from - 1] > 0.1 * top
+  to++   while to < blocks - 1 and block[to + 1] > 0.1 * top
+  peak.center = lo + ((from + to + 1) << 4)
+  a = corr[bestAt - 1]
+  b = corr[bestAt]
+  c = corr[bestAt + 1]
+  den = a - 2 * b + c
+  frac = if den then (a - c) / (2 * den) else 0
+  bestAt - TILT_SHIFT + frac
+
+sides =! { near: Uint8Array.new(0), far: Uint8Array.new(0) }
+
+# The tilt of the bars crossing the axis line at `o` around the t
+# `center`, from their shift on the lines `gap` apart to either side, or
+# NaN when the two shifts are weak or disagree. A wider gap resolves the
+# angle finer but needs the label taller than the pair. Leaves `luma`
+# holding the line. Returns the scan angle: the bars' normal. `lean.mid`
+# is the t where the match centered.
+lean =! { mid: 0 }
+tiltAt =! (img, format, angle, o, center, luma, gap = TILT_GAP) ->
+  {width, height, data} = img
+  if sides.near.length < luma.length
+    sides.near = Uint8Array.new luma.length
+    sides.far  = Uint8Array.new luma.length
+  {near, far} = sides
+  dx = Math.cos angle
+  dy = Math.sin angle
+  count = sampleAlong luma, data, width, height, format, width / 2 - o * dy, height / 2 + o * dx, dx, dy
+  start = clip.start
+  # The pair must run the length of the line, sample for sample.
+  for [buf, at] in [[near, o + gap], [far, o - gap]]
+    return NaN unless sampleAlong(buf, data, width, height, format, width / 2 - at * dy, height / 2 + at * dx, dx, dy) is count and clip.start is start
+  # The stretch of the line around the densest edges.
+  lo = Math.max TILT_SHIFT, Math.round(center - start - (TILT_WINDOW >> 1))
+  hi = Math.min count - TILT_SHIFT - 1, lo + TILT_WINDOW
+  lo = Math.max TILT_SHIFT, hi - TILT_WINDOW
+  return NaN if hi - lo < 64
+  up   = barShift luma, near, lo, hi
+  upC  = peak.center
+  down = barShift luma, far, lo, hi
+  return NaN if Number.isNaN(up) or Number.isNaN(down)
+  # The pattern moves back as much on the far side as forward on the near.
+  return NaN if Math.abs(up + down) > 1.5
+  s = (up - down) / 2
+  lean.mid = start + (upC + peak.center) / 2
+  # Bars run along (gap, s) in (o, t); the scan direction is their normal.
+  angle + Math.atan2 s, gap
+
+# The offset of the line along `angle2` through the point (o, t) of the
+# line along `angle`.
+offsetAt =! (angle, o, t, angle2) ->
+  px = t * Math.cos(angle) - o * Math.sin(angle)
+  py = t * Math.sin(angle) + o * Math.cos(angle)
+  py * Math.cos(angle2) - px * Math.sin(angle2)
+
+# Read along the estimated tilt through the candidate lines of one axis
+# pass, best score first.
+scanTilt =! (img, format, angle, luma, runs, rev, codes) ->
+  extent = if angle then img.width else img.height
+  stride = Math.max 1, extent >> 5
+  candidates.sort (a, b) -> b[0] - a[0]
+  tried = 0
+  for [score, o, center] in candidates
+    break if tried is TILT_LINES
+    continue if Math.abs(o) + TILT_GAP >= extent / 2
+    tried++
+    angle2 = tiltAt img, format, angle, o, center, luma
+    continue if Number.isNaN angle2
+    o2 = offsetAt angle, o, lean.mid, angle2
+    for k in [0, 1, -1]
+      hit = readAt img, format, angle2, o2 + k * (stride >> 2), luma, runs, rev, codes
+      return hit if hit
+  null
+
+# ==[ Lines ]==
+# A scan line is a point on the image's center line across the bars and a
+# direction along them: p(o, t) = c + o * n + t * d, with d the unit scan
+# direction at `angle`, n its normal and c the image center. The axis
+# passes are the angles 0 and a quarter turn, the tilt passes any angle;
+# one sampler and one reader serve every line.
+
+# Luma along the line through (ox, oy) in direction (dx, dy), clipped to
+# the image and stepped in 16.16 fixed point, one sample per unit of t;
+# `clip.start` is the t of the first sample, and the count is returned.
+clip =! { start: 0 }
+sampleAlong =! (luma, data, width, height, format, ox, oy, dx, dy) ->
+  t0 = -Infinity
+  t1 = Infinity
+  # Slab clipping against each edge; a direction parallel to an axis is
+  # inside or outside for every t.
+  for [origin, delta, limit] in [[ox, dx, width - 1], [oy, dy, height - 1]]
+    if Math.abs(delta) < 1e-9
+      return 0 if origin < 0 or origin > limit
+    else
+      a = (0 - origin) / delta
+      b = (limit - origin) / delta
+      [a, b] = [b, a] if a > b
+      t0 = a if a > t0
+      t1 = b if b < t1
+  return 0 if t1 <= t0
+  count = Math.floor(t1 - t0) + 1
+  row   = width * format.step
+  step  = format.step
+  clip.start = t0
+  x  = Math.round((ox + t0 * dx) * 65536) + 32768
+  y  = Math.round((oy + t0 * dy) * 65536) + 32768
+  sx = Math.round dx * 65536
+  sy = Math.round dy * 65536
+  switch step
+    when 1
+      for k in [0...count]
+        luma[k] = data[(y >> 16) * row + (x >> 16)]
+        x += sx
+        y += sy
+    when 2
+      shift = format.bits - 8
+      for k in [0...count]
+        at = (y >> 16) * row + (x >> 16) * 2
+        luma[k] = (data[at] | (data[at + 1] << 8)) >>> shift
+        x += sx
+        y += sy
+    else
+      for k in [0...count]
+        at = (y >> 16) * row + (x >> 16) * step
+        luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
+        x += sx
+        y += sy
+  count
+
+# Read one line at `o` along `angle`: a hit carries the angle, the offset
+# and t0, t1, where the symbol starts and ends along the line. An axis line
+# is `scored`: when it crosses enough runs for a symbol yet does not read,
+# it may cross a tilted label and leave its bars before the stop, so it
+# joins the tilt candidates, scored before the sharpened retry rewrites
+# the runs.
+readAt =! (img, format, angle, o, luma, runs, rev, codes, scored) ->
+  {width, height, data} = img
+  dx = Math.cos angle
+  dy = Math.sin angle
+  count = sampleAlong luma, data, width, height, format, width / 2 - o * dy, height / 2 + o * dx, dx, dy
+  return null if count < 13
+  n = edgeRuns luma, count, runs, 5
+  if scored
+    score  = if n >= 13 then contrast.range * densest(runs, n) else 0
+    center = clip.start + dense.center
+  hit = readLine runs, n, rev, codes
+  hit = readLine runs, sharpRuns(luma, count, runs), rev, codes unless hit
+  unless hit
+    candidates.push [score, o, center] if scored and score
+    return null
+  hit.angle = angle
+  hit.o     = o
+  hit.t0    = clip.start + hit.from
+  hit.t1    = clip.start + hit.to
+  hit
+
+# The line at `o` along `angle` when it reads the `len` codewords in
+# `codes`; `more` receives what it read.
+sameAt =! (img, format, angle, o, luma, runs, rev, codes, len, more) ->
+  h = readAt img, format, angle, o, luma, runs, rev, more
+  return null unless h and h.len is len
+  for k in [0...len]
+    return null if more[k] isnt codes[k]
+  h
+
+# The symbol's corners. From the hit line, step outward through the bars
+# reading each line and keeping those that give the same codewords, until
+# four in a row do not (a line can fail on noise inside the bars); the
+# start and end edges are then fit to the lines kept and the quad closed
+# at the bars' edges, so a tilted label gives a tilted quad spanning the
+# bars' height.
+trackEdges =! (img, format, hit, codes, luma, runs, rev) ->
+  {width, height} = img
+  {angle} = hit
+  dx   = Math.cos angle
+  dy   = Math.sin angle
+  step = Math.max 1, Math.round((hit.t1 - hit.t0) / 64)
+  more = []
+  # Least-squares lines for the start and end edges against the offset.
+  n = so = soo = s0 = so0 = s1 = so1 = 0
+  low = high = hit.o
+  add = (o, t0, t1) ->
+    n++
+    so  += o
+    soo += o * o
+    s0  += t0
+    so0 += o * t0
+    s1  += t1
+    so1 += o * t1
+    low  = o if o < low
+    high = o if o > high
+  add hit.o, hit.t0, hit.t1
+  edges = [0, 0]
+  for dir, side in [-1, 1]
+    misses = 0
+    o      = hit.o + dir * step
+    while misses < 4
+      h = sameAt img, format, angle, o, luma, runs, rev, codes, hit.len, more
+      if h then (add o, h.t0, h.t1; misses = 0) else misses++
+      o += dir * step
+    # The bars' edge lies between the last line kept and the first that
+    # did not: halve that gap twice.
+    kept = if dir < 0 then low else high
+    lost = kept + dir * step
+    for pass in [0...2]
+      o = (kept + lost) / 2
+      h = sameAt img, format, angle, o, luma, runs, rev, codes, hit.len, more
+      if h then (add o, h.t0, h.t1; kept = o) else lost = o
+    edges[side] = (kept + lost) / 2
+  det = n * soo - so * so
+  b0  = if det then (n * so0 - so * s0) / det else 0
+  b1  = if det then (n * so1 - so * s1) / det else 0
+  a0  = (s0 - b0 * so) / n
+  a1  = (s1 - b1 * so) / n
+  point = (o, t) -> { x: width / 2 - o * dy + t * dx, y: height / 2 + o * dx + t * dy }
+  [oa, ob] = edges
+  [point(oa, a0 + b0 * oa), point(oa, a1 + b1 * oa), point(ob, a1 + b1 * ob), point(ob, a0 + b0 * ob)]
+
+# First Code 128 on any scan line, where it was read and its corners; null
+# on a miss. Lines run along both axes; after each axis pass, lines along
+# the tilt estimated from its best unread crossings, unless `opts.tilt` is
+# false, which reads the axes only.
 export readCode128 =! (img, opts = {}) ->
   asObject opts, 'opts'
-  validateImage img, opts.format
-  {width, height} = img
-  luma = Uint8Array.new(width * height)
-  copyLuma luma, undefined, img, opts.format
-  side = Math.max(width, height) + 2
-  runs = Int32Array.new(side)
-  rev = Int32Array.new(side)
+  format = validateImage img, opts.format
+  tilt   = if opts.tilt is undefined then true else opts.tilt
+  fail "invalid opts.tilt=#{tilt} (#{typeof tilt})", TypeError unless typeof tilt is 'boolean'
+  # A line along a diagonal is as long as the frame's diagonal.
+  side  = Math.ceil(Math.hypot(img.width, img.height)) + 2
+  luma  = Uint8Array.new side
+  runs  = Float64Array.new side
+  rev   = Float64Array.new side
   codes = []
-  vertical = false
-  hit = scanLines luma, width, height, false, runs, rev, codes
-  unless hit
-    vertical = true
-    hit = scanLines luma, width, height, true, runs, rev, codes
+  more  = []
+  hit   = null
+  axis  = 0
+  for a in [0, Math.PI / 2]
+    axis = a
+    candidates.length = 0
+    hit = scanLines img, format, axis, luma, runs, rev, codes
+    hit = scanTilt img, format, axis, luma, runs, rev, codes if tilt and not hit
+    break if hit
   return null unless hit
+  vertical = axis isnt 0
+  if tilt and hit.angle is axis
+    # An axis line reads a label leaning up to about fifteen degrees, and
+    # a tall one further still. Its lean, measured as the tilt passes do
+    # but over a wider pair for a finer angle, turns the hit onto a line
+    # along the bars when that line reads the same symbol, so the corners
+    # follow the bars.
+    mid   = (hit.t0 + hit.t1) / 2
+    angle = tiltAt img, format, axis, hit.o, mid, luma, TILT_WIDE
+    angle = tiltAt img, format, axis, hit.o, mid, luma if Number.isNaN angle
+    if not Number.isNaN(angle) and Math.abs(angle - axis) >= 0.005
+      h   = sameAt img, format, angle, offsetAt(axis, hit.o, mid, angle), luma, runs, rev, codes, hit.len, more
+      hit = h if h
   {text, gs1} = decodeText codes, hit.len
-  { text, gs1, codes: codes.slice(0, hit.len), line: hit.line, vertical, reversed: hit.reversed, inverted: hit.inverted }
+  codes = codes.slice 0, hit.len
+  corners = trackEdges img, format, hit, codes, luma, runs, rev
+  # Across a tilted label the axis lines that read are fewer than its
+  # height: near its top and bottom a line leaves the bars at one end. The
+  # fit's lean gives the bars' direction; tracking again along it spans
+  # the label, and once more if the first pass was itself short.
+  angle = hit.angle
+  for pass in [0...2]
+    [tl, tr, br, bl] = corners
+    across = Math.atan2 tl.x - bl.x, bl.y - tl.y
+    # The fit's edge has no direction of its own: take the half-turn that
+    # keeps the scan direction, so the line reads the symbol the same way
+    # round and the corners keep their order.
+    across -= Math.PI while across - angle > Math.PI / 2
+    across += Math.PI while angle - across > Math.PI / 2
+    break if Math.abs(across - angle) < 0.005
+    cx = (tl.x + tr.x + br.x + bl.x) / 4 - img.width  / 2
+    cy = (tl.y + tr.y + br.y + bl.y) / 4 - img.height / 2
+    h  = sameAt img, format, across, -cx * Math.sin(across) + cy * Math.cos(across), luma, runs, rev, codes, hit.len, more
+    break unless h
+    angle   = across
+    corners = trackEdges img, format, h, codes, luma, runs, rev
+  { text, gs1, codes, angle, o: hit.o, t0: hit.t0, t1: hit.t1, corners, vertical, reversed: hit.reversed, inverted: hit.inverted }
 
+# Text only; throws on a miss.
 export decodeCode128 =! (img, opts = {}) ->
   hit = readCode128 img, opts
-  throw Error.new 'Code 128 not found' unless hit
+  fail 'Code 128 not found' unless hit
   hit.text
 
 # Internals for the test suite.
-export _tests =! { codewords, modules, decodeText, PATTERNS }
+export _tests =! { codewords, decodeText }

@@ -670,10 +670,12 @@
 
     {"comment": "=== READONLY ASSIGNMENT (with constant name capture) ==="},
     {
-      "match": "([a-zA-Z$_][\\w$]*)\\s*(=!)",
+      "comment": "name =! value, or wipe! =! -> for a void readonly definition: the bang between the name and the glyph is the same void marker the `save! = ->` rule carries, so it takes storage.modifier while the name stays a constant.",
+      "match": "([a-zA-Z$_][\\w$]*)(!)?\\s*(=!)",
       "captures": {
         "1": { "name": "variable.other.constant.rip" },
-        "2": { "name": "keyword.operator.assignment.readonly.rip" }
+        "2": { "name": "storage.modifier.rip" },
+        "3": { "name": "keyword.operator.assignment.readonly.rip" }
       }
     },
 

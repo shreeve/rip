@@ -9,91 +9,110 @@
 
 export MAX_IMAGE_SIDE =! 4096
 
-LUMA8  =! { step: 1, bits: 8 }
+LUMA8  =! { step: 1, bits:  8 }
 LUMA10 =! { step: 2, bits: 10 }
 LUMA12 =! { step: 2, bits: 12 }
-RGB    =! { step: 3, bits: 8 }
-# Four-byte inputs ignore the fourth byte: alpha is never composited and the
-# X formats share the storage shape.
-RGBA   =! { step: 4, bits: 8 }
+RGB    =! { step: 3, bits:  8 }
+RGBA   =! { step: 4, bits:  8 } # Four-byte inputs ignore the fourth byte: alpha is never composited and the X formats share the storage shape.
+
 export FORMATS =!
   RGB: RGB, RGBA: RGBA, RGBX: RGBA, BGRA: RGBA, BGRX: RGBA
   I420: LUMA8, I420A: LUMA8, I422: LUMA8, I444: LUMA8, NV12: LUMA8
   I420P10: LUMA10, I420P12: LUMA12
+Object.setPrototypeOf FORMATS, null   # 'toString' is not a format
+
+# ==[ Validation ]==
+
+export fail =! (msg, kind = Error) -> throw kind.new msg
+
+export asString =! (value, name) ->
+  fail "#{name} expected string, got type=#{typeof value}", TypeError unless typeof value is 'string'
+  value
+
+export asObject =! (value, name) ->
+  fail "#{name} expected object, got type=#{typeof value}", TypeError if value is null or typeof value isnt 'object' or Array.isArray(value)
+  value
+
+export asInt =! (n, title, min, max = Infinity) ->
+  fail "#{title} expected number, got type=#{typeof n}", TypeError unless typeof n is 'number'
+  range = if max is Infinity then ">= #{min}" else "in #{min}..#{max}"
+  fail "#{title} expected integer #{range}, got #{n}", RangeError unless Number.isSafeInteger(n) and n >= min and n <= max
+  n
 
 export validateSize =! (size, name) ->
-  throw TypeError.new "#{name} expected safe integer width and height" unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
-  throw RangeError.new "#{name} expected positive width and height" if size.width <= 0 or size.height <= 0
-  throw RangeError.new "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}" if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
+  fail "#{name} expected safe integer width and height", TypeError unless Number.isSafeInteger(size.width) and Number.isSafeInteger(size.height)
+  fail "#{name} expected positive width and height", RangeError if size.width <= 0 or size.height <= 0
+  fail "#{name} expected width and height <= #{MAX_IMAGE_SIDE}, got #{size.width}x#{size.height}", RangeError if size.width > MAX_IMAGE_SIDE or size.height > MAX_IMAGE_SIDE
   size.width * size.height
 
 # Returns the input format; RGB/RGBA is detected by exact length when unnamed.
 export validateImage =! (img, named, layout, capacity) ->
-  px = validateSize img, '"img"'
+  asObject img, 'img'
+  px = validateSize img, 'img'
   if capacity and (img.width > capacity.width or img.height > capacity.height)
-    throw RangeError.new "\"img\" expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}"
+    fail "img expected dimensions <= #{capacity.width}x#{capacity.height}, got #{img.width}x#{img.height}", RangeError
   bytes = img.data
-  throw TypeError.new "\"img.data\" expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}" unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
+  fail "img.data expected Uint8Array or Uint8ClampedArray, got #{typeof bytes}", TypeError unless bytes instanceof Uint8Array or bytes instanceof Uint8ClampedArray
   if named isnt undefined
     format = FORMATS[named]
-    throw TypeError.new "invalid opts.format=#{named} (#{typeof named})" unless format
+    fail "invalid opts.format=#{named} (#{typeof named})", TypeError unless format
     if layout
       {offset, stride} = layout
       row = format.step * img.width
       end = offset + (img.height - 1) * stride + row
       if not Number.isSafeInteger(offset) or not Number.isSafeInteger(stride) or offset < 0 or stride < row or end > bytes.length
-        throw RangeError.new "\"img.data\" expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}"
+        fail "img.data expected valid offset/stride for format=#{named}, got offset=#{offset}, stride=#{stride}, length=#{bytes.length}", RangeError
     else
       expected = format.step * px
       planar = format.step <= 2
       if (planar and bytes.length < expected) or (not planar and bytes.length isnt expected)
-        throw RangeError.new "\"img.data\" expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}"
+        fail "img.data expected #{if planar then 'at least ' else ''}#{expected} bytes for format=#{named}, got #{bytes.length}", RangeError
     return format
   return RGB if bytes.length is 3 * px
   return RGBA if bytes.length is 4 * px
-  throw RangeError.new "\"img.data\" expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}"
+  fail "img.data expected #{3 * px} or #{4 * px} bytes without opts.format, got #{bytes.length}", RangeError
 
 export LITTLE_ENDIAN =! Uint8Array.new(Uint32Array.new([1]).buffer)[0] is 1
 
 # Packed four-byte pixels read as whole words: one load per pixel instead of
 # three, unrolled four wide, the same (r + 2g + b) / 4 luma. Alpha and the X
 # byte fall out of the mask, and the weights are symmetric in r and b, so
-# every RGBA/BGRA/X layout takes this path.
-copyWords =! (out, data, byteStart, n) ->
-  words = Uint32Array.new(data.buffer, byteStart, n)
-  i = 0
-  end = n - 3
-  while i < end
+# every RGBA/BGRA/X layout takes this path. The view is signed because an
+# opaque pixel sets the top bit, which an unsigned read would return as a
+# double; every operation below is bitwise.
+copyWords! =! (out, data, byteStart, n) ->
+  words = Int32Array.new(data.buffer, byteStart, n)
+  for i in [0...n - 3] by 4
     p = words[i]
     q = words[i + 1]
     r = words[i + 2]
     s = words[i + 3]
-    out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
+    out[i    ] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
     out[i + 1] = ((q & 255) + ((q >>> 7) & 510) + ((q >>> 16) & 255)) >> 2
     out[i + 2] = ((r & 255) + ((r >>> 7) & 510) + ((r >>> 16) & 255)) >> 2
     out[i + 3] = ((s & 255) + ((s >>> 7) & 510) + ((s >>> 16) & 255)) >> 2
-    i += 4
-  while i < n
+  for i in [n - (n & 3)...n]
     p = words[i]
     out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
-    i++
-  return
 
 # Convert any input into the tight native luma plane.
-export copyLuma =! (out, maxSize, img, named, layout) ->
+export copyLuma! =! (out, maxSize, img, named, layout) ->
   {step, bits} = validateImage img, named, layout, maxSize
   {width, height, data} = img
   stride = layout?.stride or width * step
   offset = layout?.offset or 0
   return if data is out and not offset and stride is width and step is 1
   if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
-    return copyWords out, data, data.byteOffset + offset, width * height
+    copyWords out, data, data.byteOffset + offset, width * height
+    return
+  if step is 1 and stride is width
+    out.set data.subarray(offset, offset + width * height)
+    return
   for y in [0...height]
     src = offset + y * stride
     dst = y * width
     if step is 1
-      for x in [0...width]
-        out[dst++] = data[src++]
+      out.set data.subarray(src, src + width), dst
     else if step is 2
       for x in [0...width]
         out[dst++] = (data[src] | (data[src + 1] << 8)) >>> (bits - 8)
@@ -102,7 +121,6 @@ export copyLuma =! (out, maxSize, img, named, layout) ->
       for x in [0...width]
         out[dst++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
         src += step
-  return
 
 # RGBA image from a per-pixel dark predicate.
 export darkToImage =! (width, height, isDark) ->
@@ -111,9 +129,135 @@ export darkToImage =! (width, height, isDark) ->
   for y in [0...height]
     for x in [0...width]
       color = if isDark(x, y) then 0 else 255
-      data[i] = color
+      data[i    ] = color
       data[i + 1] = color
       data[i + 2] = color
       data[i + 3] = 255
       i += 4
   { width, height, data }
+
+# ==[ Scan lines ]==
+
+# One scan line as 8-bit luma straight from the source pixels: `at` is the
+# first pixel's byte and `advance` the bytes to the next pixel. Packed RGB
+# takes (r + 2g + b) / 4, symmetric in r and b so every byte order reads
+# alike; wide luma planes take their top eight bits.
+export sampleLine! =! (luma, data, at, advance, count, format) ->
+  switch format.step
+    when 1
+      for k in [0...count]
+        luma[k] = data[at]
+        at += advance
+    when 2
+      shift = format.bits - 8
+      for k in [0...count]
+        luma[k] = (data[at] | (data[at + 1] << 8)) >>> shift
+        at += advance
+    else
+      for k in [0...count]
+        luma[k] = (data[at] + 2 * data[at + 1] + data[at + 2]) >> 2
+        at += advance
+
+# Run lengths of one line, even slots light and odd dark, from the edges
+# between local extrema: an extremum counts once the luma has swung a
+# `fraction`th of the line's range away from the last one, and each edge
+# sits where the luma crosses the midpoint of its own valley and peak,
+# placed between samples by interpolation. Blur leaves a narrow space short
+# of paper white and print gain widens every bar; both move the midpoint
+# crossing far less than they move a fixed threshold, and the fractional
+# positions carry sub-pixel width, which two-pixel modules need. Returns
+# the run count, zero for a flat line; `contrast.range` holds the line's
+# luma range for the caller's scoring.
+export contrast =! { range: 0 }
+
+export edgeRuns =! (luma, count, runs, fraction) ->
+  lo = 255
+  hi = 0
+  for k in [0...count]
+    v = luma[k]
+    lo = v if v < lo
+    hi = v if v > hi
+  contrast.range = hi - lo
+  return 0 if hi - lo < 32
+  swing = (hi - lo) / fraction
+  # Until the first swing the direction is unknown: track both extremes.
+  minV  = luma[0]
+  maxV  = luma[0]
+  minAt = 0
+  maxAt = 0
+  k = 1
+  while k < count
+    v = luma[k]
+    if v < minV
+      minV  = v
+      minAt = k
+    else if v > maxV
+      maxV  = v
+      maxAt = k
+    break if maxV - minV >= swing
+    k++
+  return 0 if k is count
+  rising = minAt < maxAt
+  n = 0
+  runs[n++] = 0 if rising    # the line opens dark
+  if rising
+    at     = minAt
+    value  = minV
+    best   = maxV
+    bestAt = maxAt
+  else
+    at     = maxAt
+    value  = maxV
+    best   = minV
+    bestAt = minAt
+  last = 0
+  # The edge between the extremum at `at` and the candidate at `bestAt`.
+  edge = ->
+    level = (value + best) / 2
+    i = at
+    if rising
+      i++ while luma[i] < level
+    else
+      i++ while luma[i] > level
+    # Cross between samples i - 1 and i.
+    a = luma[i - 1]
+    b = luma[i]
+    pos = i - 1 + (level - a) / (b - a)
+    runs[n++] = pos - last
+    last = pos
+  k++
+  while k < count
+    v = luma[k]
+    if rising
+      if v > best
+        best   = v
+        bestAt = k
+      else if v <= best - swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = false
+    else
+      if v < best
+        best   = v
+        bestAt = k
+      else if v >= best + swing
+        edge()
+        at     = bestAt
+        value  = best
+        best   = v
+        bestAt = k
+        rising = true
+    k++
+  edge() if Math.abs(best - value) >= swing
+  runs[n++] = count - last
+  n
+
+# The same line read right to left, light run first.
+export reverseRuns =! (runs, n, out) ->
+  m = 0
+  out[m++] = 0 if (n & 1) is 0
+  out[m++] = runs[k] for k in [n - 1..0] by -1
+  m

@@ -26,6 +26,10 @@ nested! = (a) ->
   inner = (b) -> b + 1
   inner(a)
 
+# The readonly glyph composes with the void marker.
+settle! =! (q) ->
+  q.drain()
+
 # Chained void definition and an async void def.
 alias = wipe! = -> reset()
 def store!(u)

@@ -1,6 +1,8 @@
 # ==============================================================================
-# rip/barcodes tests — encoder pins generated once from the reference
-# implementation, decoder round trips over synthetic rasters, package surface
+# rip/barcodes tests — QR encoder pins generated once from the reference
+# implementation and decoder round trips over synthetic rasters; Code 128
+# against the published vector; PDF417 codeword streams, parity and layout
+# checked with zxing-cpp; package surface
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
@@ -11,36 +13,150 @@ import * as qr from 'rip/barcodes/qr'
 import * as dom from 'rip/barcodes/dom'
 import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
 import * as code128 from 'rip/barcodes/code128'
-import { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt } from './spec.rip'
+import { encodePDF417, readPDF417, decodePDF417, _tests as p417 } from 'rip/barcodes/pdf417'
+import * as pdf417 from 'rip/barcodes/pdf417'
 import { readFileSync } from 'fs'
 
-rows = (raw) -> raw.map((row) -> row.map((b) -> if b then '1' else '0').join('')).join('\n')
+{ BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt, encodeData, detectType } = _tests
+
+WIKIPEDIA =! [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
+
+bits =! (row) -> row.map((b) -> if b then '1' else '0').join('')
+rows =! (raw) -> raw.map(bits).join('\n')
+flat =! (W, H, value) -> { width: W, height: H, data: Uint8Array.new(W * H * 4).fill(value) }
+art  =! (picture) -> picture.split('\n').map (row) -> [...row].map (ch) -> ch is '#'
+ansi =! (picture) -> picture.replaceAll('#', '\x1b[40m  \x1b[0m').replaceAll('.', '\x1b[1;47m  \x1b[0m') + '\n'
+
+# RGBA raster of a module matrix on a gray field, with rotation, inversion
+# and a shear of `skew` pixels per hundred rows.
+paint =! (raw, W, H, invert = false, rotate = 0, skew = 0) ->
+  h      = raw.length
+  w      = raw[0].length
+  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
+  turned = rotate is 90 or rotate is 270
+  ox     = (W - (if turned then h else w)) >> 1
+  oy     = (H - (if turned then w else h)) >> 1
+  for y in [0...h]
+    shift = Math.round skew * y / 100
+    for x in [0...w]
+      dark = raw[y][x]
+      dark = not dark if invert
+      v    = if dark then 20 else 240
+      [px, py] = switch rotate
+        when 90  then [h - 1 - y, x]
+        when 180 then [w - 1 - x, h - 1 - y]
+        when 270 then [y, w - 1 - x]
+        else [x, y]
+      px += shift unless turned
+      py += shift if turned
+      at = 4 * ((oy + py) * W + ox + px)
+      data[at] = data[at + 1] = data[at + 2] = v
+      data[at + 3] = 255
+  { width: W, height: H, data }
+
+# The three symbologies' rasters through one painter: a QR symbol with a
+# four-module quiet zone, a Code 128 bar row `h` pixels tall, a PDF417 stack.
+raster =! (text, opts, scale, W, H, invert, rotate) -> paint encodeQR(text, 'raw', { ...opts, scale, border: 4 }), W, H, invert, rotate
+bars   =! (text, opts, scale, W, H, invert, rotate, h = 30) -> paint (encodeCode128(text, 'raw', { ...opts, scale, height: 1 }) for y in [0...h]), W, H, invert, rotate
+stack  =! (text, opts, W, H, invert, rotate, skew) -> paint encodePDF417(text, 'raw', opts), W, H, invert, rotate, skew
+
+# `img` turned counterclockwise by `degrees` about its center, sampled
+# bilinearly, as a lens delivers a turned label: smooth edges, not the
+# staircase of nearest pixels. Square images only.
+turn =! (img, degrees) ->
+  size   = img.width
+  angle  = degrees * Math.PI / 180
+  c      = size / 2
+  turned = { width: size, height: size, data: Uint8Array.new(size * size * 4).fill(240) }
+  at     = (x, y) -> img.data[4 * (y * size + x)]
+  for y in [0...size]
+    for x in [0...size]
+      dx = x - c
+      dy = y - c
+      sx = c + dx * Math.cos(angle) + dy * Math.sin(angle)
+      sy = c - dx * Math.sin(angle) + dy * Math.cos(angle)
+      continue unless sx >= 0 and sx < size - 1 and sy >= 0 and sy < size - 1
+      x0 = sx | 0
+      y0 = sy | 0
+      fx = sx - x0
+      fy = sy - y0
+      v  = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
+      q  = 4 * (y * size + x)
+      turned.data[q] = turned.data[q + 1] = turned.data[q + 2] = Math.round v
+  turned
+
+# Modules painted by an SVG, as a raw matrix: the optimized path draws each
+# module as a move, `h1v1`, a return to its left edge, and `Z`; plain output
+# draws one rect per module. Everything outside the envelope must be a module.
+svgCells =! (svg, W) ->
+  cells = ((false for x in [0...W]) for y in [0...W])
+  cell = /([Mm])(-?\d+) (-?\d+)h1v1(?:H(\d+)|h-1)Z|<rect x="(\d+)" y="(\d+)" width="1" height="1" \/>/g
+  x = 0
+  y = 0
+  for m in svg.matchAll cell
+    if m[5] isnt undefined
+      x = +m[5]
+      y = +m[6]
+    else
+      if m[1] is 'M'
+        x = +m[2]
+        y = +m[3]
+      else
+        x += +m[2]
+        y += +m[3]
+      eq +m[4], x if m[4] isnt undefined   # `H<x>` returns to the cell's own left edge
+    cells[y][x] = true
+  rest = svg.replace cell, ''
+  open = "<svg viewBox=\"0 0 #{W} #{W}\" xmlns=\"http://www.w3.org/2000/svg\">"
+  ok rest is open + '<path d=""/></svg>' or rest is open + '</svg>', rest
+  cells
+
+# Pixels of a GIF from the package's own writer: GIF87a, a 128-entry palette
+# with entry 0 white and the rest black, then an uncompressed LZW stream whose
+# every sub-block opens with a clear code and carries literal palette indices.
+gifPixels =! (gif) ->
+  eq String.fromCharCode(...gif.subarray(0, 6)), 'GIF87a'
+  width  = gif[6] | gif[7] << 8
+  height = gif[8] | gif[9] << 8
+  eq Array.from(gif.subarray(10, 16)), [0xf6, 0, 0, 255, 255, 255]
+  eq Array.from(gif.subarray(16, 397)).every((b) -> b is 0), true
+  eq Array.from(gif.subarray(397, 408)), [0x2c, 0, 0, 0, 0, gif[6], gif[7], gif[8], gif[9], 0, 7]
+  pixels = []
+  pos    = 408
+  until gif[pos] is 1 and gif[pos + 1] is 0x81
+    n = gif[pos]
+    eq gif[pos + 1], 0x80
+    pixels.push ...gif.subarray(pos + 2, pos + 1 + n)
+    pos += n + 1
+  eq Array.from(gif.subarray(pos, gif.length)), [1, 0x81, 0, 0x3b]
+  { width, height, pixels }
 
 # ==[ Package surface ]==
 
-console.log "\nPackage"
+p "\nPackage"
 
 test "exports", ->
-  eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodeQR', 'readCode128']
-  eq enc.default, encodeQR
-  eq enc.decodeQR, decodeQR
+  eq Object.keys(enc).sort(), ['QRScanner', 'decodeCode128', 'decodePDF417', 'decodeQR', 'decodeQRBatch', 'default', 'encodeCode128', 'encodePDF417', 'encodeQR', 'readCode128', 'readPDF417']
+  eq enc.default,       encodeQR
+  eq enc.decodeQR,      decodeQR
   eq enc.encodeCode128, encodeCode128
   eq enc.decodeCode128, decodeCode128
   eq Object.keys(qr).sort(), ['QRScanner', '_tests', 'decodeQR', 'decodeQRBatch', 'encodeQR']
   eq Object.keys(code128).sort(), ['_tests', 'decodeCode128', 'encodeCode128', 'readCode128']
+  eq Object.keys(pdf417).sort(),  ['_tests', 'decodePDF417', 'encodePDF417', 'readPDF417']
   eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
 
 test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
   eq pkg.dependencies, undefined
-  eq pkg.rip, { browser: true }
-  for file in ['spec.rip', 'gif.rip', 'image.rip', 'qr.rip', 'code128.rip', 'barcodes.rip', 'dom.rip']
+  eq pkg.rip,          { browser: true }
+  for file in pkg.files when file.endsWith('.rip')
     source = readFileSync "#{import.meta.dir}/#{file}", 'utf8'
     eq /\bBun\.|node:|process\.|globalThis/.test(source), false, file
 
 # ==[ Spec tables ]==
 
-console.log "\nSpec"
+p "\nSpec"
 
 test "Table 1 codeword totals", ->
   eq BYTES, [
@@ -49,27 +165,27 @@ test "Table 1 codeword totals", ->
   ]
 
 test "alignment centers", ->
-  eq alignmentPatterns(1), []
-  eq alignmentPatterns(2), [6, 18]
-  eq alignmentPatterns(7), [6, 22, 38]
+  eq alignmentPatterns(1),  []
+  eq alignmentPatterns(2),  [6, 18]
+  eq alignmentPatterns(7),  [6, 22, 38]
   eq alignmentPatterns(40), [6, 30, 58, 86, 114, 142, 170]
 
 test "format and version words", ->
   eq formatBits('medium', 0), 0b101010000010010
-  eq formatBits('low', 7), 0b110100101110110
-  eq versionBits(7), 0x07C94
+  eq formatBits('low',    7), 0b110100101110110
+  eq versionBits(7),  0x07C94
   eq versionBits(40), 0x28C69
 
 test "mask predicates and popcount", ->
   eq maskBits(0, 0), 0xff
   eq maskBits(1, 0), 0b01110010
-  eq popcnt(0), 0
+  eq popcnt(0),          0
   eq popcnt(0xffffffff), 32
   eq popcnt(0x80000001), 2
 
 # ==[ Encoder ]==
 
-console.log "\nEncoder"
+p "\nEncoder"
 
 ENCODE_DATA =! [
   ["12345678", 1, "low", "numeric", [16, 32, 123, 114, 39, 0, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 188, 247, 62, 248, 53, 170, 224]]
@@ -83,30 +199,106 @@ ENCODE_DATA =! [
 test "encodeData vectors", ->
   for [text, version, ecc, type, bytes] in ENCODE_DATA
     utf8 = if type is 'byte' then TextEncoder.new().encode(text) else undefined
-    eq Array.from(_tests.encodeData(version, ecc, text, type, utf8)), bytes, text
+    eq Array.from(encodeData(version, ecc, text, type, utf8)), bytes, text
 
 test "detectType", ->
-  eq _tests.detectType('12345678'), 'numeric'
-  eq _tests.detectType('HELLO WORLD'), 'alphanumeric'
-  eq _tests.detectType('hello'), 'byte'
-  eq _tests.detectType('🔻'), 'byte'
+  eq detectType('12345678'),    'numeric'
+  eq detectType('HELLO WORLD'), 'alphanumeric'
+  eq detectType('hello'),       'byte'
+  eq detectType('🔻'),          'byte'
 
 test "ascii", ->
-  eq encodeQR('Hello world', 'ascii'), "█████████████████████████\n██ ▄▄▄▄▄ ██▀ ▀██ ▄▄▄▄▄ ██\n██ █   █ █   ███ █   █ ██\n██ █▄▄▄█ █  █▀▄█ █▄▄▄█ ██\n██▄▄▄▄▄▄▄█ █ █▄█▄▄▄▄▄▄▄██\n██ █▄ ▄ ▄█▀▀  ▀▀     █▀██\n██ ▄▄▄ ▀▄▄▀▀▀▀  ▄█▀  ▄███\n████▄▄█▄▄▄  ▄█ ▄▄█▀▀██▄██\n██ ▄▄▄▄▄ █▀██▄█▀▄▀█▀  ▀██\n██ █   █ █  █▄▀▀  ▀▀██▄██\n██ █▄▄▄█ █▄▀▀█ ▀█▄▀▀ ████\n██▄▄▄▄▄▄▄█▄██▄▄█▄█▄██▄███\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+  eq encodeQR('Hello world', 'ascii'), """
+    █████████████████████████
+    ██ ▄▄▄▄▄ ██▀ ▀██ ▄▄▄▄▄ ██
+    ██ █   █ █   ███ █   █ ██
+    ██ █▄▄▄█ █  █▀▄█ █▄▄▄█ ██
+    ██▄▄▄▄▄▄▄█ █ █▄█▄▄▄▄▄▄▄██
+    ██ █▄ ▄ ▄█▀▀  ▀▀     █▀██
+    ██ ▄▄▄ ▀▄▄▀▀▀▀  ▄█▀  ▄███
+    ████▄▄█▄▄▄  ▄█ ▄▄█▀▀██▄██
+    ██ ▄▄▄▄▄ █▀██▄█▀▄▀█▀  ▀██
+    ██ █   █ █  █▄▀▀  ▀▀██▄██
+    ██ █▄▄▄█ █▄▀▀█ ▀█▄▀▀ ████
+    ██▄▄▄▄▄▄▄█▄██▄▄█▄█▄██▄███
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+    """
 
 test "term", ->
-  eq encodeQR('Hi', 'term', border: 1), "\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[40m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\u001b[1;47m  \u001b[0m\n"
+  eq encodeQR('Hi', 'term', border: 1), ansi """
+    .......................
+    .#######...##..#######.
+    .#.....#.#####.#.....#.
+    .#.###.#.##..#.#.###.#.
+    .#.###.#.#.#...#.###.#.
+    .#.###.#..####.#.###.#.
+    .#.....#..#..#.#.....#.
+    .#######.#.#.#.#######.
+    .........#####.........
+    .#.....#.###.###..###..
+    .#.##.#...##.#.#.#.....
+    ..##..###..##.#..####..
+    .##.#....#.#.....#.#...
+    .#.#..####.....#..###..
+    .........#.######.#....
+    .#######...#.#.##...#..
+    .#.....#....###.###....
+    .#.###.#..#..#..#..#...
+    .#.###.#...#.#.....#...
+    .#.###.#..##...#...###.
+    .#.....#...#.....#.#...
+    .#######.####.#..####..
+    .......................
+    """
 
 test "svg, optimized and plain", ->
-  eq encodeQR('Hello world', 'svg'), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M2 2h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 3h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 4h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 5h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm4 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 6h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 7h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm6 0h1v1h-1ZM2 8h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM10 9h1v1h-1Zm2 0h1v1h-1ZM2 10h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm4 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 11h1v1H2Zm3 0h1v1H5Zm2 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1ZM2 12h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm1 0h1v1H9Zm5 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 13h1v1H2Zm4 0h1v1H6Zm1 0h1v1H7Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM4 14h1v1H4Zm1 0h1v1H5Zm2 0h1v1H7Zm1 0h1v1H8Zm1 0h1v1H9Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm6 0h1v1h-1Zm-12 1h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 16h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm5 0h1v1h-1Zm3 0h1v1h-1Zm4 0h1v1h-1Zm1 0h1v1h-1ZM2 17h1v1H2Zm6 0h1v1H8Zm2 0h1v1h-1Zm5 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 18h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm5 0h1v1h-1ZM2 19h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 20h1v1H2Zm2 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm2 0h1v1H8Zm2 0h1v1h-1Zm4 0h1v1h-1Zm3 0h1v1h-1Zm3 0h1v1h-1ZM2 21h1v1H2Zm6 0h1v1H8Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm1 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm1 0h1v1h-1ZM2 22h1v1H2Zm1 0h1v1H3Zm1 0h1v1H4Zm1 0h1v1H5Zm1 0h1v1H6Zm1 0h1v1H7Zm1 0h1v1H8Zm2 0h1v1h-1Zm3 0h1v1h-1Zm1 0h1v1h-1Zm2 0h1v1h-1Zm2 0h1v1h-1Zm3 0h1v1h-1Z\"/></svg>"
-  eq encodeQR('Hi', 'svg', optimize: false), "<svg viewBox=\"0 0 25 25\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"2\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"2\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"3\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"4\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"5\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"6\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"7\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"8\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"9\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"10\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"11\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"12\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"13\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"9\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"14\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"15\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"16\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"17\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"17\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"18\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"14\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"19\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"16\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"22\" y=\"20\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"21\" width=\"1\" height=\"1\" /><rect x=\"2\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"3\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"4\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"5\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"6\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"7\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"8\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"10\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"11\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"12\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"13\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"15\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"18\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"19\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"20\" y=\"22\" width=\"1\" height=\"1\" /><rect x=\"21\" y=\"22\" width=\"1\" height=\"1\" /></svg>"
+  raw = encodeQR 'Hello world', 'raw'
+  svg = encodeQR 'Hello world', 'svg'
+  ok svg.startsWith('<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"><path d="M2 2h1v1H2Zm1 0h1v1H3Z')
+  ok svg.includes('h-1Z')   # cells at x >= 10 return by `h-1`, the shorter command
+  eq svgCells(svg, 25), raw
+  plain = encodeQR 'Hello world', 'svg', optimize: false
+  ok plain.startsWith('<svg viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="1" height="1" />')
+  eq svgCells(plain, 25), raw
 
 test "gif and data-url", ->
-  eq Array.from(encodeQR('Hello world', 'gif', scale: 2)), [71, 73, 70, 56, 55, 97, 50, 0, 50, 0, 246, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 44, 0, 0, 0, 0, 50, 0, 50, 0, 0, 7, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 127, 128, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 127, 128, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 127, 128, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 127, 128, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 129, 0, 59]
-  eq encodeQR('Hello world', 'data-url'), "data:image/gif;base64,R0lGODdhGQAZAPYAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACwAAAAAGQAZAAAHf4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQAAAAEAAAABAQEBAQEBAAAAAAEAAAAAAAEAAAEBAQAAAQAAAAAAAQAAAAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAB/gAABAAEBAQABAAEBAQAAAAEAAQEBAAEAAAAAAQABAQEAAQABAQAAAQABAAEBAQABAAAAAAEAAAAAAAEAAQEAAQAAAQAAAAAAAQAAAAABAQEBAQEBAAEAAQABAAEBAQEBAQEAAAAAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAAAAH+AAQABAQEBAQAAAAEBAAABAQEBAQAAAAAAAAEAAAEAAQAAAQEBAQEBAQEBAQEAAQAAAAABAQEBAQABAQAAAAABAQEAAAEBAQAAAAAAAQAAAAEBAAABAQEBAQEAAAEBAQAAAAAAAAAAAQEAAQEBAQEBAAEBAQAAAAAAAQAAAAAAf4AAAAAAAAAAAQEAAAEAAAABAQAAAAAAAAABAQEBAQEBAAAAAAEAAAEAAAABAQAAAAAAAQAAAAAAAQABAAAAAAEAAQABAQEBAAAAAAEAAQEBAAEAAQEAAQAAAQEAAAAAAQAAAAABAAEBAQABAAEBAAABAQEBAQEAAAAAAAAAAQB6gAEBAQABAAEAAAABAAABAAABAAAAAAAAAQAAAAAAAQAAAQEAAQEAAAEBAQAAAAAAAAEBAQEBAQEAAQAAAQEAAQABAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgQA7"
+  raw = encodeQR 'Hello world', 'raw'
+  gif = encodeQR 'Hello world', 'gif', scale: 2
+  {width, height, pixels} = gifPixels gif
+  eq [width, height], [50, 50]
+  expected = []
+  for y in [0...50]
+    expected.push(if raw[y // 2][x // 2] then 1 else 0) for x in [0...50]
+  eq pixels, expected
+  eq encodeQR('Hello world', 'data-url'), 'data:image/gif;base64,' + Buffer.from(encodeQR('Hello world', 'gif')).toString('base64')
 
 test "raw", ->
-  eq encodeQR('Hello world', 'raw', border: 1), [[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, true, false, false, false, true, true, true, true, true, true, true, false], [false, true, false, false, false, false, false, true, false, false, true, true, true, false, false, true, false, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, true, false, false, false, true, false, true, true, true, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, false, true, false, true, true, true, false, true, false], [false, true, false, false, false, false, false, true, false, true, true, false, true, false, false, true, false, false, false, false, false, true, false], [false, true, true, true, true, true, true, true, false, true, false, true, false, true, false, true, true, true, true, true, true, true, false], [false, false, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false], [false, true, false, true, true, true, true, true, false, false, false, true, true, false, false, true, true, true, true, true, false, false, false], [false, true, false, false, true, false, true, false, false, true, true, true, true, true, true, true, true, true, true, true, false, true, false], [false, true, true, true, true, true, false, true, true, false, false, false, false, true, true, true, false, false, true, true, true, false, false], [false, true, false, false, false, true, true, false, false, true, true, true, true, true, true, false, false, true, true, true, false, false, false], [false, false, false, true, true, false, true, true, true, true, true, true, false, true, true, true, false, false, false, false, false, true, false], [false, false, false, false, false, false, false, false, false, true, true, false, false, true, false, false, false, true, true, false, false, false, false], [false, true, true, true, true, true, true, true, false, false, false, false, true, false, false, true, false, false, false, true, true, false, false], [false, true, false, false, false, false, false, true, false, true, false, false, false, false, true, false, true, false, true, true, true, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, true, false, false, true, true, false, false, false, false, true, false], [false, true, false, true, true, true, false, true, false, true, true, false, false, true, true, true, true, true, true, false, false, false, false], [false, true, false, true, true, true, false, true, false, true, false, false, false, true, false, false, true, false, false, true, false, false, false], [false, true, false, false, false, false, false, true, false, false, true, true, false, true, true, false, false, true, true, true, false, false, false], [false, true, true, true, true, true, true, true, false, true, false, false, true, true, false, true, false, true, false, false, true, false, false], [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]]
+  eq encodeQR('Hello world', 'raw', border: 1), art """
+    .......................
+    .#######...#...#######.
+    .#.....#..###..#.....#.
+    .#.###.#.###...#.###.#.
+    .#.###.#.###...#.###.#.
+    .#.###.#.##..#.#.###.#.
+    .#.....#.##.#..#.....#.
+    .#######.#.#.#.#######.
+    .........#.#...........
+    .#.#####...##..#####...
+    .#..#.#..###########.#.
+    .#####.##....###..###..
+    .#...##..######..###...
+    ...##.######.###.....#.
+    .........##..#...##....
+    .#######....#..#...##..
+    .#.....#.#....#.#.####.
+    .#.###.#.##.#..##....#.
+    .#.###.#.##..######....
+    .#.###.#.#...#..#..#...
+    .#.....#..##.##..###...
+    .#######.#..##.#.#..#..
+    .......................
+    """
 
 VERSION_HASHES =! ["15144155502040334453", "11860336336062881808", "9136085086669388644", "1193089572591710977", "7686873670648342784", "5343431842319324110", "17390098021478000837", "3840461960574158097", "4294510183992695906", "15528468463722452699", "6845340642062067951", "2863315931406977110", "1000235694808952747", "4850376682882191310", "170292611262382408", "16193601112266899915", "3021963056225426727", "17063662145875125935", "15921535972440319276", "10460739331697383771", "4104402773850033517", "6767157915294766020", "16623589994970719969", "12747355529232067061", "17235346348443545711", "11264115602249123588", "11370428948163515140", "15807326944508417556", "135482596482876342", "4755772298643999272", "17978155199721953926", "16372105395315088973", "144795419258277521", "14530093731977448862", "18060845299463144063", "3503644178110624366", "6867699886559328586", "10580509781540705", "18052239940279011487", "2543736270194563918"]
 
@@ -136,25 +328,38 @@ test "single-slot symbol cache survives version changes", ->
   eq rows(encodeQR('MASK', 'raw', border: 1)), a
   eq rows(encodeQR('MASK', 'raw', mask: 3, border: 1)), MASKS[3]
 
+# ISO/IEC 18004 Table 7, level L: the longest message of each mode per
+# version. Pins version selection at every boundary, including the three
+# character-count-indicator bands.
+CAPACITY_LOW =!
+  numeric:      [41, 77, 127, 187, 255, 322, 370, 461, 552, 652, 772, 883, 1022, 1101, 1250, 1408, 1548, 1725, 1903, 2061, 2232, 2409, 2620, 2812, 3057, 3283, 3517, 3669, 3909, 4158, 4417, 4686, 4965, 5253, 5529, 5836, 6153, 6479, 6743, 7089]
+  alphanumeric: [25, 47, 77, 114, 154, 195, 224, 279, 335, 395, 468, 535, 619, 667, 758, 854, 938, 1046, 1153, 1249, 1352, 1460, 1588, 1704, 1853, 1990, 2132, 2223, 2369, 2520, 2677, 2840, 3009, 3183, 3351, 3537, 3729, 3927, 4087, 4296]
+  byte:         [17, 32, 53, 78, 106, 134, 154, 192, 230, 271, 321, 367, 425, 458, 520, 586, 644, 718, 792, 858, 929, 1003, 1091, 1171, 1273, 1367, 1465, 1528, 1628, 1732, 1840, 1952, 2068, 2188, 2303, 2431, 2563, 2699, 2809, 2953]
+
 test "capacity boundaries", ->
   ok encodeQR('x'.repeat(17), 'raw', version: 1, ecc: 'low')
   throws (-> encodeQR('x'.repeat(18), 'raw', version: 1, ecc: 'low')), 'Capacity overflow'
   ok encodeQR('7'.repeat(7089), 'ascii', ecc: 'low')
   throws (-> encodeQR('7'.repeat(7090), 'ascii', ecc: 'low')), 'Capacity overflow'
   throws (-> encodeQR('x'.repeat(3000), 'raw')), 'Capacity overflow'
+  for encoding, ch of { numeric: '7', alphanumeric: 'A', byte: 'x' }
+    for n, i in CAPACITY_LOW[encoding]
+      eq encodeQR(ch.repeat(n), 'raw', { ecc: 'low', border: 1 }).length, 17 + 4 * (i + 1) + 2, "#{encoding} v#{i + 1}"
+      throws (-> encodeQR(ch.repeat(n + 1), 'raw', { ecc: 'low', border: 1, version: i + 1 })), 'Capacity overflow'
 
 test "argument validation", ->
-  throws (-> encodeQR(123, 'raw')), TypeError
-  throws (-> encodeQR('x', 'nope')), 'Unknown output'
-  throws (-> encodeQR('x', 'raw', version: 0)), RangeError
-  throws (-> encodeQR('x', 'raw', version: 41)), RangeError
-  throws (-> encodeQR('x', 'raw', mask: 9)), 'invalid mask'
-  throws (-> encodeQR('x', 'raw', ecc: 'zz')), 'invalid ecc'
+  throws (-> encodeQR(123, 'raw')),                        TypeError
+  throws (-> encodeQR('x', 'nope')),                       'Unknown output'
+  throws (-> encodeQR('x', 'raw', version: 0)),            RangeError
+  throws (-> encodeQR('x', 'raw', version: 41)),           RangeError
+  throws (-> encodeQR('x', 'raw', mask: 9)),               RangeError
+  throws (-> encodeQR('x', 'raw', ecc: 'zz')),             'invalid ecc'
+  throws (-> encodeQR('x', 'raw', encoding: 'constructor')), 'invalid encoding'
   throws (-> encodeQR('abc', 'raw', encoding: 'numeric')), 'Unknown letter'
-  throws (-> encodeQR('x', 'raw', border: 0)), RangeError
-  throws (-> encodeQR('x', 'raw', scale: 2000)), RangeError
+  throws (-> encodeQR('x', 'raw', border: 0)),             RangeError
+  throws (-> encodeQR('x', 'raw', scale: 2000)),           RangeError
   throws (-> encodeQR('x', 'raw', version: 1, scale: 50)), 'reduce border/scale'
-  throws (-> encodeQR('x', 'raw', textEncoder: -> 'no')), TypeError
+  throws (-> encodeQR('x', 'raw', textEncoder: -> 'no')),  TypeError
 
 test "custom text encoder", ->
   bytes = Uint8Array.from [72, 105]
@@ -162,32 +367,10 @@ test "custom text encoder", ->
 
 # ==[ Decoder ]==
 
-console.log "\nDecoder"
+p "\nDecoder"
 
-# RGBA raster with the symbol centered on a gray field.
-raster = (text, opts, scale, W, H, invert = false, rotate = 0) ->
-  raw = encodeQR text, 'raw', { ...opts, scale, border: 4 }
-  s = raw.length
-  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
-  ox = (W - s) >> 1
-  oy = (H - s) >> 1
-  for y in [0...s]
-    for x in [0...s]
-      dark = raw[y][x]
-      dark = not dark if invert
-      v = if dark then 0 else 255
-      [px, py] = switch rotate
-        when 90 then [s - 1 - y, x]
-        when 180 then [s - 1 - x, s - 1 - y]
-        when 270 then [y, s - 1 - x]
-        else [x, y]
-      p = 4 * ((oy + py) * W + ox + px)
-      data[p] = data[p + 1] = data[p + 2] = v
-      data[p + 3] = 255
-  { width: W, height: H, data }
-
-toLuma = (img) ->
-  n = img.width * img.height
+toLuma =! (img) ->
+  n    = img.width * img.height
   luma = Uint8Array.new(n)
   for i in [0...n]
     p = 4 * i
@@ -210,29 +393,76 @@ test "numeric, alphanumeric, byte and unicode payloads", ->
   for text in ['7'.repeat(300), 'HELLO WORLD $%*+-./:', 'mixed Case 123', 'Ünïcödé 🔻 text']
     eq decodeQR(raster(text, {}, 4, 500, 500)), text
 
+test "small image, low contrast", ->
+  # A 25 px side is under four threshold blocks; the window folds onto the edge.
+  raw = encodeQR 'Hi', 'raw', border: 2
+  n = raw.length
+  data = Uint8Array.new(n * n)
+  for y in [0...n]
+    data[y * n + x] = (if raw[y][x] then 40 else 200) for x in [0...n]
+  eq decodeQR({ width: n, height: n, data }, format: 'I420'), 'Hi'
+
 test "luma and packed formats", ->
   img = raster 'FORMATS', {}, 4, 300, 300
   eq decodeQR(toLuma(img), format: 'I420'), 'FORMATS'
-  eq decodeQR(img, format: 'RGBA'), 'FORMATS'
+  eq decodeQR(img,         format: 'RGBA'), 'FORMATS'
   rgb = Uint8Array.new(img.width * img.height * 3)
   for i in [0...img.width * img.height]
     rgb[3 * i + k] = img.data[4 * i + k] for k in [0...3]
   eq decodeQR({ width: img.width, height: img.height, data: rgb }), 'FORMATS'
 
+test "any angle, coarse layers, planar and packed formats, textDecoder", ->
+  text = 'https://example.com/path?q=1'
+  img  = raster text, {}, 4, 400, 400
+  for degrees in [10, 30, 45, 60]
+    eq decodeQR(turn img, degrees), text, "#{degrees} degrees"
+  # A 348 px symbol in a 1080p frame is found on the coarsest layer, and
+  # with nativeLimit under the frame's short side the native layer is not
+  # searched: the first plane binarized is the eighth-scale one.
+  planes = []
+  eq decodeQR(raster('LAYERS', {}, 12, 1920, 1080), nativeLimit: 500, imageOnBitmap: (plane) -> planes.push "#{plane.width}x#{plane.height}"), 'LAYERS'
+  eq planes[0], '240x135'
+  eq decodeQR(raster('LAYERS', {}, 1, 1920, 1080)), 'LAYERS', 'one pixel per module in a 1080p frame'
+  # Planar formats read the luma plane alone, ten-bit samples drop to
+  # eight, and the four-byte formats weigh the middle byte double, so
+  # BGRA and RGBA agree on gray pixels.
+  img  = raster 'FORMATS', {}, 4, 300, 300
+  n    = 300 * 300
+  luma = toLuma(img).data
+  nv12 = Uint8Array.new(n + n // 2).fill 128
+  nv12.set luma
+  eq decodeQR({ width: 300, height: 300, data: nv12 }, format: 'NV12'), 'FORMATS'
+  p10 = Uint8Array.new 2 * n
+  for i in [0...n]
+    p10[2 * i]     = (luma[i] << 2) & 255
+    p10[2 * i + 1] = luma[i] >> 6
+  eq decodeQR({ width: 300, height: 300, data: p10 }, format: 'I420P10'), 'FORMATS'
+  eq decodeQR(img, format: 'BGRA'), 'FORMATS'
+  # Byte segments go through textDecoder with the ECI in force; text past
+  # Latin-1 is sent as UTF-8 behind ECI 26.
+  seen = null
+  custom = (bytes, eci) ->
+    seen = [bytes.length, eci]
+    'custom'
+  eq decodeQR(raster('bytes ünïcödé', {}, 4, 300, 300), textDecoder: custom), 'custom'
+  eq seen, [17, 26]   # UTF-8 bytes behind ECI 26
+
 test "throws when nothing decodes", ->
-  blank = { width: 200, height: 200, data: Uint8Array.new(200 * 200 * 4).fill(128) }
+  blank = flat 200, 200, 128
   throws (-> decodeQR blank), Error, 'finder'
   eq decodeQR(raster('EFFORT', {}, 4, 300, 300), effort: Infinity, timeLimit: Infinity), 'EFFORT'
 
 test "option and image validation", ->
   img = raster 'V', {}, 4, 200, 200
-  throws (-> decodeQR(img, effort: 0)), TypeError
-  throws (-> decodeQR(img, timeLimit: -1)), TypeError
-  throws (-> decodeQR(img, format: 'nope')), TypeError
-  throws (-> decodeQR(img, pointsOnDetect: 1)), TypeError
+  throws (-> decodeQR(img, effort: 0)                                  ), TypeError
+  throws (-> decodeQR(img, timeLimit: -1)                              ), TypeError
+  throws (-> decodeQR(img, format: 'nope')                             ), TypeError
+  throws (-> decodeQR(img, format: 'toString')                         ), TypeError, 'format'
+  throws (-> decodeQR(null)                                            ), TypeError, 'img'
+  throws (-> decodeQR(img, pointsOnDetect: 1)                          ), TypeError
   throws (-> decodeQR({ width: 0, height: 1, data: Uint8Array.new(0) })), RangeError
   throws (-> decodeQR({ width: 2, height: 2, data: Uint8Array.new(5) })), RangeError
-  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })), TypeError
+  throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })     ), TypeError
 
 test "pointsOnDetect reports geometry in image coordinates", ->
   scale = 5
@@ -260,7 +490,7 @@ test "imageOnResult delivers the sampled module grid", ->
   eq (dark(x, y) for x in [0...21] for y in [0...21]), ((raw[y + 1][x + 1] for x in [0...21]) for y in [0...21])
 
 test! "decodeQRBatch finds every symbol", ->
-  two = raster 'LEFT', {}, 4, 700, 300
+  two   = raster 'LEFT',  {}, 4, 700, 300
   right = raster 'RIGHT', {}, 4, 300, 300
   for y in [0...300]
     for x in [0...300]
@@ -296,38 +526,38 @@ test! "scanner reuse, exclusive operations and clean", ->
 
 # ==[ Code 128 ]==
 
-console.log "\nCode 128"
+p "\nCode 128"
 
-test "Code 128 codewords: published vector, shortest subset choice, FNC1", ->
-  eq c128.codewords('Wikipedia'), [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
-  eq c128.codewords('1234'), [105, 12, 34, 82, 106]
-  eq c128.codewords('A1234'), [104, 33, 99, 12, 34, 95, 106]
+test "codewords: published vector, shortest subset choice, FNC1", ->
+  eq c128.codewords('Wikipedia'), WIKIPEDIA
+  eq c128.codewords('1234'),      [105, 12, 34, 82, 106]
+  eq c128.codewords('A1234'),     [104, 33, 99, 12, 34, 95, 106]
   eq c128.codewords('ABC123456'), [104, 33, 34, 35, 99, 12, 34, 56, 23, 106]
-  eq c128.codewords('\x01\x02'), [103, 65, 66, 94, 106]
-  eq c128.codewords('a\x01b'), [104, 65, 98, 65, 66, 0, 106]
-  eq c128.codewords('AB\x1dCD'), [104, 33, 34, 102, 35, 36, 7, 106]
+  eq c128.codewords('\x01\x02'),  [103, 65, 66, 94, 106]
+  eq c128.codewords('a\x01b'),    [104, 65, 98, 65, 66, 0, 106]
+  eq c128.codewords('AB\x1dCD'),  [104, 33, 34, 102, 35, 36, 7, 106]
   eq c128.codewords('(01)09501101530003', true), [104, 102, 8, 16, 17, 9, 99, 9, 50, 11, 1, 53, 0, 3, 8, 106]
   for text in ['Hello, World! 2026', 'L2602852147', '12345', '\x7f~ ', 'x0y1z2', '2026-09-15T12:00']
     codes = c128.codewords text
     ok codes.length <= text.length + 3, text
     sum = codes[0]
-    sum += k * codes[k] for k in [1...codes.length - 2]
-    eq sum % 103, codes[codes.length - 2], text
-    eq codes[codes.length - 1], 106
+    sum += codes[i] * i for i in [1...codes.length - 2]
+    eq codes.at(-2), sum % 103, text
+    eq codes.at(-1), 106
   throws (-> c128.codewords 'é'), Error, 'cannot encode'
-  throws (-> c128.codewords ''), Error, 'empty'
+  throws (-> c128.codewords ''),  Error, 'empty'
 
-test "Code 128 modules and outputs", ->
+test "modules and outputs", ->
   raw = encodeCode128 'Wikipedia', 'raw', border: 0
   eq raw.length, 11 * 12 + 2
-  eq raw.slice(0, 11).map((b) -> if b then 1 else 0).join(''), '11010010000'
-  eq raw.slice(-13).map((b) -> if b then 1 else 0).join(''), '1100011101011'
+  eq bits(raw.slice(0, 11)), '11010010000'
+  eq bits(raw.slice(-13)),   '1100011101011'
   eq encodeCode128('Wikipedia').length, 11 * 12 + 2 + 20
   eq encodeCode128('Wikipedia', 'raw', scale: 3, border: 1).length, 3 * (11 * 12 + 4)
   ascii = encodeCode128 'ok', 'ascii', border: 2
-  eq ascii.length, 62
+  eq ascii.length,      62
   eq ascii.slice(0, 2), '██'
-  eq ascii.at(-1), '\n'
+  eq ascii.at(-1),      '\n'
   eq encodeCode128('ok', 'svg', border: 2, height: 10), '<svg viewBox="0 0 61 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 0h2v10h-2ZM5 0h1v10h-1ZM8 0h1v10h-1ZM13 0h1v10h-1ZM17 0h4v10h-4ZM22 0h1v10h-1ZM24 0h2v10h-2ZM30 0h1v10h-1ZM33 0h1v10h-1ZM35 0h3v10h-3ZM39 0h1v10h-1ZM42 0h2v10h-2ZM46 0h2v10h-2ZM51 0h3v10h-3ZM55 0h1v10h-1ZM57 0h2v10h-2Z"/></svg>'
   eq (encodeCode128('ok', 'svg', border: 2, height: 10, optimize: false).match(/<rect /g)).length, 16
   term = encodeCode128 'ok', 'term', border: 2
@@ -337,75 +567,402 @@ test "Code 128 modules and outputs", ->
   eq gif.length, 660
   eq gif.at(-1), 0x3b
   url = encodeCode128 'ok', 'data-url', border: 2, height: 4
-  eq url.slice(0, 28), 'data:image/gif;base64,R0lGOD'
-  eq url.length, 902
-  throws (-> encodeCode128 'ok', 'png'), Error, 'Unknown output'
-  throws (-> encodeCode128 42), TypeError, 'expected string'
-  throws (-> encodeCode128 'ok', 'raw', scale: 0), RangeError, 'scale'
-  throws (-> encodeCode128 'ok', 'raw', border: -1), RangeError, 'border'
-  throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError, 'height'
-  throws (-> encodeCode128 'ok', 'raw', scale: 100), Error, 'exceeds'
+  eq url, 'data:image/gif;base64,' + btoa(String.fromCharCode(...gif))
+  throws (-> encodeCode128 'ok', 'png'),              Error,      'Unknown output'
+  throws (-> encodeCode128 42),                       TypeError,  'expected string'
+  throws (-> encodeCode128 'ok', 'raw', scale: 0),    RangeError, 'scale'
+  throws (-> encodeCode128 'ok', 'raw', border: -1),  RangeError, 'border'
+  throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError,  'height'
+  throws (-> encodeCode128 'ok', 'raw', scale: 100),  Error,      'exceeds'
 
-# RGBA raster with the bar row painted 30 pixels tall on a gray field.
-bars = (text, opts, scale, W, H, rotate = 0, invert = false) ->
-  raw = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
-  w = raw.length
-  h = 30
-  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
-  turned = rotate is 90 or rotate is 270
-  ox = (W - (if turned then h else w)) >> 1
-  oy = (H - (if turned then w else h)) >> 1
-  for y in [0...h]
-    for x in [0...w]
-      dark = raw[x]
-      dark = not dark if invert
-      v = if dark then 20 else 240
-      px = x
-      py = y
-      switch rotate
-        when 90 then (px = h - 1 - y; py = x)
-        when 180 then (px = w - 1 - x; py = h - 1 - y)
-        when 270 then (px = y; py = w - 1 - x)
-      p = 4 * ((oy + py) * W + ox + px)
-      data[p] = data[p + 1] = data[p + 2] = v
-      data[p + 3] = 255
-  { width: W, height: H, data }
-
-test "Code 128 round trips: scales, rotations, inversion, GS1", ->
+test "round trips: scales, rotations, inversion, GS1", ->
   for scale in [1, 2, 3, 5]
     eq decodeCode128(bars('Hello, World! 2026', {}, scale, 1400, 200)), 'Hello, World! 2026', "scale #{scale}"
+  # No quiet zone at all: the symbol fills the line in both directions.
+  edge = encodeCode128('Wikipedia', 'raw', border: 0, scale: 2).length
+  for rotate in [0, 180]
+    eq decodeCode128(bars('Wikipedia', { border: 0 }, 2, edge, 100, false, rotate)), 'Wikipedia', "flush #{rotate}"
   for rotate in [0, 90, 180, 270]
-    hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, rotate)
-    eq hit.text, 'Wikipedia', "rotate #{rotate}"
-    eq hit.vertical, rotate is 90 or rotate is 270
+    hit = readCode128 bars('Wikipedia', {}, 2, 500, 500, false, rotate)
+    eq hit.text,     'Wikipedia', "rotate #{rotate}"
+    eq hit.vertical, rotate is 90  or rotate is 270
     eq hit.reversed, rotate is 180 or rotate is 270
     eq hit.inverted, false
-    eq hit.codes, [104, 55, 73, 75, 73, 80, 69, 68, 73, 65, 88, 106]
-  hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, 0, true)
-  eq hit.text, 'Wikipedia'
+    eq hit.codes,    WIKIPEDIA
+  hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, true)
+  eq hit.text,     'Wikipedia'
   eq hit.inverted, true
-  eq readCode128(bars('a\x01b\x02', {}, 2, 500, 300)).text, 'a\x01b\x02'
-  eq readCode128(bars('0123456789', {}, 1, 300, 100)).text, '0123456789'
-  eq readCode128(bars('ok', {}, 1, 100, 20)).text, 'ok'
-  hit = readCode128 bars('(01)09501101530003', gs1: true, 2, 600, 300)
-  eq hit.text, '(01)09501101530003'
-  eq hit.gs1, true
-  hit = readCode128 bars('AB\x1dCD', {}, 2, 500, 300)
-  eq hit.text, 'AB\x1dCD'
-  eq hit.gs1, false
-  eq readCode128(toLuma(bars('Wikipedia', {}, 2, 500, 300)), format: 'I420').text, 'Wikipedia'
-  blank = { width: 50, height: 50, data: Uint8Array.new(50 * 50 * 4).fill(200) }
-  eq readCode128(blank), null
-  throws (-> decodeCode128 blank), Error, 'not found'
-  throws (-> readCode128 blank, null), TypeError, 'opts'
-  throws (-> readCode128 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
+  # GS1-128 from a luma plane.
+  hit = readCode128 toLuma(bars('(01)09501101530003', { gs1: true }, 2, 500, 100)), format: 'I420'
+  eq [hit.text, hit.gs1], ['(01)09501101530003', true]
+  # The check digit of another message reads as nothing, at either scale.
+  good = encodeCode128 'Wikipedia', 'raw', border: 0, height: 1
+  bad  = good.slice()
+  bad[110 + k] = encodeCode128('Wikipedib', 'raw', border: 0, height: 1)[110 + k] for k in [0...11]
+  eq readCode128(paint((good for y in [0...30]), 300, 100)).text, 'Wikipedia'
+  eq readCode128(paint((bad  for y in [0...30]), 300, 100)), null, 'spliced check digit'
+  eq readCode128(paint(((bad.flatMap (m) -> [m, m]) for y in [0...30]), 400, 100)), null, 'spliced check digit at scale 2'
 
-test "Code 128 text: shifts, FNC4 high characters, latches", ->
-  text = (codes) -> c128.decodeText(codes, codes.length).text
-  eq text([104, 98, 65, 66, 0, 106]), '\x01b'
-  eq text([104, 100, 33, 34, 0, 106]), 'ÁB'
-  eq text([104, 100, 100, 33, 34, 0, 106]), 'ÁÂ'
-  eq text([104, 100, 100, 33, 100, 34, 0, 106]), 'ÁB'
+# The quad's start edge leans by `degrees` and spans `height`.
+leans =! (hit, degrees, height) ->
+  [tl, tr, br, bl] = hit.corners
+  edge = Math.atan2 bl.x - tl.x, bl.y - tl.y
+  span = Math.hypot bl.x - tl.x, bl.y - tl.y
+  ok Math.abs(edge + degrees * Math.PI / 180) < 0.03, "#{degrees} degrees: edge leans #{(-edge * 180 / Math.PI).toFixed 1}"
+  ok Math.abs(span - height) < 10, "#{degrees} degrees: height #{span.toFixed 1}"
+
+test "corners span the bars and follow a tilt", ->
+  img = bars 'Wikipedia', {}, 2, 500, 300
+  hit = readCode128 img
+  # The bars' true extent, from the image itself, down the first bar.
+  x0  = 250 + hit.t0
+  x1  = 250 + hit.t1
+  x   = Math.floor x0 + 1
+  ys  = (y for y in [0...300] when img.data[4 * (y * 500 + x)] < 128)
+  xs  = hit.corners.map (c) -> c.x
+  eys = hit.corners.map (c) -> c.y
+  ok Math.abs(Math.min(...xs) - x0) < 1 and Math.abs(Math.max(...xs) - x1) < 1, 'width'
+  ok Math.abs(Math.min(...eys) - ys[0]) <= 4 and Math.abs(Math.max(...eys) - ys.at(-1) - 1) <= 4, "height #{Math.min(...eys)}..#{Math.max(...eys)} vs #{ys[0]}..#{ys.at(-1)}"
+  # A taller label turned counterclockwise: to twelve degrees a row still
+  # crosses every bar, beyond that only the tilt estimate reads it. The
+  # start edge leans left going down by the angle, and the quad spans the
+  # label's full height, not just the lines that read.
+  img = bars 'Wikipedia', {}, 3, 700, 700, false, 0, 120
+  for degrees in [5, 12, 30, 45, 60, 75]
+    turned = turn img, degrees
+    hit    = readCode128 turned
+    eq hit?.text, 'Wikipedia', "#{degrees} degrees"
+    # The axes alone read within about fifteen degrees of either one.
+    eq readCode128(turned, tilt: false)?.text, (if degrees <= 12 or degrees >= 75 then 'Wikipedia' else undefined), "#{degrees} degrees, axes only"
+    leans hit, degrees, 120
+  # A wide, short label at a shallow lean: a row still reads it, yet only
+  # one or two rows do, too few for a fit through them to find the lean.
+  # The corners must lean with the bars all the same.
+  img = bars 'DR2039', {}, 5, 700, 700, false, 0, 130
+  for degrees in [4, 8, 12, 16, 20, -4, -12, -20]
+    hit = readCode128 turn(img, degrees)
+    eq hit?.text, 'DR2039', "wide #{degrees} degrees"
+    leans hit, degrees, 130
+  # Leaning the other way: the fit's edge has no direction of its own, and
+  # the corners must keep their order rather than turn a half turn.
+  img = bars 'Wikipedia', {}, 3, 700, 700, false, 0, 120
+  for degrees in [-12, -30, -45]
+    hit = readCode128 turn(img, degrees)
+    eq hit?.text, 'Wikipedia', "#{degrees} degrees"
+    leans hit, degrees, 120
+
+test "ink gain: bars a pixel wider on each side", ->
+  # Print gain widens every bar by what it narrows the next space; the
+  # distances from one bar's start to the next hold where the widths drift.
+  for text in ['Wikipedia', '42094043']
+    raw = encodeCode128 text, 'raw', { scale: 3, height: 1 }
+    fat = raw.map (dark, i) -> dark or raw[i - 1] or raw[i + 1]
+    eq readCode128(paint((fat for y in [0...40]), 900, 120))?.text, text, text
+
+test "text: shifts, FNC4 high characters, latches", ->
+  text =! (codes) -> c128.decodeText(codes, codes.length).text
+  eq text([104, 98, 65, 66, 0, 106]),                  '\x01b'
+  eq text([104, 100, 33, 34, 0, 106]),                 'ÁB'
+  eq text([104, 100, 100, 33, 34, 0, 106]),            'ÁÂ'
+  eq text([104, 100, 100, 33, 100, 34, 0, 106]),       'ÁB'
   eq text([103, 65, 100, 65, 99, 1, 101, 66, 0, 106]), '\x01a01\x02'
-  eq text([105, 0, 100, 33, 0, 106]), '00A'
+  eq text([105, 0, 100, 33, 0, 106]),                  '00A'
   eq c128.decodeText([105, 102, 1, 102, 2, 0, 106], 7), { text: '01\x1d02', gs1: true }
+
+# ==[ PDF417 ]==
+
+p "\nPDF417"
+
+# Message codewords of Latin-1 text.
+cw =! (text, encoding = 'auto') -> p417.codewords Uint8Array.from(text, (ch) -> ch.charCodeAt 0), encoding, []
+
+test "codewords: modes, submodes, switching", ->
+  eq cw('ABCD', 'text'),    [1, 63]
+  eq cw('1234', 'numeric'), [902, 12, 434]
+  eq cw('abcd', 'byte'),    [901, 97, 98, 99, 100]
+  eq cw('abcdef', 'byte'),  [924, 163, 179, 507, 603, 522]
+  # Specification worked examples: nine bytes under 901 keep the tail one
+  # per codeword; text drops to numeric at thirteen digits.
+  eq cw('\x01\x02\x03\x04\x05\x06\x07\x08\x04', 'byte'), [901, 1, 620, 89, 74, 846, 7, 8, 4]
+  eq (cw('1'.repeat(n)).length for n in [1..22]), [1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9]
+  eq (cw('Ä'.repeat(n)).length for n in [1..7]), [2, 3, 4, 5, 6, 6, 7]
+  eq cw('A'),            [0 * 30 + 29]                 # alpha, punctuation-shift pad
+  eq cw('a'),            [27 * 30 + 0]                 # lower latch
+  eq cw('aB'),           [27 * 30 + 0, 27 * 30 + 1]    # alpha shift from lower
+  eq cw('A;'),           [0 * 30 + 29, 0 * 30 + 29]    # punctuation shift, pad
+  eq cw('1,2'),          [28 * 30 + 1, 13 * 30 + 2]    # mixed latch; comma is mixed
+  eq cw('1;;'),          [28 * 30 + 1, 25 * 30 + 0, 0 * 30 + 29]   # punctuation latch when two follow
+  eq cw('Hello\x01World'), [7 * 30 + 27, 4 * 30 + 11, 11 * 30 + 14, 913, 1, 27 * 30 + 22, 14 * 30 + 17, 11 * 30 + 3]
+  eq cw('ab\x01\x02\x03cd'), [901, 163, 177, 269, 787, 135, 100]   # short text runs stay binary
+  throws (-> cw 'é', 'text'),       Error, 'cannot encode'
+  # An odd tail padded in the punctuation submode latches to alpha, and
+  # the text after a byte shift is encoded from there.
+  eq cw('AB1;;\x01;;;;;'), [1, 841, 750, 29, 913, 1, 865, 0, 0, 29]
+  eq cw('AB1;;\x01ABCDE'), [1, 841, 750, 29, 913, 1, 1, 63, 149]
+  throws (-> cw 'x', 'numeric'),    Error, 'digits only'
+  throws (-> cw ''),                Error, 'empty'
+
+test "Reed-Solomon over GF(929)", ->
+  eq Array.from(p417.generator 0), [27, 917]
+  eq Array.from(p417.generator 1), [522, 568, 723, 809]
+  eq p417.generator(8).length, 512
+  # Any corrected codeword polynomial has zero syndromes: encode, corrupt
+  # within capacity, correct back; one parity codeword always stays free.
+  codes = cw 'Errors and erasures over the prime field'
+  data  = p417.symbolCodewords codes, 4, 10, 3       # 40 cells, 16 parity
+  n = data.length
+  k = 16
+  scramble = (errors, erased) ->
+    c = Int32Array.from data
+    c[i] = (c[i] + 100 + i) % 929 for i in [1..errors]
+    e = Int32Array.from [20...20 + erased]
+    c[i] = 0 for i in e
+    [c, e]
+  [c, e] = scramble 3, 9                              # 2*3 + 9 = 15 <= 15
+  eq p417.correct(c, n, k, e, e.length), 3
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 0, 15
+  eq p417.correct(c, n, k, e, e.length), 0
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 4, 8                              # 2*4 + 8 = 16: nothing left to detect with
+  eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 1, 13                             # 2*1 + 13 = 15, the last that corrects
+  eq p417.correct(c, n, k, e, e.length), 1
+  eq Array.from(c), Array.from(data)
+  [c, e] = scramble 1, 14
+  eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 0, 16
+  eq p417.correct(c, n, k, e, e.length), -1
+  [c, e] = scramble 0, 17
+  eq p417.correct(c, n, k, e, e.length), -1
+  c = Int32Array.from data
+  eq p417.correct(c, n, k, e, 0), 0
+
+test "layout: level, dimensions, indicators", ->
+  eq (p417.autoLevel m for m in [1, 40, 41, 160, 161, 320, 321, 863, 864, 925]), [2, 2, 3, 3, 4, 4, 5, 5, 4, 0]
+  eq p417.dimensions(20, undefined, undefined, 3, 3), { columns: 2, rows: 10 }
+  eq p417.dimensions(20, 5, undefined, 3, 3),         { columns: 5, rows: 4 }
+  eq p417.dimensions(20, undefined, 4, 3, 3),         { columns: 5, rows: 4 }
+  eq p417.dimensions(20, 5, 4, 3, 3),                 { columns: 5, rows: 4 }
+  eq p417.dimensions(20, undefined, undefined, 3, 1), { columns: 1, rows: 20 }
+  eq p417.dimensions(20, undefined, undefined, 3, 8), { columns: 4, rows: 5 }
+  eq encodePDF417('Hello PDF417', 'raw', aspect: 1).length > encodePDF417('Hello PDF417', 'raw', aspect: 8).length, true
+  throws (-> p417.dimensions 21, 5, 4, 3, 3),          RangeError, 'holds 20'
+  throws (-> p417.dimensions 2000, 1, undefined, 3, 3), RangeError, 'max 90'
+  throws (-> p417.dimensions 2000, undefined, 3, 3, 3), RangeError, 'max 30'
+  # Never more than 928 cells, whatever the shape.
+  throws (-> p417.dimensions 2, 30, 40, 3, 3),          RangeError, 'max 928'
+  throws (-> p417.dimensions 928, 30, undefined, 3, 3), RangeError, 'max 928'
+  throws (-> p417.dimensions 928, undefined, 31, 3, 3), RangeError, 'max 928'
+  for need in [921..928]
+    dims  = p417.dimensions need, undefined, undefined, 3, 3
+    cells = dims.columns * dims.rows
+    ok cells >= need and cells <= 928, "#{need} fits #{dims.columns}x#{dims.rows}"
+  # Row 4 of a 13-row, 2-column, level 2 symbol: cluster 1 carries the
+  # level and row remainder on the left, the row count on the right.
+  eq p417.indicator(1, 4, 13, 2, 2, false), 30 + 3 * 2 + 0
+  eq p417.indicator(1, 4, 13, 2, 2, true),  30 + 4
+  eq p417.indicator(0, 4, 13, 2, 2, false), 30 + 4
+  eq p417.indicator(2, 4, 13, 2, 2, false), 30 + 1
+  data = p417.symbolCodewords [1, 63], 2, 3, 0
+  eq Array.from(data), [4, 1, 63, 900, ...Array.from(p417.eccCodewords(Int32Array.from([4, 1, 63, 900]), 0))]
+
+HELLO =! """
+  ########.#.#.#...#####.#.#..#####.##.#.#.....##....###.#.#.###......#######.#...#.#..#
+  ########.#.#.#...####.#.#....#....##..#.###..#.....####.#.#...#.....#######.#...#.#..#
+  ########.#.#.#...##.#.#.#####.....###..#.#.######..#.#.#....####....#######.#...#.#..#
+  ########.#.#.#...###.#..#.###.....#..#.....##.##...##.#.####.#####..#######.#...#.#..#
+  ########.#.#.#...##.#.###.....#...###.....#.##...#.####.#.###...###.#######.#...#.#..#
+  ########.#.#.#...#####.#.###....#.#...##.#....###..####.#.#####.##..#######.#...#.#..#
+  ########.#.#.#...#.#..###...###...##.#....##..###..#.#..###.###.....#######.#...#.#..#
+  ########.#.#.#...######.#..#.###..##.#....###...#..#.#.######...###.#######.#...#.#..#
+  ########.#.#.#...#.#..##.#####....###.#....#####.#.#####.#..###.#...#######.#...#.#..#
+  ########.#.#.#...##.#...###.####..###.##..#...##...#.#...##...##....#######.#...#.#..#
+  ########.#.#.#...##.#..###....#...##.##..####...#..####.#..###..###.#######.#...#.#..#
+  ########.#.#.#...##.#...#..#####..#..##..##..####..######.#...##..#.#######.#...#.#..#
+  ########.#.#.#...##.#.....#.##....##.###...##.#....#.#....##....##..#######.#...#.#..#
+  ########.#.#.#...####.#...#....#..#.#...######.###.#####.#...#..##..#######.#...#.#..#
+  ########.#.#.#...####.#....####.#.#.#####..##..#...#.#......#..####.#######.#...#.#..#
+  ########.#.#.#...##..#.##.###.....#.....#.###.###..###..#.#...###...#######.#...#.#..#
+  ########.#.#.#...##.#...#####.###.##.##.####...#...#.#...####....#..#######.#...#.#..#
+  ########.#.#.#...######..#.###.##.#.#####..##..#...####..#.####...#.#######.#...#.#..#
+  """
+
+# Every case here decodes with zxing-cpp.
+PINS =! [
+  ['Hello PDF417', {}, '16759322038964277220', 86, 18]
+  ['The quick brown fox jumps over the lazy dog, 42 times; really? (yes) {ok} [fine] "quoted" #1 @home', {}, '7846982029010869402', 103, 37]
+  ['12345678901234567890123456789012345678901234567890', {}, '5965295783082383056', 86, 28]
+  ['ORDER-2026-09-16 qty 00001234567890123 ref abc', {}, '12089213095314550506', 86, 34]
+  ['\x00\x01\x02\xff\xfe\xfd binary \x80\x81 tail', {}, '5388649561758448112', 86, 28]
+  ['abcdef', { encoding: 'byte' }, '16385500419708780100', 86, 15]
+  ['abcdefg', { encoding: 'byte' }, '2847640181012233553', 86, 16]
+  ['Hello\x01World', {}, '10501875650112426562', 86, 17]
+  ['Grüße, 世界! ünïcödé', {}, '5450240929259030254', 86, 36]
+  ['level zero', { ecc: 0 }, '229268292100416905', 86, 9]
+  ['level eight ' + 'x'.repeat(50), { ecc: 8 }, '16611835918714643843', 205, 69]
+  ['one column', { columns: 1 }, '12025549302922334139', 86, 15]
+  ['thirty columns ' + 'y'.repeat(200), { columns: 30 }, '10289456403934732096', 579, 5]
+  ['ninety rows ' + 'z'.repeat(300), { rows: 90 }, '6998225270771950661', 103, 90]
+  ['compact symbol here', { compact: true }, '17172449583246438028', 52, 19]
+  ['B'.repeat(800) + '1'.repeat(400) + 'c'.repeat(300), {}, '3702506550965028681', 239, 76]
+  ['0000000000000000000000000000000000000000000000000000000000001', { encoding: 'numeric' }, '13842950279047227124', 86, 31]
+  [';;;;;;;;;', {}, '4889440228876649914', 86, 15]
+  ["line one\nline two\r\n\ttabbed", {}, '3017900233706190855', 86, 25]
+]
+
+test "symbols: pinned module rows", ->
+  eq rows(encodePDF417('Hello PDF417', 'raw', rowHeight: 1, border: 0)), HELLO.replaceAll('#', '1').replaceAll('.', '0')
+  for [text, opts, hash, W, H] in PINS
+    raw = encodePDF417 text, 'raw', { ...opts, rowHeight: 1, border: 0 }
+    eq [Bun.hash(rows raw).toString(), raw[0].length, raw.length], [hash, W, H], text.slice(0, 20)
+
+test "outputs agree and options apply", ->
+  # The row height shapes the symbol: at three modules a row the same
+  # message fits nine rows of two columns.
+  raw = encodePDF417 'Hello PDF417', 'raw'
+  eq [raw.length, raw[0].length], [9 * 3 + 4, 17 * 6 + 1 + 4]
+  eq raw[2 + 3][2 + 8], false
+  eq raw[2 + 3][2], true
+  eq encodePDF417('Hello PDF417', 'raw', scale: 2, border: 1, rowHeight: 2, columns: 2).length, 2 * (9 * 2 + 2)
+  ascii = encodePDF417 'Hello PDF417', 'ascii', rowHeight: 1, border: 0
+  eq ascii.split('\n').length, 10
+  term = encodePDF417 'Hello PDF417', 'term', rowHeight: 1, border: 0
+  eq term, ansi(HELLO)
+  svg = encodePDF417 'Hello PDF417', 'svg', rowHeight: 1, border: 0
+  ok svg.startsWith('<svg viewBox="0 0 86 18" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h8v1h-8ZM9 0h1v1h-1Z')
+  eq (encodePDF417('Hello PDF417', 'svg', rowHeight: 1, border: 0, optimize: false).match(/<rect /g)).length, (svg.match(/Z/g)).length
+  gif = gifPixels encodePDF417('Hello PDF417', 'gif', rowHeight: 2, border: 1, scale: 2, columns: 2)
+  eq [gif.width, gif.height], [210, 40]
+  raw = encodePDF417 'Hello PDF417', 'raw', rowHeight: 2, border: 1, scale: 2, columns: 2
+  eq gif.pixels.join(''), raw.flat().map((b) -> if b then 1 else 0).join('')
+  url = encodePDF417 'Hello PDF417', 'data-url', rowHeight: 1, border: 0
+  ok url.startsWith 'data:image/gif;base64,R0lGODdh'
+  throws (-> encodePDF417 'x', 'png'),                   Error,      'Unknown output'
+  throws (-> encodePDF417 42),                           TypeError,  'expected string'
+  throws (-> encodePDF417 'x', 'raw', scale: 0),         RangeError, 'scale'
+  throws (-> encodePDF417 'x', 'raw', ecc: 9),           RangeError, 'ecc'
+  throws (-> encodePDF417 'x', 'raw', columns: 31),      RangeError, 'columns'
+  throws (-> encodePDF417 'x', 'raw', rows: 2),          RangeError, 'rows'
+  throws (-> encodePDF417 'x', 'raw', encoding: 'ascii'), Error,     'encoding'
+  throws (-> encodePDF417 'x'.repeat(2000)),             Error,      'Capacity overflow'
+  throws (-> encodePDF417 'x', 'raw', scale: 60),        Error,      'exceeds'
+
+test "round trips: scales, row heights, rotations, inversion, shapes", ->
+  text = 'Rip reads PDF417 symbols in a few hundred microseconds.'
+  for scale in [1, 2, 3]
+    eq decodePDF417(stack(text, { scale }, 400, 200)), text, "scale #{scale}"
+  for rowHeight in [1, 2, 3, 5]
+    eq decodePDF417(stack(text, { rowHeight, scale: 2 }, 400, 300)), text, "row height #{rowHeight}"
+  for rotate in [0, 90, 180, 270]
+    hit = readPDF417 stack(text, { scale: 2 }, 400, 400, false, rotate)
+    eq hit.text,     text, "rotate #{rotate}"
+    eq hit.vertical, rotate is 90  or rotate is 270
+    eq hit.reversed, rotate is 180 or rotate is 270
+    eq hit.inverted, false
+    eq [hit.rows, hit.columns, hit.ecc, hit.errors, hit.erasures], [14, 3, 2, 0, 0]
+  hit = readPDF417 stack(text, { scale: 2 }, 400, 200, true)
+  eq [hit.text, hit.inverted], [text, true]
+  eq decodePDF417(stack(text, { scale: 2, compact: true }, 400, 200)), text
+  eq decodePDF417(stack(text, { scale: 2, columns: 1 }, 200, 700)), text
+  eq decodePDF417(stack(text, { scale: 1, columns: 30, rows: 3, ecc: 0 }, 700, 100)), text
+  eq decodePDF417(stack(text, { scale: 1, rows: 90 }, 300, 400)), text
+  eq decodePDF417(stack(text, { scale: 2, ecc: 8 }, 800, 400)), text
+  eq decodePDF417(stack('Grüße, 世界!', { scale: 2 }, 300, 200)), 'Grüße, 世界!'
+  eq decodePDF417(toLuma(stack(text, { scale: 2 }, 400, 200)), format: 'I420'), text
+  hit = readPDF417 stack('\x00\x01\xff\xfe', { scale: 2 }, 300, 200)
+  eq Array.from(hit.bytes), [0, 1, 255, 254]
+  eq hit.text, '\x00\x01\xff\xfe'
+  eq hit.codewords, [6, 901, 0, 1, 255, 254]
+
+test "geometry: skew, corners, cropped and damaged start patterns", ->
+  text = 'Symbols read along the true row direction'
+  for skew in [-6, -3, 3, 6]
+    eq decodePDF417(stack(text, { scale: 2 }, 500, 300, false, 0, skew)), text, "skew #{skew}"
+  raw = encodePDF417 text, 'raw', scale: 2, border: 4
+  hit = readPDF417 paint(raw, 400, 300)
+  [tl, tr, br, bl] = hit.corners
+  ok Math.abs(tl.x - ((400 - raw[0].length) >> 1) - 8) < 1.5, "left edge at #{tl.x}"
+  ok Math.abs(tl.y - ((300 - raw.length) >> 1) - 8) < 2,     "top at #{tl.y}"
+  ok Math.abs(bl.y - tl.y - (raw.length - 16)) < 3,           "height #{bl.y - tl.y}"
+  ok Math.abs(tr.x - tl.x - (raw[0].length - 16)) < 3,        "width #{tr.x - tl.x}"
+  # Start pattern cut off the left: the stop pattern anchors the read.
+  cropped = (row.slice(60) for row in raw)
+  hit = readPDF417 paint(cropped, 400, 300)
+  eq hit.text, text
+  right = ((400 - cropped[0].length) >> 1) + cropped[0].length - 8
+  ok Math.abs(hit.corners[1].x - right) < 2,                        "stop edge at #{hit.corners[1].x}"
+  ok Math.abs(hit.corners[1].x - hit.corners[0].x - (raw[0].length - 16)) < 3, "width #{hit.corners[1].x - hit.corners[0].x}"
+  # Start pattern erased on the top and bottom rows: the rows still read.
+  torn = (row.slice() for row in raw)
+  for y in [0...torn.length] when y < 8 + 12 or y >= torn.length - 8 - 12
+    torn[y][x] = false for x in [8...8 + 40]
+  hit = readPDF417 paint(torn, 400, 300)
+  eq hit.text, text
+  # Holes become erasures, not errors.
+  holed = (row.slice() for row in raw)
+  for y in [8 + 12...8 + 18]
+    holed[y][x] = false for x in [60...110]
+  hit = readPDF417 paint(holed, 400, 300)
+  eq hit.text, text
+  ok hit.erasures > 0 and hit.errors <= 1, "erasures #{hit.erasures} errors #{hit.errors}"
+  # Whole rows torn off the top and bottom are erasures across the width.
+  cut = raw.slice 8 + 12, raw.length - 8 - 6
+  hit = readPDF417 paint(cut, 400, 300)
+  eq hit.text, text
+  eq [hit.columns, hit.erasures, hit.errors], [2, 6, 0]
+  # A mirror image reads with the stack walked from its other end.
+  mirror = ([...row].reverse() for row in raw)
+  eq readPDF417(paint(mirror, 400, 300)).text, text
+  # Rows a pixel tall on a clean raster.
+  eq decodePDF417(stack(text, { rowHeight: 1, scale: 1 }, 400, 200)), text
+  blank = flat 60, 60, 200
+  eq readPDF417(blank), null
+  throws (-> decodePDF417 blank),     Error,     'not found'
+  throws (-> readPDF417 blank, null), TypeError, 'opts'
+  throws (-> readPDF417 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
+
+test "errors to the limit through the raster", ->
+  text = 'Errors at the limit of level two'
+  raw  = encodePDF417 text, 'raw', ecc: 2, border: 0, columns: 3
+  # Level 2 holds eight parity codewords and one is kept to check the
+  # correction, so three wrong cells correct and a fourth is a miss. A
+  # wrong cell is a valid codeword of the row's own cluster: the cell
+  # three rows down, copied over all three module rows.
+  wrong = (m, r, c) ->
+    left = 17 + 17 + 17 * c
+    for k in [0...3]
+      m[3 * r + k][left + i] = m[3 * (r + 3) + k][left + i] for i in [0...17]
+  cells = [[1, 0], [1, 1], [1, 2], [2, 0]]
+  for errors in [1..4]
+    m = (row.slice() for row in raw)
+    wrong m, r, c for [r, c] in cells.slice(0, errors)
+    hit = readPDF417 paint(m, 400, 200)
+    if errors < 4
+      eq [hit?.text, hit?.errors, hit?.erasures], [text, errors, 0], "#{errors} wrong cells"
+    else
+      eq hit, null, "#{errors} wrong cells"
+
+test "decompaction: text, bytes, numbers, ECI, macro", ->
+  parse = (codes) -> p417.parse Int32Array.from([codes.length + 1, ...codes]), codes.length + 1
+  eq parse([1, 63]).text, 'ABCD'
+  eq parse([902, 12, 434]).text, '1234'
+  eq parse([901, 97, 98, 99, 100]).text, 'abcd'
+  eq parse([924, 163, 179, 507, 603, 522]).text, 'abcdef'
+  eq parse([901, 1, 620, 89, 74, 846, 7, 8, 4]).text, '\x01\x02\x03\x04\x05\x06\x07\x08\x04'
+  eq parse([7 * 30 + 27, 4 * 30 + 11, 11 * 30 + 14, 913, 1, 27 * 30 + 22, 14 * 30 + 17, 11 * 30 + 3]).text, 'Hello\x01World'
+  eq parse([28 * 30 + 1, 25 * 30 + 0, 0 * 30 + 29]).text, '1;;'
+  eq parse([927, 26, 901, 0xc3, 0xa9]).text, 'é'
+  eq parse([927, 4, 901, 0xb1]).text, 'ą'
+  eq Array.from(parse([927, 26, 901, 0xc3, 0xa9]).bytes), [0xc3, 0xa9]
+  eq parse([921, 1, 63]).readerInit, true
+  # Macro control block after the data: segment index, file id, fields.
+  r = parse [1, 63, 928, 111, 103, 17, 53, 923, 1, 14, 923, 0, 12 * 30 + 4, 21 * 30 + 4, 922]
+  eq r.text, 'ABCD'
+  eq r.macro, { segmentIndex: 3, fileId: '017053', last: true, segmentCount: 4, fileName: 'MEVE' }
+  throws (-> parse [913]),           Error, 'byte shift at end'
+  throws (-> parse [927]),           Error, 'ECI at end'
+  throws (-> parse [922]),           Error, 'not a mode'
+  throws (-> parse [928, 111]),      Error, 'truncated'
+  throws (-> parse [928, 111, 103]), Error, 'no file id'
+  throws (-> parse [902, 899]),      Error, 'start with 1'

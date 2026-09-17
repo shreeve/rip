@@ -1,0 +1,7 @@
+export default
+  name: 'scan'
+  hosts: ['scan.via.rip', 'scan.local'] # loopback + LAN (reachable per `janus mode`)
+  hub:
+    bridge: 'hub'           # Janus Bam door for live App watch (see index.rip)
+  app:
+    root: 'app'

@@ -896,7 +896,7 @@ class Emitter {
   }
 
   static isReadonlyDeclIn(stores, x) {
-    if (!isNode(x) || x[0] !== 'readonly' || x.length !== 3) return false;
+    if (!isNode(x) || (x[0] !== 'readonly' && x[0] !== 'void-readonly') || x.length !== 3) return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'readonly';
@@ -2286,7 +2286,7 @@ class Emitter {
       return;
     }
     if (!(isNode(value) && isDefHead(value[0]))) {
-      throw this.positionedError(value, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`, `save! = =>`, `fn!: ->`", owner);
+      throw this.positionedError(value, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`, `save! =! ->`, `save! = =>`, `fn!: ->`", owner);
     }
   }
 
@@ -4913,6 +4913,7 @@ class Emitter {
     // Readonly — the same discipline again: `readonly x, 5`
     // declines to call emission on its semanticKind
     'readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
+    'void-readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
     // Module imports only (spec + source): the dynamic-import CALL
     // spells the same head and declines to the expression path on its
     // semanticKind — length cannot discriminate (`import(Foo, "./m.js")`
@@ -8917,11 +8918,12 @@ class Emitter {
   // construction: the glyphs differ); a typed twin's annotation role
   // covers the whole declaration.
   readonlyDecl(node, ind) {
-    const [, target, value] = node;
+    const [head, target, value] = node;
+    if (head === 'void-readonly') this.registerVoidValue(value, node);
     if (typeof target !== 'string') {
       throw this.positionedError(node, `emitter: a readonly declaration takes a plain name — '<target> =! …' cannot declare a ${isNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
     }
-    this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
+    this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
       this.mark(node, 'target', () => this.b.emit(target));
       if (this.ts) this.noteKind(node, 'target', 'readonly');
@@ -8937,7 +8939,7 @@ class Emitter {
         this.expr(value);
         if (wrap) this.b.emit(')');
       }));
-    }));
+    })));
     this.b.emit(';');
   }
 

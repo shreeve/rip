@@ -172,6 +172,26 @@ code "export void assign indented", '''
   };
   '''
 
+code "export void readonly wrapped", '''
+  export save! =!
+  -> 1
+  ''', '''
+  export const save = (function() {
+    1;
+    return;
+  });
+  '''
+
+code "export void readonly indented", '''
+  export save! =!
+    -> 1
+  ''', '''
+  export const save = (function() {
+    1;
+    return;
+  });
+  '''
+
 code "export typed state wrapped", '''
   export c: number :=
   1
@@ -442,6 +462,26 @@ code "void assign indented", '''
     1;
     return;
   };
+  '''
+
+code "void readonly wrapped", '''
+  save! =!
+  -> 1
+  ''', '''
+  const save = (function() {
+    1;
+    return;
+  });
+  '''
+
+code "void readonly indented", '''
+  save! =!
+    -> 1
+  ''', '''
+  const save = (function() {
+    1;
+    return;
+  });
   '''
 
 code "state wrapped", '''

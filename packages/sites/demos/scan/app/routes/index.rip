@@ -1,0 +1,213 @@
+# One camera, three readers. QRCanvas and QRCamera decode QR through the
+# VideoFrame path and paint the finder overlay; the luma that lands in the
+# scanner's arena goes on to readCode128 and readPDF417 without another
+# copy. Every hit is announced once until a different code appears. The
+# stats line reports what the camera delivers and how the readers keep up,
+# so a change to the pipeline is measured, not felt.
+import { QRCanvas, rearCamera, frameLoop } from 'rip/barcodes/dom'
+import { readCode128 } from 'rip/barcodes/code128'
+import { readPDF417 } from 'rip/barcodes/pdf417'
+
+export Home = component
+  player  := null
+  overlay := null
+  finder  := null      # the viewfinder element; the readers scan what it shows
+  status  := ''        # shown only when something fails
+  latest  := null
+  history := []
+  cancel  := null
+  camera  := null
+  canvas  := null
+  stream  := ''        # delivered width x height and frame rate
+  fps     := 0
+  decodeMs := 0        # moving average over frames
+  frames  := 0         # since the last reset
+  reads   := 0
+  firstMs := null      # time to the first read since the last reset
+  armedAt := 0
+  zoom    := 2         # the default: twice the pixels per module
+  zoomRange := null
+  torchable := false
+  torch   := false
+  quality := '4k'
+  seen    := 0         # id of the last frame the 1D and stacked readers saw
+  stamps  := []
+
+  mounted: ->
+    try
+      camera = rearCamera! player, format: 'auto'
+    catch error
+      status = "Camera unavailable: #{error.message}"
+      return
+    # Above 1080p a QR's finders are found at half resolution on two frames
+    # in three, and at full resolution on the third, so a small or distant
+    # code is still found within a tenth of a second.
+    canvas = QRCanvas.new { overlay }, async: true, nativeLimit: 1500, nativeEvery: 3
+    armedAt = performance.now()
+    describe()
+    fit()
+    player.addEventListener 'loadedmetadata', (-> describe()), once: true
+    window.addEventListener 'resize', fit
+    document.addEventListener 'visibilitychange', wake
+    cancel = frameLoop (-> scan().catch (error) -> report error), player
+
+  # A failure anywhere in the loop lands in the status line, since a phone
+  # shows no console.
+  failed := ''
+  report: (error) ->
+    return if failed is error.message
+    failed = error.message
+    status = "Error: #{error.message}"
+
+  # Scan the part of the frame the viewfinder shows and a tenth beyond each
+  # edge, since a symbol centered by eye can poke past the edge.
+  fit: ->
+    canvas.cropTo finder.clientWidth / finder.clientHeight, 0.1 if finder?.clientHeight
+
+  # What the track settled on, and the controls it offers.
+  describe: ->
+    try
+      s = camera.settings()
+      w = s.width  or player.videoWidth
+      h = s.height or player.videoHeight
+      stream = "#{w}x#{h}#{if s.frameRate then ' @' + Math.round(s.frameRate) else ''}"
+      caps = camera.capabilities()
+      zoomRange = if caps.zoom then { min: caps.zoom.min, max: Math.min(caps.zoom.max, 5), step: caps.zoom.step or 0.1 } else null
+      torchable = !!caps.torch
+      # A new track starts unlit and at 1x; carry the page's zoom over.
+      torch = false
+      setZoom zoom if zoomRange
+    catch error
+      report error
+
+  setZoom: (value) ->
+    zoom = value
+    camera.zoom(value).catch (error) -> report error
+
+  toggleTorch: ->
+    torch = not torch
+    camera.torch(torch).catch (error) -> report error
+
+  # Reopen at another size to measure what resolution buys. The old stream
+  # is already stopped when a request fails, so the failure is the status.
+  setQuality: (name) ->
+    quality = name
+    size = if name is '4k' then { width: { ideal: 3840 }, height: { ideal: 2160 } } else if name is '1080p' then { width: { ideal: 1920 }, height: { ideal: 1080 } } else { width: { ideal: 1280 }, height: { ideal: 720 } }
+    try
+      camera.reopen! size
+    catch error
+      report error
+      return
+    describe()
+    clear()
+
+  # A phone ends or pauses the track while the page is hidden. Shown again,
+  # a track that is no longer live is reopened under the same constraints
+  # and a paused player is resumed.
+  wake: ->
+    return unless document.visibilityState is 'visible' and camera
+    track = camera.track()
+    if track and track.readyState is 'live'
+      player.play()?.catch (-> undefined)
+      return
+    try
+      camera.reopen! {}
+      describe()
+    catch error
+      report error
+
+  # The reset button: the stream at 4K, torch off, zoom at 2x, and a clear
+  # page. A stream change only clears the page.
+  reset: ->
+    toggleTorch() if torch
+    setZoom 2 if zoomRange and zoom isnt 2
+    if quality is '4k' then clear() else setQuality '4k'
+
+  clear: ->
+    frames  = 0
+    reads   = 0
+    firstMs = null
+    armedAt = performance.now()
+    latest  = null
+    history = []
+    seen    = 0
+    canvas?.clear()
+
+  # Per presented frame: QR through the canvas (its own async decode), then
+  # the other readers on the same luma while the scanner is not busy.
+  scan: ->
+    t0   = performance.now()
+    text = camera.readFrame! canvas, true
+    frame = canvas.lastFrame()
+    hit = null
+    if text isnt undefined
+      hit = { kind: 'QR', text }
+    else if frame and frame.id isnt seen
+      seen = frame.id
+      c128 = readCode128 frame, format: 'I420'
+      if c128
+        hit = { kind: 'Code 128', text: c128.text }
+        canvas.mark! c128.corners
+      else
+        pdf = readPDF417 frame, format: 'I420'
+        if pdf
+          hit = { kind: 'PDF417', text: pdf.text }
+          canvas.mark! pdf.corners
+    dt = performance.now() - t0
+    decodeMs = if frames then decodeMs * 0.9 + dt * 0.1 else dt
+    frames++
+    tick t0
+    if hit
+      reads++
+      firstMs = t0 - armedAt if firstMs is null
+      found hit.kind, hit.text
+
+  # Frames per second over the last second.
+  tick: (now) ->
+    stamps.push now
+    stamps.shift() while stamps.length and stamps[0] < now - 1000
+    fps = stamps.length
+
+  found: (kind, text) ->
+    return if latest? and latest.kind is kind and latest.text is text
+    latest  = { kind, text }
+    history = [{ kind, text, at: Date.new().toLocaleTimeString() }, ...history].slice 0, 20
+
+  beforeUnmount: ->
+    cancel?()
+    camera?.stop()
+    window.removeEventListener 'resize', fit
+    document.removeEventListener 'visibilitychange', wake
+
+  render
+    div class: 'stats'
+      span "#{stream or 'no stream'}"
+      span "#{fps} fps"
+      span "#{decodeMs.toFixed 1} ms"
+      span "reads #{reads}/#{frames}"
+      span (if firstMs? then "first #{(firstMs / 1000).toFixed 2} s" else 'no read yet')
+    p class: 'status', status if status
+    div class: 'viewfinder', ref: finder
+      video ref: player, playsinline: true, muted: true
+      canvas ref: overlay, 'aria-hidden': 'true'
+      div class: 'aimer', 'aria-hidden': 'true'
+      div class: 'hint', 'QR · PDF417 · Code 128' unless latest?
+    div class: 'latest', 'aria-live': 'polite', role: 'status'
+      if latest?
+        span class: 'kind', latest.kind
+        code latest.text
+    div class: 'controls'
+      for name in ['720p', '1080p', '4k']
+        button class: (if quality is name then 'on' else ''), 'aria-pressed': (quality is name), @click: (-> setQuality name), name
+      if zoomRange?
+        label "zoom #{zoom.toFixed 1}x"
+          input type: 'range', min: zoomRange.min, max: zoomRange.max, step: zoomRange.step, value: zoom, @input: (e) -> setZoom Number(e.target.value)
+      if torchable
+        button class: (if torch then 'on' else ''), 'aria-pressed': torch, @click: (-> toggleTorch()), 'torch'
+      button @click: (-> reset()), 'reset'
+    ul class: 'history'
+      for hit in history
+        li
+          span class: 'kind', hit.kind
+          code hit.text
+          span class: 'at', hit.at
