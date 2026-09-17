@@ -14,10 +14,11 @@ hits get the same lock through `canvas.mark!`. A hit is
 announced once until a different code appears; the last twenty stay in a
 list.
 
-A stats line shows the delivered stream size and frame rate, frames per
-second, milliseconds per frame, reads per frame since the last reset and
-the time to the first read, so a change to the pipeline is measured
-rather than felt. The controls reopen the camera at 720p, 1080p or 4K,
+A stats line at the top shows the delivered stream size and frame rate,
+frames per second, milliseconds per frame, reads per frame since the last
+reset and the time to the first read, so a change to the pipeline is
+measured rather than felt. The viewfinder is square in portrait, with a
+card-shaped guide, and the latest read sits right under it. The controls reopen the camera at 720p, 1080p or 4K,
 set the zoom where the browser offers it (iOS 17+ and Android), switch
 the torch, and reset the counters.
 

@@ -11,7 +11,7 @@ import { readPDF417 } from 'rip/barcodes/pdf417'
 export Home = component
   player  := null
   overlay := null
-  status  := 'Starting the camera'
+  status  := ''        # shown only when something fails
   latest  := null
   history := []
   cancel  := null
@@ -39,7 +39,6 @@ export Home = component
       status = "Camera unavailable: #{error.message}"
       return
     canvas = QRCanvas.new { overlay }, cropToSquare: false, async: true
-    status = 'Fill the box with a QR code, a PDF417 symbol or a Code 128 label'
     armedAt = performance.now()
     describe()
     player.addEventListener 'loadedmetadata', (-> describe()), once: true
@@ -143,18 +142,22 @@ export Home = component
     camera?.stop()
 
   render
-    h1 'Scan'
-    p status
-    div class: 'viewfinder'
-      video ref: player, playsinline: true, muted: true
-      canvas ref: overlay
-      div class: 'aimer'
     div class: 'stats'
       span "#{stream or 'no stream'}"
       span "#{fps} fps"
       span "#{decodeMs.toFixed 1} ms"
       span "reads #{reads}/#{frames}"
       span (if firstMs? then "first #{(firstMs / 1000).toFixed 2} s" else 'no read yet')
+    p class: 'status', status if status
+    div class: 'viewfinder'
+      video ref: player, playsinline: true, muted: true
+      canvas ref: overlay
+      div class: 'aimer'
+      div class: 'hint', 'QR · PDF417 · Code 128' unless latest?
+    if latest?
+      div class: 'latest'
+        span class: 'kind', latest.kind
+        code latest.text
     div class: 'controls'
       for name in ['720p', '1080p', '4k']
         button class: (if quality is name then 'on' else ''), @click: (-> setQuality name), name
@@ -164,10 +167,6 @@ export Home = component
       if torchable
         button class: (if torch then 'on' else ''), @click: (-> toggleTorch()), 'torch'
       button @click: (-> reset()), 'reset'
-    if latest?
-      div class: 'latest'
-        span class: 'kind', latest.kind
-        code latest.text
     ul class: 'history'
       for hit in history
         li
