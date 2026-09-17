@@ -4,7 +4,7 @@
 //   - the grammar/lexer surface: COMPONENT/RENDER keywords, the
 //     context-sensitive offer/accept classification, the render-block
 //     scan context and rewrite pass
-//   - the member model: declaration spellings lowering into _init(__props)
+//   - the member model: declaration spellings lowering into _init(__given)
 //     in the order, member unwrap (the (1) component-scope twin),
 //     lifecycle hooks, owner-frame effects
 //   - the parse-time defect layer: #121 (uncategorized body
@@ -219,14 +219,14 @@ describe('typed and optional props', () => {
   test('`@size: number` is a REQUIRED typed prop — \'s lowering, the annotation recorded for M12-E', () => {
     const { code } = compile('C = component\n  @size: number\n  render\n    div "x"\n');
     expect(code).toContain("static __props = ['size'];");
-    expect(code).toContain('this.size = __state(__props.__bind_size__ ?? __props.size);');
+    expect(code).toContain('this.size = __state(__given.__bind_size__ ?? __given.size);');
   });
 
   test('`@size: number = 5` is a typed plain PUBLIC field; `@size: number := 5` a typed state prop', () => {
     expect(compile('C = component\n  @size: number = 5\n  render\n    div "x"\n').code)
-      .toContain('this.size = __props.size ?? 5;');
+      .toContain('this.size = __given.size ?? 5;');
     expect(compile('C = component\n  @size: number := 5\n  render\n    div "x"\n').code)
-      .toContain('this.size = __state(__props.__bind_size__ ?? __props.size ?? 5);');
+      .toContain('this.size = __state(__given.__bind_size__ ?? __given.size ?? 5);');
   });
 
   test('a PRIVATE bare typed line has no member reading and rejects ', () => {
@@ -236,7 +236,7 @@ describe('typed and optional props', () => {
   test('`@name? := "anon"` — an optional prop WITH a default: \'s exact lowering, the marker recorded side-band', () => {
     const src = 'C = component\n  @name? := "anon"\n  render\n    div "x"\n';
     const { code } = compile(src);
-    expect(code).toContain('this.name = __state(__props.__bind_name__ ?? __props.name ?? "anon");');
+    expect(code).toContain('this.name = __state(__given.__bind_name__ ?? __given.name ?? "anon");');
     expect(code).toContain("static __props = ['name'];");
     // The marker's span reaches RoleStore (the side-band role —
     //  type story reads it).
@@ -262,9 +262,9 @@ describe('typed and optional props', () => {
 
   test('the optional marker rides every member operator: `? =`, `? ~=`, `? =!` lower as the unmarked forms , marker recorded', () => {
     expect(compile('C = component\n  @name? = 1\n  render\n    div "x"\n').code)
-      .toContain('this.name = __props.name ?? 1;');
+      .toContain('this.name = __given.name ?? 1;');
     expect(compile('C = component\n  @name? =! 1\n  render\n    div "x"\n').code)
-      .toContain('this.name = __props.name ?? 1;');
+      .toContain('this.name = __given.name ?? 1;');
     expect(compile('C = component\n  x := 1\n  @big? ~= x * 2\n  render\n    div "x"\n').code)
       .toContain('this.big = __computed(() => (this.x.value * 2));');
     // The marker's span records on each declaration node.
@@ -282,19 +282,19 @@ describe('typed and optional props', () => {
     // operator; each cell lowers exactly like its untyped optional
     //.
     expect(compile('C = component\n  @name?: string := "anon"\n  render\n    div "x"\n').code)
-      .toContain('this.name = __state(__props.__bind_name__ ?? __props.name ?? "anon");');
+      .toContain('this.name = __state(__given.__bind_name__ ?? __given.name ?? "anon");');
     // The spaced spelling is the same program.
     expect(compile('C = component\n  @name? : string := "anon"\n  render\n    div "x"\n').code)
-      .toContain('this.name = __state(__props.__bind_name__ ?? __props.name ?? "anon");');
+      .toContain('this.name = __state(__given.__bind_name__ ?? __given.name ?? "anon");');
     expect(compile('C = component\n  @name?: string = "anon"\n  render\n    div "x"\n').code)
-      .toContain('this.name = __props.name ?? "anon";');
+      .toContain('this.name = __given.name ?? "anon";');
     expect(compile('C = component\n  x := 1\n  @big?: number ~= x * 2\n  render\n    div "x"\n').code)
       .toContain('this.big = __computed(() => (this.x.value * 2));');
     expect(compile('C = component\n  @max?: number =! 10\n  render\n    div "x"\n').code)
-      .toContain('this.max = __props.max ?? 10;');
+      .toContain('this.max = __given.max ?? 10;');
     // Bodiless: an optional TYPED prop.
     expect(compile('C = component\n  @label?: string\n  render\n    div "x"\n').code)
-      .toContain('this.label = __state(__props.__bind_label__ ?? __props.label);');
+      .toContain('this.label = __state(__given.__bind_label__ ?? __given.label);');
   });
 
   test('the three-way combination records BOTH side-band roles — optionalMarker and annotation (M12-E reads the pair)', () => {
@@ -326,7 +326,7 @@ describe('typed and optional props', () => {
 
   test('`@items: Array<number>` lowers as a required typed prop — generic type text is legal here', () => {
     expect(compile('C = component\n  @items: Array<number>\n  render\n    div "x"\n').code)
-      .toContain('this.items = __state(__props.__bind_items__ ?? __props.items);');
+      .toContain('this.items = __state(__given.__bind_items__ ?? __given.items);');
   });
 });
 
@@ -357,16 +357,16 @@ describe('the member model: _init lowering and member unwrap', () => {
   test('the core seven-spelling lowering: source-order init, offers next, effects last, static __props', () => {
     const { code } = compile(SRC);
     expect(code).toContain("static __props = ['label', 'opt', 'step'];");
-    const init = code.slice(code.indexOf('_init(__props) {'), code.indexOf('onClick(e)'));
+    const init = code.slice(code.indexOf('_init(__given) {'), code.indexOf('onClick(e)'));
     const lines = init.split('\n').map((l) => l.trim()).filter((l) => l && l !== '}' && !l.startsWith('_init'));
     // Value members initialize in SOURCE ORDER (a plain member reads a
     // state declared above it; traces log as written); offers register
     // after the values; effects start last.
     expect(lines).toEqual([
  'this.count = __state(0);',
- 'this.label = __state(__props.__bind_label__ ?? __props.label);',
- 'this.opt = __state(__props.__bind_opt__ ?? __props.opt);',
- 'this.step = __state(__props.__bind_step__ ?? __props.step ?? 1);',
+ 'this.label = __state(__given.__bind_label__ ?? __given.label);',
+ 'this.opt = __state(__given.__bind_opt__ ?? __given.opt);',
+ 'this.step = __state(__given.__bind_step__ ?? __given.step ?? 1);',
  'this.limit = 100;',
  'this.note = "plain";',
  'this.total = __computed(() => (this.count.value * 2));',

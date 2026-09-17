@@ -363,7 +363,7 @@ code 'computed postfix ternary compiles to JS ternary', '''
       div "hello"
   ''', '''
   export const Foo = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.user = __state(null);
       this.href = __computed(() => (this.user.value ? "/b" : "/a"));
     }
@@ -386,7 +386,7 @@ code 'render block with identifier property value compiles to reactive setAttrib
         "click"
   ''', '''
   export const Bar = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.user = __state(null);
       this.href = __computed(() => (this.user.value ? "/b" : "/a"));
     }

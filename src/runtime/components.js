@@ -909,7 +909,7 @@ function __style(el, value) {
 // The prop keys a construction passes, checked against the definition:
 // `children` is the projection channel and always legal; `__bind_x__`
 // carries the shared container the `<=>` channel passes for a DECLARED
-// prop x (_init reads __props.__bind_x__ first), and an unknown bind name
+// prop x (_init reads __given.__bind_x__ first), and an unknown bind name
 // is loud even under `extends` — __bind_ keys never ride rest. Under
 // `extends <tag>` an undeclared prop is a REST prop forwarded onto the
 // inherited element; anywhere else it is an error. Answers the rest

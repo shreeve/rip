@@ -808,7 +808,7 @@ code 'top-level `a` is an HTML anchor, not an SVG element', '''
         "go"
   ''', '''
   let A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('a');
@@ -828,7 +828,7 @@ code 'inside an svg subtree, `a` takes the SVG namespace', '''
         a href: "/x"
   ''', '''
   let B = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -853,7 +853,7 @@ code 'single element', '''
       div
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -869,7 +869,7 @@ code 'element with text child', '''
       span "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -888,7 +888,7 @@ code 'nested elements', '''
         span "inner"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -908,7 +908,7 @@ code 'element with id', '''
       div#main
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -925,7 +925,7 @@ code 'element with static class', '''
       div.card
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -942,7 +942,7 @@ code 'element with multiple classes', '''
       div.card.active
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -959,7 +959,7 @@ code 'static attribute', '''
       input type: "text", placeholder: "name"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('input');
@@ -977,7 +977,7 @@ code 'boolean attribute', '''
       input disabled: true
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('input');
@@ -995,7 +995,7 @@ code 'reactive attribute', '''
       a href: href
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.href = __computed(() => "/home");
     }
     _create() {
@@ -1016,7 +1016,7 @@ code 'reactive boolean attribute', '''
       button disabled: loading
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.loading = __state(true);
     }
     _create() {
@@ -1037,7 +1037,7 @@ code 'reactive text node', '''
       span name
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.name = __state("world");
     }
     _create() {
@@ -1060,7 +1060,7 @@ code 'event handler with method reference', '''
       button @click: handleClick
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     handleClick() {
       return p("clicked");
@@ -1081,7 +1081,7 @@ code 'bare @click shorthand binds onClick to its element', '''
       button @click, "Click me"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     onClick() {
       return p("clicked");
@@ -1105,7 +1105,7 @@ code 'bare shorthand resolves @keydown to onKeydown, multiple per element', '''
       button @click, @keydown, "Press"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     onClick() {
       return p("click");
@@ -1133,7 +1133,7 @@ code 'bare shorthand scopes the listener to the element it sits on, not the root
         button @click, "inner"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     onClick() {
       return p("clicked");
@@ -1158,7 +1158,7 @@ code 'explicit @event: handler binds to the element', '''
       button @click: toggle
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     toggle() {
       return p("explicit");
@@ -1179,7 +1179,7 @@ code 'defining onClick alone attaches no listener (no name-based magic)', '''
       button "Click me"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     onClick() {
       return p("clicked");
@@ -1201,7 +1201,7 @@ code 'onError is a lifecycle hook, never a DOM listener', '''
       div "safe"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     onError(e) {
       return p(e.message);
@@ -1222,7 +1222,7 @@ code 'value: @event is a member read, not an event binding', '''
       input value: @click
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('input');
@@ -1240,7 +1240,7 @@ code 'static element ref writes the state cell + registers compare-and-clear', '
       canvas ref: canvas
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.canvas = __state(null);
     }
     _create() {
@@ -1263,7 +1263,7 @@ code 'plain `=` member read + reassigned only in an effect is NOT a silent-freez
       div "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.count = 0;
       __effect(() => {
         this.count = this.count + 1;
@@ -1287,7 +1287,7 @@ code 'two-way binding value (text input)', '''
       input value <=> name
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.name = __state("");
     }
     _create() {
@@ -1309,7 +1309,7 @@ code 'two-way binding checked (checkbox)', '''
       input type: "checkbox", checked <=> active
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.active = __state(false);
     }
     _create() {
@@ -1332,7 +1332,7 @@ code 'two-way binding valueAsNumber (number input)', '''
       input type: "number", value <=> age
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.age = __state(25);
     }
     _create() {
@@ -1355,7 +1355,7 @@ code 'value: reactive is one-way push (use <=> for two-way)', '''
       input type: "text", value: name
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.name = __state("");
     }
     _create() {
@@ -1377,7 +1377,7 @@ code 'dynamic classes with .()', '''
       div.("card", isActive && "active")
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.isActive = __state(true);
     }
     _create() {
@@ -1398,7 +1398,7 @@ code 'combined static + dynamic classes: .card.(\'flex-1\')', '''
         . "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1422,7 +1422,7 @@ code 'multiple static + dynamic: .card.primary.(\'flex\', active && \'on\')', ''
       .card.primary.("flex", active && "on")
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.active = __state(true);
     }
     _create() {
@@ -1443,7 +1443,7 @@ code 'static class merged with reactive class attr', '''
       div.card class: (isActive && "active")
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.isActive = __state(true);
     }
     _create() {
@@ -1467,7 +1467,7 @@ code 'lifecycle hooks mounted and unmounted', '''
       div "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     mounted() {
       return p("mounted");
@@ -1492,7 +1492,7 @@ code 'offer compiles to state + setContext', '''
       div
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.active = __state("hello");
       setContext('active', this.active);
     }
@@ -1511,7 +1511,7 @@ code 'accept compiles to getContext', '''
       div
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.active = getContext('active');
     }
     _create() {
@@ -1529,7 +1529,7 @@ code 'svg element with children', '''
         circle cx: "50", cy: "50", r: "40"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1550,7 +1550,7 @@ code 'svg static class: attribute closes its setAttribute call', '''
       svg class: 'animate-spin'
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1567,7 +1567,7 @@ code 'svg static class: array closes both __clsx and setAttribute', '''
       svg class: ['icon', 'spin']
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1586,7 +1586,7 @@ code 'svg with multiple element types', '''
         text "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1613,7 +1613,7 @@ code 'svg with class uses setAttribute', '''
         path d: "M10 10"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1633,7 +1633,7 @@ code 'hyphenated attributes (data-* and aria-*)', '''
       div data-testid: "main", aria-label: "content"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1651,7 +1651,7 @@ code 'data attribute sigil ($open → data-open)', '''
       div $testid: "main", $open: true
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1669,7 +1669,7 @@ code 'data attribute sigil hyphenated ($my-thing → data-my-thing)', '''
       div $my-thing: "test"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1687,7 +1687,7 @@ code 'reactive innerHTML', '''
       div innerHTML: content
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.content = __state("hello");
     }
     _create() {
@@ -1708,7 +1708,7 @@ code 'reactive textContent', '''
       div textContent: text
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.text = __state("hi");
     }
     _create() {
@@ -1728,7 +1728,7 @@ code 'element with id and multiple classes', '''
       div#app.main.container
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1747,7 +1747,7 @@ code 'implicit div for .class selector', '''
         span "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1769,7 +1769,7 @@ code 'static style attribute', '''
         span "styled"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1791,7 +1791,7 @@ code 'static style object takes the style road', '''
         span "styled"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1813,7 +1813,7 @@ code 'reactive style object takes the style road in an effect', '''
       div style: { color: tone }
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.tone = __state("red");
     }
     _create() {
@@ -1835,8 +1835,8 @@ code 'a style value spelled as a name takes the style road, which removes on nul
   ''', '''
   export const A = class extends __Component {
     static __props = ['style'];
-    _init(__props) {
-      this.style = __state(__props.__bind_style__ ?? __props.style ?? null);
+    _init(__given) {
+      this.style = __state(__given.__bind_style__ ?? __given.style ?? null);
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1855,7 +1855,7 @@ code 'multiple boolean attributes', '''
       input hidden: true, required: false
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('input');
@@ -1875,7 +1875,7 @@ code 'mixed text and element children', '''
         strong "world"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -1899,7 +1899,7 @@ code 'event handler with element children', '''
         span "Click me"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     handleClick() {
       return p("hi");
@@ -1926,7 +1926,7 @@ code 'reactive boolean + reactive text combined', '''
         span label
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.label = __state("btn");
       this.disabled = __state(false);
     }
@@ -1955,7 +1955,7 @@ code 'multiple state and computed', '''
       span sum
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.x = __state(1);
       this.y = __state(2);
       this.sum = __computed(() => (this.x.value + this.y.value));
@@ -1980,7 +1980,7 @@ code 'reactive expression as text (x + 1)', '''
       span (x + 1)
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.x = __state(5);
     }
     _create() {
@@ -2003,7 +2003,7 @@ code 'reactive binary op expression as text', '''
       span count * 2
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.count = __state(0);
     }
     _create() {
@@ -2026,7 +2026,7 @@ code 'inline arrow event handler', '''
       button @click: -> @handleClick()
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     handleClick() {
       return p("clicked");
@@ -2046,7 +2046,7 @@ code 'bare .() at line start (implicit div)', '''
       .("card", "active")
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2066,7 +2066,7 @@ code 'bare .() with children', '''
         span "inside"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2089,7 +2089,7 @@ code 'static class: attribute', '''
       div class: "static-class"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2106,7 +2106,7 @@ code 'static class: array uses __clsx', '''
       div class: ["a", "b"]
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2124,7 +2124,7 @@ code 'inline class: array with child block', '''
         span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2146,7 +2146,7 @@ code 'inline class: array with conditional and child block', '''
         span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2171,7 +2171,7 @@ code 'beforeMount and beforeUnmount hooks', '''
       div "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     beforeMount() {
       return p("before");
@@ -2199,7 +2199,7 @@ code 'computed with block body', '''
       span doubled
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.x = __state(0);
       this.doubled = __computed(() => {
         let v = this.x.value * 2;
@@ -2229,7 +2229,7 @@ code 'effect with block body', '''
       div "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.x = __state(0);
       __effect(() => {
         let v = this.x.value + 1;
@@ -2253,7 +2253,7 @@ code 'render = prefix: property access', '''
         = item.textContent
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2272,7 +2272,7 @@ code 'render = prefix: deep property (nav is HTML tag)', '''
         = nav.dataset.trigger
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2291,7 +2291,7 @@ code 'render = prefix: link.href (link is HTML tag)', '''
         = link.href
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -2310,7 +2310,7 @@ code 'render: property access attr value with children', '''
         span "child"
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -2332,7 +2332,7 @@ code 'render: deep property chain attr value with children', '''
         span "child"
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -2354,7 +2354,7 @@ code 'render: CSS class tail still works with children', '''
         span "child"
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -2376,7 +2376,7 @@ code 'render: CSS class + property access attr coexist', '''
         span "child"
   ''', '''
   export const Test = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -2394,7 +2394,7 @@ code 'render: CSS class + property access attr coexist', '''
 
 # Block factories are class METHODS on the v4 scaffold (no IIFE wrapper,
 # no module-level create_block functions); disposers register through
-# __ownerFrame(); declared props surface as static __props.
+# __ownerFrame(); declared props surface as static __given.
 
 code 'simple conditional', '''
   export A = component
@@ -2404,7 +2404,7 @@ code 'simple conditional', '''
         span "yes"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -2471,7 +2471,7 @@ code 'if-else conditional', '''
         span "no"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -2563,7 +2563,7 @@ code 'simple loop', '''
         span item
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([1, 2, 3]);
     }
     _create() {
@@ -2618,7 +2618,7 @@ code 'text output in loop with postfix if else', '''
           = "Ready" if item else "No"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([true]);
     }
     _create() {
@@ -2673,7 +2673,7 @@ code 'conditional inside loop threads loop vars', '''
           span "yes"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{active: true}]);
     }
     _create() {
@@ -2771,7 +2771,7 @@ code 'nested loops thread outer vars', '''
           span cell
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.rows = __state([[1, 2]]);
     }
     _create() {
@@ -2857,7 +2857,7 @@ code 'tag-named local (`code`) shadows the HTML tag name', '''
         div code
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{label: "x", body: "y"}]);
     }
     _create() {
@@ -2905,7 +2905,7 @@ code 'tag-named loop variable (`code`) shadows the HTML tag name', '''
         span code
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state(["a", "b"]);
     }
     _create() {
@@ -2960,7 +2960,7 @@ code 'tag-named local shadows the HTML tag in a property chain', '''
         div code.value
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{value: "x"}]);
     }
     _create() {
@@ -3008,7 +3008,7 @@ code 'string containing \'this\' in conditional factory', '''
         span "this works"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -3073,7 +3073,7 @@ code 'string containing \'this\' in loop factory', '''
         span "this also works"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([1]);
     }
     _create() {
@@ -3120,7 +3120,7 @@ code 'indented inline @event handler binds a listener', '''
         @input: (e) => msg = e.target.value
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.msg = __state("");
     }
     _create() {
@@ -3143,8 +3143,8 @@ code 'bare-ident — in-scope value is a text child, not an attribute', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['title'];
-    _init(__props) {
-      this.title = __state(__props.__bind_title__ ?? __props.title ?? "");
+    _init(__given) {
+      this.title = __state(__given.__bind_title__ ?? __given.title ?? "");
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -3167,8 +3167,8 @@ code 'offer public prop with @', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['active'];
-    _init(__props) {
-      this.active = __state(__props.__bind_active__ ?? __props.active ?? "hello");
+    _init(__given) {
+      this.active = __state(__given.__bind_active__ ?? __given.active ?? "hello");
       setContext('active', this.active);
     }
     _create() {
@@ -3187,8 +3187,8 @@ code 'data attribute sigil with presence operator ($open: val?!)', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['active'];
-    _init(__props) {
-      this.active = __state(__props.__bind_active__ ?? __props.active ?? false);
+    _init(__given) {
+      this.active = __state(__given.__bind_active__ ?? __given.active ?? false);
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -3210,7 +3210,7 @@ code 'conditional inside parent element', '''
         span "after"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -3282,7 +3282,7 @@ code 'conditional with fragment (multiple then-children)', '''
         div "b"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(false);
     }
     _create() {
@@ -3356,7 +3356,7 @@ code 'reactive text inside conditional factory', '''
         span name
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
       this.name = __state("world");
     }
@@ -3430,7 +3430,7 @@ code 'loop inside parent element', '''
           li item
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state(["a", "b"]);
     }
     _create() {
@@ -3488,8 +3488,8 @@ code '@children slot rendering', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['children'];
-    _init(__props) {
-      this.children = __props.children ?? null;
+    _init(__given) {
+      this.children = __given.children ?? null;
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -3512,7 +3512,7 @@ code 'slot under a child component forwards the received children', '''
         slot
   ''', '''
   let Section = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('section');
@@ -3523,7 +3523,7 @@ code 'slot under a child component forwards the received children', '''
     }
   };
   export const Frame = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -3578,7 +3578,7 @@ code 'a member named slot under a child component keeps its text reading', '''
         slot
   ''', '''
   let Section = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('section');
@@ -3589,7 +3589,7 @@ code 'a member named slot under a child component keeps its text reading', '''
     }
   };
   export const Frame = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.slot = "text";
     }
     _create() {
@@ -3637,8 +3637,8 @@ code 'slot reads a declared @children cell by value', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['children'];
-    _init(__props) {
-      this.children = __state(__props.__bind_children__ ?? __props.children);
+    _init(__given) {
+      this.children = __state(__given.__bind_children__ ?? __given.children);
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -3659,8 +3659,8 @@ code '@prop rendered as text (readonly)', '''
   ''', '''
   export const A = class extends __Component {
     static __props = ['name'];
-    _init(__props) {
-      this.name = __props.name ?? "anon";
+    _init(__given) {
+      this.name = __given.name ?? "anon";
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -3678,7 +3678,7 @@ code 'static expression as text (2 + 3)', '''
       span (2 + 3)
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -3699,7 +3699,7 @@ code 'transition sets _t on block factory', '''
           span "hello"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -3767,7 +3767,7 @@ code 'no transition — no _t on block', '''
         span "yes"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -3834,8 +3834,8 @@ code 'component extends: inherits tag, rest props forwarded', '''
   export const Test = class extends __Component {
     static __props = ['label'];
     static __extends = 'input';
-    _init(__props) {
-      this.label = __state(__props.__bind_label__ ?? __props.label ?? "");
+    _init(__given) {
+      this.label = __state(__given.__bind_label__ ?? __given.label ?? "");
     }
     _create() {
       this._el0 = document.createElement('fieldset');
@@ -3869,7 +3869,7 @@ code '=! member paren multi-stmt hoists inner assigns in _init', '''
       div
   ''', '''
   let C = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       let a;
       this.x = (a = 1, a);
     }
@@ -3891,7 +3891,7 @@ code '= member paren multi-stmt hoists inner assigns in _init', '''
       div
   ''', '''
   let C = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       let a;
       this.x = (a = 1, a);
     }
@@ -3926,7 +3926,7 @@ code ':= member paren multi-stmt hoists inner assigns in _init', '''
       div
   ''', '''
   let C = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       let a;
       this.x = __state((a = 1, a));
     }
@@ -3948,7 +3948,7 @@ code '~= member paren multi-stmt hoists inside computed only', '''
       div
   ''', '''
   let C = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.x = __computed(() => {
         let a = 1;
         return a;
@@ -4058,7 +4058,7 @@ code 'child component with static props', '''
         Child label: "hello"
   ''', '''
   let Child = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -4067,7 +4067,7 @@ code 'child component with static props', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -4113,7 +4113,7 @@ code 'child component with reactive prop (signal pass-through)', '''
         Child count: count
   ''', '''
   let Child = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -4122,7 +4122,7 @@ code 'child component with reactive prop (signal pass-through)', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.count = __state(0);
     }
     _create() {
@@ -4168,7 +4168,7 @@ code 'child component with children (slot)', '''
         span "slot content"
   ''', '''
   let Child = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -4177,7 +4177,7 @@ code 'child component with children (slot)', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -4228,7 +4228,7 @@ code 'child component with props and children', '''
           span "child content"
   ''', '''
   let Child = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('span');
@@ -4237,7 +4237,7 @@ code 'child component with props and children', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -4289,7 +4289,7 @@ code 'boolean prop shorthand — single bare identifier', '''
       Btn outline
   ''', '''
   let Btn = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -4298,7 +4298,7 @@ code 'boolean prop shorthand — single bare identifier', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -4339,7 +4339,7 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
       Btn outline, ghost, "Save"
   ''', '''
   let Btn = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -4348,7 +4348,7 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -4395,7 +4395,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
       Btn outline, ghost, @click: handler, variant: "secondary", "Save"
   ''', '''
   let Btn = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -4404,7 +4404,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -4452,7 +4452,7 @@ code 'boolean prop shorthand — explicit value still wins', '''
       Btn outline: false, "X"
   ''', '''
   let Btn = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -4461,7 +4461,7 @@ code 'boolean prop shorthand — explicit value still wins', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       { const __prev = __pushComponent(this); try {
@@ -4509,7 +4509,7 @@ code 'bare component reference (no args)', '''
         Counter
   ''', '''
   let Counter = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -4518,7 +4518,7 @@ code 'bare component reference (no args)', '''
     }
   };
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -4623,7 +4623,7 @@ code 'outer auto-index avoids inner explicit `i`', '''
           span "#{v}#{i}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{options: [1, 2]}]);
     }
     _create() {
@@ -4709,7 +4709,7 @@ code 'outer auto-index avoids body-level render-local declaration', '''
         span "#{i}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([1, 2]);
     }
     _create() {
@@ -4757,7 +4757,7 @@ code 'reactive iter var: member access wrapped in __effect', '''
         span "#{item.qty}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{qty: 1}]);
     }
     _create() {
@@ -4810,7 +4810,7 @@ code 'reactive iter var: literal-array source stays static', '''
         span "#{item.qty}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._anchor0 = document.createComment('for');
@@ -4857,7 +4857,7 @@ code 'reactive iter var: alias is NOT tracked (deferred)', '''
         span "#{local.qty}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{qty: 1}]);
     }
     _create() {
@@ -4906,7 +4906,7 @@ code 'render-local binding compiles to a hoisted `let`, not a textnode', '''
         span "#{sum}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{a: 1, b: 2}]);
     }
     _create() {
@@ -4957,7 +4957,7 @@ code 'compound assignment mutates a render-local without re-declaring', '''
         span "#{sum}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.items = __state([{a: 1, b: 2}]);
     }
     _create() {
@@ -5007,7 +5007,7 @@ code 'private `=` member is plain, `:=` is reactive state', '''
       button "#{label}#{count}"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.label = "hi";
       this.count = __state(0);
     }
@@ -5228,7 +5228,7 @@ code 'bare-ident shorthand — known name is a boolean attribute', '''
       div hidden
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -5245,7 +5245,7 @@ code 'bare-ident shorthand — an unknown name is still the attribute it names',
       div outline
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -5265,7 +5265,7 @@ code 'bare-ident shorthand — a word on its own line is an attribute of the enc
         'Save'
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
     }
     _create() {
       this._el0 = document.createElement('button');
@@ -5293,7 +5293,7 @@ code 'transition with ~slide preset', '''
           span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -5362,7 +5362,7 @@ code 'transition with ~scale preset', '''
           span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -5431,7 +5431,7 @@ code 'transition with ~blur preset', '''
           span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -5500,7 +5500,7 @@ code 'transition with ~fly preset', '''
           span "hi"
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.show = __state(true);
     }
     _create() {
@@ -5619,7 +5619,7 @@ code 'plain `=` write is a property write; `:=` write is a signal write', '''
     render null
   ''', '''
   export const A = class extends __Component {
-    _init(__props) {
+    _init(__given) {
       this.flag = false;
       this.count = __state(0);
     }

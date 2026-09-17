@@ -1431,8 +1431,8 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('_init carries the same props annotation (TS-only)', () => {
     const code = ts(FIXTURE).code;
-    const init = code.slice(code.indexOf('_init(__props'));
-    expect(init.slice(0, 200)).toContain('_init(__props: {');
+    const init = code.slice(code.indexOf('_init(__given'));
+    expect(init.slice(0, 200)).toContain('_init(__given: {');
   });
 
   test('an all-optional props surface takes `props?:`', () => {

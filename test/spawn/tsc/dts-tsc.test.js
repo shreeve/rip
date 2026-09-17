@@ -416,27 +416,33 @@ describeTscExtended('component declarations: consumer programs check against the
     expect(byFile.get('consumer.ts').length).toBeGreaterThanOrEqual(2);
   }, TSC_TIMEOUT);
 
-  test('a default naming a module-private binding ships `any`; a declared or imported one keeps its `typeof`', () => {
+  test('a default naming a module-private binding ships `any`; a declared, imported, or global one keeps its `typeof`', () => {
     const dts = compile([
       "import { Store } from './store'",
       'cart = { n: 1 }',
+      '{ lid } = cart',
       'export Other = component',
       '  render null',
       'export Tag = component',
       '  @basket := cart',
+      '  @lid := lid',
       '  @other := new Other()',
       '  @store := new Store()',
+      '  @pi := Math.PI',
       '  render null',
       '',
     ].join('\n')).declarations;
     expect(dts).not.toContain('typeof cart');
+    expect(dts).not.toMatch(/typeof lid\b/);
     const consumer = [
       "import { Tag } from './tag';",
-      'const t = new Tag({ basket: 5 });',
+      'const t = new Tag({ basket: 5, lid: 5 });',
       'const s: number = t.store.value.n;',
+      'const p: number = t.pi.value;',
       'new Tag({ store: 5 });',
       'new Tag({ other: 5 });',
-      'console.log(s);',
+      "new Tag({ pi: 'x' });",
+      'console.log(s, p);',
       'export {};',
       '',
     ].join('\n');
@@ -446,14 +452,14 @@ describeTscExtended('component declarations: consumer programs check against the
       'consumer.ts': consumer,
     });
     expect(byFile.get('tag.d.ts')).toEqual([]);
-    expect(byFile.get('consumer.ts').map((l) => Number(/\((\d+),/.exec(l)[1]))).toEqual([4, 5]);
+    expect(byFile.get('consumer.ts').map((l) => Number(/\((\d+),/.exec(l)[1]))).toEqual([5, 6, 7]);
     expect(unattributed).toEqual([]);
   }, TSC_TIMEOUT);
 
   test('the container brand (F1): plain { value } literals REJECT on both spellings; a real container passes', () => {
     // The double-wrap hole: the runtime's container detection is
     // `typeof x.read === 'function'` — a plain `{ value: 'x' }` is
-    // not signal-shaped, so `__state(__props.title ?? …)` would WRAP
+    // not signal-shaped, so `__state(__given.title ?? …)` would WRAP
     // it and `.value` becomes the object while the declared type
     // said string. The branded container type (`read(): T` — the
     // predicate itself) makes both literal spellings type errors,

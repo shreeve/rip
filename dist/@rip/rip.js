@@ -15878,7 +15878,7 @@ ${pad ?? ""}`);
       }
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
-      this.b.emit(`${pad}_init(__props`);
+      this.b.emit(`${pad}_init(__given`);
       if (tsInfo !== null)
         this.b.tsOnly(() => {
           this.b.emit(": ");
@@ -15944,7 +15944,7 @@ ${pad ?? ""}`);
           }
           this.b.emit(" = ");
           if (m.isPublic)
-            this.b.emit(`__props.${m.name} ?? `);
+            this.b.emit(`__given.${m.name} ?? `);
           const prevCN = this._componentName;
           if (this.isComponentDecl(m.value))
             this._componentName = m.name;
@@ -15971,11 +15971,11 @@ ${pad ?? ""}`);
           memberName(m.node, m.name, m.value === undefined ? "property" : "target");
           this.b.emit(` = ${this.runtimeName("__state")}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name}`);
+            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name}`);
             if (m.required && this.ts)
               this.b.tsOnly(() => this.b.emit("!"));
           } else if (m.isPublic) {
-            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name} ?? `);
+            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);

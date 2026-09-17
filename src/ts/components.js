@@ -535,7 +535,7 @@ const memberTypeSegments = (m, lead, info = null) => {
     // PUBLIC is the line, not the kind: a member the caller can reach
     // takes whatever container arrives on its bind channel, and a
     // defaulted prop (`@step: number = 1`) carries kind 'state' while
-    // `_init` still reads `__props.__bind_step__` first. A private member
+    // `_init` still reads `__given.__bind_step__` first. A private member
     // is minted here and nowhere else.
     const notify = m.isPublic ? TAKEN : MINTED;
     return [
@@ -653,7 +653,7 @@ export const propsParamOptional = (info) => !publicProps(info).some(isRequiredPr
 // surface and its index signature), then one union arm per REQUIRED
 // prop making it non-optional — passable as the plain slot or the
 // container slot (the base keeps both keys optional so _init's
-// `__props.x` / `__props.__bind_x__` reads type on every arm).
+// `__given.x` / `__given.__bind_x__` reads type on every arm).
 // The projection channel's type. The union is the runtime's admission
 // and is what the .d.ts road spells inline (a declaration file owes its
 // reader a self-contained type); the FACE road names it through the

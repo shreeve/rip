@@ -9097,7 +9097,7 @@ class Emitter {
   // A component declaration lowers to an anonymous class extending the
   // runtime's __Component: members categorize into the declaration
   // model; value members initialize in SOURCE ORDER inside
-  // _init(__props), offers register next, and effects start last (a
+  // _init(__given), offers register next, and effects start last (a
   // reaction never fires against a half-built instance); methods and the
   // exact-five lifecycle hooks emit as class methods; the render block
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
@@ -9766,7 +9766,7 @@ class Emitter {
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
-      this.b.emit(`${pad}_init(__props`);
+      this.b.emit(`${pad}_init(__given`);
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
       this.scopes.push(initNames);
@@ -9838,7 +9838,7 @@ class Emitter {
             memberName(m.node, m.name);
           }
           this.b.emit(' = ');
-          if (m.isPublic) this.b.emit(`__props.${m.name} ?? `);
+          if (m.isPublic) this.b.emit(`__given.${m.name} ?? `);
           // A member-held component declaration takes the MEMBER's
           // name (its data-part and placeholder identity), so the
           // nested declaration inherits the ENCLOSING component's
@@ -9874,7 +9874,7 @@ class Emitter {
           memberName(m.node, m.name, m.value === undefined ? 'property' : 'target');
           this.b.emit(` = ${this.runtimeName('__state')}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name}`);
+            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name}`);
             // A REQUIRED prop's props type is an intersection with a
             // two-arm union (`{name: …} | {__bind_name__: …}`), so one
             // of the pair is always present — a correlation no
@@ -9884,7 +9884,7 @@ class Emitter {
             // none.
             if (m.required && this.ts) this.b.tsOnly(() => this.b.emit('!'));
           } else if (m.isPublic) {
-            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name} ?? `);
+            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);
@@ -17489,8 +17489,8 @@ const RUNTIME_TABLE = [
     // string, not "Rip") — the declare-in-place widening story.
     // `__state` PASSES AN EXISTING CELL THROUGH (reactive.js's first
     // line), which the signature states by admitting the cell in the
-    // ARGUMENT: a prop's delivery seam is `__state(__props.__bind_x__ ??
-    // __props.x ?? …)`, whose argument legitimately unions the cell with
+    // ARGUMENT: a prop's delivery seam is `__state(__given.__bind_x__ ??
+    // __given.x ?? …)`, whose argument legitimately unions the cell with
     // the value, and a signature that always wrapped would type that
     // member a cell of a cell.
     // That union is READ BY USERS: an annotated `:=` enforces its

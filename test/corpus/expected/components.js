@@ -1,10 +1,10 @@
 let Counter = class extends __Component {
   static __props = ['label', 'opt', 'step'];
-  _init(__props) {
+  _init(__given) {
     this.count = __state(0);
-    this.label = __state(__props.__bind_label__ ?? __props.label);
-    this.opt = __state(__props.__bind_opt__ ?? __props.opt);
-    this.step = __state(__props.__bind_step__ ?? __props.step ?? 1);
+    this.label = __state(__given.__bind_label__ ?? __given.label);
+    this.opt = __state(__given.__bind_opt__ ?? __given.opt);
+    this.step = __state(__given.__bind_step__ ?? __given.step ?? 1);
     this.limit = 100;
     this.note = "plain";
     this.total = __computed(() => (this.count.value * 2));
@@ -48,7 +48,7 @@ let Counter = class extends __Component {
   }
 };
 let Panel = class extends __Component {
-  _init(__props) {
+  _init(__given) {
     this.active = __state(true);
   }
   _create() {
@@ -96,12 +96,12 @@ let Panel = class extends __Component {
 };
 let Badge = class extends __Component {
   static __props = ['size', 'step', 'name', 'nick', 'label'];
-  _init(__props) {
-    this.size = __state(__props.__bind_size__ ?? __props.size);
-    this.label = __props.label ?? "x";
-    this.step = __state(__props.__bind_step__ ?? __props.step ?? 1);
-    this.name = __state(__props.__bind_name__ ?? __props.name ?? "anon");
-    this.nick = __state(__props.__bind_nick__ ?? __props.nick ?? "nn");
+  _init(__given) {
+    this.size = __state(__given.__bind_size__ ?? __given.size);
+    this.label = __given.label ?? "x";
+    this.step = __state(__given.__bind_step__ ?? __given.step ?? 1);
+    this.name = __state(__given.__bind_name__ ?? __given.name ?? "anon");
+    this.nick = __state(__given.__bind_nick__ ?? __given.nick ?? "nn");
   }
   onClick() {
     return 1;
@@ -125,7 +125,7 @@ let Badge = class extends __Component {
   }
 };
 let Two = class extends __Component {
-  _init(__props) {
+  _init(__given) {
   }
   _create() {
     this._frag0 = document.createDocumentFragment();
@@ -142,7 +142,7 @@ let Two = class extends __Component {
   }
 };
 let Roster = class extends __Component {
-  _init(__props) {
+  _init(__given) {
     this.items = __state([{id: 1, name: "a"}]);
     this.vis = __state(true);
     this.sel = __state("");
@@ -290,7 +290,7 @@ let Roster = class extends __Component {
   }
 };
 let Chooser = class extends __Component {
-  _init(__props) {
+  _init(__given) {
     this.n = __state(1);
   }
   _create() {
@@ -452,7 +452,7 @@ let Chooser = class extends __Component {
   }
 };
 let Chart = class extends __Component {
-  _init(__props) {
+  _init(__given) {
   }
   _create() {
     this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -468,8 +468,8 @@ let Chart = class extends __Component {
 };
 let Chip = class extends __Component {
   static __props = ['label'];
-  _init(__props) {
-    this.label = __state(__props.__bind_label__ ?? __props.label ?? "c");
+  _init(__given) {
+    this.label = __state(__given.__bind_label__ ?? __given.label ?? "c");
   }
   fire() {
     return this.emit("pick", this.label.value);
@@ -487,7 +487,7 @@ let Chip = class extends __Component {
   }
 };
 let Deck = class extends __Component {
-  _init(__props) {
+  _init(__given) {
     this.name = __state("n");
   }
   onPick(e) {
@@ -657,7 +657,7 @@ let Deck = class extends __Component {
   }
 };
 let StaticRows = class extends __Component {
-  _init(__props) {
+  _init(__given) {
   }
   _create() {
     this._el0 = document.createElement('ul');
@@ -698,7 +698,7 @@ let StaticRows = class extends __Component {
   }
 };
 let Frame = class extends __Component {
-  _init(__props) {
+  _init(__given) {
   }
   _create() {
     this._el0 = document.createElement('div');
@@ -710,7 +710,7 @@ let Frame = class extends __Component {
   }
 };
 let Holder = class extends __Component {
-  _init(__props) {
+  _init(__given) {
   }
   _create() {
     { const __prev = __pushComponent(this); try {
@@ -751,8 +751,8 @@ let Holder = class extends __Component {
 let FancyBtn = class extends __Component {
   static __props = ['label'];
   static __extends = 'button';
-  _init(__props) {
-    this.label = __state(__props.__bind_label__ ?? __props.label ?? "go");
+  _init(__given) {
+    this.label = __state(__given.__bind_label__ ?? __given.label ?? "go");
   }
   _create() {
     this._el0 = document.createElement('button');
@@ -769,7 +769,7 @@ let FancyBtn = class extends __Component {
 };
 let GatedOrder = class extends __Component {
   static __gates = [{ path: 'orders', key: (params, query) => params.id }];
-  _init(__props) {
+  _init(__given) {
     this.order = __gateBind(this, 0);
     this.snapshot = __state(this.order.value);
   }
