@@ -1,5 +1,6 @@
 import { test, eq, ok, throws } from 'rip/testing'
 import * as server from 'rip/sites'
+import type { Ctx } from 'rip/sites'
 import {
   get, post, put, patch, del, all, use, prefix,
   before, after, raw, onError, notFound, fetch as handle,
@@ -455,7 +456,9 @@ test! 'request marks and trusted tenant context stay request-local', ->
     if priorWorker? then process.env.WORKER_ID = priorWorker else delete process.env.WORKER_ID
 
 test 'requestContext and env expose focused ambient capabilities', ->
-  marker = { name: 'synthetic' }
+  # A synthetic env: the test is about identity through the store, not
+  # about a request, so the marker is anything ctx() can hand back.
+  marker = { name: 'synthetic' } as unknown as Ctx
   result = requestContext.run { env: marker, data: { value: '  inside  ' } }, ->
     { value: read('value'), current: ctx() }
   eq result, { value: 'inside', current: marker }

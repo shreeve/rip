@@ -201,7 +201,7 @@ export Home = component
         button class: (if quality is name then 'on' else ''), 'aria-pressed': (quality is name), @click: (-> setQuality name), name
       if zoomRange?
         label "zoom #{zoom.toFixed 1}x"
-          input type: 'range', min: zoomRange.min, max: zoomRange.max, step: zoomRange.step, value: zoom, @input: (e) -> setZoom Number(e.target.value)
+          input type: 'range', min: zoomRange.min, max: zoomRange.max, step: zoomRange.step, value: "#{zoom}", @input: (e) -> setZoom Number(e.target.value)
       if torchable
         button class: (if torch then 'on' else ''), 'aria-pressed': torch, @click: (-> toggleTorch()), 'torch'
       button @click: (-> reset()), 'reset'

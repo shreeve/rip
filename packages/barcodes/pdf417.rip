@@ -1282,10 +1282,26 @@ class Stream
         fail "PDF417 codeword #{v} inside macro block"
     macro
 
+# What a read answers: the parse fills the message fields, and the
+# decoder that called it adds the symbol's geometry and error budget.
+export type PDF417Result = {
+  readerInit: boolean
+  text?: string
+  bytes?: Uint8Array
+  macro?: { segmentIndex: number, fileId: string, last: boolean, [key: string]: any }
+  columns?: number
+  rows?: number
+  ecc?: number
+  errors?: number
+  erasures?: number
+  codewords?: number[]
+  corners?: { x: number, y: number }[]
+}
+
 # Data codewords into bytes, an ECI-decoded text and any macro block.
 parse =! (c, count) ->
   s = Stream.new c, count
-  result = { readerInit: false }
+  result: PDF417Result = { readerInit: false }
   if count > 1 and c[1] is 921
     result.readerInit = true
     s.i = 2

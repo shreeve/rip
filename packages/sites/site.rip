@@ -856,15 +856,15 @@ export subrequest = (data, fn) ->
 # Session proxy — access session.foo anywhere (via AsyncLocalStorage)
 export session: Record<string, any> = Proxy.new {},
   get: (_, key) ->
-    requestContext.getStore()?.env?.session?[key]
+    requestContext.getStore()?.env?.session?[String(key)]
   set: (_, key, value) ->
     ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
     ctx.session ?= {}
-    ctx.session[key] = value
+    ctx.session[String(key)] = value
     true
   deleteProperty: (_, key) ->
     ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
-    delete ctx.session[key] if ctx.session?
+    delete ctx.session[String(key)] if ctx.session?
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)
@@ -916,7 +916,7 @@ export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 # four back off it.
 type HttpError = Error & { status: number, code?: string, api?: boolean, field?: string }
 
-def error(message: string, status: number, code?: string, field?: string): never
+def error(message: string, status?: number, code?: string, field?: string): never
 def error(fields: Record<string, string>): void
 def error(message: string | Record<string, string>, status = 400, code?: string, field?: string): void
   # Map form — a field→message map, for collected validation:
@@ -997,7 +997,7 @@ export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | 
 
   # get value from store — supports dotted paths for nested JSON bodies,
   # e.g. read 'patient.firstName' walks {patient: {firstName: ...}}
-  v = store.data or {}
+  v: unknown = store.data or {}
   if name?
     for part in name.split('.')
       break unless v? and typeof v is 'object'
