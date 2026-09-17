@@ -784,6 +784,9 @@ MAX_SIZE        =! 177              # version 40 side in modules
 MAX_CODEWORDS   =! BYTES.at(-1)     # version 40 codeword count
 MAX_CANDIDATES  =! 16               # finder records ranked per polarity
 MAX_SETS        =! 256              # retry triples scheduled per layer
+MAX_LOOSE       =! 64               # loose finder records admitted per layer
+MAX_LOOSE_WINDOWS =! 4096         # loose-pass windows cross-checked per layer; a texture fits every window
+LOOSE_PITCH     =! 6                # loose windows only below this pitch; wider rings survive blur within half a pitch
 BLOCK           =! 8                # threshold block side in pixels
 BLOCK_SHIFT     =! 3                # log2 BLOCK
 BATCH_MAX_SIDE  =! 3840             # decodeQRBatch default arena side
@@ -793,6 +796,7 @@ FINDER_INSET    =! 7                # finder centers sit 3.5 modules in from eac
 POLARITY =! 1                       # set for light-on-dark finders
 DEAD     =! 2                       # consumed by a decode or inside a decoded region
 ANCHOR   =! 4                       # a decoded symbol's TL record; slots 2..3 hold its TR and BL indices
+STRICT   =! 8                       # some row fit the finder ratios within half a pitch
 
 # Failure values shared by every attempt; a decode returns a string or one
 # of these. The frame path throws only when a layer's finder storage
@@ -1042,14 +1046,22 @@ bit =! (layer, x, y) ->
 # ==[ Finder patterns ]==
 
 # Module pitch of a tolerant 1:1:3:1:1 run, or zero when it does not fit.
-ratio =! (a, b, c, d, e) ->
+# With `loose`, a window under LOOSE_PITCH that fits within six tenths of
+# its pitch (a blurred ring thins one run of a small finder) returns the
+# pitch negated.
+ratio =! (a, b, c, d, e, loose = false) ->
   total = a + b + c + d + e
   return 0 if total < 7
   ms  = total / 7
   tol = ms * 0.5
   fits = Math.abs(ms - a) < tol and Math.abs(ms - b) < tol and Math.abs(3 * ms - c) < 3 * tol and
     Math.abs(ms - d) < tol and Math.abs(ms - e) < tol
-  if fits then ms else 0
+  return ms if fits
+  return 0 if not loose or ms >= LOOSE_PITCH
+  tol = ms * 0.6
+  fits = Math.abs(ms - a) < tol and Math.abs(ms - b) < tol and Math.abs(3 * ms - c) < 3 * tol and
+    Math.abs(ms - d) < tol and Math.abs(ms - e) < tol
+  if fits then -ms else 0
 
 # Consecutive `color` pixels from (x, y) inclusive stepping (dx, dy); stops on
 # mismatch, border, or once the count passes `cap` (at most floor(cap)+1).
@@ -1077,8 +1089,9 @@ run =! (layer, x, y, dx, dy, color, cap) ->
   Math.min n, Math.floor(cap) + 1
 
 # 1:1:3:1:1 cross-check from (cx, cy) along (dx, dy): the refined center
-# coordinate, the measured pitch when asked, or -1 on ratio failure.
-cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false) ->
+# coordinate, the measured pitch when asked, or -1 on ratio failure; a
+# loose check accepts the looser fit too.
+cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false, loose = false) ->
   center = if inverted then 0 else 1
   side   = if inverted then 1 else 0
   r2 = run layer, cx, cy, -dx, -dy, center, Infinity
@@ -1094,7 +1107,7 @@ cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false) ->
   r3 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, cap
   ahead += r3
   r4 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, cap
-  return -1 unless ratio(r0, r1, r2, r3, r4)
+  return -1 unless ratio(r0, r1, r2, r3, r4, loose)
   if measure then (r0 + r1 + r2 + r3 + r4) / 7 else start + 1 + r0 + r1 + r2 / 2
 
 vertical =! (layer, pattern, inverted, measure = false) ->
@@ -1185,6 +1198,10 @@ edgePitch =! (layer, first, second, inverted) ->
   a = pitch first
   b = pitch second
   if a and b then (a + b) / 2 else 0
+
+# A record without a strict row hit needs three row hits to anchor a triple.
+looseRecord =! (layer, index) ->
+  not (layer.inverted[index] & STRICT) and layer.patterns[index * 4 + 3] < 3
 
 copyPattern! =! (layer, index, out) ->
   pos = index * 4
@@ -1361,14 +1378,27 @@ bitmapRows! =! (layer, from, to) ->
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
-recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
-  start = x - r0 - r1 - r2 - r3 - r4
-  cx    = Math.round(start + r0 + r1 + r2 / 2)
-  cap   = ms * 3
-  cy    = cross layer, cx, y, 0, 1, cap, inverted
-  return if cy < 0
-  refinedX = cross layer, cx, Math.round(cy), 1, 0, cap, inverted
-  return if refinedX < 0
+recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
+  layer.looseWindows++ if loose
+  strict = if ms > 0 then STRICT else 0
+  ms     = Math.abs ms
+  start  = x - r0 - r1 - r2 - r3 - r4
+  cx     = Math.round(start + r0 + r1 + r2 / 2)
+  cap    = ms * 3
+  cy     = -1
+  refinedX = -1
+  if strict
+    cy       = cross layer, cx, y, 0, 1, cap, inverted
+    refinedX = cross(layer, cx, Math.round(cy), 1, 0, cap, inverted) if cy >= 0
+    # The mandatory pass counted every window that cross-checks strictly.
+    return if loose and refinedX >= 0
+  if refinedX < 0
+    return unless loose
+    strict   = 0
+    cy       = cross layer, cx, y, 0, 1, cap, inverted, false, true
+    return if cy < 0
+    refinedX = cross layer, cx, Math.round(cy), 1, 0, cap, inverted, false, true
+    return if refinedX < 0
   patterns = layer.patterns
   polarity = if inverted then 1 else 0
   for i in [0...layer.patternCount]
@@ -1380,7 +1410,10 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
     patterns[pos + 1] = (patterns[pos + 1] * patterns[pos + 3] + cy) / count
     patterns[pos + 2] = (patterns[pos + 2] * patterns[pos + 3] + ms) / count
     patterns[pos + 3] = count
+    layer.inverted[i] |= strict
     return
+  return if not strict and layer.looseCount >= MAX_LOOSE
+  layer.looseCount++ unless strict
   index = layer.patternCount++
   pos   = index * 4
   fail "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
@@ -1388,12 +1421,13 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted) ->
   patterns[pos + 1] = cy
   patterns[pos + 2] = ms
   patterns[pos + 3] = 1
-  layer.inverted[index] = polarity
+  layer.inverted[index] = polarity | strict
 
-# Rolling run-length window over every second row. Each run is measured
-# straight off the packed row: the word's opposite-color bits are isolated
-# with clz32 and whole words are consumed until a stop or the row's end.
-findRows! =! (layer, from, to) ->
+# Rolling run-length window over every second row; the loose pass admits
+# loose windows with loose cross-checks. Each run is measured straight off
+# the packed row: the word's opposite-color bits are isolated with clz32
+# and whole words are consumed until a stop or the row's end.
+findRows! =! (layer, from, to, loose) ->
   width  =! layer.width
   words  =! layer.words
   bitmap =! layer.bitmap
@@ -1425,8 +1459,8 @@ findRows! =! (layer, from, to) ->
       dark     = previous
       previous = not previous
       if runs >= 5
-        ms = ratio r0, r1, r2, r3, r4
-        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark) if ms
+        ms = ratio r0, r1, r2, r3, r4, loose
+        recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark), loose if ms
 
 # ==[ Decode drivers ]==
 
@@ -1552,6 +1586,9 @@ export class QRScanner
         luma: luma
         patternCount: 0
         patterns: Float64Array.new(centers * 4)
+        looseCount: 0
+        looseWindows: 0
+        loosened: false
         used: false
         width: 0
         words: 0
@@ -1641,6 +1678,9 @@ export class QRScanner
       layer.blockWidth   = if used then Math.ceil(aw / BLOCK) else 0
       layer.blockHeight  = if used then Math.ceil(ah / BLOCK) else 0
       layer.patternCount = 0
+      layer.looseCount   = 0
+      layer.looseWindows = 0
+      layer.loosened     = false
       layer.plane.W      = layer.width
       layer.plane.H      = layer.height
       layer.plane.bw     = layer.blockWidth
@@ -1677,6 +1717,9 @@ export class QRScanner
         layer.width        = 0
         layer.words        = 0
         layer.patternCount = 0
+        layer.looseCount   = 0
+        layer.looseWindows = 0
+        layer.loosened     = false
         layer.setCount     = 0
         layer.setCursor    = 0
         layer.used         = false
@@ -1952,14 +1995,14 @@ export class QRScanner
     confirmed  = 0
     for i in [0...layer.patternCount]
       state = layer.inverted[i]
-      continue if (state & POLARITY) isnt polarity or state & DEAD
+      continue if (state & POLARITY) isnt polarity or state & DEAD or looseRecord(layer, i)
       confirmed++ if pts[i * 4 + 3] >= 2
     # With three confirmed centers, require two row hits to reject one-row data.
     minimum = if confirmed >= 3 then 2 else 1
     count   = 0
     for i in [0...layer.patternCount]
       state = layer.inverted[i]
-      continue if (state & POLARITY) isnt polarity or state & DEAD
+      continue if (state & POLARITY) isnt polarity or state & DEAD or looseRecord(layer, i)
       confidence = pts[i * 4 + 3]
       continue if confidence < minimum
       count = @retain i, -confidence, count, MAX_CANDIDATES
@@ -2659,9 +2702,23 @@ export class QRScanner
     layer.patternCount = 0
     rows = if cooperative then 32 else layer.height
     for y in [0...layer.height] by rows
-      findRows layer, y, Math.min(layer.height, y + rows)
+      findRows layer, y, Math.min(layer.height, y + rows), false
       @retryStart += yield if cooperative and y + rows < layer.height
     layer.found = true
+
+  # Retry tier: admit loose finder windows, bounded by the time limit and
+  # the per-layer window and record caps, then rebuild the retry sets.
+  loosen!: (layer, cooperative) ->
+    layer.loosened  = true
+    layer.setsReady = false
+    # Textured rows are dense in loose windows: small chunks keep the
+    # bounds fine-grained.
+    rows = 4
+    for y in [0...layer.height] by rows
+      break if layer.looseCount >= MAX_LOOSE or layer.looseWindows >= MAX_LOOSE_WINDOWS
+      break if @timeLimit isnt Infinity and Date.now() - @retryStart >= @timeLimit
+      findRows layer, y, Math.min(layer.height, y + rows), true
+      @retryStart += yield if cooperative and y + rows < layer.height
 
   # Mandatory attempt: both polarities ranked independently, then the pick
   # with the better geometry-times-evidence product.
@@ -2719,7 +2776,7 @@ export class QRScanner
     layer.setCount  = 0
     layer.setCursor = 0
     eligible = 0
-    eligible++ for i in [0...layer.patternCount] when not (layer.inverted[i] & DEAD)
+    eligible++ for i in [0...layer.patternCount] when not (layer.inverted[i] & DEAD) and not looseRecord(layer, i)
     return if eligible < 3
     pts        = layer.patterns
     neighbors  = @candidates
@@ -2727,7 +2784,7 @@ export class QRScanner
     for i in [0...layer.patternCount - 2]
       @retryStart += yield if cooperative and i and not (i & 7)
       state = layer.inverted[i]
-      continue if state & DEAD
+      continue if state & DEAD or looseRecord(layer, i)
       inverted = !!(state & POLARITY)
       p0 = i * 4
       # A 1.5 scale allowance retains the largest legal perspective dimension.
@@ -2736,7 +2793,7 @@ export class QRScanner
       count        = 0
       for index in [i + 1...layer.patternCount]
         otherState = layer.inverted[index]
-        continue if otherState & DEAD or !!(otherState & POLARITY) isnt inverted
+        continue if otherState & DEAD or !!(otherState & POLARITY) isnt inverted or looseRecord(layer, index)
         pos      = index * 4
         smallest = Math.min pts[p0 + 2], pts[pos + 2]
         largest  = Math.max pts[p0 + 2], pts[pos + 2]
@@ -2861,6 +2918,7 @@ export class QRScanner
         if mandatory
           triple = @pickTriple layer
         else
+          yield* @loosen(layer, cooperative) unless layer.loosened
           yield* @buildSets(layer, cooperative) unless layer.setsReady
           triple = @nextSet layer
         unless triple
