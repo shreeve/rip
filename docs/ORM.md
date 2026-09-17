@@ -74,12 +74,20 @@ tags?    string[]              # array — stored as a VARCHAR[] column
 Field types and their columns: `string`/`email`/`url`/`phone`/`zip` →
 `VARCHAR`, `text` → `TEXT`, `integer` → `INTEGER`, `number` → `DOUBLE`,
 `boolean` → `BOOLEAN`, `date` → `DATE`, `datetime` → `TIMESTAMP`,
-`uuid` → `UUID`, `json`/`any` → `JSON`. An array of a scalar is DuckDB's
-own LIST of it — `tags? string[]` is `VARCHAR[]`, `integer[]` is
-`INTEGER[]` — so the database can index it and `list_contains` can
-push down. An array whose element has no scalar form (a nested schema,
-`json`, `any`) and a nested schema itself are `JSON` documents. An
-unknown type name is a loud error, never a silent `VARCHAR`.
+`uuid` → `UUID`, `json`/`any` → `JSON`, `variant` → `VARIANT`. An array
+of a scalar is DuckDB's own LIST of it — `tags? string[]` is
+`VARCHAR[]`, `integer[]` is `INTEGER[]` — so the database can index it
+and `list_contains` can push down. An array whose element has no scalar
+form (a nested schema, `json`, `any`) and a nested schema itself are
+`JSON` documents. An unknown type name is a loud error, never a silent
+`VARCHAR`.
+
+A `variant` field is a `json` field the engine stores typed: the app
+reads and writes it as an object, exactly as `json`, and SQL reaches
+into it by path — `WHERE meta.patient.firstName = 'Ada'` — where a
+`json` column needs `->>`. The JSON operators do not apply to a
+`VARIANT`. Writes bind through `?::JSON`, which the model renders; a
+raw `INSERT` must cast the same way, or the document lands as a string.
 
 ### Constraints
 

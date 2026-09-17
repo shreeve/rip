@@ -82,6 +82,7 @@ const types = {
   zip:      (v) => typeof v === 'string' && /^\d{5}(-\d{4})?$/.test(v),
   text:     (v) => typeof v === 'string',
   json:     (v) => v !== undefined,
+  variant:  (v) => v !== undefined,
   any:      () => true,
 };
 
@@ -1580,6 +1581,7 @@ const JSON_TYPES = {
   date:     () => ({ type: 'string', format: 'date' }),
   datetime: () => ({ type: 'string', format: 'date-time' }),
   json:     () => ({}),
+  variant:  () => ({}),
   any:      () => ({}),
 };
 

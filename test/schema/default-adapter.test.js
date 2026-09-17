@@ -157,6 +157,21 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(data).toEqual([['infinity'], [null]]);
   });
 
+  test('a VARIANT column arrives as JSON text under encoding json and decodes like JSON', async () => {
+    const fetch = fetchDouble(envelope(
+      [
+        { name: 'j', duckdbType: 'JSON', lossless: true },
+        { name: 'v', duckdbType: 'VARIANT', lossless: false, encoding: 'json' },
+        { name: 'g', duckdbType: 'GEOMETRY', lossless: false, encoding: 'varchar-cast' },
+      ],
+      [['{"name":"Steve"}', '{"name":"Steve","n":42,"s":"42"}', 'POINT (1 2)']]));
+    const { data } = await withFetch(fetch, () => adapter().query('SELECT j, v, g FROM t'));
+    const [j, v, g] = data[0];
+    expect(j).toEqual({ name: 'Steve' });
+    expect(v).toEqual({ name: 'Steve', n: 42, s: '42' }); // a real object; 42 and "42" stay apart
+    expect(g).toBe('POINT (1 2)'); // display text stays text
+  });
+
   test('Date params encode to ISO-Z, nested values included; Invalid Date throws loudly', async () => {
     const fetch = fetchDouble(envelope([], []));
     await withFetch(fetch, () => adapter().query(

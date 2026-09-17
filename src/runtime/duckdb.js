@@ -312,10 +312,12 @@ function decodeJson(value) {
 }
 
 // The decode kinds, in one lookup — `null` for every type that arrives
-// already shaped (scalars, LIST, STRUCT, DECIMAL's lossless string).
-function cellKind(duckdbType) {
-  return String(duckdbType ?? '').trim().toUpperCase() === 'JSON'
-    ? 'json' : temporalKind(duckdbType);
+// already shaped (scalars, LIST, STRUCT, DECIMAL's lossless string). A
+// JSON column is JSON text; so is any column harbor labels
+// `encoding: 'json'`, which is how a VARIANT crosses the wire.
+function cellKind(column) {
+  const type = String(column?.duckdbType ?? column?.type ?? '').trim().toUpperCase();
+  return type === 'JSON' || column?.encoding === 'json' ? 'json' : temporalKind(type);
 }
 
 function decodeCell(value, kind) {
@@ -325,7 +327,7 @@ function decodeCell(value, kind) {
 // Whole-result decode in one pass. Fast path: when no column decodes
 // the rows are returned untouched, with no row copy.
 function decodeRows(columns, rows) {
-  const kinds = (columns ?? []).map((c) => cellKind(c?.duckdbType ?? c?.type));
+  const kinds = (columns ?? []).map(cellKind);
   if (!kinds.some((k) => k)) return rows;
   return rows.map((row) => row.map((v, i) => (kinds[i] ? decodeCell(v, kinds[i]) : v)));
 }

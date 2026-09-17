@@ -1539,7 +1539,7 @@ class SchemaQuery {
         // spelling reaches the column.
         const field = norm.fields.get(fieldFor(norm, column));
         const opaque = !!field &&
-          (field.array === true || field.typeName === 'json' || field.typeName === 'any');
+          (field.array === true || isDocument(field));
         if (v === undefined) {
           // An undefined value is an absent parameter, not a filter —
           // rendering IS NULL for it turns `where(title: params.title)`
@@ -1715,7 +1715,7 @@ class SchemaQuery {
       const column = columnFor(n, k);
       const field = n.fields.get(fieldFor(n, column));
       const quoted = callerColumn(n, k, n.callerWritableColumns, 'updateAll() key');
-      sets.push(quoted + ' = ?');
+      sets.push(quoted + ' = ' + placeholderFor(field));
       params.push(serialize(values[k], field));
     }
     if (n.timestamps) {
@@ -2263,7 +2263,7 @@ async function save(def, inst) {
       const v = inst[n];
       if (v == null) continue;
       cols.push(quoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'insert column'));
-      placeholders.push('?');
+      placeholders.push(placeholderFor(f));
       values.push(serialize(v, f));
       writtenColumns.push([n, v]);
     }
@@ -2344,7 +2344,7 @@ async function save(def, inst) {
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
       const written = snapshotValue(cur);
-      sets.push(quoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'update column') + ' = ?');
+      sets.push(quoteIdent(norm.columnOf.get(n), norm.callerWritableColumns, 'update column') + ' = ' + placeholderFor(f));
       values.push(serialize(written, f));
       nextSnap[n] = written;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, n) ? snap[n] : null;
@@ -2624,11 +2624,24 @@ async function reload(def, inst) {
   return inst;
 }
 
+// The field types that hold a whole document: JSON columns, and a
+// VARIANT, which is JSON at the wire in both directions.
+function isDocument(field) {
+  return !!field && (field.typeName === 'json' || field.typeName === 'any' || field.typeName === 'variant');
+}
+
 function serialize(v, field) {
-  if (field && field.typeName === 'json' && v != null && typeof v === 'object') {
+  if (field && (field.typeName === 'json' || field.typeName === 'variant') && v != null && typeof v === 'object') {
     return JSON.stringify(v);
   }
   return v;
+}
+
+// A VARIANT column stores a bound string as a string, not as the
+// document it spells, so its parameter is cast to JSON at the
+// placeholder; every other column takes the bare `?`.
+function placeholderFor(field) {
+  return field?.typeName === 'variant' ? '?::JSON' : '?';
 }
 
 // Compare values at the SQL adapter boundary without erasing type
@@ -3003,7 +3016,7 @@ SchemaDef.prototype.upsert = async function (data, opts) {
     if (v == null) continue;
     const column = norm.columnOf.get(n);
     cols.push(column);
-    placeholders.push('?');
+    placeholders.push(placeholderFor(f));
     const serialized = serialize(v, f);
     values.push(serialized);
     plannedValues.set(column, serialized);
@@ -3450,6 +3463,7 @@ const SQL_TYPES = {
   string: 'VARCHAR', text: 'TEXT', integer: 'INTEGER', number: 'DOUBLE',
   boolean: 'BOOLEAN', date: 'DATE', datetime: 'TIMESTAMP', email: 'VARCHAR',
   url: 'VARCHAR', uuid: 'UUID', phone: 'VARCHAR', zip: 'VARCHAR', json: 'JSON', any: 'JSON',
+  variant: 'VARIANT',
 };
 
 // DuckDB spells an inline ENUM `ENUM('a', 'b')`, and reports it back

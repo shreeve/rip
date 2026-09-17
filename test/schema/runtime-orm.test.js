@@ -247,6 +247,29 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.calls[0].params).toEqual([{ like: true, gte: 3 }]);
   });
 
+  // A variant field is a json field the engine stores typed: an object
+  // against it is the document, and it is written through a JSON cast
+  // so the engine parses it rather than keeping the text.
+  test('variant: an object is a value in where(), and writes bind through ?::JSON', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "docs"/, rows(['id'], [1]));
+      adapter.on(/^INSERT INTO "docs"/, rows(['id', 'meta'], [1, { name: 'Ada' }]));
+      adapter.on(/^UPDATE "docs"/, rows(['id'], [1]));
+      const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('rank', 'integer')));
+      await Doc.where({ meta: { name: 'Ada' } }).all();
+      await Doc.create({ meta: { name: 'Ada' }, rank: 1 });
+      await Doc.where({ rank: 1 }).updateAll({ meta: { name: 'Bob' }, rank: 2 });
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+      'SELECT * FROM "docs" WHERE "meta" = ?',
+      'INSERT INTO "docs" ("meta", "rank") VALUES (?::JSON, ?) RETURNING *',
+      'UPDATE "docs" SET "meta" = ?::JSON, "rank" = ? WHERE "rank" = ?',
+    ]);
+    expect(r.calls[1].params).toEqual(['{"name":"Ada"}', 1]);
+    expect(r.calls[2].params).toEqual(['{"name":"Bob"}', 2, 1]);
+  });
+
   test('order: structured forms quote and validate; the string form stays verbatim', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT \* FROM "users"/, rows(['id'], [1]));
@@ -3664,6 +3687,8 @@ describe('orm: runtime delivery', () => {
       // a nested schema is an object, so it is a JSON document — the
       // same answer the array form has always given
       expect(ddl(field('a', 'Point'))).toContain('"a" JSON');
+      // a variant is the engine's typed document column
+      expect(ddl(field('a', 'variant'))).toContain('"a" VARIANT');
       // an array of a nested schema has no scalar element form, so it
       // is a JSON document too
       expect(ddl(field('a', 'Point', { array: true }))).toContain('"a" JSON');
