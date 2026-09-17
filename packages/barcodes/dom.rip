@@ -188,8 +188,9 @@ export class QRCanvas
       @resultQR.context.imageSmoothingEnabled = false
     @bitmap = getCanvasContext(bitmap) if bitmap
     decoder = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
-    decoder.effort         = @opts.effort    if @opts.effort    isnt undefined
-    decoder.timeLimit      = @opts.timeLimit if @opts.timeLimit isnt undefined
+    decoder.effort         = @opts.effort      if @opts.effort      isnt undefined
+    decoder.timeLimit      = @opts.timeLimit   if @opts.timeLimit   isnt undefined
+    decoder.nativeLimit    = @opts.nativeLimit if @opts.nativeLimit isnt undefined
     decoder.pointsOnDetect = ((points, result) => @onPoints points, result) if @overlay
     decoder.imageOnResult  = ((img) => @drawResultQr img) if @resultQR
     if @bitmap

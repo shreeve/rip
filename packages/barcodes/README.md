@@ -115,6 +115,7 @@ the next frame. A clean raster decodes at one pixel per module.
 | `format` | `'RGB'`, `'RGBA'`, `'RGBX'`, `'BGRA'`, `'BGRX'`, `'I420'`, `'I420A'`, `'I422'`, `'I444'`, `'NV12'`, `'I420P10'`, `'I420P12'` | detected from length |
 | `effort` | retry tier: 1 runs only the mandatory pass, `Infinity` runs every retry | 1 |
 | `timeLimit` | milliseconds available to retries | one 60 FPS frame |
+| `nativeLimit` | shorter side above which finder search skips the native layer and starts at half resolution; modules are still read from native luma | `Infinity` |
 | `textDecoder` | `(bytes, eci) -> string` for byte segments | `TextDecoder` |
 | `pointsOnDetect` | `(points, result) ->` finder, alignment and outline geometry | |
 | `imageOnResult` | `(image) ->` the sampled module grid as RGBA | |

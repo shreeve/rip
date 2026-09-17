@@ -1031,6 +1031,9 @@ validateOpts! =! (opts) ->
   if opts.timeLimit isnt undefined and opts.timeLimit isnt Infinity and
       (typeof opts.timeLimit isnt 'number' or not Number.isFinite(opts.timeLimit) or opts.timeLimit < 0)
     fail "invalid opts.timeLimit=#{opts.timeLimit} (#{typeof opts.timeLimit})", TypeError
+  if opts.nativeLimit isnt undefined and opts.nativeLimit isnt Infinity and
+      (typeof opts.nativeLimit isnt 'number' or not Number.isFinite(opts.nativeLimit) or opts.nativeLimit < 0)
+    fail "invalid opts.nativeLimit=#{opts.nativeLimit} (#{typeof opts.nativeLimit})", TypeError
   for name in ['textDecoder', 'pointsOnDetect', 'imageOnResult', 'imageOnBitmap']
     if opts[name] isnt undefined and typeof opts[name] isnt 'function'
       fail "invalid opts.#{name}=#{opts[name]} (#{typeof opts[name]})", TypeError
@@ -1515,9 +1518,13 @@ export class QRScanner
     bytes = maxPixels * stride
     unless Number.isSafeInteger(bytes) and bytes <= MAX_ARENA_BYTES
       fail "input arena expected <= #{MAX_ARENA_BYTES} bytes, got #{maxPixels}*#{stride}", RangeError
-    @effort     = if init.effort    is undefined then 1         else init.effort
-    @timeLimit  = if init.timeLimit is undefined then 1000 / 60 else init.timeLimit
-    @opts       = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit }
+    @effort      = if init.effort      is undefined then 1         else init.effort
+    @timeLimit   = if init.timeLimit   is undefined then 1000 / 60 else init.timeLimit
+    # Finder search skips the native layer once the shorter side exceeds
+    # this; a large frame's symbols are found on the half layer and their
+    # modules still sampled from native luma.
+    @nativeLimit = if init.nativeLimit is undefined then Infinity  else init.nativeLimit
+    @opts        = Object.freeze { ...init, effort: @effort, maxSize, timeLimit: @timeLimit, nativeLimit: @nativeLimit }
     @width      = 0
     @height     = 0
     @luma       = Uint8Array.new(bytes)
@@ -1590,6 +1597,7 @@ export class QRScanner
         looseWindows: 0
         loosened: false
         used: false
+        search: false
         width: 0
         words: 0
         # Projection reads luma through the threshold grid; `sh` is 3 for
@@ -1672,6 +1680,7 @@ export class QRScanner
     for layer, i in @layers
       used = not i or Math.min(aw, ah) >= 64
       layer.used         = used
+      layer.search       = used and (i > 0 or Math.min(aw, ah) <= @nativeLimit)
       layer.width        = if used then aw else 0
       layer.height       = if used then ah else 0
       layer.words        = if used then Math.ceil(aw / 32) else 0
@@ -2913,7 +2922,7 @@ export class QRScanner
           stop = true
           break
         layer = layers[i]
-        continue unless layer.used
+        continue unless layer.search
         yield* @binarize(layer, cooperative) unless layer.found
         if mandatory
           triple = @pickTriple layer
