@@ -1704,14 +1704,35 @@ export class QRScanner
     finally
       @endOperation()
 
-  # Project a module center and classify its pixel against the owning
-  # threshold block; floor keeps boundary values in the containing pixel.
+  # Project a module center and classify its bilinear luma against the
+  # threshold interpolated between the four nearest block centers.
   read: (s, map, mx, my) ->
     point = mapPoint map, mx, my
-    px = Math.floor point.x
-    py = Math.floor point.y
-    return 0 if px < 0 or py < 0 or px >= s.W or py >= s.H
-    dark = s.d[py * s.W + px] <= s.cut[(py >> s.sh) * s.bw + (px >> s.sh)]
+    W  = s.W
+    x  = point.x - 0.5
+    y  = point.y - 0.5
+    return 0 if x < 0 or y < 0 or x >= W - 1 or y >= s.H - 1
+    x0 = x | 0
+    y0 = y | 0
+    fx = x - x0
+    fy = y - y0
+    d  = s.d
+    i  = y0 * W + x0
+    value = (d[i] * (1 - fx) + d[i + 1] * fx) * (1 - fy) + (d[i + W] * (1 - fx) + d[i + W + 1] * fx) * fy
+    half = (1 << s.sh) / 2
+    u   = Math.min Math.max((point.x - half) / (2 * half), 0), s.bw - 1
+    v   = Math.min Math.max((point.y - half) / (2 * half), 0), s.bh - 1
+    u0  = u | 0
+    v0  = v | 0
+    u1  = Math.min u0 + 1, s.bw - 1
+    v1  = Math.min v0 + 1, s.bh - 1
+    gu  = u - u0
+    gv  = v - v0
+    cut = s.cut
+    r0  = v0 * s.bw
+    r1  = v1 * s.bw
+    threshold = (cut[r0 + u0] * (1 - gu) + cut[r0 + u1] * gu) * (1 - gv) + (cut[r1 + u0] * (1 - gu) + cut[r1 + u1] * gu) * gv
+    dark = value <= threshold
     if dark isnt @invertedProjection then 1 else 0
 
   # Fourth corner of a projective finder square from its three local pitches:
