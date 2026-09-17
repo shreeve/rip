@@ -1,7 +1,8 @@
 # ==============================================================================
-# rip/barcodes tests — encoder pins generated once from the reference
-# implementation, decoder round trips over synthetic rasters, Code 128 against
-# the published vector, package surface
+# rip/barcodes tests — QR encoder pins generated once from the reference
+# implementation and decoder round trips over synthetic rasters; Code 128
+# against the published vector; PDF417 codeword streams, parity and layout
+# checked with zxing-cpp; package surface
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
@@ -25,6 +26,64 @@ rows =! (raw) -> raw.map(bits).join('\n')
 flat =! (W, H, value) -> { width: W, height: H, data: Uint8Array.new(W * H * 4).fill(value) }
 art  =! (picture) -> picture.split('\n').map (row) -> [...row].map (ch) -> ch is '#'
 ansi =! (picture) -> picture.replaceAll('#', '\x1b[40m  \x1b[0m').replaceAll('.', '\x1b[1;47m  \x1b[0m') + '\n'
+
+# RGBA raster of a module matrix on a gray field, with rotation, inversion
+# and a shear of `skew` pixels per hundred rows.
+paint =! (raw, W, H, invert = false, rotate = 0, skew = 0) ->
+  h      = raw.length
+  w      = raw[0].length
+  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
+  turned = rotate is 90 or rotate is 270
+  ox     = (W - (if turned then h else w)) >> 1
+  oy     = (H - (if turned then w else h)) >> 1
+  for y in [0...h]
+    shift = Math.round skew * y / 100
+    for x in [0...w]
+      dark = raw[y][x]
+      dark = not dark if invert
+      v    = if dark then 20 else 240
+      [px, py] = switch rotate
+        when 90  then [h - 1 - y, x]
+        when 180 then [w - 1 - x, h - 1 - y]
+        when 270 then [y, w - 1 - x]
+        else [x, y]
+      px += shift unless turned
+      py += shift if turned
+      at = 4 * ((oy + py) * W + ox + px)
+      data[at] = data[at + 1] = data[at + 2] = v
+      data[at + 3] = 255
+  { width: W, height: H, data }
+
+# The three symbologies' rasters through one painter: a QR symbol with a
+# four-module quiet zone, a Code 128 bar row `h` pixels tall, a PDF417 stack.
+raster =! (text, opts, scale, W, H, invert, rotate) -> paint encodeQR(text, 'raw', { ...opts, scale, border: 4 }), W, H, invert, rotate
+bars   =! (text, opts, scale, W, H, invert, rotate, h = 30) -> paint (encodeCode128(text, 'raw', { ...opts, scale, height: 1 }) for y in [0...h]), W, H, invert, rotate
+stack  =! (text, opts, W, H, invert, rotate, skew) -> paint encodePDF417(text, 'raw', opts), W, H, invert, rotate, skew
+
+# `img` turned counterclockwise by `degrees` about its center, sampled
+# bilinearly, as a lens delivers a turned label: smooth edges, not the
+# staircase of nearest pixels. Square images only.
+turn =! (img, degrees) ->
+  size   = img.width
+  angle  = degrees * Math.PI / 180
+  c      = size / 2
+  turned = { width: size, height: size, data: Uint8Array.new(size * size * 4).fill(240) }
+  at     = (x, y) -> img.data[4 * (y * size + x)]
+  for y in [0...size]
+    for x in [0...size]
+      dx = x - c
+      dy = y - c
+      sx = c + dx * Math.cos(angle) + dy * Math.sin(angle)
+      sy = c - dx * Math.sin(angle) + dy * Math.cos(angle)
+      continue unless sx >= 0 and sx < size - 1 and sy >= 0 and sy < size - 1
+      x0 = sx | 0
+      y0 = sy | 0
+      fx = sx - x0
+      fy = sy - y0
+      v  = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
+      q  = 4 * (y * size + x)
+      turned.data[q] = turned.data[q + 1] = turned.data[q + 2] = Math.round v
+  turned
 
 # Modules painted by an SVG, as a raw matrix: the optimized path draws each
 # module as a move, `h1v1`, a return to its left edge, and `Z`; plain output
@@ -297,28 +356,6 @@ test "custom text encoder", ->
 
 p "\nDecoder"
 
-# RGBA raster with the symbol centered on a gray field.
-raster =! (text, opts, scale, W, H, invert = false, rotate = 0) ->
-  raw  = encodeQR text, 'raw', { ...opts, scale, border: 4 }
-  s    = raw.length
-  data = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
-  ox   = (W - s) >> 1
-  oy   = (H - s) >> 1
-  for y in [0...s]
-    for x in [0...s]
-      dark = raw[y][x]
-      dark = not dark if invert
-      v    = if dark then 0 else 255
-      [px, py] = switch rotate
-        when 90  then [s - 1 - y, x]
-        when 180 then [s - 1 - x, s - 1 - y]
-        when 270 then [y, s - 1 - x]
-        else [x, y]
-      p = 4 * ((oy + py) * W + ox + px)
-      data[p] = data[p + 1] = data[p + 2] = v
-      data[p + 3] = 255
-  { width: W, height: H, data }
-
 toLuma =! (img) ->
   n    = img.width * img.height
   luma = Uint8Array.new(n)
@@ -360,6 +397,42 @@ test "luma and packed formats", ->
   for i in [0...img.width * img.height]
     rgb[3 * i + k] = img.data[4 * i + k] for k in [0...3]
   eq decodeQR({ width: img.width, height: img.height, data: rgb }), 'FORMATS'
+
+test "any angle, coarse layers, planar and packed formats, textDecoder", ->
+  text = 'https://example.com/path?q=1'
+  img  = raster text, {}, 4, 400, 400
+  for degrees in [10, 30, 45, 60]
+    eq decodeQR(turn img, degrees), text, "#{degrees} degrees"
+  # A 348 px symbol in a 1080p frame is found on the coarsest layer, and
+  # with nativeLimit under the frame's short side the native layer is not
+  # searched: the first plane binarized is the eighth-scale one.
+  planes = []
+  eq decodeQR(raster('LAYERS', {}, 12, 1920, 1080), nativeLimit: 500, imageOnBitmap: (plane) -> planes.push "#{plane.width}x#{plane.height}"), 'LAYERS'
+  eq planes[0], '240x135'
+  eq decodeQR(raster('LAYERS', {}, 1, 1920, 1080)), 'LAYERS', 'one pixel per module in a 1080p frame'
+  # Planar formats read the luma plane alone, ten-bit samples drop to
+  # eight, and the four-byte formats weigh the middle byte double, so
+  # BGRA and RGBA agree on gray pixels.
+  img  = raster 'FORMATS', {}, 4, 300, 300
+  n    = 300 * 300
+  luma = toLuma(img).data
+  nv12 = Uint8Array.new(n + n // 2).fill 128
+  nv12.set luma
+  eq decodeQR({ width: 300, height: 300, data: nv12 }, format: 'NV12'), 'FORMATS'
+  p10 = Uint8Array.new 2 * n
+  for i in [0...n]
+    p10[2 * i]     = (luma[i] << 2) & 255
+    p10[2 * i + 1] = luma[i] >> 6
+  eq decodeQR({ width: 300, height: 300, data: p10 }, format: 'I420P10'), 'FORMATS'
+  eq decodeQR(img, format: 'BGRA'), 'FORMATS'
+  # Byte segments go through textDecoder with the ECI in force; text past
+  # Latin-1 is sent as UTF-8 behind ECI 26.
+  seen = null
+  custom = (bytes, eci) ->
+    seen = [bytes.length, eci]
+    'custom'
+  eq decodeQR(raster('bytes ünïcödé', {}, 4, 300, 300), textDecoder: custom), 'custom'
+  eq seen, [17, 26]   # UTF-8 bytes behind ECI 26
 
 test "throws when nothing decodes", ->
   blank = flat 200, 200, 128
@@ -489,29 +562,6 @@ test "modules and outputs", ->
   throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError,  'height'
   throws (-> encodeCode128 'ok', 'raw', scale: 100),  Error,      'exceeds'
 
-# RGBA raster with the bar row painted 30 pixels tall on a gray field.
-bars =! (text, opts, scale, W, H, invert = false, rotate = 0, h = 30) ->
-  raw    = encodeCode128 text, 'raw', { ...opts, scale, height: 1 }
-  w      = raw.length
-  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 190)
-  turned = rotate is 90 or rotate is 270
-  ox     = (W - (if turned then h else w)) >> 1
-  oy     = (H - (if turned then w else h)) >> 1
-  for y in [0...h]
-    for x in [0...w]
-      dark = raw[x]
-      dark = not dark if invert
-      v    = if dark then 20 else 240
-      [px, py] = switch rotate
-        when 90  then [h - 1 - y, x]
-        when 180 then [w - 1 - x, h - 1 - y]
-        when 270 then [y, w - 1 - x]
-        else [x, y]
-      p = 4 * ((oy + py) * W + ox + px)
-      data[p] = data[p + 1] = data[p + 2] = v
-      data[p + 3] = 255
-  { width: W, height: H, data }
-
 test "round trips: scales, rotations, inversion, GS1", ->
   for scale in [1, 2, 3, 5]
     eq decodeCode128(bars('Hello, World! 2026', {}, scale, 1400, 200)), 'Hello, World! 2026', "scale #{scale}"
@@ -529,31 +579,16 @@ test "round trips: scales, rotations, inversion, GS1", ->
   hit = readCode128 bars('Wikipedia', {}, 2, 500, 300, true)
   eq hit.text,     'Wikipedia'
   eq hit.inverted, true
-
-# `img` turned counterclockwise by `degrees` about its center, sampled
-# bilinearly, as a lens delivers a turned label: smooth edges, not the
-# staircase of nearest pixels. Square images only.
-turn =! (img, degrees) ->
-  size   = img.width
-  angle  = degrees * Math.PI / 180
-  c      = size / 2
-  turned = { width: size, height: size, data: Uint8Array.new(size * size * 4).fill(240) }
-  at     = (x, y) -> img.data[4 * (y * size + x)]
-  for y in [0...size]
-    for x in [0...size]
-      dx = x - c
-      dy = y - c
-      sx = c + dx * Math.cos(angle) + dy * Math.sin(angle)
-      sy = c - dx * Math.sin(angle) + dy * Math.cos(angle)
-      continue unless sx >= 0 and sx < size - 1 and sy >= 0 and sy < size - 1
-      x0 = sx | 0
-      y0 = sy | 0
-      fx = sx - x0
-      fy = sy - y0
-      v  = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy
-      q  = 4 * (y * size + x)
-      turned.data[q] = turned.data[q + 1] = turned.data[q + 2] = Math.round v
-  turned
+  # GS1-128 from a luma plane.
+  hit = readCode128 toLuma(bars('(01)09501101530003', { gs1: true }, 2, 500, 100)), format: 'I420'
+  eq [hit.text, hit.gs1], ['(01)09501101530003', true]
+  # The check digit of another message reads as nothing, at either scale.
+  good = encodeCode128 'Wikipedia', 'raw', border: 0, height: 1
+  bad  = good.slice()
+  bad[110 + k] = encodeCode128('Wikipedib', 'raw', border: 0, height: 1)[110 + k] for k in [0...11]
+  eq readCode128(paint((good for y in [0...30]), 300, 100)).text, 'Wikipedia'
+  eq readCode128(paint((bad  for y in [0...30]), 300, 100)), null, 'spliced check digit'
+  eq readCode128(paint(((bad.flatMap (m) -> [m, m]) for y in [0...30]), 400, 100)), null, 'spliced check digit at scale 2'
 
 # The quad's start edge leans by `degrees` and spans `height`.
 leans =! (hit, degrees, height) ->
@@ -776,35 +811,6 @@ test "outputs agree and options apply", ->
   throws (-> encodePDF417 'x'.repeat(2000)),             Error,      'Capacity overflow'
   throws (-> encodePDF417 'x', 'raw', scale: 60),        Error,      'exceeds'
 
-# RGBA raster of a module matrix on a gray field, with rotation, inversion
-# and a shear of `skew` pixels per hundred rows.
-paint =! (raw, W, H, invert = false, rotate = 0, skew = 0) ->
-  h      = raw.length
-  w      = raw[0].length
-  data   = Uint8Array.new(W * H * 4).fill(if invert then 40 else 200)
-  turned = rotate is 90 or rotate is 270
-  ox     = (W - (if turned then h else w)) >> 1
-  oy     = (H - (if turned then w else h)) >> 1
-  for y in [0...h]
-    shift = Math.round skew * y / 100
-    for x in [0...w]
-      dark = raw[y][x]
-      dark = not dark if invert
-      v    = if dark then 20 else 240
-      [px, py] = switch rotate
-        when 90  then [h - 1 - y, x]
-        when 180 then [w - 1 - x, h - 1 - y]
-        when 270 then [y, w - 1 - x]
-        else [x, y]
-      px += shift unless turned
-      py += shift if turned
-      at = 4 * ((oy + py) * W + ox + px)
-      data[at] = data[at + 1] = data[at + 2] = v
-      data[at + 3] = 255
-  { width: W, height: H, data }
-
-stack =! (text, opts, W, H, invert, rotate, skew) -> paint encodePDF417(text, 'raw', opts), W, H, invert, rotate, skew
-
 test "round trips: scales, row heights, rotations, inversion, shapes", ->
   text = 'Rip reads PDF417 symbols in a few hundred microseconds.'
   for scale in [1, 2, 3]
@@ -878,6 +884,27 @@ test "geometry: skew, corners, cropped and damaged start patterns", ->
   throws (-> decodePDF417 blank),     Error,     'not found'
   throws (-> readPDF417 blank, null), TypeError, 'opts'
   throws (-> readPDF417 { width: 2, height: 2, data: Uint8Array.new(3) }), RangeError, 'img.data'
+
+test "errors to the limit through the raster", ->
+  text = 'Errors at the limit of level two'
+  raw  = encodePDF417 text, 'raw', ecc: 2, border: 0, columns: 3
+  # Level 2 holds eight parity codewords and one is kept to check the
+  # correction, so three wrong cells correct and a fourth is a miss. A
+  # wrong cell is a valid codeword of the row's own cluster: the cell
+  # three rows down, copied over all three module rows.
+  wrong = (m, r, c) ->
+    left = 17 + 17 + 17 * c
+    for k in [0...3]
+      m[3 * r + k][left + i] = m[3 * (r + 3) + k][left + i] for i in [0...17]
+  cells = [[1, 0], [1, 1], [1, 2], [2, 0]]
+  for errors in [1..4]
+    m = (row.slice() for row in raw)
+    wrong m, r, c for [r, c] in cells.slice(0, errors)
+    hit = readPDF417 paint(m, 400, 200)
+    if errors < 4
+      eq [hit?.text, hit?.errors, hit?.erasures], [text, errors, 0], "#{errors} wrong cells"
+    else
+      eq hit, null, "#{errors} wrong cells"
 
 test "decompaction: text, bytes, numbers, ECI, macro", ->
   parse = (codes) -> p417.parse Int32Array.from([codes.length + 1, ...codes]), codes.length + 1
