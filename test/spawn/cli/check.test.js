@@ -195,6 +195,18 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('a satisfies is author type information: its mismatch publishes under gradual, at TypeScript\'s own anchor', () => {
+    // The line carries no annotation token, so only the satisfies opens
+    // it; tsc anchors a whole-shape miss on the `satisfies` keyword.
+    const dir = workspace({ 'sat.rip': 'type Entry = { href: string, name: string }\nx = { href: "/a" } satisfies Entry\nconsole.log x\n' });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('sat.rip:2:20 - error TS2741');
+      expect(r.stdout).not.toContain('hidden in unannotated code');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   // A member NAMED `constructor` (or any other Object.prototype name) is
   // legal TS, and the face must spell it as written: a name-keyed table
   // that inherits from Object.prototype would print the inherited

@@ -141,16 +141,23 @@ function lineIndexer(source) {
   };
 }
 
-// The 0-based lines carrying a type annotation. `tokens` is the compiler
-// lexer's token array; TYPE is the kind every annotation lowers to, which is
-// why this reads tokens rather than scanning text — a scan cannot tell the
-// annotation `x: T = v` from the object literal `{ x: T }`.
+// The token kinds that are the author's own type information: TYPE, the
+// kind every annotation lowers to, and SATISFIES — a relation the author
+// asked to have checked, so the value it checks is a checked line. A cast
+// is not one: `as T` asserts a type and asks for nothing, and an assertion
+// opening its scope would check code the author never typed.
+const ANNOTATION_KINDS = new Set(['TYPE', 'SATISFIES']);
+
+// The 0-based lines carrying author type information. `tokens` is the
+// compiler lexer's token array, which is why this reads tokens rather than
+// scanning text — a scan cannot tell the annotation `x: T = v` from the
+// object literal `{ x: T }`.
 export function annotatedLinesOf(tokens, source) {
   const lines = new Set();
   if (!tokens) return lines;
   const lineAt = lineIndexer(source);
   for (const t of tokens) {
-    if (t.kind !== 'TYPE') continue;
+    if (!ANNOTATION_KINDS.has(t.kind)) continue;
     if (typeof t.start !== 'number') continue;
     lines.add(lineAt(t.start));
   }
@@ -680,7 +687,7 @@ function typedLinesOf(tokens, source, face) {
   // schema or component needs no token at all: the face types it by
   // construction (COMPILER_TYPED_KINDS).
   const offsets = [];
-  for (const t of tokens ?? []) if (t.kind === 'TYPE' && typeof t.start === 'number') offsets.push(t.start);
+  for (const t of tokens ?? []) if (ANNOTATION_KINDS.has(t.kind) && typeof t.start === 'number') offsets.push(t.start);
   for (const decl of declarationHeadersOf(face?.stores)) {
     if (COMPILER_TYPED_KINDS.has(decl.kind) || offsets.some((o) => inHeader(decl, o))) typed.add(lineAt(decl.name.sourceStart));
   }
@@ -729,7 +736,7 @@ export function scopeGateOf(tokens, source, face, typedImports = null) {
   // number -> 42` types `api`, and the method's callers are reached through
   // the object that carries it.
   const typeOffsets = [];
-  for (const t of tokens ?? []) if (t.kind === 'TYPE' && typeof t.start === 'number') typeOffsets.push(t.start);
+  for (const t of tokens ?? []) if (ANNOTATION_KINDS.has(t.kind) && typeof t.start === 'number') typeOffsets.push(t.start);
   const annotatedWithin = (flow) => typeOffsets.some((o) =>
     o >= flow.value[0] && o < flow.value[1] && !flow.holes.some(([s, e]) => o >= s && o < e));
   const identifiers = identifierIndexOf(tokens);

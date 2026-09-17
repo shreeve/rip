@@ -2778,14 +2778,14 @@ if (RUN_GRAMMAR) {
     // exercise — the numerator the family rows sum to.
     const negWithin = denom.filter((i) => seen.has(i) && negSeen.has(i)).length;
     // TYPE VOCABULARY, classified by TypeScript's own grammar, live: every
-    // type-level text in the corpus (TYPE/TYPE_DECL/TYPE_PARAMS/CAST tokens
+    // type-level text in the corpus (TYPE/TYPE_DECL/TYPE_PARAMS/CAST/SATISFIES tokens
     // — everything beneath the parser's one-token opacity) is parsed
     // through the pinned tsgo each run, and the type-AST node kinds are the
     // classes. The taxonomy is TS's: closed, not curated — and in-process
     // classification can never be stale. Three derived pseudo-kinds carry
     // distinctions a bare kind cannot: OptionalPropertySignature,
     // ConstrainedTypeParameter, SelfReferentialAlias.
-    const TYPE_TOKEN_KINDS = new Set(['TYPE', 'TYPE_DECL', 'TYPE_PARAMS', 'CAST']);
+    const TYPE_TOKEN_KINDS = new Set(['TYPE', 'TYPE_DECL', 'TYPE_PARAMS', 'CAST', 'SATISFIES']);
     const typeTokensOf = (file) => {
       try {
         return tokenize(fs.readFileSync(file, 'utf8'), path.basename(file)).tokens

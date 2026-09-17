@@ -28,6 +28,7 @@ const CONTINUATIONS = new Map([
   ['|', 'the union type operator — `x as A | B` reads `x as (A | B)`, as in TS'],
   ['&', 'the intersection type operator, same reading'],
   ['CAST', 'a chained cast (`x as A as B`) collapses one cast at a time'],
+  ['SATISFIES', 'a chained check (`x as A satisfies B`) collapses one operator at a time'],
   ['$end', 'end of input — the collector stops by exhaustion'],
 ]);
 

@@ -1,7 +1,6 @@
 # 11-types.rip — the erased-type surface, and the type VOCABULARY the census counts.
 
 # ── type aliases: simple, union, function ──
-# `satisfies` is deliberately absent: rip has no source spelling for it, and the emitter uses it internally for computed lowerings only.
 # Generic def signatures live with 08-functions; the position-constrained spellings below follow the boundaries note (CORPUS.md).
 
 type Port = number
@@ -131,6 +130,17 @@ count = (JSON.parse('[3,4]') as number[]).length
 veiled = payload as unknown as { deep: boolean }
 
 console.log('cast:', text.length, count, typeof veiled)
+
+# ── satisfies: the value is checked against the type and keeps its own ──
+
+type Route = { path: string, label: string }
+
+routes = { home: { path: '/', label: 'Home' }, about: { path: '/about', label: 'About' } } satisfies Record<string, Route>
+homeLabel = routes.home.label satisfies string
+routeCount = (Object.keys(routes) satisfies string[]).length
+checkedThenCast = payload satisfies unknown as string
+
+console.log('satisfies:', routes.about.path, homeLabel, routeCount, checkedThenCast.length)
 
 # ── keyword types: the primitive vocabulary an annotation can name ──
 

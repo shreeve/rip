@@ -869,6 +869,19 @@ describe('flattenHover', () => {
   });
 });
 
+describe('hoverableSpans', () => {
+  test('the words of a cast\'s and a satisfies\' type answer, like an annotation\'s; the operator word does not', () => {
+    const source = 'a = x as Map<K, V>\nb = y satisfies Wide\n';
+    const tokens = [
+      { kind: 'CAST', start: 6, end: 18, value: 'Map<K, V>' },
+      { kind: 'SATISFIES', start: 25, end: 39, value: 'Wide' },
+    ];
+    const spans = hoverableSpans({ tokens, trivia: [] }, source);
+    const words = spans.map(([a, b]) => source.slice(a, b));
+    expect(words).toEqual(['Map', 'K', 'V', 'Wide']);
+  });
+});
+
 describe('SCHEMA_PAYLOADS', () => {
   test('names every token payload a schema entry captures, and hoverableSpans descends each one', () => {
     expect(SCHEMA_PAYLOADS).toEqual(['paramTokens', 'bodyTokens', 'transformTokens', 'argTokens']);

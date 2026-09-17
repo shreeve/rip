@@ -44,6 +44,22 @@ code "cast with array type", "a = x as number[]", "let a = x;"
 code "chained casts erased", "y = x as A as B", "let y = x;"
 
 # ==============================================================================
+# `expr satisfies Type` — the same token shape, the same erasure; the TS
+# face checks the value against the type instead of replacing its type
+# ==============================================================================
+
+code "satisfies on identifier erased", "y = x satisfies Foo", "let y = x;"
+code "satisfies on object literal erased", "y = { a: 1 } satisfies Record<string, number>", "let y = {a: 1};"
+code "satisfies inside call erased", "foo(x satisfies Bar)", "foo(x)"
+code "satisfies on member access erased", "r = obj.prop satisfies T", "let r = obj.prop;"
+code "parenthesized satisfies as a member head", "n = (x satisfies T).name", "let n = x.name;"
+code "satisfies stops before plus", "y = x satisfies Bar + n", "let y = x + n;"
+code "satisfies with union type", "u = x satisfies A | B", "let u = x;"
+code "satisfies chained with a cast, either order", "y = x satisfies A as B\nz = x as A satisfies B", "let y = x;\nlet z = x;"
+code "a postfix guard ends the satisfies run", "y = x satisfies T if c", "let y;\n\nif (c) y = x;"
+code "satisfies is a name outside the postfix position", "satisfies = 2\no = { satisfies: 1 }\np = o.satisfies", "let satisfies = 2;\nlet o = {satisfies: 1};\nlet p = o.satisfies;"
+
+# ==============================================================================
 # Shadow-TS check path — the cast becomes a real TS assertion (it narrows)
 # ==============================================================================
 #
@@ -99,7 +115,10 @@ fail "a plus-signed literal is not a type", "x = y as +1",
   "a numeric literal type spells its sign with '-'"
 
 fail "a cast that claims no type rejects", "x = y as -z",
-  "'as' begins a cast and takes a type"
+  "'as' takes a type"
+
+fail "a satisfies that claims no type rejects", "x = y satisfies -z",
+  "'satisfies' takes a type"
 
 # ==============================================================================
 # The cast's type run and a following clause keyword

@@ -1,8 +1,8 @@
 // Types — the compile-time type surface, which is an ERASURE. Rip
 // types are annotations the grammar never parses: this pass finds each
-// one, collapses its token run into a single opaque TYPE or CAST token,
-// and that token carries text the emitter drops on the floor. Nothing
-// here survives into JavaScript.
+// one, collapses its token run into a single opaque TYPE, CAST, or
+// SATISFIES token, and that token carries text the emitter drops on the
+// floor. Nothing here survives into JavaScript.
 //
 // That is the whole symmetry with schema.js. Both files are a rewrite
 // pass plus the compile-time surface of one construct, and both sit
@@ -32,9 +32,11 @@ import { counter } from './counter.js';
 // span:
 //   TYPE — `: run` (span from the colon through the type's end)
 //   CAST — `as run` (span from `as` through the type's end)
+//   SATISFIES — `satisfies run` (the same span shape)
 // Runs before implicitBlocks/implicitObjects/implicitCalls:
 // a claimed colon can no longer open an implicit object, and a
-// claimed `as` can no longer become an implicit call's callee/argument.
+// claimed `as`/`satisfies` can no longer become an implicit call's
+// callee/argument.
 // Colons NOT in a type position — object pairs, ternary branches,
 // pattern renames — are deliberately untouched.
 //
@@ -42,14 +44,23 @@ import { counter } from './counter.js';
 // run from the tape and mints a fresh token in its place (ids stay
 // stable for every surviving token; indices are never stored).
 
-// Tokens that can END the left-hand expression of an `expr as Type`
-// cast. CAST is included so chains (`x as A as B`) collapse one cast
-// at a time.
+// The postfix type operators, by their contextual word: `expr as T`
+// (CAST, an assertion) and `expr satisfies T` (SATISFIES, a check that
+// leaves the value's own type in place). Both collapse the same way
+// and stop at the same terminals; the grammar and the emitter tell
+// them apart by kind. Either word stays an ordinary name anywhere but
+// this position (`satisfies = 2`, `{ as: 1 }`).
+const POSTFIX_TYPE_KINDS = new Map([['as', 'CAST'], ['satisfies', 'SATISFIES']]);
+const isPostfixTypeWord = (t) => t?.kind === 'IDENTIFIER' && POSTFIX_TYPE_KINDS.has(t.value);
+
+// Tokens that can END the left-hand expression of a postfix type
+// operator. CAST and SATISFIES are included so chains (`x as A as B`,
+// `x satisfies A as B`) collapse one operator at a time.
 const CAST_LHS_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_END', 'REGEX',
   'HEREGEX_END', 'BOOL', 'NULL', 'UNDEFINED', ')', 'CALL_END', 'PARAM_END',
   ']', 'INDEX_END', '}', 'PICK_END', 'THIS', '@', 'SUPER', '?', 'PRESENCE',
-  'DAMMIT', 'CAST', 'IMPORT_META',
+  'DAMMIT', 'CAST', 'SATISFIES', 'IMPORT_META',
 ]);
 
 // Tokens that can BEGIN a type expression. RESERVED covers the TS
@@ -465,8 +476,9 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     const t = tokens[j];
     const kd = t.kind;
 
-    // A chained cast: the second `as` starts a new cast on the result.
-    if (opts.cast && depth === 0 && kd === 'IDENTIFIER' && t.value === 'as') break;
+    // A chained operator: a second `as`/`satisfies` starts a new one
+    // on the result.
+    if (opts.cast && depth === 0 && isPostfixTypeWord(t)) break;
     // The cast's type lives on one logical line: a depth-0 line break
     // that survived as a plain continuation (a trailing `>` suppresses
     // the TERMINATOR) must not let the run swallow the next line.
@@ -793,7 +805,7 @@ const syncTypeGenericMemo = (tokens, memo) => {
       // angle level (`interface P<T>` / `… extends Q<T>` — the
       // trailing close must end the line so the body INDENT forms).
       memo.answers.set(memo.level, true);
-    } else if (t.kind === 'IDENTIFIER' && t.value === 'as' &&
+    } else if (isPostfixTypeWord(t) &&
                tokens[j - 1] && tokens[j - 1].kind !== '.' && tokens[j - 1].kind !== '?.' &&
                CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
       // A postfix-cast head (`expr as Map<K, V>`): the trailing close
@@ -1340,20 +1352,20 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       }
     }
 
-    // ── `expr as Type` — the postfix cast ──────────────────────────
-    if (kd === 'IDENTIFIER' && tok.value === 'as' &&
+    // ── `expr as Type` / `expr satisfies Type` — the postfix type operators ──
+    if (isPostfixTypeWord(tok) &&
         prev && prev.kind !== '.' && prev.kind !== '?.' && CAST_LHS_ENDERS.has(prev.kind) &&
         tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) ||
           // A signed numeric literal enters the cast reading too:
           // `-1` claims, `+1` rejects inside the run with the fix.
           (tokens[i + 1].kind === '+' && tokens[i + 2]?.kind === 'NUMBER'))) {
-      const last = claim('CAST', tok, i + 1, { cast: true });
-      // The trigger committed the cast reading (a value ender, `as`,
-      // a type starter); a run that then claims NOTHING must reject
-      // here — falling through would read `as` as a plain identifier
-      // and emit a CALL of the left operand.
+      const last = claim(POSTFIX_TYPE_KINDS.get(tok.value), tok, i + 1, { cast: true });
+      // The trigger committed the operator reading (a value ender, the
+      // word, a type starter); a run that then claims NOTHING must
+      // reject here — falling through would read the word as a plain
+      // identifier and emit a CALL of the left operand.
       if (last < 0) {
-        fail("'as' begins a cast and takes a type — `x as T`", tok.start, tok.end);
+        fail(`'${tok.value}' takes a type — \`x ${tok.value} T\``, tok.start, tok.end);
       }
       if (last >= 0) {
         i = last;
@@ -1365,7 +1377,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         const cast = out[out.length - 1];
         if (follow && follow.newLine &&
             follow.kind !== 'TERMINATOR' && follow.kind !== 'INDENT' && follow.kind !== 'OUTDENT' &&
-            !(follow.kind === 'IDENTIFIER' && follow.value === 'as')) {
+            !isPostfixTypeWord(follow)) {
           const gap = text.slice(cast.end, follow.start);
           const nl = gap.indexOf('\n');
           if (nl >= 0) {

@@ -1191,8 +1191,9 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
       if (!(t.kind === 'PROPERTY' && prevWord === '.' && prevPrev === 'NEW_TARGET')) {
         spans.push([t.start, t.end]);
       }
-    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL') && source !== null) {
-      // An annotation or a type/interface DECLARATION is one opaque
+    } else if ((t.kind === 'TYPE' || t.kind === 'TYPE_DECL' || t.kind === 'CAST' || t.kind === 'SATISFIES') && source !== null) {
+      // An annotation, a type/interface DECLARATION, or a postfix
+      // operator's type (`as T` / `satisfies T`) is one opaque
       // token; its WORDS answer (tsgo resolves the names) while its
       // punctuation, spaces, and quote bytes decline like everyone
       // else's. The words come off the SOURCE slice — the token's
@@ -1203,6 +1204,8 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
       // an echo of the bytes under the cursor.
       const slice = source.slice(t.start, t.end);
       const veiled = [...comments.map((c) => [c.start - t.start, c.end - t.start])];
+      // The operator word itself is a keyword, and declines like `if`.
+      if (t.kind === 'CAST' || t.kind === 'SATISFIES') veiled.push([0, slice.match(/^\w+/)[0].length]);
       for (const q of slice.matchAll(/'[^'\n]*'|"[^"\n]*"/g)) {
         veiled.push([q.index, q.index + q[0].length]);
       }

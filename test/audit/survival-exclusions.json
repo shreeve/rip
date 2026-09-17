@@ -29,10 +29,10 @@
     "54:23:hubTheme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03"
   },
   "11-types.rip": {
-    "174:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
-    "190:14:first": "labeled tuple element — a label, not an identifier with a symbol",
-    "190:29:second": "labeled tuple element — a label, not an identifier with a symbol",
-    "198:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
+    "184:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
+    "200:14:first": "labeled tuple element — a label, not an identifier with a symbol",
+    "200:29:second": "labeled tuple element — a label, not an identifier with a symbol",
+    "208:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
   },
   "13-components.rip": {
     "13:4:span": "lowered into a string — the face holds these bytes inside a literal",

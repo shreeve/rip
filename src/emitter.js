@@ -3539,7 +3539,7 @@ class Emitter {
     // above — the name is invisible to every check keyed on the walk,
     // and here it hides the name from the hoist pass too, so the module
     // BUILDS and throws on the const write at runtime instead.
-    else if (p[0] === 'cast') this.patternNames(p[1], out, binding, p);
+    else if (p[0] === 'cast' || p[0] === 'satisfies') this.patternNames(p[1], out, binding, p);
     else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
     return out;
   }
@@ -7846,8 +7846,8 @@ class Emitter {
   // if emits a ternary and sits in the ternary tier.
   static jsTier(x) {
     if (!isNode(x)) return 'primary';
-    // A cast erases to its value — grouping reads through it.
-    if (x[0] === 'cast' && x.length === 3) return Emitter.jsTier(x[1]);
+    // A cast or a satisfies erases to its value — grouping reads through it.
+    if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) return Emitter.jsTier(x[1]);
     if (isAssign(x)) return 'assign';
     if (isTernary(x) || (isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
@@ -8087,7 +8087,7 @@ class Emitter {
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
-    if (head === 'cast' && node.length === 3) return this.cast(node);
+    if ((head === 'cast' || head === 'satisfies') && node.length === 3) return this.postfixType(node);
     if (head === '?' && node.length === 2) return this.existence(node);
     if (head === 'presence' && node.length === 2 && this.lockedHead(node, 'presence')) return this.presence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
@@ -14728,40 +14728,42 @@ class Emitter {
     this.operand(prevLink, 'right', prevLink[2]);
   }
 
-  // ["cast", value, "T"] — the postfix `expr as Type` cast. JS mode
-  // ERASES it: the value alone emits, transparently (grouping reads
+  // ["cast", value, "T"] / ["satisfies", value, "T"] — the postfix
+  // `expr as Type` cast and the `expr satisfies Type` check. JS mode
+  // ERASES either: the value alone emits, transparently (grouping reads
   // through to the value's tier), and the annotation role's cover row
   // spans the emitted value — the type's only generated manifestation
   //; $self is a cover over the same extent (the emitted slice
   // never equals the source, which still spells `as T`).
   //
-  // The TS face spells the cast: `(value as T)`, every added
-  // byte TS-only, so the editor sees the assertion (hover/narrowing)
-  // and stripping restores the bare value. The parens are structural,
-  // not cosmetic — TS's `as` sits at relational precedence, so a bare
-  // spelling rebinds in exactly the positions where JS-mode grouping
-  // (which reads THROUGH the cast) adds nothing: member/call heads
-  // (`x.foo` must face as `(x as T).foo`) and type texts ending in a
-  // bare name before `<` (`a as T < b` would parse `T<b>` as type
-  // arguments). A non-primary value takes its own TS-only parens —
-  // `as` binds tighter than logical/ternary/assignment forms whose
-  // JS-mode bytes emit bare here (`(a && b) as T`, never
-  // `a && b as T`, which TS reads as `a && (b as T)`).
-  cast(node) {
+  // The TS face spells the operator: `(value as T)` /
+  // `(value satisfies T)`, every added byte TS-only, so the editor sees
+  // the assertion or the check, and stripping restores the bare value.
+  // The parens are structural, not cosmetic — TS puts both operators at relational
+  // precedence, so a bare spelling rebinds in exactly the positions
+  // where JS-mode grouping (which reads THROUGH the node) adds nothing:
+  // member/call heads (`x.foo` must face as `(x as T).foo`) and type
+  // texts ending in a bare name before `<` (`a as T < b` would parse
+  // `T<b>` as type arguments). A non-primary value takes its own
+  // TS-only parens — both operators bind tighter than logical/ternary/
+  // assignment forms whose JS-mode bytes emit bare here (`(a && b) as
+  // T`, never `a && b as T`, which TS reads as `a && (b as T)`).
+  postfixType(node) {
     if (!this.ts) {
       this.mark(node, '$self', () =>
         this.mark(node, 'annotation', () =>
           this.mark(node, 'value', () => this.expr(node[1]))));
       return;
     }
-    // The recorded source spelling (`as T`, the CAST token's span) —
-    // byte-equal emission lets the builder classify the annotation
-    // row exact, the mapping contract's spelling at exact positions.
+    // The recorded source spelling (`as T` / `satisfies T`, the token's
+    // span) — byte-equal emission lets the builder classify the
+    // annotation row exact, the mapping contract's spelling at exact
+    // positions.
     const id = this.stores.idOf(node);
     const row = id === null ? null : this.stores.role(id, 'annotation');
     const spelled = row && row.sourceStart != null && this.b.source !== null
       ? this.b.source.slice(row.sourceStart, row.sourceEnd)
-      : `as ${tidyType(node[2])}`;
+      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[2])}`;
     this.mark(node, '$self', () => {
       this.b.tsOnly(() => this.b.emit('('));
       const wrapValue = Emitter.jsTier(node[1]) !== 'primary';
@@ -17706,7 +17708,7 @@ const referencesNames = (sexpr, names, isDecl = () => false) => {
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
-    if (h === 'cast' && x.length === 3) return walk(x[1]);
+    if ((h === 'cast' || h === 'satisfies') && x.length === 3) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
     return x.some(walk);
   };

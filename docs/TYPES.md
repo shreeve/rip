@@ -49,7 +49,7 @@ Rip supports:
 - typed bindings and forwards;
 - parameter, rest, default, optional, and destructured annotations;
 - function and arrow return types;
-- casts with `as`;
+- casts with `as`, and `satisfies` checks;
 - type aliases and interfaces, with block bodies whose bare-colon members take their type from the indented block beneath them;
 - typed class, static, string-named, and prototype members;
 - overload signatures;
@@ -69,6 +69,7 @@ def parse(input: string): Result
   Result.new input
 
 value = raw as User
+routes = { home: '/', about: '/about' } satisfies Record<string, RoutePath>
 
 type Pair<T> = [T, T]
 
@@ -84,6 +85,8 @@ export count: number := 0
 
 `::` is prototype access. Type annotations use one colon.
 
+`expr as T` asserts: the checker takes `T` as the expression's type. `expr satisfies T` checks: the expression must be assignable to `T`, and keeps its own inferred type — so `routes.home` above is still the literal `'/'`, and `routes.hom` is still a missing member, where a `Record<string, RoutePath>` annotation or cast would widen both. Both operators erase to nothing, bind alike (looser than arithmetic and member access, tighter than comparison), chain in either order, and their type text runs to the first operator or clause keyword (`v = x satisfies T if c` keeps its guard). Each word is contextual: `satisfies = 2` and `{ as: 1 }` are ordinary names. Under gradual checking a `satisfies` is author type information and opens its line; a cast is not.
+
 ## Front-end representation
 
 Type syntax is intentionally absent from the s-expression tree.
@@ -91,9 +94,9 @@ Type syntax is intentionally absent from the s-expression tree.
 ### Lexer
 
 `rewriteTypes` (`src/types.js`, run as a tail pass by `tokenize`) folds
-each annotation into one `TYPE` token and each
-cast into one `CAST` token. The token carries opaque source text and
-its exact span.
+each annotation into one `TYPE` token, each
+cast into one `CAST` token, and each `satisfies` into one `SATISFIES`
+token. The token carries opaque source text and its exact span.
 
 The lexer owns structural decisions:
 

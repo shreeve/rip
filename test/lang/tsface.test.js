@@ -972,6 +972,21 @@ describe('TS-face emission pins', () => {
     expect(stripFace(call.code, call.tsRegions)).toBe('let r = f(1);');
   });
 
+  test('satisfies spells into the face as TS-only `(value satisfies T)`, the cast\'s shape; stripping restores the bare value', () => {
+    const faced = ts('v = data satisfies Widget\n');
+    expect(faced.code).toBe('let v = (data satisfies Widget);' + MARKER);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js('v = data satisfies Widget\n').code);
+    const member = ts('n = (data satisfies Widget).name\n');
+    expect(member.code).toBe('let n = (data satisfies Widget).name;' + MARKER);
+    expect(stripFace(member.code, member.tsRegions)).toBe('let n = data.name;');
+    const literal = ts('m = { a: 1 } satisfies Record<string, number>\n');
+    expect(literal.code).toBe('let m = (({a: 1}) satisfies Record<string, number>);' + MARKER);
+    expect(stripFace(literal.code, literal.tsRegions)).toBe('let m = {a: 1};');
+    const chained = ts('c = x as A satisfies B\n');
+    expect(chained.code).toBe('let c = ((x as A) satisfies B);' + MARKER);
+    expect(stripFace(chained.code, chained.tsRegions)).toBe('let c = x;');
+  });
+
   test('a non-primary cast value takes its own TS-only parens — TS `as` binds tighter than the bare JS bytes', () => {
     // `a && b as boolean` would parse in TS as `a && (b as boolean)`;
     // the face groups the value so the assertion covers what Rip cast.
@@ -1058,6 +1073,17 @@ describe('TS-face emission pins', () => {
     expect(faced.code.slice(row.generatedStart, row.generatedEnd)).toBe('as Widget');
     expect(row.mappingKind).toBe('exact');
     const plain = js('v = data as Widget\n');
+    const cover = plain.mappings.rows.find((m) => m.role === 'annotation');
+    expect(cover.mappingKind).toBe('cover');
+    expect(plain.code.slice(cover.generatedStart, cover.generatedEnd)).toBe('data');
+  });
+
+  test('the satisfies annotation row maps EXACT onto its `satisfies T` face bytes; JS mode keeps the cover over the value', () => {
+    const faced = ts('v = data satisfies Widget\n');
+    const row = faced.mappings.rows.find((m) => m.role === 'annotation');
+    expect(faced.code.slice(row.generatedStart, row.generatedEnd)).toBe('satisfies Widget');
+    expect(row.mappingKind).toBe('exact');
+    const plain = js('v = data satisfies Widget\n');
     const cover = plain.mappings.rows.find((m) => m.role === 'annotation');
     expect(cover.mappingKind).toBe('cover');
     expect(plain.code.slice(cover.generatedStart, cover.generatedEnd)).toBe('data');
