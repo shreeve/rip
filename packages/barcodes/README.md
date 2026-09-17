@@ -83,7 +83,9 @@ decodePDF417 { width, height, data }          # the text, or throws
   rotation, inversion, damaged rows, a cropped start pattern and holes,
   and reads Macro PDF417 segment metadata
 
-## Encoding
+## QR
+
+### Encoding
 
 ```coffee
 encodeQR text, output, opts
@@ -104,7 +106,7 @@ Single-segment encoding is always used, and penalty scoring runs on the
 reserved test form, so output matches the reference implementation module
 for module.
 
-## Decoding
+### Decoding
 
 `decodeQR` takes `{ width, height, data }` and returns the decoded string. It
 throws when no symbol decodes; in a camera loop that is a frame miss, feed
@@ -115,7 +117,7 @@ the next frame. A clean raster decodes at one pixel per module.
 | `format` | `'RGB'`, `'RGBA'`, `'RGBX'`, `'BGRA'`, `'BGRX'`, `'I420'`, `'I420A'`, `'I422'`, `'I444'`, `'NV12'`, `'I420P10'`, `'I420P12'` | detected from length |
 | `effort` | retry tier: 1 runs only the mandatory pass, `Infinity` runs every retry | 1 |
 | `timeLimit` | milliseconds available to retries | one 60 FPS frame |
-| `nativeLimit` | shorter side above which finder search skips the native layer and starts at half resolution; modules are still read from native luma. `QRCanvas` takes it with `nativeEvery`, the frame interval at which native is searched regardless | `Infinity` |
+| `nativeLimit` | shorter side above which finder search skips the native layer and starts at half resolution; modules are still read from native luma | `Infinity` |
 | `textDecoder` | `(bytes, eci) -> string` for byte segments | `TextDecoder` |
 | `pointsOnDetect` | `(points, result) ->` finder, alignment and outline geometry | |
 | `imageOnResult` | `(image) ->` the sampled module grid as RGBA | |
@@ -235,7 +237,7 @@ rotated one. Against ZXing's PDF417 blackbox photo sets 1 to 3 it decodes
 all 58 images at each of four rotations. Its Macro set decodes one segment
 per image; images holding several symbols return the first found.
 
-## Scanner
+### Scanner
 
 ```coffee
 import { QRScanner } from 'rip/barcodes'
@@ -262,7 +264,7 @@ overlay = document.querySelector 'canvas'     # positioned over the video
 canvas = QRCanvas.new { overlay }
 camera = rearCamera! video
 cancel = frameLoop ->
-  decoded = camera.readFrame! canvas          # undefined until a frame decodes
+  decoded = camera.readFrame! canvas, true    # undefined until a frame decodes
   if decoded isnt undefined
     p decoded
     cancel()
@@ -294,11 +296,14 @@ the track delivered and `camera.capabilities()` what it can change;
 'continuous' }` sets any other advanced constraint the browser offers
 (iOS exposes zoom and torch, Android also focus and exposure), and
 `camera.reopen! { width: { ideal: 1920 } }` restarts the stream under new
-constraints. `camera.listDevices()` and `camera.setDevice(id)` switch
-cameras. When the browser exposes `VideoFrame`,
-`camera.readFrame! canvas, true` copies frames plane-for-plane into the
-scanner arena without a canvas round trip, and `canvas.lastFrame()` hands
-that luma to the other readers as `format: 'I420'` without another copy.
+constraints. `camera.listDevices!` and `camera.setDevice! id` switch
+cameras. `camera.readFrame! canvas, true` reads the frame at the sensor's
+own size, plane-for-plane into the scanner arena when the browser exposes
+`VideoFrame` and through a canvas otherwise; without `true` the frame is
+drawn at the video element's rendered size, so a page that styles the
+player small scans a small picture. `canvas.lastFrame()` hands the luma
+of the last frame to the other readers as `format: 'I420'` without another
+copy.
 `svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and
 `BarcodeDetector` is a Shape Detection API ponyfill over `decodeQR` and
 `readPDF417` that reports `qr_code` and `pdf417`. Camera access needs a
@@ -308,9 +313,13 @@ secure context.
 
 Measured against [paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the
 TypeScript implementation this package was ported from, both running under
-Bun 1.4.0 on an Apple M5. Each figure is the best of three processes; every
-process runs the whole sequence in this order, so each row is timed after
-the rows above it warmed the JIT, the way an application mixes symbol sizes.
+Bun 1.4.0 on an Apple M5, with a harness that is not part of this package.
+Each figure is the best of three processes; every process runs the whole
+sequence in this order, so each row is timed after the rows above it warmed
+the JIT, the way an application mixes symbol sizes. The package's own
+timing contract is `rip test/bench.rip`: means over 400 ms windows, with
+the readers' hit rows at 1080p and their miss rows at 1080p and at the
+phone arena; its rows are not the ones below.
 
 | Encode (µs)         |   rip | paulmillr/qr | speedup |
 |---------------------|------:|-------------:|--------:|
@@ -392,7 +401,9 @@ PDF417 blackbox corpus.
 ## Test
 
 ```bash
-bun run test
+bun run test      # rip test.rip, the contract
+bun run corpus    # rip test/corpus.rip, the ZXing blackbox scorecard; --record matches test/corpus.txt
+bun run bench     # rip test/bench.rip, the timing contract
 ```
 
 The suite pins spec tables, encoded codewords, every output format, every

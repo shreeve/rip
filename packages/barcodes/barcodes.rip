@@ -13,8 +13,9 @@
 #         own generator table. Every buffer is allocated once per scanner.
 #         Encodes to raw, ascii, term, svg, gif and data-url; reads RGB,
 #         RGBA and planar YUV frames, with a browser layer for canvas,
-#         camera and VideoFrame input. Code 128 is a one-line reader over
-#         the same luma sampling. PDF417 tracks a start or stop pattern
+#         camera and VideoFrame input. Code 128 reads on scan lines along
+#         both axes and along a label's measured tilt, and tracks its four
+#         corners along the bars. PDF417 tracks a start or stop pattern
 #         down the symbol, samples rays along the true row direction with
 #         sub-pixel edges, votes codewords into rows by their cluster, and
 #         corrects erasures and errors together over GF(929). The QR half

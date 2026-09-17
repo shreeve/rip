@@ -2,9 +2,14 @@
 # rip/barcodes — browser plumbing for camera scanning
 #
 # QRCanvas owns a reusable scanner and the optional overlay, result and bitmap
-# canvases; QRCamera feeds it frames, preferring a zero-copy VideoFrame path
-# that writes native planes straight into the scanner arena. Overlay identity
-# changes are suppressed for three frames so camera jitter never flickers.
+# canvases, scans a centered crop of each frame (`crop`, `margin`, `cropTo!`),
+# hands the last frame's luma to the other readers (`lastFrame()`), and paints
+# one lock around a decoded symbol or any four corners (`mark!`), eased
+# between estimates and faded on expiry. QRCamera feeds it frames, preferring
+# a zero-copy VideoFrame path that writes native planes straight into the
+# scanner arena, opens the stream at the sensor's full size, and exposes
+# zoom, torch and other track constraints. Overlay identity changes are
+# suppressed for three frames so camera jitter never flickers.
 # BarcodeDetector is a ponyfill over decodeQR and readPDF417 for the Shape
 # Detection API.
 # ==============================================================================

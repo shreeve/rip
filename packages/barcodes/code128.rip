@@ -12,7 +12,8 @@
 # along both axes; a line that crosses bars without reading gives the
 # label's tilt from the shift of its pattern a few lines over, and lines
 # along that tilt read it, so a label lies at any angle. A line that fails
-# is tried once more through a sharpened binarizer.
+# is tried once more through a sharpened binarizer. A hit is then tracked
+# line by line along the bars' direction to the four corners of the label.
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
