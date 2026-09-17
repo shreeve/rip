@@ -17328,8 +17328,9 @@ ${pad ?? ""}`);
       rec.hasKids = true;
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? "this";
-    const host = this.projectionHost;
-    line(() => this.b.emit(host !== null ? `{ const ${prevV} = ${host}._beginProjection(${self()}); try {` : `{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
+    const held = this.projectionHost;
+    const host = () => held !== null && held.startsWith("this.") ? `${self()}.${held.slice(5)}` : held;
+    line(() => this.b.emit(held !== null ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {` : `{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
     line(() => this.b.emit("try {"));
     line(() => {
       this.b.emit(`${instVar} = new `);
@@ -17449,7 +17450,7 @@ ${this.replayPad}}` : " }");
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit("}"));
-    line(() => this.b.emit(host !== null ? `} finally { ${host}._endProjection(${prevV}); } }` : `} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
+    line(() => this.b.emit(held !== null ? `} finally { ${host()}._endProjection(${prevV}); } }` : `} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
     for (const { pair, event, value } of eventBindings) {
       if (this.ts) {
         const keyNode = isNode(pair) && isNode(pair[1]) ? pair[1] : null;
