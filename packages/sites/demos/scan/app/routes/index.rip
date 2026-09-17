@@ -82,11 +82,16 @@ export Home = component
     describe()
     reset()
 
+  # Back to a fresh page: counters, the result, the history and the lock.
   reset: ->
     frames  = 0
     reads   = 0
     firstMs = null
     armedAt = performance.now()
+    latest  = null
+    history = []
+    seen    = 0
+    canvas?.clear()
 
   # Per presented frame: QR through the canvas (its own async decode), then
   # the other readers on the same luma while the scanner is not busy.
