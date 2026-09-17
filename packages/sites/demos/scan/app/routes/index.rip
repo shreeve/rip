@@ -25,7 +25,7 @@ export Home = component
   reads   := 0
   firstMs := null      # time to the first read since the last reset
   armedAt := 0
-  zoom    := 1
+  zoom    := 2         # the default: twice the pixels per module
   zoomRange := null
   torchable := false
   torch   := false
@@ -70,7 +70,9 @@ export Home = component
       caps = camera.capabilities()
       zoomRange = if caps.zoom then { min: caps.zoom.min, max: Math.min(caps.zoom.max, 5), step: caps.zoom.step or 0.1 } else null
       torchable = !!caps.torch
-      setZoom 2 if zoomRange and zoom is 1
+      # A new track starts unlit and at 1x; carry the page's zoom over.
+      torch = false
+      setZoom zoom if zoomRange
     catch error
       report error
 
@@ -90,8 +92,12 @@ export Home = component
     describe()
     reset()
 
-  # Back to a fresh page: counters, the result, the history and the lock.
+  # Back to a fresh page: the stream at 4K, torch off, zoom at 2x, and the
+  # counters, result, history and lock cleared.
   reset: ->
+    return setQuality '4k' if quality isnt '4k'   # reopens the stream, then lands here again
+    toggleTorch() if torch
+    setZoom 2 if zoomRange and zoom isnt 2
     frames  = 0
     reads   = 0
     firstMs = null
