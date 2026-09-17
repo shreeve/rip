@@ -51,6 +51,45 @@ test "control flow, declarations, and word operators", ->
   ok hl('class Foo extends Bar').includes span('keyword', 'class')
   ok hl('User = schema :model').includes span('keyword', 'schema')
 
+test "then / else connectors and satisfies casts are keywords", ->
+  out = hl 'user = findUser(id) then return user else fallback()'
+  ok out.includes span('keyword', 'then')
+  ok out.includes span('keyword', 'else')
+  ok hl('x = y satisfies T').includes span('keyword', 'satisfies')
+
+test "a four-hash banner is a line comment, not a block opener", ->
+  out = hl '#### Banner\nx = 1\n### block ###\ny = 2'
+  ok out.includes span('comment', '#### Banner')
+  ok out.includes span('number', '1')
+  ok out.includes span('comment', '### block ###')
+  ok out.includes span('number', '2')
+
+test "division after a value is not a regex; a regex still is", ->
+  ok not hl('r = a / b / c').includes('hljs-regexp')
+  ok not hl('r = f(x) / g(y)').includes('hljs-regexp')
+  ok hl('m = /ab+/g').includes span('regexp', '/ab+/g')
+  ok hl('s.match /x/').includes span('regexp', '/x/')
+
+test "both interpolation spellings in double strings", ->
+  ok hl('"a #{b}"').includes 'hljs-subst'
+  ok hl('"a ${b}"').includes 'hljs-subst'
+  ok not hl("'a $" + "{b}'").includes 'hljs-subst'
+
+test "object keys are attrs; a ternary colon is not a key", ->
+  out = hl 'total: 1, rate?: 2'
+  ok out.includes span('attr', 'total')
+  ok out.includes span('attr', 'rate?')
+  ok not hl('a ? b : c').includes('hljs-attr')
+  ok not hl('x := 1').includes('hljs-attr')
+
+test "reactive and compound operators are one token each", ->
+  ok hl('kind!> derive').includes span('operator', '!&gt;')
+  ok hl('n >>>= 1').includes span('operator', '&gt;&gt;&gt;=')
+  ok hl('i++').includes span('operator', '++')
+
+test "a static def keeps its @ inside the function name", ->
+  ok hl('def @m(a)').includes span('title function_', '@m')
+
 test "inline try/finally keeps both clause words as control keywords", ->
   out = hl 'try fsyncSync(directory) finally closeSync(directory)'
   ok out.includes span('keyword', 'try')

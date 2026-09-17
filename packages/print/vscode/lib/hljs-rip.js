@@ -3,7 +3,9 @@
 
 module.exports = function(hljs) {
   const KEYWORDS = [
-    // Control flow
+    // Control flow. `then` / `else` are also the loose `and` / `or`
+    // below assignment (`x = get() else fallback()`); one word, one
+    // color, as in the editor grammars.
     'if', 'else', 'unless', 'then', 'switch', 'when',
     'for', 'while', 'until', 'loop', 'do',
     'return', 'break', 'continue', 'throw',
@@ -17,7 +19,7 @@ module.exports = function(hljs) {
     // Declarations
     'class', 'def', 'enum', 'interface', 'type', 'extends', 'own', 'schema',
     // Iteration
-    'in', 'of', 'by', 'as',
+    'in', 'of', 'by', 'as', 'satisfies',
     // Component system
     'component', 'render', 'slot', 'offer', 'accept',
     // Other
@@ -46,12 +48,13 @@ module.exports = function(hljs) {
     'IntersectionObserver',
     // Rip stdlib
     'p', 'pp', 'pj', 'pr', 'abort', 'assert', 'exit', 'kind', 'noop',
-    'raise', 'rand', 'sleep', 'todo', 'warn', 'zip',
+    'raise', 'rand', 'sleep', 'todo', 'warn', 'zip', 'toMatchable',
   ];
 
+  // Rip interpolates both spellings in a double-quoted string or heredoc.
   const INTERPOLATION = {
     className: 'subst',
-    begin: /#\{/, end: /\}/,
+    begin: /#\{|\$\{/, end: /\}/,
     keywords: { keyword: KEYWORDS, literal: LITERALS },
   };
 
@@ -85,9 +88,12 @@ module.exports = function(hljs) {
     contains: [INTERPOLATION, hljs.HASH_COMMENT_MODE],
   };
 
+  // A slash after a value is division (`a / b / c`, `y/2`), never a
+  // regex: the lookbehind and the no-space-after-slash rule are the Vim
+  // grammar's guard. A regex is one line.
   const REGEX = {
     className: 'regexp',
-    begin: /\/(?![/*])(?:[^\/\\]|\\.)*\/[gimsuy]*/,
+    begin: /(?<![\w$)\]}])\/(?![/*+?\s])(?:[^\/\\\n]|\\.)*\/[gimsuy]*/,
     relevance: 0,
   };
 
@@ -103,9 +109,11 @@ module.exports = function(hljs) {
     ],
   };
 
+  // Exactly three hashes open and close a block; a `####` banner is a
+  // line comment (the editor grammars draw the same line).
   const BLOCK_COMMENT = {
     className: 'comment',
-    begin: '###', end: '###',
+    begin: /(?<!#)###(?!#)/, end: /(?<!#)###(?!#)/,
     contains: [hljs.PHRASAL_WORDS_MODE],
   };
 
@@ -154,7 +162,7 @@ module.exports = function(hljs) {
     contains: [
       WORD_ARRAY,
       SYMBOL_LIT,
-      { className: 'title.function', begin: /[a-zA-Z_$][\w$]*[!?]?/ },
+      { className: 'title.function', begin: /@?[a-zA-Z_$][\w$]*[!?]?/ },
     ],
   };
 
@@ -164,6 +172,15 @@ module.exports = function(hljs) {
     contains: [
       { className: 'title.function', begin: /[a-zA-Z_$][\w$]*[!?]?/ },
     ],
+  };
+
+  // `key: value` — an object key, a render attribute, a schema field
+  // name, or a type annotation's name; the colon must follow directly
+  // (`a ? b : c` is a ternary) and not open `::` or `:=`.
+  const OBJECT_KEY = {
+    className: 'attr',
+    match: /\b[a-zA-Z_$][\w$]*(?:[.-][a-zA-Z_$][\w$]*)*\??(?=:(?![:=]))/,
+    relevance: 0,
   };
 
   const COMPONENT_DEF = {
@@ -194,9 +211,11 @@ module.exports = function(hljs) {
     relevance: 5,
   };
 
+  // Longest spelling first: the reactive arrows (`~>`, `<~`, `!>`),
+  // compound assignments, shifts, and increments are one token each.
   const OPERATORS = {
     className: 'operator',
-    begin: /::|:=|~=|~>|<~|<=>|\.=|\?=|\$(?=['"])|=!|!\?|\?!|=~|\?\?=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||[+\-*\/%&|^~<>=!?]/,
+    begin: /::|:=|~=|~>|<~|!>|<=>|\.=|\?=|\$(?=['"])|=!|!\?|\?!|=~|>>>=|<<=|>>=|\*\*=|\/\/=|%%=|&&=|\|\|=|\?\?=|[+\-*\/%&|^]=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\+\+|--|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||>>>|<<|>>|[+\-*\/%&|^~<>=!?]/,
     relevance: 0,
   };
 
@@ -227,6 +246,7 @@ module.exports = function(hljs) {
       COMPONENT_DEF,
       FUNCTION_DEF,
       METHOD_DEF,
+      OBJECT_KEY,
       CLASS_DEF,
       NUMBER,
       INSTANCE_VAR,

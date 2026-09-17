@@ -27,13 +27,19 @@ html = hljs.highlight('tags = %w[alpha beta]', { language: 'rip' }).value
 
 - **Keywords and declarations** — control flow, `def` (with function
   names), `class`, `schema`, `component`/`render`/`slot`/`offer`/`accept`
-- **Strings** — double/single quotes and heredocs, with `#{}`
+- **Strings** — double/single quotes and heredocs, with `#{}` and `${}`
   interpolation where Rip interpolates
+- **Object keys** — `key:` in objects, render attributes, and schema
+  fields (the colon must follow directly; a ternary's `:` is not a key)
 - **Word arrays** (`%w[…]` and paired-delimiter variants) and
   **symbol literals** (`:name`, `:domain.name`, `:kebab-name`)
-- **Rip operators** — reactive (`:=`, `~=`, `~>`), two-way bind
-  (`<=>`), method/readonly assignment (`.=`, `=!`),
-  prototype `::`, dammit `!`, Houdini/maybe dammit `?!`, tagged-template `$`
+- **Rip operators** — reactive (`:=`, `~=`, `~>`, `<~`, `!>`), two-way bind
+  (`<=>`), method/readonly assignment (`.=`, `=!`), compound assignment,
+  prototype `::`, dammit `!`, Houdini/maybe dammit `?!`, tagged-template `$`;
+  `then` / `else` keep their keyword color as connectors, `as` / `satisfies`
+  as casts
+- **Division is not a regex** — `a / b / c` stays arithmetic; a regex
+  starts where a value cannot end
 - **Regexes, heregexes, numbers, comments** — including hex numbers
   and block comments
 
