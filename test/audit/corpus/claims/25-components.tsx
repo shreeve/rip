@@ -128,3 +128,19 @@ const meterCap: number = meter.cap
 const meterNote: string = meter.note
 
 console.log('members:', meterWidth, meterSpan, meterLabel, meterCap, meterNote)
+
+// ── An unannotated prop types its use site from its default ──
+
+function Latch({ open = false }) {
+  return <span>latch {String(open)}</span>
+}
+
+function Porch() {
+  return (
+    <div>
+      <Latch open={true} />
+    </div>
+  )
+}
+
+console.log('defaults:', typeof Latch, typeof Porch)

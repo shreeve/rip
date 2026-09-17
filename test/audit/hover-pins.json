@@ -724,6 +724,14 @@
       {
         "name": "Meter",
         "expect": "let Meter: typeof Meter"
+      },
+      {
+        "name": "Latch",
+        "expect": "let Latch: typeof Latch"
+      },
+      {
+        "name": "Porch",
+        "expect": "let Porch: typeof Porch"
       }
     ],
     "positions": [

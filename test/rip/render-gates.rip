@@ -8,7 +8,7 @@ code 'gate: hoists static __gates and binds via __gateBind', '''
 ''', '''
   export const A = class extends __Component {
     static __gates = ['user'];
-    _init(props) {
+    _init(__props) {
       this.user = __gateBind(this, 0);
     }
     _create() {
@@ -31,7 +31,7 @@ code 'gate: keyed source hoists (path, key fn) pair', '''
 ''', '''
   export const A = class extends __Component {
     static __gates = [{ path: 'order', key: (params, query) => params.id }];
-    _init(props) {
+    _init(__props) {
       this.order = __gateBind(this, 0);
     }
     _create() {
@@ -47,7 +47,7 @@ code 'gate: @params key form normalizes to bare params', '''
 ''', '''
   export const A = class extends __Component {
     static __gates = [{ path: 'order', key: (params, query) => params.id }];
-    _init(props) {
+    _init(__props) {
       this.order = __gateBind(this, 0);
     }
     _create() {
@@ -63,7 +63,7 @@ code 'gate: subpath binds the nested path string', '''
 ''', '''
   export const A = class extends __Component {
     static __gates = ['settings.theme'];
-    _init(props) {
+    _init(__props) {
       this.theme = __gateBind(this, 0);
     }
     _create() {
@@ -80,7 +80,7 @@ code 'gate: binds before state so initializers consume the value', '''
 ''', '''
   export const A = class extends __Component {
     static __gates = ['user'];
-    _init(props) {
+    _init(__props) {
       this.user = __gateBind(this, 0);
       this.form = __state({...this.user.value});
     }

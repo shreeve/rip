@@ -15861,7 +15861,7 @@ ${pad ?? ""}`);
       }
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
-      this.b.emit(`${pad}_init(props`);
+      this.b.emit(`${pad}_init(__props`);
       if (tsInfo !== null)
         this.b.tsOnly(() => {
           this.b.emit(": ");
@@ -15927,7 +15927,7 @@ ${pad ?? ""}`);
           }
           this.b.emit(" = ");
           if (m.isPublic)
-            this.b.emit(`props.${m.name} ?? `);
+            this.b.emit(`__props.${m.name} ?? `);
           const prevCN = this._componentName;
           if (this.isComponentDecl(m.value))
             this._componentName = m.name;
@@ -15954,11 +15954,11 @@ ${pad ?? ""}`);
           memberName(m.node, m.name, m.value === undefined ? "property" : "target");
           this.b.emit(` = ${this.runtimeName("__state")}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name}`);
+            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name}`);
             if (m.required && this.ts)
               this.b.tsOnly(() => this.b.emit("!"));
           } else if (m.isPublic) {
-            this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name} ?? `);
+            this.b.emit(`__props.__bind_${m.name}__ ?? __props.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);
@@ -17827,8 +17827,17 @@ ${this.replayPad}}` : " }");
         const write = () => {
           this.b.emit("{ const __v");
           site([this.b.offset - 3, this.b.offset]);
-          if (this.ts)
-            this.b.tsOnly(() => this.b.emit(recv2.surfaced ? `: ${recv2.valsName}['style'] | undefined` : ": any"));
+          if (this.ts) {
+            this.b.tsOnly(() => {
+              if (recv2.surfaced) {
+                this.b.emit(`: ${recv2.valsName}['`);
+                this.emitKeyAs(storedKey, key);
+                this.b.emit("'] | undefined");
+              } else {
+                this.b.emit(": any");
+              }
+            });
+          }
           this.b.emit(" = ");
           this.renderExpr(value);
           this.b.emit(`; ${this.runtimeName("__style")}(`);

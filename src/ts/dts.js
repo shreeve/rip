@@ -406,6 +406,10 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return kind === 'state' || kind === 'computed';
   };
 
+  // Which module names a member's `typeof` spelling may root at — set by
+  // the declaring pass below, read at each component declaration.
+  let spellable = null;
+
   // A component declaration: the component is a STRUCTURAL
   // construct — like an enum it declares without carrying an
   // annotation. The shape is the companion-interface pattern the face
@@ -421,7 +425,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   };
 
   const componentDecl = (node, name, exported, stmt) => {
-    const info = componentTypeInfo(stores, source, node);
+    const info = componentTypeInfo(stores, source, node, null, { spellable });
     const exp = exported ? 'export ' : '';
     // A GENERIC component: the members already reference the parameter,
     // so the list has to reach both shipped declarations or the file
@@ -605,7 +609,29 @@ export function emitDeclarations({ sexpr, stores, source }) {
          t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
   }
 
+  // A member's `typeof` names a module binding, and this file declares
+  // only its typed bindings, so a root that neither an import nor one
+  // of this file's value declarations binds is TS2304 for every
+  // consumer. Which names get declared is known only once the pass has
+  // run and never depends on how a member is typed, so the pass runs
+  // once recording the roots and, if any fail to resolve, again with
+  // those roots refused.
+  const passStart = lines.length;
+  const roots = new Set();
+  spellable = (name) => { roots.add(name); return true; };
   for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+  const importNames = new Set(sexpr.slice(1).filter(isModuleImport).flatMap(importBoundNames));
+  const passText = lines.slice(passStart).join('\n');
+  const refused = new Set([...roots].filter((name) => !importNames.has(name) &&
+    !new RegExp(`\\b(?:let|const|function|class|enum) ${name.replace(/[$]/g, '\\$&')}\\b`).test(passText)));
+  if (refused.size > 0) {
+    lines.length = passStart;
+    pendingImports.length = 0;
+    pendingDefaults.length = 0;
+    pendingExportLists.length = 0;
+    spellable = (name) => !refused.has(name);
+    for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+  }
 
   // Deferred edges resolve against the FULL declaration text: a
   // default export or bare export list names a binding whose

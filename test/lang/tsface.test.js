@@ -1297,6 +1297,17 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     expect(rows.some((m) => m.mappingKind === 'cover')).toBe(true);
   });
 
+  test('a `style:` key owns an EXACT row on its own bytes, static and reactive', () => {
+    for (const value of ["'color: red'", '"color: #{tone}"']) {
+      const src = `C = component\n  tone := 'red'\n  render\n    span style: ${value}\n`;
+      const r = ts(src);
+      const key = src.indexOf('style');
+      const exact = r.mappings.rows.find((m) => m.mappingKind === 'exact' && m.sourceStart === key);
+      expect(exact).toBeDefined();
+      expect(r.code.slice(exact.generatedStart, exact.generatedEnd)).toBe('style');
+    }
+  });
+
   test('a typed param annotation is an EXACT row; the param name stays exact too', () => {
     const src = 'f = (a: string) -> a\n';
     const r = ts(src);
@@ -1419,8 +1430,8 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
 
   test('_init carries the same props annotation (TS-only)', () => {
     const code = ts(FIXTURE).code;
-    const init = code.slice(code.indexOf('_init(props'));
-    expect(init.slice(0, 200)).toContain('_init(props: {');
+    const init = code.slice(code.indexOf('_init(__props'));
+    expect(init.slice(0, 200)).toContain('_init(__props: {');
   });
 
   test('an all-optional props surface takes `props?:`', () => {
@@ -1444,7 +1455,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
-      'let Chip!: { new (props?: { label?: any; __bind_label__?: { value: any; read(): any; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
+      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
     );
     // Whole-line TS syntax: stripping restores the bare hoist.
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);

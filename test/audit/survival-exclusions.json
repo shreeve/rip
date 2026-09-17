@@ -147,7 +147,9 @@
     "71:4:input": "lowered into a string — the face holds these bytes inside a literal",
     "71:10:ref": "component `ref` prop — lowers to `this`-rooted wiring; the face holds no such identifier at this position",
     "77:4:div": "lowered into a string — the face holds these bytes inside a literal",
-    "78:13:inner": "channel spelling (`<=>`) — rip-native; the lowering leaves no tokenizable identifier at this position"
+    "78:13:inner": "channel spelling (`<=>`) — rip-native; the lowering leaves no tokenizable identifier at this position",
+    "131:4:span": "lowered into a string — the face holds these bytes inside a literal",
+    "135:4:div": "lowered into a string — the face holds these bytes inside a literal"
   },
   "26-schema.rip": {
     "23:6:datetime": "lowered into a string — the face holds these bytes inside a literal",

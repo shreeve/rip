@@ -1,5 +1,5 @@
 # Components: declarations, the member model, the static
-# render DSL. Component member declarations lower into _init(props) in
+# render DSL. Component member declarations lower into _init(__props) in
 # fixed order; render lowers to _create()/_setup() with one __effect
 # per dynamic binding.
 
