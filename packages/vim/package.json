@@ -1,0 +1,17 @@
+{
+  "name": "@rip/vim",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vim syntax, indent, and filetype support for Rip",
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "files": [
+    "ftdetect",
+    "ftplugin",
+    "indent",
+    "syntax",
+    "README.md"
+  ]
+}

@@ -54,6 +54,9 @@ syn match  ripNumber        /\<\d[0-9_]*\%(\.\d[0-9_]*\)\?\%([eE][+-]\?\d[0-9_]*
 
 " --- Keywords ---------------------------------------------------------------
 
+" `then` / `else` are also the loose `and` / `or` below assignment
+" (`x = get() else fallback()`); they stay ripKeyword either way, the
+" group `and` / `or` sit in.
 syn keyword ripKeyword      if else unless then switch when
 syn keyword ripKeyword      for while until loop do
 syn keyword ripKeyword      return break continue throw

@@ -148,6 +148,10 @@
       "name": "@rip/validate",
       "version": "4.0.0",
     },
+    "packages/vim": {
+      "name": "@rip/vim",
+      "version": "4.0.0",
+    },
     "packages/vscode": {
       "name": "vscode-rip",
       "version": "4.0.0",
@@ -229,6 +233,8 @@
     "@rip/utils": ["@rip/utils@workspace:packages/utils"],
 
     "@rip/validate": ["@rip/validate@workspace:packages/validate"],
+
+    "@rip/vim": ["@rip/vim@workspace:packages/vim"],
 
     "@rip/x12": ["@rip/x12@workspace:packages/x12"],
 
