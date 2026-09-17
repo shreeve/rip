@@ -12,7 +12,8 @@
     "./pdf417": "./pdf417.rip"
   },
   "scripts": {
-    "test": "rip test.rip"
+    "test": "rip test.rip",
+    "corpus": "rip corpus.rip"
   },
   "rip": {
     "browser": true
