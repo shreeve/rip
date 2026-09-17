@@ -14,7 +14,8 @@
   "scripts": {
     "test": "rip test.rip",
     "corpus": "rip test/corpus.rip",
-    "bench": "rip test/bench.rip"
+    "bench": "rip test/bench.rip",
+    "compare": "rip test/compare.rip"
   },
   "rip": {
     "browser": true

@@ -315,68 +315,92 @@ secure context.
 
 ## Performance
 
-Measured against [paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the
-TypeScript implementation this package was ported from, both running under
-Bun 1.4.0 on an Apple M5, with a harness that is not part of this package.
-Each figure is the best of three processes; every process runs the whole
-sequence in this order, so each row is timed after the rows above it warmed
-the JIT, the way an application mixes symbol sizes. The package's own
-timing contract is `rip test/bench.rip`: means over 400 ms windows, with
-the readers' hit rows at 1080p and their miss rows at 1080p and at the
-phone arena; its rows are not the ones below.
+Everything below is reproducible from this directory on an Apple M5 under
+Bun 1.4.0. `rip test/bench.rip` is the package's timing contract: every
+figure a mean over a 400 ms window after warm-up, the readers on a clean
+raster and on frames with no symbol at 1080p and at the 2160x2592 arena a
+phone's square viewfinder scans, as I420 luma. A change to a reader lands
+with the rows it touches.
 
-| Encode (µs)         |   rip | paulmillr/qr | speedup |
-|---------------------|------:|-------------:|--------:|
-| raw, version 1      |   2.4 |          3.2 |   1.33x |
-| raw, version 8      |  14.7 |         24.7 |   1.68x |
-| raw, version 18     |  46.4 |         61.8 |   1.33x |
-| svg, version 8      |  31.0 |         47.4 |   1.53x |
-| gif, version 8      |  14.6 |         18.3 |   1.25x |
+| Encode                    |       |
+|---------------------------|------:|
+| QR raw, version 1         |  2 µs |
+| QR raw, version 10        | 15 µs |
+| QR raw, version 22        | 47 µs |
+| QR svg, version 10        | 32 µs |
+| QR gif, version 10        | 15 µs |
+| Code 128 raw, 18 chars    |  2 µs |
+| PDF417 raw, 18 chars      | 12 µs |
 
-| Decode (µs)                |    rip | paulmillr/qr | speedup |
-|----------------------------|-------:|-------------:|--------:|
-| 132x132 raster, version 1  |   28.5 |        114.1 |   4.00x |
-| 1280x720 frame, one symbol |    578 |         1010 |   1.75x |
-| 1920x1080 frame, one symbol|   1300 |         2210 |   1.70x |
-| 1920x1080 noise, no symbol |   6030 |        23900 |   3.96x |
+| Read a clean raster       |         |
+|---------------------------|--------:|
+| QR version 1, 132x132     |   36 µs |
+| QR 1280x720               |  653 µs |
+| QR version 10, 1920x1080  | 1.56 ms |
+| Code 128, 1920x1080       |  171 µs |
+| PDF417, 1920x1080         |  149 µs |
+
+| Miss, no symbol   | 1920x1080 | 2160x2592 |
+|-------------------|----------:|----------:|
+| QR, desk          |   5.01 ms |  13.59 ms |
+| QR, printed page  |   2.83 ms |   8.21 ms |
+| QR, noise         |  10.78 ms |  27.54 ms |
+| QR, fine weave    |   3.60 ms |  10.44 ms |
+| QR, desk, `nativeLimit: 1500` |   |   4.70 ms |
+| Code 128, desk    |   1.04 ms |   1.43 ms |
+| Code 128, printed page |      |   927 µs |
+| Code 128, noise   |           |   2.20 ms |
+| PDF417, desk      |    288 µs |    464 µs |
+| PDF417, noise     |           |   1.31 ms |
+
+A camera runs the miss rows thirty times a second, so they are what
+sets the frame budget; the phone is about twice as slow as this machine.
+Photographs from ZXing's corpus decode in a fraction of a millisecond to
+11 ms, the slowest a 2390x2220 PDF417 of 74 rows by 12 columns at level 8.
+
+`rip test/corpus.rip` scores the readers on ZXing's blackbox photographs
+against the counts ZXing's own tests require; `test/corpus.txt` is that
+output, committed:
+
+| Set                          | images | rip reads | ZXing requires |
+|------------------------------|-------:|----------:|---------------:|
+| qrcode-1 to 6, four rotations |   179 |       684 |            611 |
+| pdf417-1 to 3, where tested   |    58 |       144 |            144 |
+| code128-1 to 3, where tested  |    49 |        96 |             90 |
+| falsepositives-1 and 2        |    47 |   0 false |    up to 6 allowed |
+
+`rip test/compare.rip` races the QR half against
+[paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the TypeScript
+implementation it was ported from, with Paul's package checked out at
+`misc/qr`. Both run in one process on the same inputs; each row is the
+best of three 400 ms means, this package timed first:
+
+| Encode (µs)                 |    rip | paulmillr/qr | speedup |
+|-----------------------------|-------:|-------------:|--------:|
+| raw, version 1              |    2.3 |          3.0 |   1.33x |
+| raw, version 10             |   14.1 |         16.8 |   1.19x |
+| raw, version 22             |   45.5 |         51.2 |   1.13x |
+| svg, version 10             |   29.7 |         46.6 |   1.57x |
+| gif, version 10             |   14.4 |         17.8 |   1.23x |
+
+| Decode (µs)                 |    rip | paulmillr/qr | speedup |
+|-----------------------------|-------:|-------------:|--------:|
+| 132x132 raster, version 1   |   33.0 |          112 |   3.38x |
+| 1280x720 frame, one symbol  |    620 |          996 |   1.61x |
+| 1920x1080 frame, one symbol |   1489 |         2190 |   1.47x |
+| 1920x1080 weave, no symbol  |   5403 |        23660 |   4.38x |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
-background, plus a full-frame noise image for the miss case, which is
-dominated by the finder search; this package walks it on packed words.
-
-PDF417 has no reference implementation in the same runtime to race, so
-its figures stand alone, measured the same way on the same machine:
-
-| PDF417 encode (µs)          |   rip |
-|-----------------------------|------:|
-| raw, `Hello PDF417`         |  10.4 |
-| raw, 192 bytes of text      |  39.5 |
-| raw, 768 bytes of text      | 135.7 |
-| raw, 200 digits             |  39.4 |
-| svg, 192 bytes              |  26.0 |
-| gif, 192 bytes              |  25.3 |
-
-| PDF417 decode (µs)               |   rip |
-|----------------------------------|------:|
-| 300x100 raster, 9 rows x 2 cols  |    83 |
-| 1280x720 frame, one symbol       |   232 |
-| 1920x1080 frame, 192 bytes       |   343 |
-| 1920x1080 noise, no symbol       |   302 |
-
-The frames are the same kind as the QR rows above, with the symbol drawn
-at two to four pixels per module. Photographs from ZXing's corpus decode
-in 0.4 to 8 ms, the largest a 2390x2220 image of 74 rows by 12 columns at
-level 8.
+background, plus a full-frame weave for the miss case, which is dominated
+by the finder search; this package walks it on packed words.
 
 Encode timings are sensitive to which symbol size a process sees first.
 A version 1 symbol fits one 32-bit word per row and never fills a word, so
 a JIT that meets it first specializes the encoder on small integers; the
 first larger symbol then produces full words, which JavaScript reads as
 doubles from an unsigned array, and the recompiled mixed-type code runs
-slower for the rest of the process. The reference implementation shows
-this in the table: warmed only on its own size, its raw version 8 and
-18 rows are 16.8 and 52.8. This package stores matrix words in an
+slower for the rest of the process. This package stores matrix words in an
 `Int32Array`, so a full word is an ordinary integer in every version and
 the encoder keeps one specialization whatever order the sizes arrive in.
 
@@ -391,6 +415,7 @@ in the world, and a great deal of measuring.
 bun run test      # rip test.rip, the contract
 bun run corpus    # rip test/corpus.rip, the ZXing blackbox scorecard; --record matches test/corpus.txt
 bun run bench     # rip test/bench.rip, the timing contract
+bun run compare   # rip test/compare.rip, the race against paulmillr/qr (needs misc/qr)
 ```
 
 The suite pins spec tables, encoded codewords, every output format, every
