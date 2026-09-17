@@ -16,19 +16,8 @@ export DrawerTitle = DialogTitle
 export DrawerDescription = DialogDescription
 export DrawerClose = DialogClose
 
-# DrawerPopup carries DialogPopup's mechanics verbatim, since an extends
-# component cannot render another component as its root; a change to
-# one belongs in both. The effect's first run happens before the
-# mounted tree reaches the document, and showModal throws on a
-# disconnected element, so a drawer that starts open would fail its
-# mount. Opening waits a microtask.
-#
-# Firefox and WebKit render a closed dialog as display: none at once,
-# whatever its transition says, so closing flips data-open first and
-# calls close() only once the popup's own animations settle; styles key
-# on data-open, never on [open]. Escape is canceled and routed through
-# the cell for the same reason. A cancel the browser marks uncancelable
-# still closes natively, without the exit.
+# Repeats DialogPopup's mechanics, since an extends component can't render
+# another component as its root; change both together.
 export DrawerPopup = component extends dialog
   accept open
   accept side
@@ -37,22 +26,16 @@ export DrawerPopup = component extends dialog
   el: HTMLDialogElement | null := null
   closedBy ~= @rest.closedby ?? 'any'
 
-  # Stable Safari and every iOS browser ignore closedby, so a press that
-  # starts and ends on the backdrop closes here and Escape is refused
-  # under none; where the attribute works the browser does both. Goes
-  # when Safari ships it.
+  # Safari ignores closedby, so backdrop presses and Escape under none are
+  # handled here until it ships.
   pressed = false
   onBackdrop = (e: PointerEvent): boolean ->
     return false unless e.target is e.currentTarget
     r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
     e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
 
-  # A press inside the panel that travels toward the panel's side drags
-  # it along, and releasing past a quarter of its size or with speed
-  # dismisses it. The pointer is captured once the drag is past the
-  # slop, so a link under a swipe is not clicked when it ends, and the
-  # browser's own drag of a link or image is refused while a press is
-  # tracked, since it would cancel the pointer sequence first.
+  # Capture past the slop so a swipe from a link doesn't follow it; the
+  # browser's own link or image drag would cancel the pointer sequence.
   horizontal ~= side is 'left' or side is 'right'
   toward ~= if side is 'left' or side is 'top' then -1 else 1
   along = (e: PointerEvent): number -> if horizontal then e.clientX else e.clientY
