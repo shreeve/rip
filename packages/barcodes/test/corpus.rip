@@ -7,10 +7,13 @@
 # Reads the PNGs itself, so nothing beyond the runtime is needed. Lives under
 # test/ because it imports the file system, which never travels to the browser.
 #
-#   rip test/corpus.rip [sets] [rotations] [-v]
+#   rip test/corpus.rip [sets] [rotations] [-v] [--record]
 #   rip test/corpus.rip pdf417,code128 0,180 -v
 #
 # Sets are name prefixes; rotations are degrees. -v lists every miss.
+# --record prints the counts alone, without timings, so the output is the
+# same text on every run and `rip test/corpus.rip --record > test/corpus.txt`
+# is the committed record.
 # ==============================================================================
 
 import { readFileSync, readdirSync, existsSync } from 'fs'
@@ -24,7 +27,8 @@ ROOT =! "#{import.meta.dir}/../../../misc/zxing/core/src/test/resources/blackbox
 # ==[ PNG ]==
 
 # A non-interlaced PNG as RGBA: grayscale, RGB, palette, and either with
-# alpha, at one to eight bits per sample, which covers the corpus.
+# alpha, at one to eight bits per sample, which covers the corpus. Anything
+# else is refused, never read as garbage.
 readPng =! (file) ->
   bytes = readFileSync file
   fail "#{file} is not a PNG" unless bytes.readUInt32BE(0) is 0x89504e47
@@ -44,6 +48,7 @@ readPng =! (file) ->
     at += 12 + size
   {width, height, depth, color, interlace} = head
   fail "#{file}: interlaced PNG" if interlace
+  fail "#{file}: #{depth}-bit PNG" if depth > 8
   channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[color]
   bpp      = Math.max 1, (channels * depth) >> 3
   stride   = (width * channels * depth + 7) >> 3
@@ -110,13 +115,17 @@ EXPECT =!
   'code128-1': [7, null, 7, null]
   'code128-2': [36, null, 36, null]
   'code128-3': [2, null, 2, null]
-  'falsepositives': [2, 2, 2, 2]     # false reads allowed, not reads expected
+  'falsepositives':   [2, 2, 2, 2]   # false reads allowed, not reads expected
+  'falsepositives-2': [4, 4, 4, 4]
 
 args      = process.argv.slice 2
 verbose   = args.includes '-v'
-args      = args.filter (a) -> a isnt '-v'
+record    = args.includes '--record'
+args      = args.filter (a) -> a isnt '-v' and a isnt '--record'
 sets      = if args[0] then args[0].split(',') else ['qrcode', 'pdf417', 'code128', 'falsepositives']
 rotations = if args[1] then args[1].split(',').map(Number) else [0, 90, 180, 270]
+for deg in rotations when deg not in [0, 90, 180, 270]
+  fail "rotation #{deg}: only 0, 90, 180 and 270 are drawn"
 
 rotate =! (img, deg) ->
   return img unless deg
@@ -165,8 +174,8 @@ matches =! (hit, want) ->
 pad =! (s, n) -> String(s).padStart n
 
 names = readdirSync(ROOT).filter((d) -> EXPECT[d] and sets.some((s) -> d.startsWith s)).sort()
-grand = { ours: 0, zxing: 0, false: 0, ms: 0, images: 0 }
-p "set              images   " + rotations.map((r) -> pad("#{r}°", 9)).join('') + "   mean ms   max ms"
+grand = { ours: 0, zxing: 0, false: 0, ms: 0, images: 0, skipped: 0 }
+p "set              images   " + rotations.map((r) -> pad("#{r}°", 9)).join('') + (if record then '' else "   mean ms   max ms")
 for name in names
   dir    = "#{ROOT}#{name}/"
   kind   = name.split('-')[0]
@@ -179,7 +188,13 @@ for name in names
     hits = 0
     for f in files
       base = f.slice 0, -4
-      img  = rotate readPng(dir + f), deg
+      try
+        img = rotate readPng(dir + f), deg
+      catch error
+        # A refused image is reported as such, not scored as a miss.
+        grand.skipped++
+        p "  #{name}/#{base} #{deg}° SKIP #{error.message}"
+        continue
       want = expected dir, base
       t0   = performance.now()
       hit  = read img
@@ -203,6 +218,8 @@ for name in names
   runs = files.length * rotations.length
   grand.ms     += ms
   grand.images += runs
-  p "#{name.padEnd 16} #{pad files.length, 6}   #{cells.join ''}   #{pad (ms / runs).toFixed(1), 7}   #{pad worst.toFixed(0), 6}"
+  timing = if record then '' else "   #{pad (ms / runs).toFixed(1), 7}   #{pad worst.toFixed(0), 6}"
+  p "#{name.padEnd 16} #{pad files.length, 6}   #{cells.join ''}#{timing}"
 p ""
-p "reads #{grand.ours} of ZXing's #{grand.zxing} where ZXing tests the rotation; #{grand.false} false reads; #{(grand.ms / grand.images).toFixed 1} ms mean over #{grand.images} decodes"
+p "reads #{grand.ours} of ZXing's #{grand.zxing} where ZXing tests the rotation; #{grand.false} false reads#{if grand.skipped then "; #{grand.skipped} images refused" else ''}"
+p "#{(grand.ms / grand.images).toFixed 1} ms mean over #{grand.images} decodes" unless record
