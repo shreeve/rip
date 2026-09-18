@@ -1805,7 +1805,9 @@ export class QRScanner
     @retryStart = 0
     @retries = 0
 
-  # Lifecycle wipe: every typed array on the scanner and its layers is zeroed.
+  # Lifecycle wipe: every typed array on the scanner and its layers is zeroed
+  # once. Layer zero's luma is the scanner's own arena and each lumaWords
+  # views its layer's luma, so those aliases are skipped by identity.
   clean!: ->
     @beginOperation()
     try
@@ -1815,7 +1817,7 @@ export class QRScanner
         v.fill 0 if ArrayBuffer.isView v
       for layer in @layers
         for own k, v of layer
-          v.fill 0 if ArrayBuffer.isView v
+          v.fill 0 if ArrayBuffer.isView(v) and v isnt layer.lumaWords and v isnt @luma
         layer.blockHeight  = 0
         layer.blockWidth   = 0
         layer.height       = 0
