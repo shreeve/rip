@@ -562,9 +562,16 @@ barShift =! (luma, luma2, lo, hi) ->
     gradB[k] = luma2[x + 1] - luma2[x]
   best   = -Infinity
   bestAt = 0
+  # Integer products, four per step; the sums are exact in any order.
   for s in [0..2 * TILT_SHIFT]
     sum = 0
-    sum += gradA[k + s] * gradB[k] for k in [0...span]
+    k = 0
+    while k + 3 < span
+      sum += gradA[k + s] * gradB[k] + gradA[k + s + 1] * gradB[k + 1] + gradA[k + s + 2] * gradB[k + 2] + gradA[k + s + 3] * gradB[k + 3]
+      k += 4
+    while k < span
+      sum += gradA[k + s] * gradB[k]
+      k++
     corr[s] = sum
     if sum > best
       best   = sum
