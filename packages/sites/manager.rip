@@ -1039,6 +1039,12 @@ export main = (argv) ->
   # mkdtemp's private 0700 would wall it out.
   runDir = mkdtempSync join(tmpdir(), 'rip-srv-')
   chmodSync runDir, 0o755
+  # Only sockets live in runDir. Generated artifacts (worker.js, every
+  # app generation, migration copies) live under the project: the OS
+  # reclaims the temp folder (macOS deletes files there that go three
+  # days unread) and a worker spawn needs its artifact for the manager's
+  # whole life. Created once the manager lock is held, so it is ours alone.
+  artifactsDir = null
   workers = []
   bootingWorkers = []
   workerSerial = 0
@@ -1788,8 +1794,8 @@ export main = (argv) ->
 
   prepareApi = (epoch) ->
     generation++
-    artifact = join runDir, "app-#{generation}.js"
-    reportPath = join runDir, "app-#{generation}.json"
+    artifact = join artifactsDir, "app-#{generation}.js"
+    reportPath = join artifactsDir, "app-#{generation}.json"
     try
       report = generate! project.entry, artifact, reportPath, "api-#{generation}"
     catch error
@@ -1910,8 +1916,8 @@ export main = (argv) ->
         documents = (stabilizeAppDocuments! documents).documents
       if project.entry?
         generation++
-        candidateArtifact = join runDir, "release-#{generation}.js"
-        report = generate! project.entry, candidateArtifact, join(runDir, "release-#{generation}.json"), "release-#{generation}"
+        candidateArtifact = join artifactsDir, "release-#{generation}.js"
+        report = generate! project.entry, candidateArtifact, join(artifactsDir, "release-#{generation}.json"), "release-#{generation}"
         appArtifact = candidateArtifact
         for slot in [0...args.workers]
           bootSlot! candidateWorkers
@@ -2012,7 +2018,7 @@ export main = (argv) ->
     admissionAttempted = false
     try
       record = persistMigration { ...record, phase: 'activating' }
-      activeArtifact = join runDir, "active-#{record.id}.js"
+      activeArtifact = join artifactsDir, "active-#{record.id}.js"
       copyFileSync record.targetArtifact, activeArtifact
       candidateWorkers = bootArtifact! activeArtifact
       startDoorbell() unless doorbell?
@@ -2056,7 +2062,7 @@ export main = (argv) ->
     restored = []
     admissionAttempted = false
     try
-      activeArtifact = join runDir, "restored-#{record.id}.js"
+      activeArtifact = join artifactsDir, "restored-#{record.id}.js"
       copyFileSync record.oldArtifact, activeArtifact
       restored = bootArtifact! activeArtifact
       operation = 'Restoring'
@@ -2090,8 +2096,8 @@ export main = (argv) ->
         documents = buildAppDocuments! project
         documents = (stabilizeAppDocuments! documents).documents
       generation++
-      candidateArtifact = join runDir, "migration-#{generation}.js"
-      reportPath = join runDir, "migration-#{generation}.json"
+      candidateArtifact = join artifactsDir, "migration-#{generation}.js"
+      reportPath = join artifactsDir, "migration-#{generation}.json"
       report = generate! project.entry, candidateArtifact, reportPath, "migration-#{generation}"
       generations = join project.root, '.rip', 'generations'
       mkdirSync generations, { recursive: true, mode: 0o700 }
@@ -2237,6 +2243,9 @@ export main = (argv) ->
 
   try
     startManagerControl()
+    artifactsDir = join project.root, '.rip', 'run'
+    rmSync artifactsDir, { recursive: true, force: true }
+    mkdirSync artifactsDir, { recursive: true, mode: 0o700 }
     publication = null
     if project.appRoot? and operation isnt 'Maintenance'
       preliminary = buildAppDocuments! project
@@ -2257,11 +2266,11 @@ export main = (argv) ->
     startAssetsWatchers()
     if project.entry?
       startApiWatcher()
-      workerArtifact = join runDir, 'worker.js'
-      generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(runDir, 'worker-result.json'), 'worker'
+      workerArtifact = join artifactsDir, 'worker.js'
+      generate! join(import.meta.dir, 'worker.rip'), workerArtifact, join(artifactsDir, 'worker-result.json'), 'worker'
       unless operation is 'Maintenance'
-        appArtifact = join runDir, 'app.js'
-        report = generate! project.entry, appArtifact, join(runDir, 'app-result.json'), 'app'
+        appArtifact = join artifactsDir, 'app.js'
+        report = generate! project.entry, appArtifact, join(artifactsDir, 'app-result.json'), 'app'
         setApiInputs report.inputs
         if project.appRoot?
           authoritative = buildAppDocuments! project
@@ -2305,6 +2314,9 @@ export main = (argv) ->
     process.off 'SIGINT', onSigint
     process.off 'SIGTERM', onSigterm
     try managerControl?.stop true
+    # Before the owner file goes: a successor acquires the lock the moment
+    # it is gone and claims the same artifacts directory.
+    rmSync artifactsDir, { recursive: true, force: true } if artifactsDir?
     try unlinkSync managerPath if managerOwned
     try unlinkSync managerOwner if managerOwned
     rmSync runDir, { recursive: true, force: true }
