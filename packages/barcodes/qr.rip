@@ -828,15 +828,25 @@ evalLow =! (poly, length, x) ->
 
 # ==[ Payload ]==
 
-# Bit reader over corrected data codewords plus a scratch byte buffer with
-# one prefix view per length, so byte segments decode without allocating.
+# Bit reader over corrected data codewords plus a scratch byte arena sized
+# by the first segment that needs it, with one prefix view per length, so
+# byte segments decode without allocating once a scanner has met their
+# symbol size. Kanji runs of more than a chunk decode chunk by chunk.
+KANJI_CHUNK =! MAX_CODEWORDS & ~1
+
 class Payload
-  constructor: (capacity) ->
+  constructor: ->
     @position = 0
     @data     = Uint8Array.new(0)
     @dataLen  = 0
-    @bytes    = Uint8Array.new(capacity)
-    @views    = Array.new(capacity + 1)
+    @bytes    = Uint8Array.new(0)
+    @views    = []
+
+  # Grow the byte arena to n; the prefix views follow the new buffer.
+  reserve!: (n) ->
+    return if @bytes.length >= n
+    @bytes        = Uint8Array.new(n)
+    @views.length = 0
 
   # A length-n window over the byte arena, created once per length so the
   # frame path never allocates after its first use.
@@ -915,7 +925,7 @@ class Payload
           parts.push [segment, eci]
           res = ''
         else
-          return FAIL.data if length >= @views.length
+          @reserve dataLen
           @bytes[i] = @read(8) for i in [0...length]
           # A segment under no ECI is read the way readers in the wild do.
           decoder = if named then ECI_DECODERS[eci] else guessDecoder(@view length)
@@ -930,7 +940,8 @@ class Payload
         return FAIL.data if length < 0 or @position + 13 * length > dataLen * 8
         decoder = ECI_DECODERS[if hanzi then 29 else 20]
         return FAIL.data unless decoder
-        chunk = (@views.length - 1) & ~1
+        chunk = KANJI_CHUNK
+        @reserve Math.min(2 * length, chunk)
         n     = 0
         for i in [0...length]
           value = @read 13
@@ -1637,11 +1648,12 @@ export class QRScanner
     @luma       = Uint8Array.new(bytes)
     @image      = { data: @luma, height: 0, width: 0 }
     @input      = { data: @luma, height: 0, width: 0 }
-    @grid       = Uint8Array.new(MAX_SIZE * MAX_SIZE)
-    @fun        = Uint8Array.new(MAX_SIZE * MAX_SIZE)
+    # Version-sized scratch, grown by reserve() to the largest symbol attempted.
+    @grid       = Uint8Array.new(0)
+    @fun        = Uint8Array.new(0)
+    @codewords  = Uint8Array.new(0)
+    @blockBytes = Uint8Array.new(0)
     @alignPos   = Uint8Array.new(7)
-    @codewords  = Uint8Array.new(MAX_CODEWORDS)
-    @blockBytes = Uint8Array.new(MAX_CODEWORDS)
     @syndromes  = Uint8Array.new(31)
     @sigma      = Uint8Array.new(31)
     @previous   = Uint8Array.new(31)
@@ -1653,7 +1665,7 @@ export class QRScanner
     @pick       = Float64Array.new(8)
     @nodes      = Float64Array.new(7 * 7 * 2)
     @located    = Float64Array.new((7 * 7 - 3) * 4)
-    @payload    = Payload.new MAX_CODEWORDS
+    @payload    = Payload.new()
     @inFlight   = false
     @staged     = false
     @resized    = false
@@ -1756,6 +1768,17 @@ export class QRScanner
     packQuad @from, c, c, size - c, c, size - 6.5, size - 6.5, c, size - c
     packQuad @to, tl.x, tl.y, tr.x, tr.y, brX, brY, bl.x, bl.y
     @mapQuad out
+
+  # Grow the module grid, function map and codeword scratch to one symbol
+  # size: a scanner that only ever meets small symbols never pays for
+  # Version 40.
+  reserve!: (size) ->
+    return if @grid.length >= size * size
+    words       = BYTES[versionOf(size) - 1]
+    @grid       = Uint8Array.new(size * size)
+    @fun        = Uint8Array.new(size * size)
+    @codewords  = Uint8Array.new(words)
+    @blockBytes = Uint8Array.new(words)
 
   setAlignments: (ver) ->
     return 0 if ver is 1
@@ -2829,6 +2852,7 @@ export class QRScanner
       continue if (i > 0 and size is snapped) or (i > 1 and size is mean)
       continue if size < MIN_SIZE or size > MAX_SIZE or Math.abs(size - estimate) > 6
       @decodedSize = size
+      @reserve size
       # A located bottom-right alignment pattern upgrades the affine BR
       # estimate to perspective.
       f      = 1 - 3 / (size - FINDER_INSET)
