@@ -830,16 +830,17 @@ class Payload
   view: (n) ->
     @views[n] or (@views[n] = Uint8Array.new(@bytes.buffer, 0, n))
 
+  # No field exceeds 16 bits, so three bytes cover one at any bit offset;
+  # bytes past the end read as zero and are masked away with the rest of
+  # the window.
   read: (bits) ->
     start = @position
     return -1 if start + bits > @dataLen * 8
-    value = 0
-    pos   = start
-    for i in [0...bits]
-      value = (value << 1) | ((@data[pos >> 3] >> (7 - (pos & 7))) & 1)
-      pos++
-    @position = pos
-    value
+    data   = @data
+    byte   = start >> 3
+    window = (data[byte] << 16) | (data[byte + 1] << 8) | data[byte + 2]
+    @position = start + bits
+    (window >> (24 - (start & 7) - bits)) & ((1 << bits) - 1)
 
   # Returns a string, or with deferText an array of strings and [bytes, eci]
   # parts for a caller-supplied text decoder, or FAIL.data.
