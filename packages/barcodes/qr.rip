@@ -542,6 +542,15 @@ buildSymCache =! (ver) ->
       y += dir
     xOffset -= 2
     dir = -dir
+  # The zigzag fills a two-module column, so consecutive positions mostly
+  # sit side by side in one word: such a pair is placed as one 2-bit OR.
+  # Entries are (wordIndex << 6 | shift << 1 | 1), or 0 where the pair
+  # straddles a word or a function pattern.
+  pair = Int32Array.new(n >>> 1)
+  for i in [0...n - 1] by 2
+    a = posBuf[i]
+    b = posBuf[i + 1]
+    pair[i >>> 1] = ((a >>> 5) << 6) | ((b & 31) << 1) | 1 if (a >>> 5) is (b >>> 5) and (a & 31) is (b & 31) + 1
   planesT = planes.map (pl) ->
     t = mat size
     transposeMat pl, t
@@ -550,23 +559,34 @@ buildSymCache =! (ver) ->
     ver
     tpl: m.v
     pos: posBuf.slice(0, n)
+    pair
     planes: planes.map((pl) -> pl.v)
     planesT
     work: [mat(size), mat(size), mat(size), mat(size)]
   }
 
-# Template copy, data-bit scatter along the cached zigzag order, then mask
-# selection over XOR candidates; the first lowest score wins.
+# Template copy, data bits placed two at a time along the cached zigzag
+# order, then mask selection over XOR candidates; the first lowest score
+# wins.
 drawSymbol =! (ver, ecc, data, maskIdx) ->
   symCache = buildSymCache ver unless symCache?.ver is ver
-  {tpl, pos, planes, planesT, work} = symCache
+  {tpl, pos, pair, planes, planesT, work} = symCache
   [m, t, cand, candT] = work
   m.v.set tpl
   need = Math.min(8 * data.length, pos.length)
-  for i in [0...need]
-    if data[i >>> 3] & (0x80 >>> (i & 7))
-      q = pos[i]
-      m.v[q >>> 5] |= 1 << (q & 31)
+  for i in [0...need] by 2
+    two = (data[i >>> 3] >>> (6 - (i & 7))) & 3
+    continue unless two
+    pr = pair[i >>> 1]
+    if pr & 1
+      m.v[pr >>> 6] |= two << ((pr >>> 1) & 31)
+    else
+      if two & 2
+        q = pos[i]
+        m.v[q >>> 5] |= 1 << (q & 31)
+      if two & 1
+        q = pos[i + 1]
+        m.v[q >>> 5] |= 1 << (q & 31)
   mask = maskIdx
   if mask is undefined
     transposeMat m, t
