@@ -2432,25 +2432,42 @@ export class QRScanner
         y = i // 3
         fun[y * size + x] = 1
         fun[x * size + y] = 1
-    bytes = @codewords
-    total = BYTES[ver - 1]
-    bytes.fill 0, 0, total
+    bytes    = @codewords
+    total    = BYTES[ver - 1]
+    limit    = 8 * total
     grid     = @grid
     bitIndex = 0
+    acc      = 0
     dir      = -1
     y        = size - 1
     xOffset  = size - 1
     while xOffset > 0
       xOffset = 5 if xOffset is 6
+      # Mask predicates repeat every twelve rows: one period per column
+      # packs into a word, indexed by the row modulo twelve.
+      mask0 = 0
+      mask1 = 0
+      for i in [0...12]
+        mask0 |= ((maskBits(xOffset, i) >> mask) & 1) << i
+        mask1 |= ((maskBits(xOffset - 1, i) >> mask) & 1) << i
+      ym = y % 12
       loop
+        row = y * size
         for j in [0...2]
           x = xOffset - j
-          continue if fun[y * size + x]
-          if bitIndex < 8 * total and (grid[y * size + x] ^ ((maskBits(x, y) >> mask) & 1)) is 1
-            bytes[bitIndex >> 3] |= 0x80 >> (bitIndex & 7)
+          continue if fun[row + x]
+          # Codewords fill in walk order, so each byte lands whole after
+          # its eighth bit.
+          if bitIndex < limit
+            acc = (acc << 1) | (grid[row + x] ^ (((if j then mask1 else mask0) >> ym) & 1))
+            if (bitIndex & 7) is 7
+              bytes[bitIndex >> 3] = acc
+              acc = 0
           bitIndex++
         break if y + dir < 0 or y + dir >= size
-        y += dir
+        y  += dir
+        ym += dir
+        if ym < 0 then ym = 11 else if ym is 12 then ym = 0
       dir = -dir
       xOffset -= 2
     ecc         = ECC_LEVELS[eccIndex]
