@@ -488,10 +488,10 @@ as 6.6 mil, and most cards print between 6.6 and 10 mil, so the card must
 sit within the distance where that constant, times `X`, still yields two
 pixels.
 
-**A fixed-focus ultra-wide webcam**, such as the camera built into an
-Apple Studio Display: 1920 pixels wide at most, a 122° diagonal lens whose
-16:9 crop spans roughly 115° horizontally, fixed focus set for a person at
-desk distance.
+**A fixed-focus ultra-wide webcam cannot read the card.** The camera
+built into an Apple Studio Display is the worked example: 1920 pixels wide
+at most, a 122° diagonal lens whose 16:9 crop spans roughly 115°
+horizontally, fixed focus set for a person at desk distance.
 
 ```
 1920 / (2 · tan 57.5°) ≈ 611 px per unit of X / d
@@ -501,31 +501,35 @@ desk distance.
 | --- | --- | --- |
 | 6.6 mil | d ≤ 4.0 in | d ≤ 2.0 in |
 | 10 mil | d ≤ 6.1 in | d ≤ 3.1 in |
+| lens sharp | d ≥ 12 in | d ≥ 12 in |
+| **both** | **no distance** | **no distance** |
 
 The card has to be two to six inches from the lens. A small-sensor f/2.4
 ultra-wide of this class holds acceptable focus down to roughly ten to
 fifteen inches; inside six inches the blur circle spans several pixels,
 and with modules one or two pixels wide any blur beyond half a module
 erases the bars. The two windows never overlap: sharp only beyond a foot,
-resolvable only inside six inches. No zoom capability is offered, so
-nothing trades field of view for pixels.
+resolvable only inside six inches. The track reports no zoom capability,
+so nothing trades field of view for pixels.
 
-**A phone's main camera**: 3840 pixels wide, a lens near 70° horizontal,
-and a zoom that crops the sensor. `rearCamera` asks for the full sensor and
-the scan demo opens at 2x, about 35° across.
+**A phone's main camera at 2x reads the card from 4 to 18 inches.** It
+delivers 3840 pixels wide through a lens near 70° horizontal, and its zoom
+crops the sensor: 2x halves the tangent, leaving about 38° across.
 
 ```
-3840 / (2 · tan 17.5°) ≈ 6100 px per unit of X / d
+3840 / (2 · tan 19°) ≈ 5600 px per unit of X / d
 ```
 
 | Module X | 1 px per module | 2 px per module |
 | --- | --- | --- |
-| 6.6 mil | d ≤ 40 in | d ≤ 20 in |
-| 10 mil | d ≤ 61 in | d ≤ 31 in |
+| 6.6 mil | d ≤ 37 in | d ≤ 18 in |
+| 10 mil | d ≤ 56 in | d ≤ 28 in |
+| lens sharp | d ≥ 4 in | d ≥ 4 in |
+| **both** | **4 to 37 in** | **4 to 18 in** |
 
 Autofocus reaches down to about four inches, so the sharp window and the
 resolvable window overlap by more than a foot, and the card reads at an
-ordinary hand-held distance. Ten times the pixels per unit of angle is
+ordinary hand-held distance. Nine times the pixels per unit of `X / d` is
 the whole difference; the lens's ability to focus close merely lets the
 card use them.
 
@@ -533,12 +537,13 @@ The frame sizes and module sizes are hard numbers; the fields of view and
 the near focus limit are lens-class figures, not measurements. A near
 limit of six inches, twice as close as estimated, would let a 10 mil card
 reach the one-pixel floor; the reliable two-pixel level needs the figures
-off by a factor of three in the same direction. The sensor behind such a
-webcam holds far more pixels than it delivers, and a face-tracking crop
-like Center Stage can raise the pixels per degree, but no web API steers
-it toward a card. QR fares better on the webcam only because its modules
-are larger: a printed QR with 20 mil modules resolves at a foot, right
-where the lens is sharp.
+off by a factor of three to four in the same direction. The sensor behind
+such a webcam holds far more pixels than it delivers, and a face-tracking
+crop like Center Stage can raise the pixels per degree, but no web API
+steers it toward a card. QR fares better on the webcam only because its
+modules are larger: an ordinary one-inch printed QR has 40 mil modules,
+which put two pixels on each module at a foot, right where the lens is
+sharp.
 
 ## Credits
 
