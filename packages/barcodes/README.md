@@ -330,33 +330,33 @@ with the rows it touches.
 | Encode                    |       |
 |---------------------------|------:|
 | QR raw, version 1         |  2 µs |
-| QR raw, version 10        | 15 µs |
-| QR raw, version 22        | 47 µs |
-| QR svg, version 10        | 32 µs |
-| QR gif, version 10        | 15 µs |
+| QR raw, version 10        | 13 µs |
+| QR raw, version 22        | 41 µs |
+| QR svg, version 10        | 20 µs |
+| QR gif, version 10        | 13 µs |
 | Code 128 raw, 18 chars    |  2 µs |
-| PDF417 raw, 18 chars      | 12 µs |
+| PDF417 raw, 18 chars      | 11 µs |
 
 | Read a clean raster       |         |
 |---------------------------|--------:|
-| QR version 1, 132x132     |   36 µs |
-| QR 1280x720               |  653 µs |
-| QR version 10, 1920x1080  | 1.56 ms |
-| Code 128, 1920x1080       |  171 µs |
-| PDF417, 1920x1080         |  149 µs |
+| QR version 1, 132x132     |   26 µs |
+| QR 1280x720               |  591 µs |
+| QR version 10, 1920x1080  | 1.41 ms |
+| Code 128, 1920x1080       |  107 µs |
+| PDF417, 1920x1080         |  114 µs |
 
 | Miss, no symbol   | 1920x1080 | 2160x2592 |
 |-------------------|----------:|----------:|
-| QR, desk          |   5.01 ms |  13.59 ms |
-| QR, printed page  |   2.83 ms |   8.21 ms |
-| QR, noise         |  10.78 ms |  27.54 ms |
-| QR, fine weave    |   3.60 ms |  10.44 ms |
-| QR, desk, `nativeLimit: 1500` |   |   4.70 ms |
-| Code 128, desk    |   1.04 ms |   1.43 ms |
-| Code 128, printed page |      |   927 µs |
-| Code 128, noise   |           |   2.20 ms |
-| PDF417, desk      |    288 µs |    464 µs |
-| PDF417, noise     |           |   1.31 ms |
+| QR, desk          |   4.64 ms |  12.55 ms |
+| QR, printed page  |   2.55 ms |   7.12 ms |
+| QR, noise         |   8.95 ms |  21.94 ms |
+| QR, fine weave    |   3.13 ms |   8.73 ms |
+| QR, desk, `nativeLimit: 1500` |   |   4.05 ms |
+| Code 128, desk    |    764 µs |   1.16 ms |
+| Code 128, printed page |      |   742 µs |
+| Code 128, noise   |           |   1.73 ms |
+| PDF417, desk      |    223 µs |    401 µs |
+| PDF417, noise     |           |   785 µs |
 
 A camera runs the miss rows thirty times a second, so they are what
 sets the frame budget; the phone is about twice as slow as this machine.
@@ -382,18 +382,18 @@ best of three 400 ms means, this package timed first:
 
 | Encode (µs)                 |    rip | paulmillr/qr | speedup |
 |-----------------------------|-------:|-------------:|--------:|
-| raw, version 1              |    2.3 |          3.0 |   1.33x |
-| raw, version 10             |   14.1 |         16.8 |   1.19x |
-| raw, version 22             |   45.5 |         51.2 |   1.13x |
-| svg, version 10             |   29.7 |         46.6 |   1.57x |
-| gif, version 10             |   14.4 |         17.8 |   1.23x |
+| raw, version 1              |    2.2 |          3.1 |   1.39x |
+| raw, version 10             |   13.1 |         19.5 |   1.49x |
+| raw, version 22             |   41.5 |         54.1 |   1.30x |
+| svg, version 10             |   19.6 |         48.7 |   2.49x |
+| gif, version 10             |   12.9 |         18.4 |   1.43x |
 
 | Decode (µs)                 |    rip | paulmillr/qr | speedup |
 |-----------------------------|-------:|-------------:|--------:|
-| 132x132 raster, version 1   |   33.0 |          112 |   3.38x |
-| 1280x720 frame, one symbol  |    620 |          996 |   1.61x |
-| 1920x1080 frame, one symbol |   1489 |         2190 |   1.47x |
-| 1920x1080 weave, no symbol  |   5403 |        23660 |   4.38x |
+| 132x132 raster, version 1   |   23.9 |          117 |   4.89x |
+| 1280x720 frame, one symbol  |    577 |         1026 |   1.78x |
+| 1920x1080 frame, one symbol |   1382 |         2246 |   1.63x |
+| 1920x1080 weave, no symbol  |   4482 |        24413 |   5.45x |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
@@ -436,6 +436,15 @@ output, errors-and-erasures correction to its limit, and decompaction
 including Macro PDF417, then round-trips rasters across scales, row
 heights, rotations, inversion, compact and extreme shapes, skew, cropped
 and torn start columns and holes.
+
+Three probes under `test/` print one hash line per case, so two builds can
+be shown identical beyond the corpus counts: `probe-stages.rip` hashes the
+decoder's grid, codewords and result for every version, level, mask, text
+kind, scale and damage level; `probe-pixels.rip` hashes every pyramid
+layer's luma, cuts, blocks, packed bitmap and finder count across sizes,
+input formats, padding and offsets; `probe-encode.rip` hashes every
+encoder output in every format and option. Each header carries its diff
+recipe.
 
 ## Design
 
