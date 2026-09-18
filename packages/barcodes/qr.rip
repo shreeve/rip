@@ -1388,23 +1388,44 @@ bitmapRows! =! (layer, from, to) ->
   blocks  = layer.blocks
   # Four pixels per word when rows keep word alignment.
   lumaWords = if LITTLE_ENDIAN and (width & 3) is 0 and (luma.byteOffset & 3) is 0 then layer.lumaWords else null
+  # A grid under five blocks folds the window onto its edge blocks.
+  small = bWidth < 5 or bHeight < 5
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
     top  = clamp y, 2, bHeight - 3
+    sum  = 0
+    unless small
+      # The window is clamped two blocks inside either edge, so it slides one
+      # column at a time between them: five column sums built once per block
+      # row, and each step drops the column leaving and adds the one entering.
+      r0 = bWidth * (top - 2)
+      r1 = r0 + bWidth
+      r2 = r1 + bWidth
+      r3 = r2 + bWidth
+      r4 = r3 + bWidth
+      c0 = blocks[r0]     + blocks[r1]     + blocks[r2]     + blocks[r3]     + blocks[r4]
+      c1 = blocks[r0 + 1] + blocks[r1 + 1] + blocks[r2 + 1] + blocks[r3 + 1] + blocks[r4 + 1]
+      c2 = blocks[r0 + 2] + blocks[r1 + 2] + blocks[r2 + 2] + blocks[r3 + 2] + blocks[r4 + 2]
+      c3 = blocks[r0 + 3] + blocks[r1 + 3] + blocks[r2 + 3] + blocks[r3 + 3] + blocks[r4 + 3]
+      c4 = blocks[r0 + 4] + blocks[r1 + 4] + blocks[r2 + 4] + blocks[r3 + 4] + blocks[r4 + 4]
+      sum = c0 + c1 + c2 + c3 + c4
     for x in [0...bWidth]
       xPos = clamp x * BLOCK, 0, maxX
-      left = clamp x, 2, bWidth - 3
-      sum = 0
-      if bWidth < 5 or bHeight < 5
-        # A grid under five blocks folds the window onto its edge blocks.
+      if small
+        left = clamp x, 2, bWidth - 3
+        sum  = 0
         for yy in [-2..2]
           row = bWidth * clamp(top + yy, 0, bHeight - 1)
           for xx in [-2..2]
             sum += blocks[row + clamp(left + xx, 0, bWidth - 1)]
-      else
-        for yy in [-2..2]
-          row  = bWidth * (top + yy) + left
-          sum += blocks[row - 2] + blocks[row - 1] + blocks[row] + blocks[row + 1] + blocks[row + 2]
+      else if x > 2 and x <= bWidth - 3
+        col = x + 2
+        c0  = c1
+        c1  = c2
+        c2  = c3
+        c3  = c4
+        c4  = blocks[r0 + col] + blocks[r1 + col] + blocks[r2 + col] + blocks[r3 + col] + blocks[r4 + col]
+        sum = c0 + c1 + c2 + c3 + c4
       cut = (sum / 25) | 0
       cuts[y * bWidth + x] = cut
       pos     = yPos * width + xPos
