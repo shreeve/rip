@@ -1,10 +1,25 @@
 # Tiny API so Janus can Bam-admit the Hub. App-only sites have no bridge;
 # without this, `bootApp({ watch: true })` connects and Janus refuses.
-import { hub, start } from 'rip/sites'
+import { hub, start, post } from 'rip/sites'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 hub
   bridge: 'hub'
   auth: false
   open: -> { '+': ['/hub'] }
+
+# Diagnostic: the page posts one frame's luma plane; it lands in dumps/ as
+# raw bytes named by its size and native format, for the readers to replay.
+post '/api/dump' ->
+  bytes = @req.raw.arrayBuffer!
+  w = @req.query('w')
+  h = @req.query('h')
+  f = @req.query('f') or 'luma'
+  dir = join(import.meta.dir, 'dumps')
+  mkdirSync dir, recursive: true
+  name = "#{Date.now()}-#{w}x#{h}-#{f}.luma"
+  writeFileSync join(dir, name), Buffer.from(bytes)
+  { saved: name, bytes: bytes.byteLength }
 
 start!

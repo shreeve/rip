@@ -31,5 +31,7 @@ body { margin: 0; padding: 12px 16px 16px; font: 16px/1.4 system-ui, sans-serif;
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .controls button { padding: 6px 12px; border: 1px solid #555; border-radius: 6px; background: #222; color: #eee; font: inherit; }
 .controls button.on { border-color: #2f5; color: #2f5; }
+.controls select { padding: 6px 10px; border: 1px solid #555; border-radius: 6px; background: #222; color: #eee; font: inherit; max-width: 60vw; }
 .controls label { display: flex; align-items: center; gap: 8px; color: #aaa; font-size: 13px; }
 .controls input[type=range] { width: 140px; }
+.controls .build { font: 12px/1.4 ui-monospace, monospace; color: #8a8; }

@@ -8,6 +8,12 @@ import { QRCanvas, rearCamera, frameLoop } from 'rip/barcodes/dom'
 import { readCode128 } from 'rip/barcodes/code128'
 import { readPDF417 } from 'rip/barcodes/pdf417'
 
+# "09/17/2026 @ 7:26pm", local time.
+stamp = (at) ->
+  pad = (n) -> String(n).padStart 2, '0'
+  h = at.getHours() % 12 or 12
+  "#{pad at.getMonth() + 1}/#{pad at.getDate()}/#{at.getFullYear()} @ #{h}:#{pad at.getMinutes()}#{if at.getHours() < 12 then 'am' else 'pm'}"
+
 export Home = component
   player  := null
   overlay := null
@@ -32,13 +38,30 @@ export Home = component
   quality := '4k'
   seen    := 0         # id of the last frame the 1D and stacked readers saw
   stamps  := []
+  onResize := null     # the listeners, bound here so removal finds them
+  onWake   := null
+  build    := ''       # the published App: its hash and when it landed
+  devices  := []       # the cameras on offer, once permission has named them
+  deviceId := ''       # the one the stream is open on
+  onDevices := null
+  gone     := false    # unmounted while the camera permission was pending
 
   mounted: ->
+    loadBuild()
     try
-      camera = rearCamera! player, format: 'auto'
+      opened = rearCamera! player, format: 'auto'
     catch error
       status = "Camera unavailable: #{error.message}"
       return
+    # A live update can remount the page while the permission prompt is
+    # up; the instance that asked is gone, and its stream must not leak.
+    if gone or not player
+      opened.stop()
+      return
+    camera = opened
+    listCameras()
+    onDevices = -> listCameras()
+    navigator.mediaDevices.addEventListener 'devicechange', onDevices
     # Above 1080p a QR's finders are found at half resolution on two frames
     # in three, and at full resolution on the third, so a small or distant
     # code is still found within a tenth of a second.
@@ -47,9 +70,22 @@ export Home = component
     describe()
     fit()
     player.addEventListener 'loadedmetadata', (-> describe()), once: true
-    window.addEventListener 'resize', fit
-    document.addEventListener 'visibilitychange', wake
+    onResize = -> fit()
+    onWake   = -> wake()
+    window.addEventListener 'resize', onResize
+    document.addEventListener 'visibilitychange', onWake
     cancel = frameLoop (-> scan().catch (error) -> report error), player
+
+  # The App's identity: latest.json names the hash, and the file's own
+  # Last-Modified header is when the manager published it.
+  loadBuild: ->
+    try
+      res = fetch! '/latest.json', cache: 'no-store'
+      {hash} = res.json!
+      at = Date.new res.headers.get('last-modified')
+      build = "#{hash} · #{if Number.isNaN(at.getTime()) then '' else stamp at}"
+    catch
+      build = ''
 
   # A failure anywhere in the loop lands in the status line, since a phone
   # shows no console.
@@ -79,6 +115,27 @@ export Home = component
       setZoom zoom if zoomRange
     catch error
       report error
+
+  # A desktop can hold several cameras: a display's, the laptop's, a
+  # phone's over Continuity. Labels arrive with the first permission, and
+  # a phone comes and goes, so the list follows devicechange.
+  listCameras: ->
+    try
+      devices  = camera.listDevices!
+      deviceId = camera.settings().deviceId or ''
+    catch error
+      report error
+
+  setDevice: (id) ->
+    return if id is deviceId
+    try
+      camera.setDevice! id
+    catch error
+      report error
+      return
+    deviceId = id
+    describe()
+    clear()
 
   setZoom: (value) ->
     zoom = value
@@ -122,6 +179,20 @@ export Home = component
     toggleTorch() if torch
     setZoom 2 if zoomRange and zoom isnt 2
     if quality is '4k' then clear() else setQuality '4k'
+
+  # Post the frame the readers last saw, as raw luma, to /api/dump, where
+  # it lands in dumps/ for the readers to replay outside the browser.
+  dump: ->
+    f = canvas?.lastFrame()
+    unless f
+      status = 'No frame to dump yet'
+      return
+    try
+      res = fetch! "/api/dump?w=#{f.width}&h=#{f.height}&f=#{camera.scanned.format}", method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f.data.slice(0, f.width * f.height)
+      out = res.json!
+      status = "Dumped #{out.saved} (#{out.bytes} bytes)"
+    catch error
+      report error
 
   clear: ->
     frames  = 0
@@ -174,10 +245,12 @@ export Home = component
     history = [{ kind, text, at: Date.new().toLocaleTimeString() }, ...history].slice 0, 20
 
   beforeUnmount: ->
+    gone = true
     cancel?()
+    navigator.mediaDevices.removeEventListener 'devicechange', onDevices if onDevices
     camera?.stop()
-    window.removeEventListener 'resize', fit
-    document.removeEventListener 'visibilitychange', wake
+    window.removeEventListener 'resize', onResize
+    document.removeEventListener 'visibilitychange', onWake
 
   render
     div class: 'stats'
@@ -197,6 +270,10 @@ export Home = component
         span class: 'kind', latest.kind
         code latest.text
     div class: 'controls'
+      if devices.length > 1
+        select 'aria-label': 'camera', @change: ((e) -> setDevice e.target.value)
+          for d in devices
+            option value: d.deviceId, selected: (d.deviceId is deviceId), d.label
       for name in ['720p', '1080p', '4k']
         button class: (if quality is name then 'on' else ''), 'aria-pressed': (quality is name), @click: (-> setQuality name), name
       if zoomRange?
@@ -205,6 +282,8 @@ export Home = component
       if torchable
         button class: (if torch then 'on' else ''), 'aria-pressed': torch, @click: (-> toggleTorch()), 'torch'
       button @click: (-> reset()), 'reset'
+      button @click: (-> dump()), 'dump'
+      span class: 'build', build if build
     ul class: 'history'
       for hit in history
         li
