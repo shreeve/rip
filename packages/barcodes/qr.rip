@@ -635,17 +635,37 @@ renderRaw =! (r) ->
   res
 
 # Half-block glyphs with dark modules printed blank and light ones as blocks,
-# which reads correctly on a dark terminal with light text.
+# which reads correctly on a dark terminal with light text. GLYPH is indexed
+# by (upper, lower) darkness and QUAD by four such cells packed two bits
+# each, so a line grows four glyphs per concatenation.
+GLYPH =! ['█', '▀', '▄', ' ']
+QUAD  =! (GLYPH[i >> 6] + GLYPH[(i >> 4) & 3] + GLYPH[(i >> 2) & 3] + GLYPH[i & 3] for i in [0...256])
+
 renderAscii =! (r) ->
-  W   = r.W
+  {m, W, map} = r
+  {words, v}  = m
   out = ''
   for y in [0...W] by 2
+    my0 = map[y]
+    # Past the bottom edge the missing row reads as dark: the half-block
+    # glyph then shows only the last real row.
+    my1 = if y + 1 < W then map[y + 1] else -2
+    b0  = my0 * words
+    b1  = my1 * words
+    acc = 0
+    n   = 0
     for x in [0...W]
-      first = darkAt r, x, y
-      # Past the bottom edge the missing row reads as dark: the half-block
-      # glyph then shows only the last real row.
-      second = if y + 1 >= W then true else darkAt(r, x, y + 1)
-      out += if first then (if second then ' ' else '▄') else (if second then '▀' else '█')
+      mx = map[x]
+      g  = if my1 is -2 then 1 else 0
+      if mx >= 0
+        g |= 2 if my0 >= 0 and (v[b0 + (mx >>> 5)] >>> (mx & 31)) & 1
+        g |= 1 if my1 >= 0 and (v[b1 + (mx >>> 5)] >>> (mx & 31)) & 1
+      acc = (acc << 2) | g
+      if ++n is 4
+        out += QUAD[acc]
+        acc = 0
+        n   = 0
+    out += GLYPH[(acc >> (2 * (n - 1 - i))) & 3] for i in [0...n]
     out += '\n'
   out
 
