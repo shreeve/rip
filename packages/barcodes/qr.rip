@@ -750,9 +750,9 @@ renderSvg =! (r, optimize) ->
   out + '</svg>'
 
 renderGif =! (r) ->
-  W = r.W
-  {m, map} = r
-  row = Uint8Array.new(W)
+  {m, W, map} = r
+  {words, v}  = m
+  row    = Uint8Array.new(W)
   prevMy = -2
   writeGif W, W, (y) ->
     my = map[y]
@@ -760,7 +760,10 @@ renderGif =! (r) ->
       prevMy = my
       row.fill 0
       if my >= 0
-        row[x] = matGet(m, map[x], my) for x in [0...W] when map[x] >= 0
+        base = my * words
+        for x in [0...W]
+          mx = map[x]
+          row[x] = (v[base + (mx >>> 5)] >>> (mx & 31)) & 1 if mx >= 0
     row
 
 # ==[ Encoder API ]==
