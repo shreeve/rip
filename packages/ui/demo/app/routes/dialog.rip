@@ -15,7 +15,7 @@ export DialogPage = component
             'Open Dialog'
           DialogPopup
             class: [
-              'm-auto w-96 max-w-[calc(100vw-2.5rem)] scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
+              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
               'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
               'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-dialog data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
