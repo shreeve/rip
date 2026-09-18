@@ -175,7 +175,8 @@ ALNUM_VAL =! do ->
 # ==[ Reed-Solomon ]==
 
 # Generator polynomial (leading 1 dropped) and every coefficient*feedback
-# product, cached per parity length.
+# product packed four to a word (coefficient j in byte j & 3 of word
+# j >> 2), cached per parity length.
 RS_CACHE =! []
 
 rsGenerator =! (n) ->
@@ -191,26 +192,38 @@ rsGenerator =! (n) ->
 
 rsCached =! (n) ->
   return RS_CACHE[n] if RS_CACHE[n]
-  gen = rsGenerator n
-  products = Uint8Array.new(256 * n)
+  gen    = rsGenerator n
+  stride = (n + 3) >> 2
+  packed = Int32Array.new(256 * stride)
   for f in [1...256]
     lf   = LOG[f]
-    base = f * n
+    base = f * stride
     for j in [0...n]
       c = gen[j]
-      products[base + j] = EXP[LOG[c] + lf] if c
-  RS_CACHE[n] = { gen, products }
+      packed[base + (j >> 2)] |= EXP[LOG[c] + lf] << (8 * (j & 3)) if c
+  RS_CACHE[n] = { gen, packed }
 
-# Parity via LFSR remainder.
+RS_TMP =! Int32Array.new(8)
+
+# Parity via LFSR remainder, four coefficients a word: each data byte shifts
+# the remainder down one byte across the words and XORs in the packed
+# products row of the feedback byte.
 rsEcc =! (data, rs) ->
-  {gen, products} = rs
-  n    = gen.length
-  last = n - 1
-  res  = Uint8Array.new(n)
+  {gen, packed} = rs
+  n      = gen.length
+  stride = packed.length >>> 8
+  last   = stride - 1
+  w      = RS_TMP.fill 0, 0, stride
   for i in [0...data.length]
-    base = (data[i] ^ res[0]) * n
-    res[j] = res[j + 1] ^ products[base + j] for j in [0...last]
-    res[last] = products[base + last]
+    word = w[0]
+    base = (data[i] ^ (word & 0xff)) * stride
+    for k in [0...last]
+      up   = w[k + 1]
+      w[k] = ((word >>> 8) | (up << 24)) ^ packed[base + k]
+      word = up
+    w[last] = (word >>> 8) ^ packed[base + last]
+  res = Uint8Array.new(n)
+  res[j] = w[j >> 2] >>> (8 * (j & 3)) for j in [0...n]
   res
 
 capacity =! (ver, ecc) ->
@@ -1598,6 +1611,7 @@ export class QRScanner
     @sigma      = Uint8Array.new(31)
     @previous   = Uint8Array.new(31)
     @next       = Uint8Array.new(31)
+    @remainder  = Int32Array.new(8)
     @candidates = Uint32Array.new(MAX_CANDIDATES)
     @ranks      = Float64Array.new(MAX_CANDIDATES)
     @found      = Uint32Array.new(4 * MAX_CANDIDATES * 3)
@@ -2322,16 +2336,19 @@ export class QRScanner
     syndromes  = @syndromes
     # The generator divides an intact block: a zero LFSR remainder, computed
     # exactly as the encoder does, settles the common case without syndromes.
-    {products} = rsCached eccWords
-    rem  = @next
-    last = eccWords - 1
-    rem.fill 0, 0, eccWords
+    # Coefficient j lives in byte j & 3 of word j >> 2; the top word's spare
+    # bytes shift in zeros and fold zero products, so they stay zero.
+    {packed} = rsCached eccWords
+    rem    = @remainder
+    stride = (eccWords + 3) >> 2
+    last   = stride - 1
+    rem.fill 0, 0, stride
     for i in [0...length]
-      base = (blockBytes[offset + i] ^ rem[0]) * eccWords
-      rem[j] = rem[j + 1] ^ products[base + j] for j in [0...last]
-      rem[last] = products[base + last]
+      base = (blockBytes[offset + i] ^ (rem[0] & 0xff)) * stride
+      rem[j] = ((rem[j] >>> 8) | (rem[j + 1] << 24)) ^ packed[base + j] for j in [0...last]
+      rem[last] = (rem[last] >>> 8) ^ packed[base + last]
     dirty = 0
-    dirty |= rem[j] for j in [0...eccWords]
+    dirty |= rem[j] for j in [0...stride]
     return true unless dirty
     for i in [0...eccWords]
       value = 0
