@@ -44,6 +44,10 @@ const vimSyntax = readFileSync(
   path.resolve(import.meta.dir, '..', '..', '..', 'vim', 'syntax', 'rip.vim'), 'utf8');
 const readonlyRule = grammar.patterns.find((p) =>
   typeof p.match === 'string' && p.match.endsWith('(=!)'));
+const tagRule = renderBlock.patterns.find((p) =>
+  typeof p.begin === 'string' && p.begin.includes('|wbr)'));
+const ownLineAttrRule = renderBlock.patterns.find((p) =>
+  typeof p.match === 'string' && p.match.includes('|<=>'));
 
 describe('own-line bare-flag lockstep (grammar ⇄ compiler)', () => {
   test('the grammar alternation is BOOLEAN_ATTRS minus the parse-reserved words', () => {
@@ -156,5 +160,28 @@ describe('void readonly definition lockstep (editor grammars ⇄ compiler)', () 
 
   test('Vim admits the bang between the constant name and the glyph', () => {
     expect(vimSyntax).toMatch(/syn match\s+ripReadonlyName\s+\/\^\\s\*\\zs\[a-zA-Z_\$\]\[a-zA-Z0-9_\$\]\*\\ze!\\\?/);
+  });
+});
+
+describe('hyphenated attribute lockstep (grammar ⇄ compiler)', () => {
+  const tagRe = new RegExp(tagRule.begin);
+  const attrRe = new RegExp(ownLineAttrRule.match);
+
+  test('a tag word heading a hyphenated attribute is the attribute, not an element', () => {
+    for (const [line, name] of [['      data-side: side', 'data-side'], ['      text-anchor: middle', 'text-anchor']]) {
+      expect(line).not.toMatch(tagRe);
+      expect(attrRe.exec(line)[1]).toBe(name);
+      const { code } = compile(`P = component\n  render\n    div\n      ${line.trim()}\n`,
+        { runtimeDelivery: 'none' });
+      expect(code).toContain(`setAttribute('${name}', __v)`);
+      expect(code).not.toContain(`createElement('${name.split('-')[0]}')`);
+    }
+  });
+
+  test('the same word alone on its line is still the element', () => {
+    expect(tagRe.exec('      data')[1]).toBe('data');
+    expect('      data').not.toMatch(attrRe);
+    expect(compile('P = component\n  render\n    div\n      data\n', { runtimeDelivery: 'none' }).code)
+      .toContain("createElement('data')");
   });
 });
