@@ -1089,9 +1089,18 @@ ratio =! (a, b, c, d, e, loose = false) ->
 run =! (layer, x, y, dx, dy, color, cap) ->
   n = 0
   if dy
-    while bit(layer, x, y) is color and n <= cap
+    return 0 if x < 0 or x >= layer.width
+    # The column's word offset and mask are fixed; only the row bound moves.
+    bitmap = layer.bitmap
+    words  = layer.words
+    height = layer.height
+    mask   = 1 << (x & 31)
+    want   = if color then mask else 0
+    pos    = y * words + (x >>> 5)
+    while y >= 0 and y < height and (bitmap[pos] & mask) is want and n <= cap
       n++
-      y += dy
+      y   += dy
+      pos += dy * words
     return n
   return 0 if y < 0 or y >= layer.height
   row = y * layer.words
