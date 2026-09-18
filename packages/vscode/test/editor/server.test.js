@@ -797,6 +797,41 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
+  test('a component host in an extends head navigates to the host\'s declaration and hovers as the component', async () => {
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const src = [
+        'export Popup = component extends dialog',   // 0
+        "  @title := ''",                     // 1
+        '  render',                           // 2
+        '    dialog',                         // 3
+        '      slot',                         // 4
+        '',
+        'export Sheet = component extends Popup',    // 6
+        '  render',                           // 7
+        '    Popup',                          // 8
+        '      slot',                         // 9
+        '',
+      ].join('\n');
+      const wait = nextDiagnostics(published);
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: src },
+      });
+      await wait();
+      const def = await client.request('textDocument/definition', {
+        textDocument: { uri }, position: { line: 6, character: 35 },   // inside `Popup` in the head
+      });
+      expect(def?.[0]?.range?.start?.line).toBe(0);
+      const hover = await client.request('textDocument/hover', {
+        textDocument: { uri }, position: { line: 6, character: 35 },
+      });
+      expect(hover?.contents?.value).toContain('component Popup extends dialog');
+    } finally {
+      await client.stop();
+    }
+  });
+
   test('the #124 handler story: explicit bindings navigate and rename; the bare directive declines definition and REFUSES rename', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));

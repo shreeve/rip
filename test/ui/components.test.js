@@ -603,9 +603,32 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component\n  data := await load()\n  render\n    div "x"', /state initializer cannot await/);
   });
 
-  test('`component extends` takes an HTML tag — a component parent rejects ', () => {
+  test('`component extends <Component>`: rest spreads into the first class-scope construction of the host, which binds as the instance', () => {
+    const code = compile('Base = component extends div\n  render\n    div\n      slot\nSub = component extends Base\n  @tone := "a"\n  render\n    Base data-tone: tone\n      slot\n').code;
+    expect(code).toContain("static __extends = 'Base';");
+    // The bare reactive member passes its container (the sharing contract), after the spread.
+    expect(code).toContain('new Base({ ...this._rest, "data-tone": this.tone, children: this.children })');
+    expect(code).toContain('this._inheritedInst = this._inst0;');
+    expect(code).toContain('this._inheritedOwn = new Set(["data-tone"]);');
+    // No explicit props and no projection: the spread is the whole object.
+    const bare = compile('Base = component extends div\n  render\n    div\n      slot\nSub = component extends Base\n  render\n    Base\n').code;
+    expect(bare).toContain('new Base({ ...this._rest })');
+    expect(bare).toContain('this._inheritedOwn = new Set([]);');
+    // An imported host binds the same way.
+    const imported = compile("import { Base } from './base.rip'\nSub = component extends Base\n  render\n    Base\n      slot\n").code;
+    expect(imported).toContain("static __extends = 'Base';");
+  });
+
+  test('`component extends` takes an HTML tag or a component this module binds — anything else rejects', () => {
+    emitFails('Sub = component extends Nope\n  render\n    div "s"\n', /takes an HTML tag or a component bound in this module.*'Nope' is neither/s);
+    emitFails('Sub = component extends Sub\n  render\n    Sub\n', /cannot extend itself/);
+  });
+
+  test('`component extends <Component>` whose render never constructs the host at CLASS SCOPE rejects — rest props would land nowhere', () => {
     emitFails('Base = component\n  render\n    div "b"\nSub = component extends Base\n  render\n    div "s"\n',
-      /extends.*takes an HTML tag/s);
+      /never constructs a 'Base' at class scope/);
+    emitFails('Base = component\n  render\n    div "b"\nSub = component extends Base\n  vis := true\n  render\n    div\n      if vis\n        Base\n',
+      /never constructs a 'Base' at class scope/);
   });
 
   test('`component extends <tag>` whose render never creates the tag at CLASS SCOPE rejects — rest props would land nowhere ()', () => {

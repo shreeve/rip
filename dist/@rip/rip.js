@@ -8890,6 +8890,9 @@ var restAliasName = () => {
 var restPassthroughText = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
+var restOfComponentText = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
 var componentCtorSegments = () => [];
 
 // src/emitter.js
@@ -8907,6 +8910,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_restWriters",
   "_restHandlers",
   "_inheritedEl",
+  "_inheritedInst",
+  "_inheritedOwn",
   "_refCleanups",
   "_initFailed",
   "_hmrOrphans",
@@ -10597,6 +10602,17 @@ class Emitter {
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true;
       line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
+    } else if (info.extendsComponent !== null) {
+      line(() => this.b.emit(`declare rest: ${restContainerType(restOfComponentText(info))};`));
+      line(() => {
+        this.b.emit("static __ripHost() { return new ");
+        if (info.hostSpan !== null && info.hostNodeId !== null) {
+          this.b.markSpan(info.hostNodeId, "identifier", info.hostSpan[0], info.hostSpan[1], () => this.b.emit(info.extendsComponent));
+        } else {
+          this.b.emit(info.extendsComponent);
+        }
+        this.b.emit("(null!); }");
+      });
     }
     for (const text of runtimeApiDeclares("this"))
       line(() => this.b.emit(text));
@@ -15531,26 +15547,41 @@ ${pad ?? ""}`);
   componentExpr(node) {
     const [, parent, body] = node;
     let extendsTag = null;
+    let extendsComponent = null;
     if (parent !== null) {
       const p = typeof parent === "string" ? parent : null;
-      if (p === null || !isHtmlTag2(p) || p.includes("#")) {
-        throw this.positionedError(node, `emitter: 'component extends' takes an HTML tag — rest props forward onto the first '<tag>' element the ` + `render creates; '${typeof parent === "string" ? parent : "…"}' is not one ` + "(component-to-component inheritance is not a surface)");
+      if (p !== null && isHtmlTag2(p) && !p.includes("#")) {
+        extendsTag = p;
+      } else if (p !== null && isComponentName2(p) && (this.inScope(p) || this.moduleBound.has(p))) {
+        if (p === this._componentName) {
+          throw this.positionedError(node, `emitter: component '${p}' cannot extend itself — the render would construct it without end`);
+        }
+        extendsComponent = p;
+      } else {
+        throw this.positionedError(node, `emitter: 'component extends' takes an HTML tag or a component bound in this module — rest props forward ` + `onto the first one the render creates; '${typeof parent === "string" ? parent : "…"}' is neither`);
       }
-      extendsTag = p;
     }
+    const extendsHost = extendsTag ?? extendsComponent;
+    let hostSpan = null;
+    let hostNodeId = null;
     if (this.ts) {
       const id = this.stores.idOf(node) ?? null;
       const span = id !== null ? this.stores.selfSpan(id) : null;
       const src = this.b.source;
       if (span !== null && src !== null && src.startsWith("component", span[0])) {
         this.silences.push([span[0], span[0] + "component".length]);
-        if (extendsTag !== null) {
+        if (extendsHost !== null) {
           const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
-          if (head !== null && src.startsWith(extendsTag, span[0] + head[0].length)) {
+          if (head !== null && src.startsWith(extendsHost, span[0] + head[0].length)) {
             const exStart = span[0] + "component".length + head[1].length;
             this.silences.push([exStart, exStart + "extends".length]);
             const tagStart = span[0] + head[0].length;
-            this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: "tag", tag: extendsTag, svg: false });
+            if (extendsTag !== null) {
+              this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: "tag", tag: extendsTag, svg: false });
+            } else {
+              hostSpan = [tagStart, tagStart + extendsComponent.length];
+              hostNodeId = id;
+            }
           }
         }
       }
@@ -15810,9 +15841,9 @@ ${pad ?? ""}`);
       if (isPublic)
         declaredProps.push(name);
     }
-    if (extendsTag !== null) {
+    if (extendsHost !== null) {
       if (seen.has("rest")) {
-        throw this.positionedError(seen.get("rest"), "emitter: a component that extends a tag cannot declare a member named 'rest' — `@rest` is the reactive " + "view of the undeclared caller props (the rest-forwarding seam)", node);
+        throw this.positionedError(seen.get("rest"), "emitter: a component that extends a host cannot declare a member named 'rest' — `@rest` is the reactive " + "view of the undeclared caller props (the rest-forwarding seam)", node);
       }
       members.set("rest", "rest");
       memberReactive.add("rest");
@@ -15827,6 +15858,8 @@ ${pad ?? ""}`);
     const behavior = this.ts && this.scopes.length === 1 && typeof this._componentName === "string" ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
     if (tsInfo) {
+      tsInfo.hostSpan = hostSpan;
+      tsInfo.hostNodeId = hostNodeId;
       tsInfo.appStashSpec = this.appStashSpec;
       tsInfo.routesUnion = this.routesUnion;
       tsInfo.routeParams = this.routeParams;
@@ -15839,9 +15872,9 @@ ${pad ?? ""}`);
       if (label !== null)
         memberKinds.set(m.name, { label, optional: m.optional === true });
     }
-    if (extendsTag !== null)
+    if (extendsHost !== null)
       memberKinds.set("rest", { label: "rest", optional: false });
-    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map, renderPlainReads: new Set };
+    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, plainWrites: new Map, renderPlainReads: new Set };
     const ind = this.ind;
     const pad = "  ".repeat(ind + 1);
     const ipad = pad + "  ";
@@ -15915,9 +15948,9 @@ ${pad ?? ""}`);
         this.b.emit(`${pad}static __props = [${declaredProps.map((n) => `'${n}'`).join(", ")}];
 `);
       }
-      if (extendsTag !== null) {
+      if (extendsHost !== null) {
         this.b.emit(`${pad}static __extends = `);
-        this.emitQuotedPrimitive(extendsTag);
+        this.emitQuotedPrimitive(extendsHost);
         this.b.emit(`;
 `);
       }
@@ -15928,7 +15961,7 @@ ${pad ?? ""}`);
           stateVars,
           derivedVars,
           gateVars,
-          extendsTag,
+          extendsTag: extendsHost,
           methods,
           hooks,
           hasRender: renderNode !== null
@@ -16246,6 +16279,9 @@ ${pad ?? ""}`);
         this.renderBody(renderNode, ind, frame);
       if (extendsTag !== null && frame.inheritedBound !== true) {
         throw this.positionedError(node, `emitter: this component extends '${extendsTag}' but its render never creates a '<${extendsTag}>' element ` + "at class scope — rest props forward onto the FIRST class-scope element of the extended tag (at any " + "nesting depth; conditional branches and loop rows never bind it), and without one every caller prop " + "lands nowhere");
+      }
+      if (extendsComponent !== null && frame.inheritedBound !== true) {
+        throw this.positionedError(node, `emitter: this component extends '${extendsComponent}' but its render never constructs a '${extendsComponent}' ` + "at class scope — rest props forward onto the FIRST class-scope construction of the extended component (at " + "any nesting depth; conditional branches and loop rows never bind it), and without one every caller prop " + "lands nowhere");
       }
       this.b.emit("  ".repeat(ind) + "}");
     });
@@ -17138,6 +17174,9 @@ ${pad ?? ""}`);
     }
     const instVar = this.newRenderVar("inst");
     const elVar = this.newRenderVar("el");
+    const isHost = R.frame.extendsComponent === name && rec.kind === "class" && R.frame.inheritedBound !== true && this.renderVarKind(name) === null && this.resolveBareRead(name) === null;
+    if (isHost)
+      R.frame.inheritedBound = true;
     const props = [];
     const updaters = [];
     const eventBindings = [];
@@ -17404,11 +17443,14 @@ ${pad ?? ""}`);
       ctorRef();
       this.b.emit("(");
       if (props.length === 0) {
-        this.b.emit("{}");
+        this.b.emit(isHost ? `{ ...${self()}._rest }` : "{}");
       } else {
         const multi = propDirs.size > 0;
         const inner = this.replayPad + "  ";
         this.b.emit(multi ? "{" : "{ ");
+        if (isHost)
+          this.b.emit(multi ? `
+${inner}...${self()}._rest,` : `...${self()}._rest, `);
         props.forEach((p, i) => {
           if (multi) {
             if (i > 0)
@@ -17501,6 +17543,11 @@ ${this.replayPad}}` : " }");
       this.b.emit(") {");
     });
     line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
+    if (isHost) {
+      const own = [...seenKeys.keys()].filter((k) => k !== "children").map((k) => JSON.stringify(k)).join(", ");
+      line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
+      line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
+    }
     if (rec.kind === "class") {
       line(() => this.b.emit(`  (this._children || (this._children = [])).push(${instVar});`));
     } else {
@@ -26232,7 +26279,7 @@ class __Component {
     this.rest.touch();
     const tok = __pushOwner(this._frame);
     try {
-      this._applyInheritedProp(this._inheritedEl, key, value);
+      this._applyInheritedProp(this._inheritedInst ?? this._inheritedEl, key, value);
     } finally {
       __popOwner(tok);
     }
@@ -26245,10 +26292,12 @@ class __Component {
     for (const key in this._rest)
       this._applyInheritedProp(this._inheritedEl, key, this._rest[key]);
   }
-  _applyInheritedProp(el, key, value) {
+  _applyInheritedProp(host, key, value) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
-    if (!el || key === "key" || key === "ref" || key === "children" || key.startsWith("__bind_"))
+    if (!host || key === "key" || key === "ref" || key === "children" || key.startsWith("__bind_"))
+      return;
+    if (this._inheritedOwn?.has(key))
       return;
     const prevWriter = this._restWriters?.[key];
     if (prevWriter) {
@@ -26259,13 +26308,20 @@ class __Component {
     }
     if (value != null && typeof value === "object" && typeof value.read === "function") {
       (this._restWriters ??= {})[key] = __effect(() => {
-        this._applyPlainInheritedProp(el, key, value.value);
+        this._applyPlainInheritedProp(host, key, value.value);
       });
       return;
     }
-    this._applyPlainInheritedProp(el, key, value);
+    this._applyPlainInheritedProp(host, key, value);
   }
-  _applyPlainInheritedProp(el, key, value) {
+  _applyPlainInheritedProp(host, key, value) {
+    if (typeof host._updateProp === "function") {
+      if (host._state === "failed" || host._state === "unmounted")
+        return;
+      host._updateProp(key, value);
+      return;
+    }
+    const el = host;
     if (key[0] === "@") {
       const event = key.slice(1).split(".")[0];
       this._restHandlers || (this._restHandlers = {});
@@ -26473,6 +26529,8 @@ class __Component {
     this._root = null;
     this._nodes = null;
     this._inheritedEl = null;
+    this._inheritedInst = null;
+    this._inheritedOwn = null;
   }
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === "failed" || this._state === "unmounted")

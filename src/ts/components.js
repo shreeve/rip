@@ -93,7 +93,11 @@ const yieldsIn = (x) => {
 // file binds; a refused root types the member `any`.
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
   const [, parent, body] = node;
-  const extendsTag = typeof parent === 'string' ? parent : null;
+  // The host: a tag, or a component the render constructs (JS emission
+  // has already refused anything else; a component's name is capitalized
+  // and no tag's is).
+  const extendsComponent = typeof parent === 'string' && /^[A-Z]/.test(parent) ? parent : null;
+  const extendsTag = typeof parent === 'string' && extendsComponent === null ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
   const members = [];
 
@@ -234,6 +238,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
   for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; }
   return {
     extendsTag,
+    extendsComponent,
     behavior,
     members,
     roleText,
@@ -645,8 +650,11 @@ const isRequiredProp = (m) => m.kind === 'prop' && m.annotation !== null && !m.o
 const keyText = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`);
 
 // Every component takes `props` optionally unless a REQUIRED prop
-// exists (annotated `@x: T`, no marker, no default).
-export const propsParamOptional = (info) => !publicProps(info).some(isRequiredProp);
+// exists (annotated `@x: T`, no marker, no default). Under a component
+// host the parameter is required: the host may carry a required prop
+// this surface cannot see by name, and a child use always passes an
+// object, so nothing is lost.
+export const propsParamOptional = (info) => info.extendsComponent === null && !publicProps(info).some(isRequiredProp);
 
 // The props object type as segments: every prop as an optional entry
 // with its `<=>` bind slot, `children` (+ the extends attribute
@@ -709,6 +717,22 @@ export function restPassthroughEntries(tag, road = 'dts') {
 export const restPassthroughText = (tag, road = 'dts') =>
   `{ ${restPassthroughEntries(tag, road).map(([k, t]) => `${keyText(k)}?: ${t}`).join('; ')}; ${REST_TEMPLATES} }`;
 export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g, '_')}`;
+// The passthrough object under `extends <Component>`: the host's own
+// props surface less the keys this component declares, the projection
+// slot, which is this component's own, and every bind slot, since a
+// bind key never rides rest (the runtime refuses an unknown one) and a
+// declared prop's own twin is minted beside it. The host's surface is a
+// union when it carries a required prop (one arm per spelling), and
+// Omit over a union keeps only the common keys, so the omission
+// distributes through a conditional over an inferred parameter.
+// Spelled inline on both roads: the host name is the only reference,
+// and a declaration file resolves it through its own import or binding.
+export const restOfComponentText = (info) => {
+  const own = new Set(['children']);
+  for (const m of publicProps(info)) own.add(m.name);
+  const keys = [...[...own].map((k) => `'${k}'`), '`__bind_${string}__`'].join(' | ');
+  return `(NonNullable<ConstructorParameters<typeof ${info.extendsComponent}>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, ${keys}> : never) : never)`;
+};
 // Every DOM-lib global the minted declaration text can spell: `Node`
 // in the children union, the tag map under `extends`. A declaration
 // file naming one carries its own `dom` lib reference (src/ts/dts.js),
@@ -765,6 +789,7 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
     segs.push({ text: `; ${REST_TEMPLATES}` });
   }
   segs.push({ text: ' }' });
+  if (info.extendsComponent !== null) segs.push({ text: ` & ${restOfComponentText(info)}` });
   for (const m of props.filter(isRequiredProp)) {
     const t = m.annotation;
     segs.push(
@@ -1103,6 +1128,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   // The rest view: the passthrough object, named on the face and inline
   // in the declarations (a .d.ts owes its reader a self-contained type).
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag))};` }] });
+  else if (info.extendsComponent !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(restOfComponentText(info))};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }

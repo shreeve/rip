@@ -525,6 +525,18 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
   });
 
+  test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object', () => {
+    const d = compile("import { Popup } from './popup.rip'\nSheet = component extends Popup\n  @side := 'left'\n  render\n    Popup data-side: @side\n      slot\n").declarations;
+    const omitted = "(NonNullable<ConstructorParameters<typeof Popup>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, 'children' | 'side' | `__bind_${string}__`> : never) : never)";
+    // The parameter is required under a component host (the host may
+    // carry a required prop this surface cannot name).
+    expect(d).toContain(`new (props: { side?: string`);
+    expect(d).toContain(`children?: Node | string | number | boolean | null } & ${omitted}): Sheet;`);
+    expect(d).toContain(`rest: { readonly value: ${omitted}; read(): ${omitted}; touch(): void };`);
+    expect(d).not.toContain('HTMLElementTagNameMap["Popup"]');
+    expect(d).toContain("import { Popup } from './popup.rip';");
+  });
+
   test('a component with no annotations still declares — the props surface is structural (prop-name completions)', () => {
     const d = compile('Tag = component\n  @kind\n').declarations;
     expect(d).toContain('interface Tag {');

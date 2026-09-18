@@ -461,6 +461,40 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     });
   });
 
+  test('hover: a component-host extends component presents the host in its head and its own props only', async () => {
+    // Under `extends <Component>` the props surface is the wrapper's own
+    // props intersected with the host's less the declared keys; the hover
+    // names the host in the head and keeps the wrapper's own rows, with
+    // the host's surface (and the tag passthrough behind it) folded in.
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const src = [
+        'export Popup = component extends dialog',  // 0
+        "  @title := ''",                            // 1
+        '  render',                                  // 2
+        '    dialog',                                // 3
+        '      slot',                                // 4
+        '',
+        'export Sheet = component extends Popup',    // 6
+        "  @side := 'left'",                          // 7
+        '  render',                                   // 8
+        '    Popup data-side: side',                  // 9
+        '      slot',                                 // 10
+        '',
+        'export Page = component',                    // 12
+        '  render',                                   // 13
+        "    Sheet side: 'right', title: 'x'",         // 14
+        '',
+      ].join('\n');
+      await api.open('sheet.rip', src);
+      const use = await api.hover('sheet.rip', 14, 6);   // inside `Sheet`
+      expect(use?.contents?.value).toContain('component Sheet extends Popup');
+      expect(use?.contents?.value).toContain('side?: string');
+      expect(use?.contents?.value).not.toContain('title');
+      expect(use?.contents?.value).not.toContain('HTMLElementTagNameMap');
+      expect(use?.contents?.value).not.toContain('ConstructorParameters');
+    });
+  });
+
   test('hover: `@rest` names the provided view, typed as the tag\'s passthrough', async () => {
     // Under `extends`, `rest` is provided, not declared: its read mints
     // `(rest)`, and its type is the per-tag passthrough object the editor

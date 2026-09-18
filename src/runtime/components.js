@@ -1110,7 +1110,7 @@ class __Component {
     // instance, not of the caller.
     const tok = __pushOwner(this._frame);
     try {
-      this._applyInheritedProp(this._inheritedEl, key, value);
+      this._applyInheritedProp(this._inheritedInst ?? this._inheritedEl, key, value);
     } finally { __popOwner(tok); }
   }
   _applyRestToInheritedEl() {
@@ -1118,9 +1118,15 @@ class __Component {
     if (!this._inheritedEl || !this._rest) return;
     for (const key in this._rest) this._applyInheritedProp(this._inheritedEl, key, this._rest[key]);
   }
-  _applyInheritedProp(el, key, value) {
+  // The host is the inherited element, or under `extends <Component>`
+  // the host instance the render constructed with rest spread into its
+  // props. A key the render's own line passes is the line's: the
+  // spread put the line's value after rest at construction, and an
+  // update to the rest key stops here.
+  _applyInheritedProp(host, key, value) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
-    if (!el || key === 'key' || key === 'ref' || key === 'children' || key.startsWith('__bind_')) return;
+    if (!host || key === 'key' || key === 'ref' || key === 'children' || key.startsWith('__bind_')) return;
+    if (this._inheritedOwn?.has(key)) return;
     // Each key holds at most ONE live writer: overwriting or deleting
     // a rest key disposes the previous container writer FIRST — and
     // removes its dead disposer from the instance frame's list, so a
@@ -1145,12 +1151,18 @@ class __Component {
     // the DOM property would drop every later update — a reactive
     // value forwards through an effect, never by reference.
     if (value != null && typeof value === 'object' && typeof value.read === 'function') {
-      (this._restWriters ??= {})[key] = __effect(() => { this._applyPlainInheritedProp(el, key, value.value); });
+      (this._restWriters ??= {})[key] = __effect(() => { this._applyPlainInheritedProp(host, key, value.value); });
       return;
     }
-    this._applyPlainInheritedProp(el, key, value);
+    this._applyPlainInheritedProp(host, key, value);
   }
-  _applyPlainInheritedProp(el, key, value) {
+  _applyPlainInheritedProp(host, key, value) {
+    if (typeof host._updateProp === 'function') {
+      if (host._state === 'failed' || host._state === 'unmounted') return;
+      host._updateProp(key, value);
+      return;
+    }
+    const el = host;
     if (key[0] === '@') {
       const event = key.slice(1).split('.')[0];
       this._restHandlers || (this._restHandlers = {});
@@ -1329,6 +1341,8 @@ class __Component {
     this._root = null;
     this._nodes = null;
     this._inheritedEl = null;
+    this._inheritedInst = null;
+    this._inheritedOwn = null;
   }
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === 'failed' || this._state === 'unmounted') return;

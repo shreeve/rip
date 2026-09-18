@@ -31,7 +31,7 @@ import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
-import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
+import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
@@ -48,7 +48,7 @@ import { restAliasName, restPassthroughText, COMPONENT_FAILURE_TYPE,
 const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
-  '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl',
+  '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
   '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys',
 ]);
 
@@ -2716,6 +2716,25 @@ class Emitter {
       this._restTags.add(info.extendsTag);
       this._needsClassValue = true; // the alias types the view's `class`
       line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
+    } else if (info.extendsComponent !== null) {
+      line(() => this.b.emit(`declare rest: ${restContainerType(restOfComponentText(info))};`));
+      // The host itself, referenced under the head's own bytes so the
+      // name there resolves to the component it names and hovers as the
+      // component. A construction inside a body: a type position hovers
+      // as `typeof Host`, a bare value reference likewise, only the
+      // target of `new` answers the construct signature the presenter
+      // dresses; a field initializer would draw use-before-declaration
+      // on a host bound later in the module; and `null!` is never, so a
+      // required props parameter draws no arity error.
+      line(() => {
+        this.b.emit('static __ripHost() { return new ');
+        if (info.hostSpan !== null && info.hostNodeId !== null) {
+          this.b.markSpan(info.hostNodeId, 'identifier', info.hostSpan[0], info.hostSpan[1], () => this.b.emit(info.extendsComponent));
+        } else {
+          this.b.emit(info.extendsComponent);
+        }
+        this.b.emit('(null!); }');
+      });
     }
     // The runtime base's API, declared because the inlined base types as
     // `any` and carries nothing into the class. `this` rather than the
@@ -9264,21 +9283,36 @@ class Emitter {
   // groups like a class expression.
   componentExpr(node) {
     const [, parent, body] = node;
-    // `component extends <tag>` — the rest-forwarding surface: the
-    // parent must be a real HTML tag — any other word would emit
-    // DEAD rest machinery for a component or junk parent: no
-    // inheritance, no target element).
+    // `component extends <host>` — the rest-forwarding surface. The
+    // host is an HTML tag, or a component this module binds or imports;
+    // the render must construct it, and the caller's undeclared props
+    // land on it. A component host is delegation, never inheritance:
+    // nothing of its body is visible here, and its class is not this
+    // class's parent.
     let extendsTag = null;
+    let extendsComponent = null;
     if (parent !== null) {
       const p = typeof parent === 'string' ? parent : null;
-      if (p === null || !isHtmlTag(p) || p.includes('#')) {
+      if (p !== null && isHtmlTag(p) && !p.includes('#')) {
+        extendsTag = p;
+      } else if (p !== null && isComponentName(p) && (this.inScope(p) || this.moduleBound.has(p))) {
+        if (p === this._componentName) {
+          throw this.positionedError(node,
+            `emitter: component '${p}' cannot extend itself — the render would construct it without end`);
+        }
+        extendsComponent = p;
+      } else {
         throw this.positionedError(node,
-          `emitter: 'component extends' takes an HTML tag — rest props forward onto the first '<tag>' element the ` +
-          `render creates; '${typeof parent === 'string' ? parent : '…'}' is not one ` +
-          '(component-to-component inheritance is not a surface)');
+          `emitter: 'component extends' takes an HTML tag or a component bound in this module — rest props forward ` +
+          `onto the first one the render creates; '${typeof parent === 'string' ? parent : '…'}' is neither`);
       }
-      extendsTag = p;
     }
+    const extendsHost = extendsTag ?? extendsComponent;
+    // A component host's name is a real reference on the face (the
+    // class declares `typeof <Host>` under it), so its span is kept
+    // for the mark that makes definition and hover answer there.
+    let hostSpan = null;
+    let hostNodeId = null;
     // The head's grammar words own no recorded positions, so their
     // bytes would fall to the class expression's cover row — a hover
     // there describes (and highlights) the WHOLE lowered class. The
@@ -9293,13 +9327,18 @@ class Emitter {
       const src = this.b.source;
       if (span !== null && src !== null && src.startsWith('component', span[0])) {
         this.silences.push([span[0], span[0] + 'component'.length]);
-        if (extendsTag !== null) {
+        if (extendsHost !== null) {
           const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
-          if (head !== null && src.startsWith(extendsTag, span[0] + head[0].length)) {
+          if (head !== null && src.startsWith(extendsHost, span[0] + head[0].length)) {
             const exStart = span[0] + 'component'.length + head[1].length;
             this.silences.push([exStart, exStart + 'extends'.length]);
             const tagStart = span[0] + head[0].length;
-            this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: 'tag', tag: extendsTag, svg: false });
+            if (extendsTag !== null) {
+              this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: 'tag', tag: extendsTag, svg: false });
+            } else {
+              hostSpan = [tagStart, tagStart + extendsComponent.length];
+              hostNodeId = id;
+            }
           }
         }
       }
@@ -9613,10 +9652,10 @@ class Emitter {
     // Under `extends`, `rest` is the runtime-owned reactive view of
     // the undeclared caller props — a user member of that name would
     // shadow the machinery.
-    if (extendsTag !== null) {
+    if (extendsHost !== null) {
       if (seen.has('rest')) {
         throw this.positionedError(seen.get('rest'),
-          "emitter: a component that extends a tag cannot declare a member named 'rest' — `@rest` is the reactive " +
+          "emitter: a component that extends a host cannot declare a member named 'rest' — `@rest` is the reactive " +
           'view of the undeclared caller props (the rest-forwarding seam)', node);
       }
       members.set('rest', 'rest');
@@ -9656,6 +9695,8 @@ class Emitter {
       ? `__${this._componentName}__computed` : null;
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
     if (tsInfo) {
+      tsInfo.hostSpan = hostSpan;
+      tsInfo.hostNodeId = hostNodeId;
       tsInfo.appStashSpec = this.appStashSpec;
       tsInfo.routesUnion = this.routesUnion;
       tsInfo.routeParams = this.routeParams;
@@ -9671,8 +9712,8 @@ class Emitter {
     }
     // The provided `rest` view is no declared member, but its reads mint a
     // kind of their own: `(rest)`, the view of the undeclared caller props.
-    if (extendsTag !== null) memberKinds.set('rest', { label: 'rest', optional: false });
-    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
+    if (extendsHost !== null) memberKinds.set('rest', { label: 'rest', optional: false });
+    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
@@ -9776,13 +9817,12 @@ class Emitter {
       if (declaredProps.length > 0) {
         this.b.emit(`${pad}static __props = [${declaredProps.map((n) => `'${n}'`).join(', ')}];\n`);
       }
-      if (extendsTag !== null) {
+      if (extendsHost !== null) {
         // The runtime's rest seam reads this: undeclared constructor
         // props collect into the reactive `rest` view and forward
-        // onto the inherited element (the rest machinery lives on
-        // __Component).
+        // onto the host (the rest machinery lives on __Component).
         this.b.emit(`${pad}static __extends = `);
-        this.emitQuotedPrimitive(extendsTag);
+        this.emitQuotedPrimitive(extendsHost);
         this.b.emit(';\n');
       }
       // HMR identity/signature — module-scope named components only.
@@ -9794,7 +9834,7 @@ class Emitter {
           stateVars,
           derivedVars,
           gateVars,
-          extendsTag,
+          extendsTag: extendsHost,
           methods,
           hooks,
           hasRender: renderNode !== null,
@@ -10187,6 +10227,13 @@ class Emitter {
           `emitter: this component extends '${extendsTag}' but its render never creates a '<${extendsTag}>' element ` +
           'at class scope — rest props forward onto the FIRST class-scope element of the extended tag (at any ' +
           'nesting depth; conditional branches and loop rows never bind it), and without one every caller prop ' +
+          'lands nowhere');
+      }
+      if (extendsComponent !== null && frame.inheritedBound !== true) {
+        throw this.positionedError(node,
+          `emitter: this component extends '${extendsComponent}' but its render never constructs a '${extendsComponent}' ` +
+          'at class scope — rest props forward onto the FIRST class-scope construction of the extended component (at ' +
+          'any nesting depth; conditional branches and loop rows never bind it), and without one every caller prop ' +
           'lands nowhere');
       }
 
@@ -11343,6 +11390,13 @@ class Emitter {
     // data-part of its own; the child's render carries its own).
     const instVar = this.newRenderVar('inst');
     const elVar = this.newRenderVar('el');
+    // Under `extends <Component>`, the FIRST class-scope construction
+    // of the host takes rest: spread into its props ahead of the line's
+    // own keys, and bound as the instance later rest writes route
+    // through (the fixed bindInheritedTarget rule, for a part).
+    const isHost = R.frame.extendsComponent === name && rec.kind === 'class' && R.frame.inheritedBound !== true &&
+      this.renderVarKind(name) === null && this.resolveBareRead(name) === null;
+    if (isHost) R.frame.inheritedBound = true;
 
     // ── The argument walk: props, event bindings, children ──
     const props = [];      // { pair, key, fn } in source order
@@ -11731,7 +11785,7 @@ class Emitter {
       ctorRef();
       this.b.emit('(');
       if (props.length === 0) {
-        this.b.emit('{}');
+        this.b.emit(isHost ? `{ ...${self()}._rest }` : '{}');
       } else {
         // With directive-carrying pairs, the argument object emits ONE
         // PAIR PER LINE so each directive sits directly above the face
@@ -11740,6 +11794,7 @@ class Emitter {
         const multi = propDirs.size > 0;
         const inner = this.replayPad + '  ';
         this.b.emit(multi ? '{' : '{ ');
+        if (isHost) this.b.emit(multi ? `\n${inner}...${self()}._rest,` : `...${self()}._rest, `);
         props.forEach((p, i) => {
           if (multi) {
             if (i > 0) this.b.emit(',');
@@ -11833,6 +11888,11 @@ class Emitter {
       this.b.emit(') {');
     });
     line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
+    if (isHost) {
+      const own = [...seenKeys.keys()].filter((k) => k !== 'children').map((k) => JSON.stringify(k)).join(', ');
+      line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
+      line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
+    }
     if (rec.kind === 'class') {
       line(() => this.b.emit(`  (this._children || (this._children = [])).push(${instVar});`));
     } else {

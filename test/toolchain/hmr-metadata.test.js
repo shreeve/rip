@@ -95,6 +95,18 @@ Row = component
     expect(code).toContain('"props":["disabled"]');
   });
 
+  test('a component host is the signature\'s extends, by name', () => {
+    const src = `import { Popup } from './popup.rip'
+export Sheet = component extends Popup
+  @side := 'left'
+  render
+    Popup data-side: side
+`;
+    const { code } = compileHmr(src, 'ui/sheet.rip');
+    expect(code).toContain('"extends":"Popup"');
+    expect(code).toContain('"props":["side"]');
+  });
+
   test('impl fingerprint changes when methods change; shape stays when state stays', () => {
     const a = compileHmr(SRC, 'c.rip').code;
     const b = compileHmr(SRC.replace('bump = -> count += 1', 'bump = -> count += 2\n  reset = -> count = 0'), 'c.rip').code;

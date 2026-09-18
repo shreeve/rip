@@ -3068,6 +3068,15 @@ function componentPropsAt(flat, open) {
   while (flat.startsWith(' & (', at)) {
     const groupEnd = balancedTo(flat, at + 3);
     if (groupEnd === -1) return null;
+    // Under `extends <Component>` the host's surface rides one group of
+    // its own, the host's construction props less the declared keys; it
+    // is the head's `extends`, and none of its rows are this component's.
+    const host = /^NonNullable<ConstructorParameters<typeof ([A-Za-z_$][\w$]*)>\[0\]>/.exec(flat.slice(at + 4, groupEnd));
+    if (host !== null) {
+      extendsTag.tag = host[1];
+      at = groupEnd + 1;
+      continue;
+    }
     const named = unionArms(flat.slice(at + 4, groupEnd))
       .filter((a) => a.startsWith('{') && a.endsWith('}'))
       .flatMap((a) => membersOf(a.slice(1, -1)));

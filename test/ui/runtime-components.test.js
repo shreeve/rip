@@ -1629,6 +1629,49 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     expect(inst.label.read()).toBe('new');
   });
 
+  test('a bound host INSTANCE takes rest writes through its own prop updater: declared props write the member, undeclared keys reach its rest, the line\'s own keys stop, containers unwrap through an owned effect, teardown releases', () => {
+    const Host = defineComponent(RT, {
+      name: 'Host', props: ['title'],
+      init(p, a) { this.title = a.__state(p.__bind_title__ ?? p.title ?? ''); },
+      create() { return document.createElement('div'); },
+    });
+    Host.__extends = 'div';
+    const host = new Host({});
+    host._inheritedEl = host._create();
+    host._state = 'mounted';
+    const Wrap = defineComponent(RT, { name: 'Wrap', props: ['side'], init(p, a) { this.side = a.__state(p.side ?? 'l'); } });
+    Wrap.__extends = 'Host';
+    const wrap = new Wrap({ title: 't0', 'data-x': 'x0', 'data-own': 'ignored' });
+    wrap._inheritedInst = host;
+    wrap._inheritedOwn = new Set(['data-own']);
+    wrap._state = 'mounted';
+    // A declared prop of the host writes its member; an undeclared one
+    // reaches the host's rest and its element.
+    wrap._updateProp('title', 't1');
+    expect(host.title.read()).toBe('t1');
+    wrap._updateProp('data-x', 'x1');
+    expect(host._rest['data-x']).toBe('x1');
+    expect(host._inheritedEl.getAttribute('data-x')).toBe('x1');
+    // null deletes down the chain.
+    wrap._updateProp('data-x', null);
+    expect('data-x' in host._rest).toBe(false);
+    expect(host._inheritedEl.getAttribute('data-x')).toBeNull();
+    // A key the render's own line passes is the line's: the update stops.
+    wrap._updateProp('data-own', 'later');
+    expect('data-own' in host._rest).toBe(false);
+    // A container unwraps through an effect the wrapper owns.
+    const cell = RT.__state('c0');
+    wrap._updateProp('title', cell);
+    expect(host.title.read()).toBe('c0');
+    cell.value = 'c1';
+    expect(host.title.read()).toBe('c1');
+    expect(Object.keys(wrap._restWriters)).toEqual(['title']);
+    wrap._teardown({ state: 'unmounted', hooks: false, removeDOM: false });
+    expect(wrap._inheritedInst).toBeNull();
+    expect(wrap._inheritedOwn).toBeNull();
+    expect(wrap._restWriters).toBeNull();
+  });
+
   test('rest.touch() notifies @rest readers on _setRestProp', () => {
     const inst = makeBtn({ title: 'a' });
     const log = [];
