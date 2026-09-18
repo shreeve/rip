@@ -16,7 +16,7 @@ import { execSync, spawn } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join, relative, resolve } from 'path'
-import { edgeControl } from 'rip/sites/edge'
+import { edgeControl, edgeScope } from 'rip/sites/edge'
 import { toEmail } from './email.rip'
 
 throw Error.new('rip/email/cli is a CLI, not a library; run it as rip-email (rip email)') unless import.meta.main
@@ -26,7 +26,7 @@ VERSION = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf-8'
 USAGE = '''
 usage: rip-email <verb> [args]
 
-  rip-email dev [dir] [--host H] [--open]         serve a live preview at https://email.local/
+  rip-email dev [dir] [--host H] [--open]         serve a live preview at https://email.local/ and https://email.via.rip/
   rip-email export [dir] [--out DIR] [--text]     write <out>/<file>.html per template
 
   dir defaults to ./emails, or to the current directory when it is
@@ -184,15 +184,16 @@ edge = (control, method, path, body = null) ->
 
 # Another app holding the host would make the manager wait thirty seconds
 # for the claim to lapse and then refuse, so the host is a flag.
-dev = (root, host, open) ->
+dev = (root, hosts, open) ->
   control = edgeControl()
   die 'rip-email: the edge is not running — start it with `janus autostart`' unless control
-  address = "https://#{host}/"
+  addresses = hosts.map (host) -> "https://#{host}/"
   title = paint GREEN, "Rip Email #{VERSION}"
   console.log ''
   console.log "    #{title}"
   console.log "    Templates:                   #{shown root}"
-  console.log "    Running preview at:          #{address}"
+  console.log "    Running preview at:          #{addresses[0]}"
+  console.log "                                 #{address}" for address in addresses.slice(1)
   console.log ''
   pending = paint DIM, '◌ Getting the preview ready...'
   process.stdout.write " #{pending}" if process.stdout.isTTY
@@ -209,17 +210,18 @@ dev = (root, host, open) ->
   # run, and this one lives only as long as the run.
   project = mkdtempSync join(tmpdir(), 'rip-email-')
   symlinkSync join(import.meta.dir, 'preview', 'app'), join(project, 'app')
-  writeFileSync join(project, 'serve.rip'), "export default\n  name: 'email'\n  hosts: ['#{host}']\n"
+  writeFileSync join(project, 'serve.rip'), "export default\n  name: 'email'\n  hosts: [#{hosts.map((host) -> "'#{host}'").join(', ')}]\n"
   writeFileSync join(project, 'index.rip'), "import '#{join(import.meta.dir, 'preview', 'index.rip')}'\n"
 
   manager = spawn process.execPath, ["--preload=#{join ROOT, 'src', 'loader.js'}", join(ROOT, 'packages', 'sites', 'manager.rip'), project, '--no-watch-api', '--access-log=off'],
     stdio: ['inherit', 'pipe', 'inherit']
     env: { ...process.env, RIP_EMAIL_DIR: root, JANUS_CONTROL: control }
-  # The manager announces its host on stdout once registered; the banner
+  # The manager announces its hosts on stdout once registered; the banner
   # already has. Anything else it says there passes through.
+  announcement = if addresses.length is 1 then ["rip-sites: email  #{addresses[0]}"] else ['rip-sites: email', ...addresses.map((address) -> "  #{address}")]
   manager.stdout.on 'data', (chunk) ->
-    text = String chunk
-    process.stdout.write text unless text is "rip-sites: #{address}\n"
+    text = String(chunk).split('\n').filter((line) -> not announcement.includes(line)).join('\n')
+    process.stdout.write text if text
   # The manager owns the shutdown: it deregisters from the edge on its way
   # out, so a signal to this process is handed to it, and the project
   # goes once it has exited.
@@ -249,6 +251,9 @@ dev = (root, host, open) ->
     console.log " #{OK} Ready in #{seconds}s"
 
   if open
+    # The family the edge resolves here, as the catalog chooses it.
+    family = if edgeScope() is 'lan' then '.local' else '.via.rip'
+    address = "https://#{hosts.find((host) -> host.endsWith family) or hosts[0]}/"
     try
       execSync (if process.platform is 'darwin' then "open '#{address}'" else "xdg-open '#{address}'")
     catch
@@ -317,8 +322,8 @@ rootArg = -> if positional[0] then templateRoot(positional[0]) else defaultRoot(
 
 switch verb
   when 'dev'
-    host = previewHost flag('--host') ?? 'email.local'
-    dev rootArg(), host, has('--open')
+    hosts = if flag('--host')? then [previewHost flag('--host')] else ['email.local', 'email.via.rip']
+    dev rootArg(), hosts, has('--open')
   when 'export'
     exportAll! rootArg(), resolve(flag('--out') ?? 'out'), has('--text')
   when 'render'

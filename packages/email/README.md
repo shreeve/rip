@@ -65,7 +65,7 @@ Block elements and headings become line breaks, a link keeps its address beside 
 `rip email` previews and exports the templates in a directory (`./emails` by default, or the current directory when it is itself named `emails`). A template file exports one component; a file led by an underscore is shared by templates and is not one. `Component.previewProps` chooses the props it renders with and `Component.subject`, a function of the props, gives the subject line.
 
 ```bash
-rip email dev            # live preview at https://email.local/ under the edge
+rip email dev            # live preview at https://email.local/ and https://email.via.rip/ under the edge
 rip email export --text  # <out>/<file>.html and .txt per template
 ```
 
