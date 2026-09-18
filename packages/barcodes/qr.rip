@@ -175,7 +175,8 @@ ALNUM_VAL =! do ->
 # ==[ Reed-Solomon ]==
 
 # Generator polynomial (leading 1 dropped) and every coefficient*feedback
-# product, cached per parity length.
+# product packed four to a word (coefficient j in byte j & 3 of word
+# j >> 2), cached per parity length.
 RS_CACHE =! []
 
 rsGenerator =! (n) ->
@@ -191,26 +192,38 @@ rsGenerator =! (n) ->
 
 rsCached =! (n) ->
   return RS_CACHE[n] if RS_CACHE[n]
-  gen = rsGenerator n
-  products = Uint8Array.new(256 * n)
+  gen    = rsGenerator n
+  stride = (n + 3) >> 2
+  packed = Int32Array.new(256 * stride)
   for f in [1...256]
     lf   = LOG[f]
-    base = f * n
+    base = f * stride
     for j in [0...n]
       c = gen[j]
-      products[base + j] = EXP[LOG[c] + lf] if c
-  RS_CACHE[n] = { gen, products }
+      packed[base + (j >> 2)] |= EXP[LOG[c] + lf] << (8 * (j & 3)) if c
+  RS_CACHE[n] = { gen, packed }
 
-# Parity via LFSR remainder.
+RS_TMP =! Int32Array.new(8)
+
+# Parity via LFSR remainder, four coefficients a word: each data byte shifts
+# the remainder down one byte across the words and XORs in the packed
+# products row of the feedback byte.
 rsEcc =! (data, rs) ->
-  {gen, products} = rs
-  n    = gen.length
-  last = n - 1
-  res  = Uint8Array.new(n)
+  {gen, packed} = rs
+  n      = gen.length
+  stride = packed.length >>> 8
+  last   = stride - 1
+  w      = RS_TMP.fill 0, 0, stride
   for i in [0...data.length]
-    base = (data[i] ^ res[0]) * n
-    res[j] = res[j + 1] ^ products[base + j] for j in [0...last]
-    res[last] = products[base + last]
+    word = w[0]
+    base = (data[i] ^ (word & 0xff)) * stride
+    for k in [0...last]
+      up   = w[k + 1]
+      w[k] = ((word >>> 8) | (up << 24)) ^ packed[base + k]
+      word = up
+    w[last] = (word >>> 8) ^ packed[base + last]
+  res = Uint8Array.new(n)
+  res[j] = w[j >> 2] >>> (8 * (j & 3)) for j in [0...n]
   res
 
 capacity =! (ver, ecc) ->
@@ -252,9 +265,15 @@ encodeData =! (ver, ecc, text, type, utf8) ->
   push MODE_BITS[type], 4
   push dataLen, lengthBits
   if type is 'numeric'
-    for i in [0...dataLen] by 3
-      n = Math.min(3, dataLen - i)
-      push Number(text.slice(i, i + n)), NUMERIC_BITS[n]
+    # Three digits a group straight from their code points; the tail group
+    # carries one or two.
+    i = 0
+    while i + 3 <= dataLen
+      push (text.charCodeAt(i) - 48) * 100 + (text.charCodeAt(i + 1) - 48) * 10 + text.charCodeAt(i + 2) - 48, 10
+      i += 3
+    rest = dataLen - i
+    if rest is 2 then push (text.charCodeAt(i) - 48) * 10 + text.charCodeAt(i + 1) - 48, 7
+    else if rest is 1 then push text.charCodeAt(i) - 48, 4
   else if type is 'alphanumeric'
     for i in [0...dataLen - 1] by 2
       push ALNUM_VAL[text.charCodeAt(i)] * 45 + ALNUM_VAL[text.charCodeAt(i + 1)], 11
@@ -529,6 +548,15 @@ buildSymCache =! (ver) ->
       y += dir
     xOffset -= 2
     dir = -dir
+  # The zigzag fills a two-module column, so consecutive positions mostly
+  # sit side by side in one word: such a pair is placed as one 2-bit OR.
+  # Entries are (wordIndex << 6 | shift << 1 | 1), or 0 where the pair
+  # straddles a word or a function pattern.
+  pair = Int32Array.new(n >>> 1)
+  for i in [0...n - 1] by 2
+    a = posBuf[i]
+    b = posBuf[i + 1]
+    pair[i >>> 1] = ((a >>> 5) << 6) | ((b & 31) << 1) | 1 if (a >>> 5) is (b >>> 5) and (a & 31) is (b & 31) + 1
   planesT = planes.map (pl) ->
     t = mat size
     transposeMat pl, t
@@ -537,23 +565,34 @@ buildSymCache =! (ver) ->
     ver
     tpl: m.v
     pos: posBuf.slice(0, n)
+    pair
     planes: planes.map((pl) -> pl.v)
     planesT
     work: [mat(size), mat(size), mat(size), mat(size)]
   }
 
-# Template copy, data-bit scatter along the cached zigzag order, then mask
-# selection over XOR candidates; the first lowest score wins.
+# Template copy, data bits placed two at a time along the cached zigzag
+# order, then mask selection over XOR candidates; the first lowest score
+# wins.
 drawSymbol =! (ver, ecc, data, maskIdx) ->
   symCache = buildSymCache ver unless symCache?.ver is ver
-  {tpl, pos, planes, planesT, work} = symCache
+  {tpl, pos, pair, planes, planesT, work} = symCache
   [m, t, cand, candT] = work
   m.v.set tpl
   need = Math.min(8 * data.length, pos.length)
-  for i in [0...need]
-    if data[i >>> 3] & (0x80 >>> (i & 7))
-      q = pos[i]
-      m.v[q >>> 5] |= 1 << (q & 31)
+  for i in [0...need] by 2
+    two = (data[i >>> 3] >>> (6 - (i & 7))) & 3
+    continue unless two
+    pr = pair[i >>> 1]
+    if pr & 1
+      m.v[pr >>> 6] |= two << ((pr >>> 1) & 31)
+    else
+      if two & 2
+        q = pos[i]
+        m.v[q >>> 5] |= 1 << (q & 31)
+      if two & 1
+        q = pos[i + 1]
+        m.v[q >>> 5] |= 1 << (q & 31)
   mask = maskIdx
   if mask is undefined
     transposeMat m, t
@@ -611,28 +650,59 @@ isBytes =! (a) ->
 # Dark module at output pixel (x, y); false in the border.
 darkAt =! (r, x, y) -> r.map[x] >= 0 and r.map[y] >= 0 and matGet(r.m, r.map[x], r.map[y]) is 1
 
+# Border rows are stored without map or bit lookups; module rows read the
+# column map once per cell with the row's word base hoisted. The boolean
+# rows themselves are the floor: filled, sliced and push-built rows all
+# measure slower than plain indexed stores.
 renderRaw =! (r) ->
-  W   = r.W
+  {m, W, map} = r
+  {words, v}  = m
   res = Array.new(W)
   for y in [0...W]
+    my  = map[y]
     row = Array.new(W)
-    for x in [0...W]
-      row[x] = darkAt(r, x, y)
+    if my < 0
+      row[x] = false for x in [0...W]
+    else
+      base = my * words
+      for x in [0...W]
+        mx = map[x]
+        row[x] = mx >= 0 and ((v[base + (mx >>> 5)] >>> (mx & 31)) & 1) is 1
     res[y] = row
   res
 
 # Half-block glyphs with dark modules printed blank and light ones as blocks,
-# which reads correctly on a dark terminal with light text.
+# which reads correctly on a dark terminal with light text. GLYPH is indexed
+# by (upper, lower) darkness and QUAD by four such cells packed two bits
+# each, so a line grows four glyphs per concatenation.
+GLYPH =! ['█', '▀', '▄', ' ']
+QUAD  =! (GLYPH[i >> 6] + GLYPH[(i >> 4) & 3] + GLYPH[(i >> 2) & 3] + GLYPH[i & 3] for i in [0...256])
+
 renderAscii =! (r) ->
-  W   = r.W
+  {m, W, map} = r
+  {words, v}  = m
   out = ''
   for y in [0...W] by 2
+    my0 = map[y]
+    # Past the bottom edge the missing row reads as dark: the half-block
+    # glyph then shows only the last real row.
+    my1 = if y + 1 < W then map[y + 1] else -2
+    b0  = my0 * words
+    b1  = my1 * words
+    acc = 0
+    n   = 0
     for x in [0...W]
-      first = darkAt r, x, y
-      # Past the bottom edge the missing row reads as dark: the half-block
-      # glyph then shows only the last real row.
-      second = if y + 1 >= W then true else darkAt(r, x, y + 1)
-      out += if first then (if second then ' ' else '▄') else (if second then '▀' else '█')
+      mx = map[x]
+      g  = if my1 is -2 then 1 else 0
+      if mx >= 0
+        g |= 2 if my0 >= 0 and (v[b0 + (mx >>> 5)] >>> (mx & 31)) & 1
+        g |= 1 if my1 >= 0 and (v[b1 + (mx >>> 5)] >>> (mx & 31)) & 1
+      acc = (acc << 2) | g
+      if ++n is 4
+        out += QUAD[acc]
+        acc = 0
+        n   = 0
+    out += GLYPH[(acc >> (2 * (n - 1 - i))) & 3] for i in [0...n]
     out += '\n'
   out
 
@@ -651,40 +721,75 @@ renderTerm =! (r) ->
 digits =! (n) -> if n < 10 then 1 else if n < 100 then 2 else if n < 1000 then 3 else 4
 chars  =! (d) -> if d < 0 then 1 + digits(-d) else digits(d)
 
+# Finished path commands for the two common relative moves (same row, next
+# row) with the `h-1` return, keyed by (dy, dx) for one output width: the
+# coordinates never change between symbols of the same size, so the number
+# formatting is paid once per distinct move. `runs[k]` is k one-step moves.
+svgCache = null
+runs     = []
+
 renderSvg =! (r, optimize) ->
-  W       = r.W
+  {m, W, map} = r
+  {words, v}  = m
+  svgCache = { W, cmds: Array.new(4 * W) } unless svgCache?.W is W
+  cmds    = svgCache.cmds
   out     = '<svg viewBox="0 0 ' + W + ' ' + W + '" xmlns="http://www.w3.org/2000/svg">'
   path    = ''
   prevX   = 0
   prevY   = 0
   hasPrev = false
   for y in [0...W]
-    for x in [0...W]
-      continue unless darkAt(r, x, y)
+    my = map[y]
+    continue if my < 0
+    base = my * words
+    x = 0
+    while x < W
+      mx = map[x]
+      unless mx >= 0 and (v[base + (mx >>> 5)] >>> (mx & 31)) & 1
+        x++
+        continue
       unless optimize
         out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" />'
+        x++
         continue
       # The shorter move wins, relative on ties; lengths are counted so only
-      # the chosen command is built.
-      if hasPrev
-        dx = x - prevX
-        dy = y - prevY
-        mv = if chars(dx) + chars(dy) <= digits(x) + digits(y) then "m#{dx} #{dy}" else "M#{x} #{y}"
+      # the chosen command is built. Return to the cell's left edge by the
+      # shorter command: `H<x>` is two characters for single-digit x, `h-1`
+      # three.
+      dx = x - prevX
+      dy = y - prevY
+      if hasPrev and x >= 10 and dy <= 1 and chars(dx) + 1 <= digits(x) + digits(y)
+        k   = (2 * dy + 1) * W + dx
+        cmd = cmds[k]
+        cmd = cmds[k] = "m#{dx} #{dy}h1v1h-1Z" if cmd is undefined
       else
-        mv = "M#{x} #{y}"
-      # Return to the cell's left edge by the shorter command: `H<x>` is two
-      # characters for single-digit x, `h-1` three.
-      path += if x < 10 then "#{mv}h1v1H#{x}Z" else "#{mv}h1v1h-1Z"
-      prevX   = x
-      prevY   = y
+        mv = if hasPrev and chars(dx) + chars(dy) <= digits(x) + digits(y) then "m#{dx} #{dy}" else "M#{x} #{y}"
+        cmd = if x < 10 then "#{mv}h1v1H#{x}Z" else "#{mv}h1v1h-1Z"
+      path   += cmd
       hasPrev = true
+      prevY   = y
+      # From x = 10 on, a dark cell right after another always takes the
+      # one-step relative move, so a run of them is one cached string.
+      x++
+      k = 0
+      if x >= 10
+        while x < W
+          mx = map[x]
+          break unless mx >= 0 and (v[base + (mx >>> 5)] >>> (mx & 31)) & 1
+          k++
+          x++
+        if k
+          rep = runs[k]
+          rep = runs[k] = 'm1 0h1v1h-1Z'.repeat(k) if rep is undefined
+          path += rep
+      prevX = x - 1
   out += '<path d="' + path + '"/>' if optimize
   out + '</svg>'
 
 renderGif =! (r) ->
-  W = r.W
-  {m, map} = r
-  row = Uint8Array.new(W)
+  {m, W, map} = r
+  {words, v}  = m
+  row    = Uint8Array.new(W)
   prevMy = -2
   writeGif W, W, (y) ->
     my = map[y]
@@ -692,7 +797,10 @@ renderGif =! (r) ->
       prevMy = my
       row.fill 0
       if my >= 0
-        row[x] = matGet(m, map[x], my) for x in [0...W] when map[x] >= 0
+        base = my * words
+        for x in [0...W]
+          mx = map[x]
+          row[x] = (v[base + (mx >>> 5)] >>> (mx & 31)) & 1 if mx >= 0
     row
 
 # ==[ Encoder API ]==
@@ -707,9 +815,12 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   encoding = if opts.encoding is undefined then detectType(text) else opts.encoding
   fail "invalid encoding=#{encoding}" unless Object.hasOwn LENGTH_BITS, encoding
   if encoding isnt 'byte'
-    alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
-    for ch in text
-      fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
+    limit = if encoding is 'numeric' then 10 else ALPHANUMERIC.length
+    for i in [0...text.length]
+      code = ALNUM_VAL[text.charCodeAt(i)]   # undefined past 127
+      unless code >= 0 and code < limit
+        ch = String.fromCodePoint text.codePointAt(i)
+        fail "Unknown letter: \"#{ch}\". Allowed: #{ALPHANUMERIC.slice(0, limit)}"
   mask        = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
   textEncoder = opts.textEncoder
   # Reject impossible built-in UTF-8 payloads before encoding duplicates a
@@ -786,7 +897,7 @@ STRICT   =! 8                       # some row fit the finder ratios within half
 
 # Failure values shared by every attempt; a decode returns a string or one
 # of these. The frame path throws only when a layer's finder storage
-# overflows, which its sizing rules out: `patterns` holds one record per
+# overflows, which its ceiling rules out: `patterns` grows to one record per
 # 7x7-pixel cell, a finder spans at least seven pixels each way, and a new
 # center within two modules of an existing record merges into it.
 FAIL =! Object.freeze
@@ -815,31 +926,42 @@ evalLow =! (poly, length, x) ->
 
 # ==[ Payload ]==
 
-# Bit reader over corrected data codewords plus a scratch byte buffer with
-# one prefix view per length, so byte segments decode without allocating.
+# Bit reader over corrected data codewords plus a scratch byte arena sized
+# by the first segment that needs it, with one prefix view per length, so
+# byte segments decode without allocating once a scanner has met their
+# symbol size. Kanji runs of more than a chunk decode chunk by chunk.
+KANJI_CHUNK =! MAX_CODEWORDS & ~1
+
 class Payload
-  constructor: (capacity) ->
+  constructor: ->
     @position = 0
     @data     = Uint8Array.new(0)
     @dataLen  = 0
-    @bytes    = Uint8Array.new(capacity)
-    @views    = Array.new(capacity + 1)
+    @bytes    = Uint8Array.new(0)
+    @views    = []
+
+  # Grow the byte arena to n; the prefix views follow the new buffer.
+  reserve!: (n) ->
+    return if @bytes.length >= n
+    @bytes        = Uint8Array.new(n)
+    @views.length = 0
 
   # A length-n window over the byte arena, created once per length so the
   # frame path never allocates after its first use.
   view: (n) ->
     @views[n] or (@views[n] = Uint8Array.new(@bytes.buffer, 0, n))
 
+  # No field exceeds 16 bits, so three bytes cover one at any bit offset;
+  # bytes past the end read as zero and are masked away with the rest of
+  # the window.
   read: (bits) ->
     start = @position
     return -1 if start + bits > @dataLen * 8
-    value = 0
-    pos   = start
-    for i in [0...bits]
-      value = (value << 1) | ((@data[pos >> 3] >> (7 - (pos & 7))) & 1)
-      pos++
-    @position = pos
-    value
+    data   = @data
+    byte   = start >> 3
+    window = (data[byte] << 16) | (data[byte + 1] << 8) | data[byte + 2]
+    @position = start + bits
+    (window >> (24 - (start & 7) - bits)) & ((1 << bits) - 1)
 
   # Returns a string, or with deferText an array of strings and [bytes, eci]
   # parts for a caller-supplied text decoder, or FAIL.data.
@@ -901,7 +1023,7 @@ class Payload
           parts.push [segment, eci]
           res = ''
         else
-          return FAIL.data if length >= @views.length
+          @reserve dataLen
           @bytes[i] = @read(8) for i in [0...length]
           # A segment under no ECI is read the way readers in the wild do.
           decoder = if named then ECI_DECODERS[eci] else guessDecoder(@view length)
@@ -916,7 +1038,8 @@ class Payload
         return FAIL.data if length < 0 or @position + 13 * length > dataLen * 8
         decoder = ECI_DECODERS[if hanzi then 29 else 20]
         return FAIL.data unless decoder
-        chunk = (@views.length - 1) & ~1
+        chunk = KANJI_CHUNK
+        @reserve Math.min(2 * length, chunk)
         n     = 0
         for i in [0...length]
           value = @read 13
@@ -1089,9 +1212,18 @@ ratio =! (a, b, c, d, e, loose = false) ->
 run =! (layer, x, y, dx, dy, color, cap) ->
   n = 0
   if dy
-    while bit(layer, x, y) is color and n <= cap
+    return 0 if x < 0 or x >= layer.width
+    # The column's word offset and mask are fixed; only the row bound moves.
+    bitmap = layer.bitmap
+    words  = layer.words
+    height = layer.height
+    mask   = 1 << (x & 31)
+    want   = if color then mask else 0
+    pos    = y * words + (x >>> 5)
+    while y >= 0 and y < height and (bitmap[pos] & mask) is want and n <= cap
       n++
-      y += dy
+      y   += dy
+      pos += dy * words
     return n
   return 0 if y < 0 or y >= layer.height
   row = y * layer.words
@@ -1112,19 +1244,27 @@ run =! (layer, x, y, dx, dy, color, cap) ->
 # coordinate, the measured pitch when asked, or -1 on ratio failure; a
 # loose check accepts the looser fit too.
 cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false, loose = false) ->
-  center = if inverted then 0 else 1
-  side   = if inverted then 1 else 0
-  r2 = run layer, cx, cy, -dx, -dy, center, Infinity
-  back = r2
+  center  = if inverted then 0 else 1
+  side    = if inverted then 1 else 0
+  back    = run layer, cx, cy, -dx, -dy, center, Infinity
+  forward = run layer, cx + dx, cy + dy, dx, dy, center, Infinity
+  r2      = back + forward
+  # ratio() needs a center run over 1.5 modules with every other run under
+  # that (over 1.2 with the others under 1.6 for a loose fit), so a center
+  # shorter than two bits fails before the remaining runs, and any run
+  # reaching the center (four thirds of it when loose) fails as measured.
+  return -1 if r2 < 2
+  most = if loose then 4 * r2 / 3 else r2
   r1 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, side, cap
+  return -1 if r1 >= most
   back += r1
   r0 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, center, cap
+  return -1 if r0 >= most
   back += r0
   start = (if dx then cx else cy) - back
-  forward = run layer, cx + dx, cy + dy, dx, dy, center, Infinity
-  r2 += forward
   ahead = 1 + forward
   r3 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, cap
+  return -1 if r3 >= most
   ahead += r3
   r4 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, cap
   return -1 unless ratio(r0, r1, r2, r3, r4, loose)
@@ -1357,23 +1497,44 @@ bitmapRows! =! (layer, from, to) ->
   blocks  = layer.blocks
   # Four pixels per word when rows keep word alignment.
   lumaWords = if LITTLE_ENDIAN and (width & 3) is 0 and (luma.byteOffset & 3) is 0 then layer.lumaWords else null
+  # A grid under five blocks folds the window onto its edge blocks.
+  small = bWidth < 5 or bHeight < 5
   for y in [from...to]
     yPos = clamp y * BLOCK, 0, maxY
     top  = clamp y, 2, bHeight - 3
+    sum  = 0
+    unless small
+      # The window is clamped two blocks inside either edge, so it slides one
+      # column at a time between them: five column sums built once per block
+      # row, and each step drops the column leaving and adds the one entering.
+      r0 = bWidth * (top - 2)
+      r1 = r0 + bWidth
+      r2 = r1 + bWidth
+      r3 = r2 + bWidth
+      r4 = r3 + bWidth
+      c0 = blocks[r0]     + blocks[r1]     + blocks[r2]     + blocks[r3]     + blocks[r4]
+      c1 = blocks[r0 + 1] + blocks[r1 + 1] + blocks[r2 + 1] + blocks[r3 + 1] + blocks[r4 + 1]
+      c2 = blocks[r0 + 2] + blocks[r1 + 2] + blocks[r2 + 2] + blocks[r3 + 2] + blocks[r4 + 2]
+      c3 = blocks[r0 + 3] + blocks[r1 + 3] + blocks[r2 + 3] + blocks[r3 + 3] + blocks[r4 + 3]
+      c4 = blocks[r0 + 4] + blocks[r1 + 4] + blocks[r2 + 4] + blocks[r3 + 4] + blocks[r4 + 4]
+      sum = c0 + c1 + c2 + c3 + c4
     for x in [0...bWidth]
       xPos = clamp x * BLOCK, 0, maxX
-      left = clamp x, 2, bWidth - 3
-      sum = 0
-      if bWidth < 5 or bHeight < 5
-        # A grid under five blocks folds the window onto its edge blocks.
+      if small
+        left = clamp x, 2, bWidth - 3
+        sum  = 0
         for yy in [-2..2]
           row = bWidth * clamp(top + yy, 0, bHeight - 1)
           for xx in [-2..2]
             sum += blocks[row + clamp(left + xx, 0, bWidth - 1)]
-      else
-        for yy in [-2..2]
-          row  = bWidth * (top + yy) + left
-          sum += blocks[row - 2] + blocks[row - 1] + blocks[row] + blocks[row + 1] + blocks[row + 2]
+      else if x > 2 and x <= bWidth - 3
+        col = x + 2
+        c0  = c1
+        c1  = c2
+        c2  = c3
+        c3  = c4
+        c4  = blocks[r0 + col] + blocks[r1 + col] + blocks[r2 + col] + blocks[r3 + col] + blocks[r4 + col]
+        sum = c0 + c1 + c2 + c3 + c4
       cut = (sum / 25) | 0
       cuts[y * bWidth + x] = cut
       pos     = yPos * width + xPos
@@ -1411,6 +1572,20 @@ bitmapRows! =! (layer, from, to) ->
           bitmap[word + 1] = (bitmap[word + 1] & ~highMask) | (value >>> (32 - shift))
         pos  += width
         word += words
+
+# Double a layer's finder records, up to one per 7x7 cell of the staged frame.
+growFinders =! (layer) ->
+  centers = Math.ceil(layer.width / 7) * Math.ceil(layer.height / 7)
+  count   = layer.inverted.length
+  fail "finder storage exhausted at #{layer.width}x#{layer.height}" if count >= centers
+  records  = Math.min centers, count * 2
+  patterns = Float64Array.new(records * 4)
+  inverted = Uint8Array.new(records)
+  patterns.set layer.patterns
+  inverted.set layer.inverted
+  layer.patterns = patterns
+  layer.inverted = inverted
+  patterns
 
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
@@ -1452,7 +1627,7 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
   layer.looseCount++ unless strict
   index = layer.patternCount++
   pos   = index * 4
-  fail "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
+  patterns = growFinders layer if pos + 3 >= patterns.length
   patterns[pos]     = refinedX
   patterns[pos + 1] = cy
   patterns[pos + 2] = ms
@@ -1462,22 +1637,24 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
 # Rolling run-length window over every second row; the loose pass admits
 # loose windows with loose cross-checks. Each run is measured straight off
 # the packed row: the word's opposite-color bits are isolated with clz32
-# and whole words are consumed until a stop or the row's end.
+# and whole words are consumed until a stop or the row's end. The current
+# word and its consumed-bit shift carry from run to run; the next word
+# loads only when a run crosses a word boundary.
 findRows! =! (layer, from, to, loose) ->
   width  =! layer.width
   words  =! layer.words
   bitmap =! layer.bitmap
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
-    runs = 0
-    row  = y * words
-    previous = (bitmap[row] & 1) is 1
+    runs  = 0
+    at    = y * words
+    word  = bitmap[at]
+    shift = 0
+    previous = (word & 1) is 1
     x = 0
     while x < width
       length = 0
       loop
-        shift = x & 31
-        word  = bitmap[row + (x >>> 5)]
         stops = if previous then ~word else word
         w     = stops >> shift
         span  = Math.min 32 - shift, width - x
@@ -1485,7 +1662,10 @@ findRows! =! (layer, from, to, loose) ->
         len   = Math.min first, span
         length += len
         x      += len
+        shift  += len
         break if first < span or x >= width
+        word  = bitmap[++at]
+        shift = 0
       r0 = r1
       r1 = r2
       r2 = r3
@@ -1566,22 +1746,24 @@ export class QRScanner
     @luma       = Uint8Array.new(bytes)
     @image      = { data: @luma, height: 0, width: 0 }
     @input      = { data: @luma, height: 0, width: 0 }
-    @grid       = Uint8Array.new(MAX_SIZE * MAX_SIZE)
-    @fun        = Uint8Array.new(MAX_SIZE * MAX_SIZE)
+    # Version-sized scratch, grown by reserve() to the largest symbol attempted.
+    @grid       = Uint8Array.new(0)
+    @fun        = Uint8Array.new(0)
+    @codewords  = Uint8Array.new(0)
+    @blockBytes = Uint8Array.new(0)
     @alignPos   = Uint8Array.new(7)
-    @codewords  = Uint8Array.new(MAX_CODEWORDS)
-    @blockBytes = Uint8Array.new(MAX_CODEWORDS)
     @syndromes  = Uint8Array.new(31)
     @sigma      = Uint8Array.new(31)
     @previous   = Uint8Array.new(31)
     @next       = Uint8Array.new(31)
+    @remainder  = Int32Array.new(8)
     @candidates = Uint32Array.new(MAX_CANDIDATES)
     @ranks      = Float64Array.new(MAX_CANDIDATES)
     @found      = Uint32Array.new(4 * MAX_CANDIDATES * 3)
     @pick       = Float64Array.new(8)
     @nodes      = Float64Array.new(7 * 7 * 2)
     @located    = Float64Array.new((7 * 7 - 3) * 4)
-    @payload    = Payload.new MAX_CODEWORDS
+    @payload    = Payload.new()
     @inFlight   = false
     @staged     = false
     @resized    = false
@@ -1617,7 +1799,8 @@ export class QRScanner
       break if i and Math.min(width, height) < 64
       blockWidth  = Math.ceil(width / BLOCK)
       blockHeight = Math.ceil(height / BLOCK)
-      centers     = Math.ceil(width / 7) * Math.ceil(height / 7)
+      # Finder records start small and grow on demand, up to one per 7x7 cell.
+      centers     = Math.min 64, Math.ceil(width / 7) * Math.ceil(height / 7)
       luma        = if i then Uint8Array.new(width * height) else @luma
       cuts        = Int16Array.new(blockWidth * blockHeight)
       layers.push
@@ -1684,6 +1867,17 @@ export class QRScanner
     packQuad @to, tl.x, tl.y, tr.x, tr.y, brX, brY, bl.x, bl.y
     @mapQuad out
 
+  # Grow the module grid, function map and codeword scratch to one symbol
+  # size: a scanner that only ever meets small symbols never pays for
+  # Version 40.
+  reserve!: (size) ->
+    return if @grid.length >= size * size
+    words       = BYTES[versionOf(size) - 1]
+    @grid       = Uint8Array.new(size * size)
+    @fun        = Uint8Array.new(size * size)
+    @codewords  = Uint8Array.new(words)
+    @blockBytes = Uint8Array.new(words)
+
   setAlignments: (ver) ->
     return 0 if ver is 1
     last     = sizeOf(ver) - 7
@@ -1747,7 +1941,9 @@ export class QRScanner
     @retryStart = 0
     @retries = 0
 
-  # Lifecycle wipe: every typed array on the scanner and its layers is zeroed.
+  # Lifecycle wipe: every typed array on the scanner and its layers is zeroed
+  # once. Layer zero's luma is the scanner's own arena and each lumaWords
+  # views its layer's luma, so those aliases are skipped by identity.
   clean!: ->
     @beginOperation()
     try
@@ -1757,7 +1953,7 @@ export class QRScanner
         v.fill 0 if ArrayBuffer.isView v
       for layer in @layers
         for own k, v of layer
-          v.fill 0 if ArrayBuffer.isView v
+          v.fill 0 if ArrayBuffer.isView(v) and v isnt layer.lumaWords and v isnt @luma
         layer.blockHeight  = 0
         layer.blockWidth   = 0
         layer.height       = 0
@@ -2299,24 +2495,32 @@ export class QRScanner
     syndromes  = @syndromes
     # The generator divides an intact block: a zero LFSR remainder, computed
     # exactly as the encoder does, settles the common case without syndromes.
-    {products} = rsCached eccWords
-    rem  = @next
-    last = eccWords - 1
-    rem.fill 0, 0, eccWords
+    # Coefficient j lives in byte j & 3 of word j >> 2; the top word's spare
+    # bytes shift in zeros and fold zero products, so they stay zero.
+    {packed} = rsCached eccWords
+    rem    = @remainder
+    stride = (eccWords + 3) >> 2
+    last   = stride - 1
+    rem.fill 0, 0, stride
     for i in [0...length]
-      base = (blockBytes[offset + i] ^ rem[0]) * eccWords
-      rem[j] = rem[j + 1] ^ products[base + j] for j in [0...last]
-      rem[last] = products[base + last]
+      base = (blockBytes[offset + i] ^ (rem[0] & 0xff)) * stride
+      rem[j] = ((rem[j] >>> 8) | (rem[j + 1] << 24)) ^ packed[base + j] for j in [0...last]
+      rem[last] = (rem[last] >>> 8) ^ packed[base + last]
     dirty = 0
-    dirty |= rem[j] for j in [0...eccWords]
+    dirty |= rem[j] for j in [0...stride]
     return true unless dirty
+    # The register holds x^eccWords * C(x) mod g(x), which agrees with the
+    # block at every generator root up to the factor alpha^(i * eccWords),
+    # so the syndromes come from its eccWords coefficients instead of the
+    # whole block.
+    next = @next
+    next[k] = (rem[k >> 2] >> ((k & 3) * 8)) & 0xff for k in [0...eccWords]
     for i in [0...eccWords]
       value = 0
-      value = mul(value, EXP[i]) ^ blockBytes[offset + j] for j in [0...length]
-      syndromes[i] = value
+      value = mul(value, EXP[i]) ^ next[k] for k in [0...eccWords]
+      syndromes[i] = mul value, EXP[255 - ((i * eccWords) % 255)]
     sigma    = @sigma
     previous = @previous
-    next     = @next
     sigma.fill    0, 0, eccWords + 1
     previous.fill 0, 0, eccWords + 1
     sigma[0]    = 1
@@ -2410,25 +2614,42 @@ export class QRScanner
         y = i // 3
         fun[y * size + x] = 1
         fun[x * size + y] = 1
-    bytes = @codewords
-    total = BYTES[ver - 1]
-    bytes.fill 0, 0, total
+    bytes    = @codewords
+    total    = BYTES[ver - 1]
+    limit    = 8 * total
     grid     = @grid
     bitIndex = 0
+    acc      = 0
     dir      = -1
     y        = size - 1
     xOffset  = size - 1
     while xOffset > 0
       xOffset = 5 if xOffset is 6
+      # Mask predicates repeat every twelve rows: one period per column
+      # packs into a word, indexed by the row modulo twelve.
+      mask0 = 0
+      mask1 = 0
+      for i in [0...12]
+        mask0 |= ((maskBits(xOffset, i) >> mask) & 1) << i
+        mask1 |= ((maskBits(xOffset - 1, i) >> mask) & 1) << i
+      ym = y % 12
       loop
+        row = y * size
         for j in [0...2]
           x = xOffset - j
-          continue if fun[y * size + x]
-          if bitIndex < 8 * total and (grid[y * size + x] ^ ((maskBits(x, y) >> mask) & 1)) is 1
-            bytes[bitIndex >> 3] |= 0x80 >> (bitIndex & 7)
+          continue if fun[row + x]
+          # Codewords fill in walk order, so each byte lands whole after
+          # its eighth bit.
+          if bitIndex < limit
+            acc = (acc << 1) | (grid[row + x] ^ (((if j then mask1 else mask0) >> ym) & 1))
+            if (bitIndex & 7) is 7
+              bytes[bitIndex >> 3] = acc
+              acc = 0
           bitIndex++
         break if y + dir < 0 or y + dir >= size
-        y += dir
+        y  += dir
+        ym += dir
+        if ym < 0 then ym = 11 else if ym is 12 then ym = 0
       dir = -dir
       xOffset -= 2
     ecc         = ECC_LEVELS[eccIndex]
@@ -2524,12 +2745,64 @@ export class QRScanner
       formatValue = if formatValue is first then second else -1
     decoded
 
-  # One symbol or one alignment tile into the scanner grid; tiles never overlap.
+  # One symbol or one alignment tile into the scanner grid; tiles never
+  # overlap. Sampling is read() unrolled: each row's homography terms are
+  # products of one module coordinate, computed once per row and summed in
+  # read()'s order, so every sample matches read() bit for bit.
   projectQuad!: (s, map, size, left = 0, right = size, top = 0, bottom = size) ->
-    grid = @grid
+    grid     = @grid
+    inverted = @invertedProjection
+    {W, H, d, cut, bw, bh, sh} = s
+    xMax  = W - 1
+    yMax  = H - 1
+    uMax  = bw - 1
+    vMax  = bh - 1
+    half  = (1 << sh) / 2
+    twice = 2 * half
+    m0 = map[0]
+    m1 = map[1]
+    m2 = map[2]
+    m3 = map[3]
+    m4 = map[4]
+    m5 = map[5]
+    m6 = map[6]
+    m7 = map[7]
+    m8 = map[8]
     for y in [top...bottom]
+      my  = y + 0.5
+      rx  = m1 * my
+      ry  = m4 * my
+      rd  = m7 * my
+      row = y * size
       for x in [left...right]
-        grid[y * size + x] = @read s, map, x + 0.5, y + 0.5
+        mx  = x + 0.5
+        den = m6 * mx + rd + m8
+        px  = (m0 * mx + rx + m2) / den
+        py  = (m3 * mx + ry + m5) / den
+        sx  = px - 0.5
+        sy  = py - 0.5
+        if sx < 0 or sy < 0 or sx >= xMax or sy >= yMax
+          grid[row + x] = 0
+          continue
+        x0 = sx | 0
+        y0 = sy | 0
+        fx = sx - x0
+        fy = sy - y0
+        i  = y0 * W + x0
+        value = (d[i] * (1 - fx) + d[i + 1] * fx) * (1 - fy) + (d[i + W] * (1 - fx) + d[i + W + 1] * fx) * fy
+        u  = Math.min Math.max((px - half) / twice, 0), uMax
+        v  = Math.min Math.max((py - half) / twice, 0), vMax
+        u0 = u | 0
+        v0 = v | 0
+        u1 = Math.min u0 + 1, uMax
+        v1 = Math.min v0 + 1, vMax
+        gu = u - u0
+        gv = v - v0
+        r0 = v0 * bw
+        r1 = v1 * bw
+        threshold = (cut[r0 + u0] * (1 - gu) + cut[r0 + u1] * gu) * (1 - gv) + (cut[r1 + u0] * (1 - gu) + cut[r1 + u1] * gu) * gv
+        grid[row + x] = if (value <= threshold) isnt inverted then 1 else 0
+    return
 
   projectMap: (s, map, size) ->
     return FAIL.timing unless @timing(s, map, size)
@@ -2677,6 +2950,7 @@ export class QRScanner
       continue if (i > 0 and size is snapped) or (i > 1 and size is mean)
       continue if size < MIN_SIZE or size > MAX_SIZE or Math.abs(size - estimate) > 6
       @decodedSize = size
+      @reserve size
       # A located bottom-right alignment pattern upgrades the affine BR
       # estimate to perspective.
       f      = 1 - 3 / (size - FINDER_INSET)

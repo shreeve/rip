@@ -30,5 +30,9 @@
     "pdf417.rip",
     "dom.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@zxing/library": "^0.23.0",
+    "zxing-wasm": "^3.1.4"
+  }
 }

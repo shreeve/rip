@@ -17,7 +17,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -562,9 +562,16 @@ barShift =! (luma, luma2, lo, hi) ->
     gradB[k] = luma2[x + 1] - luma2[x]
   best   = -Infinity
   bestAt = 0
+  # Integer products, four per step; the sums are exact in any order.
   for s in [0..2 * TILT_SHIFT]
     sum = 0
-    sum += gradA[k + s] * gradB[k] for k in [0...span]
+    k = 0
+    while k + 3 < span
+      sum += gradA[k + s] * gradB[k] + gradA[k + s + 1] * gradB[k + 1] + gradA[k + s + 2] * gradB[k + 2] + gradA[k + s + 3] * gradB[k + 3]
+      k += 4
+    while k < span
+      sum += gradA[k + s] * gradB[k]
+      k++
     corr[s] = sum
     if sum > best
       best   = sum
@@ -706,6 +713,10 @@ sampleAlong =! (luma, data, width, height, format, ox, oy, dx, dy) ->
   y  = Math.round((oy + t0 * dy) * 65536) + 32768
   sx = Math.round dx * 65536
   sy = Math.round dy * 65536
+  # An axis line steps one whole pixel per sample: a row segment or a column.
+  if (sx is 65536 and sy is 0) or (sx is 0 and sy is 65536)
+    sampleLine luma, data, (y >> 16) * row + (x >> 16) * step, (if sy then row else step), count, format
+    return count
   switch step
     when 1
       for k in [0...count]
@@ -816,6 +827,10 @@ trackEdges =! (img, format, hit, codes, luma, runs, rev) ->
   [oa, ob] = edges
   [point(oa, a0 + b0 * oa), point(oa, a1 + b1 * oa), point(ob, a1 + b1 * ob), point(ob, a0 + b0 * ob)]
 
+# Line buffers sized for the longest diagonal seen so far, so a camera loop
+# feeding frames of one size allocates once.
+lines =! { side: 0, luma: Uint8Array.new(0), runs: Float64Array.new(0), rev: Float64Array.new(0) }
+
 # First Code 128 on any scan line, where it was read and its corners; null
 # on a miss. Lines run along both axes; after each axis pass, lines along
 # the tilt estimated from its best unread crossings, unless `opts.tilt` is
@@ -827,9 +842,12 @@ export readCode128 =! (img, opts = {}) ->
   fail "invalid opts.tilt=#{tilt} (#{typeof tilt})", TypeError unless typeof tilt is 'boolean'
   # A line along a diagonal is as long as the frame's diagonal.
   side  = Math.ceil(Math.hypot(img.width, img.height)) + 2
-  luma  = Uint8Array.new side
-  runs  = Float64Array.new side
-  rev   = Float64Array.new side
+  if side > lines.side
+    lines.side = side
+    lines.luma = Uint8Array.new side
+    lines.runs = Float64Array.new side
+    lines.rev  = Float64Array.new side
+  {luma, runs, rev} = lines
   codes = []
   more  = []
   hit   = null

@@ -27,7 +27,7 @@ camera, fast enough to scan on a phone at thirty frames a second.
   length.
 - **It is fast.** A 1080p frame with no symbol in it costs a few
   milliseconds for QR and under two for the linear and stacked readers, so
-  a camera loop never falls behind. It reads QR 1.5 to 4x faster than
+  a camera loop never falls behind. It reads QR 1.7 to 5.5x faster than
   the TypeScript library it was ported from.
 - **It is small and self-contained.** Plain code, no WebAssembly, no native
   module, nothing to install beyond the package. One import gives you all
@@ -273,8 +273,8 @@ decoded symbol, `resultQR` for the sampled module grid (scaled by
 | `async` | decode with `decodeAsync`, yielding to the host between chunks | `false` |
 | `decodeAll` | decode every symbol on the frame and draw every lock | `false` |
 | `effort`, `timeLimit`, `nativeLimit`, `textDecoder` | passed to the scanner (see [Decoding](#decoding)) | |
-| `nativeEvery` | with `nativeLimit`: the frame interval at which the native layer is searched regardless | `1` |
-| `overlayColor`, `overlayFailedColor` | the lock, and the lock with `drawFailed` on a symbol found but not read | green, red |
+| `nativeEvery` | with `nativeLimit`: every `nativeEvery`-th frame searches the native layer regardless; `1` never does | `1` |
+| `overlayColor`, `overlayFailedColor` | the lock, and the lock with `drawFailed` on a symbol found but not read | `#4ade80`, `#f87171` |
 | `overlaySideColor` | dims the frame outside the scanned region | `black` |
 | `overlayEase` | of the way to a lock's new corners per display frame; `1` snaps | `0.3` |
 | `overlayTimeout` | milliseconds a lock outlives its last sighting before fading | `500` |
@@ -330,38 +330,39 @@ with the rows it touches.
 | Encode                    |       |
 |---------------------------|------:|
 | QR raw, version 1         |  2 µs |
-| QR raw, version 10        | 15 µs |
-| QR raw, version 22        | 47 µs |
-| QR svg, version 10        | 32 µs |
-| QR gif, version 10        | 15 µs |
+| QR raw, version 10        | 13 µs |
+| QR raw, version 22        | 41 µs |
+| QR svg, version 10        | 20 µs |
+| QR gif, version 10        | 13 µs |
 | Code 128 raw, 18 chars    |  2 µs |
-| PDF417 raw, 18 chars      | 12 µs |
+| PDF417 raw, 18 chars      | 11 µs |
 
 | Read a clean raster       |         |
 |---------------------------|--------:|
-| QR version 1, 132x132     |   36 µs |
-| QR 1280x720               |  653 µs |
-| QR version 10, 1920x1080  | 1.56 ms |
-| Code 128, 1920x1080       |  171 µs |
-| PDF417, 1920x1080         |  149 µs |
+| QR version 1, 132x132     |   26 µs |
+| QR 1280x720               |  591 µs |
+| QR version 10, 1920x1080  | 1.41 ms |
+| Code 128, 1920x1080       |  107 µs |
+| PDF417, 1920x1080         |  114 µs |
 
 | Miss, no symbol   | 1920x1080 | 2160x2592 |
 |-------------------|----------:|----------:|
-| QR, desk          |   5.01 ms |  13.59 ms |
-| QR, printed page  |   2.83 ms |   8.21 ms |
-| QR, noise         |  10.78 ms |  27.54 ms |
-| QR, fine weave    |   3.60 ms |  10.44 ms |
-| QR, desk, `nativeLimit: 1500` |   |   4.70 ms |
-| Code 128, desk    |   1.04 ms |   1.43 ms |
-| Code 128, printed page |      |   927 µs |
-| Code 128, noise   |           |   2.20 ms |
-| PDF417, desk      |    288 µs |    464 µs |
-| PDF417, noise     |           |   1.31 ms |
+| QR, desk          |   4.64 ms |  12.55 ms |
+| QR, printed page  |   2.55 ms |   7.12 ms |
+| QR, noise         |   8.95 ms |  21.94 ms |
+| QR, fine weave    |   3.13 ms |   8.73 ms |
+| QR, desk, nativeLimit 1500 |  |   4.05 ms |
+| Code 128, desk    |    764 µs |   1.16 ms |
+| Code 128, printed page |      |   742 µs |
+| Code 128, noise   |           |   1.73 ms |
+| PDF417, desk      |    223 µs |    401 µs |
+| PDF417, noise     |           |   785 µs |
 
 A camera runs the miss rows thirty times a second, so they are what
 sets the frame budget; the phone is about twice as slow as this machine.
-Photographs from ZXing's corpus decode in a fraction of a millisecond to
-11 ms, the slowest a 2390x2220 PDF417 of 74 rows by 12 columns at level 8.
+Photographs from ZXing's corpus read in 1.2 ms on average across the
+scorecard's 1332 decodes; the slowest, a 2390x2220 PDF417 of 74 rows by
+12 columns at level 8, takes 6 ms once warm.
 
 `rip test/corpus.rip` scores the readers on ZXing's blackbox photographs
 against the counts ZXing's own tests require; `test/corpus.txt` is that
@@ -374,31 +375,48 @@ output, committed:
 | code128-1 to 3, where tested  |    49 |        96 |             90 |
 | falsepositives-1 and 2        |    47 |   0 false |    up to 6 allowed |
 
-`rip test/compare.rip` races the QR half against
-[paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the TypeScript
-implementation it was ported from, with Paul's package checked out at
-`misc/qr`. Both run in one process on the same inputs; each row is the
-best of three 400 ms means, this package timed first:
+`rip test/compare.rip` races everyone in one process on the same inputs:
+ZXing as its JavaScript port ([@zxing/library](https://github.com/zxing-js/library))
+and its C++ build ([zxing-wasm](https://github.com/Sec-ant/zxing-wasm),
+`tryHarder` on as its own benchmark runs it), both dev dependencies of
+this package; [paulmillr/qr](https://github.com/paulmillr/qr), the
+implementation the QR half was ported from, as 0.7.0 was released and with
+[pull request 39](https://github.com/paulmillr/qr/pull/39) applied, checked
+out at `misc/qr` and `misc/qr-perf`; and this package twice, as it stands
+on main, checked out at `misc/rip-prior`, and as the working tree. A row
+is the best of three 400 ms means, the columns timed left to right, each
+with how many times faster this package is:
 
-| Encode (µs)                 |    rip | paulmillr/qr | speedup |
-|-----------------------------|-------:|-------------:|--------:|
-| raw, version 1              |    2.3 |          3.0 |   1.33x |
-| raw, version 10             |   14.1 |         16.8 |   1.19x |
-| raw, version 22             |   45.5 |         51.2 |   1.13x |
-| svg, version 10             |   29.7 |         46.6 |   1.57x |
-| gif, version 10             |   14.4 |         17.8 |   1.23x |
+| Encode (µs)                 |     qr 0.7.0 |   qr + PR 39 |     rip main |    rip |
+|-----------------------------|-------------:|-------------:|-------------:|-------:|
+| raw, version 1              |   3.1 (1.4x) |   2.2 (1.0x) |   2.3 (1.1x) |    2.2 |
+| raw, version 10             |  18.5 (1.4x) |  12.9 (1.0x) |  14.6 (1.1x) |   12.9 |
+| raw, version 22             |  53.0 (1.3x) |  41.2 (1.0x) |  46.5 (1.2x) |   40.1 |
+| svg, version 10             |  45.5 (2.4x) |  21.2 (1.1x) |  29.4 (1.5x) |   19.3 |
+| gif, version 10             |  18.4 (1.4x) |  12.7 (1.0x) |  14.8 (1.2x) |   12.9 |
 
-| Decode (µs)                 |    rip | paulmillr/qr | speedup |
-|-----------------------------|-------:|-------------:|--------:|
-| 132x132 raster, version 1   |   33.0 |          112 |   3.38x |
-| 1280x720 frame, one symbol  |    620 |          996 |   1.61x |
-| 1920x1080 frame, one symbol |   1489 |         2190 |   1.47x |
-| 1920x1080 weave, no symbol  |   5403 |        23660 |   4.38x |
+| Decode (µs)                 |          ZXing |     zxing-wasm |       qr 0.7.0 |   qr + PR 39 |     rip main |    rip |
+|-----------------------------|---------------:|---------------:|---------------:|-------------:|-------------:|-------:|
+| 132x132 raster, version 1   |    49.2 (2.0x) |    79.8 (3.3x) |     117 (4.8x) |  21.9 (0.9x) |  34.5 (1.4x) |   24.4 |
+| 1280x720 frame, one symbol  |    2040 (3.6x) |    2102 (3.7x) |    1004 (1.7x) |   554 (1.0x) |   621 (1.1x) |    574 |
+| 1920x1080 frame, one symbol |    4509 (3.3x) |    4774 (3.5x) |    2276 (1.7x) |  1232 (0.9x) |  1498 (1.1x) |   1378 |
+| 1920x1080 weave, no symbol  |    4516 (1.0x) |    8122 (1.8x) |   24623 (5.5x) |  4437 (1.0x) |  5536 (1.2x) |   4452 |
+
+| Read (µs)                   |          ZXing |     zxing-wasm |     rip main |    rip |
+|-----------------------------|---------------:|---------------:|-------------:|-------:|
+| Code 128, 1920x1080         |   2028 (18.8x) |   1648 (15.3x) |   170 (1.6x) |    108 |
+| PDF417, 1920x1080           |   4448 (39.4x) |   4276 (37.9x) |   146 (1.3x) |    113 |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
 background, plus a full-frame weave for the miss case, which is dominated
-by the finder search; this package walks it on packed words.
+by the finder search; this package walks it on packed words. The Code 128
+and PDF417 rasters are built as the bench's 1080p hit frames are; ZXing reads them
+through its own luma conversion, as its benchmark does. Pull request 39
+carries this package's QR decoder work back to its origin, so those two
+columns trade blows; the one algorithmic difference between them is
+the grid sampler, which reads the nearest pixel there and interpolates
+here.
 
 Encode timings are sensitive to which symbol size a process sees first.
 A version 1 symbol fits one 32-bit word per row and never fills a word, so
@@ -420,7 +438,7 @@ in the world, and a great deal of measuring.
 bun run test      # rip test.rip, the contract
 bun run corpus    # rip test/corpus.rip, the ZXing blackbox scorecard; --record matches test/corpus.txt
 bun run bench     # rip test/bench.rip, the timing contract
-bun run compare   # rip test/compare.rip, the race against paulmillr/qr (needs misc/qr)
+bun run compare   # rip test/compare.rip, the race against ZXing and paulmillr/qr (checkouts named in its header)
 ```
 
 The suite pins spec tables, encoded codewords, every output format, every
@@ -436,6 +454,16 @@ output, errors-and-erasures correction to its limit, and decompaction
 including Macro PDF417, then round-trips rasters across scales, row
 heights, rotations, inversion, compact and extreme shapes, skew, cropped
 and torn start columns and holes.
+
+Three probes under `test/` print one hash line per case, so two builds can
+be shown identical beyond the corpus counts: `probe-stages.rip` hashes the
+decoder's grid, codewords and result for every version and level, the
+automatic mask and one explicit mask, three text kinds, scales 1 to 3 and
+six damage levels; `probe-pixels.rip` hashes every pyramid layer's luma,
+cuts, blocks, packed bitmap and finder count across sizes, input formats,
+padding and offsets; `probe-encode.rip` hashes every output format across
+payload alphabets, ecc levels, six border/scale pairs and both mask
+choices. Each header carries its diff recipe.
 
 ## Design
 
@@ -460,8 +488,8 @@ together.
 
 One file per symbology, `qr.rip`, `pdf417.rip` and `code128.rip`, each
 holding its tables, encoder and reader; a root entry that re-exports all
-three; the camera and canvas plumbing in `dom.rip`; and the GIF writer, ECI
-table and image-input helpers the symbologies share. The package is
+three; the camera and canvas plumbing in `dom.rip`; and the GIF writer,
+image-input helpers and ECI table shared between symbologies. The package is
 browser-safe (`rip.browser: true`). The QR half is a port of
 [paulmillr/qr](https://github.com/paulmillr/qr); PDF417 and Code 128 are
 original to this package.
@@ -552,11 +580,11 @@ The QR half of this package is a port of [paulmillr/qr](https://github.com/paulm
 Apache-2.0 and derived in turn from the ZXing project. The QR tables,
 encoder, decoder pipeline, scanner, camera plumbing and `BarcodeDetector`
 ponyfill follow his design; the port keeps his algorithms, restructures
-them for Rip, and verifies itself against his implementation with an
-oracle that compares every output format byte for byte and every decode
-result on synthetic frames. The performance work described above is on top
-of that foundation. Code 128 and PDF417 are original to this package and
-share only the image input, ECI table and GIF writer. The PDF417 encoder
+them for Rip, and pins its encoder against vectors generated from his
+implementation and its decoder against round trips over synthetic rasters.
+The performance work described above is on top of that foundation. Code
+128 and PDF417 are original to this package; PDF417 shares the image input,
+ECI table and GIF writer, Code 128 the image input and GIF writer. The PDF417 encoder
 is checked against [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp),
 which decodes its output byte for byte across compaction modes, levels,
 shapes and scales, and the reader against the photographs in ZXing's

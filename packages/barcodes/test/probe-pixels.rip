@@ -1,0 +1,156 @@
+# ==============================================================================
+# rip/barcodes — pixel stage probe
+#
+# One line per input: a hash of every pyramid layer's luma, threshold cuts,
+# block averages, packed bitmap and finder-pattern count, plus the decode
+# result. Covers sizes from 8x8 to 1922x1082, four pixel textures, every
+# input format (unnamed RGB/RGBA, RGBA, BGRA, RGBX, RGB, I420, NV12,
+# I420P10), row padding and byte offsets through the layout path, and the
+# in-place arena path where pixels are written straight into the scanner's
+# luma plane before processImage. Two builds must print the same text.
+#
+#   rip test/probe-pixels.rip > probe-pixels.txt
+#   diff probe-pixels-main.txt probe-pixels.txt
+# ==============================================================================
+
+import { encodeQR, QRScanner } from '../qr.rip'
+
+seed = 99
+rnd =! -> ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) >>> 8) & 255
+
+fnv     =! (h, v) -> Math.imul(h ^ (v & 0xff), 16777619) | 0
+hashArr =! (h, a, n) ->
+  for i in [0...n]
+    v = a[i] | 0
+    h = fnv h, v
+    h = fnv h, v >> 8
+    h = fnv h, v >> 16
+    h = fnv h, v >> 24
+  h
+
+STEP =! { auto: 4, RGBA: 4, BGRA: 4, RGBX: 4, RGB: 3, I420: 1, NV12: 1, I420P10: 2 }
+
+# A gray level per pixel: noise, a blurred checkerboard, low contrast, a ramp.
+texture =! (kind, x, y, w) ->
+  switch kind
+    when 0 then rnd()
+    when 1 then (if ((x >> 2) + (y >> 2)) & 1 then 40 + (rnd() & 15) else 210 - (rnd() & 15))
+    when 2 then 128 + (rnd() & 7)
+    else (x * 255 / w) | 0
+
+# Write one frame of `format` into `data` at `offset` with row `stride`.
+fill! =! (data, format, w, h, kind, offset, stride) ->
+  step = STEP[format]
+  for y in [0...h]
+    at = offset + y * stride
+    for x in [0...w]
+      v = texture kind, x, y, w
+      switch step
+        when 1 then data[at] = v
+        when 2
+          wide = (v << 2) | (rnd() & 3)      # ten bits, the low two are noise
+          data[at]     = wide & 255
+          data[at + 1] = wide >> 8
+        when 3
+          data[at]     = v ^ (rnd() & 3)
+          data[at + 1] = v
+          data[at + 2] = v ^ (rnd() & 3)
+        else
+          data[at]     = v ^ (rnd() & 3)
+          data[at + 1] = v
+          data[at + 2] = v ^ (rnd() & 3)
+          data[at + 3] = rnd()               # alpha or X, never read
+      at += step
+  # Chroma planes follow the luma plane for the planar formats.
+  if step is 1
+    data[i] = rnd() for i in [offset + stride * h...data.length]
+  return
+
+drain! =! (g) ->
+  loop
+    break if g.next().done
+  return
+
+# The decode result, then every used layer binarized whether or not the
+# scan reached it.
+settle =! (scanner) ->
+  r = null
+  try
+    r = scanner.decode()[0]
+  catch e
+    r = e
+  for layer in scanner.layers when layer.used and not layer.found
+    drain scanner.binarize(layer, false)
+  if r instanceof Error then "E:#{r.message}" else "ok:#{r}"
+
+hashLayers =! (scanner) ->
+  h = 2166136261 | 0
+  for layer in scanner.layers when layer.used
+    h = hashArr h, layer.luma,   layer.width * layer.height
+    h = hashArr h, layer.cuts,   layer.blockWidth * layer.blockHeight
+    h = hashArr h, layer.blocks, layer.blockWidth * layer.blockHeight
+    h = hashArr h, layer.bitmap, layer.words * layer.height
+    h = fnv h, layer.patternCount
+  h
+
+line =! (name, scanner) ->
+  result = settle scanner
+  p "#{name} #{(hashLayers(scanner) >>> 0).toString 16} #{result}"
+  return
+
+t0 = performance.now()
+count = 0
+
+# External buffers through addImage: every format, four textures.
+sizes = [[8, 8], [9, 7], [13, 5], [17, 9], [31, 31], [64, 48], [65, 33], [100, 101], [129, 130], [257, 255], [640, 480], [1922, 1082]]
+for [w, h] in sizes
+  for format in ['auto', 'RGBA', 'BGRA', 'RGBX', 'RGB', 'I420', 'NV12', 'I420P10']
+    for kind in [0...4]
+      step  = STEP[format]
+      total = w * h * step + (if step is 1 then w * h else 0)
+      data  = Uint8Array.new total
+      fill data, format, w, h, kind, 0, w * step
+      scanner = QRScanner.new { maxSize: { width: w, height: h } }
+      scanner.addImage { width: w, height: h, data }, (if format is 'auto' then undefined else format)
+      line "add #{format} #{w}x#{h}/#{kind}", scanner
+      count++
+
+# The arena path: pixels written into the scanner's own luma plane, then
+# processImage with a layout, at row paddings and byte offsets that steer
+# the conversion between the word-wise and per-pixel loops.
+for [w, h] in [[8, 8], [9, 7], [13, 5], [64, 48], [65, 33], [100, 101], [640, 480], [1922, 1082]]
+  for format in ['RGBA', 'BGRA', 'RGBX', 'RGB', 'I420', 'NV12', 'I420P10']
+    for pad in [0, 3, 8]
+      for skip in [0, 1, 4]
+        step   = STEP[format]
+        stride = w * step + pad
+        total  = skip + stride * h + (if step is 1 then stride * h else 0)
+        scanner = QRScanner.new { maxSize: { width: w, height: h }, stride: Math.ceil(total / (w * h)) + 1 }
+        fill scanner.luma, format, w, h, (w + skip + pad) & 3, skip, stride
+        scanner.processImage { width: w, height: h }, format, { offset: skip, stride }
+        line "arena #{format} #{w}x#{h} pad#{pad} off#{skip}", scanner
+        count++
+
+# Symbols at several scales and offsets, so the pattern counts and the
+# coarse layers carry real finders.
+for scale in [1, 2, 3, 5, 8, 13]
+  raw = encodeQR "EQUIV #{scale}", 'raw', { border: 3 }
+  n   = raw.length * scale
+  for [w, h, ox, oy] in [[n, n, 0, 0], [n + 37, n + 11, 19, 5], [Math.max(n, 300), Math.max(n, 200), 7, 3]]
+    for format in ['RGBA', 'I420']
+      step = STEP[format]
+      data = Uint8Array.new(w * h * step * 2).fill 180
+      for y in [0...n]
+        for x in [0...n]
+          v = if raw[y // scale][x // scale] then 10 else 245
+          at = ((oy + y) * w + ox + x) * step
+          data[at] = v
+          if step is 4
+            data[at + 1] = v
+            data[at + 2] = v
+      scanner = QRScanner.new { maxSize: { width: w, height: h } }
+      scanner.addImage { width: w, height: h, data: data.subarray(0, w * h * step * (if step is 1 then 2 else 1)) }, format
+      line "qr s#{scale} #{format} #{w}x#{h}+#{ox},#{oy}", scanner
+      count++
+
+console.error "#{count} probes in #{((performance.now() - t0) / 1000).toFixed 1}s"
