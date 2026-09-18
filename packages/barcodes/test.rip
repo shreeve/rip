@@ -383,11 +383,25 @@ test "round trip every third version at every level", ->
     for ecc in ['low', 'medium', 'quartile', 'high']
       eq decodeQR(raster(text, { version: ver, ecc }, 3, 700, 700)), text, "v#{ver} #{ecc}"
 
-test "rotations and inverted symbols", ->
+test "rotations, inverted and mirrored symbols", ->
   text = 'https://example.com/path?q=1'
   for rotate in [0, 90, 180, 270]
     eq decodeQR(raster(text, {}, 4, 400, 400, false, rotate)), text, "rot #{rotate}"
   eq decodeQR(raster(text, {}, 4, 400, 400, true)), text, 'inverted'
+  # A mirror image at every rotation: each row of the raster reversed.
+  for rotate in [0, 90, 180, 270]
+    img = raster text, {}, 4, 400, 400, false, rotate
+    {width, height, data} = img
+    for y in [0...height]
+      row = y * width * 4
+      for x in [0...width >> 1]
+        a = row + x * 4
+        b = row + (width - 1 - x) * 4
+        for k in [0...4]
+          t = data[a + k]
+          data[a + k] = data[b + k]
+          data[b + k] = t
+    eq decodeQR(img), text, "mirrored rot #{rotate}"
 
 test "numeric, alphanumeric, byte and unicode payloads", ->
   for text in ['7'.repeat(300), 'HELLO WORLD $%*+-./:', 'mixed Case 123', 'Ünïcödé 🔻 text']

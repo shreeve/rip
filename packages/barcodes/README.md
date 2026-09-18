@@ -466,6 +466,76 @@ browser-safe (`rip.browser: true`). The QR half is a port of
 [paulmillr/qr](https://github.com/paulmillr/qr); PDF417 and Code 128 are
 original to this package.
 
+## Lens physics
+
+Whether a camera can read the PDF417 on the back of a driver's license
+is decided before any code runs, by two constraints on the distance
+between lens and card. The readers want a module at least one pixel wide
+in the frame they see, and reliably about two; the lens has to hold the
+card in focus at that distance. Some cameras satisfy both at once and
+some cannot satisfy them at any distance.
+
+Pixels per module for a flat card at distance `d` with module size `X`:
+
+```
+p = X / d × W / (2 · tan(HFOV / 2))
+```
+
+`W` is the delivered frame width and `HFOV` the horizontal field of view.
+The second factor is a constant for a camera: how many pixels it lays
+across one unit of `X / d`. AAMVA allows a license PDF417 an `X` as small
+as 6.6 mil, and most cards print between 6.6 and 10 mil, so the card must
+sit within the distance where that constant, times `X`, still yields two
+pixels.
+
+**A fixed-focus ultra-wide webcam**, such as the camera built into an
+Apple Studio Display: 1920 pixels wide at most, a 122° diagonal lens whose
+16:9 crop spans roughly 115° horizontally, fixed focus set for a person at
+desk distance.
+
+```
+1920 / (2 · tan 57.5°) ≈ 611 px per unit of X / d
+```
+
+| Module X | 1 px per module | 2 px per module |
+| --- | --- | --- |
+| 6.6 mil | d ≤ 4.0 in | d ≤ 2.0 in |
+| 10 mil | d ≤ 6.1 in | d ≤ 3.1 in |
+
+The card has to be two to six inches from the lens. A small-sensor f/2.4
+ultra-wide of this class holds acceptable focus down to roughly ten to
+fifteen inches; inside six inches the blur circle spans several pixels,
+and with modules one or two pixels wide any blur beyond half a module
+erases the bars. The two windows never overlap: sharp only beyond a foot,
+resolvable only inside six inches. No zoom capability is offered, so
+nothing trades field of view for pixels.
+
+**A phone's main camera**: 3840 pixels wide, a lens near 70° horizontal,
+and a zoom that crops the sensor. `rearCamera` asks for the full sensor and
+the scan demo opens at 2x, about 35° across.
+
+```
+3840 / (2 · tan 17.5°) ≈ 6100 px per unit of X / d
+```
+
+| Module X | 1 px per module | 2 px per module |
+| --- | --- | --- |
+| 6.6 mil | d ≤ 40 in | d ≤ 20 in |
+| 10 mil | d ≤ 61 in | d ≤ 31 in |
+
+Autofocus reaches down to about four inches, so the sharp window and the
+resolvable window overlap by more than a foot, and the card reads at an
+ordinary hand-held distance. Ten times the pixels per unit of angle is
+the whole difference; the lens's ability to focus close merely lets the
+card use them.
+
+The frame sizes and module sizes are hard numbers; the fields of view and
+the near focus limit are lens-class figures. They would have to be off by
+a factor of three, in the same direction, for the webcam's two windows to
+touch. QR fares better on the webcam only because its modules are larger:
+a printed QR with 20 mil modules resolves at a foot, right where the lens
+is sharp.
+
 ## Credits
 
 The QR half of this package is a port of [paulmillr/qr](https://github.com/paulmillr/qr)

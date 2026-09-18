@@ -2461,7 +2461,26 @@ export class QRScanner
 
   # Both format copies within Hamming distance three; the last in-radius
   # (ecc, mask) wins per copy, the closer copy is tried first.
+  # A mirror image locates like any symbol, since finders and timing are
+  # symmetric, and fails only at the format and data bits, so a failed read
+  # is retried on the transposed grid, which is the upright symbol. The
+  # symbology expects a reader to read mirror images; a camera plane can
+  # arrive mirrored with no metadata saying so.
   decodeGrid: (size) ->
+    result = @decodeOriented size
+    return result unless result instanceof Error
+    grid = @grid
+    for y in [1...size]
+      for x in [0...y]
+        a = y * size + x
+        b = x * size + y
+        t = grid[a]
+        grid[a] = grid[b]
+        grid[b] = t
+    mirrored = @decodeOriented size
+    if mirrored instanceof Error then result else mirrored
+
+  decodeOriented: (size) ->
     return FAIL.version unless checkVersion(@grid, size)
     m  = @grid
     f1 = 0
