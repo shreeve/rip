@@ -906,6 +906,12 @@ sampleRay! =! (luma, img, format, x, y, dx, dy, count) ->
   step  = format.step
   row   = width * step
   data  = img.data
+  # An axis ray steps one whole pixel per sample, so the inner samples run
+  # from the first by a fixed advance: a row segment or a column.
+  if hi > lo and ((dy is 0 and (dx is 1 or dx is -1)) or (dx is 0 and (dy is 1 or dy is -1)))
+    at = (y + lo * dy | 0) * row + (x + lo * dx | 0) * step
+    sampleLine luma.subarray(lo, hi), data, at, dx * step + dy * row, hi - lo, format
+    return
   if step is 1
     for n in [lo...hi]
       luma[n] = data[(y + n * dy | 0) * row + (x + n * dx | 0)]
