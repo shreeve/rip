@@ -9,7 +9,7 @@
 
   --color-bg-background:     var(--color-neutral-950);
   --color-bg-surface-hover:  oklch(from var(--color-neutral-900) calc(l + 0.02) c h);
-  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l + 0.06) c h);
+  --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l + 0.04) c h);
 
   --color-border-surface: var(--color-neutral-800);
   --color-border-input:   oklch(from var(--color-border-surface) calc(l + 0.04) c h);

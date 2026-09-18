@@ -15,7 +15,7 @@ export TemplatePage = component
   render
     div class: 'contents'
       header class: 'flex h-15 min-w-0 items-center gap-5 border-b border-surface px-5'
-        span class: 'flex-1 truncate text-sm font-semibold', "#{@params.rest}.rip"
+        span class: 'flex-1 truncate text-sm-plus font-medium', "#{@params.rest}.rip"
         if found
           Group
             Choice label: 'HTML',   active: ui.view is 'html',   pick: (-> ui.view = 'html')
