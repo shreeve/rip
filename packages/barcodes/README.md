@@ -530,11 +530,15 @@ the whole difference; the lens's ability to focus close merely lets the
 card use them.
 
 The frame sizes and module sizes are hard numbers; the fields of view and
-the near focus limit are lens-class figures. They would have to be off by
-a factor of three, in the same direction, for the webcam's two windows to
-touch. QR fares better on the webcam only because its modules are larger:
-a printed QR with 20 mil modules resolves at a foot, right where the lens
-is sharp.
+the near focus limit are lens-class figures, not measurements. A near
+limit of six inches, twice as close as estimated, would let a 10 mil card
+reach the one-pixel floor; the reliable two-pixel level needs the figures
+off by a factor of three in the same direction. The sensor behind such a
+webcam holds far more pixels than it delivers, and a face-tracking crop
+like Center Stage can raise the pixels per degree, but no web API steers
+it toward a card. QR fares better on the webcam only because its modules
+are larger: a printed QR with 20 mil modules resolves at a foot, right
+where the lens is sharp.
 
 ## Credits
 
