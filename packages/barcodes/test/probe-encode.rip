@@ -1,0 +1,123 @@
+# ==============================================================================
+# rip/barcodes — encoder output probe
+#
+# One line per encode: a SHA-256 of the output, so two builds can be shown
+# byte-identical on every format. QR: payloads from empty to three thousand
+# characters in alphanumeric, numeric and byte alphabets, every ecc level,
+# six border/scale pairs, the automatic mask and an explicit one, SVG with
+# and without path optimization, raw, ascii, term, gif, data-url and svg.
+# Code 128: ASCII, control characters, digit runs and GS1 payloads through
+# every output, scale, border and height. PDF417: every ecc level, forced
+# columns and rows, row heights, aspects, encodings and the compact form.
+# An encode that throws hashes its message.
+#
+#   rip test/probe-encode.rip > probe-encode.txt
+#   diff probe-encode-main.txt probe-encode.txt
+# ==============================================================================
+
+import { createHash } from 'crypto'
+import { encodeQR } from '../qr.rip'
+import { encodeCode128 } from '../code128.rip'
+import { encodePDF417 } from '../pdf417.rip'
+
+seed = 12345
+rnd =! -> (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
+
+# Raw output hashes as '0'/'1' rows (Code 128's raw is a single row) so a
+# boolean and a bit never collide with a rendered string.
+bits   =! (row) -> (row.map (b) -> if b then '1' else '0').join('')
+digest =! (x) ->
+  h = createHash 'sha256'
+  if x instanceof Uint8Array then h.update x
+  else if typeof x is 'string' then h.update x
+  else if typeof x[0] is 'boolean' then h.update bits(x)
+  else h.update (x.map bits).join('\n')
+  h.digest('hex').slice 0, 16
+
+count = 0
+line =! (name, fn) ->
+  out = ''
+  try
+    out = digest fn()
+  catch e
+    out = "ERR #{e.message}"
+  p "#{name} #{out}"
+  count++
+  return
+
+OUTPUTS =! ['raw', 'ascii', 'term', 'gif', 'data-url', 'svg']
+t0 = performance.now()
+
+# ==[ QR ]==
+
+ALNUM =! '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'
+texts = ['', 'x', 'HELLO WORLD', '0123456789', 'https://github.com/paulmillr/qr', 'ünïcödé 😀']
+len = 1
+while len <= 3000
+  a = ''
+  n = ''
+  b = ''
+  for i in [0...len]
+    a += ALNUM[(rnd() * 45) | 0]
+    n += String((rnd() * 10) | 0)
+    b += String.fromCharCode 32 + ((rnd() * 200) | 0)
+  texts.push a, n, b
+  len = Math.ceil len * 1.35
+
+for text, ti in texts
+  for ecc, ei in ['low', 'medium', 'quartile', 'high']
+    for [border, scale], bi in [[2, 1], [1, 1], [4, 1], [2, 2], [3, 3], [5, 2]]
+      for output, oi in OUTPUTS
+        k = ti + ei + bi + oi
+        opts = { ecc, border, scale }
+        opts.mask     = k % 8 if k % 3 is 0
+        opts.optimize = false if output is 'svg' and k % 2 is 1
+        line "qr t#{ti}:#{text.length} #{ecc} b#{border} s#{scale} m#{opts.mask} o#{opts.optimize} #{output}", -> encodeQR text, output, opts
+
+# Explicit versions with every mask, so each mask's drawing is exercised
+# on every symbol size the raw output can show.
+for v in [1..40] by 3
+  for mask in [0...8]
+    line "qr v#{v} m#{mask} raw", -> encodeQR "MASK #{mask} VERSION #{v}", 'raw', { version: v, mask, border: 1 }
+
+# ==[ Code 128 ]==
+
+C128 =! [
+  '', 'ok', 'Wikipedia', 'Hello, World! 2026', '0123456789', '01234567891', '1234',
+  'ABC123456789DEF', 'a1b2c3d4', '\x01\x02\x03TAB\tEND', 'mixed 00 11 22 CASE', 'x'.repeat(80)
+  '(01)09501101530003(17)200131', '01095011015300031720013110ABC\x1d21123'
+]
+for text, ti in C128
+  for output, oi in OUTPUTS
+    for [scale, border, height], gi in [[1, 10, 30], [2, 0, 1], [3, 1, 12], [1, 4, 100]]
+      k = ti + oi + gi
+      opts = { scale, border, height }
+      opts.gs1      = true  if ti >= 12
+      opts.optimize = false if output is 'svg' and k % 2 is 1
+      line "c128 t#{ti} s#{scale} b#{border} h#{height} g#{opts.gs1} o#{opts.optimize} #{output}", -> encodeCode128 text, output, opts
+
+# ==[ PDF417 ]==
+
+P417 =! [
+  '', 'x', 'PDF417', 'Hello, World! 2026', '0123456789012345678901234567890123456789',
+  'ünïcödé bytes \x00\xff', 'Mixed Case text with punctuation, numbers 12345 and MORE.', 'x'.repeat(400)
+  (String.fromCharCode(32 + ((rnd() * 200) | 0)) for i in [0...200]).join('')
+  (String((rnd() * 10) | 0) for i in [0...600]).join('')
+]
+for text, ti in P417
+  for output, oi in OUTPUTS
+    line "p417 t#{ti} #{output}", -> encodePDF417 text, output
+  for ecc in [0..8]
+    line "p417 t#{ti} ecc#{ecc} raw", -> encodePDF417 text, 'raw', { ecc }
+  for encoding in ['auto', 'text', 'byte', 'numeric']
+    line "p417 t#{ti} #{encoding} raw", -> encodePDF417 text, 'raw', { encoding }
+  for [columns, rows] in [[1, undefined], [3, undefined], [10, undefined], [30, undefined], [undefined, 3], [undefined, 20], [undefined, 90], [5, 12], [2, 60]]
+    line "p417 t#{ti} c#{columns} r#{rows} raw", -> encodePDF417 text, 'raw', { columns, rows }
+  for [rowHeight, aspect, scale, border] in [[1, 1, 1, 0], [2, 2, 2, 1], [3, 3, 1, 2], [5, 4, 3, 4]]
+    line "p417 t#{ti} rh#{rowHeight} a#{aspect} s#{scale} b#{border} raw", -> encodePDF417 text, 'raw', { rowHeight, aspect, scale, border }
+  line "p417 t#{ti} compact raw",     -> encodePDF417 text, 'raw', { compact: true }
+  line "p417 t#{ti} compact svg",     -> encodePDF417 text, 'svg', { compact: true }
+  line "p417 t#{ti} svg unoptimized", -> encodePDF417 text, 'svg', { optimize: false }
+  line "p417 t#{ti} gif b0",          -> encodePDF417 text, 'gif', { border: 0 }
+
+console.error "#{count} encodes in #{((performance.now() - t0) / 1000).toFixed 1}s"

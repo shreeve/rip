@@ -95,6 +95,28 @@ copyWords! =! (out, data, byteStart, n) ->
     p = words[i]
     out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
 
+# Luma of three-byte pixels from their words: three words carry four
+# pixels, so a pixel's channels come from the word or word pair that holds
+# them; the tail stays byte-wise.
+copyTriples! =! (out, data, byteStart, n) ->
+  words = Int32Array.new(data.buffer, byteStart, (3 * n) >> 2)
+  i = 0
+  w = 0
+  while i + 3 < n
+    a = words[w]
+    b = words[w + 1]
+    c = words[w + 2]
+    out[i    ] = ((a & 255) + ((a >>> 7) & 510) + ((a >>> 16) & 255)) >> 2
+    out[i + 1] = ((a >>> 24) + ((b & 255) << 1) + ((b >>> 8) & 255)) >> 2
+    out[i + 2] = (((b >>> 16) & 255) + ((b >>> 23) & 510) + (c & 255)) >> 2
+    out[i + 3] = (((c >>> 8) & 255) + ((c >>> 15) & 510) + (c >>> 24)) >> 2
+    i += 4
+    w += 3
+  src = byteStart - data.byteOffset + i * 3
+  while i < n
+    out[i++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
+    src += 3
+
 # Convert any input into the tight native luma plane.
 export copyLuma! =! (out, maxSize, img, named, layout) ->
   {step, bits} = validateImage img, named, layout, maxSize
@@ -104,6 +126,9 @@ export copyLuma! =! (out, maxSize, img, named, layout) ->
   return if data is out and not offset and stride is width and step is 1
   if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
     copyWords out, data, data.byteOffset + offset, width * height
+    return
+  if step is 3 and LITTLE_ENDIAN and stride is width * 3 and ((data.byteOffset + offset) & 3) is 0
+    copyTriples out, data, data.byteOffset + offset, width * height
     return
   if step is 1 and stride is width
     out.set data.subarray(offset, offset + width * height)
@@ -141,9 +166,23 @@ export darkToImage =! (width, height, isDark) ->
 # One scan line as 8-bit luma straight from the source pixels: `at` is the
 # first pixel's byte and `advance` the bytes to the next pixel. Packed RGB
 # takes (r + 2g + b) / 4, symmetric in r and b so every byte order reads
-# alike; wide luma planes take their top eight bits.
+# alike; wide luma planes take their top eight bits. Consecutive pixels
+# copy whole, planar bytes straight across and word-aligned packed pixels
+# a word at a time.
 export sampleLine! =! (luma, data, at, advance, count, format) ->
-  switch format.step
+  step = format.step
+  if advance is step
+    aligned = LITTLE_ENDIAN and ((data.byteOffset + at) & 3) is 0
+    if step is 1
+      luma.set data.subarray(at, at + count)
+      return
+    if step is 4 and aligned
+      copyWords luma, data, data.byteOffset + at, count
+      return
+    if step is 3 and aligned
+      copyTriples luma, data, data.byteOffset + at, count
+      return
+  switch step
     when 1
       for k in [0...count]
         luma[k] = data[at]
@@ -211,47 +250,44 @@ export edgeRuns =! (luma, count, runs, fraction) ->
     best   = minV
     bestAt = minAt
   last = 0
-  # The edge between the extremum at `at` and the candidate at `bestAt`.
-  edge = ->
+  k++
+  while k < count
+    v = luma[k]
+    if (if rising then v > best else v < best)
+      best   = v
+      bestAt = k
+    else if (if rising then v <= best - swing else v >= best + swing)
+      # The edge between the extremum at `at` and the candidate at
+      # `bestAt`: cross between samples i - 1 and i.
+      level = (value + best) / 2
+      i = at
+      if rising
+        i++ while luma[i] < level
+      else
+        i++ while luma[i] > level
+      a = luma[i - 1]
+      b = luma[i]
+      pos = i - 1 + (level - a) / (b - a)
+      runs[n++] = pos - last
+      last   = pos
+      at     = bestAt
+      value  = best
+      best   = v
+      bestAt = k
+      rising = not rising
+    k++
+  if Math.abs(best - value) >= swing
     level = (value + best) / 2
     i = at
     if rising
       i++ while luma[i] < level
     else
       i++ while luma[i] > level
-    # Cross between samples i - 1 and i.
     a = luma[i - 1]
     b = luma[i]
     pos = i - 1 + (level - a) / (b - a)
     runs[n++] = pos - last
     last = pos
-  k++
-  while k < count
-    v = luma[k]
-    if rising
-      if v > best
-        best   = v
-        bestAt = k
-      else if v <= best - swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = false
-    else
-      if v < best
-        best   = v
-        bestAt = k
-      else if v >= best + swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = true
-    k++
-  edge() if Math.abs(best - value) >= swing
   runs[n++] = count - last
   n
 

@@ -4,8 +4,7 @@
 # Uncompressed LZW stream: 8-bit codes and a clear code every 126 pixels, so
 # no dictionary state exists. Palette entry 0 is white, every other entry
 # black; `rowFor(y)` returns the 0/1 byte row for output row y (identical rows
-# may return the same buffer) and each row is copied in spans bounded
-# by the chunk boundaries.
+# may return the same buffer).
 # ==============================================================================
 
 SIGNATURE =! Uint8Array.new [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]  # GIF87a
@@ -37,21 +36,23 @@ export writeGif =! (W, H, rowFor) ->
   u16 H
   out[pos++] = 0x00
   out[pos++] = 0x07   # LZW minimum code size 7: clear is 0x80, end is 0x81
-  i = 0
+  # Pixel rows are copied back to back into the unused tail of the output,
+  # then spread forward chunk by chunk behind their two-byte headers: every
+  # chunk lands at or before its source, so the moves never clobber pixels
+  # still to be copied.
+  src = out.length - 4 - pixels
+  q   = src
   for y in [0...H]
-    row = rowFor y
-    x = 0
-    while x < W
-      if i % CHUNK is 0
-        rem = pixels - i
-        out[pos++] = (if rem < CHUNK then rem else CHUNK) + 1
-        out[pos++] = 0x80
-      n = Math.min(CHUNK - i % CHUNK, W - x)
-      # A span is at most 126 bytes; a byte loop beats a view per span.
-      out[pos + k] = row[x + k] for k in [0...n]
-      pos += n
-      x   += n
-      i   += n
+    out.set rowFor(y), q
+    q += W
+  s = src
+  for i in [0...pixels] by CHUNK
+    n = if pixels - i < CHUNK then pixels - i else CHUNK
+    out[pos++] = n + 1
+    out[pos++] = 0x80
+    out.copyWithin pos, s, s + n
+    pos += n
+    s   += n
   if tail is 0
     out[pos++] = 1
     out[pos++] = 0x80
