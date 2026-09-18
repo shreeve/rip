@@ -572,7 +572,8 @@ export class QRCanvas
     # Every nativeEvery-th frame searches the native layer regardless, so a
     # small symbol on a large frame is still found within a few frames.
     if @opts.nativeLimit isnt undefined
-      @scanner.nativeLimit = if @frames % @opts.nativeEvery then @opts.nativeLimit else Infinity
+      every = @opts.nativeEvery
+      @scanner.nativeLimit = if every > 1 and @frames % every is 0 then Infinity else @opts.nativeLimit
     @bitmapDrawn         = false
     @overlayDrawn        = false
     @overlayBatch.length = 0
