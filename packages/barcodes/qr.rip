@@ -2546,12 +2546,64 @@ export class QRScanner
       formatValue = if formatValue is first then second else -1
     decoded
 
-  # One symbol or one alignment tile into the scanner grid; tiles never overlap.
+  # One symbol or one alignment tile into the scanner grid; tiles never
+  # overlap. Sampling is read() unrolled: each row's homography terms are
+  # products of one module coordinate, computed once per row and summed in
+  # read()'s order, so every sample matches read() bit for bit.
   projectQuad!: (s, map, size, left = 0, right = size, top = 0, bottom = size) ->
-    grid = @grid
+    grid     = @grid
+    inverted = @invertedProjection
+    {W, H, d, cut, bw, bh, sh} = s
+    xMax  = W - 1
+    yMax  = H - 1
+    uMax  = bw - 1
+    vMax  = bh - 1
+    half  = (1 << sh) / 2
+    twice = 2 * half
+    m0 = map[0]
+    m1 = map[1]
+    m2 = map[2]
+    m3 = map[3]
+    m4 = map[4]
+    m5 = map[5]
+    m6 = map[6]
+    m7 = map[7]
+    m8 = map[8]
     for y in [top...bottom]
+      my  = y + 0.5
+      rx  = m1 * my
+      ry  = m4 * my
+      rd  = m7 * my
+      row = y * size
       for x in [left...right]
-        grid[y * size + x] = @read s, map, x + 0.5, y + 0.5
+        mx  = x + 0.5
+        den = m6 * mx + rd + m8
+        px  = (m0 * mx + rx + m2) / den
+        py  = (m3 * mx + ry + m5) / den
+        sx  = px - 0.5
+        sy  = py - 0.5
+        if sx < 0 or sy < 0 or sx >= xMax or sy >= yMax
+          grid[row + x] = 0
+          continue
+        x0 = sx | 0
+        y0 = sy | 0
+        fx = sx - x0
+        fy = sy - y0
+        i  = y0 * W + x0
+        value = (d[i] * (1 - fx) + d[i + 1] * fx) * (1 - fy) + (d[i + W] * (1 - fx) + d[i + W + 1] * fx) * fy
+        u  = Math.min Math.max((px - half) / twice, 0), uMax
+        v  = Math.min Math.max((py - half) / twice, 0), vMax
+        u0 = u | 0
+        v0 = v | 0
+        u1 = Math.min u0 + 1, uMax
+        v1 = Math.min v0 + 1, vMax
+        gu = u - u0
+        gv = v - v0
+        r0 = v0 * bw
+        r1 = v1 * bw
+        threshold = (cut[r0 + u0] * (1 - gu) + cut[r0 + u1] * gu) * (1 - gv) + (cut[r1 + u0] * (1 - gu) + cut[r1 + u1] * gu) * gv
+        grid[row + x] = if (value <= threshold) isnt inverted then 1 else 0
+    return
 
   projectMap: (s, map, size) ->
     return FAIL.timing unless @timing(s, map, size)
