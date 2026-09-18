@@ -17,7 +17,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, validateImage } from './image.rip'
+import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -706,6 +706,10 @@ sampleAlong =! (luma, data, width, height, format, ox, oy, dx, dy) ->
   y  = Math.round((oy + t0 * dy) * 65536) + 32768
   sx = Math.round dx * 65536
   sy = Math.round dy * 65536
+  # An axis line steps one whole pixel per sample: a row segment or a column.
+  if (sx is 65536 and sy is 0) or (sx is 0 and sy is 65536)
+    sampleLine luma, data, (y >> 16) * row + (x >> 16) * step, (if sy then row else step), count, format
+    return count
   switch step
     when 1
       for k in [0...count]

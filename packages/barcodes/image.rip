@@ -166,9 +166,23 @@ export darkToImage =! (width, height, isDark) ->
 # One scan line as 8-bit luma straight from the source pixels: `at` is the
 # first pixel's byte and `advance` the bytes to the next pixel. Packed RGB
 # takes (r + 2g + b) / 4, symmetric in r and b so every byte order reads
-# alike; wide luma planes take their top eight bits.
+# alike; wide luma planes take their top eight bits. Consecutive pixels
+# copy whole, planar bytes straight across and word-aligned packed pixels
+# a word at a time.
 export sampleLine! =! (luma, data, at, advance, count, format) ->
-  switch format.step
+  step = format.step
+  if advance is step
+    aligned = LITTLE_ENDIAN and ((data.byteOffset + at) & 3) is 0
+    if step is 1
+      luma.set data.subarray(at, at + count)
+      return
+    if step is 4 and aligned
+      copyWords luma, data, data.byteOffset + at, count
+      return
+    if step is 3 and aligned
+      copyTriples luma, data, data.byteOffset + at, count
+      return
+  switch step
     when 1
       for k in [0...count]
         luma[k] = data[at]
