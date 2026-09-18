@@ -265,9 +265,15 @@ encodeData =! (ver, ecc, text, type, utf8) ->
   push MODE_BITS[type], 4
   push dataLen, lengthBits
   if type is 'numeric'
-    for i in [0...dataLen] by 3
-      n = Math.min(3, dataLen - i)
-      push Number(text.slice(i, i + n)), NUMERIC_BITS[n]
+    # Three digits a group straight from their code points; the tail group
+    # carries one or two.
+    i = 0
+    while i + 3 <= dataLen
+      push (text.charCodeAt(i) - 48) * 100 + (text.charCodeAt(i + 1) - 48) * 10 + text.charCodeAt(i + 2) - 48, 10
+      i += 3
+    rest = dataLen - i
+    if rest is 2 then push (text.charCodeAt(i) - 48) * 10 + text.charCodeAt(i + 1) - 48, 7
+    else if rest is 1 then push text.charCodeAt(i) - 48, 4
   else if type is 'alphanumeric'
     for i in [0...dataLen - 1] by 2
       push ALNUM_VAL[text.charCodeAt(i)] * 45 + ALNUM_VAL[text.charCodeAt(i + 1)], 11
