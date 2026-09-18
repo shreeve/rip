@@ -333,15 +333,6 @@
       "name": "storage.type.component.rip"
     },
 
-    {"comment": "=== $ SIGIL DATA ATTRIBUTES ==="},
-    {
-      "match": "(\\$)([a-zA-Z_]\\w*)",
-      "captures": {
-        "1": { "name": "punctuation.definition.variable.rip" },
-        "2": { "name": "entity.other.attribute-name.data.rip" }
-      }
-    },
-
     {"comment": "=== RENDER BLOCK (context-aware tag/component/attribute highlighting) ==="},
     {
       "comment": "Captures render keyword + indentation. HTML tags, components, and attributes are only highlighted inside this context. The block ends when a non-blank line is not indented deeper than render. This capture is what the editor actually shows for `render` — it matches at line start and out-ranks the keyword rule below, so the two must agree on the scope. `render` stays in control rather than joining the declaration keywords: it introduces a BLOCK, which is what `try`, `do` and `loop` do, and reading it apart from `component` matters more than filing it with the thing it is a member of — a declaration color would make the section header and the declaration of the whole component indistinguishable.",

@@ -34,7 +34,7 @@ Panel = component
         "id kid"
       .('grid', active && 'on')
       p class: "static"
-      section $open: true, $my-thing: "x"
+      section data-open: true, data-my-thing: "x"
       article data-lucide: "search"
       form novalidate
       . role: "note"

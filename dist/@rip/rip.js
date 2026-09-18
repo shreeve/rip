@@ -3070,10 +3070,6 @@ function rewriteRender(tokens, mintId, fail) {
         continue;
       }
     }
-    if (t.kind === "PROPERTY" && t.value[0] === "$" && t.value.length > 1 && ![".", "?.", "@"].includes(out[out.length - 1]?.kind)) {
-      out.push({ ...t, kind: "STRING", value: `"data-${t.value.slice(1)}"` });
-      continue;
-    }
     if (t.kind === "IDENTIFIER" && next?.kind === "-" && !next.spaced) {
       const parts = [t.value];
       let j = i + 1;
@@ -3087,9 +3083,7 @@ function rewriteRender(tokens, mintId, fail) {
           break;
       }
       if (parts.length > 1 && tokens[j - 1].kind === "PROPERTY") {
-        let joined = parts.join("-");
-        if (joined[0] === "$")
-          joined = `data-${joined.slice(1)}`;
+        const joined = parts.join("-");
         out.push({ ...t, kind: "STRING", value: `"${joined}"`, end });
         i = j - 1;
         continue;
@@ -17709,6 +17703,29 @@ ${this.replayPad}}` : " }");
         if (rec !== null && span !== null && span[1] > span[0])
           rec.sites.push(span);
       };
+      const keyBytes = rec !== null ? rec.key : null;
+      const claimingKey = (fn) => {
+        if (keyBytes === null)
+          return fn();
+        const prev = this.b.claimWithin;
+        this.b.claimWithin = keyBytes;
+        try {
+          return fn();
+        } finally {
+          this.b.claimWithin = prev;
+        }
+      };
+      const avoidingKey = (fn) => {
+        if (keyBytes === null)
+          return fn();
+        const prev = this.primitiveAvoid;
+        this.primitiveAvoid = [...prev ?? [], keyBytes];
+        try {
+          return fn();
+        } finally {
+          this.primitiveAvoid = prev;
+        }
+      };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
         this.checkBareEventHandler(pair, value);
@@ -17742,7 +17759,7 @@ ${this.replayPad}}` : " }");
           } else {
             recv2.emit();
             this.b.emit(".addEventListener(");
-            this.emitQuotedPrimitive(eventName);
+            claimingKey(() => this.emitQuotedPrimitive(eventName));
             this.b.emit(`, (${ev}`);
           }
           this.tsScaffoldAny();
@@ -17752,7 +17769,7 @@ ${this.replayPad}}` : " }");
               this.b.tsOnly(() => this.b.emit("("));
             const castStart = this.b.offset;
             this.b.emit(`${self}.`);
-            this.emitPrimitive(value);
+            avoidingKey(() => this.emitPrimitive(value));
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(known !== null ? ` as (e: ${known}) => unknown)` : " as any)"));
             if (this.ts && known !== null)
@@ -17761,7 +17778,7 @@ ${this.replayPad}}` : " }");
           } else {
             const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known ?? "any" : isFunc(value) ? null : known;
             this.b.emit("(");
-            site(this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.expr(value))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -17897,7 +17914,7 @@ ${this.replayPad}}` : " }");
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
         const recv2 = this.tsElReceiver(el);
         const emitBooleanKey = () => {
-          const span = this.emitKeyAs(storedKey, key);
+          const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv2.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: "attr", name: key, type: "boolean | undefined" });
           }
@@ -17910,7 +17927,7 @@ ${this.replayPad}}` : " }");
             this.b.emit("', !!");
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
-            this.renderExpr(value);
+            avoidingKey(() => this.renderExpr(value));
             const satStart = this.b.offset + 1;
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" satisfies boolean | undefined)"));
@@ -17921,7 +17938,7 @@ ${this.replayPad}}` : " }");
         } else {
           this.renderLine(pair, () => {
             this.b.emit("if (");
-            this.withExpression(() => this.expr(value));
+            avoidingKey(() => this.withExpression(() => this.expr(value)));
             const satStart = this.b.offset + 1;
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" satisfies boolean | undefined"));
@@ -17997,11 +18014,12 @@ ${this.replayPad}}` : " }");
         recordAttrKey();
       };
       const emitAttrKey = () => {
-        const span = this.emitKeyAs(storedKey, key);
+        const span = claimingKey(() => this.emitKeyAs(storedKey, key));
         if (attrSpan === null)
           attrSpan = span;
         recordAttrKey();
       };
+      const emitAttrValue = () => avoidingKey(() => this.renderExpr(value));
       const nullableAnnotation = () => {
         if (!this.ts)
           return;
@@ -18014,7 +18032,7 @@ ${this.replayPad}}` : " }");
             site([this.b.offset - 3, this.b.offset]);
             nullableAnnotation();
             this.b.emit(" = ");
-            this.renderExpr(value);
+            emitAttrValue();
             this.b.emit("; __v == null ? ");
             recv.emit();
             this.b.emit(".removeAttribute('");
@@ -18036,7 +18054,7 @@ ${this.replayPad}}` : " }");
             if (routeWrap)
               this.b.tsOnly(() => this.b.emit("__ripRoute("));
             const valStart = this.b.offset;
-            site(this.renderExpr(value));
+            site(emitAttrValue());
             const valEnd = this.b.offset;
             if (this.ts) {
               if (routeWrap)
@@ -18055,7 +18073,7 @@ ${this.replayPad}}` : " }");
           site([this.b.offset - 3, this.b.offset]);
           nullableAnnotation();
           this.b.emit(" = ");
-          this.renderExpr(value);
+          emitAttrValue();
           this.b.emit("; if (__v != null) ");
           recv.emit();
           emitSetAttribute();
@@ -18073,7 +18091,7 @@ ${this.replayPad}}` : " }");
           if (routeWrap)
             this.b.tsOnly(() => this.b.emit("__ripRoute("));
           const valStart = this.b.offset;
-          site(this.renderExpr(value));
+          site(emitAttrValue());
           const valEnd = this.b.offset;
           if (this.ts) {
             if (routeWrap)

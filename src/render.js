@@ -5,7 +5,6 @@
 //   .card            → div.card          (implicit div for class-only)
 //   .                → div               (bare dot with children)
 //   . foo: bar       → div foo: bar      (dot + attribute line)
-//   $open: true      → "data-open": true (data-attribute sigil)
 //   data-lucide: "x" → "data-lucide": "x" (hyphenated keys re-join)
 //   ~fade            → __transition__: "fade"
 //   value <=> name   → __bind_value__: name  (two-way binding)
@@ -333,14 +332,6 @@ export function rewriteRender(tokens, mintId, fail) {
       }
     }
 
-    // ── Data-attribute sigil: `$open:` → "data-open": ── (never on a
-    // member/property chain — `obj.$key` stays member access).
-    if (t.kind === 'PROPERTY' && t.value[0] === '$' && t.value.length > 1 &&
-        !['.', '?.', '@'].includes(out[out.length - 1]?.kind)) {
-      out.push({ ...t, kind: 'STRING', value: `"data-${t.value.slice(1)}"` });
-      continue;
-    }
-
     // ── Hyphenated attribute keys: `data-lucide:` / `aria-x:` →
     // one STRING key (re-joined from the '-' operator split) ──
     if (t.kind === 'IDENTIFIER' && next?.kind === '-' && !next.spaced) {
@@ -357,8 +348,7 @@ export function rewriteRender(tokens, mintId, fail) {
         if (wasProperty) break;
       }
       if (parts.length > 1 && tokens[j - 1].kind === 'PROPERTY') {
-        let joined = parts.join('-');
-        if (joined[0] === '$') joined = `data-${joined.slice(1)}`;
+        const joined = parts.join('-');
         out.push({ ...t, kind: 'STRING', value: `"${joined}"`, end });
         i = j - 1;
         continue;

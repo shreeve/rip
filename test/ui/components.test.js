@@ -668,14 +668,14 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
 // ════════════════════════════════════════════════════════════════════
 
 describe('the static render DSL: emission pins', () => {
-  test('elements, ids, classes, attributes, data sigils, hyphenated keys, text', () => {
+  test('elements, ids, classes, attributes, hyphenated keys, text', () => {
     const { code } = compile(`P = component
   active := true
   render
     .card
       div#main "id kid"
       p class: "static"
-      section $open: true, $my-thing: "x"
+      section data-open: true, data-my-thing: "x"
       article data-lucide: "search"
       div style: "color: red", innerHTML: "<b>x</b>"
       = active

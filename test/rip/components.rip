@@ -1645,41 +1645,6 @@ code 'hyphenated attributes (data-* and aria-*)', '''
   };
   '''
 
-code 'data attribute sigil ($open → data-open)', '''
-  export A = component
-    render
-      div $testid: "main", $open: true
-  ''', '''
-  export const A = class extends __Component {
-    _init(__given) {
-    }
-    _create() {
-      this._el0 = document.createElement('div');
-      this._el0.setAttribute('data-part', 'A');
-      this._el0.setAttribute('data-testid', "main");
-      this._el0.setAttribute('data-open', true);
-      return this._el0;
-    }
-  };
-  '''
-
-code 'data attribute sigil hyphenated ($my-thing → data-my-thing)', '''
-  export A = component
-    render
-      div $my-thing: "test"
-  ''', '''
-  export const A = class extends __Component {
-    _init(__given) {
-    }
-    _create() {
-      this._el0 = document.createElement('div');
-      this._el0.setAttribute('data-part', 'A');
-      this._el0.setAttribute('data-my-thing', "test");
-      return this._el0;
-    }
-  };
-  '''
-
 code 'reactive innerHTML', '''
   export A = component
     content := "hello"
@@ -3179,11 +3144,11 @@ code 'offer public prop with @', '''
   };
   '''
 
-code 'data attribute sigil with presence operator ($open: val?!)', '''
+code 'data attribute with the presence operator (data-open: val?!)', '''
   export A = component
     @active := false
     render
-      div $open: @active?!
+      div data-open: @active?!
   ''', '''
   export const A = class extends __Component {
     static __props = ['active'];
