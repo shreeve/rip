@@ -218,9 +218,10 @@ r.doc.patient.age = 6      # nested change; dirty tracking is deep
 r.save!()
 ```
 
-A `variant` field takes an object or an array. A bare JS string is not JSON
-text and fails the cast, so store a scalar as a document or as its JSON text
-(`'"Steve"'`).
+A `variant` field takes any value and gives it back: an object, an array,
+a string, a number, a boolean. A string is stored as a VARIANT string, not
+parsed as a document, so `doc: '{"a":1}'` is the seven-character text and
+`doc.a` is NULL. Hand it the object.
 
 ### In Rip through raw SQL
 
