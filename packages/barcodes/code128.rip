@@ -816,6 +816,10 @@ trackEdges =! (img, format, hit, codes, luma, runs, rev) ->
   [oa, ob] = edges
   [point(oa, a0 + b0 * oa), point(oa, a1 + b1 * oa), point(ob, a1 + b1 * ob), point(ob, a0 + b0 * ob)]
 
+# Line buffers sized for the longest diagonal seen so far, so a camera loop
+# feeding frames of one size allocates once.
+lines =! { side: 0, luma: Uint8Array.new(0), runs: Float64Array.new(0), rev: Float64Array.new(0) }
+
 # First Code 128 on any scan line, where it was read and its corners; null
 # on a miss. Lines run along both axes; after each axis pass, lines along
 # the tilt estimated from its best unread crossings, unless `opts.tilt` is
@@ -827,9 +831,12 @@ export readCode128 =! (img, opts = {}) ->
   fail "invalid opts.tilt=#{tilt} (#{typeof tilt})", TypeError unless typeof tilt is 'boolean'
   # A line along a diagonal is as long as the frame's diagonal.
   side  = Math.ceil(Math.hypot(img.width, img.height)) + 2
-  luma  = Uint8Array.new side
-  runs  = Float64Array.new side
-  rev   = Float64Array.new side
+  if side > lines.side
+    lines.side = side
+    lines.luma = Uint8Array.new side
+    lines.runs = Float64Array.new side
+    lines.rev  = Float64Array.new side
+  {luma, runs, rev} = lines
   codes = []
   more  = []
   hit   = null
