@@ -1355,6 +1355,9 @@ export type PDF417Result = {
   erasures?: number
   codewords?: number[]
   corners?: { x: number, y: number }[]
+  vertical?: boolean
+  reversed?: boolean
+  inverted?: boolean
 }
 
 # Data codewords into bytes, an ECI-decoded text and any macro block.

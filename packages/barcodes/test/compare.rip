@@ -136,7 +136,7 @@ C128_JS =! zxing.BarcodeFormat.CODE_128
 PDF_JS  =! zxing.BarcodeFormat.PDF_417
 
 encodeWidths =! [12, 12, 12, 6]
-head 'Encode (µs)', ['qr 0.7.0', 'qr + PR 39', 'rip prior', 'rip'], encodeWidths
+head 'Encode (µs)', ['qr 0.7.0', 'qr + PR 39', 'rip main', 'rip'], encodeWidths
 for [name, text, format] in [['raw, version 1', 'Hello world', 'raw'], ['raw, version 10', t10, 'raw'], ['raw, version 22', t22, 'raw'], ['svg, version 10', t10, 'svg'], ['gif, version 10', t10, 'gif']]
   row! name, encodeWidths, [(-> encode070 text, format), (-> encode39 text, format), (-> encodePrior text, format), (-> encodeQR text, format)]
 
@@ -146,7 +146,7 @@ fhd   = qrRaster t10, 6, 1920, 1080
 noise = { width: 1920, height: 1080, data: Uint8Array.new(1920 * 1080 * 4).map((_, i) -> if (i & 3) is 3 then 255 else (i * 7919) & 0xff) }
 decodeWidths =! [14, 14, 14, 12, 12, 6]
 p ''
-head 'Decode (µs)', ['ZXing', 'zxing-wasm', 'qr 0.7.0', 'qr + PR 39', 'rip prior', 'rip'], decodeWidths
+head 'Decode (µs)', ['ZXing', 'zxing-wasm', 'qr 0.7.0', 'qr + PR 39', 'rip main', 'rip'], decodeWidths
 for [name, img, text] in [['132x132 raster, version 1', small, 'Hello world'], ['1280x720 frame, one symbol', hd, 'https://example.com/some/path?with=query'], ['1920x1080 frame, one symbol', fhd, t10]]
   expect name, zxingRead(img, QR_JS), text
   expect name, (wasmRead! img, 'QRCode'), text
@@ -166,6 +166,6 @@ for [name, img, format, wasm, prior, read] in [['Code 128', bars, C128_JS, 'Code
   expect name, prior(img).text, 'Hello, World! 2026'
   expect name, read(img).text, 'Hello, World! 2026'
 p ''
-head 'Read (µs)', ['ZXing', 'zxing-wasm', 'rip prior', 'rip'], readWidths
+head 'Read (µs)', ['ZXing', 'zxing-wasm', 'rip main', 'rip'], readWidths
 row! 'Code 128, 1920x1080', readWidths, [(-> zxingRead bars, C128_JS), later(-> wasmRead bars, 'Code128'), (-> readCode128Prior bars), (-> readCode128 bars)]
 row! 'PDF417, 1920x1080',   readWidths, [(-> zxingRead stack, PDF_JS), later(-> wasmRead stack, 'PDF417'), (-> readPDF417Prior stack), (-> readPDF417 stack)]

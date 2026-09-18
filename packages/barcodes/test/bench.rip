@@ -64,43 +64,46 @@ scenes =! (W, H) ->
 
 miss =! (fn) -> -> try fn() catch then null
 
+# Scene names as the README's tables print them.
+label =! { desk: 'desk', text: 'printed page', noise: 'noise', weave: 'fine weave' }
+
 t8  = 'x'.repeat 192
 t18 = 'x'.repeat 768
 p 'Encode'
-row 'QR raw v1',   time -> encodeQR 'Hello world', 'raw'
-row 'QR raw v10',  time -> encodeQR t8, 'raw'
-row 'QR raw v22',  time -> encodeQR t18, 'raw'
-row 'QR svg v10',  time -> encodeQR t8, 'svg'
-row 'QR gif v10',  time -> encodeQR t8, 'gif'
-row 'Code 128',    time -> encodeCode128 'Hello, World! 2026', 'raw'
-row 'PDF417',      time -> encodePDF417 'Hello, World! 2026', 'raw'
+row 'QR raw, version 1',      time -> encodeQR 'Hello world', 'raw'
+row 'QR raw, version 10',     time -> encodeQR t8, 'raw'
+row 'QR raw, version 22',     time -> encodeQR t18, 'raw'
+row 'QR svg, version 10',     time -> encodeQR t8, 'svg'
+row 'QR gif, version 10',     time -> encodeQR t8, 'gif'
+row 'Code 128 raw, 18 chars', time -> encodeCode128 'Hello, World! 2026', 'raw'
+row 'PDF417 raw, 18 chars',   time -> encodePDF417 'Hello, World! 2026', 'raw'
 
 p '\nRead a clean raster'
 small = qrRaster 'Hello world', 4, 132, 132
 hd    = qrRaster 'https://example.com/some/path?with=query', 8, 1280, 720
 fhd   = qrRaster t8, 6, 1920, 1080
-row 'QR v1 132x132',    time -> decodeQR small
-row 'QR 720p',          time -> decodeQR hd
-row 'QR v10 1080p',     time -> decodeQR fhd
+row 'QR version 1, 132x132',    time -> decodeQR small
+row 'QR 1280x720',              time -> decodeQR hd
+row 'QR version 10, 1920x1080', time -> decodeQR fhd
 bars  = barsRaster 'Hello, World! 2026', 3, 120, 1920, 1080
 stack = stackRaster 'Hello, World! 2026', 3, 1920, 1080
-row 'Code 128 1080p',   time -> readCode128 bars
-row 'PDF417 1080p',     time -> readPDF417 stack
+row 'Code 128, 1920x1080',      time -> readCode128 bars
+row 'PDF417, 1920x1080',        time -> readPDF417 stack
 
 p '\nMiss at 1080p (I420)'
 s = scenes 1920, 1080
 for name in ['desk', 'text', 'noise', 'weave']
-  row "QR #{name}", time miss -> decodeQR s[name], format: 'I420'
-row 'Code 128 desk',  time -> readCode128 s.desk, format: 'I420'
-row 'PDF417 desk',    time -> readPDF417 s.desk, format: 'I420'
+  row "QR, #{label[name]}", time miss -> decodeQR s[name], format: 'I420'
+row 'Code 128, desk', time -> readCode128 s.desk, format: 'I420'
+row 'PDF417, desk',   time -> readPDF417 s.desk, format: 'I420'
 
 p '\nMiss at the phone arena 2160x2592 (I420)'
 s = scenes 2160, 2592
 for name in ['desk', 'text', 'noise', 'weave']
-  row "QR #{name}", time miss -> decodeQR s[name], format: 'I420'
-row 'QR desk, nativeLimit 1500', time miss -> decodeQR s.desk, format: 'I420', nativeLimit: 1500
-row 'Code 128 desk',  time -> readCode128 s.desk,  format: 'I420'
-row 'Code 128 text',  time -> readCode128 s.text,  format: 'I420'
-row 'Code 128 noise', time -> readCode128 s.noise, format: 'I420'
-row 'PDF417 desk',    time -> readPDF417 s.desk,   format: 'I420'
-row 'PDF417 noise',   time -> readPDF417 s.noise,  format: 'I420'
+  row "QR, #{label[name]}", time miss -> decodeQR s[name], format: 'I420'
+row 'QR, desk, nativeLimit 1500', time miss -> decodeQR s.desk, format: 'I420', nativeLimit: 1500
+row 'Code 128, desk',         time -> readCode128 s.desk,  format: 'I420'
+row 'Code 128, printed page', time -> readCode128 s.text,  format: 'I420'
+row 'Code 128, noise',        time -> readCode128 s.noise, format: 'I420'
+row 'PDF417, desk',           time -> readPDF417 s.desk,   format: 'I420'
+row 'PDF417, noise',          time -> readPDF417 s.noise,  format: 'I420'
