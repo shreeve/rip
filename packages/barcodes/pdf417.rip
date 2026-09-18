@@ -834,6 +834,18 @@ lookup =! (runs, at, total, mirror) ->
     pattern = (pattern << 1) | (if mirror then k & 1 else 1 - (k & 1))
   bits[pattern] - 1
 
+# The widest pair of a pattern's runs and the least fraction of the window
+# it spans when the pattern matches: what the match allows, less a margin,
+# so a check before the match only skips windows the match would refuse.
+widest =! (pattern, modules) ->
+  at   = 0
+  wide = 0
+  for k in [0...pattern.length - 1]
+    if pattern[k] + pattern[k + 1] > wide
+      wide = pattern[k] + pattern[k + 1]
+      at   = k
+  { at, fraction: (wide - 0.8) / modules - 0.01 }
+
 # Width in pixels of the runs at `at` when they match a fixed pattern, or 0.
 # Each distance from a run's leading edge to the next run of its kind is
 # compared, since print gain moves every edge by the same amount and leaves
@@ -855,17 +867,18 @@ matchRuns =! (runs, at, pattern, modules) ->
   if err < total * 0.25 then total else 0
 
 # First run index at or after `from`, same parity, where the pattern matches.
-# A sliding sum of the window rejects one narrower than a module a run
-# before the full comparison.
+# A sliding sum of the window rejects one narrower than a module a run,
+# then the pattern's widest pair of runs, before the full comparison.
 findRuns =! (runs, n, from, pattern, modules) ->
   len  = pattern.length
   last = n - len
   return -1 if from > last
+  {at: pair, fraction} = widest pattern, modules
   total = 0
   total += runs[from + k] for k in [0...len]
   at = from
   loop
-    return at if total >= modules and matchRuns(runs, at, pattern, modules)
+    return at if total >= modules and runs[at + pair] + runs[at + pair + 1] >= fraction * total and matchRuns(runs, at, pattern, modules)
     at += 2
     return -1 if at > last
     total += runs[at + len - 2] + runs[at + len - 1] - runs[at - 2] - runs[at - 1]
