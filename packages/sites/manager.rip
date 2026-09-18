@@ -1292,6 +1292,7 @@ export main = (argv) ->
   createRegistration = ->
     backoff = 200
     conflictDeadline = null
+    claim = if site? then site.host else hosts.join(', ')
     loop
       response = controlFetch! args.control, 'POST', '/1.0/apps', registration()
       detail = response.text!
@@ -1304,9 +1305,10 @@ export main = (argv) ->
         continue
       unless response.status is 409
         throw Error.new("Janus registration failed (#{response.status}): #{detail}")
-      conflictDeadline ?= Date.now() + REGISTER_409_MS
+      unless conflictDeadline?
+        conflictDeadline = Date.now() + REGISTER_409_MS
+        warn "rip-sites: #{claim} held by another app; waiting up to #{REGISTER_409_MS / 1000}s for the claim to lapse"
       if Date.now() >= conflictDeadline
-        claim = if site? then site.host else hosts.join(', ')
         throw Error.new("Janus host claim remained occupied (409): #{claim}")
       sleep! backoff
       backoff = Math.min backoff * 2, 5000

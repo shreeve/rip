@@ -334,6 +334,8 @@ test! 'manager retries stale registration claims within a bounded window', ->
     ok not process.exitCode?
     process.kill 'SIGTERM'
     eq await process.exited, 143
+    waiting = (await launched.err).split('rip-sites: retry.example.test held by another app; waiting up to 1s for the claim to lapse\n')
+    eq waiting.length, 2, await launched.err
   finally
     try process?.kill 'SIGKILL'
     await process.exited if process?
@@ -353,6 +355,7 @@ test! 'manager stops retrying a registration claim after its deadline', ->
     { proc, err } = run project, [project, '--host', 'occupied.example.test', '--control', controlSocket, '--no-watch', '--access-log=off'],
       RIP_REGISTER_409_MS: '100'
     eq await proc.exited, 1
+    ok (await err).includes('rip-sites: occupied.example.test held by another app; waiting up to 0.1s for the claim to lapse\n')
     ok (await err).includes('Janus host claim remained occupied (409): occupied.example.test')
     eq calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length, 2
   finally
