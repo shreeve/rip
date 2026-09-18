@@ -1479,22 +1479,24 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
 # Rolling run-length window over every second row; the loose pass admits
 # loose windows with loose cross-checks. Each run is measured straight off
 # the packed row: the word's opposite-color bits are isolated with clz32
-# and whole words are consumed until a stop or the row's end.
+# and whole words are consumed until a stop or the row's end. The current
+# word and its consumed-bit shift carry from run to run; the next word
+# loads only when a run crosses a word boundary.
 findRows! =! (layer, from, to, loose) ->
   width  =! layer.width
   words  =! layer.words
   bitmap =! layer.bitmap
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
-    runs = 0
-    row  = y * words
-    previous = (bitmap[row] & 1) is 1
+    runs  = 0
+    at    = y * words
+    word  = bitmap[at]
+    shift = 0
+    previous = (word & 1) is 1
     x = 0
     while x < width
       length = 0
       loop
-        shift = x & 31
-        word  = bitmap[row + (x >>> 5)]
         stops = if previous then ~word else word
         w     = stops >> shift
         span  = Math.min 32 - shift, width - x
@@ -1502,7 +1504,10 @@ findRows! =! (layer, from, to, loose) ->
         len   = Math.min first, span
         length += len
         x      += len
+        shift  += len
         break if first < span or x >= width
+        word  = bitmap[++at]
+        shift = 0
       r0 = r1
       r1 = r2
       r2 = r3
