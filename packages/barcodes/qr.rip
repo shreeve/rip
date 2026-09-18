@@ -2350,13 +2350,18 @@ export class QRScanner
     dirty = 0
     dirty |= rem[j] for j in [0...stride]
     return true unless dirty
+    # The register holds x^eccWords * C(x) mod g(x), which agrees with the
+    # block at every generator root up to the factor alpha^(i * eccWords),
+    # so the syndromes come from its eccWords coefficients instead of the
+    # whole block.
+    next = @next
+    next[k] = (rem[k >> 2] >> ((k & 3) * 8)) & 0xff for k in [0...eccWords]
     for i in [0...eccWords]
       value = 0
-      value = mul(value, EXP[i]) ^ blockBytes[offset + j] for j in [0...length]
-      syndromes[i] = value
+      value = mul(value, EXP[i]) ^ next[k] for k in [0...eccWords]
+      syndromes[i] = mul value, EXP[255 - ((i * eccWords) % 255)]
     sigma    = @sigma
     previous = @previous
-    next     = @next
     sigma.fill    0, 0, eccWords + 1
     previous.fill 0, 0, eccWords + 1
     sigma[0]    = 1
