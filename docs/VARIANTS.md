@@ -27,8 +27,9 @@ is listed.
 | read a field | `doc.patient.firstName` |
 | read an array element | `doc.orders[1].testCode` (1-based) |
 | read a key with a dash or space | `doc."first-name"` |
-| read several fields as columns | `unnest(doc::STRUCT(requisitionNumber VARCHAR, visitDate VARCHAR))` |
-| read nested fields as columns | `unnest(doc::STRUCT(a VARCHAR, patient STRUCT(gender VARCHAR)), recursive := true)` |
+| read several fields | `doc.{requisitionNumber visitDate}` (harbor expands it) |
+| read nested fields | `doc.{requisitionNumber patient.{lastName firstName}}` |
+| read several fields as typed columns | `unnest(doc::STRUCT(requisitionNumber VARCHAR, visitDate VARCHAR))` |
 | filter on a string | `WHERE doc.patient.firstName = 'Steve'` |
 | filter on a number | `WHERE doc.patient.age > 40` (see *ordering*) |
 | filter on a boolean | `WHERE doc.patient.active` |
@@ -110,8 +111,20 @@ Cast to a native type in exactly these situations:
   element a document (`o.o.testCode` works); `doc.orders::STRUCT(...)[]`
   gives typed columns.
 
-**Several fields at once.** There is no `doc.{a,b}`. The compact form is a
-struct cast naming the fields you want, unnested into columns:
+**Several fields at once.** Harbor expands the shell's braces in a
+statement before the engine sees it, from every client, Rip included:
+
+```sql
+SELECT id, doc.{requisitionNumber visitDate patient.{lastName firstName}}
+  FROM orders
+ WHERE doc.patient.lastName ILIKE 'morel'
+```
+
+is four path expressions. Items are separated by whitespace, commas, or
+both; groups nest; a group can sit anywhere in a term and a cast suffix
+distributes (`doc.{a b}::VARCHAR`). A struct literal, `{'a': 1}`, is never
+touched. The result columns stay VARIANT. For typed columns, a struct cast
+naming the fields you want, unnested:
 
 ```sql
 SELECT id, unnest(doc::STRUCT(requisitionNumber VARCHAR, visitDate VARCHAR))
