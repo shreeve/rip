@@ -180,8 +180,11 @@ Defined in detail by [WORKSPACE.md](WORKSPACE.md). HMR-critical facts:
 ### Layer B — refresh tiers
 
 Compiler emits `__hmrId` / `__hmrSig` on module-scope components when
-`hmr` is on (omitted in production). A process registry maps id →
-definition, signature, living instances.
+`hmr` is on (omitted in production), and exports the module's component
+table as `__hmrComponents`, module-private components included: a
+living instance of a component the module does not export still has a
+replacement to patch into. A process registry maps id → definition,
+signature, living instances.
 
 | Tier | When | Keeps | Rebuilds |
 |---|---|---|---|

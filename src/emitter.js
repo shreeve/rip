@@ -4706,6 +4706,7 @@ class Emitter {
         }
         this.emitTsTypeDecls(sexpr.slice(1), '');
         if (rest.length) this.mark(sexpr, 'body', () => this.statements(rest, 0, 'program'));
+        this.emitHmrComponentTable();
         this.scopes.pop();
         this.rframes.pop();
       });
@@ -4815,6 +4816,15 @@ class Emitter {
     this.b.emit(`const DATA = ${JSON.stringify(this.dataPayload)};\n\n`);
   }
 
+  // Every module-scope component under one export, whether or not the
+  // module exports it: a living instance of a module-private component
+  // can only be patched if the renderer can reach the replacement
+  // class, and the module's exports do not name it. hmr builds only.
+  emitHmrComponentTable() {
+    if (!this.hmr || !this.modulePath || this.moduleComponentNames.size === 0) return;
+    this.b.emit(`\n\nexport const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(', ')} };`);
+  }
+
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
       this.emitDataConst();
@@ -4834,6 +4844,7 @@ class Emitter {
       }
       this.emitTsTypeDecls(sexpr.slice(1), '');
       this.mark(sexpr, 'body', () => this.statements(stmts, 0, 'program'));
+      this.emitHmrComponentTable();
       this.scopes.pop();
       this.rframes.pop();
     });

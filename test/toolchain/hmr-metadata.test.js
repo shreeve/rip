@@ -42,11 +42,25 @@ describe('HMR metadata emission', () => {
     expect(code).toContain('"extends":null');
   });
 
-  test('hmr:false (default) emits no __hmrId or __hmrSig', () => {
+  test('hmr:true exports the module component table, private components included', () => {
+    const src = `${SRC}
+Row = component
+  render
+    li
+      = 'row'
+`;
+    const { code } = compileHmr(src);
+    expect(code).toContain('static __hmrId = "routes/counter.rip#Row"');
+    expect(code).not.toContain('export const Row');
+    expect(code).toContain('export const __hmrComponents = { Counter, Row };');
+  });
+
+  test('hmr:false (default) emits no __hmrId, __hmrSig, or component table', () => {
     const off = compile(SRC, { path: 'routes/counter.rip', runtimeDelivery: 'none' });
     const explicit = compile(SRC, { path: 'routes/counter.rip', runtimeDelivery: 'none', hmr: false });
     expect(off.code).not.toContain('__hmrId');
     expect(off.code).not.toContain('__hmrSig');
+    expect(off.code).not.toContain('__hmrComponents');
     expect(explicit.code).not.toContain('__hmrId');
     expect(explicit.code).toBe(off.code);
   });

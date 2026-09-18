@@ -11890,6 +11890,7 @@ class Emitter {
         this.emitTsTypeDecls(sexpr.slice(1), "");
         if (rest.length)
           this.mark(sexpr, "body", () => this.statements(rest, 0, "program"));
+        this.emitHmrComponentTable();
         this.scopes.pop();
         this.rframes.pop();
       });
@@ -11979,6 +11980,13 @@ class Emitter {
 
 `);
   }
+  emitHmrComponentTable() {
+    if (!this.hmr || !this.modulePath || this.moduleComponentNames.size === 0)
+      return;
+    this.b.emit(`
+
+export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(", ")} };`);
+  }
   programPlain(sexpr, stmts) {
     this.mark(sexpr, "$self", () => {
       this.emitDataConst();
@@ -12000,6 +12008,7 @@ class Emitter {
       }
       this.emitTsTypeDecls(sexpr.slice(1), "");
       this.mark(sexpr, "body", () => this.statements(stmts, 0, "program"));
+      this.emitHmrComponentTable();
       this.scopes.pop();
       this.rframes.pop();
     });
@@ -29334,6 +29343,14 @@ function createRenderer(opts) {
     let isComponent = function(value) {
       return typeof value === "function" && value.__hmrId === hmrId;
     };
+    let table = module.__hmrComponents;
+    if (table != null && typeof table === "object") {
+      for (let key in table) {
+        let value = table[key];
+        if (isComponent(value))
+          return value;
+      }
+    }
     if (isComponent(module.default))
       return module.default;
     for (let key in module) {
