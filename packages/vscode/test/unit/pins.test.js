@@ -1,7 +1,7 @@
 // Tier 3 pin probe — the probe builder and hover parser as units.
 // The LSP stdio half lives in test/editor/pins-lsp.test.js.
 import { test, expect, describe } from 'bun:test';
-import { buildProbe, parseProbeHover } from '../../src/pins.js';
+import { buildProbe, parseProbeHover, buildVerify, refusedByVerify } from '../../src/pins.js';
 
 describe('buildProbe', () => {
   test('splices a probe declaration above the first write, same indent', () => {
@@ -62,3 +62,63 @@ describe('parseProbeHover', () => {
     expect(parseProbeHover(hover('let __rip_probe_0_items: string[]'))).toBe('string[]');
   });
 });
+
+// A hover answer is verified where the pin will live: one `declare let`
+// per answer, appended at the probe's top level, and a diagnostic on that
+// line refuses the answer by its ORIGINAL index — the index the pinnables
+// array and the answers array share, not the position among the answers
+// that survived parsing.
+describe('buildVerify', () => {
+  test('appends one top-level declaration per answer, keyed by answer index', () => {
+    const probe = 'let a;\nlet b;\n'
+    const { text, lineOf } = buildVerify(probe, ['string[]', 'Stats'])
+    expect(text).toBe('let a;\nlet b;\ndeclare let __rip_verify_0: string[];\ndeclare let __rip_verify_1: Stats;\n')
+    expect(text.split('\n')[2]).toBe('declare let __rip_verify_0: string[];')
+    expect(lineOf.get(2)).toBe(0)
+    expect(lineOf.get(3)).toBe(1)
+    expect(lineOf.size).toBe(2)
+  })
+
+  test('a null answer takes no line and does not shift the indices after it', () => {
+    const { text, lineOf } = buildVerify('x();\n', [null, 'number', null, 'Stats'])
+    expect(text).toBe('x();\ndeclare let __rip_verify_1: number;\ndeclare let __rip_verify_3: Stats;\n')
+    expect(lineOf.get(1)).toBe(1)
+    expect(lineOf.get(2)).toBe(3)
+    expect(lineOf.size).toBe(2)
+  })
+
+  test('a probe without a trailing newline still starts its verify lines on fresh lines', () => {
+    const { text, lineOf } = buildVerify('let a;\nlet b;', ['number'])
+    expect(text).toBe('let a;\nlet b;\ndeclare let __rip_verify_0: number;\n')
+    expect(lineOf.get(2)).toBe(0)
+  })
+
+  test('no answers leaves the probe untouched', () => {
+    const { text, lineOf } = buildVerify('let a;\n', [null, null])
+    expect(text).toBe('let a;\n')
+    expect(lineOf.size).toBe(0)
+  })
+})
+
+describe('refusedByVerify', () => {
+  const at = (line, code) => ({ code, range: { start: { line, character: 0 }, end: { line, character: 10 } } })
+  const lineOf = new Map([[5, 0], [6, 2]])
+
+  test('a diagnostic on a verify line refuses that answer index', () => {
+    expect(refusedByVerify([at(6, 2304)], lineOf)).toEqual(new Set([2]))
+  })
+
+  test('any diagnostic refuses — the code is not consulted', () => {
+    expect(refusedByVerify([at(5, 2552), at(6, 7006)], lineOf)).toEqual(new Set([0, 2]))
+  })
+
+  test('diagnostics off the verify lines refuse nothing', () => {
+    expect(refusedByVerify([at(0, 2304), at(4, 2304), at(7, 2304)], lineOf)).toEqual(new Set())
+  })
+
+  test('tolerates a missing pull and malformed items', () => {
+    expect(refusedByVerify(null, lineOf)).toEqual(new Set())
+    expect(refusedByVerify(undefined, lineOf)).toEqual(new Set())
+    expect(refusedByVerify([null, {}, { range: null }, at(5, 2304)], lineOf)).toEqual(new Set([0]))
+  })
+})
