@@ -2305,7 +2305,12 @@ export main = (argv) ->
     if operation is 'Maintenance'
       warn "rip-sites: unresolved migration #{migration.id}; Maintenance has empty admission"
     else
-      managerOutput! "rip-sites: https://#{if site? then site.host else hosts[0]}/"
+      urls = (if site? then [site.host] else hosts).map (host) -> "https://#{host}/"
+      if urls.length is 1
+        managerOutput! "rip-sites: #{args.name}  #{urls[0]}"
+      else
+        managerOutput! "rip-sites: #{args.name}"
+        managerOutput! "  #{url}" for url in urls
     process.exitCode = await finished
   catch error
     warn "rip-sites: #{String(error)}" unless stopping

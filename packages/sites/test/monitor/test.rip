@@ -876,7 +876,8 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
         Response.new('Not Found', { status: 404 })
     proc = null
     try
-      proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ENTRY, '--name', 'cart', '--host', 'cart.test', '--control', socket, "--access-log=#{mode}"],
+      hosts = if mode is 'off' then ['--host', 'cart.test', '--host', 'cart.local'] else ['--host', 'cart.test']
+      proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ENTRY, '--name', 'cart', ...hosts, '--control', socket, "--access-log=#{mode}"],
         stdin: 'ignore'
         stdout: 'pipe'
         stderr: 'pipe'
@@ -903,11 +904,11 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
   raw = run! 'raw'
   eq raw.output, TextDecoder.new().decode(Uint8Array.new([...helloLine(), ...accessLine(sequence: '1')]))
   eq raw.accessCount, 1
-  ok raw.diagnostic.includes 'rip-sites: https://cart.test/'
+  ok raw.diagnostic.includes 'rip-sites: cart  https://cart.test/\n'
 
   disabled = run! 'off'
   eq disabled.accessCount, 0
-  ok disabled.output.includes 'rip-sites: https://cart.test/'
+  ok disabled.output.includes 'rip-sites: cart\n  https://cart.test/\n  https://cart.local/\n'
 
 test! 'a missing registration waits for move instead of retrying its dead ID', ->
   calls = []
