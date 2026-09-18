@@ -384,7 +384,7 @@ implementation the QR half was ported from, as 0.7.0 was released and with
 out at `misc/qr` and `misc/qr-perf`; and this package as it stood before
 its own review round, checked out at `misc/rip-prior`, and as it is. A row
 is the best of three 400 ms means, the columns timed left to right, each
-shown with its slowdown against this package:
+with how many times faster this package is:
 
 | Encode (µs)                 |     qr 0.7.0 |   qr + PR 39 |    rip prior |    rip |
 |-----------------------------|-------------:|-------------:|-------------:|-------:|

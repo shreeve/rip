@@ -9,8 +9,8 @@
 # FETCH_HEAD`). This package runs twice as well: as it stands on main,
 # checked out at misc/rip-prior (`git worktree add misc/rip-prior main`),
 # and as the working tree. A row is the best of three means over 400 ms
-# windows, the columns timed left to right, each shown with its slowdown
-# against the working tree. The rows are the README's Performance tables.
+# windows, the columns timed left to right, each shown with how many times
+# faster the working tree is. The rows are the README's Performance tables.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as zxing from '@zxing/library'
@@ -82,7 +82,7 @@ later =! (fn) ->
 
 us =! (v) -> if v >= 100 then v.toFixed(0) else v.toFixed(1)
 
-# The last cell is this package; every other cell shows its slowdown against it.
+# The last cell is this package; every other cell shows how many times faster it is.
 row! =! (name, widths, cells) ->
   values = []
   for cell in cells
