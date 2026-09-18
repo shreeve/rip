@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'rip/app'
-import { DialogClose, DialogDescription, DialogTitle, DialogTrigger } from './dialog.rip'
+import { DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from './dialog.rip'
 
 type Side = 'left' | 'right' | 'top' | 'bottom'
 
@@ -16,19 +16,11 @@ export DrawerTitle = DialogTitle
 export DrawerDescription = DialogDescription
 export DrawerClose = DialogClose
 
-# Repeats DialogPopup's mechanics, since an extends component can't render
-# another component as its root; change both together.
-export DrawerPopup = component extends dialog
+export DrawerPopup = component extends DialogPopup
   accept open
   accept side
-  accept labelledBy
-  accept describedBy
-  el: HTMLDialogElement | null := null
   closedBy ~= @rest.closedby ?? 'any'
 
-  # Safari ignores closedby, so backdrop presses and Escape under none are
-  # handled here until it ships.
-  pressed = false
   onBackdrop = (e: PointerEvent): boolean ->
     return false unless e.target is e.currentTarget
     r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
@@ -49,8 +41,7 @@ export DrawerPopup = component extends dialog
     s
 
   down = (e: PointerEvent) ->
-    pressed = onBackdrop(e)
-    drag = if pressed or closedBy isnt 'any' then null else { id: e.pointerId, start: along(e), at: performance.now() }
+    drag = if onBackdrop(e) or closedBy isnt 'any' then null else { id: e.pointerId, start: along(e), at: performance.now() }
   move = (e: PointerEvent) ->
     return unless drag and e.pointerId is drag.id
     travel = (along(e) - drag.start) * toward
@@ -60,7 +51,6 @@ export DrawerPopup = component extends dialog
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     offset = Math.max(0, travel)
   up = (e: PointerEvent) ->
-    open = false if pressed and onBackdrop(e) and closedBy is 'any'
     return unless drag
     dialog = e.currentTarget as HTMLDialogElement
     size = if horizontal then dialog.offsetWidth else dialog.offsetHeight
@@ -73,43 +63,14 @@ export DrawerPopup = component extends dialog
     offset = 0
   refuseDrag = (e: DragEvent) -> e.preventDefault() if drag
 
-  cancel = (e: Event) ->
-    e.preventDefault()
-    open = false unless closedBy is 'none'
-
-  ~>
-    dialog = el
-    return unless dialog
-    if open
-      queueMicrotask ->
-        return unless open and not dialog.open and dialog.isConnected
-        visible = document.activeElement?.matches(':focus-visible')
-        dialog.showModal()
-        focused = document.activeElement as HTMLElement | null
-        if focused and not visible and focused.matches(':focus-visible')
-          focused.blur()
-          focused.focus({ focusVisible: false })
-    else if dialog.open
-      queueMicrotask ->
-        exits = dialog.getAnimations().map (a) -> a.finished
-        Promise.allSettled(exits).then -> dialog.close() if not open and dialog.open
-
   render
-    dialog
-      ref: el
-      closedby: closedBy
+    DialogPopup
       style: swipeStyle
       data-side: side
-      data-open: open or undefined
-      data-closed: not open or undefined
       data-swiping: swiping or undefined
-      aria-labelledby: labelledBy or undefined
-      aria-describedby: describedBy or undefined
       @pointerdown: down
       @pointermove: move
       @pointerup: up
       @pointercancel: settle
       @dragstart: refuseDrag
-      @cancel: cancel
-      @close: (-> open = false)
       slot
