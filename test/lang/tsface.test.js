@@ -82,6 +82,8 @@ const REGION_SHAPES = [
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
   /^declare function __ripRoute<const T extends string>\(s: T extends `\/\$\{string\}` \? .* : T\): T;$/su, // the route helper declare, the path-part conditional with the union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
+  /^__ripNarrowed\($/u,                                    // narrowed-container wrap opener (a container passed under the branch that tested its member)
+  /^declare function __ripNarrowed<T extends \{ value: unknown \}>\(c: T\): \{ readonly value: NonNullable<T\['value'\]>; read\(\): NonNullable<T\['value'\]> \};$/u, // the narrowed-container helper declare
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
   /^declare function __ripAmbientStash<T>\(v: T\): T;$/u, // the ambience helper declare
   /^declare function __ripSourceKey<const T extends \(.*\)>\(s: T\): T;$/su, // the stash-key helper declare
@@ -619,6 +621,23 @@ describe('TS-face emission pins', () => {
     }
     // The identifier spelling mints nothing and gains nothing.
     expect(ts('try\n  f()\ncatch e\n  e\n').code).toContain('} catch (e) {');
+  });
+
+  test('an annotated catch binding (`catch error: any`) types the parameter on the face alone, in both try forms', () => {
+    const stmt = 'try\n  f()\ncatch error: any\n  error.status\n';
+    const value = 'v = try\n  f()\ncatch error: unknown\n  error\n';
+    expect(ts(stmt).code).toContain('} catch (error: any) {\n  error.status;');
+    expect(ts(value).code).toContain('} catch (error: unknown) {');
+    expect(js(stmt).code).toContain('} catch (error) {\n  error.status;');
+    expect(js(stmt).code).not.toContain('any');
+    // The inline handler: the run ends at `then`, which stays the body's.
+    const inline = 'w = try h() catch e: unknown then String(e)\n';
+    expect(ts(inline).code).toContain('} catch (e: unknown) {');
+    expect(js(inline).code).toContain('} catch (e) {');
+    for (const src of [stmt, value, inline]) {
+      const r = ts(src);
+      expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+    }
   });
 
   test('single typed arrow param gains TS-only parens (TS requires them; stripping restores the bare name)', () => {
@@ -2176,6 +2195,43 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
       expect(faced.code).toContain('declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;');
       expect(plain.code).not.toContain('__ripNarrow');
     }
+  });
+
+  test('a bare member condition narrows its reads and wraps the container it passes to a child', () => {
+    const src = [
+      'C = component',
+      '  page: { item: any } := { item: null }',
+      '  found ~= page.item',
+      '  render',
+      '    if found',
+      '      span found.html',
+      '      Child item: found, other: page',
+      '    if @found',
+      '      Child item: found',
+      '    Child item: found',
+      'Child = component',
+      '  @item: any',
+      '  @other: any',
+      '  render',
+      '    span item.html',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-bare.rip' });
+    const plain = js(src, { path: 'narrow-bare.rip' });
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    expect(faced.code).toContain('__effect(() => { __ripNarrow(ctx.found.value); _t0.data = ctx.found.value.html; })');
+    // The wrap is the branch's: the same pass outside any branch stays bare.
+    expect(faced.code).toContain('new Child({ item: __ripNarrowed(ctx.found), other: ctx.page })');
+    expect(faced.code.match(/new Child\(\{ item: __ripNarrowed\(ctx\.found\) \}\)/g)).toHaveLength(1);
+    expect(faced.code).toContain('new Child({ item: this.found })');
+    expect(faced.code).toContain("declare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T['value']>; read(): NonNullable<T['value']> };");
+    expect(plain.code).not.toContain('__ripNarrow');
+    // The narrowed-span record: the read and the pass under the branch,
+    // never the condition itself or the unbranched pass.
+    const lineOf = (d) => src.slice(0, d.start).split('\n').length;
+    const at = new Set(faced.narrowedDecls.map((d) => `${lineOf(d)}:${src.slice(d.start, d.end)}`));
+    expect([...at].sort()).toEqual(['6:found', '7:found', '9:found']);
+    expect(plain.narrowedDecls).toEqual([]);
   });
 
   test('a call, an index, an optional link, or a loop variable at the root proves nothing', () => {

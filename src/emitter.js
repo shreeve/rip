@@ -704,6 +704,14 @@ class Emitter {
     // editor needs the distinction and cannot derive it: both positions
     // resolve to the same face symbol.
     this.memberDecls = [];
+    // Source spans of a bare member read or passed under the branch that
+    // tested it: the face narrows the REFERENCE (`ctx.found.value`), and a
+    // hover on the name lands on the member, so the editor drops the
+    // nullish arms here itself. Live only inside an effect body that
+    // opened a guard, never a nested function's.
+    this.narrowedDecls = [];
+    this._narrowedReads = null;
+    this._textOwner = null;
     // Minted KIND labels: a declaration's own name span and the word rip
     // spells that construct with. The lowering's `const`/`let` describes the
     // cell it binds, never the construct the author declared — the same leak
@@ -1798,7 +1806,8 @@ class Emitter {
     const m = this.b.currentMark;
     const src = this.b.source;
     if (this.ts) {
-      this.emitPrimitive(name);
+      const span = this.emitPrimitive(name);
+      if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
@@ -1826,6 +1835,7 @@ class Emitter {
       // through this rewrite, so consumer positions keep the container.
       const span = this.emitPrimitive(name);
       if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
+      if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
@@ -2848,7 +2858,7 @@ class Emitter {
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
     const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
-      'vocabulary', 'silences', 'memberDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls'];
+      'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
     try {
@@ -6237,6 +6247,13 @@ class Emitter {
             this.b.emit(` = ${param});\n`);
             this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
             this.b.emit('  '.repeat(ind) + '}');
+          } else if (Emitter.isTypedWrapper(binding)) {
+            // An annotated binding (`catch error: any`): the name is the
+            // JS parameter and the annotation is the face's alone.
+            this.b.emit(' catch (');
+            this.mark(part, 'binding', () => this.emitParam(binding));
+            this.b.emit(') ');
+            this.withBindings([binding[1]], () => this.braceBlock(body, ind));
           } else {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.b.emit(binding));
@@ -7411,6 +7428,11 @@ class Emitter {
               this.b.emit('\n');
             });
             this.b.emit('  '.repeat(ind) + '}');
+          } else if (Emitter.isTypedWrapper(binding)) {
+            this.b.emit(' catch (');
+            this.mark(part, 'binding', () => this.emitParam(binding));
+            this.b.emit(') ');
+            this.withBindings([binding[1]], () => this.returnBlock(body, ind));
           } else {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.b.emit(binding));
@@ -10372,12 +10394,22 @@ class Emitter {
         this.b.emit(pad);
         const emitIt = () => {
           this.b.emit(`${this.runtimeName('__effect')}(() => { `);
-          this.narrowGuard();
-          s.fn();
+          const prev = this._narrowedReads;
+          this._narrowedReads = this.narrowedReadNames();
+          try {
+            this.narrowGuard();
+            s.fn();
+          } finally {
+            this._narrowedReads = prev;
+          }
           this.b.emit(' })');
         };
         if (s.node != null) this.mark(s.node, '$self', emitIt);
-        else emitIt();
+        else if (s.within != null) {
+          const prevWithin = this.b.claimWithin;
+          this.b.claimWithin = s.within;
+          try { emitIt(); } finally { this.b.claimWithin = prevWithin; }
+        } else emitIt();
         this.b.emit(';\n');
       } else {
         if (s.node != null) this.renderDirectives(s.node, pad);
@@ -10433,7 +10465,15 @@ class Emitter {
   // so it rejects here (factory scopes share one closure; no check).
   renderEffect(node, fn, checkExpr) {
     if (checkExpr !== undefined) this.checkSetupLocalRefs(checkExpr, node);
-    this.rstate.sink.setups.push({ kind: 'effect', node, fn });
+    // An effect with no node of its own (a bare text child is a
+    // primitive) replays with its claims bounded to the element being
+    // rendered when it was queued. Under the record's frame alone, a
+    // class-scope effect emitted before a block's takes the block's
+    // occurrence, and the hover on one read answers for the other.
+    const owner = node == null ? this._textOwner : null;
+    const id = owner != null ? this.stores.idOf(owner) : null;
+    const within = id != null ? [this.stores.node(id).sourceStart, this.stores.node(id).sourceEnd] : null;
+    this.rstate.sink.setups.push({ kind: 'effect', node, fn, within });
   }
 
   // A class-scope emission that lands in _setup (an effect body, a
@@ -10962,6 +11002,12 @@ class Emitter {
 
   // The shared child/attribute walk for element argument lists.
   renderChildren(el, args, owner = null) {
+    const prevOwner = this._textOwner;
+    this._textOwner = owner;
+    try { this.renderChildrenOf(el, args, owner); } finally { this._textOwner = prevOwner; }
+  }
+
+  renderChildrenOf(el, args, owner) {
     for (let k = 0; k < args.length; k++) {
       const arg = args[k];
       if (isFunc(arg)) {
@@ -11944,7 +11990,7 @@ class Emitter {
     if (typeof value === 'string') {
       if (this.renderVarKind(value) !== null) return null;
       const r = this.resolveBareRead(value);
-      if (r === 'member-reactive') return () => {
+      if (r === 'member-reactive') return this.narrowedContainer(value, () => {
         this.b.emit(`${this.renderSelf ?? 'this'}.`);
         // The bind SHARES the container, so this position is the container's
         // — but the author wrote their own binding here, not a consumer's
@@ -11952,18 +11998,44 @@ class Emitter {
         // answers the type they bound (RULINGS.md, the name in a bind).
         const span = this.emitPrimitive(value);
         if (this.ts && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
-      };
-      if (r === 'reactive') return () => this.emitPrimitive(value);
+        return span;
+      });
+      if (r === 'reactive') return this.narrowedContainer(value, () => this.emitPrimitive(value));
       return null;
     }
     if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3 &&
         typeof value[2] === 'string' && this.memberIsReactive(value[2])) {
-      return () => {
+      return this.narrowedContainer(value[2], () => {
         this.b.emit(`${this.renderSelf ?? 'this'}.`);
-        this.emitPrimitive(value[2]);
-      };
+        return this.emitPrimitive(value[2]);
+      });
     }
     return null;
+  }
+
+  // A container passed under a branch that tested its member (`if found`
+  // … `Child item: found`) wraps, on the face only, in `__ripNarrowed(…)`,
+  // a cell with the null dropped from its value: the branch's swap
+  // disposes the child, and the child's bindings with it, before any of
+  // them re-run against the value that dismissed the block — the same
+  // owner-ordered invariant `__ripNarrow` rides
+  // (test/ui/branch-order.test.js). Nothing narrows a chain's container
+  // (`if session.user` tests a value, not a container), so only the bare
+  // spellings qualify.
+  narrowedContainer(name, emitRef) {
+    if (!this.ts) return emitRef;
+    return () => {
+      // Read at emission, like narrowGuard: the record open then is the
+      // block whose branches were tested.
+      const narrowed = this.activeNarrowed().some((c) => c === name ||
+        (isNode(c) && c[0] === '.' && c[1] === 'this' && c.length === 3 && c[2] === name));
+      if (!narrowed) return emitRef();
+      this._needsNarrowedHelper = true;
+      this.b.tsOnly(() => this.b.emit('__ripNarrowed('));
+      const span = emitRef();
+      this.b.tsOnly(() => this.b.emit(')'));
+      if (span != null) this.narrowedDecls.push({ start: span[0], end: span[1] });
+    };
   }
 
   // A SYNTACTICALLY `/`-leading string value — a quoted literal, or an
@@ -12893,14 +12965,17 @@ class Emitter {
   // no input shape here; a >4-length node would be one, and rejects
   // loudly if the grammar ever grew it).
   // The chains a branch condition proves non-null for its body: the
-  // condition itself when it is a plain `.` chain rooted at a member
-  // (`session.user`, `@stash.user.profile`), and each such operand
-  // of a top-level `and`. Anything else — a call, an index, an optional
-  // link, a render local or loop variable at the root — proves nothing
-  // the face can spell.
+  // condition itself when it is a member or a plain `.` chain rooted
+  // at one (`found`, `session.user`, `@stash.user.profile`), and each
+  // such operand of a top-level `and`. Anything else — a call, an
+  // index, an optional link, a render local or loop variable at the
+  // root — proves nothing the face can spell.
   narrowConjuncts(cond) {
     if (isNode(cond) && cond[0] === '&&' && cond.length === 3) {
       return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
+    }
+    if (typeof cond === 'string') {
+      return this.renderVarKind(cond) !== null || this.bareRewrite(cond) === null ? [] : [cond];
     }
     if (!Emitter.isDotChain(cond)) return [];
     let root = cond;
@@ -12952,19 +13027,38 @@ class Emitter {
     return this.activeNarrowed().length > 0;
   }
 
+  // The bare members among the active chains — the names whose reads
+  // and container passes record in narrowedDecls.
+  narrowedReadNames() {
+    const names = new Set();
+    for (const c of this.activeNarrowed()) {
+      if (typeof c === 'string') names.add(c);
+      else if (c[0] === '.' && c[1] === 'this' && c.length === 3 && typeof c[2] === 'string') names.add(c[2]);
+    }
+    return names;
+  }
+
   narrowGuard(form = 'statement', { trailing = true } = {}) {
     const chains = this.activeNarrowed();
     if (chains.length === 0) return false;
     this._needsNarrowHelper = true;
-    this.b.tsOnly(() => this.b.echo(() => {
-      chains.forEach((c, i) => {
-        if (i > 0) this.b.emit(' ');
-        this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
-        this.renderExpr(c);
-        this.b.emit(form === 'statement' ? ');' : '),');
-      });
-      if (trailing) this.b.emit(' ');
-    }));
+    // An echo claims no occurrence: the chain's reads are the branch
+    // condition's, and a claim here would take the occurrence a later
+    // emission in the same frame maps to.
+    this.b.suppressClaims = true;
+    try {
+      this.b.tsOnly(() => this.b.echo(() => {
+        chains.forEach((c, i) => {
+          if (i > 0) this.b.emit(' ');
+          this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
+          this.renderExpr(c);
+          this.b.emit(form === 'statement' ? ');' : '),');
+        });
+        if (trailing) this.b.emit(' ');
+      }));
+    } finally {
+      this.b.suppressClaims = false;
+    }
     return true;
   }
 
@@ -13315,7 +13409,9 @@ class Emitter {
       if (hasRef) this.b.emit(`${this.runtimeName('__batch')}(() => `);
       const guarded = this.narrowGuard(hasRef ? 'expression' : 'statement');
       this.b.emit(`${this.runtimeName('__reconcile')}(${anchorVar}, ${state}, `);
-      this.withExpression(() => this.expr(iter));
+      const prevNarrowed = this._narrowedReads;
+      this._narrowedReads = this.narrowedReadNames();
+      try { this.withExpression(() => this.expr(iter)); } finally { this._narrowedReads = prevNarrowed; }
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
         // The keyFn's item param takes the same element type as the
@@ -16075,6 +16171,14 @@ class Emitter {
   // inlines, operand-grouped). Both bodies implicitly return their last
   // expression.
   func(node) {
+    // A nested function body is not narrowed (a handler can fire after
+    // the flip), so no read inside it records.
+    const prev = this._narrowedReads;
+    this._narrowedReads = null;
+    try { return this.emitFunc(node); } finally { this._narrowedReads = prev; }
+  }
+
+  emitFunc(node) {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
@@ -18565,6 +18669,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (emitter._needsNarrowHelper === true) {
     builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;\n'));
   }
+  // The narrowed-container helper: a cell with the null dropped from its
+  // value — what a child's required prop admits under a branch that tested
+  // the member. A plain cell shape, not an intersection with the argument:
+  // the editor's presenters collapse a cell to its value and pass any
+  // other shape through raw.
+  if (emitter._needsNarrowedHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T[\'value\']>; read(): NonNullable<T[\'value\']> };\n'));
+  }
   // A top-level `globalThis.NAME ??= expr` DECLARES the global. The
   // spelling is the boundary: `??=` says "install unless someone already
   // did", which is a declaration wearing runtime clothes — DSL vocabulary
@@ -18648,7 +18760,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

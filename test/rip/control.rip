@@ -331,6 +331,14 @@ test "?? throw fires on null", '''
     e.message
 ''', "Missing"
 
+test "an annotated catch binding (`catch e: any`) is the plain parameter at runtime", '''
+  grab = -> null
+  try
+    grab() ?? throw new Error "Missing"
+  catch e: any
+    e.message
+''', "Missing"
+
 # ==============================================================================
 # Switch with Explicit Returns
 # ==============================================================================

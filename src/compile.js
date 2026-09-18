@@ -273,6 +273,9 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // resolve to the same face symbol — so the editor cannot tell them
     // apart without this. TS face only; empty otherwise.
     memberDecls: emitted.memberDecls ?? [],
+    // Source spans of a bare member read or passed under the branch that
+    // tested it (the editor drops the nullish arms there). TS face only.
+    narrowedDecls: emitted.narrowedDecls ?? [],
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /

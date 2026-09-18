@@ -1129,10 +1129,17 @@ grammar =
   # lowers patterns to a plain `catch (error)` plus a pattern
   # assignment), or the bare form.
   Catch: [
-    o 'CATCH Identifier Block', '[2, 3]'   , 'catch: binding, body'
+    o 'CATCH CatchVar Block'  , '[2, 3]'   , 'catch: binding, body'
     o 'CATCH Object Block'    , '[2, 3]'   , 'catch: binding, body'
     o 'CATCH Array Block'     , '[2, 3]'   , 'catch: binding, body'
     o 'CATCH Block'           , '[null, 2]', 'catch: binding, body'
+  ]
+
+  # A named catch binding, optionally annotated (`catch error: any`) —
+  # the same erased wrapper a typed parameter takes.
+  CatchVar: [
+    o 'Identifier'
+    o 'Identifier TYPE', '["typed-var", 1, 2]', 'typedvar: _, target, annotation'
   ]
 
   Throw: [

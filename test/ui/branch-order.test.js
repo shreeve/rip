@@ -15,7 +15,7 @@ import { createStash } from '../../packages/app/stash.rip';
 
 installRecordingDOM();
 const RT = { ...R, ...Cm };
-const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__detach', '__transition', '__detachRef'];
+const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__pushComponent', '__popComponent', '__detach', '__transition', '__detachRef'];
 
 const load = (lines) => {
   const { code } = compile(lines.join('\n'), { runtimeDelivery: 'none' });
@@ -120,6 +120,36 @@ describe('a binding under a branch never observes the state that dismissed it', 
     const stash = createStash({ p: { user: { email: 'a@x' } } });
     const inst = mount(C, { store: stash.p });
     expect(() => { stash.p.user = null; }).toThrow(TypeError);
+    inst.unmount();
+  });
+});
+
+describe('a child under a branch never observes the state that dismissed it', () => {
+  // The container the branch passes (`Child user: found`) is what the
+  // face wraps in `__ripNarrowed`: the child's bindings belong to the
+  // block, so the swap disposes them before they can read the null.
+  test('a child reading the container it was handed', () => {
+    const C = load([
+      'C = component',
+      '  @store: any',
+      '  found ~= @store.user',
+      '  render',
+      '    if found',
+      '      Child user: found, label: @store.label',
+      'Child = component',
+      '  @user: any',
+      '  @label: string',
+      '  render',
+      '    div',
+      '      span "#{user.email} #{label}"',
+    ]);
+    const stash = createStash({ p: { user: { email: 'a@x' }, label: 'a' } });
+    const inst = mount(C, { store: stash.p });
+    expect(text(inst)).toBe('a@x a');
+    R.__batch(() => { stash.p.label = 'c'; stash.p.user = null; });
+    expect(inst.__target.childNodes.length).toBe(1);
+    stash.p.user = { email: 'b@x' };
+    expect(text(inst)).toBe('b@x c');
     inst.unmount();
   });
 });

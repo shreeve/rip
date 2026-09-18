@@ -1965,6 +1965,10 @@ async function refresh(document) {
     // answers in the author's vocabulary rather than the container the
     // face declares (see `memberDeclKind`).
     memberDecls: result.memberDecls ?? [],
+    // SOURCE spans of a bare member read or passed under the branch that
+    // tested it — the face narrows the reference, the hover lands on the
+    // member, so the presenter drops the nullish arms itself.
+    narrowedDecls: result.narrowedDecls ?? [],
     // Generated spans of face-echo text (the behavior objects) — the
     // diagnostic mapper drops non-exact-mapped diagnostics born there,
     // the real copy's report being the one honest squiggle.
@@ -2975,7 +2979,10 @@ function reorderUnionHover(ctx, contents) {
 // memberDecls channel; anywhere else the member's container is real (a
 // consumer holding an instance writes `inst.people.value`) and passes
 // through untouched.
-function presentReactiveCellHover(contents, atMemberDecl = false) {
+// `narrowed`: the position sits under a branch that tested this member,
+// so the value's nullish arms drop — what the face's assertion did to the
+// reference the hover cannot land on.
+function presentReactiveCellHover(contents, atMemberDecl = false, narrowed = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
   const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
@@ -2997,7 +3004,13 @@ function presentReactiveCellHover(contents, atMemberDecl = false) {
   const cell = cellShape(type);
   if (cell === null) return null;
   const head = member ? `(property) ${qualified}` : `${cell.readonly ? 'const' : 'let'} ${plain}`;
-  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${cell.value}${fence[3]}`);
+  let shown = cell.value;
+  if (narrowed) {
+    const arms = unionArms(shown);
+    const kept = arms.filter((a) => a !== 'null' && a !== 'undefined');
+    if (kept.length > 0 && kept.length < arms.length) shown = kept.join(' | ');
+  }
+  const reworded = value.replace(fence[0], `${fence[1]}${head}: ${shown}${fence[3]}`);
   return { ...contents, value: reworded };
 }
 
@@ -3155,8 +3168,11 @@ function presentComponentSignatureHover(contents) {
 // optional-property convention, kept so these keys hover like every
 // other optional property (and the slot truly admits an explicit
 // `undefined`). A `(property)` hover whose union carries no brand arm
-// passes through untouched.
-function presentPropSlotHover(contents) {
+// passes through untouched — except a STANDALONE cell at a prop key
+// (`atPropKey`, the render-pairs channel): tsgo types the literal's
+// property by the value passed, and a member passed there is the bind
+// admission, never a cell the author holds, so it too reads as its value.
+function presentPropSlotHover(contents, atPropKey = false) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;
   const fence = /(```(?:typescript|ts)\n)([^]*?)(\n?```)/.exec(value);
@@ -3167,7 +3183,8 @@ function presentPropSlotHover(contents) {
   const [, name, opt, type] = head;
   // The cell arms collapse onto their value type (collapseCellArms — the
   // same collapse a diagnostic's quoted types take).
-  const collapsed = collapseCellArms(type);
+  let collapsed = collapseCellArms(type);
+  if (collapsed === type && atPropKey && !name.includes('.')) collapsed = cellShape(type)?.value ?? type;
   if (collapsed === type) return null;
   const reworded = `(property) ${name}${opt}: ${collapsed}`;
   return { ...contents, value: value.replace(fence[0], `${fence[1]}${reworded}${fence[3]}`) };
@@ -3385,6 +3402,7 @@ connection.onHover(presented('textDocument/hover', async (params) => {
   // and about something the user never wrote.
   if (inNoUserSymbolSpan(ctx.good.silent ?? [], ctx.offset)) return null;
   const memberDecl = memberDeclKind(ctx.good.memberDecls ?? [], ctx.offset);
+  const narrowed = memberDeclKind(ctx.good.narrowedDecls ?? [], ctx.offset) === 'value';
 
   const hover = await tsgoRequest('textDocument/hover', {
     textDocument: { uri: ctx.state.tsUri },
@@ -3421,9 +3439,10 @@ connection.onHover(presented('textDocument/hover', async (params) => {
 
   let contents = (await enrichEvolvingAnyHover(ctx, hover)) ?? hover.contents;
   contents = reorderUnionHover(ctx, contents) ?? contents;
-  contents = presentReactiveCellHover(contents, memberDecl === 'value') ?? contents;
+  contents = presentReactiveCellHover(contents, memberDecl === 'value', narrowed) ?? contents;
   contents = presentComponentSignatureHover(contents) ?? contents;
-  contents = presentPropSlotHover(contents) ?? contents;
+  const atPropKey = (ctx.good.renderPairs ?? []).some((p) => ctx.offset >= p.key[0] && ctx.offset < p.key[1]);
+  contents = presentPropSlotHover(contents, atPropKey) ?? contents;
   // The declaration's own kind. tsgo names the CELL the lowering binds
   // (`const count: number`), which describes the emission and not the
   // construct the author declared — the same leak the token audit refuses

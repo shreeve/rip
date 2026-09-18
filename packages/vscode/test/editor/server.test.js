@@ -67,6 +67,52 @@ const hoverAt = (client, line, character) =>
   client.request('textDocument/hover', { textDocument: { uri }, position: { line, character } });
 
 describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
+  test('a member read or passed under the branch that tested it hovers without its nullish arms', async () => {
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const wait = nextDiagnostics(published);
+      const fixture = [
+        'C = component',                    // 0
+        '  found: string | null := null',   // 1
+        '  render',                         // 2
+        '    if found',                     // 3
+        '      span found',                 // 4
+        '      Child x: found',             // 5
+        '    span found',                   // 6
+        'Child = component',                // 7
+        '  @x: string',                     // 8
+        '  render',                         // 9
+        '    span x',                       // 10
+        'console.log C',                    // 11
+        '',
+      ].join('\n');
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: fixture },
+      });
+      await wait();
+      // The face asserts the reference (`ctx.found.value`); the hover lands
+      // on the member, so the presenter drops the arms the branch excluded.
+      const read = await hoverAt(client, 4, 11);
+      expect(read.contents.value).toContain('(state) found: string');
+      expect(read.contents.value).not.toContain('null');
+      const passed = await hoverAt(client, 5, 15);
+      expect(passed.contents.value).toContain('(state) found: string');
+      expect(passed.contents.value).not.toContain('null');
+      // The KEY answers the prop's type, value-first, whatever was passed.
+      const key = await hoverAt(client, 5, 12);
+      expect(key.contents.value).toContain('(property) x: string');
+      expect(key.contents.value).not.toContain('read()');
+      // The condition tests the null; outside the branch nothing excluded it.
+      const tested = await hoverAt(client, 3, 7);
+      expect(tested.contents.value).toContain('(state) found: string | null');
+      const outside = await hoverAt(client, 6, 9);
+      expect(outside.contents.value).toContain('(state) found: string | null');
+    } finally {
+      await client.stop();
+    }
+  });
+
   test('stale hover: aligned positions serve, shifted-context positions answer null', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));

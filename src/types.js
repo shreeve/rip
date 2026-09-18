@@ -531,6 +531,7 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     if (depth === 0) {
       if (RUN_STOPS.has(kd)) break;
       if (opts.stopAtFatArrow && kd === '=>') break;
+      if (opts.stopAtThen && kd === 'THEN') break;
       if (opts.cast && CAST_STOPS.has(kd)) {
         // A cast's numeric literal type may open SIGNED: `x as -1`
         // claims (TypeScript's negative numeric literal type). `+` is
@@ -1495,6 +1496,24 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       if (prev.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) { i = last; continue; }
+      }
+
+      // A catch binding's annotation: `catch error: any`. Claimed here,
+      // before implicitObjects, which would otherwise read the line as
+      // the pattern `{error: any}`. TypeScript admits `any` and
+      // `unknown` there and reports any other spelling at the annotation.
+      if (frames.length === 0 && (prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') &&
+          beforePrev?.kind === 'CATCH') {
+        // The inline handler (`catch e: any then …`) ends the run at `then`.
+        const last = claim('TYPE', tok, i + 1, { stopAtThen: true });
+        if (last >= 0) {
+          if (prev.kind === 'PROPERTY') {
+            rejectValueWordBinding(prev);
+            prev.kind = 'IDENTIFIER';
+          }
+          i = last;
+          continue;
+        }
       }
 
       // Parameter annotation: `(a: T)`, `(a: T = d)`, `def f(a: T)`,

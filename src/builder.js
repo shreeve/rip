@@ -35,6 +35,10 @@ export class CodeBuilder {
     // (claimPrimitiveSpan). The bookkeeping below is per-mark and per-row, so
     // the shipping JS emission — which never claims one — does not run it.
     this.trackPrimitives = primitives;
+    // Claim controls a caller sets around one emission: no claims at all
+    // (an echo), or claims bounded to a source span tighter than the frame.
+    this.suppressClaims = false;
+    this.claimWithin = null;
     this.chunks = [];
     this.length = 0;
     this.openMarks = 0;
@@ -279,8 +283,15 @@ export class CodeBuilder {
   // recorded, never a search of the text.
   claimPrimitiveSpan(value, avoid = null) {
     const f = this.currentMark;
-    if (f === null) return null;
-    let candidates = this.stores.primitiveSpans(value, f.sourceStart, f.sourceEnd);
+    if (f === null || this.suppressClaims) return null;
+    // `claimWithin` bounds a claim tighter than the frame: an emission
+    // replayed under a broad frame (a render record's) names the source
+    // span its occurrences live in, without opening a frame of its own
+    // and the row that would come with it.
+    const w = this.claimWithin;
+    const lo = w === null ? f.sourceStart : Math.max(f.sourceStart, w[0]);
+    const hi = w === null ? f.sourceEnd : Math.min(f.sourceEnd, w[1]);
+    let candidates = this.stores.primitiveSpans(value, lo, hi);
     if (avoid !== null && avoid.length > 0) {
       candidates = candidates.filter((p) =>
         !avoid.some(([a, b]) => p.sourceStart >= a && p.sourceEnd <= b));
