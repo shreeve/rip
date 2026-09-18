@@ -778,9 +778,12 @@ export encodeQR =! (text, output = 'raw', opts = {}) ->
   encoding = if opts.encoding is undefined then detectType(text) else opts.encoding
   fail "invalid encoding=#{encoding}" unless Object.hasOwn LENGTH_BITS, encoding
   if encoding isnt 'byte'
-    alpha = if encoding is 'numeric' then ALPHANUMERIC.slice(0, 10) else ALPHANUMERIC
-    for ch in text
-      fail "Unknown letter: \"#{ch}\". Allowed: #{alpha}" unless alpha.includes ch
+    limit = if encoding is 'numeric' then 10 else ALPHANUMERIC.length
+    for i in [0...text.length]
+      code = ALNUM_VAL[text.charCodeAt(i)]   # undefined past 127
+      unless code >= 0 and code < limit
+        ch = String.fromCodePoint text.codePointAt(i)
+        fail "Unknown letter: \"#{ch}\". Allowed: #{ALPHANUMERIC.slice(0, limit)}"
   mask        = if opts.mask is undefined then undefined else asInt(opts.mask, 'opts.mask', 0, 7)
   textEncoder = opts.textEncoder
   # Reject impossible built-in UTF-8 payloads before encoding duplicates a
