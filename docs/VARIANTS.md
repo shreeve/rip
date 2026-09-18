@@ -27,6 +27,8 @@ is listed.
 | read a field | `doc.patient.firstName` |
 | read an array element | `doc.orders[1].testCode` (1-based) |
 | read a key with a dash or space | `doc."first-name"` |
+| read several fields as columns | `unnest(doc::STRUCT(requisitionNumber VARCHAR, visitDate VARCHAR))` |
+| read nested fields as columns | `unnest(doc::STRUCT(a VARCHAR, patient STRUCT(gender VARCHAR)), recursive := true)` |
 | filter on a string | `WHERE doc.patient.firstName = 'Steve'` |
 | filter on a number | `WHERE doc.patient.age > 40` (see *ordering*) |
 | filter on a boolean | `WHERE doc.patient.active` |
@@ -106,7 +108,25 @@ Cast to a native type in exactly these situations:
 - **`len`, `length`, and any function without a VARIANT overload.**
 - **Arrays.** `unnest` needs a list type. `doc.orders::VARIANT[]` keeps each
   element a document (`o.o.testCode` works); `doc.orders::STRUCT(...)[]`
-  gives typed columns and fills missing fields with NULL.
+  gives typed columns.
+
+**Several fields at once.** There is no `doc.{a,b}`. The compact form is a
+struct cast naming the fields you want, unnested into columns:
+
+```sql
+SELECT id, unnest(doc::STRUCT(requisitionNumber VARCHAR, visitDate VARCHAR))
+  FROM orders
+ WHERE doc.patient.lastName ILIKE 'morel'
+```
+
+That yields columns `requisitionNumber` and `visitDate`. Two unnests sit
+side by side, one per sub-object, or one nested struct with
+`recursive := true` flattens the lot. Keys the document has and the struct
+does not name are dropped; a key the struct names and the document lacks
+is NULL at the top level of the cast. Below the top level, on a stored
+column, it is an error (`is missing key`), and `TRY_CAST` gives NULL for
+the whole struct rather than the field; a constant fills NULL at any depth.
+Name only keys the documents carry when casting a nested value.
 
 **A cast in the SELECT runs on every scanned row, not only the rows the
 WHERE keeps.** The path is pushed into the scan, so `SELECT doc.age::INTEGER
