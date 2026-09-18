@@ -12128,6 +12128,25 @@ class Emitter {
         }
       }
       const site = (span) => { if (rec !== null && span !== null && span[1] > span[0]) rec.sites.push(span); };
+      // The key's bytes bound the key's own claim, and the value's claims
+      // skip them. A value that repeats the key's spelling (`title: title`,
+      // `@cancel: cancel`) otherwise pairs the two generated words with the
+      // wrong source words: a road that emits the value first takes the
+      // key's bytes, and the pair's frame, which owns a bare value word,
+      // hands that word to the key.
+      const keyBytes = rec !== null ? rec.key : null;
+      const claimingKey = (fn) => {
+        if (keyBytes === null) return fn();
+        const prev = this.b.claimWithin;
+        this.b.claimWithin = keyBytes;
+        try { return fn(); } finally { this.b.claimWithin = prev; }
+      };
+      const avoidingKey = (fn) => {
+        if (keyBytes === null) return fn();
+        const prev = this.primitiveAvoid;
+        this.primitiveAvoid = [...(prev ?? []), keyBytes];
+        try { return fn(); } finally { this.primitiveAvoid = prev; }
+      };
 
       // Event binding: `@name: handler`. A dispatch through a bare
       // member name calls the method on the instance (`ctx` inside
@@ -12179,7 +12198,7 @@ class Emitter {
           } else {
             recv.emit();
             this.b.emit('.addEventListener(');
-            this.emitQuotedPrimitive(eventName);
+            claimingKey(() => this.emitQuotedPrimitive(eventName));
             this.b.emit(`, (${ev}`);
           }
           this.tsScaffoldAny();
@@ -12195,7 +12214,7 @@ class Emitter {
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             const castStart = this.b.offset;
             this.b.emit(`${self}.`);
-            this.emitPrimitive(value);
+            avoidingKey(() => this.emitPrimitive(value));
             if (this.ts) this.b.tsOnly(() => this.b.emit(known !== null ? ` as (e: ${known}) => unknown)` : ' as any)'));
             // The `as` expression (its closing paren excluded) is the
             // pair's relation site — TS2352 stands on it.
@@ -12218,7 +12237,7 @@ class Emitter {
                 ? (known ?? 'any')
                 : isFunc(value) ? null : known;
             this.b.emit('(');
-            site(this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.expr(value))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit('))');
@@ -12420,7 +12439,7 @@ class Emitter {
         // CLAIM, so a value repeating the key (`disabled: @rest.disabled`)
         // still lands on the key.
         const emitBooleanKey = () => {
-          const span = this.emitKeyAs(storedKey, key);
+          const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: key, type: 'boolean | undefined' });
           }
@@ -12437,7 +12456,7 @@ class Emitter {
             // `satisfies` binds looser than `!!` — without the parens the
             // negation's own result is what gets checked.
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
-            this.renderExpr(value);
+            avoidingKey(() => this.renderExpr(value));
             // The `satisfies` keyword is the pair's relation site —
             // TS1360 stands on the keyword, never on the expression.
             const satStart = this.b.offset + 1;
@@ -12449,7 +12468,7 @@ class Emitter {
           this.renderLine(pair, () => {
             this.b.emit('if (');
             // The guard's own parens already group the expression.
-            this.withExpression(() => this.expr(value));
+            avoidingKey(() => this.withExpression(() => this.expr(value)));
             // The `satisfies` keyword is the relation site (the toggle arm above).
             const satStart = this.b.offset + 1;
             if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined'));
@@ -12581,10 +12600,11 @@ class Emitter {
       // which a value repeating the key (`disabled: @rest.disabled`)
       // makes ambiguous.
       const emitAttrKey = () => {
-        const span = this.emitKeyAs(storedKey, key);
+        const span = claimingKey(() => this.emitKeyAs(storedKey, key));
         if (attrSpan === null) attrSpan = span;
         recordAttrKey();
       };
+      const emitAttrValue = () => avoidingKey(() => this.renderExpr(value));
       const nullableAnnotation = () => {
         if (!this.ts) return;
         this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | undefined` : ': any'));
@@ -12600,7 +12620,7 @@ class Emitter {
             site([this.b.offset - 3, this.b.offset]);
             nullableAnnotation();
             this.b.emit(' = ');
-            this.renderExpr(value);
+            emitAttrValue();
             this.b.emit('; __v == null ? ');
             recv.emit();
             this.b.emit(".removeAttribute('");
@@ -12628,7 +12648,7 @@ class Emitter {
             const valStart = this.b.offset;
             // The call's argument is the pair's relation site (TS2345);
             // a literal or a template draws nothing of its own there.
-            site(this.renderExpr(value));
+            site(emitAttrValue());
             const valEnd = this.b.offset;
             // The wrap CLOSES WITHOUT a cast: __ripRoute returns a
             // string-literal type setAttribute already accepts, and an
@@ -12653,7 +12673,7 @@ class Emitter {
           site([this.b.offset - 3, this.b.offset]);
           nullableAnnotation();
           this.b.emit(' = ');
-          this.renderExpr(value);
+          emitAttrValue();
           this.b.emit('; if (__v != null) ');
           recv.emit();
           emitSetAttribute();
@@ -12672,7 +12692,7 @@ class Emitter {
           if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
           const valStart = this.b.offset;
           // The call's argument is the relation site (the effect arm above).
-          site(this.renderExpr(value));
+          site(emitAttrValue());
           const valEnd = this.b.offset;
           // The value checks against the surface's widened
           // `propertyType | string` road (Rip DOM attributes are
