@@ -95,6 +95,28 @@ copyWords! =! (out, data, byteStart, n) ->
     p = words[i]
     out[i] = ((p & 255) + ((p >>> 7) & 510) + ((p >>> 16) & 255)) >> 2
 
+# Luma of three-byte pixels from their words: three words carry four
+# pixels, so a pixel's channels come from the word or word pair that holds
+# them; the tail stays byte-wise.
+copyTriples! =! (out, data, byteStart, n) ->
+  words = Int32Array.new(data.buffer, byteStart, (3 * n) >> 2)
+  i = 0
+  w = 0
+  while i + 3 < n
+    a = words[w]
+    b = words[w + 1]
+    c = words[w + 2]
+    out[i    ] = ((a & 255) + ((a >>> 7) & 510) + ((a >>> 16) & 255)) >> 2
+    out[i + 1] = ((a >>> 24) + ((b & 255) << 1) + ((b >>> 8) & 255)) >> 2
+    out[i + 2] = (((b >>> 16) & 255) + ((b >>> 23) & 510) + (c & 255)) >> 2
+    out[i + 3] = (((c >>> 8) & 255) + ((c >>> 15) & 510) + (c >>> 24)) >> 2
+    i += 4
+    w += 3
+  src = byteStart - data.byteOffset + i * 3
+  while i < n
+    out[i++] = (data[src] + 2 * data[src + 1] + data[src + 2]) >> 2
+    src += 3
+
 # Convert any input into the tight native luma plane.
 export copyLuma! =! (out, maxSize, img, named, layout) ->
   {step, bits} = validateImage img, named, layout, maxSize
@@ -104,6 +126,9 @@ export copyLuma! =! (out, maxSize, img, named, layout) ->
   return if data is out and not offset and stride is width and step is 1
   if step is 4 and LITTLE_ENDIAN and stride is width * 4 and ((data.byteOffset + offset) & 3) is 0
     copyWords out, data, data.byteOffset + offset, width * height
+    return
+  if step is 3 and LITTLE_ENDIAN and stride is width * 3 and ((data.byteOffset + offset) & 3) is 0
+    copyTriples out, data, data.byteOffset + offset, width * height
     return
   if step is 1 and stride is width
     out.set data.subarray(offset, offset + width * height)
