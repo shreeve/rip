@@ -866,6 +866,46 @@ matchRuns =! (runs, at, pattern, modules) ->
     err += d
   if err < total * 0.25 then total else 0
 
+# Every run index where a mode's anchor pattern matches, for both modes
+# and both parities of one runs array, in one pass: `hits[base + 2 * mode
+# + parity]` receives the ascending positions. Four windows slide
+# together, each summed as its own sweep would sum it, restarted after a
+# match, so the width gate reads the same totals as a sweep per window.
+START_WIDEST =! widest START_RUNS, FORWARD.modules
+STOP_WIDEST  =! widest STOP_BACK,  MIRROR.modules
+tot   =! Float64Array.new 4
+fresh =! Uint8Array.new 4
+sweep! =! (runs, n, hits, base) ->
+  hits[base + w].length = 0 for w in [0...4]
+  fresh.fill 1
+  last8 = n - START_RUNS.length
+  last9 = n - STOP_BACK.length
+  for at in [0..last8]
+    w = at & 1
+    if fresh[w]
+      t = 0
+      t += runs[at + k] for k in [0...START_RUNS.length]
+      fresh[w] = 0
+    else
+      t = tot[w] + (runs[at + 6] + runs[at + 7] - runs[at - 2] - runs[at - 1])
+    tot[w] = t
+    if t >= FORWARD.modules and runs[at + START_WIDEST.at] + runs[at + START_WIDEST.at + 1] >= START_WIDEST.fraction * t and matchRuns(runs, at, START_RUNS, FORWARD.modules)
+      hits[base + w].push at
+      fresh[w] = 1
+    continue if at > last9
+    w += 2
+    if fresh[w]
+      t = 0
+      t += runs[at + k] for k in [0...STOP_BACK.length]
+      fresh[w] = 0
+    else
+      t = tot[w] + (runs[at + 7] + runs[at + 8] - runs[at - 2] - runs[at - 1])
+    tot[w] = t
+    if t >= MIRROR.modules and runs[at + STOP_WIDEST.at] + runs[at + STOP_WIDEST.at + 1] >= STOP_WIDEST.fraction * t and matchRuns(runs, at, STOP_BACK, MIRROR.modules)
+      hits[base + w].push at
+      fresh[w] = 1
+  return
+
 # First run index at or after `from`, same parity, where the pattern matches.
 # A sliding sum of the window rejects one narrower than a module a run,
 # then the pattern's widest pair of runs, before the full comparison.
@@ -1709,20 +1749,19 @@ tryDecode =! (s, x, y, dx, dy, unit, first, endAt, extent, mode) ->
 # then the same for stop patterns read backward; each is tried through to a
 # decode.
 scanLine =! (s, vertical, line, count) ->
-  {runs, rev} = s
+  {runs, rev, hits} = s
   n = edgeRuns s.luma, count, runs, 5
   # A start pattern and an indicator need sixteen runs.
   return null if n < 16
   m = reverseRuns runs, n, rev
-  for mode in [FORWARD, MIRROR] then for reversed in [false, true]
+  sweep runs, n, hits, 0
+  sweep rev,  m, hits, 4
+  for mode, mi in [FORWARD, MIRROR] then for reversed in [false, true]
     r  = if reversed then rev else runs
     rn = if reversed then m else n
     for inverted in [false, true]
       first = if inverted then 0 else 1
-      at = first
-      loop
-        at = findRuns r, rn, at, mode.anchor, mode.modules
-        break if at < 0
+      for at in hits[(if reversed then 4 else 0) + 2 * mi + first]
         pos = 0
         pos += r[k] for k in [0...at]
         pixel = if reversed then count - 1 - pos else pos
@@ -1745,7 +1784,6 @@ scanLine =! (s, vertical, line, count) ->
           hit.reversed = reversed
           hit.inverted = inverted
           return hit
-        at += 2
   null
 
 # Scan lines middle-out at a stride that covers the axis in about 32 lines.
@@ -1780,6 +1818,7 @@ buffers =! (side) ->
   state.luma      = Uint8Array.new(side)
   state.runs      = Float64Array.new(side)
   state.rev       = Float64Array.new(side)
+  state.hits      = ([] for w in [0...8])
   state.rluma     = Uint8Array.new(2 * side)
   state.rruns     = Float64Array.new(2 * side + 2)
   state.cells     = Int16Array.new(maxRays * MAX_CELLS)
