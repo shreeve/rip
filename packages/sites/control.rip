@@ -2,8 +2,12 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:f
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
+# A socket nobody listens on: missing, stale, or closed under the request.
+export unreachable = (error) ->
+  error?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
+
 export janusErrorMessage = (error) ->
-  if error?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
+  if unreachable error
     'Janus unavailable'
   else
     "#{error?.message or error}"

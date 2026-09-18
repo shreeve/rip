@@ -8,6 +8,7 @@ import { managerRuntime } from '../../control.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 APP = join(import.meta.dir, '..', '..', 'sites.rip')
+MANAGER = join(import.meta.dir, '..', '..', 'manager.rip')
 
 run = (file, args, env, cwd = null) ->
   proc = Bun.spawn [process.execPath, PRELOAD, file, ...args],
@@ -579,6 +580,35 @@ test! 'path status and stop reach an uncataloged manager', ->
     ok not existsSync(join(site.runtime, 'agent.json'))
   finally
     manager.stop true
+    rmSync site.root, { recursive: true, force: true }
+
+test! 'path controls report a missing manager instead of crashing', ->
+  site = fixture 'rip-path-absent-'
+  project = join site.root, 'project'
+  mkdirSync project
+  writeFileSync join(project, 'index.rip'), '# project\n'
+  root = realpathSync project
+  env = { RIP_AGENT_HOME: site.state, RIP_AGENT_RUNTIME: site.runtime, JANUS_CONTROL: join(site.root, 'absent.sock') }
+  try
+    for args in [['status', project], ['stop', project]]
+      result = cli! APP, args, env
+      eq result.code, 0, result.err
+      eq result.out, "No manager is running for #{root}.\n"
+      eq result.err, ''
+    for args in [['hold', project], ['release', project], ['migrate'], ['recover', '0123456789abcdef0123456789abcdef']]
+      result = cli! MANAGER, args, env, project
+      eq result.code, 1, args[0]
+      eq result.out, ''
+      eq result.err, "rip-sites: #{args[0]} needs a running manager for #{root}\n"
+    # A socket file with no listener behind it is the same answer.
+    writeFileSync managerRuntime(root).socket, ''
+    stale = cli! APP, ['status', project], env
+    eq stale.code, 0, stale.err
+    eq stale.out, "No manager is running for #{root}.\n"
+    refused = cli! MANAGER, ['hold', project], env, project
+    eq refused.code, 1
+    eq refused.err, "rip-sites: hold needs a running manager for #{root}\n"
+  finally
     rmSync site.root, { recursive: true, force: true }
 
 test! 'public manager grammar preserves option values and cwd defaults', ->

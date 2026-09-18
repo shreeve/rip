@@ -6,7 +6,7 @@ import { brotliCompressSync, brotliDecompressSync, constants as zlib } from 'nod
 import { rash, check } from 'rip/app/rash'
 import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
-import { janusErrorMessage, managerRequest, managerRuntime, resolveProject, waitManagerStopped } from './control.rip'
+import { janusErrorMessage, managerRequest, managerRuntime, resolveProject, unreachable, waitManagerStopped } from './control.rip'
 import { configureEdge, edgeControl, edgeFetch } from './edge.rip'
 
 positiveEnv = (name, fallback) ->
@@ -985,7 +985,16 @@ export main = (argv) ->
     if body?
       options.body = JSON.stringify body
       options.headers = { 'content-type': 'application/json' }
-    response = fetch! "http://manager/#{args.command}", options
+    response = null
+    try
+      response = fetch! "http://manager/#{args.command}", options
+    catch error
+      throw error unless unreachable error
+      # A stopped manager is what status reports and what stop leaves behind; the deploy verbs need a live one.
+      if args.command in ['status', 'stop']
+        p "No manager is running for #{project.root}."
+        return
+      abort "rip-sites: #{args.command} needs a running manager for #{project.root}"
     body = response.text!
     abort "rip-sites: #{args.command} failed (#{response.status}): #{body}" unless response.ok
     waitManagerStopped! managerPath if args.command is 'stop'

@@ -399,7 +399,7 @@ test! 'manager runtime is private to the current POSIX user', ->
   mkdirSync runtimeRoot
   try
     { proc } = run project, ['status', project], { TMPDIR: runtimeRoot }
-    eq await proc.exited, 1
+    eq await proc.exited, 0
     runtime = join runtimeRoot, "rip-managers-#{process.getuid!}"
     info = statSync runtime
     ok info.isDirectory()
