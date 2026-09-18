@@ -624,13 +624,24 @@ isBytes =! (a) ->
 # Dark module at output pixel (x, y); false in the border.
 darkAt =! (r, x, y) -> r.map[x] >= 0 and r.map[y] >= 0 and matGet(r.m, r.map[x], r.map[y]) is 1
 
+# Border rows are stored without map or bit lookups; module rows read the
+# column map once per cell with the row's word base hoisted. The boolean
+# rows themselves are the floor: filled, sliced and push-built rows all
+# measure slower than plain indexed stores.
 renderRaw =! (r) ->
-  W   = r.W
+  {m, W, map} = r
+  {words, v}  = m
   res = Array.new(W)
   for y in [0...W]
+    my  = map[y]
     row = Array.new(W)
-    for x in [0...W]
-      row[x] = darkAt(r, x, y)
+    if my < 0
+      row[x] = false for x in [0...W]
+    else
+      base = my * words
+      for x in [0...W]
+        mx = map[x]
+        row[x] = mx >= 0 and ((v[base + (mx >>> 5)] >>> (mx & 31)) & 1) is 1
     res[y] = row
   res
 
