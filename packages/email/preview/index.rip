@@ -18,7 +18,7 @@ LOADER = join(ROOT, 'src', 'loader.js')
 RUN    = join(ROOT, 'src', 'cli', 'run.js')
 CLI    = join(ROOT, 'packages', 'email', 'cli.rip')
 
-child = (...rest) ->
+child = (...rest: string[]) ->
   args = ["--preload=#{LOADER}", RUN, CLI, ...rest]
   result = spawnSync process.execPath, args,
     encoding: 'utf8'

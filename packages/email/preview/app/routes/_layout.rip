@@ -9,10 +9,10 @@ export Layout = component
       socket.onopen = ->
         socket.send JSON.stringify({ '+': ['/templates'] })
         ui.live = true
-      socket.onmessage = (event) ->
+      socket.onmessage = (event: MessageEvent) ->
         frames = JSON.parse event.data
         frames = [frames] unless Array.isArray frames
-        if frames.some((frame) -> frame?.stamp?)
+        if frames.some((frame: { stamp?: unknown }) -> frame?.stamp?)
           @stash.source('templates').refetch()
           @stash.source('message', ui.current).refetch() if ui.current
       socket.onclose = ->

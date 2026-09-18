@@ -1,3 +1,6 @@
 {
-  "name": "rip-email-preview"
+  "name": "rip-email-preview",
+  "rip": {
+    "strict": true
+  }
 }

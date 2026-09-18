@@ -61,7 +61,8 @@ Stage = component
 
   fit: (event) ->
     frame = event.target
-    root = frame.contentDocument.documentElement
+    root = frame.contentDocument?.documentElement
+    return unless root
     ResizeObserver.new(-> frame.style.height = "#{root.scrollHeight}px").observe root
 
   render
@@ -70,13 +71,13 @@ Stage = component
         InboxRow subject: message.subject, preview: message.preview, dark: dark
         div class: 'flex min-h-0 flex-col overflow-hidden rounded-lg shadow-lg'
           if view is 'html'
-            iframe title: 'Rendered email', srcdoc: doc, @load: ((e) -> fit(e)), class: 'block min-h-0 w-full bg-white'
+            iframe title: 'Rendered email', srcdoc: doc, @load: fit, class: 'block min-h-0 w-full bg-white'
           else
             pre class: "min-h-0 overflow-auto p-4 font-mono text-xs wrap-break-word whitespace-pre-wrap #{if dark then 'bg-neutral-900 text-neutral-200' else 'bg-white text-neutral-800'}", (if view is 'text' then message.text else indent(message.html))
 
 InboxRow = component
-  @subject: string | null
-  @preview: string | null
+  @subject?: string
+  @preview?: string
   @dark: boolean
   render
     div class: "flex flex-col gap-y-1 rounded-lg px-4.5 py-4 shadow-lg #{if dark then 'bg-neutral-900' else 'bg-white'}"

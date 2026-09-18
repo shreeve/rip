@@ -47,4 +47,5 @@ export stash =
       try
         Message.parse(get!("preview/#{key}"))
       catch error
-        if error.status is 404 then { missing: true } else throw error
+        throw error unless error instanceof Error and 'status' of error and error.status is 404
+        { missing: true }

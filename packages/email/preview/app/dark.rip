@@ -3,6 +3,7 @@
 # background, a border, or text, with chroma cut by a fifth.
 
 canvas = document.createElement('canvas').getContext('2d')
+throw Error.new 'rip-email: no 2d canvas context' unless canvas
 SENTINEL = '#010203'
 KEYWORDS = Set.new ['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'none', 'solid', 'dashed', 'dotted', 'double', 'auto']
 TOKEN = /#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^)]*\)|\b[a-z]+\b/gi
@@ -20,12 +21,13 @@ rgba = (text: string) ->
   [Number(m[1]) / 255, Number(m[2]) / 255, Number(m[3]) / 255, (if m[4]? then Number(m[4]) else 1)]
 
 WHITE = [0.95047, 1.0, 1.08883]
-linear = (c) -> if c <= 0.04045 then c / 12.92 else ((c + 0.055) / 1.055) ** 2.4
-gamma  = (c) -> if c <= 0.0031308 then 12.92 * c else 1.055 * (c ** (1 / 2.4)) - 0.055
-f      = (t) -> if t > 216 / 24389 then Math.cbrt(t) else (841 / 108) * t + 4 / 29
-finv   = (t) -> if t > 6 / 29 then t * t * t else (108 / 841) * (t - 4 / 29)
 
-toLch = (rgb) ->
+linear = (c: number) -> if c <= 0.04045 then c / 12.92 else ((c + 0.055) / 1.055) ** 2.4
+gamma  = (c: number) -> if c <= 0.0031308 then 12.92 * c else 1.055 * (c ** (1 / 2.4)) - 0.055
+f      = (t: number) -> if t > 216 / 24389 then Math.cbrt(t) else (841 / 108) * t + 4 / 29
+finv   = (t: number) -> if t > 6 / 29 then t * t * t else (108 / 841) * (t - 4 / 29)
+
+toLch = (rgb: number[]) ->
   r = linear rgb[0]
   g = linear rgb[1]
   b = linear rgb[2]
@@ -39,7 +41,7 @@ toLch = (rgb) ->
   bb = 200 * (fy - fz)
   { l: 116 * fy - 16, c: Math.hypot(a, bb), h: Math.atan2(bb, a) }
 
-fromLch = (lch) ->
+fromLch = (lch: { l: number, c: number, h: number }) ->
   a = lch.c * Math.cos(lch.h)
   bb = lch.c * Math.sin(lch.h)
   fy = (lch.l + 16) / 116
@@ -64,9 +66,9 @@ invert = (text: string) ->
 
 # Longhands only: a shorthand and its longhand are one value, and an
 # inversion applied twice is no inversion.
-PROPS = ['backgroundColor', 'borderColor', 'color']
+PROPS = ['backgroundColor', 'borderColor', 'color'] as const
 
-doctypeOf = (doc) ->
+doctypeOf = (doc: Document) ->
   dt = doc.doctype
   return '' unless dt
   publicId = if dt.publicId then " PUBLIC \"#{dt.publicId}\"" else ''
@@ -84,5 +86,6 @@ export darken = (html: string): string ->
       value = el.style[prop]
       el.style[prop] = value.replace(TOKEN, invert) if value
   for el in doc.querySelectorAll('[bgcolor]')
-    el.setAttribute 'bgcolor', invert(el.getAttribute('bgcolor'))
+    value = el.getAttribute 'bgcolor'
+    el.setAttribute 'bgcolor', invert(value) if value?
   "#{doctypeOf doc}#{doc.documentElement.outerHTML}"
