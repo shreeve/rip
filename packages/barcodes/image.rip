@@ -250,47 +250,44 @@ export edgeRuns =! (luma, count, runs, fraction) ->
     best   = minV
     bestAt = minAt
   last = 0
-  # The edge between the extremum at `at` and the candidate at `bestAt`.
-  edge = ->
+  k++
+  while k < count
+    v = luma[k]
+    if (if rising then v > best else v < best)
+      best   = v
+      bestAt = k
+    else if (if rising then v <= best - swing else v >= best + swing)
+      # The edge between the extremum at `at` and the candidate at
+      # `bestAt`: cross between samples i - 1 and i.
+      level = (value + best) / 2
+      i = at
+      if rising
+        i++ while luma[i] < level
+      else
+        i++ while luma[i] > level
+      a = luma[i - 1]
+      b = luma[i]
+      pos = i - 1 + (level - a) / (b - a)
+      runs[n++] = pos - last
+      last   = pos
+      at     = bestAt
+      value  = best
+      best   = v
+      bestAt = k
+      rising = not rising
+    k++
+  if Math.abs(best - value) >= swing
     level = (value + best) / 2
     i = at
     if rising
       i++ while luma[i] < level
     else
       i++ while luma[i] > level
-    # Cross between samples i - 1 and i.
     a = luma[i - 1]
     b = luma[i]
     pos = i - 1 + (level - a) / (b - a)
     runs[n++] = pos - last
     last = pos
-  k++
-  while k < count
-    v = luma[k]
-    if rising
-      if v > best
-        best   = v
-        bestAt = k
-      else if v <= best - swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = false
-    else
-      if v < best
-        best   = v
-        bestAt = k
-      else if v >= best + swing
-        edge()
-        at     = bestAt
-        value  = best
-        best   = v
-        bestAt = k
-        rising = true
-    k++
-  edge() if Math.abs(best - value) >= swing
   runs[n++] = count - last
   n
 
