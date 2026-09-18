@@ -374,31 +374,48 @@ output, committed:
 | code128-1 to 3, where tested  |    49 |        96 |             90 |
 | falsepositives-1 and 2        |    47 |   0 false |    up to 6 allowed |
 
-`rip test/compare.rip` races the QR half against
-[paulmillr/qr](https://github.com/paulmillr/qr) 0.7.0, the TypeScript
-implementation it was ported from, with Paul's package checked out at
-`misc/qr`. Both run in one process on the same inputs; each row is the
-best of three 400 ms means, this package timed first:
+`rip test/compare.rip` races everyone in one process on the same inputs:
+ZXing as its JavaScript port ([@zxing/library](https://github.com/zxing-js/library))
+and its C++ build ([zxing-wasm](https://github.com/Sec-ant/zxing-wasm),
+`tryHarder` on as its own benchmark runs it), both dev dependencies of
+this package; [paulmillr/qr](https://github.com/paulmillr/qr), the
+implementation the QR half was ported from, as 0.7.0 was released and with
+[pull request 39](https://github.com/paulmillr/qr/pull/39) applied, checked
+out at `misc/qr` and `misc/qr-perf`; and this package as it stood before
+its own review round, checked out at `misc/rip-prior`, and as it is. A row
+is the best of three 400 ms means, the columns timed left to right, each
+shown with its slowdown against this package:
 
-| Encode (µs)                 |    rip | paulmillr/qr | speedup |
-|-----------------------------|-------:|-------------:|--------:|
-| raw, version 1              |    2.2 |          3.1 |   1.39x |
-| raw, version 10             |   13.1 |         19.5 |   1.49x |
-| raw, version 22             |   41.5 |         54.1 |   1.30x |
-| svg, version 10             |   19.6 |         48.7 |   2.49x |
-| gif, version 10             |   12.9 |         18.4 |   1.43x |
+| Encode (µs)                 |     qr 0.7.0 |   qr + PR 39 |    rip prior |    rip |
+|-----------------------------|-------------:|-------------:|-------------:|-------:|
+| raw, version 1              |   3.1 (1.4x) |   2.2 (1.0x) |   2.3 (1.1x) |    2.2 |
+| raw, version 10             |  18.5 (1.4x) |  12.9 (1.0x) |  14.6 (1.1x) |   12.9 |
+| raw, version 22             |  53.0 (1.3x) |  41.2 (1.0x) |  46.5 (1.2x) |   40.1 |
+| svg, version 10             |  45.5 (2.4x) |  21.2 (1.1x) |  29.4 (1.5x) |   19.3 |
+| gif, version 10             |  18.4 (1.4x) |  12.7 (1.0x) |  14.8 (1.2x) |   12.9 |
 
-| Decode (µs)                 |    rip | paulmillr/qr | speedup |
-|-----------------------------|-------:|-------------:|--------:|
-| 132x132 raster, version 1   |   23.9 |          117 |   4.89x |
-| 1280x720 frame, one symbol  |    577 |         1026 |   1.78x |
-| 1920x1080 frame, one symbol |   1382 |         2246 |   1.63x |
-| 1920x1080 weave, no symbol  |   4482 |        24413 |   5.45x |
+| Decode (µs)                 |          ZXing |     zxing-wasm |       qr 0.7.0 |   qr + PR 39 |    rip prior |    rip |
+|-----------------------------|---------------:|---------------:|---------------:|-------------:|-------------:|-------:|
+| 132x132 raster, version 1   |    49.2 (2.0x) |    79.8 (3.3x) |     117 (4.8x) |  21.9 (0.9x) |  34.5 (1.4x) |   24.4 |
+| 1280x720 frame, one symbol  |    2040 (3.6x) |    2102 (3.7x) |    1004 (1.7x) |   554 (1.0x) |   621 (1.1x) |    574 |
+| 1920x1080 frame, one symbol |    4509 (3.3x) |    4774 (3.5x) |    2276 (1.7x) |  1232 (0.9x) |  1498 (1.1x) |   1378 |
+| 1920x1080 weave, no symbol  |    4516 (1.0x) |    8122 (1.8x) |   24623 (5.5x) |  4437 (1.0x) |  5536 (1.2x) |   4452 |
+
+| Read (µs)                   |          ZXing |     zxing-wasm |    rip prior |    rip |
+|-----------------------------|---------------:|---------------:|-------------:|-------:|
+| Code 128, 1920x1080         |   2028 (18.8x) |   1648 (15.3x) |   170 (1.6x) |    108 |
+| PDF417, 1920x1080           |   4448 (39.4x) |   4276 (37.9x) |   146 (1.3x) |    113 |
 
 Encode inputs are `Hello world`, 192 bytes and 768 bytes of text. Decode
 inputs are synthetic RGBA frames with one symbol centered on a flat
 background, plus a full-frame weave for the miss case, which is dominated
-by the finder search; this package walks it on packed words.
+by the finder search; this package walks it on packed words. The Code 128
+and PDF417 rasters are the bench's 1080p hit frames; ZXing reads them
+through its own luma conversion, as its benchmark does. Pull request 39
+carries this package's QR decoder work back to its origin, so those two
+columns trade blows; the one algorithmic difference left between them is
+the grid sampler, which reads the nearest pixel there and interpolates
+here.
 
 Encode timings are sensitive to which symbol size a process sees first.
 A version 1 symbol fits one 32-bit word per row and never fills a word, so
@@ -420,7 +437,7 @@ in the world, and a great deal of measuring.
 bun run test      # rip test.rip, the contract
 bun run corpus    # rip test/corpus.rip, the ZXing blackbox scorecard; --record matches test/corpus.txt
 bun run bench     # rip test/bench.rip, the timing contract
-bun run compare   # rip test/compare.rip, the race against paulmillr/qr (needs misc/qr)
+bun run compare   # rip test/compare.rip, the race against ZXing and paulmillr/qr (checkouts named in its header)
 ```
 
 The suite pins spec tables, encoded codewords, every output format, every

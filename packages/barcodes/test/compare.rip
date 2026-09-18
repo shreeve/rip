@@ -1,13 +1,57 @@
-# The QR race against paulmillr/qr, the implementation this package was
-# ported from: `rip test/compare.rip`, with Paul's package checked out at
-# misc/qr in the repository root (`git clone https://github.com/paulmillr/qr
-# misc/qr`). Both run in one process on the same inputs, this package first
-# on each row; a row is the best of three means over 400 ms windows. The
-# rows are the README's Performance table.
+# The race, everyone in one process on the same inputs: `rip test/compare.rip`.
+# ZXing runs as its JavaScript port, @zxing/library, and as its C++ build,
+# zxing-wasm (`tryHarder` on, as its own benchmark runs it), both dev
+# dependencies of this package. paulmillr/qr, the implementation the QR half was ported from, runs
+# twice: 0.7.0 as released, checked out at misc/qr in the repository root
+# (`git clone https://github.com/paulmillr/qr misc/qr`), and with pull
+# request 39 applied, checked out beside it (`git -C misc/qr fetch
+# https://github.com/shreeve/qr perf && git -C misc/qr worktree add ../qr-perf
+# FETCH_HEAD`). This package runs twice as well: as it stands on main,
+# checked out at misc/rip-prior (`git worktree add misc/rip-prior main`),
+# and as the working tree. A row is the best of three means over 400 ms
+# windows, the columns timed left to right, each shown with its slowdown
+# against the working tree. The rows are the README's Performance tables.
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import * as zxing from '@zxing/library'
+import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader'
 import { encodeQR, decodeQR } from '../qr.rip'
-import { encodeQR as encodeRef } from '../../../misc/qr/src/index.ts'
-import { decodeQR as decodeRef } from '../../../misc/qr/src/decode.ts'
+import { encodeCode128, readCode128 } from '../code128.rip'
+import { encodePDF417, readPDF417 } from '../pdf417.rip'
+import { encodeQR as encode070 } from '../../../misc/qr/src/index.ts'
+import { decodeQR as decode070 } from '../../../misc/qr/src/decode.ts'
+import { encodeQR as encode39 } from '../../../misc/qr-perf/src/index.ts'
+import { decodeQR as decode39 } from '../../../misc/qr-perf/src/decode.ts'
+import { encodeQR as encodePrior, decodeQR as decodePrior } from '../../../misc/rip-prior/packages/barcodes/qr.rip'
+import { readCode128 as readCode128Prior } from '../../../misc/rip-prior/packages/barcodes/code128.rip'
+import { readPDF417 as readPDF417Prior } from '../../../misc/rip-prior/packages/barcodes/pdf417.rip'
 
+# zxing-wasm takes its binary by hand outside a browser.
+wasmBinary =! readFileSync fileURLToPath(import.meta.resolve 'zxing-wasm/reader/zxing_reader.wasm')
+prepareZXingModule! { overrides: { wasmBinary }, fireImmediately: true }
+
+# @zxing/library warns with a stack trace on every miss.
+warn =! console.warn
+console.warn = (...args) -> warn ...args unless typeof args[0] is 'string' and args[0].startsWith 'MultiFormatReader:'
+
+# @zxing/library reads one-byte luma, converted here as its own benchmark does.
+zxingRead =! (img, format) ->
+  {data, width, height} = img
+  luma = Uint8ClampedArray.new(width * height)
+  j = 0
+  for i in [0...data.length] by 4
+    luma[j++] = (data[i] + 2 * data[i + 1] + data[i + 2]) / 4
+  source = zxing.RGBLuminanceSource.new luma, width, height
+  bitmap = zxing.BinaryBitmap.new zxing.HybridBinarizer.new(source)
+  hints  = Map.new()
+  hints.set zxing.DecodeHintType.POSSIBLE_FORMATS, [format]
+  zxing.MultiFormatReader.new().decode(bitmap, hints).getText()
+
+wasmRead =! (img, format) ->
+  found = readBarcodes! img, { formats: [format], maxNumberOfSymbols: 1, tryHarder: true }
+  if found.length then found[0].text else null
+
+# Best of three 400 ms windows after warm-up; an `async` cell awaits each call.
 time =! (fn) ->
   fn() for i in [0...5]
   best = Infinity
@@ -20,43 +64,108 @@ time =! (fn) ->
     best = Math.min best, (performance.now() - t0) * 1000 / n
   best
 
-row =! (name, ours, theirs) ->
-  a = time ours
-  b = time theirs
-  us = (v) -> if v >= 100 then v.toFixed(0) else v.toFixed(1)
-  p "| #{name.padEnd 27} | #{us(a).padStart 6} | #{us(b).padStart 12} | #{(b / a).toFixed(2).padStart 6}x |"
+timeAsync =! (fn) ->
+  for i in [0...5] then fn!
+  best = Infinity
+  for rep in [0...3]
+    t0 = performance.now()
+    n  = 0
+    while performance.now() - t0 < 400
+      fn!
+      n++
+    best = Math.min best, (performance.now() - t0) * 1000 / n
+  best
 
-raster =! (text, scale, W, H) ->
-  raw  = encodeQR text, 'raw', { scale, border: 4 }
-  data = Uint8Array.new(W * H * 4).fill 200
-  ox   = (W - raw.length) >> 1
-  oy   = (H - raw.length) >> 1
-  for y in [0...raw.length]
-    for x in [0...raw.length]
-      q = 4 * ((oy + y) * W + ox + x)
-      data[q] = data[q + 1] = data[q + 2] = if raw[y][x] then 0 else 255
-      data[q + 3] = 255
+later =! (fn) ->
+  fn.async = true
+  fn
+
+us =! (v) -> if v >= 100 then v.toFixed(0) else v.toFixed(1)
+
+# The last cell is this package; every other cell shows its slowdown against it.
+row! =! (name, widths, cells) ->
+  values = []
+  for cell in cells
+    values.push(if not cell then null else if cell.async then timeAsync! cell else time cell)
+  base   = values[values.length - 1]
+  out    = "| #{name.padEnd 27} |"
+  for v, i in values
+    text = if v is null then '' else if i is values.length - 1 then us v else "#{us v} (#{(v / base).toFixed 1}x)"
+    out += " #{text.padStart widths[i]} |"
+  p out
+  return
+
+head =! (title, names, widths) ->
+  p "| #{title.padEnd 27} |" + (" #{names[i].padStart widths[i]} |" for i in [0...names.length]).join('')
+  p "|-----------------------------|" + ("#{'-'.repeat widths[i] + 1}:|" for i in [0...names.length]).join('')
+
+rgba =! (W, H, fill = 200) ->
+  data = Uint8Array.new(W * H * 4).fill fill
+  data[i] = 255 for i in [3...data.length] by 4
   { width: W, height: H, data }
+
+place =! (img, rows, ox, oy) ->
+  for y in [0...rows.length]
+    for x in [0...rows[y].length]
+      v = if rows[y][x] then 0 else 255
+      q = 4 * ((oy + y) * img.width + ox + x)
+      img.data[q] = img.data[q + 1] = img.data[q + 2] = v
+  img
+
+qrRaster =! (text, scale, W, H) ->
+  raw = encodeQR text, 'raw', { scale, border: 4 }
+  place rgba(W, H), raw, (W - raw.length) >> 1, (H - raw.length) >> 1
+
+barsRaster =! (text, scale, h, W, H) ->
+  raw = encodeCode128 text, 'raw', { scale, height: 1 }
+  place rgba(W, H), (raw for y in [0...h]), (W - raw.length) >> 1, (H - h) >> 1
+
+stackRaster =! (text, scale, W, H) ->
+  raw = encodePDF417 text, 'raw', { scale }
+  place rgba(W, H), raw, (W - raw[0].length) >> 1, (H - raw.length) >> 1
 
 miss =! (fn, img) -> -> try fn(img) catch then null
 
+# Every reader reads the hit rows before it is timed.
+expect =! (name, got, want) -> fail "#{name}: read #{JSON.stringify got}, not #{JSON.stringify want}" unless got is want
+
 t10 = 'x'.repeat 192
 t22 = 'x'.repeat 768
-p '| Encode (µs)                 |    rip | paulmillr/qr | speedup |'
-p '|-----------------------------|-------:|-------------:|--------:|'
-row 'raw, version 1',  (-> encodeQR 'Hello world', 'raw'), (-> encodeRef 'Hello world', 'raw')
-row 'raw, version 10', (-> encodeQR t10, 'raw'),           (-> encodeRef t10, 'raw')
-row 'raw, version 22', (-> encodeQR t22, 'raw'),           (-> encodeRef t22, 'raw')
-row 'svg, version 10', (-> encodeQR t10, 'svg'),           (-> encodeRef t10, 'svg')
-row 'gif, version 10', (-> encodeQR t10, 'gif'),           (-> encodeRef t10, 'gif')
-small = raster 'Hello world', 4, 132, 132
-hd    = raster 'https://example.com/some/path?with=query', 8, 1280, 720
-fhd   = raster t10, 6, 1920, 1080
+QR_JS   =! zxing.BarcodeFormat.QR_CODE
+C128_JS =! zxing.BarcodeFormat.CODE_128
+PDF_JS  =! zxing.BarcodeFormat.PDF_417
+
+encodeWidths =! [12, 12, 12, 6]
+head 'Encode (µs)', ['qr 0.7.0', 'qr + PR 39', 'rip prior', 'rip'], encodeWidths
+for [name, text, format] in [['raw, version 1', 'Hello world', 'raw'], ['raw, version 10', t10, 'raw'], ['raw, version 22', t22, 'raw'], ['svg, version 10', t10, 'svg'], ['gif, version 10', t10, 'gif']]
+  row! name, encodeWidths, [(-> encode070 text, format), (-> encode39 text, format), (-> encodePrior text, format), (-> encodeQR text, format)]
+
+small = qrRaster 'Hello world', 4, 132, 132
+hd    = qrRaster 'https://example.com/some/path?with=query', 8, 1280, 720
+fhd   = qrRaster t10, 6, 1920, 1080
 noise = { width: 1920, height: 1080, data: Uint8Array.new(1920 * 1080 * 4).map((_, i) -> if (i & 3) is 3 then 255 else (i * 7919) & 0xff) }
+decodeWidths =! [14, 14, 14, 12, 12, 6]
 p ''
-p '| Decode (µs)                 |    rip | paulmillr/qr | speedup |'
-p '|-----------------------------|-------:|-------------:|--------:|'
-row '132x132 raster, version 1',  (-> decodeQR small), (-> decodeRef small)
-row '1280x720 frame, one symbol', (-> decodeQR hd),    (-> decodeRef hd)
-row '1920x1080 frame, one symbol',(-> decodeQR fhd),   (-> decodeRef fhd)
-row '1920x1080 weave, no symbol', miss(decodeQR, noise), miss(decodeRef, noise)
+head 'Decode (µs)', ['ZXing', 'zxing-wasm', 'qr 0.7.0', 'qr + PR 39', 'rip prior', 'rip'], decodeWidths
+for [name, img, text] in [['132x132 raster, version 1', small, 'Hello world'], ['1280x720 frame, one symbol', hd, 'https://example.com/some/path?with=query'], ['1920x1080 frame, one symbol', fhd, t10]]
+  expect name, zxingRead(img, QR_JS), text
+  expect name, (wasmRead! img, 'QRCode'), text
+  expect name, decode070(img), text
+  expect name, decode39(img), text
+  expect name, decodePrior(img), text
+  expect name, decodeQR(img), text
+  row! name, decodeWidths, [(-> zxingRead img, QR_JS), later(-> wasmRead img, 'QRCode'), (-> decode070 img), (-> decode39 img), (-> decodePrior img), (-> decodeQR img)]
+row! '1920x1080 weave, no symbol', decodeWidths, [miss(((i) -> zxingRead i, QR_JS), noise), later(-> wasmRead noise, 'QRCode'), miss(decode070, noise), miss(decode39, noise), miss(decodePrior, noise), miss(decodeQR, noise)]
+
+bars  = barsRaster 'Hello, World! 2026', 3, 120, 1920, 1080
+stack = stackRaster 'Hello, World! 2026', 3, 1920, 1080
+readWidths =! [14, 14, 12, 6]
+for [name, img, format, wasm, prior, read] in [['Code 128', bars, C128_JS, 'Code128', readCode128Prior, readCode128], ['PDF417', stack, PDF_JS, 'PDF417', readPDF417Prior, readPDF417]]
+  expect name, zxingRead(img, format), 'Hello, World! 2026'
+  expect name, (wasmRead! img, wasm), 'Hello, World! 2026'
+  expect name, prior(img).text, 'Hello, World! 2026'
+  expect name, read(img).text, 'Hello, World! 2026'
+p ''
+head 'Read (µs)', ['ZXing', 'zxing-wasm', 'rip prior', 'rip'], readWidths
+row! 'Code 128, 1920x1080', readWidths, [(-> zxingRead bars, C128_JS), later(-> wasmRead bars, 'Code128'), (-> readCode128Prior bars), (-> readCode128 bars)]
+row! 'PDF417, 1920x1080',   readWidths, [(-> zxingRead stack, PDF_JS), later(-> wasmRead stack, 'PDF417'), (-> readPDF417Prior stack), (-> readPDF417 stack)]
