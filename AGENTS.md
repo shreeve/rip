@@ -15,6 +15,9 @@ Permanent documentation:
   declaration DSL, naming, the query surface, persistence,
   transactions, and the adapter contract.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
+- [docs/VARIANTS.md](docs/VARIANTS.md) — reading and writing `VARIANT`
+  documents from SQL, Rip and the harbor REPL: one rule per surface, a
+  quick reference, and the measured edges.
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — the Rip Workspace
   constitution: browser publication consumption, live changes, reconnect
   recovery, and the apply boundary.

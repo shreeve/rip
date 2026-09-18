@@ -35,6 +35,7 @@ package-local `TODO.md` files (for example
 - [docs/SERVER.md](docs/SERVER.md) — Sites, Janus, manager, worker architecture
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser publication / apply contract
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
+- [docs/VARIANTS.md](docs/VARIANTS.md) — `VARIANT` documents from SQL, Rip and the harbor REPL
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
