@@ -1121,19 +1121,27 @@ run =! (layer, x, y, dx, dy, color, cap) ->
 # coordinate, the measured pitch when asked, or -1 on ratio failure; a
 # loose check accepts the looser fit too.
 cross =! (layer, cx, cy, dx, dy, cap, inverted, measure = false, loose = false) ->
-  center = if inverted then 0 else 1
-  side   = if inverted then 1 else 0
-  r2 = run layer, cx, cy, -dx, -dy, center, Infinity
-  back = r2
+  center  = if inverted then 0 else 1
+  side    = if inverted then 1 else 0
+  back    = run layer, cx, cy, -dx, -dy, center, Infinity
+  forward = run layer, cx + dx, cy + dy, dx, dy, center, Infinity
+  r2      = back + forward
+  # ratio() needs a center run over 1.5 modules with every other run under
+  # that (over 1.2 with the others under 1.6 for a loose fit), so a center
+  # shorter than two bits fails before the remaining runs, and any run
+  # reaching the center (four thirds of it when loose) fails as measured.
+  return -1 if r2 < 2
+  most = if loose then 4 * r2 / 3 else r2
   r1 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, side, cap
+  return -1 if r1 >= most
   back += r1
   r0 = run layer, cx - dx * back, cy - dy * back, -dx, -dy, center, cap
+  return -1 if r0 >= most
   back += r0
   start = (if dx then cx else cy) - back
-  forward = run layer, cx + dx, cy + dy, dx, dy, center, Infinity
-  r2 += forward
   ahead = 1 + forward
   r3 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, side, cap
+  return -1 if r3 >= most
   ahead += r3
   r4 = run layer, cx + dx * ahead, cy + dy * ahead, dx, dy, center, cap
   return -1 unless ratio(r0, r1, r2, r3, r4, loose)
