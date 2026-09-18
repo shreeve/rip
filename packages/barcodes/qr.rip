@@ -799,7 +799,7 @@ STRICT   =! 8                       # some row fit the finder ratios within half
 
 # Failure values shared by every attempt; a decode returns a string or one
 # of these. The frame path throws only when a layer's finder storage
-# overflows, which its sizing rules out: `patterns` holds one record per
+# overflows, which its ceiling rules out: `patterns` grows to one record per
 # 7x7-pixel cell, a finder spans at least seven pixels each way, and a new
 # center within two modules of an existing record merges into it.
 FAIL =! Object.freeze
@@ -1464,6 +1464,20 @@ bitmapRows! =! (layer, from, to) ->
         pos  += width
         word += words
 
+# Double a layer's finder records, up to one per 7x7 cell of the staged frame.
+growFinders =! (layer) ->
+  centers = Math.ceil(layer.width / 7) * Math.ceil(layer.height / 7)
+  count   = layer.inverted.length
+  fail "finder storage exhausted at #{layer.width}x#{layer.height}" if count >= centers
+  records  = Math.min centers, count * 2
+  patterns = Float64Array.new(records * 4)
+  inverted = Uint8Array.new(records)
+  patterns.set layer.patterns
+  inverted.set layer.inverted
+  layer.patterns = patterns
+  layer.inverted = inverted
+  patterns
+
 # A five-run window that starts, centers and ends on a dark run: cross-check
 # it and merge into a finder record within two modules of an existing center.
 recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
@@ -1504,7 +1518,7 @@ recordFinder! =! (layer, y, x, r0, r1, r2, r3, r4, ms, inverted, loose) ->
   layer.looseCount++ unless strict
   index = layer.patternCount++
   pos   = index * 4
-  fail "finder storage exhausted at #{layer.width}x#{layer.height}" if pos + 3 >= patterns.length
+  patterns = growFinders layer if pos + 3 >= patterns.length
   patterns[pos]     = refinedX
   patterns[pos + 1] = cy
   patterns[pos + 2] = ms
@@ -1675,7 +1689,8 @@ export class QRScanner
       break if i and Math.min(width, height) < 64
       blockWidth  = Math.ceil(width / BLOCK)
       blockHeight = Math.ceil(height / BLOCK)
-      centers     = Math.ceil(width / 7) * Math.ceil(height / 7)
+      # Finder records start small and grow on demand, up to one per 7x7 cell.
+      centers     = Math.min 64, Math.ceil(width / 7) * Math.ceil(height / 7)
       luma        = if i then Uint8Array.new(width * height) else @luma
       cuts        = Int16Array.new(blockWidth * blockHeight)
       layers.push
