@@ -159,3 +159,15 @@ let moduleUrl = import.meta.url
 let tagTarget = function() { return new.target?.name ?? 'called plain' }
 
 console.log('from file url:', moduleUrl.startsWith('file:'), tagTarget())
+
+// ── Void readonly: the bang and the readonly glyph compose — a function that never changes and never returns ──
+
+const wipe = function(): void { console.log('wipe ran') }
+const wipeCarried =
+function(): void { console.log('wipe carried ran') }
+const wipeDropped =
+  function(): void { console.log('wipe dropped ran') }
+
+wipe()
+wipeCarried()
+wipeDropped()

@@ -128,3 +128,14 @@ demand = (value: string | null) -> value ?? throw new Error('missing value')
 held = try reject(503) catch caught then caught
 
 console.log('held:', held, 'demand:', demand('present'))
+
+# ── annotated catch binding: `catch error: any` is the plain parameter at runtime, the annotation reaches the face ──
+
+parseLoose = (raw: string) ->
+  try
+    JSON.parse(raw)
+  catch error: any
+    console.log('loose failed:', typeof error.message)
+    null
+
+console.log('loose:', parseLoose('{"ok":true}'), parseLoose('not json'))

@@ -6,7 +6,7 @@
 // signatures construct fresh; released children the view does not
 // claim are unmounted.
 import { describe, expect, test } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';

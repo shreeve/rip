@@ -1,157 +1,43 @@
-// The editor features driven over real LSP stdio against the
-// real server + tsgo, per-feature acceptance plus the recorded
-// negatives:
+// The editor's FEATURES driven over real LSP stdio against the real
+// server + tsgo, per-feature acceptance plus the recorded negatives:
 //
 //   COMPLETIONS: member items land with resolve-lazy detail; scaffolding
-//     labels (the __ runtime, _ref temps) never surface; auto-import
-//     edits arrive on resolve as idiomatic Rip (no semicolon, .rip
-//     specifier) in BOTH spellings — a new import line and a merge into
-//     an existing clause; staleness respected (a broken buffer's changed
-//     region answers null, aligned positions serve).
-//   DEFINITION: same-doc, cross-file into an UNOPENED
-//     dependency (recompile-for-mappings), and pass-through into a
-//     real .ts sibling.
-//   SIGNATURE HELP: active parameter indices correct across the
-//     bodiless overload rows.
-//   SEMANTIC TOKENS: tokens land on Rip spans (annotation tokens map —
-//     they have real Rip spans in the face), hoist-duplicated tokens
-//     DEDUP to one source token, range requests answer the range.
-//   REFERENCES: lists span three files, two of them never opened.
-//   RENAME: the coincident-span dedup pinned (a hoisted declaration's let-line and
-//     assignment are one source span → ONE edit), cross-file edits reach
-//     unopened files, out-of-closure files stay untouched;
-//     prepareRename refuses unmappable positions; a rename touching a
-//     broken buffer refuses whole (never partial-applies).
-//   CODE ACTIONS: the auto-import quickfix maps its edit onto Rip source.
+//     labels never surface; auto-import edits arrive on resolve as idiomatic
+//     Rip in both spellings; staleness respected.
+//   DEFINITION: same-doc, cross-file into an UNOPENED dependency, and
+//     pass-through into a real .ts sibling.
+//   SIGNATURE HELP, SEMANTIC TOKENS, DOCUMENT / WORKSPACE SYMBOLS, DOCUMENT
+//     LINKS, REFERENCES (three files, two never opened).
+//   RENAME: coincident-span dedup, cross-file edits reach unopened files,
+//     out-of-closure files stay untouched, a broken buffer refuses whole.
+//     Plus the render loop variables.
+//   CODE ACTIONS: source.* actions map their edits onto Rip source; TS
+//     directives reach the editor; write-site hover enrichment crosses
+//     files; the auto-import quickfix maps its edit onto Rip source.
 //
 // Same availability guard as the other live suites: dependencies absent →
 // skip; the package's `bun run test` preflight turns a missing tsgo into a
 // hard failure first (tsgo-broker.test.js owns the loud skip notice).
+//
+// Every test opens its own server over its own workspace, so the describes
+// run CONCURRENT (`bun test` runs a file's tests in series otherwise, and
+// this file is one server per test); the harness caps live sessions.
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSemanticTokens } from '../../src/tsgo.js';
 import { SCAFFOLD_FAMILIES } from '../../src/translate.js';
 
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
+// The harness wrapper and fixtures. linkSupport mirrors VS Code: a definition may answer
+// LocationLink, and the specifier-origin test depends on it. Identifier
+// definitions still answer plain locations either way.
+import { tsgoAvailable, inWorkspace as inHarness, decodeSemanticTokens } from './support/harness.mjs';
 
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
 
-function makeWorkspace(files) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-feat-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  return ws;
-}
-
-// One live session over a fresh workspace; the api wraps every feature
-// request in current-buffer coordinates.
-async function inWorkspace(files, fn) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const ws = makeWorkspace(files);
-  const published = [];
-  const logs = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => {
-      if (m === 'textDocument/publishDiagnostics') published.push(p);
-      if (m === 'window/logMessage') logs.push(p.message);
-    },
-  });
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function awaitPublish(rel, sinceLen) {
-    const u = uriOf(rel);
-    for (let i = 0; i < 60; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${rel} arrived`);
-  }
-  const versions = new Map();
-  const at = (rel, line, character) => ({
-    textDocument: { uri: uriOf(rel) },
-    position: { line, character },
-  });
-  const api = {
-    ws,
-    logs,
-    uriOf,
-    sleep,
-    capabilities: null,
-    async open(rel, text) {
-      const before = published.length;
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      await awaitPublish(rel, before);
-    },
-    // didOpen with NO wait for the first compile — the editor's own
-    // cold-open ordering, where a cached answer is the only answer.
-    openNoWait(rel, text) {
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-    },
-    async change(rel, text) {
-      const before = published.length;
-      const v = (versions.get(rel) || 1) + 1;
-      versions.set(rel, v);
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version: v }, contentChanges: [{ text }] });
-      await awaitPublish(rel, before);
-    },
-    diagnostics(rel) {
-      const u = uriOf(rel);
-      for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i].diagnostics;
-      return [];
-    },
-    hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
-    completion: (rel, line, character, context) => client.request('textDocument/completion', {
-      ...at(rel, line, character), ...(context ? { context } : {}),
-    }),
-    resolveItem: (item) => client.request('completionItem/resolve', item),
-    definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
-    typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
-    references: (rel, line, character, includeDeclaration = true) => client.request('textDocument/references', { ...at(rel, line, character), context: { includeDeclaration } }),
-    signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
-    prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
-    rename: (rel, line, character, newName) => client.request('textDocument/rename', { ...at(rel, line, character), newName }),
-    documentSymbol: (rel) => client.request('textDocument/documentSymbol', { textDocument: { uri: uriOf(rel) } }),
-    documentLink: (rel) => client.request('textDocument/documentLink', { textDocument: { uri: uriOf(rel) } }),
-    workspaceSymbol: (query) => client.request('workspace/symbol', { query }),
-    semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
-    semanticTokensRange: (rel, range) => client.request('textDocument/semanticTokens/range', { textDocument: { uri: uriOf(rel) }, range }),
-    codeAction: (rel, range, diagnostics, only) => client.request('textDocument/codeAction', {
-      textDocument: { uri: uriOf(rel) }, range, context: { diagnostics, ...(only ? { only } : {}) },
-    }),
-  };
-  try {
-    const init = await client.request('initialize', {
-      processId: process.pid,
-      rootUri: 'file://' + ws,
-      // linkSupport mirrors VS Code: a definition may answer LocationLink,
-      // and the specifier-origin test below depends on it. Identifier
-      // definitions still answer plain locations either way.
-      capabilities: { workspace: { configuration: true }, textDocument: { definition: { linkSupport: true } } },
-    });
-    api.capabilities = init.capabilities;
-    client.notify('initialized', {});
-    return await fn(api);
-  } finally {
-    await client.stop();
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-}
+const inWorkspace = (files, fn) => inHarness(files, fn, {
+  prefix: 'rip-feat-',
+  capabilities: { workspace: { configuration: true }, textDocument: { definition: { linkSupport: true } } },
+});
 
 // Apply LSP TextEdits to a text (bottom-up, so earlier offsets stay valid).
 function applyEdits(text, edits) {
@@ -171,6 +57,7 @@ function applyEdits(text, edits) {
 }
 
 // Semantic-token decoding is LSP wire format, shared from the tsgo client
+
 // (`decodeSemanticTokens`) rather than hand-rolled per consumer.
 const decodeTokens = decodeSemanticTokens;
 
@@ -178,7 +65,16 @@ const CompletionItemKind = { Field: 5, Property: 10 };
 
 const UTIL = 'export def shout(s: string): string\n  s.toUpperCase()\nexport answer = 42\n';
 
-describe.skipIf(!tsgoAvailable)('completions', () => {
+// Three files around one symbol: util defines `answer`; a and b import
+// and use it; app imports a and b (so both join the program unopened).
+const THREE_FILES = {
+  'util.rip': 'export answer = 42\n',
+  'a.rip': 'import { answer } from "./util.rip"\nexport aa = answer + 1\n',
+  'b.rip': 'import { answer } from "./util.rip"\nexport bb = answer + 2\n',
+};
+const APP_AB = 'import { aa } from "./a.rip"\nimport { bb } from "./b.rip"\nk = aa + bb\n';
+
+describe.concurrent.skipIf(!tsgoAvailable)('completions', () => {
   test('member completion serves with resolve-lazy detail; scaffolding labels never surface', async () => {
     await inWorkspace({}, async (api) => {
       // A reactive declaration inlines the __ runtime into the face —
@@ -505,7 +401,7 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('definition', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('definition', () => {
   test('same-doc definition lands on the Rip declaration', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', 'total = 41\nnext = total + 1\n');
@@ -728,7 +624,7 @@ describe.skipIf(!tsgoAvailable)('definition', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('signature help', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('signature help', () => {
   test('active parameter indices hold across bodiless overload rows', async () => {
     await inWorkspace({}, async (api) => {
       const src = [
@@ -756,7 +652,7 @@ describe.skipIf(!tsgoAvailable)('signature help', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('semantic tokens', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('semantic tokens', () => {
   const SRC = [
     'interface Point',
     '  x: number',
@@ -829,7 +725,7 @@ describe.skipIf(!tsgoAvailable)('semantic tokens', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
   test('the outline lands on Rip spans: hierarchy kept, hoist manifestations deduped, scaffolding dropped', async () => {
     await inWorkspace({}, async (api) => {
       const SRC = [
@@ -921,7 +817,7 @@ describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('document links (the trivia channel serves)', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('document links (the trivia channel serves)', () => {
   test('relative paths in COMMENTS linkify; strings that look like paths and missing files do not', async () => {
     await inWorkspace({
       'NOTES.md': '# notes\n<a id="setup"></a>\nsetup here\n',
@@ -958,16 +854,8 @@ describe.skipIf(!tsgoAvailable)('document links (the trivia channel serves)', ()
   }, 30000);
 });
 
-// Three files around one symbol: util defines `answer`; a and b import
-// and use it; app imports a and b (so both join the program unopened).
-const THREE_FILES = {
-  'util.rip': 'export answer = 42\n',
-  'a.rip': 'import { answer } from "./util.rip"\nexport aa = answer + 1\n',
-  'b.rip': 'import { answer } from "./util.rip"\nexport bb = answer + 2\n',
-};
-const APP_AB = 'import { aa } from "./a.rip"\nimport { bb } from "./b.rip"\nk = aa + bb\n';
 
-describe.skipIf(!tsgoAvailable)('references', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('references', () => {
   test('a reference list spans three files, two of them never opened', async () => {
     await inWorkspace(THREE_FILES, async (api) => {
       await api.open('app.rip', APP_AB); // pulls a, b, util into the program
@@ -991,7 +879,7 @@ describe.skipIf(!tsgoAvailable)('references', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('rename', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('rename', () => {
   test('the coincident-span dedup: a hoisted declaration renames as ONE edit, never coincident duplicates', async () => {
     await inWorkspace({}, async (api) => {
       // `count: number = 42` emits a typed hoist line AND an assignment
@@ -1280,7 +1168,7 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('render loop variables', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('render loop variables', () => {
   test('references answer for the loop variable from any of its uses: a keyed callback and a nested block', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', [
@@ -1379,7 +1267,7 @@ describe.skipIf(!tsgoAvailable)('render loop variables', () => {
   }, 60000);
 });
 
-describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('source.* code actions', () => {
   const WHOLE_DOC = { start: { line: 0, character: 0 }, end: { line: 99, character: 0 } };
 
   // The tolerant face made READ surfaces work on an incomplete buffer,
@@ -1507,7 +1395,7 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inheritance)', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inheritance)', () => {
   test('# @ts-expect-error suppresses the next line; an unused one lands TS2578 on the Rip comment', async () => {
     await inWorkspace({}, async (api) => {
       // The directive places in the face, so the deliberate
@@ -1582,7 +1470,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
       // TS2322 onto the `Chip label: 123` head line the directive governs —
       // absorbed, and absorbing it marked the directive USED, so the TS2578
       // drops. A hint alone would NOT have marked it used: that guard is
-      // pinned by check.test.js ('an unused @ts-expect-error stays loud').
+      // pinned by test/spawn/cli/check.test.js ('an unused @ts-expect-error stays loud').
       const chip = 'export Chip = component\n  @label: string := ""\n\n  render\n    span label\n\n';
       await api.open('app.rip',
         chip + 'export App = component\n  render\n    div\n      # @ts-expect-error — label expects string\n      Chip label: 123\n');
@@ -1597,7 +1485,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () => {
   test('an EXPORTED unannotated binding hovers its inferred type at the write site (Tier 1 declare-in-place)', async () => {
     // Formerly this pinned a limitation: the hoisted shape left an
     // exported let un-evolved (TypeScript's own rule), so the write
@@ -1730,7 +1618,7 @@ describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () =
   }, 120000);
 });
 
-describe.skipIf(!tsgoAvailable)('code actions', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('code actions', () => {
   test('the auto-import quickfix maps its edit into the existing Rip import clause', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       await api.open('app.rip', 'import { answer } from "./util.rip"\nk = answer\ny = shout\n');

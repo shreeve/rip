@@ -51,7 +51,7 @@
 // fragment's context parameter and loop item/index params, event handler
 // params (inline casts, named-ref pre-scan annotation), the schema
 // transform's `it` — carry face types now, each gated where it is enforced
-// (check.test.js's branch-body/loop-row and handler cases;
+// (test/spawn/cli/check-*.test.js's branch-body/loop-row and handler cases;
 // schema-types.test.js's transform case), and this dimension is what
 // discovers the NEXT such name the day an emission grows one.
 //
@@ -245,7 +245,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';
@@ -1884,11 +1884,12 @@ function expectedTokenType(d, form) {
   // behavior — a permanent red on a green gauge, indistinguishable
   // from a real regression.
   if (/^\s*[A-Za-z_$][\w$.]*\??::/.test(val)) return null;
-  // A function-valued PLAIN binding classifies as `function`, not
-  // `variable` — TS's own rule, and the right one. Restricted to `plain`:
-  // an arrow handed to `:=`/`~=` is wrapped in a cell, so the NAME stays a
-  // variable no matter what the arrow is.
-  if (form === 'plain' && IS_ARROW.test(val)) return 'function';
+  // A function-valued PLAIN or PINNED binding classifies as `function`,
+  // not `variable` — TS's own rule, and the right one: both lower to a
+  // bare declaration holding the arrow (`wipe! =! ->` is `const wipe =
+  // function`). Not `:=`/`~=`: an arrow handed to those is wrapped in a
+  // cell, so the NAME stays a variable no matter what the arrow is.
+  if ((form === 'plain' || form === 'pinned') && IS_ARROW.test(val)) return 'function';
   return 'variable';
 }
 // A LOOP HEAD declares its bindings, and the audit reads that from the
@@ -2337,7 +2338,7 @@ if (RUN_GRAMMAR) {
     ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
     ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
-    ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/toolchain/check.test.js instead'],
+    ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/spawn/cli/check.test.js instead'],
   ]);
   const denom = [], excludedIdx = [];
   for (let i = 1; i < names.length; i++) {

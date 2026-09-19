@@ -14,18 +14,7 @@
 //
 // Same availability guard as the other live suites.
 import { test, expect, describe } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
-
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
+import { tsgoAvailable, inWorkspace as inHarness } from './support/harness.mjs';
 
 const STASH = [
   "import { source } from 'rip/app'",
@@ -45,69 +34,15 @@ const FIXTURE = {
   'app/routes/orders/[id].rip': 'export Order = component\n  render\n    div @params.id\n',
 };
 
-async function inWorkspace(fn) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-routes-ed-'));
-  for (const [rel, content] of Object.entries(FIXTURE)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  const published = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') published.push(p); },
-  });
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const api = {
-    uriOf,
-    async open(rel, text) {
-      const before = published.length;
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      const u = uriOf(rel);
-      for (let i = 0; i < 100; i++) {
-        for (let j = published.length - 1; j >= before; j--) {
-          if (published[j].uri === u) { await sleep(120); return; }
-        }
-        await sleep(100);
-      }
-      throw new Error(`no publishDiagnostics for ${rel} arrived`);
-    },
-    diagnostics(rel) {
-      const u = uriOf(rel);
-      for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i].diagnostics;
-      return [];
-    },
-    async change(rel, text, version) {
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version }, contentChanges: [{ text }] });
-      await sleep(1500);
-    },
-    completion: (rel, line, character) => client.request('textDocument/completion', {
-      textDocument: { uri: uriOf(rel) }, position: { line, character },
-    }),
-    hover: (rel, line, character) => client.request('textDocument/hover', {
-      textDocument: { uri: uriOf(rel) }, position: { line, character },
-    }),
-  };
-  try {
-    await client.request('initialize', {
-      processId: process.pid,
-      rootUri: 'file://' + ws,
-      // snippetSupport mirrors VS Code: a dynamic member's item inserts
-      // its param slots as tabstops.
-      capabilities: {
-        workspace: { configuration: true },
-        textDocument: { completion: { completionItem: { snippetSupport: true } } },
-      },
-    });
-    client.notify('initialized', {});
-    return await fn(api);
-  } finally {
-    await client.stop();
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-}
+// snippetSupport mirrors VS Code: a dynamic member's item inserts its
+// param slots as tabstops.
+const inWorkspace = (fn) => inHarness(FIXTURE, fn, {
+  prefix: 'rip-routes-ed-',
+  capabilities: {
+    workspace: { configuration: true },
+    textDocument: { completion: { completionItem: { snippetSupport: true } } },
+  },
+});
 
 describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
   test('a mid-file trailing dot still serves member completions (the dot probe)', async () => {
@@ -135,7 +70,7 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         "    div 'home'",
         '',
       ].join('\n');
-      await api.change('app/routes/index.rip', broken, 2);
+      await api.change('app/routes/index.rip', broken);
       const completion = await api.completion('app/routes/index.rip', 1, "  u ~= @stash.source('user').".length);
       const labels = (completion?.items ?? []).map((i) => i.label);
       expect(labels).toEqual(expect.arrayContaining(['value', 'loading', 'error', 'refetch', 'reset']));
@@ -156,8 +91,8 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         "    div 'home'",
         '',
       ].join('\n');
-      await api.change('app/routes/index.rip', nearMiss(''), 3);
-      await api.change('app/routes/index.rip', nearMiss('.'), 4);
+      await api.change('app/routes/index.rip', nearMiss(''));
+      await api.change('app/routes/index.rip', nearMiss('.'));
       const stale = await api.completion('app/routes/index.rip', 1, '  p ~= @stash.'.length);
       const staleLabels = (stale?.items ?? []).map((i) => i.label);
       expect(staleLabels).toEqual(expect.arrayContaining(['user', 'count']));
@@ -179,7 +114,7 @@ describe.skipIf(!tsgoAvailable)('typed routes in the editor', () => {
         "    div 'home'",
         '',
       ].join('\n');
-      await api.change('app/routes/index.rip', dangling, 5);
+      await api.change('app/routes/index.rip', dangling);
       const current = await api.completion('app/routes/index.rip', 1, '  p ~= @stash.'.length);
       const currentLabels = (current?.items ?? []).map((i) => i.label);
       expect(currentLabels).toEqual(expect.arrayContaining(['user', 'count']));

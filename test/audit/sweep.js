@@ -60,7 +60,7 @@ import path from 'node:path'
 const repoRoot = path.resolve(import.meta.dir, '..', '..')
 const { LspClient } = await import(path.join(repoRoot, 'packages/vscode/src/tsgo.js'))
 const { tokenize } = await import(path.join(repoRoot, 'src/lexer.js'))
-const { compile } = await import(path.join(repoRoot, 'src/compile.js'))
+const { compile } = await import(path.join(repoRoot, 'src/compiler.js'))
 // Rip's built-in field-type names and the TS types they answer as — the
 // compiler's own table, so `datetime` answering `Date` is the pair it
 // declares, never a spelling the sweep guesses.

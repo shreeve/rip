@@ -2,7 +2,7 @@
 // gate and the face describe one text: a `__DATA__` payload is not code,
 // and a tolerant compile's recovered face is gated like any other.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { scopeGateOf } from '../../src/scopes.js';
 
 const gateOf = (source, opts = {}) => {

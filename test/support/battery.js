@@ -20,7 +20,7 @@
 import { basename } from 'node:path';
 import { collectInto } from './testing.js';
 
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as ormRuntime from '../../src/runtime/orm.js';

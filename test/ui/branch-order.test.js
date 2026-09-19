@@ -7,7 +7,7 @@
 // flush. The last group pins the leave-transition freeze: the leaving
 // block keeps its DOM and loses its effects.
 import { test, expect, describe } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { installRecordingDOM } from '../support/recording-dom.js';
 import * as R from '../../src/runtime/reactive.js';
 import * as Cm from '../../src/runtime/components.js';

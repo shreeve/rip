@@ -14,16 +14,21 @@ import { describe, test } from 'bun:test';
 
 export const EXTENDED = Boolean(process.env.RIP_EXTENDED);
 
-export const describeExtended = EXTENDED
-  ? describe
-  : (name, fn) => {
-      if (!process.env.CI) return;
-      describe(name, () => {
-        test('the extended tier is REQUIRED in CI but RIP_EXTENDED is unset', () => {
-          throw new Error(
-            'this run executes in CI (the CI environment variable is set) without RIP_EXTENDED — ' +
-            'CI must run the extended tier (`bun run test:all`); a CI run cannot silently drop it',
-          );
-        });
-      });
-    };
+// Off the tier, an extended describe registers nothing — except in CI,
+// where it registers one failing test so the omission cannot pass.
+const off = (name, fn) => {
+  if (!process.env.CI) return;
+  describe(name, () => {
+    test('the extended tier is REQUIRED in CI but RIP_EXTENDED is unset', () => {
+      throw new Error(
+        'this run executes in CI (the CI environment variable is set) without RIP_EXTENDED — ' +
+        'CI must run the extended tier (`bun run test:all`); a CI run cannot silently drop it',
+      );
+    });
+  });
+};
+
+// Wrapped rather than aliased: under `bun test`, describe itself is frozen.
+export const describeExtended = EXTENDED ? (name, fn) => describe(name, fn) : off;
+// The concurrent form: the tests inside run at the same time.
+describeExtended.concurrent = EXTENDED ? (name, fn) => describe.concurrent(name, fn) : off;

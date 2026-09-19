@@ -12,13 +12,23 @@
 //     under CI, the same teeth test/support/extended.js puts on the
 //     extended tier.
 //
+// Two scheduling properties ride along, asserted on `--plan` and on a
+// probe lane: the CPU budget reaches every package lane as
+// RIP_LANE_WORKERS (the suites that fan out size themselves by it), and
+// lanes are planned longest-first. Neither is a correctness property of
+// the orchestrator — a wrong order still runs every lane — but a budget
+// that silently stops reaching the lanes is how a 10-core box came to
+// run ~25 workers, and that is worth a gate.
+//
 // The fixture is a real directory tree, not a mock: the orchestrator's job
 // IS spawning processes, and a stubbed spawn would gate nothing. It stays
 // out of the extended tier even so — the fixtures are trivial, and a
 // broken aggregation is precisely what a green fast loop would hide.
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from '../../support/spawn.js';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { alive, until } from '../../support/wait.js';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -30,8 +40,20 @@ const FAILING = "import { expect, test } from 'bun:test';\ntest('no', () => { ex
 // A minimal stand-in for this repository's shape: a root suite plus
 // packages/*/ suites, with the same bunfig boundary (the root run must not
 // reach into packages/**, or a package's failure would be counted twice).
+// Every fixture root, removed when the file is done (a leaked root per
+// test per run adds up: 1,500 of them were found in one TMPDIR).
+const roots = [];
+afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
+
+// A nested orchestrator that will not finish is terminated with the test
+// instead of outliving it: SIGTERM, which it handles by stopping its own
+// lanes and exiting 143. One left running was found three hours later,
+// still holding a lane's port.
+const BOUND = { timeout: 60_000, killSignal: 'SIGTERM' };
+
 const fixture = (packages) => {
   const root = mkdtempSync(join(tmpdir(), 'rip-test-all-'));
+  roots.push(root);
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', private: true }));
   writeFileSync(join(root, 'bunfig.toml'), '[test]\npathIgnorePatterns = ["packages/**"]\n');
   mkdirSync(join(root, 'test'));
@@ -45,13 +67,25 @@ const fixture = (packages) => {
   return root;
 };
 
-const orchestrate = (root, env = {}) =>
-  spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+const orchestrate = (root, env = {}, ...extra) =>
+  spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000', ...extra], {
     encoding: 'utf8',
     env: { ...process.env, CI: '', NO_COLOR: '1', ...env },
+    ...BOUND,
   });
 
+// Spawns nothing; what it prints is the schedule.
+const plan = (root) => orchestrate(root, {}, '--plan');
+const planned = (r) => [...r.stdout.matchAll(/^▸ (.+)$/gm)].map((m) => m[1]);
+
 const GREEN = { script: 'bun test suite.test.js', body: PASSING };
+
+// A lane that parks: it records its pid in the fixture and waits to be
+// told to stop, standing in for a suite mid-flight when the run is
+// interrupted.
+const PARKED = {
+  script: `bun -e "require('fs').writeFileSync('lane.pid', String(process.pid)); setInterval(() => {}, 1000)"`,
+};
 const RED = { script: 'bun test suite.test.js', body: FAILING };
 // Exits 0 having run nothing — what a suite whose every describe is
 // skipped looks like from outside. Indistinguishable from GREEN by exit
@@ -166,6 +200,7 @@ describe('the lane orchestrator', () => {
       encoding: 'utf8',
       env,
       keepForceColor: true, // orchestrator must see FORCE_COLOR to enable PTYs without a TTY
+      ...BOUND,
     });
     expect(r.status).toBe(0);
     // The live output line (not the echoed `bun -e` source) carries the
@@ -211,6 +246,54 @@ describe('the lane orchestrator', () => {
     expect(r.stdout).not.toContain('packages/docs');
     expect(r.status).toBe(0);
   });
+
+  // The budget has to REACH the suites that size themselves by it
+  // (vscode's --parallel count), and a budget that stops arriving is
+  // invisible from the exit code — the lane sizes itself by the machine
+  // again and everything still passes, slower. So the probe lane prints
+  // what it was handed, and it must be the number the banner promised.
+  test('every package lane is handed its share of the budget as RIP_LANE_WORKERS', () => {
+    const probe = {
+      script: 'bun -e ' + JSON.stringify("console.log('1 tests: lane-workers=' + process.env.RIP_LANE_WORKERS)"),
+    };
+    const r = orchestrate(fixture({ probe }));
+    expect(r.status).toBe(0);
+    const banner = r.stdout.match(/(\d+) per sibling lane\)/);
+    expect(banner).not.toBeNull();
+    expect(r.stdout).toContain(`lane-workers=${banner[1]}\n`);
+  });
+
+  test('lanes are planned longest-first, unlisted lanes last in discovery order', () => {
+    // sites and ui are in the orchestrator's longest-first list, sites
+    // ahead of ui; the other two are not and trail in the order the walk
+    // found them.
+    const root = fixture({ zebra: GREEN, sites: GREEN, aardvark: GREEN, ui: GREEN });
+    const r = plan(root);
+    expect(r.status).toBe(0);
+    expect(planned(r)).toEqual([
+      'root (extended tier)',
+      'packages/sites',
+      'packages/ui',
+      'packages/aardvark',
+      'packages/zebra',
+    ]);
+    expect(readdirSync(join(root, 'test'))).toEqual(['root.test.js']); // a plan writes nothing
+  });
+
+  // A real run starts lanes in the planned order too (the plan is the
+  // queue, not a separate listing). One lane at a time makes the start
+  // order the output order.
+  test('a run starts lanes in the planned order', () => {
+    const r = orchestrate(fixture({ zebra: GREEN, ui: GREEN, aardvark: GREEN }), {}, '--jobs', '1');
+    expect(r.status).toBe(0);
+    expect(planned(r)).toEqual([
+      'root (extended tier)',
+      'packages/ui',
+      'packages/aardvark',
+      'packages/zebra',
+    ]);
+  });
+
 });
 
 // This repository's own plan, asserted without running anything (`--plan`
@@ -259,4 +342,24 @@ test('the plan for this repository is one lane per packages/*/ suite plus root',
   // something a developer running `bun run test` in that directory would
   // not get. Parallelism inside a suite is that suite's own business.
   expect(discovered.length).toBe(declared.length + 1); // packages + root
+});
+
+describe('an interrupted run takes its lanes down', () => {
+  test('SIGTERM to the orchestrator stops a lane in flight and exits 143', async () => {
+    const root = fixture({ parked: PARKED });
+    const pidFile = join(root, 'packages', 'parked', 'lane.pid');
+    const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+      stdio: 'ignore',
+      env: { ...process.env, CI: '', NO_COLOR: '1' },
+    });
+    expect(await until(() => existsSync(pidFile), 15000)).toBe(true);
+    const lane = Number(readFileSync(pidFile, 'utf8'));
+    expect(alive(lane)).toBe(true);
+    const exited = new Promise((resolve) => orchestrator.once('exit', (code, signal) => resolve({ code, signal })));
+    orchestrator.kill('SIGTERM');
+    expect(await until(() => !alive(lane), 5000)).toBe(true);
+    const status = await exited;
+    expect(status).toEqual({ code: 143, signal: null });
+    rmSync(root, { recursive: true, force: true });
+  });
 });

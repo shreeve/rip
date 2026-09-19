@@ -31,162 +31,35 @@
 // Same availability guard as the other live suites: dependencies absent →
 // skip; the package's `bun run test` preflight turns a missing tsgo into a
 // hard failure first (tsgo-broker.test.js owns the loud skip notice).
+// Fixtures and the harness wrapper live in support/project-model.mjs.
+//
+// Then the DISK-LAYER HYGIENE of the model — mirror-tree ownership,
+// collision guards, traversal bounds — and its CLOSURE behaviors: the
+// active closure across a preview-tab swap, the module marker end-to-end,
+// workspace ambient .d.ts and prototype augmentation, untyped .js imports
+// staying quiet.
+//
+// Every test opens its own server over its own workspace, so the describes
+// run CONCURRENT; the harness caps live sessions.
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
 
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
+// The harness wrapper and fixtures.
+//
+// One live server session over a real workspace directory; `awaitReady`
+// holds the session until the cache revalidation log line arrives
+// (startup complete), which the persistent cache pins read. `inSession`
+// runs over an EXISTING directory — a restart over the same tree — and
+// `inWorkspace` lays one out and removes it after.
+import { tsgoAvailable, makeWorkspace as makeWs, inSession as inHarnessSession, inWorkspace as inHarnessWorkspace } from './support/harness.mjs';
 
-function makeWorkspace(files) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-pm-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  return ws;
-}
 
-// One live server session over a real workspace directory. The api
-// extends the gaps harness with hover, watched-files notifications, and
-// the server's log lines; `initialized` resolves after the cache
-// revalidation log line arrives (startup complete).
-async function inSession(ws, fn) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const published = [];
-  const logs = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => {
-      if (m === 'textDocument/publishDiagnostics') published.push(p);
-      if (m === 'window/logMessage') logs.push(p.message);
-    },
-  });
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const latest = (rel) => {
-    const u = uriOf(rel);
-    for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i];
-    return null;
-  };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function awaitPublish(rel, sinceLen) {
-    const u = uriOf(rel);
-    for (let i = 0; i < 60; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${rel} arrived`);
-  }
-  const versions = new Map();
-  const api = {
-    ws,
-    logs,
-    uriOf,
-    sleep,
-    async open(rel, text) {
-      const before = published.length;
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      await awaitPublish(rel, before);
-    },
-    close(rel) {
-      client.notify('textDocument/didClose', { textDocument: { uri: uriOf(rel) } });
-    },
-    // didOpen with NO wait — for sequences where the next notification
-    // must land before the server's first refresh of this buffer.
-    openNoWait(rel, text) {
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-    },
-    // Every publish for `rel` at or after index `since` in arrival order.
-    publishesSince(rel, since) {
-      return published.slice(since).filter((p) => p.uri === uriOf(rel));
-    },
-    get publishedCount() { return published.length; },
-    // Open a document by RAW uri (non-file schemes — the __external__ path).
-    async openUri(uri, text) {
-      const before = published.length;
-      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text } });
-      for (let i = 0; i < 60; i++) {
-        for (let j = published.length - 1; j >= before; j--) {
-          if (published[j].uri === uri) { await sleep(120); return; }
-        }
-        await sleep(100);
-      }
-      throw new Error(`no publishDiagnostics for ${uri} arrived`);
-    },
-    // Poll until `fn()` is truthy (async prunes land off the request path).
-    async poll(fn, what) {
-      for (let i = 0; i < 60; i++) {
-        if (fn()) return;
-        await sleep(150);
-      }
-      throw new Error(`condition never held: ${what}`);
-    },
-    async change(rel, text) {
-      const before = published.length;
-      const v = (versions.get(rel) || 1) + 1;
-      versions.set(rel, v);
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version: v }, contentChanges: [{ text }] });
-      await awaitPublish(rel, before);
-    },
-    watched(changes) {
-      client.notify('workspace/didChangeWatchedFiles', {
-        changes: changes.map(([rel, type]) => ({ uri: uriOf(rel), type })),
-      });
-    },
-    codes(rel) {
-      return (latest(rel)?.diagnostics ?? []).map((d) => d.code).filter((c) => c !== 6133 && c !== 6199);
-    },
-    has(rel, re) { return (latest(rel)?.diagnostics ?? []).some((d) => re.test(d.message)); },
-    hover(rel, line, character) {
-      return client.request('textDocument/hover', { textDocument: { uri: uriOf(rel) }, position: { line, character } });
-    },
-    // Wait until `pred(codes)` holds for `rel` — cross-file re-checks
-    // land asynchronously after watched-file events.
-    async until(rel, pred) {
-      for (let i = 0; i < 60; i++) {
-        if (pred(api.codes(rel))) return;
-        await sleep(150);
-      }
-      throw new Error(`condition never held for ${rel}; last codes ${JSON.stringify(api.codes(rel))}`);
-    },
-    async untilLog(re) {
-      for (let i = 0; i < 60; i++) {
-        const line = logs.find((l) => re.test(l));
-        if (line) return line;
-        await sleep(100);
-      }
-      throw new Error(`no log line matching ${re}; got:\n${logs.join('\n')}`);
-    },
-  };
-  try {
-    await client.request('initialize', { processId: process.pid, rootUri: 'file://' + ws, capabilities: {} });
-    client.notify('initialized', {});
-    await api.untilLog(/project cache:/); // startup revalidation complete
-    return await fn(api);
-  } finally {
-    await client.stop();
-  }
-}
-
-// Convenience: one session over a fresh workspace, torn down after.
-async function inWorkspace(files, fn) {
-  const ws = makeWorkspace(files);
-  try {
-    return await inSession(ws, fn);
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-}
+const SESSION = { capabilities: {}, awaitReady: true };
+const makeWorkspace = (files) => makeWs(files, 'rip-pm-');
+const inSession = (ws, fn) => inHarnessSession(ws, fn, SESSION);
+const inWorkspace = (files, fn) => inHarnessWorkspace(files, fn, { prefix: 'rip-pm-', ...SESSION });
 
 // The .rip mirrors present in a workspace's tree.
 const mirrorPaths = (ws) => {
@@ -223,7 +96,7 @@ const INFERRED_UTIL = 'export answer = 42\n';
 
 const APP = 'import { answer } from "./util.rip"\nbad = answer.toUpperCase()\n';
 
-describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('the workspace project model', () => {
   test('an unopened dependency materializes on demand and serves', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       // util.rip is on disk and NEVER opened: the importer's refresh
@@ -444,7 +317,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
 // Disk-layer hygiene: mirror-tree ownership, collision guards, and
 // traversal bounds — the mirror is editor scratch and must never
 // clobber or escape user territory.
-describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
   const mirrorFileOf = (ws, rel) => path.join(ws, '.rip', 'editor', rel + '.ts');
 
   // What a PRUNE must remove is the compiled face, not every byte. A
@@ -774,7 +647,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 // buffer opened inside the last debounce window has recorded none yet.
 // A preview tab closes the previous file in the same instant it opens
 // the next — the shape a single click in the Explorer sends.
-describe.skipIf(!tsgoAvailable)('the closure across a preview-tab swap', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('the closure across a preview-tab swap', () => {
   const USES_APP = (name) => `import { source } from 'rip/app'\n\nexport ${name} =\n  user: source fetch: -> Promise.resolve { name: 'Ada' }\n  count: 0\n`;
 
   // The app runtime's faces, by inode: a delete-and-rewrite changes them.
@@ -837,7 +710,7 @@ describe.skipIf(!tsgoAvailable)('the closure across a preview-tab swap', () => {
 // collision and the memo stores the null). Plus the restart shape
 // (the persisted closure re-materializes without collisions) and the
 // orphan-mirror startup sweep.
-describe.skipIf(!tsgoAvailable)('the module marker over LSP', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('the module marker over LSP', () => {
   // Shared top-level names across both files; `total` is unannotated
   // (evolving-let) with a read, so the write-site hover exercises the
   // enrichment path.
@@ -933,7 +806,7 @@ describe.skipIf(!tsgoAvailable)('the module marker over LSP', () => {
 // governs in the editor exactly as it does under a workspace-root tsc
 // run — and the compiler's own augmentation line makes an ANNOTATED
 // prototype member self-sufficient, no ambient file needed.
-describe.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentation', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentation', () => {
   test('a workspace .d.ts augmentation governs: the patched method is a known member', async () => {
     await inWorkspace({ 'rip-env.d.ts': 'interface String { shout(): string }\n' }, async (api) => {
       await api.open('app.rip', 'String.prototype.shout = -> @toUpperCase() + "!"\nout = "hi".shout()\n');
@@ -956,7 +829,7 @@ describe.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentat
 // Importing a plain .js module is legal, idiomatic Rip — the
 // no-declaration-file complaint (TS7016) is implicit-any-family noise
 // on exactly that pattern and never publishes.
-describe.skipIf(!tsgoAvailable)('untyped .js imports stay quiet', () => {
+describe.concurrent.skipIf(!tsgoAvailable)('untyped .js imports stay quiet', () => {
   test('a .rip importing a sibling .js draws no 7016; real errors still report', async () => {
     await inWorkspace({ 'util.js': 'export const shout = (s) => s.toUpperCase();\n' }, async (api) => {
       await api.open('app.rip', 'import { shout } from "./util.js"\nout = shout("hi")\n');

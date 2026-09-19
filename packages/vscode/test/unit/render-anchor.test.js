@@ -6,9 +6,9 @@
 // re-anchors exactly a diagnostic standing on a site. Driven through the
 // one honest mapping road (mapTsDiagnostic) over real compile() output,
 // with the diagnostics synthesized at the spans the pinned tsgo uses
-// (test/spawn/cli/check.test.js drives the same rows through tsgo).
+// (test/spawn/cli/check-*.test.js drive the same rows through tsgo).
 import { test, expect } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { mapTsDiagnostic } from '../../src/diagnostics.js';
 import { lineStartsOf, offsetToPosition } from '../../src/translate.js';
 

@@ -1,5 +1,5 @@
 // Which rip checkout owns a path — the one question the stdlib's
-// location turns on, spelled ONCE for the runtime loader (src/resolve.js)
+// location turns on, spelled ONCE for the runtime loader (src/resolver.js)
 // and for the editor and `rip check` mirror (packages/vscode/src/mirror.js).
 // Two spellings that drift put a file's types and its execution in
 // different trees, and nothing warns: the checker reads one copy of a

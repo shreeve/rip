@@ -2,7 +2,7 @@
 // instance identity and `:=` state containers, refresh `~=` bodies,
 // and recreate component-body `~>` effects — without re-running `_init`.
 import { describe, expect, test } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';

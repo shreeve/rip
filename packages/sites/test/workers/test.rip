@@ -89,6 +89,8 @@ test! 'boot failure is reported before bounded nonzero exit', ->
   try
     built = buildWorker! dir, join(import.meta.dir, 'failed.rip')
     socket = join dir, 'worker.sock'
+    # The failure must be readable on /ready BEFORE the exit; the window
+    # is the injected bound, so the poll below has to win inside it.
     proc = spawnWorker built, socket
     failed = waitFor! ->
       try

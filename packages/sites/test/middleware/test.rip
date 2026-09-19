@@ -80,7 +80,7 @@ runMode = (encrypt) ->
       signal.addEventListener 'abort', -> reject signal.reason
 
   get '/timed/ignore' ->
-    sleep! 3000
+    sleep! 2500
     { tooLate: true }
 
   post '/timed/body', (c) -> c.req.raw.text!
@@ -96,7 +96,10 @@ runMode = (encrypt) ->
       stdin: 'ignore'
       stdout: 'ignore'
       stderr: 'pipe'
-      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2' }
+      # timeout takes whole seconds, so the 504 at 1s and the recycle at
+      # 2s are the floor; the drain bound after the recycle is injected so
+      # the still-sleeping handler does not hold the exit for its full nap.
+      env: { ...process.env, APP_ARTIFACT: appArtifact, SOCKET_PATH: socket, WORKER_ID: 'middleware', WORKER_CONCURRENCY: '2', RIP_DRAIN_DEADLINE_MS: '200' }
     diagnostic = Response.new(proc.stderr).text()
     waitFor! ->
       try (unixFetch!(socket, '/ready')).status is 200 catch then false

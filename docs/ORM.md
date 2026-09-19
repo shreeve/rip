@@ -83,11 +83,14 @@ form (a nested schema, `json`, `any`) and a nested schema itself are
 `VARCHAR`.
 
 A `variant` field is a `json` field the engine stores typed: the app
-reads and writes it as an object, exactly as `json`, and SQL reaches
-into it by path — `WHERE meta.patient.firstName = 'Ada'` — where a
-`json` column needs `->>`. The JSON operators do not apply to a
-`VARIANT`. Writes bind through `?::JSON`, which the model renders; a
-raw `INSERT` must cast the same way, or the document lands as a string.
+reads and writes it as a value — an object, an array, a string, a
+number, a boolean — and gets the same value back, and SQL reaches into
+it by path — `WHERE meta.patient.firstName = 'Ada'` — where a `json`
+column needs `->>`. The JSON operators do not apply to a `VARIANT`.
+Writes bind through `?::JSON`, which the model renders; a raw `INSERT`
+must cast the same way, or the document lands as a string.
+[VARIANTS.md](VARIANTS.md) is the reference for reading, filtering and
+editing these documents from every surface.
 
 ### Constraints
 

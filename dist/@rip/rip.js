@@ -1368,10 +1368,10 @@ function parseCallableLine(kind, headerTok, line, entries, fail) {
     let depth = 1;
     pos++;
     while (pos < line.length && depth > 0) {
-      const tag2 = line[pos].kind;
-      if (tag2 === "(" || tag2 === "PARAM_START" || tag2 === "CALL_START")
+      const tag = line[pos].kind;
+      if (tag === "(" || tag === "PARAM_START" || tag === "CALL_START")
         depth++;
-      if (tag2 === ")" || tag2 === "PARAM_END" || tag2 === "CALL_END") {
+      if (tag === ")" || tag === "PARAM_END" || tag === "CALL_END") {
         depth--;
         if (depth === 0) {
           pos++;
@@ -1415,11 +1415,11 @@ function parseEnsurePairs(argTokens, directiveTok, fail) {
   const first = tokens[0];
   if (first.kind === "[" || first.kind === "INDEX_START") {
     const inner = extractBracketInner(tokens, first, fail);
-    const parts2 = splitEnsureElements(inner);
-    if (parts2.length === 0) {
+    const parts = splitEnsureElements(inner);
+    if (parts.length === 0) {
       fail(`@ensure […] must contain at least one 'message, fn' pair`, first.start);
     }
-    return consumeEnsureTuples(parts2, first, fail);
+    return consumeEnsureTuples(parts, first, fail);
   }
   const parts = splitTopLevelByComma(tokens);
   if (parts.length < 2) {
@@ -3278,8 +3278,8 @@ function thenIntroducesBody(tokens, i) {
   return false;
 }
 function collectBlocks(tokens, mintId) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
+  const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START"]);
+  const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END"]);
   const insertions = [];
   const pending = [];
   const commaInImplicitCall = (start, i) => {
@@ -3288,11 +3288,11 @@ function collectBlocks(tokens, mintId) {
       if (counter.on)
         counter.n++;
       const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
+      if (CLOSERS.has(k) || k === "OUTDENT") {
         levels++;
         continue;
       }
-      if (OPENERS2.has(k) || k === "INDENT") {
+      if (OPENERS.has(k) || k === "INDENT") {
         if (k === "INDENT")
           return false;
         levels--;
@@ -3313,11 +3313,11 @@ function collectBlocks(tokens, mintId) {
       if (counter.on)
         counter.n++;
       const k = tokens[j].kind;
-      if (CLOSERS2.has(k) || k === "OUTDENT") {
+      if (CLOSERS.has(k) || k === "OUTDENT") {
         levels++;
         continue;
       }
-      if (OPENERS2.has(k) || k === "INDENT") {
+      if (OPENERS.has(k) || k === "INDENT") {
         levels--;
         if (levels < 0)
           return false;
@@ -3349,9 +3349,9 @@ function collectBlocks(tokens, mintId) {
           pendingBlocks--;
         }
         depth++;
-      } else if (OPENERS2.has(k)) {
+      } else if (OPENERS.has(k)) {
         depth++;
-      } else if (CLOSERS2.has(k) || k === "OUTDENT") {
+      } else if (CLOSERS.has(k) || k === "OUTDENT") {
         if (depth === 0)
           return j;
         depth--;
@@ -4913,8 +4913,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
         assigned: assignedLater(end + 1, tokens[colon - 1].value)
       });
       lastEnd = end;
-      const nk2 = tokens[end + 1];
-      if (nk2 && (nk2.kind === "IDENTIFIER" || nk2.kind === "PROPERTY") && tokens[end + 2]?.kind === ":") {
+      const nk = tokens[end + 1];
+      if (nk && (nk.kind === "IDENTIFIER" || nk.kind === "PROPERTY") && tokens[end + 2]?.kind === ":") {
         colon = end + 2;
         continue;
       }
@@ -4978,9 +4978,9 @@ function rewriteTypes(tokens, mintId, text, fail) {
       return -1;
     j++;
     if (tokens[j]?.kind === "INDENT") {
-      const out2 = matchingOutdent(tokens, j);
-      assertTypeVocabulary(tokens, j + 1, out2, fail, { methods: true });
-      return out2;
+      const out = matchingOutdent(tokens, j);
+      assertTypeVocabulary(tokens, j + 1, out, fail, { methods: true });
+      return out;
     }
     const run = collectTypeRun(tokens, j, { alias: true }, fail);
     if (run.parts.length === 0) {
@@ -5011,9 +5011,9 @@ function rewriteTypes(tokens, mintId, text, fail) {
     }
     if (tokens[j]?.kind !== "INDENT")
       return -1;
-    const out2 = matchingOutdent(tokens, j);
-    assertTypeVocabulary(tokens, j + 1, out2, fail, { methods: true });
-    return out2;
+    const out = matchingOutdent(tokens, j);
+    assertTypeVocabulary(tokens, j + 1, out, fail, { methods: true });
+    return out;
   };
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
@@ -5394,7 +5394,7 @@ function tagParams(tokens) {
       continue;
     }
     if (close.kind !== ")") {
-      let depth2 = 0;
+      let depth = 0;
       let found = -1;
       for (let j = i - 1;j >= 0; j--) {
         if (counter.on)
@@ -5402,14 +5402,14 @@ function tagParams(tokens) {
         const t = tokens[j];
         const k = t.kind;
         if (k === ")" || k === "]" || k === "}" || k === "PICK_END" || k === "CALL_END" || k === "PARAM_END" || k === "INDEX_END" || k === "COMPARE" && t.value === ">") {
-          depth2++;
+          depth++;
         } else if (k === "(" || k === "[" || k === "{" || k === "PICK_START" || k === "OPTPICK_START" || k === "CALL_START" || k === "PARAM_START" || k === "INDEX_START" || k === "COMPARE" && t.value === "<") {
-          depth2--;
+          depth--;
         } else if (k === "SHIFT" && t.value === ">>")
-          depth2 += 2;
+          depth += 2;
         else if (k === "SHIFT" && t.value === ">>>")
-          depth2 += 3;
-        else if (depth2 === 0) {
+          depth += 3;
+        else if (depth === 0) {
           if (k === ":") {
             if (tokens[j - 1]?.kind === ")")
               found = j - 1;
@@ -5469,8 +5469,8 @@ function tagParams(tokens) {
   return tokens;
 }
 function tagDynamicKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
   const pendingTernary = [0];
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
@@ -5490,9 +5490,9 @@ function tagDynamicKeys(tokens) {
       while (++j < tokens.length && depth > 0) {
         if (counter.on)
           counter.n++;
-        if (OPENERS2.has(tokens[j].kind))
+        if (OPENERS.has(tokens[j].kind))
           depth++;
-        else if (CLOSERS2.has(tokens[j].kind))
+        else if (CLOSERS.has(tokens[j].kind))
           depth--;
       }
       if (depth === 0 && tokens[j]?.kind === ":") {
@@ -5500,9 +5500,9 @@ function tagDynamicKeys(tokens) {
         tokens[j - 1].kind = "]";
       }
     }
-    if (OPENERS2.has(tokens[i].kind))
+    if (OPENERS.has(tokens[i].kind))
       pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
+    else if (CLOSERS.has(tokens[i].kind))
       pendingTernary.pop();
   }
   return tokens;
@@ -5538,8 +5538,8 @@ function insertArrowCommas(tokens) {
   return tokens;
 }
 function tagCompoundKeys(tokens) {
-  const OPENERS2 = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS2 = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+  const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
+  const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
   const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
   const pendingTernary = [0];
   for (let i = 0;i < tokens.length; i++) {
@@ -5581,9 +5581,9 @@ function tagCompoundKeys(tokens) {
         tokens.splice(i, j - i + 1, collapsed);
       }
     }
-    if (OPENERS2.has(tokens[i].kind))
+    if (OPENERS.has(tokens[i].kind))
       pendingTernary.push(0);
-    else if (CLOSERS2.has(tokens[i].kind))
+    else if (CLOSERS.has(tokens[i].kind))
       pendingTernary.pop();
   }
   return tokens;
@@ -6138,7 +6138,7 @@ ${baseline}`).join(`
     const n = tokens.length;
     if (tokens[n - 1]?.kind === "=")
       return typeAliasEq(tokens, n - 1);
-    const iface = (k2) => tokens[k2]?.kind === "RESERVED" && tokens[k2].value === "interface";
+    const iface = (k) => tokens[k]?.kind === "RESERVED" && tokens[k].value === "interface";
     const k = beforeAngleGroupBack(tokens, n - 1);
     if (k < 0 || tokens[k]?.kind !== "IDENTIFIER")
       return false;
@@ -6600,14 +6600,14 @@ ${baseline}`).join(`
         let depth = 1;
         let i = pos + 3;
         while (i < text.length && depth > 0) {
-          const ch2 = text[i];
-          if (ch2 === "\\") {
+          const ch = text[i];
+          if (ch === "\\") {
             i += 2;
             continue;
           }
-          if (paired && ch2 === opener)
+          if (paired && ch === opener)
             depth++;
-          if (ch2 === closer)
+          if (ch === closer)
             depth--;
           if (depth > 0)
             i++;
@@ -8530,7 +8530,7 @@ class CodeBuilder {
     const hi = w === null ? f.sourceEnd : Math.min(f.sourceEnd, w[1]);
     let candidates = this.stores.primitiveSpans(value, lo, hi);
     if (avoid !== null && avoid.length > 0) {
-      candidates = candidates.filter((p2) => !avoid.some(([a, b]) => p2.sourceStart >= a && p2.sourceEnd <= b));
+      candidates = candidates.filter((p) => !avoid.some(([a, b]) => p.sourceStart >= a && p.sourceEnd <= b));
     }
     if (candidates.length === 0)
       return null;
@@ -11536,8 +11536,8 @@ class Emitter {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         if (head === "class") {
           for (const el of n.slice(2)) {
-            const stmts2 = isNode(el) && el[0] === "block" ? el.slice(1) : [el];
-            for (const st of stmts2) {
+            const stmts = isNode(el) && el[0] === "block" ? el.slice(1) : [el];
+            for (const st of stmts) {
               if (isNode(st) && isDefHead(st[0]) && st.length === 4)
                 for (const part of st.slice(2))
                   walk(part, level);
@@ -12463,9 +12463,9 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         if (span)
           cursor = span[1];
         else if (typeof it === "string") {
-          const at2 = src.indexOf(it, cursor);
-          if (at2 >= 0)
-            cursor = at2 + it.length;
+          const at = src.indexOf(it, cursor);
+          if (at >= 0)
+            cursor = at + it.length;
         }
       }
       const at = src.indexOf(items[k], cursor);
@@ -12518,11 +12518,11 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
             this.b.emit(", ");
           this.mark(item, "$self", () => {
             this.mark(item, "target", () => {
-              const keyText2 = ownKey(key, key);
-              if (keyText2 === key)
+              const keyText = ownKey(key, key);
+              if (keyText === key)
                 this.emitPrimitive(key);
               else
-                this.b.emit(keyText2);
+                this.b.emit(keyText);
             });
             this.b.emit(": ");
             this.mark(item, "value", () => this.b.emit(valueText));
@@ -12778,8 +12778,8 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     tagPostfixConditionals(toks);
     implicitObjects(toks, mintId);
     implicitCalls(toks, mintId);
-    const parser2 = Parser();
-    parser2.lexer = {
+    const parser = Parser();
+    parser.lexer = {
       tokens: toks,
       index: 0,
       text: "",
@@ -12797,7 +12797,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         return t.kind;
       }
     };
-    const result = parser2.parse("");
+    const result = parser.parse("");
     if (result.diagnostics.length > 0) {
       const d = result.diagnostics[0];
       const err = new Error(`schema: failed to compile a schema function body: ${d.message}`);
@@ -13036,10 +13036,10 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
           this.b.emit(" finally ");
           this.braceBlock(part, ind);
         } else {
-          const [binding, body2] = part;
+          const [binding, body] = part;
           if (binding === null) {
             this.b.emit(" catch ");
-            this.braceBlock(body2, ind);
+            this.braceBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
             const param = this.loopTempName("_err");
@@ -13052,18 +13052,18 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.mark(part, "binding", () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});
 `);
-            this.statements(isBlock(body2) ? body2.slice(1) : [body2], ind + 1, "block");
+            this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
             this.b.emit("  ".repeat(ind) + "}");
           } else if (Emitter.isTypedWrapper(binding)) {
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.emitParam(binding));
             this.b.emit(") ");
-            this.withBindings([binding[1]], () => this.braceBlock(body2, ind));
+            this.withBindings([binding[1]], () => this.braceBlock(body, ind));
           } else {
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.b.emit(binding));
             this.b.emit(") ");
-            this.withBindings([binding], () => this.braceBlock(body2, ind));
+            this.withBindings([binding], () => this.braceBlock(body, ind));
           }
         }
       }
@@ -15042,8 +15042,8 @@ ${pad ?? ""}`);
     const value = () => this.mark(node, "value", () => this.withExpression(() => this.expr(node[2])));
     const emitBranch = () => {
       if (!synth) {
-        const target2 = () => this.mark(node, "target", () => this.withTarget(() => this.withDeopt(() => this.expr(target1))));
-        target2();
+        const target = () => this.mark(node, "target", () => this.withTarget(() => this.withDeopt(() => this.expr(target1))));
+        target();
         this.b.emit(" ");
         this.mark(node, "operator", () => this.b.emit(op));
         this.b.emit(" ");
@@ -15400,11 +15400,11 @@ ${pad ?? ""}`);
     if (isBlock(body)) {
       this.mark(node, "value", () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries: entries2, names: names2 } = this.scopedHoist(stmts, []);
-        for (const n of this.pushReactiveFrame(stmts, names2))
-          names2.add(n);
-        this.scopes.push(names2);
-        this.funcBlock(node, body, stmts, ind, entries2);
+        const { entries, names } = this.scopedHoist(stmts, []);
+        for (const n of this.pushReactiveFrame(stmts, names))
+          names.add(n);
+        this.scopes.push(names);
+        this.funcBlock(node, body, stmts, ind, entries);
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -16737,13 +16737,13 @@ ${pad ?? ""}`);
         const tagExpr = head[0][1];
         const classExprs = head.slice(1);
         if (isNode(tagExpr)) {
-          const { tag: tag2, classes: classes2, id: id2 } = Emitter.collectTemplateClasses(tagExpr);
-          if (tag2 !== null && isHtmlTag2(tag2)) {
-            return this.renderDynamicTag(sexpr, tag2, classExprs, sexpr.slice(1), classes2, id2);
+          const { tag, classes, id } = Emitter.collectTemplateClasses(tagExpr);
+          if (tag !== null && isHtmlTag2(tag)) {
+            return this.renderDynamicTag(sexpr, tag, classExprs, sexpr.slice(1), classes, id);
           }
         } else if (typeof tagExpr === "string" && isHtmlTag2(tagExpr.split("#")[0])) {
-          const [tagName, id2] = tagExpr.split("#");
-          return this.renderDynamicTag(sexpr, tagName || "div", classExprs, sexpr.slice(1), [], id2);
+          const [tagName, id] = tagExpr.split("#");
+          return this.renderDynamicTag(sexpr, tagName || "div", classExprs, sexpr.slice(1), [], id);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(head);
@@ -16997,22 +16997,22 @@ ${pad ?? ""}`);
         const base = arg.split(/[#.]/)[0];
         const scopeKind = base === arg ? this.renderVarKind(arg, arg) : null;
         if (scopeKind !== null) {
-          const t2 = this.newRenderText();
+          const t = this.newRenderText();
           if (scopeKind === "loop-reactive") {
-            this.renderLine(null, () => this.b.emit(`${t2} = document.createTextNode('')`));
+            this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
             this.renderEffect(null, () => {
-              this.b.emit(`${t2}.data = `);
+              this.b.emit(`${t}.data = `);
               this.emitPrimitive(arg);
               this.b.emit(";");
             });
           } else {
             this.renderLine(null, () => {
-              this.b.emit(`${t2} = document.createTextNode(`);
+              this.b.emit(`${t} = document.createTextNode(`);
               this.emitPrimitive(arg);
               this.b.emit(")");
             });
           }
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t2})`));
+          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
           continue;
         }
         if (isHtmlTag2(base || "div")) {
@@ -17794,8 +17794,8 @@ ${this.replayPad}}` : " }");
         const evUsed = new Set;
         Emitter.collectLeafNames(value, evUsed);
         const ev = Emitter.mintName("e", evUsed);
-        const recv2 = this.tsElReceiver(el);
-        const known = this.ts ? this.tsEventTypeText([eventName], recv2.hostText) : null;
+        const recv = this.tsElReceiver(el);
+        const known = this.ts ? this.tsEventTypeText([eventName], recv.hostText) : null;
         if (this.ts) {
           const keyId = this.stores.idOf(key) ?? null;
           const keySpan = keyId !== null ? this.stores.selfSpan(keyId) : null;
@@ -17816,7 +17816,7 @@ ${this.replayPad}}` : " }");
           if (!this.ts) {
             this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
           } else {
-            recv2.emit();
+            recv.emit();
             this.b.emit(".addEventListener(");
             claimingKey(() => this.emitQuotedPrimitive(eventName));
             this.b.emit(`, (${ev}`);
@@ -17886,10 +17886,10 @@ ${this.replayPad}}` : " }");
           R.pendingClassArgs.push(() => site(this.renderExpr(value)));
         } else if (this.renderReactive(value)) {
           const isSvg = R.svgDepth > 0;
-          const recv2 = this.tsElReceiver(el);
+          const recv = this.tsElReceiver(el);
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName("__clsx");
-            recv2.emit();
+            recv.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -17906,10 +17906,10 @@ ${this.replayPad}}` : " }");
         } else {
           const isSvg = R.svgDepth > 0;
           const compound = isNode(value);
-          const recv2 = this.tsElReceiver(el);
+          const recv = this.tsElReceiver(el);
           this.renderLine(pair, () => {
             const lhsStart = this.b.offset;
-            recv2.emit();
+            recv.emit();
             if (isSvg) {
               const gen = this.b.offset + 1;
               this.b.emit(".setAttribute('");
@@ -17936,10 +17936,10 @@ ${this.replayPad}}` : " }");
         continue;
       }
       if ((key === "value" || key === "checked") && this.renderReactive(value)) {
-        const recv2 = this.tsElReceiver(el);
+        const recv = this.tsElReceiver(el);
         this.renderEffect(pair, () => {
           const lhsStart = this.b.offset;
-          recv2.emit();
+          recv.emit();
           this.b.emit(".");
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
           site([lhsStart, this.b.offset]);
@@ -17950,10 +17950,10 @@ ${this.replayPad}}` : " }");
         continue;
       }
       if (key === "innerHTML" || key === "textContent" || key === "innerText") {
-        const recv2 = this.tsElReceiver(el);
+        const recv = this.tsElReceiver(el);
         const emitAssign = () => {
           const lhsStart = this.b.offset;
-          recv2.emit();
+          recv.emit();
           this.b.emit(".");
           this.emitPropertyRoadKey(() => this.emitPrimitive(key));
           site([lhsStart, this.b.offset]);
@@ -17971,16 +17971,16 @@ ${this.replayPad}}` : " }");
         continue;
       }
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
-        const recv2 = this.tsElReceiver(el);
+        const recv = this.tsElReceiver(el);
         const emitBooleanKey = () => {
           const span = claimingKey(() => this.emitKeyAs(storedKey, key));
-          if (this.ts && recv2.surfaced && span !== null) {
+          if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: "attr", name: key, type: "boolean | undefined" });
           }
         };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            recv2.emit();
+            recv.emit();
             this.b.emit(".toggleAttribute('");
             emitBooleanKey();
             this.b.emit("', !!");
@@ -18004,7 +18004,7 @@ ${this.replayPad}}` : " }");
             if (this.ts)
               site([satStart, satStart + "satisfies".length]);
             this.b.emit(") ");
-            recv2.emit();
+            recv.emit();
             this.b.emit(".setAttribute('");
             emitBooleanKey();
             this.b.emit("', '')");
@@ -18014,14 +18014,14 @@ ${this.replayPad}}` : " }");
       }
       const isPresence = isNode(value) && value[0] === "presence" && value.length === 2;
       if (key === "style" && !isPresence) {
-        const recv2 = this.tsElReceiver(el);
+        const recv = this.tsElReceiver(el);
         const write = () => {
           this.b.emit("{ const __v");
           site([this.b.offset - 3, this.b.offset]);
           if (this.ts) {
             this.b.tsOnly(() => {
-              if (recv2.surfaced) {
-                this.b.emit(`: ${recv2.valsName}['`);
+              if (recv.surfaced) {
+                this.b.emit(`: ${recv.valsName}['`);
                 this.emitKeyAs(storedKey, key);
                 this.b.emit("'] | undefined");
               } else {
@@ -18032,14 +18032,14 @@ ${this.replayPad}}` : " }");
           this.b.emit(" = ");
           this.renderExpr(value);
           this.b.emit(`; ${this.runtimeName("__style")}(`);
-          recv2.emit();
+          recv.emit();
           this.b.emit(", __v); }");
         };
         if (this.renderReactive(value))
           this.renderEffect(pair, write, value);
         else
           this.renderLine(pair, write, false);
-        if (this.ts && recv2.surfaced && rec !== null) {
+        if (this.ts && recv.surfaced && rec !== null) {
           this.intrinsics.push({ start: rec.key[0], end: rec.key[1], kind: "attr", name: key, type: "string | __RipCSSProperties | undefined" });
         }
         continue;
@@ -22548,20 +22548,20 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     const programId = stores.idOf(parseResult.sexpr);
     for (const unit of units) {
       const generated = new Set(unit.runtimes.flatMap((rt) => rt.generatedNames ?? []));
-      const bindings2 = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
-      if (bindings2.length === 0)
+      const bindings = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
+      if (bindings.length === 0)
         continue;
       const start = builder.offset;
       if (unit.imp) {
-        builder.emit(`import { ${bindings2.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
+        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
         const specStart = builder.offset;
         builder.emit(JSON.stringify(unit.imp));
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(`;
 `);
       } else {
-        builder.emit(`const { ${bindings2.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
-        const types = face === "ts" && unit.types ? `{ ${bindings2.map(({ name }) => `${name}: ${unit.types[name] ?? "any"}`).join("; ")} }` : null;
+        builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
+        const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${unit.types[name] ?? "any"}`).join("; ")} }` : null;
         if (types !== null && types.includes("__RipClassValue"))
           emitter._needsClassValue = true;
         if (types !== null && types.includes("__RipCSSProperties"))
@@ -22678,18 +22678,18 @@ return { ${unit.names.join(", ")} };
     const reactive = new Set;
     const computed = new Set;
     const readonly = new Set;
-    const bound2 = new Set;
+    const bound = new Set;
     for (const { name, kind } of ambient) {
       if (kind === "state" || kind === "computed")
         reactive.add(name);
       else
-        bound2.add(name);
+        bound.add(name);
       if (kind === "computed")
         computed.add(name);
       if (kind === "readonly")
         readonly.add(name);
     }
-    emitter.rframes.push({ reactive, computed, bound: bound2, ambientReadonly: readonly });
+    emitter.rframes.push({ reactive, computed, bound, ambientReadonly: readonly });
     emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
   }
   emitter.program(parseResult.sexpr);
@@ -22783,20 +22783,20 @@ declare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly v
   }
   const globalDecls = [];
   if (face === "ts" && isNode(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
-    const IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
     for (const stmt of parseResult.sexpr.slice(1)) {
       if (!isNode(stmt) || stmt[0] !== "??=" || stmt.length !== 3)
         continue;
       const target = stmt[1];
       if (!isNode(target) || target[0] !== "." || target[1] !== "globalThis")
         continue;
-      if (typeof target[2] !== "string" || !IDENT2.test(target[2]))
+      if (typeof target[2] !== "string" || !IDENT.test(target[2]))
         continue;
       const RESERVED = new Set(["null", "undefined", "true", "false", "this"]);
       const v = stmt[2];
       globalDecls.push({
         name: target[2],
-        anchor: typeof v === "string" && IDENT2.test(v) && !RESERVED.has(v) ? v : null
+        anchor: typeof v === "string" && IDENT.test(v) && !RESERVED.has(v) ? v : null
       });
     }
     if (globalDecls.length) {
@@ -22908,7 +22908,7 @@ var emitDeclarations = () => {
   throw new Error("rip: declaration emission is unavailable in the browser");
 };
 
-// src/compile.js
+// src/compiler.js
 class CompileError extends Error {
   constructor(message, { path, start = null, end = null, line = null, col = null } = {}) {
     super(message);
@@ -22990,11 +22990,11 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
 `);
     }
   }
-  const parser2 = Parser();
-  parser2.lexer = makeParserLexer(path, { tolerant });
+  const parser = Parser();
+  parser.lexer = makeParserLexer(path, { tolerant });
   let result;
   try {
-    result = parser2.parse(parseSource, { primitives: face === "ts", tolerant });
+    result = parser.parse(parseSource, { primitives: face === "ts", tolerant });
   } catch (err) {
     if (typeof err.start !== "number")
       throw err;
@@ -23344,8 +23344,8 @@ COERCERS.datetime = COERCERS.date;
 function objectIssue(data) {
   if (data !== null && typeof data === "object" && !Array.isArray(data))
     return null;
-  const kind2 = data === null ? "null" : Array.isArray(data) ? "an array" : "a " + typeof data;
-  return { field: "", error: "object", message: "input must be an object; got " + kind2 };
+  const kind = data === null ? "null" : Array.isArray(data) ? "an array" : "a " + typeof data;
+  return { field: "", error: "object", message: "input must be an object; got " + kind };
 }
 var namedCoercers = new Map;
 function registerCoercer(name, fn, opts) {
@@ -23391,13 +23391,13 @@ function validateValue(v, typeName, opts) {
     const r = subDef._unionResolve(v);
     if (r.issue)
       return { errors: [r.issue] };
-    const res2 = opts?.existing ? r.def._runExistingSync(v, { ...opts, materialize: false, materializeNested: false }) : r.def._runSync(v, { ...opts, materialize: false, materializeNested: false });
-    if (res2.thrown) {
+    const res = opts?.existing ? r.def._runExistingSync(v, { ...opts, materialize: false, materializeNested: false }) : r.def._runSync(v, { ...opts, materialize: false, materializeNested: false });
+    if (res.thrown) {
       if (opts?.derived === "throw")
-        throw res2.thrown;
-      return { errors: [{ field: "", error: "derived", message: res2.thrown?.message || String(res2.thrown) }] };
+        throw res.thrown;
+      return { errors: [{ field: "", error: "derived", message: res.thrown?.message || String(res.thrown) }] };
     }
-    return res2.ok ? { value: res2.value } : { errors: res2.errors };
+    return res.ok ? { value: res.value } : { errors: res.errors };
   }
   if (v === null || typeof v !== "object" || Array.isArray(v)) {
     return { errors: [{ field: "", error: "type", message: "must be a " + typeName + " object" }] };
@@ -23418,13 +23418,13 @@ async function validateValueAsync(v, typeName, opts) {
     const r = subDef._unionResolve(v);
     if (r.issue)
       return { errors: [r.issue] };
-    const res2 = opts?.existing ? await r.def._runExistingAsync(v, { ...opts, materialize: false, materializeNested: false }) : await r.def._runAsync(v, { ...opts, materialize: false, materializeNested: false });
-    if (res2.thrown) {
+    const res = opts?.existing ? await r.def._runExistingAsync(v, { ...opts, materialize: false, materializeNested: false }) : await r.def._runAsync(v, { ...opts, materialize: false, materializeNested: false });
+    if (res.thrown) {
       if (opts?.derived === "throw")
-        throw res2.thrown;
-      return { errors: [{ field: "", error: "derived", message: res2.thrown?.message || String(res2.thrown) }] };
+        throw res.thrown;
+      return { errors: [{ field: "", error: "derived", message: res.thrown?.message || String(res.thrown) }] };
     }
-    return res2.ok ? { value: res2.value } : { errors: res2.errors };
+    return res.ok ? { value: res.value } : { errors: res.errors };
   }
   if (v === null || typeof v !== "object" || Array.isArray(v)) {
     return { errors: [{ field: "", error: "type", message: "must be a " + typeName + " object" }] };
@@ -23512,9 +23512,9 @@ var SchemaRegistry = {
     const entry = this._entries.get(name);
     return entry ? entry.def : null;
   },
-  getKind(name, kind2) {
+  getKind(name, kind) {
     const entry = this._entries.get(name);
-    return entry && entry.kind === kind2 ? entry.def : null;
+    return entry && entry.kind === kind ? entry.def : null;
   },
   has(name) {
     return this._entries.has(name);
@@ -24227,8 +24227,8 @@ class SchemaDef {
       return res.ok ? res : { ...res, from: res.from || r.def };
     }
     if (this.kind === "enum") {
-      const errs2 = this._validateEnum(data, true);
-      return errs2.length ? { ok: false, errors: errs2 } : { ok: true, value: this._materializeEnum(data) };
+      const errs = this._validateEnum(data, true);
+      return errs.length ? { ok: false, errors: errs } : { ok: true, value: this._materializeEnum(data) };
     }
     const objIssue = objectIssue(data);
     if (objIssue)
@@ -27270,19 +27270,19 @@ var writePath = function(proxy, path, value) {
   let parts = pathParts(path);
   let target = proxy;
   for (let index = 0;index < parts.length; index++) {
-    let part2 = parts[index];
-    part2 = resolvePart(part2, target);
+    let part = parts[index];
+    part = resolvePart(part, target);
     if (index === parts.length - 1) {
-      writeLiteral(target, part2, value);
+      writeLiteral(target, part, value);
     } else {
-      nested = readLiteral(target, part2);
+      nested = readLiteral(target, part);
       if (!(nested != null)) {
         nextPart = parts[index + 1];
-        writeLiteral(target, part2, typeof nextPart === "number" ? [] : {});
-        nested = readLiteral(target, part2);
+        writeLiteral(target, part, typeof nextPart === "number" ? [] : {});
+        nested = readLiteral(target, part);
       }
       if (!(nested != null && typeof nested === "object")) {
-        throw new TypeError(`Rip App: cannot write through non-object stash path segment '${part2}'`);
+        throw new TypeError(`Rip App: cannot write through non-object stash path segment '${part}'`);
       }
       target = nested;
     }
@@ -27724,21 +27724,21 @@ function createMutation(fn, opts = {}) {
 // packages/app/timing.rip
 var toFn;
 var wrap2;
-toFn = function(source2) {
-  return typeof source2 === "function" ? source2 : function() {
-    return source2.value;
+toFn = function(source) {
+  return typeof source === "function" ? source : function() {
+    return source.value;
   };
 };
-wrap2 = function(out, source2, disposer) {
+wrap2 = function(out, source, disposer) {
   let obj = { read() {
     return out.read();
   } };
   let descriptor = { get() {
     return out.value;
   } };
-  if (typeof source2 !== "function")
+  if (typeof source !== "function")
     descriptor.set = function(v) {
-      return source2.value = v;
+      return source.value = v;
     };
   Object.defineProperty(obj, "value", descriptor);
   obj.dispose = function() {
@@ -27746,8 +27746,8 @@ wrap2 = function(out, source2, disposer) {
   };
   return obj;
 };
-function delay(ms, source2) {
-  let fn = toFn(source2);
+function delay(ms, source) {
+  let fn = toFn(source);
   let out = __state(!!fn());
   let eff = __effect(function() {
     let t;
@@ -27764,10 +27764,10 @@ function delay(ms, source2) {
     out.value = false;
     return;
   });
-  return wrap2(out, source2, eff);
+  return wrap2(out, source, eff);
 }
-function debounce(ms, source2) {
-  let fn = toFn(source2);
+function debounce(ms, source) {
+  let fn = toFn(source);
   let out = __state(fn());
   let eff = __effect(function() {
     let val = fn();
@@ -27778,10 +27778,10 @@ function debounce(ms, source2) {
       return clearTimeout(t);
     };
   });
-  return wrap2(out, source2, eff);
+  return wrap2(out, source, eff);
 }
-function throttle(ms, source2) {
-  let fn = toFn(source2);
+function throttle(ms, source) {
+  let fn = toFn(source);
   let out = __state(fn());
   let last = 0;
   let eff = __effect(function() {
@@ -27801,10 +27801,10 @@ function throttle(ms, source2) {
       return clearTimeout(t);
     };
   });
-  return wrap2(out, source2, eff);
+  return wrap2(out, source, eff);
 }
-function hold(ms, source2) {
-  let fn = toFn(source2);
+function hold(ms, source) {
+  let fn = toFn(source);
   let out = __state(!!fn());
   let eff = __effect(function() {
     if (fn()) {
@@ -27820,7 +27820,7 @@ function hold(ms, source2) {
       return clearTimeout(t);
     };
   });
-  return wrap2(out, source2, eff);
+  return wrap2(out, source, eff);
 }
 // packages/app/components.rip
 var validContent;
@@ -27936,14 +27936,14 @@ function createComponents() {
       if (!(sources != null && typeof sources === "object" && !Array.isArray(sources))) {
         throw new TypeError("Rip App: component load expects a source object");
       }
-      for (let path2 in sources) {
-        if (!Object.hasOwn(sources, path2))
+      for (let path in sources) {
+        if (!Object.hasOwn(sources, path))
           continue;
-        let content2 = sources[path2];
-        path2 = validPath(path2);
-        content2 = validContent(content2);
-        files.set(path2, content2);
-        compiled.delete(path2);
+        let content = sources[path];
+        path = validPath(path);
+        content = validContent(content);
+        files.set(path, content);
+        compiled.delete(path);
       }
       return;
     },
@@ -28569,7 +28569,7 @@ function createRouter(opts) {
       unwatchScroll = adapter.scroll?.watch?.(saveScroll) ?? null;
       return router;
     },
-    push(url, opts2 = {}) {
+    push(url, opts = {}) {
       guardLoop();
       let { path, query, hash } = splitUrl(url);
       let hit = land(path);
@@ -28580,11 +28580,11 @@ function createRouter(opts) {
       adapter.replace(adapter.read(), { ...state, __ripScroll: position });
       adapter.push(externalFor(url), null);
       commit(hit, path, query, hash);
-      if (!opts2.noScroll)
+      if (!opts.noScroll)
         adapter.scroll?.top?.();
       return true;
     },
-    replace(url, opts2 = {}) {
+    replace(url, opts = {}) {
       guardLoop();
       let { path, query, hash } = splitUrl(url);
       let hit = land(path);
@@ -28593,7 +28593,7 @@ function createRouter(opts) {
       let state = adapter.readState?.() ?? {};
       adapter.replace(externalFor(url), { ...state, __ripScroll: null });
       commit(hit, path, query, hash);
-      if (!opts2.noScroll)
+      if (!opts.noScroll)
         adapter.scroll?.top?.();
       return true;
     },
@@ -28962,8 +28962,8 @@ function createRenderer(opts) {
     let jobs = gateJobs(entries, params, query);
     let results = await Promise.allSettled((() => {
       const result1 = [];
-      for (let job2 of jobs) {
-        result1.push(job2.cell.ensure());
+      for (let job of jobs) {
+        result1.push(job.cell.ensure());
       }
       return result1;
     })());
@@ -29180,9 +29180,9 @@ function createRenderer(opts) {
       }
       handler = null;
       for (let _i = built.length - 1;_i >= 0; _i--) {
-        let instance2 = built[_i];
-        if (typeof instance2.onError === "function") {
-          handler = instance2;
+        let instance = built[_i];
+        if (typeof instance.onError === "function") {
+          handler = instance;
           break;
         }
       }
@@ -29331,9 +29331,9 @@ function createRenderer(opts) {
       if (keepPrefix)
         claimSlot(entries[firstNew], into);
       commitStaging(staging, into);
-      for (let instance2 of built) {
-        if (instance2._target?.nodeType === 11)
-          instance2._target = null;
+      for (let instance of built) {
+        if (instance._target?.nodeType === 11)
+          instance._target = null;
       }
     } catch (error) {
       cleanup(built);
@@ -29516,8 +29516,8 @@ function createRenderer(opts) {
       return "noop";
     let layoutFiles = info.layouts ?? info.route.layouts ?? [];
     let chain = [...layoutFiles, info.route.file];
-    let routeMounted = sameChain(chain, mountedEntries.map(function(entry2) {
-      return entry2.file;
+    let routeMounted = sameChain(chain, mountedEntries.map(function(entry) {
+      return entry.file;
     }));
     let snap = __hmrSnapshotUi();
     try {
@@ -29566,8 +29566,8 @@ function createRenderer(opts) {
     try {
       await mount(info, candidate);
       for (let keep of migrateKeep) {
-        next = mountedEntries.find(function(entry2) {
-          return entry2.file === keep.file && entry2.instance != null;
+        next = mountedEntries.find(function(entry) {
+          return entry.file === keep.file && entry.instance != null;
         });
         if (!(next?.instance != null))
           continue;
@@ -30242,21 +30242,21 @@ prepared = function(state) {
   let sources = new Map;
   let compiled = new Map;
   const _ref = state.sources;
-  for (let path2 in _ref) {
-    if (!Object.hasOwn(_ref, path2))
+  for (let path in _ref) {
+    if (!Object.hasOwn(_ref, path))
       continue;
-    let source2 = _ref[path2];
-    sources.set(validPath2(path2), validContent2(source2));
+    let source = _ref[path];
+    sources.set(validPath2(path), validContent2(source));
   }
   const _ref1 = state.compiled;
-  for (let path2 in _ref1) {
-    if (!Object.hasOwn(_ref1, path2))
+  for (let path in _ref1) {
+    if (!Object.hasOwn(_ref1, path))
       continue;
-    let module = _ref1[path2];
-    path2 = validPath2(path2);
-    if (!sources.has(path2))
-      throw new Error(`Rip Workspace: compiled module '${path2}' has no source`);
-    compiled.set(path2, validModule(module));
+    let module = _ref1[path];
+    path = validPath2(path);
+    if (!sources.has(path))
+      throw new Error(`Rip Workspace: compiled module '${path}' has no source`);
+    compiled.set(path, validModule(module));
   }
   return { hash, sources, compiled };
 };
@@ -30699,12 +30699,12 @@ function connectFeed(client, opts = {}) {
   let schedule = function() {
     if (closed || failed || reconnectTimer != null)
       return;
-    let delay2 = Math.min(backoffMin * 2 ** attempts, backoffMax);
+    let delay = Math.min(backoffMin * 2 ** attempts, backoffMax);
     attempts += 1;
     reconnectTimer = setTimeout(function() {
       reconnectTimer = null;
       return connect();
-    }, delay2);
+    }, delay);
     return;
   };
   connect = function() {
@@ -30846,27 +30846,27 @@ function createApply(opts) {
     }
     let css = (() => {
       const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && p2.endsWith(".css")) {
-          result.push(p2);
+      for (let p of paths) {
+        if (typeof p === "string" && p.endsWith(".css")) {
+          result.push(p);
         }
       }
       return result;
     })();
     let rip = (() => {
       const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && p2.endsWith(".rip")) {
-          result.push(p2);
+      for (let p of paths) {
+        if (typeof p === "string" && p.endsWith(".rip")) {
+          result.push(p);
         }
       }
       return result;
     })();
     let ordinary = (() => {
       const result = [];
-      for (let p2 of paths) {
-        if (typeof p2 === "string" && !p2.endsWith(".rip") && !p2.endsWith(".css")) {
-          result.push(p2);
+      for (let p of paths) {
+        if (typeof p === "string" && !p.endsWith(".rip") && !p.endsWith(".css")) {
+          result.push(p);
         }
       }
       return result;
@@ -30966,8 +30966,8 @@ var sha256 = function(input) {
   }
   let digest = new Uint8Array(32);
   let out = new DataView(digest.buffer);
-  for (let i2 = 0;i2 < 8; i2++) {
-    out.setUint32(i2 * 4, H[i2], false);
+  for (let i = 0;i < 8; i++) {
+    out.setUint32(i * 4, H[i], false);
   }
   return digest;
 };
@@ -31056,11 +31056,11 @@ var currentRouter = function() {
 
 // src/browser.js
 var { __hmrEmit: __hmrEmit2 } = exports_components;
-function compile3(source2, options = {}) {
+function compile3(source, options = {}) {
   if (options.face === "ts") {
     throw new Error("rip: TypeScript face is unavailable in the browser");
   }
-  return compile(source2, { ...options, face: "js" });
+  return compile(source, { ...options, face: "js" });
 }
 var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
 var runtimes = Object.freeze({
@@ -31102,7 +31102,7 @@ var toObjectUrl = (code) => {
 };
 function createModuleLoaderImpl({
   components: registry,
-  embeddedPackages: embeddedPackages2 = {},
+  embeddedPackages = {},
   debug = false,
   hmr = false
 } = {}) {
@@ -31179,10 +31179,10 @@ function createModuleLoaderImpl({
       if (inBundle(spec))
         return { path: spec };
       const packageName = `rip/${bare[1]}`;
-      const embedded = embeddedPackages2[spec];
+      const embedded = embeddedPackages[spec];
       if (embedded)
         return { bridge: `package:${spec}`, namespace: embedded };
-      if (embeddedPackages2[packageName]) {
+      if (embeddedPackages[packageName]) {
         throw new Error(`rip: '${from}' imports '${spec}', which '${packageName}' does not export in the browser`);
       }
       const sub = bare[2] ? bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip` : "index.rip";
@@ -31201,11 +31201,11 @@ function createModuleLoaderImpl({
     if (urls.has(path))
       return urls.get(path);
     const promise = (async () => {
-      const source2 = registry.read(path);
-      if (source2 === undefined) {
+      const source = registry.read(path);
+      if (source === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile3(source2, {
+      const compiled = compile3(source, {
         path,
         runtimeDelivery: "import",
         browserModule: true,
@@ -31383,18 +31383,18 @@ async function processRipScripts(host = null) {
     h.report?.(error);
   };
   const loaded = [];
-  for (const source2 of sources) {
-    if (source2.text !== null) {
-      loaded.push(source2);
+  for (const source of sources) {
+    if (source.text !== null) {
+      loaded.push(source);
       continue;
     }
     if (typeof h.fetchText !== "function") {
       throw new Error("rip: this host loads script sources by URL but provides no fetchText");
     }
     try {
-      loaded.push({ ...source2, text: await h.fetchText(source2.url) });
+      loaded.push({ ...source, text: await h.fetchText(source.url) });
     } catch (error) {
-      report(source2.label, new Error(`rip: failed to load '${source2.label}': ${error.message}`));
+      report(source.label, new Error(`rip: failed to load '${source.label}': ${error.message}`));
     }
   }
   let active = loaded;
@@ -31403,10 +31403,10 @@ async function processRipScripts(host = null) {
     const offsets = [];
     let line = 1;
     const parts = [];
-    for (const source2 of active) {
-      offsets.push({ source: source2, start: line });
-      const text = source2.text.endsWith(`
-`) ? source2.text.slice(0, -1) : source2.text;
+    for (const source of active) {
+      offsets.push({ source, start: line });
+      const text = source.text.endsWith(`
+`) ? source.text.slice(0, -1) : source.text;
       parts.push(text);
       line += text.split(`
 `).length;
@@ -31427,7 +31427,7 @@ async function processRipScripts(host = null) {
       framed.line = local;
       framed.col = error.col;
       report(owner.source.label, framed);
-      active = active.filter((source2) => source2 !== owner.source);
+      active = active.filter((source) => source !== owner.source);
       compiled = null;
     }
   }
@@ -31474,7 +31474,7 @@ var failurePath = (error) => {
     return error.file;
   return null;
 };
-function showHmrOverlay(kind2, error) {
+function showHmrOverlay(kind, error) {
   if (typeof document === "undefined" || typeof document.createElement !== "function")
     return null;
   const root = document.body || document.documentElement;
@@ -31482,7 +31482,7 @@ function showHmrOverlay(kind2, error) {
     return null;
   clearHmrOverlay();
   const card = document.createElement("div");
-  card.setAttribute(ATTR, kind2 || "compile");
+  card.setAttribute(ATTR, kind || "compile");
   card.setAttribute("role", "alert");
   card.style.cssText = [
     "position:fixed",
@@ -31510,7 +31510,7 @@ function showHmrOverlay(kind2, error) {
     "white-space:pre-wrap",
     "overflow-wrap:anywhere"
   ].join(";");
-  const title = kind2 === "activate" ? "Rip: update failed to activate" : "Rip: update failed to compile";
+  const title = kind === "activate" ? "Rip: update failed to activate" : "Rip: update failed to compile";
   const path = failurePath(error);
   const header = path ? `${title}
 ${path}
@@ -31553,7 +31553,7 @@ ${path}
   root.appendChild(card);
   overlayEl = card;
   __hmrEmit2("reject", {
-    kind: kind2 || "compile",
+    kind: kind || "compile",
     path: failurePath(error),
     message: failureText(error).slice(0, 500)
   });
@@ -31892,11 +31892,11 @@ function createModuleLoader(options = {}) {
     embeddedPackages: { ...embeddedPackages, ...options.embeddedPackages }
   });
 }
-function compileToJS(source2, options = {}) {
+function compileToJS(source, options = {}) {
   if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
     throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
   }
-  return compile3(source2, { ...options, runtimeDelivery: "none" });
+  return compile3(source, { ...options, runtimeDelivery: "none" });
 }
 export {
   exports_app as app,

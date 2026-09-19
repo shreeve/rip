@@ -21,7 +21,7 @@
 import { test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 import { describeExtended, EXTENDED } from '../../support/extended.js';
 import { tscBatch } from '../../support/tscbatch.js';
 import { resolveTsc } from '../../support/tsc.js';

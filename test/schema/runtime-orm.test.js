@@ -270,6 +270,28 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.calls[2].params).toEqual(['{"name":"Bob"}', 2, 1]);
   });
 
+  // A value comes back from a variant field exactly as it went in, so a
+  // scalar is written as its JSON: a string as a JSON string, never as
+  // text for the cast to parse. A json column still takes a string as
+  // the JSON text it already is.
+  test('variant: a scalar is written as its JSON; a json column takes a string as text', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1]));
+      const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json')));
+      await Doc.create({ meta: 'Ada', raw: '{"name":"Ada"}' });
+      await Doc.create({ meta: 42, raw: { name: 'Bob' } });
+      await Doc.create({ meta: true, raw: '1' });
+      await Doc.create({ meta: ['a', 1], raw: [] });
+      return null;
+    });
+    expect(r.calls.map((c) => c.params)).toEqual([
+      ['"Ada"', '{"name":"Ada"}'],
+      ['42', '{"name":"Bob"}'],
+      ['true', '1'],
+      ['["a",1]', '[]'],
+    ]);
+  });
+
   test('order: structured forms quote and validate; the string form stays verbatim', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT \* FROM "users"/, rows(['id'], [1]));

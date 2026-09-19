@@ -1,7 +1,7 @@
 // HMR metadata emission and signature classification.
 // Compiler-owned __hmrId/__hmrSig when hmr:true; absent when off.
 import { describe, expect, test } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import {
   __Component,
   __hmrClassify,

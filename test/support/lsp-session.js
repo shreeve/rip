@@ -23,6 +23,12 @@ const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The server's keystroke debounce (RIP_LSP_DEBOUNCE_MS; 100 ms for an
+// editor). Every open/change here pays it once before the refresh runs,
+// so the sessions run it short; askWhileTyping still lands inside it,
+// and settleDocument's flush is what answers there, at any width.
+const DEBOUNCE_MS = 10;
+
 // Start a server over a temp workspace laid out from `files`
 // ({ 'app.rip': '…', 'package.json': '…' }). A tsconfig.json is copied in
 // unless the caller supplies one, matching what the runner does.
@@ -35,6 +41,11 @@ export async function openSession(files) {
   const pubs = new Map();
   const seen = new Map();
   const versions = new Map();
+  // The ORDER of arrivals across both streams: a settle line is only an
+  // answer to the publication it followed.
+  let seq = 0;
+  const pubSeqs = new Map();    // uri → seq of each publication, in order
+  const settledSeq = new Map(); // `<uri> v<n>` → seq of its latest settle line
 
   for (const [name, text] of Object.entries(files)) {
     const p = path.join(dir, name);
@@ -48,15 +59,26 @@ export async function openSession(files) {
   const logs = [];
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     cwd: path.join(ROOT, 'packages/vscode'),
+    env: { ...process.env, RIP_LSP_DEBOUNCE_MS: String(DEBOUNCE_MS) },
     onNotification: (m, p) => {
       // The server's own log stream. It is where a brokered surface says
       // WHY it declined — a dropped code action names itself and its
       // reason — so a test that only sees the empty result cannot tell a
       // refusal from an absence.
-      if (m === 'window/logMessage') { logs.push(p.message ?? ''); return; }
+      if (m === 'window/logMessage') {
+        const message = p.message ?? '';
+        logs.push(message);
+        // `[rip] settled <uri> v<n>`: the refresh's last publish for that
+        // buffer version is on the wire — diagnostics() reads it below.
+        const settled = /^\[rip\] settled (\S+ v\d+)$/.exec(message);
+        if (settled) settledSeq.set(settled[1], ++seq);
+        return;
+      }
       if (m !== 'textDocument/publishDiagnostics') return;
       diags.set(p.uri, p.diagnostics);
       pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
+      if (!pubSeqs.has(p.uri)) pubSeqs.set(p.uri, []);
+      pubSeqs.get(p.uri).push(++seq);
     },
   });
   // Capture what the server asks the CLIENT to watch. This matters: a
@@ -125,8 +147,8 @@ export async function openSession(files) {
       });
     },
 
-    // Wait for a diagnostics publication for `name`, then settle, and return
-    // what was published.
+    // Wait for a diagnostics publication for `name`, then for the settle
+    // line that follows it, and return what was published.
     //
     // THROWS if nothing is published within the window. This is the whole
     // point: an empty publication ("the server looked and found nothing") and
@@ -145,7 +167,7 @@ export async function openSession(files) {
     // long a caller is willing to wait are independent, and tying them means a
     // change to `every` silently rescales every caller's timeout — a re-govern
     // that needs 15s gets 3.75s and reports the server never answered.
-    async diagnostics(name, { settle = 150, timeout = 8000, every = 25 } = {}) {
+    async diagnostics(name, { timeout = 8000, every = 25 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
       const deadline = Date.now() + timeout;
@@ -166,22 +188,31 @@ export async function openSession(files) {
               'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
-      // Then let a burst finish: return once the count has held still for
-      // `settle`, rather than after `settle` regardless of what is in
-      // flight — an intermediate publication must not decide the answer.
-      let quiet = 0;
-      while (quiet < settle && Date.now() < deadline + settle) {
-        const at = pubs.get(u);
+      // Then let the burst finish — an intermediate publication must not
+      // decide the answer. The server announces `[rip] settled <uri> v<n>`
+      // after the LAST publish a refresh owes (the merged set, and the
+      // post-probe re-publish when a pin probe ran), so a settle line
+      // newer than that publication ends the wait. None by the deadline
+      // THROWS: a renamed line reads as red, never as slow. A publication
+      // with no refresh behind it — a cross-file re-pull — announces
+      // nothing; diagnosticsUntil() reads those.
+      const key = `${u} v${versions.get(name) ?? 1}`;
+      const at = pubSeqs.get(u)[want - 1];
+      while ((settledSeq.get(key) ?? -1) < at) {
+        if (Date.now() >= deadline) {
+          throw new Error(`no '[rip] settled ${key}' line after publication #${want} for ${name} within ${timeout / 1000}s`);
+        }
         await sleep(every);
-        quiet = pubs.get(u) === at ? quiet + every : 0;
       }
       seen.set(u, pubs.get(u) ?? 0);
       return diags.get(u) ?? [];
     },
 
     // Wait until `pred(payload)` holds for `name`, reading every NEW
-    // publication as it lands. For callers asserting a STATE the server
-    // must reach — a config re-govern that lands in waves (watched-file
+    // publication as it lands. For a publication no refresh announces (a
+    // cross-file re-pull: `() => true` after forget()), and for callers
+    // asserting a STATE the server must reach — a config re-govern that
+    // lands in waves (watched-file
     // forward, an early re-pull, the regenerated floor, the real
     // re-pull) — where `diagnostics()` would accept whichever wave
     // published first and read a pre-re-govern snapshot as the answer
@@ -250,7 +281,7 @@ export async function openSession(files) {
     // "the open doc was re-governed" observable.
     // Drops the counters with the payload: a later read then waits for the
     // first publication AFTER this point, which is what forgetting means.
-    forget(name) { const u = uri(name); diags.delete(u); pubs.delete(u); seen.delete(u); },
+    forget(name) { const u = uri(name); diags.delete(u); pubs.delete(u); pubSeqs.delete(u); seen.delete(u); },
 
     codes: (ds) => ds.map((d) => d.code),
 

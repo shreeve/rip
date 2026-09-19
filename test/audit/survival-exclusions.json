@@ -11,7 +11,8 @@
     "95:20:alpha": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `keyName`'s hoist widens it from 'alpha' to string, degrading `dynamic`'s computed key to an index signature — the member read loses its symbol (probe-verified: a const key tokens)"
   },
   "07-exceptions.rip": {
-    "22:40:length": "member read on `message`, which hovers `any` (verified 2026-08-03) — no symbol, no token; tsgo behaves identically on hand-written TS"
+    "22:40:length": "member read on `message`, which hovers `any` (verified 2026-08-03) — no symbol, no token; tsgo behaves identically on hand-written TS",
+    "138:46:message": "member read on `error`, bound by an annotated `catch error: any` — a member of `any` has no symbol, no token; tsgo behaves identically on hand-written TS"
   },
   "08-functions.rip": {
     "147:33:json": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `FORMATS` is a hoisted evolving `let`; inside a closure the classifier does not flow-type the capture, so the member carries no token (probe-verified on the face's exact shape)",

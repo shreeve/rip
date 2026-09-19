@@ -18,7 +18,7 @@
 //   bun scripts/fuzz-tsface.mjs <seed>
 // to print the program, its face, and the recorded regions.
 import { test, expect } from 'bun:test';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 import { stripFace } from '../../../src/emitter.js';
 import { describeExtended, EXTENDED } from '../../support/extended.js';
 import { tscBatch } from '../../support/tscbatch.js';

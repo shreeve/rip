@@ -70,10 +70,18 @@ export announceCarried! =
 -> console.log('announce carried ran')
 export announceDropped! =
   -> console.log('announce indented ran')
+export flush! =! -> console.log('flush ran')
+export flushCarried! =!
+-> console.log('flush carried ran')
+export flushDropped! =!
+  -> console.log('flush indented ran')
 
 announce()
 announceCarried()
 announceDropped()
+flush()
+flushCarried()
+flushDropped()
 console.log('bindings:', plainFlag, carriedFlag, droppedFlag, typedFlag, typedCarried, typedDropped)
 
 # ── local export lists: empty, single, aliased pairs, and both layouts ──

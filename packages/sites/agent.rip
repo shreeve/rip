@@ -71,6 +71,11 @@ managerEnv = ->
     env[key] = process.env[key] if key.startsWith 'LC_'
   env
 
+# The agent's clocks. Production runs the defaults; the appliance suite
+# sets these lower so a test that must watch a clock run out (idle exit,
+# the superseded-agent tick) waits milliseconds, not seconds.
+TICK_MS = Number(process.env.RIP_AGENT_TICK_MS) or 2000
+
 # Probe verdicts ride the agent's OWN event loop: AbortSignal.timeout
 # is wall-clock, so with every core busy a healthy peer's reply sits
 # unread past a tight deadline and reads as dead (observed in the field:
@@ -577,7 +582,7 @@ try
   setInterval (->
     reconcile()
     maybeExitIdle()
-  ), 2000
+  ), TICK_MS
 catch error
   release()
   throw error

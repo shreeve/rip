@@ -89,9 +89,12 @@ test! 'App edits preserve workers and valid API candidates swap through the door
     eq updates.length, 0
     eq ((unixFetch!('/version', first)).json!), { version: 'one' }
 
+    # The candidate boots slowly on purpose: the next save has to land
+    # while the ring is still booting 'two', so that 'three' is what the
+    # ring ends up serving.
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from 'rip/sites'
-    sleep! 1000
+    sleep! 300
     get '/version' -> { version: 'two' }
     start!
     """
@@ -529,9 +532,11 @@ test! 'API-only watch swaps workers without App Hub publication', ->
     eq messages.length, 0
     eq updates.length, 0
 
+    # A slow boot keeps the ring in flight long enough to prove it answers
+    # only once the candidate is ready.
     writeFileSync join(project, 'index.rip'), """
     import { get, start } from 'rip/sites'
-    sleep! 1000
+    sleep! 300
     get '/version' -> { version: 'two' }
     start!
     """
@@ -687,16 +692,19 @@ test! 'static edits ding /assets with URL paths: every edit once per burst, neve
     writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>three</h1>'
     writeFileSync join(project, 'public', 'style.css'), 'body { color: red }'
     writeFileSync join(project, 'pods', 'acme', 'public', 'deep.css'), 'em { color: blue }'
-    waitFor! -> touched().length > 0
-    sleep! 400
+    # Wait for the PATHS, not a duration: a split burst lands its rest
+    # within one more trailing window, so a short settle after the last
+    # expected path still catches a stray frame that names one twice.
+    waitFor! -> dinged().length is 3
+    sleep! 150
     ok wellFormed(), 'every frame dings /assets, naming each path once'
     eq dinged(), ['/deep.css', '/docs/api.html', '/style.css']
 
     # A later burst is its own frame; paths are URL paths, no content ever.
     settled = touched().length
     writeFileSync join(project, 'public', 'docs', 'api.html'), '<h1>four</h1>'
-    waitFor! -> touched().length > settled
-    sleep! 400
+    waitFor! -> dinged(settled).length is 1
+    sleep! 150
     ok wellFormed(settled), 'the later burst dings /assets, naming each path once'
     eq dinged(settled), ['/docs/api.html']
 
@@ -767,7 +775,9 @@ test! 'a lost registration re-registers before the frame; a refused hub warns on
     waitFor! -> diagnostic.text.includes 'Janus refused the change publish (409: no site of this app has a hub); frames are dropped until the app registers again'
     attempts = publishes.length
     edit 'Four'
-    sleep! 700
+    # Past the 250ms burst cap plus a small App build: a frame that was
+    # going to be attempted has been by now.
+    sleep! 400
     eq publishes.length, attempts
     eq diagnostic.text.split('Janus refused the change publish').length, 2
 

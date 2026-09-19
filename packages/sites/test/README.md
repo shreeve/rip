@@ -19,7 +19,10 @@ Order:
 10. `monitor` — Janus access protocol, framing, formatting, and foreground output.
 11. `appliance` — `sites.json` catalog, edge-scoped control, unified
     `rip sites` lifecycle (no separate edge/site CLIs).
-12. `janus` — the released Janus data plane and control plane.
+12. `appliance-control` — the control agent as a process: socket
+    ownership, outages, one writer under concurrent clients, and the CLI
+    surfaces that never boot it (shares `appliance/support.rip`).
+13. `janus` — the released Janus data plane and control plane.
 
 Code enters `rip/sites` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.

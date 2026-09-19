@@ -806,7 +806,7 @@
         "why": "nothing resolves, so nothing answers — the gradual fixture holds exactly this case"
       },
       {
-        "line": 14,
+        "line": 11,
         "character": 12,
         "token": "pad",
         "expect": null,

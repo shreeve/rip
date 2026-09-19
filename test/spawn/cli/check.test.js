@@ -8,6 +8,12 @@
 // The type cases need tsgo (they assert TS diagnostics), so they ride
 // the EXTENDED tier alongside strict-modes.test.js. The argv/usage cases
 // touch no server and stay always-on.
+//
+// Every case builds its own workspace and shares nothing, so the
+// describes run CONCURRENT: `bun test` schedules files across workers
+// but the tests inside a file one after another, and 200 spawns in
+// series would be the longest file in the repository by far. `await check()`
+// holds one of SLOTS so the tsgo processes never pile up past the machine.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
@@ -96,9 +102,21 @@ function freshProject({ withTypes = true } = {}) {
   return dir;
 }
 
-function check(dir, args = []) {
-  const r = spawnSync('bun', [BIN, 'check', ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000 });
-  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
+// One `rip check` over `dir`, awaited. At most SLOTS run at once.
+const SLOTS = 6;
+let running = 0;
+const waiting = [];
+async function check(dir, args = []) {
+  if (running >= SLOTS) await new Promise((r) => waiting.push(r));
+  running++;
+  try {
+    const p = Bun.spawn(['bun', BIN, 'check', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe', timeout: 60_000 });
+    const [stdout, stderr, status] = await Promise.all([p.stdout.text(), p.stderr.text(), p.exited]);
+    return { stdout, stderr, status };
+  } finally {
+    running--;
+    waiting.shift()?.();
+  }
 }
 
 // Mode-000 `file` for the duration of fn(). Returns false WITHOUT running
@@ -106,18 +124,18 @@ function check(dir, args = []) {
 // anyway — callers bail, the scenario cannot exist there. The restore
 // lives here so no failure path leaves an unreadable file for the
 // caller's cleanup rmSync to trip on.
-function withUnreadable(file, fn) {
+async function withUnreadable(file, fn) {
   fs.chmodSync(file, 0o000);
   try {
     try { fs.readFileSync(file, 'utf8'); return false; } catch { /* unreadable, as intended */ }
-    fn();
+    await fn();
     return true;
   } finally {
     try { fs.chmodSync(file, 0o644); } catch { /* gone with the fixture */ }
   }
 }
 
-describe('rip check: usage surface (no server)', () => {
+describe.concurrent('rip check: usage surface (no server)', () => {
   test('--help prints usage and exits 0', () => {
     const r = spawnSync('bun', [BIN, 'check', '--help'], { encoding: 'utf8' });
     expect(r.status).toBe(0);
@@ -125,10 +143,10 @@ describe('rip check: usage surface (no server)', () => {
     expect(r.stdout).toContain('Usage:');
   });
 
-  test('a directory with no .rip files is clean (exit 0)', () => {
+  test('a directory with no .rip files is clean (exit 0)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-empty-'));
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('no .rip files found');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -144,21 +162,21 @@ describe('rip check: usage surface (no server)', () => {
     expect(r.stdout).toMatch(/^rip check build [0-9a-f]+\n  compiler  .+\n  server    .+\n$/);
   });
 
-  test('an unknown flag exits 2', () => {
+  test('an unknown flag exits 2', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-flag-'));
     try {
-      const r = check(dir, ['--nope']);
+      const r = await check(dir, ['--nope']);
       expect(r.status).toBe(2);
       expect(r.stderr).toContain('unknown option');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
-describeExtended('rip check: type diagnostics over the real server', () => {
-  test('a clean file passes (exit 0)', () => {
+describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
+  test('a clean file passes (exit 0)', async () => {
     const dir = workspace({ 'clean.rip': 'add = (a: number, b: number): number -> a + b\nconsole.log add(1, 2)\n' });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -171,10 +189,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // for exactly that reason. The guarantee itself is real and belongs here,
   // where it is asserted rather than assumed: an empty file compiles, checks
   // clean, and reports as a checked file rather than vanishing from the run.
-  test('an empty file is a legal program: compiles, checks clean, and counts as checked', () => {
+  test('an empty file is a legal program: compiles, checks clean, and counts as checked', async () => {
     const dir = workspace({ 'empty.rip': '' });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
       expect(r.stdout).toContain('1 file checked');   // present in the run, not skipped
@@ -184,10 +202,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a type error surfaces at the .rip position and exits 1', () => {
+  test('a type error surfaces at the .rip position and exits 1', async () => {
     const dir = workspace({ 'bad.rip': "n: number = 'oops'\nconsole.log n\n" });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       // Mapped back to the .rip source, not the generated face: 1:1 on `n`.
       expect(r.stdout).toContain('bad.rip:1:1 - error'); // tsc-style header
@@ -195,12 +213,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a satisfies is author type information: its mismatch publishes under gradual, at TypeScript\'s own anchor', () => {
+  test('a satisfies is author type information: its mismatch publishes under gradual, at TypeScript\'s own anchor', async () => {
     // The line carries no annotation token, so only the satisfies opens
     // it; tsc anchors a whole-shape miss on the `satisfies` keyword.
     const dir = workspace({ 'sat.rip': 'type Entry = { href: string, name: string }\nx = { href: "/a" } satisfies Entry\nconsole.log x\n' });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('sat.rip:2:20 - error TS2741');
       expect(r.stdout).not.toContain('hidden in unannotated code');
@@ -212,28 +230,28 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // that inherits from Object.prototype would print the inherited
   // function's source text in its place, and the face stops parsing. The
   // real checker is the only judge of whether the face is valid TS.
-  test('a type member named `constructor` checks clean — the face keeps the name', () => {
+  test('a type member named `constructor` checks clean — the face keeps the name', async () => {
     const dir = workspace({
       'ci.rip': 'type A = Record<string, any> & { constructor: Function & { __hmrId?: string } }\nx: A = {}\nconsole.log x, Object.keys({})\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('an unresolved Unicode type name maps to its exact identifier span', () => {
+  test('an unresolved Unicode type name maps to its exact identifier span', async () => {
     const dir = workspace({ 'unicode.rip': 'type Ω = Ξ\nx: Ω = 1\n' });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([
         [2304, 1, 10, 11],
       ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('the match operator and its regex-index sugar publish nothing', () => {
+  test('the match operator and its regex-index sugar publish nothing', async () => {
     // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
     // face's prelude types toMatchable `(v: any) => string` — RULED: the
     // coercion always answers a string and carries no multi-line guard
@@ -261,7 +279,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('live.rip:1:1 - error TS2322');       // liveness: the checker really reports
       // Nothing anywhere in the match file — not a code, not a line.
@@ -289,7 +307,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // negatives by code and position; this is the CLI's own check, over a
   // workspace with no rip config, plus the strict posture the write half was
   // driven under.
-  test('every component member form checks its initializer, and in-method writes reach the source', () => {
+  test('every component member form checks its initializer, and in-method writes reach the source', async () => {
     const initDir = workspace({
       'member.rip': [
         'export Box = component',
@@ -323,14 +341,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const init = JSON.parse(check(initDir, ['--json']).stdout);
+      const init = JSON.parse((await check(initDir, ['--json'])).stdout);
       // All four member forms, each on its own declaration line, anchored on
       // the member name.
       expect(init.map((d) => [d.code, d.line, d.column])).toEqual([
         [2322, 2, 3], [2322, 3, 3], [2322, 4, 3], [2322, 5, 3],
       ]);
 
-      const writes = JSON.parse(check(writeDir, ['--json']).stdout);
+      const writes = JSON.parse((await check(writeDir, ['--json'])).stdout);
       // State, prop, and plain non-reactive member alike — each anchored on
       // the `@`, the first byte of the source the lowering's `this` stands
       // for. The method body's TS2304 is the liveness pair.
@@ -353,7 +371,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // plain `=` statement and the export path binds elsewhere. Legal rip, so
   // the whole workspace must be silent; the liveness pair is a real error in
   // a third file, which also proves a broken face cannot masquerade as one.
-  test('a multi-statement computed and an exported schema keep the face compiling', () => {
+  test('a multi-statement computed and an exported schema keep the face compiling', async () => {
     const dir = workspace({
       'panel.rip': [
         'Panel = component',
@@ -380,7 +398,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -399,7 +417,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // implicit any. A body-level declaration of the same name still
   // wins — one declaration, or TypeScript reads the pair as duplicate
   // identifiers.
-  test('a constructor body\'s @field assignment declares its field', () => {
+  test('a constructor body\'s @field assignment declares its field', async () => {
     const dir = workspace({
       // Legal, correctly-running rip: every spelling must be silent.
       'box.rip': [
@@ -456,11 +474,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file !== 'live.rip')).toEqual([]);
 
-      const neg = JSON.parse(check(negDir, ['--json']).stdout);
+      const neg = JSON.parse((await check(negDir, ['--json'])).stdout);
       expect(neg.map((d) => [d.code, d.line])).toEqual([
         // Asserted under rip.strict: a negatives fixture asks for every
         // diagnostic, and gradual suppresses the implicit-`this` class the
@@ -489,7 +507,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // wire shape is what a transform exists to absorb. The runtime rejects it
   // on `.parse()`. The two are asserted apart so that a later change to
   // either is visible on its own line.
-  test('a wrong-typed schema default publishes; the transform half stays runtime-only', () => {
+  test('a wrong-typed schema default publishes; the transform half stays runtime-only', async () => {
     const dir = workspace({
       'schema.rip': [
         'Person = schema',
@@ -502,7 +520,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       // TS1360 is what `satisfies` publishes, anchored on the default LITERAL
       // — not on the entry list that encloses it, which is where it lands
@@ -520,7 +538,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // span. The projection's anchored rows and the mapper's requote turn
   // that into one diagnostic PER computed, at the member the author
   // wrote, quoting the member's own name.
-  test('a computed cycle anchors at each involved computed with its own name, not the whole component', () => {
+  test('a computed cycle anchors at each involved computed with its own name, not the whole component', async () => {
     const dir = workspace({
       'cycle.rip': [
         'Badge = component',
@@ -532,7 +550,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line, d.column, d.endColumn])).toEqual([
         [2502, 2, 3, 8],
         [2502, 3, 3, 8],
@@ -549,7 +567,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // diagnostic born inside it — the real copy publishes the same claim
   // at its own position. Without the echo rule each error below
   // reported twice, the duplicate cover-mapped across the whole head.
-  test('one error in a twice-emitted body publishes once — the echo copy is silent', () => {
+  test('one error in a twice-emitted body publishes once — the echo copy is silent', async () => {
     const dir = workspace({
       'comp.rip': [
         "items = ['a', 'b']",
@@ -572,7 +590,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // The component error reports from the REAL _init copy, exactly
       // mapped at the offending line — and only from it.
       expect(diags.filter((d) => d.file === 'comp.rip')
@@ -585,7 +603,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('repeated face manifestations publish one identical source diagnostic', () => {
+  test('repeated face manifestations publish one identical source diagnostic', async () => {
     const dir = workspace({
       'list.rip': [
         'List = component',
@@ -596,7 +614,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line, d.column, d.message])).toEqual([
         [2304, 4, 19, "Cannot find name 'missingList'."],
       ]);
@@ -623,7 +641,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // nothing, and an author's own strictness wins (`nullPosture`,
   // mirror.js). Without it the checker cannot draw the distinction these
   // contracts ride on, in any mode.
-  test('the schema face follows runtime ordering: date defaults admit strings, required [null] publishes, ensures see Partial implicits', () => {
+  test('the schema face follows runtime ordering: date defaults admit strings, required [null] publishes, ensures see Partial implicits', async () => {
     const audit = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
     const dir = workspace({
       'tsconfig.json': JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }),
@@ -648,7 +666,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'ordering.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'landmine.rip').map((d) => d.code).sort()).toEqual([1360, 18048]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -660,7 +678,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // posture subtracts that flag (nullPosture, mirror.js); a chain that
   // states its own strictness is yielded to whole and keeps the
   // unknown.
-  test('gradual catch bindings are not unknown; an author strictness chain keeps them', () => {
+  test('gradual catch bindings are not unknown; an author strictness chain keeps them', async () => {
     const catcher = [
       'export label: (job: () => void) => void = (job) ->',
       '  try',
@@ -674,8 +692,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(strict, 'tsconfig.json'),
       JSON.stringify({ ...audit, compilerOptions: { ...audit.compilerOptions, strictNullChecks: true } }));
     try {
-      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
-      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([18046]);
+      expect(JSON.parse((await check(gradual, ['--json'])).stdout)).toEqual([]);
+      expect(JSON.parse((await check(strict, ['--json'])).stdout).map((d) => d.code)).toEqual([18046]);
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
@@ -688,7 +706,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // :shape — so every algebra call checks clean, INCLUDING Schema.extend
   // taking a mixin argument. The parse surface is refused on the mixin
   // itself: `parse` throws at runtime, so the checker says no first.
-  test('mixin projection algebra checks clean; the mixin parse surface stays refused', () => {
+  test('mixin projection algebra checks clean; the mixin parse surface stays refused', async () => {
     const dir = workspace({
       'algebra.rip': [
         'T = schema :mixin',
@@ -708,7 +726,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'algebra.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'refused.rip').map((d) => d.code)).toEqual([2339]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -725,7 +743,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // sibling package sits outside the mirror and nothing resolves.
   // The gate's ACROSS rule rides the same resolution: the ANNOTATED
   // export carries into the importer, the inferred one stays held.
-  test('a bare workspace .rip specifier resolves; its annotated exports carry, inferred ones stay held', () => {
+  test('a bare workspace .rip specifier resolves; its annotated exports carry, inferred ones stay held', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-ws-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -746,7 +764,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n');
       fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
       fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
-      const diags = JSON.parse(check(dir, ['--json', path.join('packages', 'app')]).stdout);
+      const diags = JSON.parse((await check(dir, ['--json', path.join('packages', 'app')])).stdout);
       // Resolution: no cannot-find-module anywhere, on any of the three
       // import spellings (named, named-unannotated, namespace).
       expect(diags.map((d) => d.code)).not.toContain(2307);
@@ -765,7 +783,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // heading. Composites are shape decisions and a strict project's `any` is
   // a stated one — neither is counted. Advisories never move the exit
   // status.
-  test('the escape-hatch advisories name each `any` annotation, `as any` cast, and `@ts-ignore` in gradual targets', () => {
+  test('the escape-hatch advisories name each `any` annotation, `as any` cast, and `@ts-ignore` in gradual targets', async () => {
     const src = [
       'x: any = 1',                 // annotation: counted
       'ys: any[] = []',             // composite: not counted
@@ -779,7 +797,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const gradual = workspace({ 'a.rip': src });
     const strict = workspace({ 'a.rip': src }, { strict: true });
     try {
-      const r = check(gradual);
+      const r = await check(gradual);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('2 `any` annotations');
       expect(r.stdout).toMatch(/\n  a\.rip:1\n  a\.rip:4\n/);
@@ -787,7 +805,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(r.stdout).toMatch(/cast[^\n]*\n  a\.rip:5\n/);
       expect(r.stdout).toContain('1 `@ts-ignore` directive');
       expect(r.stdout).toMatch(/directive[^\n]*\n  a\.rip:6\n/);
-      const s = check(strict).stdout;
+      const s = (await check(strict)).stdout;
       expect(s).not.toContain('`any` annotation'); expect(s).not.toContain('`as any` cast'); expect(s).not.toContain('`@ts-ignore`');
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
@@ -804,7 +822,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // remedy with no noun sends the user hunting through their own code.
   // Host names (`require`, `process`) are typed by the checkout's
   // `@types/bun` and never reach the advisory.
-  test('the hidden-diagnostics summary: consistent remedies, and the missing declarations are named', () => {
+  test('the hidden-diagnostics summary: consistent remedies, and the missing declarations are named', async () => {
     const dir = workspace({
       'app.rip': [
         'n = 42',
@@ -818,7 +836,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const out = check(dir).stdout;
+      const out = (await check(dir)).stdout;
       expect(out).toMatch(/\d+ diagnostics? hidden in unannotated code — annotate a declaration to check its scope, or set `rip\.strict` in package\.json/);
       expect(out).toMatch(/\d+ annotation diagnostics? hidden — set `rip\.strict` in package\.json to see where annotations are missing/);
       // In the home project the line stays placeless; foreign projects (a
@@ -837,7 +855,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // and the remedy is one `bun add`, where a ledger line often counts a
   // dependency's diagnostics they cannot touch. Colour is TTY-only, so
   // the tier is pinned by ORDER, which is what it means on the page.
-  test('host types apart from the running Bun advise above the ledger; a matching version is silent', () => {
+  test('host types apart from the running Bun advise above the ledger; a matching version is silent', async () => {
     // The installed version is read from the package's own
     // node_modules — written directly here, so the row needs no network
     // and pins nothing about what npm happens to publish.
@@ -853,7 +871,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(matched, 'package.json'),
       JSON.stringify({ name: 'matched', devDependencies: { '@types/bun': Bun.version } }, null, 2));
     try {
-      const out = check(stale).stdout;
+      const out = (await check(stale)).stdout;
       expect(out).toContain('No type errors');          // fires with nothing else reported
       // Both versions named, and which is which — the line is read by
       // someone who does not yet know the two can differ.
@@ -864,7 +882,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(ledger).toBeGreaterThan(-1);
       expect(out.indexOf('does not match the running Bun')).toBeLessThan(ledger);
       // The control: same shape, version agreeing, nothing said.
-      expect(check(matched).stdout).not.toContain('match the running Bun');
+      expect((await check(matched)).stdout).not.toContain('match the running Bun');
     } finally {
       fs.rmSync(stale, { recursive: true, force: true });
       fs.rmSync(matched, { recursive: true, force: true });
@@ -877,7 +895,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // install sends the reader to a package.json that already reads
   // correctly; point at the install and a stale member declaration sends
   // them somewhere that declares nothing. Both, whenever they differ.
-  test('a hoisted install and the member that declared it are both named', () => {
+  test('a hoisted install and the member that declared it are both named', async () => {
     const dir = workspace({
       // The root holds the copy and declares nothing…
       'node_modules/@types/bun/package.json': JSON.stringify({ name: '@types/bun', version: '0.0.1' }) + '\n',
@@ -893,7 +911,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'mono', workspaces: ['app'] }, null, 2));
     try {
-      const out = check(dir).stdout;
+      const out = (await check(dir)).stdout;
       expect(out).toContain(
         `\`@types/bun\` 0.0.1 (installed in ., declared in app) does not match the running Bun ${Bun.version}`,
       );
@@ -910,7 +928,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   //
   // It stops at anything the package does not declare: a class extending
   // `Error` carries Error's whole surface, and a package cannot fix that.
-  test('--public resolves types (inference included), finds nested any with its path, and stops at foreign members', () => {
+  test('--public resolves types (inference included), finds nested any with its path, and stops at foreign members', async () => {
     const clean = workspace({
       'index.rip': [
         'def build(): string',
@@ -943,7 +961,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(leaky, 'package.json'),
       JSON.stringify({ name: 'leaky-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const ok = check(clean, ['--public']);
+      const ok = await check(clean, ['--public']);
       // The whole point: `made` carries no annotation and still counts.
       // A declaration-based audit calls this untyped, which is the answer
       // that gets WORSE as a package improves.
@@ -953,7 +971,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(ok.stdout).toContain('2/2 exports fully typed (100.0%)');
       expect(ok.status).toBe(0);
 
-      const bad = check(leaky, ['--public']);
+      const bad = await check(leaky, ['--public']);
       // The path names the member that leaks, through the type that owns it.
       expect(bad.stdout).toContain('any at: Outer.inner.extra');
       expect(bad.stdout).toMatch(/\u2713 fine/);      // foreign types stay opaque
@@ -970,7 +988,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // statics, never the constructor. So an audit that reads hovers and walks
   // properties calls an unannotated constructor fully typed. Every case
   // here is one a consumer inherits and cannot fix from outside.
-  test('--public opens signatures: constructor and call parameters, returns, and the instance a constructor yields', () => {
+  test('--public opens signatures: constructor and call parameters, returns, and the instance a constructor yields', async () => {
     const dir = workspace({
       'index.rip': [
         'type Opts =',                       // NOT published: no row but `run`'s
@@ -1007,7 +1025,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'sig-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // A construct signature's parameter, on a class that declares no
       // annotated member of its own — nothing about a class's own surface
       // decides whether its constructor is read.
@@ -1038,7 +1056,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // wrong does not misreport a leak — it reports NONE, and the export comes
   // back clean. Neither spelling here carries `export` on the declaration
   // itself, and a class expression has no declared name to carry it on.
-  test('--public treats a type as the package\'s however it is spelled: declared then exported, and a class expression', () => {
+  test('--public treats a type as the package\'s however it is spelled: declared then exported, and a class expression', async () => {
     const dir = workspace({
       'index.rip': [
         'class Late',                       // exported below, not here
@@ -1055,7 +1073,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'own-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: Late.new(seed)');
       expect(out.stdout).toContain('any at: Anon.new(seed)');
       expect(out.stdout).toContain('0/2 exports fully typed (0.0%)');
@@ -1079,7 +1097,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // synthesized from `@name = param` really is the parameter's shadow, but
   // sharing a name is not evidence of it. Both errors run in the
   // under-reporting direction.
-  test('--public counts a position per declaration, and calls a field a shadow only when it is one', () => {
+  test('--public counts a position per declaration, and calls a field a shadow only when it is one', async () => {
     // (a) Three fields, three annotations, one constructor line.
     const many = workspace({
       'package.json': JSON.stringify({ name: '@q6/many', exports: { '.': './index.rip' } }),
@@ -1099,16 +1117,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'index.rip': 'export class Holder\n  constructor: (first) ->\n    @first = first\n',
     });
     try {
-      const a = check(many, ['--public']).stdout;
+      const a = (await check(many, ['--public'])).stdout;
       for (const f of ['alpha', 'beta', 'gamma']) expect(a).toContain(`Holder#${f}`);
       expect(a).toContain('3 positions need a type');
 
-      const b = check(notShadow, ['--public']).stdout;
+      const b = (await check(notShadow, ['--public'])).stdout;
       expect(b).toMatch(/Holder\.new\(first\)/);   // the parameter
       expect(b).toMatch(/Holder#first/);            // AND the field it never fed
       expect(b).toContain('2 positions need a type');
 
-      const c = check(shadow, ['--public']).stdout;
+      const c = (await check(shadow, ['--public'])).stdout;
       expect(c).toMatch(/Holder\.new\(first\)/);
       expect(c).not.toMatch(/Holder#first/);        // one edit, one position
       expect(c).toContain('1 position needs a type');
@@ -1132,7 +1150,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   //
   // The remembering still has to bound the walk. A type that contains
   // itself arrives at itself, and must open a finite number of times.
-  test('--public opens a repeated type once per position, and still ends on a type that contains itself', () => {
+  test('--public opens a repeated type once per position, and still ends on a type that contains itself', async () => {
     // Three arrivals at one `any[]`: a parameter and two properties, each
     // its own annotation to write.
     const repeated = workspace({
@@ -1173,17 +1191,17 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const a = check(repeated, ['--public']).stdout;
+      const a = (await check(repeated, ['--public'])).stdout;
       expect(a).toContain('any at: take(items)[]');
       expect(a).toContain('any at: take(o).first[]');
       expect(a).toContain('any at: take(o).second[]');
       expect(a).toContain('3 positions need a type');
 
-      const b = check(cyclic, ['--public']).stdout;
+      const b = (await check(cyclic, ['--public'])).stdout;
       expect(b).toContain('any at: visit(n).tag');
       expect(b).toContain('1 position needs a type');
 
-      const c = check(overloaded, ['--public']).stdout;
+      const c = (await check(overloaded, ['--public'])).stdout;
       expect(c).toContain('any at: use(f)()[]');
       expect(c).toContain('2 positions need a type');
     } finally {
@@ -1197,13 +1215,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // workspace and breaks for the very consumer this audit speaks for. It is
   // reported rather than skipped, because a manifest that names an entry has
   // named it, and silence would read as a package with no surface.
-  test('--public reports a manifest that publishes from outside the package', () => {
+  test('--public reports a manifest that publishes from outside the package', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ name: '@q4/outside', exports: { '.': '../shared/api.rip' } }),
       'inside.rip': 'export here: number = 1\n',
     });
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/publishes from outside the package/);
       expect(out.stdout).toContain('../shared/api.rip');
       expect(out.stdout).not.toContain('no package publishes');
@@ -1217,7 +1235,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // import invisible, and the identical inherited `any` reports as a clean
   // project. Three spellings, because the star may be preceded by a default
   // binding and the space after it is optional.
-  test('a received `any` is advised through a namespace import, however it is spelled', () => {
+  test('a received `any` is advised through a namespace import, however it is spelled', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-ns-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -1235,12 +1253,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       // The braced form, as a control: this one already worked.
       fs.writeFileSync(app, "import { Session } from '@n/lib'\ns = new Session()\nconsole.log s\n");
-      expect(check(dir, [target]).stdout).toContain('imported from `@n/lib`');
+      expect((await check(dir, [target])).stdout).toContain('imported from `@n/lib`');
 
       // The same leak reached through an alias, in each legal spelling.
       for (const line of ["import * as lib from '@n/lib'", "import *as lib from '@n/lib'"]) {
         fs.writeFileSync(app, `${line}\ns = new lib.Session()\nconsole.log s\n`);
-        const out = check(dir, [target]).stdout;
+        const out = (await check(dir, [target])).stdout;
         expect(out).toContain('imported from `@n/lib`');
         expect(out).toContain('`Session`');
         expect(out).toMatch(/app\.rip:\d+:\d+\s+lib/);   // the alias is where it arrived
@@ -1252,7 +1270,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // could not read what it was asked has not audited a clean surface. Both
   // are the same rule as the rest of this file's exit contract: 0 means
   // checked-and-clean, never couldn't-check.
-  test('--public refuses --json, and will not exit 0 on a run it could not complete', () => {
+  test('--public refuses --json, and will not exit 0 on a run it could not complete', async () => {
     // `secret.rip` is in the ENTRY's closure — the audit reads only what
     // the manifest publishes and what that reaches, so an unreadable file
     // outside the closure is no part of this surface.
@@ -1263,15 +1281,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     });
     try {
       // A clean package is clean.
-      expect(check(dir, ['--public']).status).toBe(0);
+      expect((await check(dir, ['--public'])).status).toBe(0);
       // `--json` is not a form this mode has; say so rather than answer a
       // machine in prose.
-      const json = check(dir, ['--public', '--json']);
+      const json = await check(dir, ['--public', '--json']);
       expect(json.stderr).toContain('--public has no --json form');
       expect(json.status).toBe(2);
       // A file the run cannot read leaves the surface unaudited.
       fs.chmodSync(path.join(dir, 'secret.rip'), 0o000);
-      const blocked = check(dir, ['--public']);
+      const blocked = await check(dir, ['--public']);
       expect(blocked.status).toBe(2);
       fs.chmodSync(path.join(dir, 'secret.rip'), 0o644);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1280,7 +1298,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // Q5 — the walk stops at a member whose type is another published export,
   // because that export has its own row and one edit fixes it there.
   // MEMBERSHIP is the whole question, and two shapes probe what the set is.
-  test('--public stops at a sibling wherever one exists, and reads the set per package', () => {
+  test('--public stops at a sibling wherever one exists, and reads the set per package', async () => {
     // (a) The sibling is a bare TYPE and the position reading it is a
     // value — different sides — and the stop fires all the same. Every row
     // applies one verdict, so `Bag`'s row reports what `Client`'s would;
@@ -1300,14 +1318,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'index.rip': "import { Session } from './s.rip'\nexport class Client\n  session: Session = new Session()\n",
     });
     try {
-      const a = check(typeOnly, ['--public']).stdout;
+      const a = (await check(typeOnly, ['--public'])).stdout;
       expect(a).toMatch(/any at: Bag\.hole/);            // the row that owns the edit
       expect(a).not.toMatch(/at: Client#bag/);           // and only that row
       expect(a).toMatch(/\u21b7 Client/);                 // which is not a clean bill here
       expect(a).toMatch(/reaches `Bag`/);
       expect(a).toContain('0/2 exports fully typed');
 
-      const b = check(twoEntry, ['--public']).stdout;
+      const b = (await check(twoEntry, ['--public'])).stdout;
       expect(b).toContain('0/2 exports fully typed');   // Session owns the work
       expect(b).toMatch(/✗ Session/);
       expect(b).toMatch(/\u21b7 Client/);
@@ -1323,7 +1341,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // published export exactly as a property does, and a name is a name
   // however the type was spelled. Both shapes below put one declaration
   // under several rows, and every row but one has no edit to offer.
-  test('--public stops at a sibling reached through a return, a parameter, or an alias', () => {
+  test('--public stops at a sibling reached through a return, a parameter, or an alias', async () => {
     // (a) One class, three arrivals: `holder` reads it as a property,
     // `makeThing` returns it, `useThing` takes it. Only one of the four may
     // keep the instance's defects, and it is `Thing`'s own row.
@@ -1352,7 +1370,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const printed = (out) => (out.match(/ at: /g) ?? []).length;
     const counted = (out) => Number(out.match(/(\d+) positions? needs? a type/)[1]);
     try {
-      const a = check(returned, ['--public']).stdout;
+      const a = (await check(returned, ['--public'])).stdout;
       expect(a).toMatch(/any at: Thing#val/);            // the row that owns the edit
       expect(a).not.toMatch(/at: makeThing\(\)/);        // and only that row
       expect(a).not.toMatch(/at: useThing\(t\)/);
@@ -1362,7 +1380,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(a).toContain('0/4 exports fully typed');
       expect(printed(a)).toBe(counted(a));
 
-      const b = check(aliased, ['--public']).stdout;
+      const b = (await check(aliased, ['--public'])).stdout;
       expect(b).toMatch(/any at: Box\.val/);              // the alias's own row
       expect(b).not.toMatch(/at: both\./);                // neither member under `both`
       expect(b).toMatch(/\u21b7 both/);
@@ -1378,7 +1396,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // facts about the type and travel with it; the third is not, and a stop
   // that ignores the difference drops a defect no row will ever raise —
   // which is the direction of error that reads as a clean surface.
-  test('--public defers to a sibling only where the sibling\'s row can answer', () => {
+  test('--public defers to a sibling only where the sibling\'s row can answer', async () => {
     // `Empty` carries nothing, and a published alias STATES itself: its own
     // row is clean and has nothing to say about anyone else. Every other
     // position here resolves to it, and each must answer for itself.
@@ -1390,7 +1408,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'export holds: { e: Empty } = { e: ({} as Empty) }'].join('\n') + '\n',
     });
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // A property and a return, each unclaimed, each reached through a
       // sibling that reports nothing.
       expect(out.stdout).toContain('{} at: Box#slot');
@@ -1416,7 +1434,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // deep, and a row two hops from the edit is no cleaner than one hop from
   // it. The count stays a count of EDITS — a deferred row adds no position,
   // because there is nothing to fix there.
-  test('--public counts a row deferring to a defective sibling as untyped, however deep', () => {
+  test('--public counts a row deferring to a defective sibling as untyped, however deep', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ name: '@sib/chain', exports: { '.': './index.rip' } }),
       'index.rip': ['export interface Bag', '  hole: any', '',
@@ -1425,7 +1443,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'export def alone(n: number): string', "  'y'"].join('\n') + '\n',
     });
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // One edit, named once, under the row that has to make it.
       expect(out.stdout).toMatch(/any at: Bag\.hole/);
       expect(out.stdout).toContain('1 position needs a type');
@@ -1450,7 +1468,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // A deferral edge names a SYMBOL. A package publishes from every entry its
   // manifest names, so one name can stand for two declarations, and reading
   // the edge back through the name answers for whichever row was seen last.
-  test('--public resolves a deferral to the declaration it stopped at, not the name', () => {
+  test('--public resolves a deferral to the declaration it stopped at, not the name', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ name: '@sib/dup', exports: { '.': './index.rip', './other': './other.rip' } }),
       // `Bag` here leaks, and `Client` stops at THIS one.
@@ -1461,7 +1479,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'export def fine(b: Bag): string', '  b.ok'].join('\n') + '\n',
     });
     try {
-      const out = check(dir, ['--public']).stdout;
+      const out = (await check(dir, ['--public'])).stdout;
       expect(out).toMatch(/any at: Bag\.hole/);        // the edit, named once
       expect(out).toMatch(/\u21b7 Client/);             // and the row that waits on it
       expect(out).toMatch(/reaches `Bag`/);
@@ -1478,7 +1496,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // A subpath PATTERN is a third thing: real surface, not enumerable from
   // the manifest alone. Under Q3 that is a floor — never "no entries", and
   // never a reason to audit some other file instead.
-  test('--public resolves entries the way the mirror does, and floors what a manifest only patterns', () => {
+  test('--public resolves entries the way the mirror does, and floors what a manifest only patterns', async () => {
     // (a) Conditions pick one target, the way an importing consumer does.
     const conditional = workspace({
       'package.json': JSON.stringify({ name: '@q2a/cond', exports: { '.': { import: './a.rip', require: './b.rip' } } }),
@@ -1497,16 +1515,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'index.rip': 'export def only(x)\n  x\n',
     });
     try {
-      const a = check(conditional, ['--public']).stdout;
+      const a = (await check(conditional, ['--public'])).stdout;
       expect(a).toMatch(/fromImport/);
       expect(a).not.toMatch(/fromRequire/);   // the mirror builds a face for one
 
-      const b = check(patterned, ['--public']);
+      const b = await check(patterned, ['--public']);
       expect(b.stdout).toContain('every count below is a floor');
       expect(b.stdout).not.toMatch(/notPublished/);   // never audit an unpublished file
       expect(b.status).toBe(2);
 
-      const c = check(bare, ['--public']);
+      const c = await check(bare, ['--public']);
       expect(c.stdout).toMatch(/only/);
       expect(c.status).toBe(1);
     } finally {
@@ -1523,7 +1541,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // Every published name appears BY NAME whatever its state — a name that
   // vanishes takes the denominator with it, and a percentage whose
   // denominator moves is not a measure of progress.
-  test('--public tells a clean name from a leaking one from one it never audited', () => {
+  test('--public tells a clean name from a leaking one from one it never audited', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-q3-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -1542,13 +1560,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'index.rip'),
         "export { Session, solid } from '@q3/lib'\nexport def mine(n: number): number\n  n\n");
 
-      const own = check(path.join(dir, 'packages', 'lib'), ['--public']);
+      const own = await check(path.join(dir, 'packages', 'lib'), ['--public']);
       expect(own.stdout).toMatch(/✗ Session/);        // leaking, and it says where
       expect(own.stdout).toMatch(/✓ solid/);          // clean
       expect(own.stdout).toContain('1/2 exports fully typed');
       expect(own.status).toBe(1);
 
-      const fwd = check(path.join(dir, 'packages', 'app'), ['--public']);
+      const fwd = await check(path.join(dir, 'packages', 'app'), ['--public']);
       // All three published names are LISTED, none silently dropped.
       for (const n of ['mine', 'Session', 'solid']) expect(fwd.stdout).toContain(n);
       // The two it cannot audit are marked as such, not scored clean.
@@ -1570,7 +1588,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // mirror image — a rule that floors correctly can invent floors, and a
   // rule that never invents one can miss a dead star hiding beside a live
   // one.
-  test('--public follows each `export *` to its target, and floors only what it could not follow', () => {
+  test('--public follows each `export *` to its target, and floors only what it could not follow', async () => {
     const live = workspace({
       'package.json': JSON.stringify({ name: '@q2/live', exports: { '.': './index.rip' } }),
       'a.rip': 'export def leaf(x)\n  x\n',
@@ -1601,7 +1619,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       // (a) followed: the forwarded name is a row, audited, positioned in
       // the file that declares it — and no floor, because nothing was missed.
-      const a = check(live, ['--public']);
+      const a = await check(live, ['--public']);
       expect(a.stdout).toMatch(/✗ leaf/);
       expect(a.stdout).toMatch(/a\.rip:\d+:\d+\s+any at: leaf\(x\)/);
       expect(a.stdout).toContain('1/2 exports fully typed');
@@ -1609,20 +1627,20 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(a.status).toBe(1);
 
       // (b) unfollowable: a floor, and never a clean bill.
-      const b = check(dead, ['--public']);
+      const b = await check(dead, ['--public']);
       expect(b.stdout).toContain('every count below is a floor');
       expect(b.stdout).not.toContain('exports nothing');
       expect(b.status).toBe(2);
 
       // (c) a dead star does not hide behind a live one.
-      const c = check(mixed, ['--public']);
+      const c = await check(mixed, ['--public']);
       expect(c.stdout).toMatch(/✓ good/);            // the live star is enumerated
       expect(c.stdout).toContain('every count below is a floor');   // the dead one still counts
       expect(c.status).toBe(2);
 
       // (e) stars compose: the names behind a barrel-of-barrels are
       // published too, and are found by following through.
-      const e = check(nestedBarrel, ['--public']);
+      const e = await check(nestedBarrel, ['--public']);
       expect(e.stdout).toMatch(/✗ deep/);
       expect(e.stdout).toMatch(/c\.rip:\d+:\d+\s+any at: deep\(x\)/);
       expect(e.stdout).not.toContain('exports nothing');
@@ -1630,7 +1648,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       // (d) a star whose names are shadowed by direct exports was followed
       // successfully — nothing was missed, so nothing is floored.
-      const d = check(shadowed, ['--public']);
+      const d = await check(shadowed, ['--public']);
       expect(d.stdout).not.toContain('every count below is a floor');
       expect(d.status).toBe(0);
     } finally {
@@ -1647,7 +1665,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // together, because a rule that handles one by special case fails another:
   // an entry BESIDE its package, an entry BELOW it, and a package NESTED
   // inside it. Only "nearest package.json" answers all three at once.
-  test('--public owns a declaration by its nearest package.json, not by directory position', () => {
+  test('--public owns a declaration by its nearest package.json, not by directory position', async () => {
     // (a) The manifest lists a subdirectory entry FIRST. The root entry's
     // own members are still this package's.
     const first = workspace({
@@ -1672,16 +1690,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'index.rip': "import { Helper } from './inner/inner.rip'\nexport outer = { h: Helper }\n",
     });
     try {
-      const a = check(first, ['--public']).stdout;
+      const a = (await check(first, ['--public'])).stdout;
       expect(a).toContain('lib.helper(x)');           // descended into its own member
       expect(a).toContain('1/2 exports fully typed');
 
-      const b = check(spread, ['--public']).stdout;
+      const b = (await check(spread, ['--public'])).stdout;
       expect(b).toContain('api.t');                   // reached a member declared beside the entry
       expect(b).toMatch(/lib\/thing\.rip:\d+:\d+/);  // and named its real position
       expect(b).toContain('0/1 exports fully typed');
 
-      const c = check(nested, ['--public', 'index.rip']).stdout;
+      const c = (await check(nested, ['--public', 'index.rip'])).stdout;
       // The nested package's positions are ITS work, not the parent's.
       expect(c).not.toMatch(/inner\/inner\.rip:\d+:\d+/);
     } finally {
@@ -1689,7 +1707,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  test('--public reports an entry it cannot compile and refuses to exit 0', () => {
+  test('--public reports an entry it cannot compile and refuses to exit 0', async () => {
     const dir = workspace({
       // The entry parses and is refused by the emitter; the sibling
       // compiles, so the run reaches the public pass with one readable file
@@ -1704,7 +1722,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'broken-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).not.toContain('no package publishes a .rip entry here');
       expect(out.status).toBe(1);
@@ -1717,7 +1735,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // compiled: the published entries are read first and become the compile
   // targets. Each case here is a way the old direction — audit what the
   // ordinary check happened to cover — turned the mode's answer wrong.
-  test('--public reads the manifest first: a named entry that is missing is the finding, not an empty run', () => {
+  test('--public reads the manifest first: a named entry that is missing is the finding, not an empty run', async () => {
     // No .rip file exists anywhere, so a file-first walk finds nothing to
     // check and calls the package clean — while its manifest publishes an
     // entry no consumer can resolve.
@@ -1725,14 +1743,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'dangling-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).not.toContain('no .rip files found');
       expect(out.status).toBe(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('--public audits the manifest\'s entries wherever the run was pointed', () => {
+  test('--public audits the manifest\'s entries wherever the run was pointed', async () => {
     // The named file does not import the entry. The audit still answers
     // for the entry, because the manifest is what publishes — an entry
     // outside some other target set is not a defect of the package.
@@ -1743,14 +1761,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'aimed-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public', 'util.rip']);
+      const out = await check(dir, ['--public', 'util.rip']);
       expect(out.stdout).not.toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).toContain('1/1 exports fully typed');
       expect(out.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('--public prints its own report when no entry compiles', () => {
+  test('--public prints its own report when no entry compiles', async () => {
     // The sole entry fails to compile, so nothing reaches the checker.
     // The mode still answers its own question — in place of type-checking,
     // never silently degrading to it.
@@ -1764,13 +1782,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'solo-broken', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.status).toBe(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('--public floors only a pattern that names .rip surface — a null block is an opinion, not a floor', () => {
+  test('--public floors only a pattern that names .rip surface — a null block is an opinion, not a floor', async () => {
     // `"./internal/*": null` is the manifest BLOCKING subpaths, and a
     // non-.rip pattern publishes surface this audit was never for. Neither
     // hides a name a consumer could resolve, so neither may cost the
@@ -1784,13 +1802,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         exports: { '.': './index.rip', './internal/*': null, './styles/*': './styles/*.css' },
       }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).not.toContain('every count below is a floor');
       expect(out.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('--public counts a pattern floor once per package, not once per entry', () => {
+  test('--public counts a pattern floor once per package, not once per entry', async () => {
     // The pattern is a fact about the MANIFEST; a count that rides each
     // entry's row multiplies it by however many entries the package has.
     const dir = workspace({
@@ -1803,7 +1821,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         exports: { '.': './a.rip', './b': './b.rip', './*': './src/*.rip' },
       }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('1 `export *` re-export not enumerated');
       expect(out.status).toBe(2);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1814,7 +1832,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // NAMED and never whether it is found. An audit that stopped short would
   // read cleanest on the surfaces that type deepest, which are the ones a
   // silent stop hides most.
-  test('--public walks a deep chain to its end, however far the any sits', () => {
+  test('--public walks a deep chain to its end, however far the any sits', async () => {
     // A chain 14 links long with the `any` at the bottom. Only the head is
     // published: every link is a link of ONE walk that way, where a
     // published chain is a row per link and each stops at the next, which
@@ -1829,7 +1847,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'deep-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Named at its full path, and counted as the leak it is — no floor
       // stands between the reader and it.
       expect(out.stdout).toContain(`any at: deep${'.next'.repeat(depth)}`);
@@ -1847,7 +1865,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // consumer an `any`, while the type itself is an array or a promise or an
   // object, and every member it exposes belongs to the language. Checking
   // only flags and members passes all three.
-  test('--public reaches an `any` held inside a type: element, type argument, and index value', () => {
+  test('--public reaches an `any` held inside a type: element, type argument, and index value', async () => {
     const dir = workspace({
       'index.rip': [
         'export def arr(): any[]',
@@ -1866,7 +1884,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'held-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: arr()[]');       // array element
       expect(out.stdout).toContain('any at: prom()<0>');     // type argument
       expect(out.stdout).toContain('any at: rec()[]');       // index value
@@ -1883,7 +1901,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // rip source cannot spell a template-literal type; it arises only in
   // generated component code, where the compiler keys its own slot
   // namespace `[key: `_${string}`]: any`.)
-  test('--public reports the value type of a general index signature', () => {
+  test('--public reports the value type of a general index signature', async () => {
     const dir = workspace({
       'index.rip': [
         'export type Open =',
@@ -1899,7 +1917,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'idx-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: open[]');
       expect(out.stdout).toContain('any at: Open[]');
       expect(out.stdout).toMatch(/✓ shut/);
@@ -1916,7 +1934,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // "written here" opens the foreign definition — `BodyInit` expands to
   // include `ReadableStream<any>` — and reports the language's `any` as
   // this package's defect.
-  test('--public does not open a foreign alias that lost its name to strictNullChecks', () => {
+  test('--public does not open a foreign alias that lost its name to strictNullChecks', async () => {
     const dir = workspace({
       'index.rip': [
         'export type Opts =',
@@ -1932,7 +1950,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'nullable-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/✓ send/);
       expect(out.stdout).toMatch(/✓ Opts/);
       // The `any` this package actually wrote is still its own.
@@ -1950,7 +1968,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // meets a compile error until they narrow, which is a guardrail rather
   // than a hole. `never` is none of these: it is the honest return of a
   // function that throws.
-  test('--public reports the unchecked shapes out of a signature, but not a stated width or `never`', () => {
+  test('--public reports the unchecked shapes out of a signature, but not a stated width or `never`', async () => {
     const dir = workspace({
       'index.rip': [
         'export def rAny(): any', '  return 1', '',
@@ -1964,7 +1982,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-out', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/any\s+at: rAny\(\)/);
       expect(out.stdout).toMatch(/Function\s+at: rFunction\(\)/);
       expect(out.stdout).toMatch(/✓ rUnknown/);
@@ -1983,7 +2001,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // parameter, which is an argument the consumer's own callback receives.
   // What is reported is an absence of that claim: a type that fell out of
   // a default value decides nothing.
-  test('--public trusts a stated width, and reports one that fell out of a default', () => {
+  test('--public trusts a stated width, and reports one that fell out of a default', async () => {
     const dir = workspace({
       'index.rip': [
         'export def stated(value: unknown): number', '  return 1', '',
@@ -1996,7 +2014,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-in', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Stated: a contract, and trusted.
       expect(out.stdout).toMatch(/✓ stated\b/);
       expect(out.stdout).toMatch(/✓ statedObj/);
@@ -2020,7 +2038,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // knowable shape, and naming that is the complete answer. What the audit
   // is for is the position nobody claimed: the same width arriving by
   // inference tells a consumer nothing and says nothing either.
-  test('--public trusts a stated width on the way out, and reports the same width inferred', () => {
+  test('--public trusts a stated width on the way out, and reports the same width inferred', async () => {
     const dir = workspace({
       'index.rip': [
         'export type Bag =',
@@ -2042,7 +2060,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-read', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Written, and read: a claim about what belongs there, and trusted.
       expect(out.stdout).toMatch(/\u2713 stated\b/);
       expect(out.stdout).not.toMatch(/at: stated\(\)/);
@@ -2062,7 +2080,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // otherwise. A RETURN's comes from the function, reached through a
   // parameter where there is one and through the exposing symbol where
   // there is not, since a binding holds its function in an initializer.
-  test('--public asks a root export and a return for an annotation of their own', () => {
+  test('--public asks a root export and a return for an annotation of their own', async () => {
     const dir = workspace({
       'index.rip': [
         // Bindings: one claimed, one taking what it was handed.
@@ -2087,7 +2105,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'own-claim', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/\{\}\s+at: rootBare/);
       expect(out.stdout).toMatch(/✓ rootAnn/);
       expect(out.stdout).toMatch(/✓ AliasEmpty/);
@@ -2111,7 +2129,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // inside a pin has to be read as what it is: never claimed, however
   // annotated it looks. Both bindings below land on the same hoist line,
   // which is why the answer has to be per-span and not per-declaration.
-  test('--public does not read a pinned type as an annotation the author wrote', () => {
+  test('--public does not read a pinned type as an annotation the author wrote', async () => {
     const dir = workspace({
       'index.rip': [
         'type Bag = { hole: unknown }',
@@ -2129,7 +2147,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'pinned', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Written by hand, and trusted — the pin beside it changes nothing.
       expect(out.stdout).toMatch(/✓ fromAuthored/);
       // The compiler's own description of what it found.
@@ -2145,7 +2163,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // TYPE export has no direction at all — it may be an options bag the
   // consumer builds or a result they inspect, and nothing says which, so
   // only the rules that hold either way apply to it.
-  test('--public does not read a generic mapped type, or an undirected type export, as empty', () => {
+  test('--public does not read a generic mapped type, or an undirected type export, as empty', async () => {
     const dir = workspace({
       'index.rip': [
         'export type Wrap<S> = { [K in keyof S]: S[K] }',
@@ -2166,7 +2184,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'undirected', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/✓ Wrap/);
       expect(out.stdout).toMatch(/✓ make/);
       expect(out.stdout).toMatch(/✓ Options/);
@@ -2182,7 +2200,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // at the export, while the parameter carrying it belongs to a lambda
   // several definitions away — annotating the obvious candidate changes
   // nothing at all. The declaring symbol knows which position it was.
-  test('--public names the source position that declared the defect, not where it surfaces', () => {
+  test('--public names the source position that declared the defect, not where it surfaces', async () => {
     const dir = workspace({
       'index.rip': [
         'def helper(input: string): string',     // line 1 — typed, and a red herring
@@ -2198,7 +2216,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'origin-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Surfaces at the export…
       expect(out.stdout).toMatch(/any\s+at: thing\(input\)/);
       // …and carries the lambda's parameter position, column and all.
@@ -2223,7 +2241,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // those symbols sit in. However many names expose that lambda, what is
   // left to write is the two parameters and the return it was declared
   // with, all on the one line it was declared on.
-  test('--public reports every position an export leaves untyped, once per declaration', () => {
+  test('--public reports every position an export leaves untyped, once per declaration', async () => {
     const dir = workspace({
       'index.rip': [
         'def build()',
@@ -2236,7 +2254,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'whole-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
       // Both parameters, not just the first.
       expect(found.some((l) => /at: thing\(input\)/.test(l))).toBe(true);
@@ -2263,7 +2281,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // rule does NOT cover is a signature with no parameter at all: nothing
   // there points back at the function, and the position falls back to
   // whatever exposed it.
-  test('--public attributes a return to the signature that declares it, and says so through the type it returns', () => {
+  test('--public attributes a return to the signature that declares it, and says so through the type it returns', async () => {
     const inside = workspace({
       'package.json': JSON.stringify({ name: '@ret/inside', rip: { strict: true }, exports: { '.': './index.rip' } }),
       'index.rip': [
@@ -2285,7 +2303,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const a = check(inside, ['--public']).stdout;
+      const a = (await check(inside, ['--public'])).stdout;
       // The `any` inside `Promise<any>`, named once and placed on the
       // lambda, though three names reach that same return.
       expect(a).toContain('any at: thing()<0>');
@@ -2295,7 +2313,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // The stated limit, pinned so it cannot drift unnoticed: with no
       // parameter to reach the function through, each name that exposes
       // the lambda carries a return position of its own.
-      const b = check(noParams, ['--public']).stdout;
+      const b = (await check(noParams, ['--public'])).stdout;
       expect(b).toContain('any at: thing()');
       expect(b).toContain('any at: thing.again()');
       expect(b).toContain('2 positions need a type');
@@ -2309,7 +2327,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // answers both, so the parameter is the finding and the field is its
   // shadow — and several such fields all map back to the one constructor
   // line, which would read as several things to fix at one position.
-  test('--public reports a constructor parameter, not the field that follows it', () => {
+  test('--public reports a constructor parameter, not the field that follows it', async () => {
     const dir = workspace({
       'index.rip': [
         'export class Holder',
@@ -2322,7 +2340,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'shadow-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
       expect(found.some((l) => /at: Holder\.new\(first\)/.test(l))).toBe(true);
       expect(found.some((l) => /at: Holder\.new\(second\)/.test(l))).toBe(true);
@@ -2340,7 +2358,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // verdict, and one edit fixes it there. Repeating its positions under
   // everything that happens to expose it reports one piece of work as
   // several, and inflates every count that follows.
-  test('--public stops at a member that is another export of the same entry', () => {
+  test('--public stops at a member that is another export of the same entry', async () => {
     const dir = workspace({
       'index.rip': [
         'export class Boom extends Error',
@@ -2357,7 +2375,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'sibling-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Reported once, under the export that owns it.
       expect(out.stdout).toContain('at: Boom.new(payload)');
       expect(out.stdout).not.toContain('at: api.Boom.new(payload)');
@@ -2375,7 +2393,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // does not resolve still prints that name while meaning `any`, so the
   // written form alone puts a rich-looking type beside a verdict of `any`
   // and reads as a tool error rather than as the finding it is.
-  test('--public shows the resolved type when an annotation does not land', () => {
+  test('--public shows the resolved type when an annotation does not land', async () => {
     const dir = workspace({
       'index.rip': [
         'export box: NotDeclaredAnywhere<string> = ({} as any)',
@@ -2386,7 +2404,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'unres-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any (written: NotDeclaredAnywhere<string>)');
       expect(out.stdout).toContain('any at: box');
       // A type that resolves is shown once, not doubled.
@@ -2401,7 +2419,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // resolves — and it is the one thing a reader checks a verdict against.
   // It is printed whole: long types continue onto further lines rather than
   // stopping, and the checker's own member elision is turned off.
-  test('--public prints a published type in full, however long', () => {
+  test('--public prints a published type in full, however long', async () => {
     // Anonymous by construction: a NAMED type prints as its name, which is
     // both correct and short. A structural type is the one that prints long,
     // which is why `http`'s published intersection does.
@@ -2412,7 +2430,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // Flattened, because a long type wraps across lines by design.
       const flat = out.stdout.replace(/\s+/g, ' ');
       expect(flat).toContain('aRatherLongMemberName0: string;');
@@ -2432,7 +2450,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // checker complains at the use site because using an `any` is not an
   // error. The signal is scoped to the names actually imported — the whole
   // published surface would read the same for every consumer of a package.
-  test('an `any` received from another package is advised, named, and never gates', () => {
+  test('an `any` received from another package is advised, named, and never gates', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-inh-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -2478,7 +2496,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
       fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
 
-      const out = check(dir, [path.join('packages', 'app')]);
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@rip/util`');
       expect(out.stdout).toContain('`leaky`');
       // Imported and clean: not named.
@@ -2512,7 +2530,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // asked for diagnostics, and does not report what it inherits either.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
         JSON.stringify({ name: '@rip/app-under-test', rip: { strict: true, noCheck: ['*.rip'] } }));
-      const excluded = check(dir, [path.join('packages', 'app')]);
+      const excluded = await check(dir, [path.join('packages', 'app')]);
       expect(excluded.stdout).not.toContain('imported from `@rip/util`');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -2523,7 +2541,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // entry, deferring the defect to that export's own row. Narrowed to what
   // THIS project imported, the sibling has no row — so the deferral must
   // not swallow the defect with it.
-  test('a leak deferred to an unimported sibling still reaches the advisory', () => {
+  test('a leak deferred to an unimported sibling still reaches the advisory', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-defer-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -2544,7 +2562,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         JSON.stringify({ name: '@d/app', rip: { strict: true } }));
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'),
         "import { api } from '@d/lib'\nconsole.log api.session.run(1)\n");
-      const out = check(dir, [path.join('packages', 'app')]);
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@d/lib`');
       expect(out.stdout).toContain('`api`');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -2553,7 +2571,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // An `export { name }` clause forwards what came in untyped; nothing at
   // that position consumes it — the same rule as the import specifier one
   // node over.
-  test('a re-export is a forward, not a use — the file is not listed as a use site', () => {
+  test('a re-export is a forward, not a use — the file is not listed as a use site', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-fwd-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -2572,7 +2590,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // Import and forward only — no consumption.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'forward.rip'),
         "import { leaky } from '@f/lib'\nexport { leaky }\n");
-      const out = check(dir, [path.join('packages', 'app')]);
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@f/lib`');
       expect(out.stdout).toMatch(/app\.rip/);
       expect(out.stdout).not.toMatch(/forward\.rip/);
@@ -2590,7 +2608,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // sized per block, the short path's names sit far to the left of the
   // long one's, which is exactly what a single column must not do. The
   // sample needs a package leaking more than a handful.
-  test('the received-`any` advisories read as one table: a blank line per package, one column of names, every arrival named', () => {
+  test('the received-`any` advisories read as one table: a blank line per package, one column of names, every arrival named', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-inh-table-'));
     const many = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
     try {
@@ -2616,7 +2634,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'a-considerably-longer-file-name.rip'),
         "import { zeta } from '@rip/bbb'\nexport bb = zeta(2)\n");
 
-      const lines = check(dir, [path.join('packages', 'app')]).stdout.split('\n');
+      const lines = (await check(dir, [path.join('packages', 'app')])).stdout.split('\n');
       const headings = lines.map((l, i) => i).filter((i) => /values? imported from/.test(lines[i]));
       expect(headings.length).toBe(2);
       // Every package's finding is set off from the one above it.
@@ -2643,7 +2661,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // so it is not on the gradual path at all. It belongs to the posture that
   // refuses `any`, and a gradual project meets it the same way it meets
   // every other strict finding: under `--strict`.
-  test('an inherited `any` is a strict-posture finding, previewed by --strict', () => {
+  test('an inherited `any` is a strict-posture finding, previewed by --strict', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-grad-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -2666,18 +2684,18 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
       // Gradual: silent. Not the summary either — there is nothing here
       // for a posture that accepts `any` to do.
-      const gradual = check(dir, [path.join('packages', 'app')]);
+      const gradual = await check(dir, [path.join('packages', 'app')]);
       expect(gradual.stdout).not.toContain('imported from `@rip/util`');
 
       // The same code, asked what strict would say.
-      const preview = check(dir, ['--strict', path.join('packages', 'app')]);
+      const preview = await check(dir, ['--strict', path.join('packages', 'app')]);
       expect(preview.stdout).toContain('imported from `@rip/util`');
       expect(preview.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
 
       // And once the project actually flips, without asking.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
         JSON.stringify({ name: '@rip/held', rip: { strict: true } }));
-      const strict = check(dir, [path.join('packages', 'app')]);
+      const strict = await check(dir, [path.join('packages', 'app')]);
       expect(strict.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -2690,7 +2708,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // `Config` — and a declaration is not one either, since `typeof C` and
   // `C` share one. Collapse either way and a whole branch is skipped as
   // already-seen, which reads as clean.
-  test('--public tells apart same-named types from different files, and a class from its own instance', () => {
+  test('--public tells apart same-named types from different files, and a class from its own instance', async () => {
     const dir = workspace({
       'clean.rip': 'export type Config =\n  size: number\n',
       'dirty.rip': 'export type Config =\n  leak: any\n',
@@ -2713,7 +2731,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'ident-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = check(dir, ['--public']);
+      const out = await check(dir, ['--public']);
       // The SECOND `Config` is a different type than the first, and the
       // only one that leaks. Keyed by name, it never gets walked.
       expect(out.stdout).toContain('any at: Pair.second.leak');
@@ -2734,7 +2752,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // reaches importers the way the runtime does — importing the module
   // runs the installer. A non-importing neighbor keeps its TS2304, which
   // is the typo protection ambient-everywhere would have spent.
-  test('a top-level `globalThis.NAME ??=` declares the global, scoped to its package', () => {
+  test('a top-level `globalThis.NAME ??=` declares the global, scoped to its package', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
       'packages/vocab/package.json': JSON.stringify({ name: '@t/vocab' }),
@@ -2755,7 +2773,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       const names = diags.map((d) => [d.file, /'([^']+)'/.exec(d.message)?.[1]]);
       // vocab's own package: `sh` resolves everywhere; only the typo reports.
       expect(names.filter(([f]) => f.includes('vocab'))).toEqual([
@@ -2771,7 +2789,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // Emitter scaffolding (a bang-def's `: void`, arity `?`s, pin
   // annotations) never opens the gate: an unannotated file is a silent
   // file, whatever the face emits for its lowerings.
-  test('an unannotated file with bang-defs stays silent — scaffolding never opens the gate', () => {
+  test('an unannotated file with bang-defs stays silent — scaffolding never opens the gate', async () => {
     const dir = workspace({
       'tool.rip': [
         'write! = (s) -> s',
@@ -2781,7 +2799,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
@@ -2789,7 +2807,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // workspace; the corpus carries the same shapes with their rationale
   // (test/audit/corpus/gradual/held.rip and published.rip, the `gate, …`
   // and `reach, …` sections).
-  test('the gate reads bindings, not text: function bodies, member names, and object keys open nothing; calls and standing annotations flow', () => {
+  test('the gate reads bindings, not text: function bodies, member names, and object keys open nothing; calls and standing annotations flow', async () => {
     const dir = workspace({
       'gate.rip': [
         'export ratio: number = 0.5',
@@ -2829,7 +2847,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[2339, 30], [2339, 33]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -2839,7 +2857,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // that declaration's types carry like an annotated export's. No
   // node_modules link here: the stdlib alias `rip/<name>` never has one, so
   // the resolution must come from the mirror, not from the filesystem walk.
-  test('a bare specifier landing on a .js entry resolves through its sibling .d.ts', () => {
+  test('a bare specifier landing on a .js entry resolves through its sibling .d.ts', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-jsdts-'));
     try {
       fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -2855,7 +2873,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
         'bad: string = answer',        // the declaration's type reaches the annotated line
         'console.log bad',
       ].join('\n') + '\n');
-      const diags = JSON.parse(check(dir, ['--json', path.join('packages', 'app')]).stdout);
+      const diags = JSON.parse((await check(dir, ['--json', path.join('packages', 'app')])).stdout);
       expect(diags.map((d) => d.code)).not.toContain(2307);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -2865,7 +2883,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     // answer for it.
     const stdlib = workspace({ 'grammar.rip': "import ripLanguage from 'rip/highlight'\nbad: number = ripLanguage\nconsole.log bad\n" });
     try {
-      const diags = JSON.parse(check(stdlib, ['--json']).stdout);
+      const diags = JSON.parse((await check(stdlib, ['--json'])).stdout);
       expect(diags.map((d) => d.code)).not.toContain(2307);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[2322, 2]]);
     } finally { fs.rmSync(stdlib, { recursive: true, force: true }); }
@@ -2877,7 +2895,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // manifest) was invisible — bun ran the imports that tsgo called
   // cannot-finds. The mirror plants a node_modules symlink at each dir
   // whose source twin has one.
-  test('a nested source-tree node_modules resolves through the mirror', () => {
+  test('a nested source-tree node_modules resolves through the mirror', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
       'packages/csvish/package.json': JSON.stringify({ name: '@t/csvish' }),
@@ -2893,7 +2911,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       const cannotFinds = diags.filter((d) => d.code === 2307).map((d) => /'([^']+)'/.exec(d.message)?.[1]);
       expect(cannotFinds).toEqual(['nolib']);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -2906,7 +2924,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // mode, like the floors). Undeclared-and-uninstalled stays a published
   // defect everywhere. Keeps `rip check` green on a fresh clone whose
   // optional dirs (a quarantined bench) were never installed.
-  test('a declared-but-uninstalled import is held in gradual with the install remedy; strict and undeclared publish', () => {
+  test('a declared-but-uninstalled import is held in gradual with the install remedy; strict and undeclared publish', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
       'packages/q/package.json': JSON.stringify({ name: '@t/q' }),
@@ -2920,11 +2938,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'packages/r/app.rip': "import { parse } from 'fakelib'\nconsole.log parse\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       const modOf = (d) => /'([^']+)'/.exec(d.message)?.[1];
       expect(diags.filter((d) => d.file.includes('q')).map(modOf)).toEqual(['nolib']);
       expect(diags.filter((d) => d.file.includes(path.join('r', 'app'))).map(modOf)).toEqual(['fakelib']);
-      const text = check(dir).stdout;
+      const text = (await check(dir)).stdout;
       expect(text).toMatch(/1 uninstalled-dependency import hidden — run `bun install` in packages\/q\/bench/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -2935,7 +2953,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // loose base keeps admitting `null` for a package that asked for
   // complaints. Host modules are not the discriminator: `bun:sqlite`
   // resolves from the checkout's `@types/bun` in both programs.
-  test('a nested rip.strict package is its own program, with its own posture', () => {
+  test('a nested rip.strict package is its own program, with its own posture', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),
       'packages/lib/package.json': JSON.stringify({ name: '@t/lib', rip: { strict: true } }),
@@ -2944,7 +2962,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'packages/loose/loose.rip': "import { Database } from 'bun:sqlite'\nx: string = null\nconsole.log Database, x\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // The strict package: the null refused, and the host module resolved.
       expect(diags.filter((d) => d.file.includes('lib')).map((d) => d.code)).toEqual([2322]);
       // The gradual sibling: the loose base admits it, still quiet.
@@ -2959,7 +2977,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // boundary either: a wrapper's posture is the wrapper's, not the
   // package's (the audit-tree shape, where corpus/gradual sits under
   // test/audit's tsconfig and strict package.json).
-  test('a gradual package nested in a strict workspace keeps its loose posture and floors', () => {
+  test('a gradual package nested in a strict workspace keeps its loose posture and floors', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'], rip: { strict: true } }),
       'mid/tsconfig.json': JSON.stringify({ compilerOptions: { noEmit: true } }),
@@ -2972,7 +2990,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'strict.rip': 'flag: string = null\nconsole.log(flag)\n',
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // The flipped package: floored bun:*, loose nulls — silent.
       expect(diags.filter((d) => d.file.includes('loose'))).toEqual([]);
       // The strict root still means strict.
@@ -2989,7 +3007,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // a tally the reader is told to go verify elsewhere is worse than
   // silence when the package's own check answers clean. The same file,
   // asked about directly, is answered in full.
-  test('a check reports its targets, not its dependencies', () => {
+  test('a check reports its targets, not its dependencies', async () => {
     const dir = workspace({
       'app/app.rip': [
         "import { helper } from '../lib/lib.rip'",
@@ -3004,12 +3022,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     });
     try {
       // Asked about app/ — the dependency's TS2322 is not the answer.
-      const scoped = JSON.parse(check(dir, ['--json', 'app']).stdout);
+      const scoped = JSON.parse((await check(dir, ['--json', 'app'])).stdout);
       expect(scoped).toEqual([]);
       // And not tallied on the way past either.
-      expect(check(dir, ['app']).stdout).not.toContain('in dependencies');
+      expect((await check(dir, ['app'])).stdout).not.toContain('in dependencies');
       // Asked about the whole tree — the same diagnostic IS the answer.
-      const whole = JSON.parse(check(dir, ['--json']).stdout);
+      const whole = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(whole.map((d) => [d.file, d.code])).toEqual([['lib/lib.rip', 2322]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -3025,7 +3043,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // back, named: one check spans several package.jsons, and the remedy
   // has to say which one it means (the home project alone stays unnamed).
   // The two arms differ only in what the run was asked about.
-  test('hidden diagnostics are the ledger of the code checked, not of the dependencies it reached', () => {
+  test('hidden diagnostics are the ledger of the code checked, not of the dependencies it reached', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ workspaces: ['packages/*'] }),   // anchor the mirror at the monorepo root
       'packages/app/package.json': JSON.stringify({ rip: { strict: true } }),
@@ -3043,12 +3061,12 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     try {
       // Asked about the strict consumer: util is a dependency, and says
       // nothing here — no ledger at all, not merely an unnamed one.
-      const consumer = check(dir, [path.join('packages', 'app')]).stdout;
+      const consumer = (await check(dir, [path.join('packages', 'app')])).stdout;
       expect(consumer).toContain('No type errors');
       expect(consumer).not.toContain('hidden');
       // Asked about the workspace: util is covered, so it is counted —
       // and named, because the remedy belongs to ITS package.json.
-      const both = check(dir).stdout;
+      const both = (await check(dir)).stdout;
       expect(both).toMatch(/\d+ diagnostics? hidden in unannotated code \(packages\/util\) — annotate a declaration/);
       expect(both).toMatch(/\d+ annotation diagnostics? hidden \(packages\/util\) — set `rip\.strict`/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -3076,7 +3094,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // mode governs. Under `rip.strict` the `unknown` is back — asserted
   // below, so the ruling is pinned in both directions rather than simply
   // relaxed.
-  test('a pattern catch never publishes from its own lowering; an identifier catch follows the mode', () => {
+  test('a pattern catch never publishes from its own lowering; an identifier catch follows the mode', async () => {
     const dir = workspace({
       'catchpat.rip': [
         'try',
@@ -3116,7 +3134,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file === 'catchpat.rip')).toEqual([]);
       // Gradual: the `e.message` read is gone; the planted TS2322 stays,
@@ -3128,7 +3146,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
   // The other half of the same ruling: a project that asked for strict is
   // told about the unnarrowed catch read, exactly as TypeScript would.
-  test('under rip.strict an identifier catch is `unknown` again', () => {
+  test('under rip.strict an identifier catch is `unknown` again', async () => {
     const dir = workspace({
       'scoped.rip': [
         'try',
@@ -3138,7 +3156,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[18046, 4]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -3157,7 +3175,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // component-library structure, and a component lowers to a class
   // expression. Liveness-paired: `live.rip` proves the run type-checked at
   // all rather than reporting nothing because nothing ran.
-  test('a forward-referenced class and a forward-rendered component both check clean — no minted symbol escapes the probe', () => {
+  test('a forward-referenced class and a forward-rendered component both check clean — no minted symbol escapes the probe', async () => {
     const dir = workspace({
       'fwd.rip': [
         'make = -> new Box()',    // reads Box above its declaration — forces the hoist split
@@ -3179,7 +3197,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file === 'fwd.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'comp.rip')).toEqual([]);
@@ -3206,7 +3224,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // "rip asks you to", which is the whole of what `rip.strict` means.
   // Declare-first also documents the trigger: a class declared before its uses
   // takes declare-in-place and never enters the probe set at all.
-  test('under rip.strict the unpinned forward reference is an ordinary missing annotation — reordering or annotating answers it', () => {
+  test('under rip.strict the unpinned forward reference is an ordinary missing annotation — reordering or annotating answers it', async () => {
     const dir = workspace({
       'bare.rip': [
         'make = -> (new Box())',
@@ -3230,7 +3248,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // The implicit-any family, which `rip.strict` exists to un-suppress —
       // and NOT a 2304: the minted symbol must not come back under any mode.
       expect(diags.filter((d) => d.file === 'bare.rip').map((d) => d.code).sort((a, b) => a - b))
@@ -3240,7 +3258,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('the refused answer leaves the binding unpinned — a wrong call through it is the floor\'s accepted cost', () => {
+  test('the refused answer leaves the binding unpinned — a wrong call through it is the floor\'s accepted cost', async () => {
     const dir = workspace({
       'unpinned.rip': [
         'make = -> new Box()',
@@ -3251,7 +3269,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'live.rip').map((d) => d.code)).toEqual([2322]); // liveness
       expect(diags.filter((d) => d.file === 'unpinned.rip')).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -3265,7 +3283,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // type is CONSTRUCTED from the component's own members rather than read
   // back from the binding. A plain `class` still has no such surface and
   // keeps its floor, which is why the row above stays green.
-  test('under rip.strict a forward-rendered component carries its published type — the implicit-any family is closed and its props are checked through it', () => {
+  test('under rip.strict a forward-rendered component carries its published type — the implicit-any family is closed and its props are checked through it', async () => {
     const dir = workspace({
       'ok.rip': [
         'Parent = component',
@@ -3299,7 +3317,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // Neither 7005 nor 7034: the declaration is typed, so no read of it
       // is an evolving `any` — the family this row exists to close.
       expect(diags.filter((d) => d.file === 'ok.rip')).toEqual([]);
@@ -3321,7 +3339,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('a promoted parameter declares its field — the field-less spelling checks clean', () => {
+  test('a promoted parameter declares its field — the field-less spelling checks clean', async () => {
     // `constructor: (@owner: string) ->` assigns the instance property and
     // declares nothing, and TypeScript reads a class's properties from its
     // DECLARATIONS alone — so the field-less spelling drew TS2339 at the
@@ -3383,7 +3401,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n'),
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // The liveness file's two, and ONLY those — an exact list over the
       // whole workspace, so a spelling that started reporting cannot hide
       // behind a `toContain` on a different file.
@@ -3392,7 +3410,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a write to a computed is an emitter decline, bound to the write line', () => {
+  test('a write to a computed is an emitter decline, bound to the write line', async () => {
     // `doubled = 5` off `doubled ~= …` is REJECTED at compile — a real
     // message, never broken output (the for-range-ban model). This is the
     // decline's home: the spelling cannot enter the Diagnostics Audit, whose
@@ -3404,13 +3422,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'writecomp.rip': 'doubled ~= 2 * 2\ndoubled = 5\nconsole.log(doubled)\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toMatch(/writecomp\.rip:2:\d+ - error: emitter: cannot assign to computed 'doubled'/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a render branch body and a loop row are type-checked through the typed factory params', () => {
+  test('a render branch body and a loop row are type-checked through the typed factory params', async () => {
     // A branch/loop body lowers to a block factory; the face types the
     // factory's self param `: this` (carried into the handle's p() by
     // a face-only alias) and the loop item from the iterable's element
@@ -3437,7 +3455,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     ].join('\n');
     const dir = workspace({ 'c.rip': src });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('c.rip:11:20 - error'); // `toUpperCase`, inside the branch body
       expect(r.stdout).toContain("Property 'toUpperCase' does not exist on type 'number'");
@@ -3446,7 +3464,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('a loop over a call types its row from the call\'s element type — top level, keyed, and nested', () => {
+  test('a loop over a call types its row from the call\'s element type — top level, keyed, and nested', async () => {
     // `typeof` takes only an entity path, so a call iterable reaches the
     // row through the loop's face-only thunk. The misspelled call reports
     // once, at the loop head. A render local — declared before the loop
@@ -3477,9 +3495,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     ].join('\n');
     const dir = workspace({ 'c.rip': src });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
-      const strict = check(dir, ['--strict']).stdout;
+      const strict = (await check(dir, ['--strict'])).stdout;
       expect(strict.match(/TS7006/g)).toHaveLength(2);
       expect(strict).toContain("c.rip:17:13 - error TS7006: Parameter 'early'");
       expect(strict).toContain("c.rip:19:13 - error TS7006: Parameter 'late'");
@@ -3491,7 +3509,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('event handler params carry the event type — inline and named-method refs alike', () => {
+  test('event handler params carry the event type — inline and named-method refs alike', async () => {
     // The face types both handler shapes from HTMLElementEventMap: a
     // literal ≤1-param handler through the typed cast on the handler
     // expression, and a `@event: @method` ref by annotating the
@@ -3519,7 +3537,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     ].join('\n');
     const dir = workspace({ 'h.rip': src });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('h.rip:5:22 - error'); // named ref: at the method definition
       expect(r.stdout).toContain("Property 'notAnEventProperty' does not exist");
@@ -3531,15 +3549,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('the implicit-any family is permissive by default, strict under rip.strict', () => {
+  test('the implicit-any family is permissive by default, strict under rip.strict', async () => {
     const src = 'greet = (name) -> name.toUpperCase()\nconsole.log greet("hi")\n';
     const loose = workspace({ 'a.rip': src }, null);
     const strict = workspace({ 'a.rip': src }, { strict: true });
     try {
-      const l = check(loose);
+      const l = await check(loose);
       expect(l.status).toBe(0); // unannotated code is legal rip
 
-      const s = check(strict);
+      const s = await check(strict);
       expect(s.status).toBe(1);
       expect(s.stdout).toContain('TS7006');
       expect(s.stdout).toContain('a.rip:1:10 - error'); // the `name` parameter
@@ -3549,7 +3567,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  test('a yield read in an unannotated generator is permissive by default, strict under rip.strict', () => {
+  test('a yield read in an unannotated generator is permissive by default, strict under rip.strict', async () => {
     // TS7057 fires on `yield` whose generator lacks a return-type annotation —
     // the same demands-an-annotation class as TS7006, discovered leaking as a
     // hard error on a two-line legal generator (the set is an enumeration, so
@@ -3558,10 +3576,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const loose = workspace({ 'g.rip': src }, null);
     const strict = workspace({ 'g.rip': src }, { strict: true });
     try {
-      const l = check(loose);
+      const l = await check(loose);
       expect(l.status).toBe(0); // an unannotated generator is legal rip
 
-      const s = check(strict);
+      const s = await check(strict);
       expect(s.status).toBe(1);
       expect(s.stdout).toContain('TS7057');
       expect(s.stdout).toContain('g.rip:2:9 - error'); // the `yield` expression
@@ -3571,27 +3589,27 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  test('rip.noCheck silences matched paths but keeps them in the program', () => {
+  test('rip.noCheck silences matched paths but keeps them in the program', async () => {
     const files = {
       'legacy/old.rip': "bad: number = 'oops'\nconsole.log bad\n",
     };
     const on = workspace(files, null);
     const off = workspace(files, { noCheck: ['legacy/**'] });
     try {
-      expect(check(on).status).toBe(1);    // checked → the error surfaces
-      expect(check(off).status).toBe(0);   // noCheck → silenced
+      expect((await check(on)).status).toBe(1);    // checked → the error surfaces
+      expect((await check(off)).status).toBe(0);   // noCheck → silenced
     } finally {
       fs.rmSync(on, { recursive: true, force: true });
       fs.rmSync(off, { recursive: true, force: true });
     }
   }, 90_000);
 
-  test('an acknowledged @ts-expect-error absorbs its error (exit 0)', () => {
+  test('an acknowledged @ts-expect-error absorbs its error (exit 0)', async () => {
     const dir = workspace({
       'ack.rip': '# @ts-expect-error — deliberately wrong, acknowledged\nbad: number = \'oops\'\nconsole.log bad\n',
     });
     try {
-      expect(check(dir).status).toBe(0);
+      expect((await check(dir)).status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
@@ -3604,7 +3622,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // line, so this must absorb and exit 0. The negative control (same source, no
   // directive) proves the error is real, so a green run means "absorbed", not
   // "nothing fired".
-  test('a used @ts-expect-error absorbs an error on a MULTI-LINE emission', () => {
+  test('a used @ts-expect-error absorbs an error on a MULTI-LINE emission', async () => {
     // The directive must sit DIRECTLY above the arrow assignment — it
     // governs the next statement, and the type alias is a statement too.
     const alias = 'type Comparator = (a: number, b: number) => number\n';
@@ -3612,9 +3630,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const guarded = workspace({ 'm.rip': alias + '# @ts-expect-error — wrong return type, acknowledged\n' + stmt });
     const bare = workspace({ 'm.rip': alias + stmt });
     try {
-      expect(check(guarded).status).toBe(0);   // directive survives the multi-line emit and absorbs
+      expect((await check(guarded)).status).toBe(0);   // directive survives the multi-line emit and absorbs
 
-      const b = check(bare);                   // control: the error is genuinely there
+      const b = await check(bare);                   // control: the error is genuinely there
       expect(b.status).toBe(1);
       expect(b.stdout).toContain('TS2322');
     } finally {
@@ -3631,16 +3649,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // HINT (TS6133) lands in the directive's range. That hint must NOT mark
   // the directive "used" — only a real error does — or the TS2578 is
   // wrongly suppressed. `@ts-ignore` is exempt: tsc never flags it unused.
-  test('an unused @ts-expect-error stays loud (TS2578); @ts-ignore is exempt', () => {
+  test('an unused @ts-expect-error stays loud (TS2578); @ts-ignore is exempt', async () => {
     const expectErr = workspace({ 'u.rip': "# @ts-expect-error — nothing wrong here\nbadCount = 'oops'\n" });
     const ignore = workspace({ 'i.rip': "# @ts-ignore — nothing wrong here\nbadCount = 'oops'\n" });
     try {
-      const e = check(expectErr);
+      const e = await check(expectErr);
       expect(e.status).toBe(1);
       expect(e.stdout).toContain('TS2578');
       expect(e.stdout).toContain('u.rip:1:1 - error'); // on the directive itself
 
-      const i = check(ignore);
+      const i = await check(ignore);
       expect(i.status).toBe(0);              // an unused @ts-ignore is never flagged
       expect(i.stdout).not.toContain('TS2578');
     } finally {
@@ -3658,7 +3676,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // itself (the inline component-prop and two-way-bind cases below). The
   // single-line file is the in-run control: suppression itself still
   // works, so the loud block bugs mean "not governed", not "broken".
-  test('a directive governs the head line only — a bug inside the indented block surfaces, the directive reads unused', () => {
+  test('a directive governs the head line only — a bug inside the indented block surfaces, the directive reads unused', async () => {
     const dir = workspace({
       'single.rip': "# @ts-expect-error — deliberately wrong, acknowledged\nbad: number = 'oops'\nconsole.log bad\n",
       'blocks.rip': [
@@ -3677,7 +3695,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).not.toContain('single.rip');                 // the control: still absorbed
       expect(r.stdout).toContain('blocks.rip:1:1 - error TS2578');  // the def directive did nothing
@@ -3699,7 +3717,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // directive but the last as unused), and an UNACKNOWLEDGED sibling of
   // an acknowledged prop stays loud (a shared line would let one marker
   // blind every sibling).
-  test('inline component-prop directives govern per pair — siblings neither blinded nor double-flagged', () => {
+  test('inline component-prop directives govern per pair — siblings neither blinded nor double-flagged', async () => {
     const chip = [
       'export Chip = component',
       "  @label: string := ''",
@@ -3731,7 +3749,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const r = check(dir, ['--json']);
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.filter((d) => d.file.endsWith('acked.rip'))).toEqual([]);
@@ -3744,7 +3762,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // marker above a `value <=> state` line governs exactly the bind's face
   // line — the acknowledged type mismatch is absorbed with no TS2578, and
   // the identical unacknowledged bind stays loud.
-  test('an inline directive above a two-way bind governs the bind line', () => {
+  test('an inline directive above a two-way bind governs the bind line', async () => {
     const field = [
       'export Field = component',
       "  @value: string := ''",
@@ -3775,7 +3793,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const r = check(dir, ['--json']);
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.filter((d) => d.file.endsWith('bound.rip'))).toEqual([]);
@@ -3789,7 +3807,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // — DECLINES (the comment stays an ordinary Rip comment) rather than
   // re-homing onto a sibling line the author never wrote it above: the
   // sibling's own error must stay loud.
-  test('a directive above a loop `key:` declines — it never governs a sibling attribute line', () => {
+  test('a directive above a loop `key:` declines — it never governs a sibling attribute line', async () => {
     const dir = workspace({
       'k.rip': [
         'export List = component',
@@ -3805,30 +3823,30 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const r = check(dir, ['--json']);
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[2339, 10]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('cross-file: a misused typed export reports at the call site', () => {
+  test('cross-file: a misused typed export reports at the call site', async () => {
     const dir = workspace({
       'util.rip': 'export shout = (s: string): string -> s.toUpperCase()\n',
       'app.rip': "import { shout } from './util.rip'\nconsole.log shout(42)\n",
     });
     try {
-      const r = check(dir, ['app.rip', 'util.rip']);
+      const r = await check(dir, ['app.rip', 'util.rip']);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('app.rip:2:'); // the call site in app.rip
       expect(r.stdout).toContain('TS2345');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('--json emits a structured array of diagnostics', () => {
+  test('--json emits a structured array of diagnostics', async () => {
     const dir = workspace({ 'bad.rip': "n: number = 'oops'\nconsole.log n\n" });
     try {
-      const r = check(dir, ['--json']);
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const parsed = JSON.parse(r.stdout);
       expect(Array.isArray(parsed)).toBe(true);
@@ -3851,7 +3869,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   //                     still errors. `wrong.rip` is what proves the pin is a
   //                     real type and not `any`: under `any` the member is
   //                     accepted and the row would pass while pinning nothing.
-  test('a destructured binding read by a hoisted def pins to its OWN type, not the pattern\'s', () => {
+  test('a destructured binding read by a hoisted def pins to its OWN type, not the pattern\'s', async () => {
     const dir = workspace({
       'renamed.rip': [
         "{ json: media } = { json: 'application/json' }",
@@ -3873,7 +3891,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.filter((d) => d.file === 'renamed.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'shorthand.rip')).toEqual([]);
       expect(diags.filter((d) => d.file === 'wrong.rip').map((d) => d.code)).toEqual([2339]);
@@ -3887,7 +3905,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // under a bare `tsc --noEmit` batch. The editor's Tier-3 pins resolve
   // `items` to `string[]`, so the mismatch DOES fire and the directive is
   // used → clean. This asserts the batch checker runs that pin pass.
-  test('pin parity — an evolving-any closure read resolves like the editor (no spurious TS2578)', () => {
+  test('pin parity — an evolving-any closure read resolves like the editor (no spurious TS2578)', async () => {
     const dir = workspace({
       'pins.rip': [
         "items = ['a', 'b', 'c']",
@@ -3902,7 +3920,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       // Clean: the directive is USED (the string[]→number mismatch fires),
       // which only happens if `items` was pinned to string[]. A pins-less
       // batch would report TS2578 here and exit 1.
@@ -3916,7 +3934,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // closure above its definition, so it stays hoisted and the pin pass
   // types its hoist line from the definition itself; `first` declares in
   // place. Both definitions are the same unannotated function.
-  test('strict: a pinned forward definition reports TS7006 like a declare-in-place one', () => {
+  test('strict: a pinned forward definition reports TS7006 like a declare-in-place one', async () => {
     const dir = workspace({
       'forward.rip': [
         'export before = -> later(1, 2)',
@@ -3927,7 +3945,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       ].join('\n') + '\n',
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(diags.map((d) => [d.code, d.line, d.column])).toEqual([
         [7006, 2, 10], [7006, 2, 13], [7006, 4, 10], [7006, 4, 13],
       ]);
@@ -3937,16 +3955,16 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // relatedInformation ("x is declared here") rides the diagnostic pull
   // (the checker advertises the capability at handshake), and the checker
   // maps each secondary location back onto .rip source.
-  test('relatedInformation ("declared here") is reported, mapped to .rip source', () => {
+  test('relatedInformation ("declared here") is reported, mapped to .rip source', async () => {
     const dir = workspace({ 'rel.rip': 'count: number = 0\ntotal = countz + count\nconsole.log total\n' });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2552');                 // the primary
       expect(r.stdout).toContain("'count' is declared here"); // the secondary note
       expect(r.stdout).toContain('rel.rip:1:1');            // mapped to the .rip declaration
 
-      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const j = JSON.parse((await check(dir, ['--json'])).stdout);
       expect(j[0].related?.[0]).toMatchObject({ file: 'rel.rip', line: 1, column: 1 });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
@@ -3956,25 +3974,25 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // the exact TypeScript tsgo checked is inspectable, is self-gitignored,
   // and freshness comes from the start-of-run wipe — a stale face from an
   // earlier run never survives into the next program.
-  test('the TS mirror persists after a run and is rebuilt fresh each run', () => {
+  test('the TS mirror persists after a run and is rebuilt fresh each run', async () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const mirror = path.join(dir, '.rip', 'check');
-      check(dir);
+      await check(dir);
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);           // the face is retained
       expect(fs.readFileSync(path.join(mirror, '.gitignore'), 'utf8')).toBe('*\n'); // and git never sees it
       expect(fs.readFileSync(path.join(mirror, '.build'), 'utf8').trim()).not.toBe(''); // stamped with the build that wrote it
       // A face whose source no longer exists is wiped by the next run,
       // not trusted from the cache.
       fs.writeFileSync(path.join(mirror, 'deleted.rip.ts'), 'const ghost: number = 0;\n');
-      check(dir);
+      await check(dir);
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);
       expect(fs.existsSync(path.join(mirror, 'deleted.rip.ts'))).toBe(false);
       // The wipe is unconditional: a run whose only target fails to PARSE
       // still clears the previous run's faces, so the tree never shows a
       // face for source that no longer compiles.
       fs.writeFileSync(path.join(dir, 'a.rip'), 'x = (\n');
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);                                          // the parse error still reports
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -3983,19 +4001,21 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // An unwritable workspace still checks — rerouted to a temp mirror,
   // LOUDLY (fidelity degrades: per-project wrappers and @types resolution
   // change), and the temp root is removed by the exit handler.
-  test('an unwritable workspace falls back to a temp mirror, loudly, and cleans it up', () => {
+  test('an unwritable workspace falls back to a temp mirror, loudly, and cleans it up', async () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       fs.chmodSync(dir, 0o555);
       let writable = false;
       try { fs.mkdirSync(path.join(dir, '.probe')); writable = true; fs.rmdirSync(path.join(dir, '.probe')); } catch { /* expected EACCES */ }
       if (writable) return; // root / owner-override filesystem can't exercise this path
-      const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-')));
-      const r = check(dir);
+      // The fallback root's own prefix, not the fixtures' `rip-check-`: sibling
+      // check-*.test.js files build workspaces concurrently on other workers.
+      const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-fallback-')));
+      const r = await check(dir);
       expect(r.stderr).toContain('temp fallback');                       // degraded, never silent
       expect(r.status).toBe(0);                                          // the clean file still checks clean
       expect(fs.existsSync(path.join(dir, '.rip'))).toBe(false);         // nothing forced into the workspace
-      const leaked = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-') && !before.has(n));
+      const leaked = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-fallback-') && !before.has(n));
       expect(leaked).toEqual([]);                                        // the exit handler reclaimed the temp root
     } finally {
       try { fs.chmodSync(dir, 0o755); } catch { /* restore for cleanup */ }
@@ -4005,13 +4025,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 
   // A coexisting editor mirror (.rip/editor) must survive a batch check:
   // the two mirrors share the .rip parent but own disjoint subtrees.
-  test('a coexisting .rip/editor is preserved', () => {
+  test('a coexisting .rip/editor is preserved', async () => {
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const editorDir = path.join(dir, '.rip', 'editor');
       fs.mkdirSync(editorDir, { recursive: true });
       fs.writeFileSync(path.join(editorDir, 'marker'), 'keep me\n');
-      check(dir);
+      await check(dir);
       expect(fs.existsSync(path.join(editorDir, 'marker'))).toBe(true);          // editor mirror untouched
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
@@ -4019,10 +4039,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // A dangling import is the IMPORTER's defect, not a coverage gap: the
   // absent module never marks the run incomplete — tsgo's TS2307 on the
   // importing line is the report, matching the editor's closure walk.
-  test('a dangling .rip import earns TS2307 on the importer, not an incomplete run', () => {
+  test('a dangling .rip import earns TS2307 on the importer, not an incomplete run', async () => {
     const dir = workspace({ 'a.rip': "p: import('./gone.rip').T = 5\nconsole.log p\n" });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2307');
       expect(r.stdout).toContain('a.rip:1');
@@ -4034,10 +4054,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // with a dangling import checks clean and SILENT — the corpus's own
   // errors fixtures dangle an import on purpose, and a default `rip check`
   // over a repo containing them must not be permanently "incomplete".
-  test('a dangling import under @ts-nocheck stays silent (exit 0)', () => {
+  test('a dangling import under @ts-nocheck stays silent (exit 0)', async () => {
     const dir = workspace({ 'a.rip': "# @ts-nocheck\np: import('./gone.rip').T = 5\nconsole.log p\n" });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
       expect(r.stderr).not.toContain('incomplete');
@@ -4048,13 +4068,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // specifier whose path walks THROUGH a file (./lib.rip/T.rip, ENOTDIR)
   // is the same importer-side defect and gets the same report — TS2307 on
   // the importer, never a permanently incomplete run.
-  test('a specifier through a file (ENOTDIR) is a TS2307, not an incomplete run', () => {
+  test('a specifier through a file (ENOTDIR) is a TS2307, not an incomplete run', async () => {
     const dir = workspace({
       'a.rip': "p: import('./lib.rip/T.rip').T = 5\nconsole.log p\n",
       'lib.rip': 'export x = 1\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2307');
       expect(r.stderr).not.toContain('incomplete');
@@ -4066,15 +4086,15 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // the missing face), never a bare "cannot find module" that misstates
   // the problem. The exit is 1, not 2 — an error-severity diagnostic
   // outranks the incomplete posture in the exit-code ladder.
-  test('an unreadable (existing) import still marks the run incomplete', () => {
+  test('an unreadable (existing) import still marks the run incomplete', async () => {
     const dir = workspace({
       'a.rip': "p: import('./locked.rip').T = 5\nconsole.log p\n",
       'locked.rip': 'export helper = 42\n',
     });
     try {
-      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
+      const exercised = await withUnreadable(path.join(dir, 'locked.rip'), async () => {
         // a.rip is the explicit target; locked.rip is reached only as its import.
-        const r = check(dir, [path.join(dir, 'a.rip')]);
+        const r = await check(dir, [path.join(dir, 'a.rip')]);
         expect(r.stderr).toContain('locked.rip (EACCES)');
         expect(r.stderr).toContain('the run is incomplete');
         expect(r.status).toBe(1); // tsgo's TS2307 on the missing face outranks exit 2
@@ -4087,11 +4107,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // named on the command line or swept up by the directory walk — that
   // cannot be read is skipped loudly (exit 2, a stderr note), and a clean
   // sibling does NOT rescue the exit code into a false 0.
-  test('an unreadable file leaves the run incomplete (exit 2, no false clean)', () => {
+  test('an unreadable file leaves the run incomplete (exit 2, no false clean)', async () => {
     const dir = workspace({ 'ok.rip': 'x: number = 1\nconsole.log x\n', 'locked.rip': 'y: number = 2\nconsole.log y\n' });
     try {
-      const exercised = withUnreadable(path.join(dir, 'locked.rip'), () => {
-        const r = check(dir);
+      const exercised = await withUnreadable(path.join(dir, 'locked.rip'), async () => {
+        const r = await check(dir);
         expect(r.status).toBe(2);                          // incomplete coverage → never 0
         expect(r.stderr).toContain('the run is incomplete');
         expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
@@ -4104,14 +4124,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // URIs; the mirror URI must match them (pathToFileURL, not `'file://' +
   // path`), or a workspace path with a space silently drops every
   // cross-file "declared here". The dir name here deliberately carries one.
-  test('cross-file relatedInformation survives a space in the workspace path', () => {
+  test('cross-file relatedInformation survives a space in the workspace path', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip check ')); // ← space is the point
     fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
     fs.writeFileSync(path.join(dir, 'lib.rip'), 'export type Config =\n  name: string\n  port: number\n');
     fs.writeFileSync(path.join(dir, 'use.rip'), "import { Config } from './lib.rip'\nc: Config = { name: 'x', port: 'nope' }\nconsole.log(c)\n");
     try {
-      const j = JSON.parse(check(dir, ['--json', 'use.rip', 'lib.rip']).stdout);
+      const j = JSON.parse((await check(dir, ['--json', 'use.rip', 'lib.rip'])).stdout);
       const primary = j.find((d) => d.code === 2322);
       expect(primary).toBeDefined();
       // The secondary note maps into the OTHER file (lib.rip), not the error
@@ -4127,10 +4147,10 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // nested file rejects under its own `strict`, the root file stays loose
   // under the root's. A single-package fixture cannot tell a correct
   // per-project resolution from a flat one, which is why no gate saw this.
-  test('a nested tsconfig governs its own files; the loose root governs the rest', () => {
+  test('a nested tsconfig governs its own files; the loose root governs the rest', async () => {
     const dir = monorepo();
     try {
-      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const j = JSON.parse((await check(dir, ['--json'])).stdout);
       const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
       expect(at('pkg/a.rip').length, 'the nested file rejects under its own strict config').toBe(1);
       expect(at('root.rip').length, 'the root file stays loose under the root config').toBe(0);
@@ -4144,11 +4164,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // day one reports nothing. Permissive is the DEFAULT, so this is the
   // first thing anyone experiences; every error here is one they have to
   // interpret before they have any way to.
-  test('a fresh project checks clean under permissive mode', () => {
+  test('a fresh project checks clean under permissive mode', async () => {
     const dir = freshProject();
     try {
-      const r = check(dir);
-      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      const r = await check(dir);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout)).toEqual([]);
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
@@ -4164,11 +4184,11 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // would answer `any` and report nothing even on a checked line), not
   // where the gate reaches — an ambient global's type does not open the
   // lines that merely mention it (see scopes.js).
-  test('the floor yields to @types/bun rather than widening it', () => {
+  test('the floor yields to @types/bun rather than widening it', async () => {
     const dir = freshProject();                       // withTypes: the real declaration governs
     try {
       fs.writeFileSync(path.join(dir, 'app.rip'), 'x: unknown = import.meta.nosuchfield\nconsole.log x\n');
-      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2339]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2339]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
@@ -4179,14 +4199,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // wrote. The probe verifies each answer where the pin will live and
   // refuses the ones that do not resolve there — the binding stays an
   // evolving `any`, the round's status quo.
-  test('a pin spelled in vocabulary the face cannot resolve is refused, not written', () => {
+  test('a pin spelled in vocabulary the face cannot resolve is refused, not written', async () => {
     const dir = workspace({
       // Written in two scopes, so the binding stays hoisted at the outer
       // one and is read from the inner — the pinnable shape.
       'walk.rip': "import { statSync } from 'fs'\nexport scan = (paths) ->\n  walk = (p) ->\n    stat = statSync p\n    stat.size\n  for p in paths\n    stat = statSync p\n    walk p if stat.isDirectory()\n",
     });
     try {
-      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
@@ -4196,20 +4216,20 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // — under gradual and strict alike — never a floored `any` (which
   // would let the misassignment below through) and never a cannot-find
   // defect on a module that demonstrably exists at runtime.
-  test('bun:* builtin modules are typed from the checkout\'s host types in every mode', () => {
+  test('bun:* builtin modules are typed from the checkout\'s host types in every mode', async () => {
     const dir = freshProject({ withTypes: false });
     try {
       fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb: number = new Database(':memory:')\nconsole.log db\n");
-      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2322]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2322]);
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', rip: { strict: true } }));
-      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2322]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2322]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('the same project is quiet before anything is installed', () => {
+  test('the same project is quiet before anything is installed', async () => {
     const dir = freshProject({ withTypes: false });
     try {
-      expect(JSON.parse(check(dir, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
@@ -4221,14 +4241,14 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // changes is whether the advisory is shouted at a project that did not
   // ask for it. (Node's modules are not a case here any more: `fs` is
   // typed from the checkout's `@types/bun`.)
-  test('a missing test-runner declaration is advisory in gradual mode, an error under strict', () => {
+  test('a missing test-runner declaration is advisory in gradual mode, an error under strict', async () => {
     const files = { 'app.rip': "describe 'adds', ->\n  1\n" };
     const gradual = workspace(files);
     const strict = workspace(files, { strict: true });
     try {
-      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
+      expect(JSON.parse((await check(gradual, ['--json'])).stdout)).toEqual([]);
       // Strict still says it, so the suppression is a MODE, not a deletion.
-      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2582]);
+      expect(JSON.parse((await check(strict, ['--json'])).stdout).map((d) => d.code)).toEqual([2582]);
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
@@ -4240,13 +4260,13 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // covers, numbered outside it. `@req` in a handler is a receiver the
   // author never annotated and has no obvious spelling to annotate, so
   // demanding one is annotation pressure by another route.
-  test("an unannotated `this` is quiet in gradual mode, an error under strict", () => {
+  test("an unannotated `this` is quiet in gradual mode, an error under strict", async () => {
     const files = { 'app.rip': 'handler = -> @req\nconsole.log handler\n' };
     const gradual = workspace(files);
     const strict = workspace(files, { strict: true });
     try {
-      expect(JSON.parse(check(gradual, ['--json']).stdout)).toEqual([]);
-      expect(JSON.parse(check(strict, ['--json']).stdout).map((d) => d.code)).toEqual([2683]);
+      expect(JSON.parse((await check(gradual, ['--json'])).stdout)).toEqual([]);
+      expect(JSON.parse((await check(strict, ['--json'])).stdout).map((d) => d.code)).toEqual([2683]);
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
@@ -4257,31 +4277,31 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // error. Typos, missing dependencies, and rip's own unresolved
   // workspace packages all live here, and TypeScript's own code is what
   // separates them from the advisory above.
-  test('an unresolvable module is still an error in gradual mode', () => {
+  test('an unresolvable module is still an error in gradual mode', async () => {
     const dir = workspace({ 'app.rip': "import { x } from 'totally-not-a-package'\nconsole.log x\n" });
     try {
-      expect(JSON.parse(check(dir, ['--json']).stdout).map((d) => d.code)).toEqual([2307]);
+      expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2307]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('the polarity inverts with the configs — strict root, loose nested', () => {
+  test('the polarity inverts with the configs — strict root, loose nested', async () => {
     const dir = monorepo({ rootStrict: true, nestedStrict: false });
     try {
-      const j = JSON.parse(check(dir, ['--json']).stdout);
+      const j = JSON.parse((await check(dir, ['--json'])).stdout);
       const at = (file) => j.filter((d) => d.file === file && d.code === 2322);
       expect(at('root.rip').length, 'the root file rejects under the strict root').toBe(1);
       expect(at('pkg/a.rip').length, 'the nested file stays loose under its own config').toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a file that does not parse reports its CompileError beside the type errors of the rest, exits 1, and says nothing on stderr', () => {
+  test('a file that does not parse reports its CompileError beside the type errors of the rest, exits 1, and says nothing on stderr', async () => {
     const dir = workspace({
       'lib.rip': 'export ratio: number = 0.5\nexport def scale(n: number): number\n  n * ratio\n',
       'app.rip': "import { scale } from './lib.rip'\nlabel: string = scale(2)\nconsole.log label\n",
       'bad.rip': 'zz = (1\n',
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('app.rip:2:1 - error');
       expect(r.stdout).toContain("bad.rip:1:6 - error: unclosed '('");
@@ -4289,7 +4309,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a __DATA__ payload is not code: it seeds no binding, it is never lexed, and the advisories do not read it', () => {
+  test('a __DATA__ payload is not code: it seeds no binding, it is never lexed, and the advisories do not read it', async () => {
     // The gate reads the compile's own token tape — the text before the
     // marker — so a payload the lexer would refuse still leaves the file
     // gated, and an annotation spelled inside the payload types nothing.
@@ -4298,7 +4318,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'shown.rip': "z: number = 'oops'\nconsole.log z\n__DATA__\nit's payload\n",
     });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('shown.rip:1:1 - error');
       expect(r.stdout).not.toContain('held.rip:');
@@ -4308,7 +4328,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a package that installs its own ambient types earns its own program: the install binds there and nowhere else', () => {
+  test('a package that installs its own ambient types earns its own program: the install binds there and nowhere else', async () => {
     // Ambient declarations bind per PROGRAM through typeRoots, which walk
     // up from the program root and never down into a member — so a nested
     // install is unread until the member has its own program. The global
@@ -4322,7 +4342,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       'pkg/a.rip': 'console.log FOO_MARK\n',
     });
     try {
-      const r = check(dir, ['--json']);
+      const r = await check(dir, ['--json']);
       const rows = JSON.parse(r.stdout);
       expect(rows.map((d) => [d.file, d.code])).toEqual([['root.rip', 2304]]);
       expect(r.status).toBe(1);
@@ -4332,7 +4352,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
   // Foreign projects (a closure's dependencies) are named on the line;
   // the home project stays unnamed. The remedy is an import wherever the
   // name is used, so it never points anywhere.
-  test('the missing-types line names foreign projects, and the remedy is the import', () => {
+  test('the missing-types line names foreign projects, and the remedy is the import', async () => {
     const dep = {
       'pkg/package.json': '{}',
       'pkg/b.rip': "describe 'adds', ->\n  1\nexport ok = 1\n",
@@ -4341,9 +4361,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const foreign = workspace(dep);
     const mixed = workspace({ ...dep, 'a.rip': "import { ok } from './pkg/b.rip'\nit 'runs', ->\n  1\nconsole.log ok\n" });
     try {
-      const f = check(foreign).stdout;
+      const f = (await check(foreign)).stdout;
       expect(f).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe` \(import it from `bun:test`\)/);
-      const m = check(mixed).stdout;
+      const m = (await check(mixed)).stdout;
       expect(m).toMatch(/missing-types advisor(y|ies) hidden \(pkg\) — no declarations for `describe`, `it` \(import them from `bun:test`\)/);
     } finally {
       fs.rmSync(foreign, { recursive: true, force: true });
@@ -4351,7 +4371,7 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     }
   }, 90_000);
 
-  test('the stash types the app: bare gates and computeds infer from app/stash.rip, in a directory check and a single-file one', () => {
+  test('the stash types the app: bare gates and computeds infer from app/stash.rip, in a directory check and a single-file one', async () => {
     // The project anchor (index.rip + package.json) discovers the stash;
     // the face splices `import('<rel>').__RipStash` with no source
     // import, so the stash must ride the closure like an import — the
@@ -4363,9 +4383,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     };
     const dir = workspace(files, { strict: true });
     try {
-      const whole = check(dir, ['--json']);
+      const whole = await check(dir, ['--json']);
       expect(JSON.parse(whole.stdout)).toEqual([]);
-      const single = check(dir, ['app/routes/page.rip', '--json']);
+      const single = await check(dir, ['app/routes/page.rip', '--json']);
       expect(JSON.parse(single.stdout)).toEqual([]);
       // The face carries the splice; the stash face carries its type.
       const face = fs.readFileSync(path.join(dir, '.rip/check/app/routes/page.rip.ts'), 'utf8');
@@ -4382,20 +4402,20 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       // gate road (the face twin IS the read the author wrote) — instead
       // of collapsing to error-`any`.
       fs.writeFileSync(path.join(dir, 'app/routes/typo.rip'), "export Typo = component\n  bad ~= @stash.missing\n  worse <~ @stash.absent\n  render null\n");
-      const typo = check(dir, ['app/routes/typo.rip', '--json']);
+      const typo = await check(dir, ['app/routes/typo.rip', '--json']);
       const typoRows = JSON.parse(typo.stdout);
       expect(typoRows.some((d) => d.code === 2339 && /missing/.test(d.message))).toBe(true);
       expect(typoRows.some((d) => d.code === 2339 && /absent/.test(d.message))).toBe(true);
       // Without the anchor the same route types nothing and strict says so.
       const bare = workspace({ 'page.rip': files['app/routes/page.rip'] }, { strict: true });
       try {
-        const r = check(bare, ['--json']);
+        const r = await check(bare, ['--json']);
         expect(JSON.parse(r.stdout).some((d) => d.code === 7006)).toBe(true);
       } finally { fs.rmSync(bare, { recursive: true, force: true }); }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
-  test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', () => {
+  test('--strict reports what rip.strict would: the same report as the same workspace with rip.strict set, nothing edited', async () => {
     // Both postures are exercised: per file (an unannotated read the gate
     // would hold, an implicit-any parameter) and per program (a null the
     // loosened posture admits, a host name typed from the checkout's
@@ -4411,9 +4431,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     const gradual = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) });
     const strict = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) }, { strict: true });
     try {
-      const plain = check(gradual, ['--json']);
-      const forced = check(gradual, ['--strict', '--json']);
-      const real = check(strict, ['--json']);
+      const plain = await check(gradual, ['--json']);
+      const forced = await check(gradual, ['--strict', '--json']);
+      const real = await check(strict, ['--json']);
       const rows = (r) => JSON.parse(r.stdout);
       expect(plain.status).toBe(1);                       // the nested strict package reports on its own
       expect(rows(plain).map((d) => d.file)).toEqual(['pkg/b.rip']);
@@ -4423,14 +4443,98 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(fs.readFileSync(path.join(gradual, 'package.json'), 'utf8')).toBe('{}');
       expect(forced.stderr).toBe('');
       // The text report says the posture was forced; the plain one does not.
-      expect(check(gradual, ['--strict']).stdout).toContain('checked under --strict');
-      expect(check(gradual).stdout).not.toContain('checked under --strict');
+      expect((await check(gradual, ['--strict'])).stdout).toContain('checked under --strict');
+      expect((await check(gradual)).stdout).not.toContain('checked under --strict');
     } finally {
       fs.rmSync(gradual, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
     }
   }, 120_000);
 });
+
+// Fixtures for the typed-routes cases: the stash, the link components, and
+// the route tree — statics, a nested dynamic, an optional, a group, a
+// catch-all, and layouts — the same shapes cart and medlabs use.
+
+const STASH = [
+  "import { source } from 'rip/app'",
+  '',
+  'export stash =',
+  "  user: source fetch: -> Promise.resolve { name: 'Ada' }",
+  '  order: source fetch: (id: string) -> Promise.resolve { id, total: 5 }',
+  '  count: 0',
+  '',
+].join('\n');
+
+const LINKS = [
+  'export ButtonLink = component extends a',
+  '  render',
+  '    a',
+  '      slot',
+  '',
+  'export PlainLink = component',
+  "  @href?: string := '/'",
+  '  render',
+  '    a href: @href',
+  '      slot',
+  '',
+].join('\n');
+
+// The route tree: statics, a nested dynamic, an optional, a group, a
+// catch-all, and layouts — the same shapes cart and medlabs use.
+const ROUTE_FILES = {
+  'index.rip': 'x = 1\n',
+  'app/stash.rip': STASH,
+  'app/components/link.rip': LINKS,
+  'app/routes/_layout.rip': [
+    'export Layout = component',
+    '  ok: -> @params.anything',
+    '  render',
+    '    div',
+    '      slot',
+    '',
+  ].join('\n'),
+  'app/routes/docs/[[page]].rip': [
+    'export Docs = component',
+    "  ok: -> @params.page ?? 'default'",
+    '  render',
+    "    div 'docs'",
+    '',
+  ].join('\n'),
+  'app/routes/files/[...rest].rip': [
+    'export Files = component',
+    '  ok: -> @params.rest',
+    '  render',
+    "    div 'files'",
+    '',
+  ].join('\n'),
+  'app/routes/(admin)/settings.rip': [
+    'export Settings = component',
+    '  render',
+    "    div 'settings'",
+    '',
+  ].join('\n'),
+  'app/routes/orders/index.rip': [
+    'export Orders = component',
+    '  ok: -> @params.anything',
+    '  render',
+    "    div 'orders'",
+    '',
+  ].join('\n'),
+  'app/routes/orders/[id].rip': [
+    'export Order = component',
+    '  ok: -> @params.id',
+    '  render',
+    '    div @params.id',
+    '',
+  ].join('\n'),
+  'app/routes/cart.rip': [
+    'export Cart = component',
+    '  render',
+    "    div 'cart'",
+    '',
+  ].join('\n'),
+};
 
 // ── Typed routes ─────────────────────────────────────────────────────
 //
@@ -4444,88 +4548,8 @@ describeExtended('rip check: type diagnostics over the real server', () => {
 // packages/vscode/test/unit/routes-discovery.test.js and differentially
 // against buildRoutes in packages/app/test/routes-discovery.test.js;
 // these are the end-to-end diagnostics.
-describeExtended('rip check: typed routes over the real server', () => {
-  const STASH = [
-    "import { source } from 'rip/app'",
-    '',
-    'export stash =',
-    "  user: source fetch: -> Promise.resolve { name: 'Ada' }",
-    '  order: source fetch: (id: string) -> Promise.resolve { id, total: 5 }',
-    '  count: 0',
-    '',
-  ].join('\n');
-
-  const LINKS = [
-    'export ButtonLink = component extends a',
-    '  render',
-    '    a',
-    '      slot',
-    '',
-    'export PlainLink = component',
-    "  @href?: string := '/'",
-    '  render',
-    '    a href: @href',
-    '      slot',
-    '',
-  ].join('\n');
-
-  // The route tree: statics, a nested dynamic, an optional, a group, a
-  // catch-all, and layouts — the same shapes cart and medlabs use.
-  const ROUTE_FILES = {
-    'index.rip': 'x = 1\n',
-    'app/stash.rip': STASH,
-    'app/components/link.rip': LINKS,
-    'app/routes/_layout.rip': [
-      'export Layout = component',
-      '  ok: -> @params.anything',
-      '  render',
-      '    div',
-      '      slot',
-      '',
-    ].join('\n'),
-    'app/routes/docs/[[page]].rip': [
-      'export Docs = component',
-      "  ok: -> @params.page ?? 'default'",
-      '  render',
-      "    div 'docs'",
-      '',
-    ].join('\n'),
-    'app/routes/files/[...rest].rip': [
-      'export Files = component',
-      '  ok: -> @params.rest',
-      '  render',
-      "    div 'files'",
-      '',
-    ].join('\n'),
-    'app/routes/(admin)/settings.rip': [
-      'export Settings = component',
-      '  render',
-      "    div 'settings'",
-      '',
-    ].join('\n'),
-    'app/routes/orders/index.rip': [
-      'export Orders = component',
-      '  ok: -> @params.anything',
-      '  render',
-      "    div 'orders'",
-      '',
-    ].join('\n'),
-    'app/routes/orders/[id].rip': [
-      'export Order = component',
-      '  ok: -> @params.id',
-      '  render',
-      '    div @params.id',
-      '',
-    ].join('\n'),
-    'app/routes/cart.rip': [
-      'export Cart = component',
-      '  render',
-      "    div 'cart'",
-      '',
-    ].join('\n'),
-  };
-
-  test('every legitimate spelling passes: literals, dynamics, externals, escape hatches, params, typed handles', () => {
+describeExtended.concurrent('rip check: typed routes over the real server', () => {
+  test('every legitimate spelling passes: literals, dynamics, externals, escape hatches, params, typed handles', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/index.rip': [
@@ -4567,13 +4591,13 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.stdout).toContain('No type errors');
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('every checked surface rejects a typo, anchored by its shape, naming the union', () => {
+  test('every checked surface rejects a typo, anchored by its shape, naming the union', async () => {
     const BAD = [
       "import { ButtonLink, PlainLink } from '../components/link.rip'",
       '',
@@ -4599,9 +4623,9 @@ describeExtended('rip check: typed routes over the real server', () => {
     ].join('\n');
     const dir = workspace({ ...ROUTE_FILES, 'app/routes/index.rip': BAD }, { strict: true });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
       // One diagnostic per surface, none elsewhere: the RoutePath
       // annotation (2820 — assignability with a did-you-mean, this
@@ -4629,7 +4653,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       // prettified (dynamic members as their parameterized display) and
       // in WALKER order (`/docs/:page` beside `/docs`), not tsgo's
       // statics-first normalization.
-      const text = check(dir).stdout;
+      const text = (await check(dir)).stdout;
       expect(text).toContain('"/carts"');
       expect(text).toContain('"/" | "/cart" | "/docs" | `/docs/:page` | "/files" | `/files/*rest` | "/orders" | `/orders/:id` | "/settings"');
       // No ROUTE member ever reads as its checked form.
@@ -4648,7 +4672,7 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('the app accessors check outside any component: currentStash()/currentRouter(), optional-chained or not', () => {
+  test('the app accessors check outside any component: currentStash()/currentRouter(), optional-chained or not', async () => {
     const NAV = [
       "import { currentRouter as cr, currentStash } from 'rip/app'",
       '',
@@ -4672,7 +4696,7 @@ describeExtended('rip check: typed routes over the real server', () => {
     ].join('\n');
     const dir = workspace({ ...ROUTE_FILES, 'app/nav.rip': NAV }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/nav.rip'));
       const lines = NAV.split('\n');
       const spanText = (d) => lines[d.line - 1].slice(d.column - 1, d.endColumn - 1);
@@ -4693,7 +4717,7 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('the stash reads as the stash: a member miss names it, a handle prints one arm', () => {
+  test('the stash reads as the stash: a member miss names it, a handle prints one arm', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/index.rip': [
@@ -4707,7 +4731,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
       expect(diags.map((d) => [d.line, d.code, d.message])).toEqual([
         // The ambience's expansion (every entry's declaration shape and
@@ -4722,7 +4746,7 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('per-route params: dynamic, catch-all, and optional shapes; statics and layouts keep the baseline', () => {
+  test('per-route params: dynamic, catch-all, and optional shapes; statics and layouts keep the baseline', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/orders/[id].rip': [
@@ -4743,7 +4767,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       const at = (suffix) => diags.filter((d) => d.file.endsWith(suffix)).map((d) => d.code);
       expect(at('orders/[id].rip')).toEqual([2339]);
       expect(at('files/[...rest].rip')).toEqual([2339]);
@@ -4754,7 +4778,7 @@ describeExtended('rip check: typed routes over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('a defaulted-D stash handle answers unknown — a consumer narrows, never receives any', () => {
+  test('a defaulted-D stash handle answers unknown — a consumer narrows, never receives any', async () => {
     // Bare `createStash()` types its handles off StashMethods' DEFAULT
     // `D`; the untyped arm of SourceHandleFor must answer the bare
     // handle (`value: unknown`) so an unnarrowed use is an error — the
@@ -4768,14 +4792,14 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('stash-consumer.rip'));
       expect(diags.map((d) => d.code)).toEqual([2322]);
       expect(diags[0].message).toContain("'unknown'");
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('a user-declared RoutePath wins over the ambient alias', () => {
+  test('a user-declared RoutePath wins over the ambient alias', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/index.rip': [
@@ -4790,11 +4814,11 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      expect(check(dir).status).toBe(0);
+      expect((await check(dir)).status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('arming: no route tree, or a catch-all-only tree, leaves every literal unchecked', () => {
+  test('arming: no route tree, or a catch-all-only tree, leaves every literal unchecked', async () => {
     const bare = workspace({
       'index.rip': 'x = 1\n',
       'app/stash.rip': STASH,
@@ -4817,15 +4841,15 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      expect(check(bare).status).toBe(0);
-      expect(check(fallbackOnly).status).toBe(0);
+      expect((await check(bare)).status).toBe(0);
+      expect((await check(fallbackOnly)).status).toBe(0);
     } finally {
       fs.rmSync(bare, { recursive: true, force: true });
       fs.rmSync(fallbackOnly, { recursive: true, force: true });
     }
   }, 120_000);
 
-  test('routes without a stash: hrefs check, the router stays untyped (v3 parity gate)', () => {
+  test('routes without a stash: hrefs check, the router stays untyped (v3 parity gate)', async () => {
     const dir = workspace({
       'index.rip': 'x = 1\n',
       'app/routes/cart.rip': ROUTE_FILES['app/routes/cart.rip'],
@@ -4839,13 +4863,13 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout);
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout);
       // Exactly the href typo: push rides the untyped router ambience.
       expect(diags.map((d) => [path.basename(d.file), d.code])).toEqual([['index.rip', 2345]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('gradual mode still surfaces route typos — real errors with cheap escapes', () => {
+  test('gradual mode still surfaces route typos — real errors with cheap escapes', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/index.rip': [
@@ -4856,13 +4880,13 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
       expect(diags.map((d) => d.code)).toEqual([2345]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('the pin pass carries the route options: a pinned file keeps its route diagnostic exact', () => {
+  test('the pin pass carries the route options: a pinned file keeps its route diagnostic exact', async () => {
     const dir = workspace({
       ...ROUTE_FILES,
       'app/routes/index.rip': [
@@ -4879,7 +4903,7 @@ describeExtended('rip check: typed routes over the real server', () => {
       ].join('\n'),
     }, { strict: true });
     try {
-      const diags = JSON.parse(check(dir, ['--json']).stdout)
+      const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
       expect(diags.length).toBe(1);
       expect(diags[0].code).toBe(2345);
@@ -4888,25 +4912,25 @@ describeExtended('rip check: typed routes over the real server', () => {
   }, 120_000);
 });
 
-describeExtended('rip check: intrinsic-element typing over the real server', () => {
+describeExtended.concurrent('rip check: intrinsic-element typing over the real server', () => {
   // The typed lowering (src/ts/dom-types.js + the receiver casts): the
   // EXISTING lowering's own byte positions check natively, so every
   // diagnostic here must anchor on the author's key/value/handler/cell
   // bytes — never on scaffold. Detection is posture-independent (the
   // gradual arm below); the strict arm carries the full matrix.
   const comp = (lines) => ['export P = component', "  q := ''", '  render', '    div', ...lines.map((l) => `      ${l}`), ''].join('\n');
-  const diagsOf = (dir) => JSON.parse(check(dir, ['--json']).stdout).map((d) => [d.code, d.line, d.column]);
+  const diagsOf = async (dir) => JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.line, d.column]);
 
-  test('a misspelled attribute key draws TS2345 anchored on the key\'s own bytes, both postures', () => {
+  test('a misspelled attribute key draws TS2345 anchored on the key\'s own bytes, both postures', async () => {
     for (const strict of [true, false]) {
       const dir = workspace({ 'app.rip': comp(["input placeholdr: 'x'"]) }, strict ? { strict: true } : null);
       try {
-        expect(diagsOf(dir), `strict=${strict}`).toEqual([[2345, 5, 13]]);
+        expect(await diagsOf(dir), `strict=${strict}`).toEqual([[2345, 5, 13]]);
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     }
   }, 120_000);
 
-  test('an unknown attribute name reports as a DIAGNOSTIC, on the word, naming the spelling that works', () => {
+  test('an unknown attribute name reports as a DIAGNOSTIC, on the word, naming the spelling that works', async () => {
     // The vocabulary is one rule the typed surface already enforces, so
     // the emitter does not also reject it here: a fatal second voice
     // would cost the file every other diagnostic. Every road — the
@@ -4914,15 +4938,15 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
     // element, and the pair — answers at its own bytes, beside the rest.
     const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly']) });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
-      const out = check(dir, ['--json']).stdout;
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
+      const out = (await check(dir, ['--json'])).stdout;
       expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(3);
       // Nothing near it: the reading it took, and the two ways out.
       expect(out).toContain('a bare word sets the boolean attribute it names');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('an unknown name on the absence road reports ONCE — the scratch const\'s own miss on the same name folds into the row', () => {
+  test('an unknown name on the absence road reports ONCE — the scratch const\'s own miss on the same name folds into the row', async () => {
     // A nullable value lowers through a scratch const annotated with the
     // tag's value surface indexed by the key, so tsgo also reports
     // TS2339 there — the same fact the row already words, on the same
@@ -4931,11 +4955,11 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
       'app.rip': ['export P = component', '  val: string | null := null', '  render', '    div', '      div notAnAttr: val', ''].join('\n'),
     });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 5, 11]]);
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 11]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('the value policy: property road strict, attribute road widened by | string', () => {
+  test('the value policy: property road strict, attribute road widened by | string', async () => {
     const dir = workspace({
       'app.rip': comp([
         'input value: q',            // property road, string := string — clean
@@ -4949,11 +4973,11 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
       ]),
     }, { strict: true });
     try {
-      expect(diagsOf(dir)).toEqual([[2345, 7, 11], [2345, 9, 13]]);   // img alt: 42, then maxLength — anchored on the key, as in the editor
+      expect(await diagsOf(dir)).toEqual([[2345, 7, 11], [2345, 9, 13]]);   // img alt: 42, then maxLength — anchored on the key, as in the editor
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('where a pair\'s complaint lands: the value\'s own complaint keeps its bytes, the pair\'s relation lands on the key', () => {
+  test('where a pair\'s complaint lands: the value\'s own complaint keeps its bytes, the pair\'s relation lands on the key', async () => {
     // RULINGS.md, the render-pair section — every road, one file: the
     // scratch-const, direct, property, boolean, and clsx roads of an
     // intrinsic, the props-object road of a component use, a bind on
@@ -4986,7 +5010,7 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
       ].join('\n'),
     }, { strict: true });
     try {
-      const rows = diagsOf(dir).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+      const rows = (await diagsOf(dir)).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
       expect(rows).toEqual([
         [2304, 11, 20], [2345, 12, 11], [2353, 13, 11], [2304, 14, 18], [2322, 15, 13], [2322, 16, 11],
         [2304, 17, 24], [2322, 18, 11], [2304, 19, 24], [2345, 20, 11], [2345, 21, 9], [2304, 22, 23],
@@ -4994,20 +5018,20 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('class values ride the clsx contract: number rejects, boolean passes', () => {
+  test('class values ride the clsx contract: number rejects, boolean passes', async () => {
     const dir = workspace({
       'app.rip': ['export P = component', '  lit := true', '  render', '    div',
         '      span class: lit', '      p class: 42', ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = diagsOf(dir);
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2322);
       expect(rows[0][1]).toBe(6);                       // the `p class: 42` pair
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('event handlers: a mismatched named method draws the cast diagnostic; a custom event stays quiet', () => {
+  test('event handlers: a mismatched named method draws the cast diagnostic; a custom event stays quiet', async () => {
     const dir = workspace({
       'app.rip': ['export P = component', "  v := ''",
         '  onKey = (e: KeyboardEvent) ->', '    v = e.key',
@@ -5018,34 +5042,34 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
         ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = diagsOf(dir);
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2352);
       expect(rows[0][1]).toBe(7);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('refs: the blessed arms pass; a non-nullable or foreign-typed cell rejects on its own pair, static and dynamic', () => {
+  test('refs: the blessed arms pass; a non-nullable or foreign-typed cell rejects on its own pair, static and dynamic', async () => {
     const clean = workspace({
       'app.rip': ['export P = component', '  el := null', '  inp: HTMLInputElement | null := null', '  render',
         '    div ref: el', '      input ref: inp', ''].join('\n'),
     }, { strict: true });
     try {
-      expect(diagsOf(clean)).toEqual([]);
+      expect(await diagsOf(clean)).toEqual([]);
     } finally { fs.rmSync(clean, { recursive: true, force: true }); }
     const bad = workspace({
       'app.rip': ['export P = component', '  vis := true', '  divCell: HTMLDivElement | null := null', '  render',
         '    div', '      if vis', '        input ref: divCell', ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = diagsOf(bad);
+      const rows = await diagsOf(bad);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2345);
       expect(rows[0][1]).toBe(7);                       // the dynamic ref's own line
     } finally { fs.rmSync(bad, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('SVG: case-sensitive names with string | number values; the dual-namespace anchor takes the SVG surface', () => {
+  test('SVG: case-sensitive names with string | number values; the dual-namespace anchor takes the SVG surface', async () => {
     const dir = workspace({
       'app.rip': ['export P = component', '  r := 4', '  render',
         "    svg viewBox: '0 0 10 10'",
@@ -5055,24 +5079,24 @@ describeExtended('rip check: intrinsic-element typing over the real server', () 
         ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = diagsOf(dir);
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2345);
       expect(rows[0][1]).toBe(6);                       // the misspelled viewbox key
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
-  test('bare shorthand stays clean through the typed surface', () => {
+  test('bare shorthand stays clean through the typed surface', async () => {
     const dir = workspace({
       'app.rip': comp(['form novalidate', 'input required', 'button disabled', "  'go'"]),
     }, { strict: true });
     try {
-      expect(diagsOf(dir)).toEqual([]);
+      expect(await diagsOf(dir)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 });
 
-describe('branch narrowing under the real checker', () => {
+describe.concurrent('branch narrowing under the real checker', () => {
   // TS18047 is a strict-null-checks answer, so the workspace is strict.
   const strictWorkspace = (files) => {
     const dir = workspace(files);
@@ -5092,19 +5116,19 @@ describe('branch narrowing under the real checker', () => {
     '',
   ].join('\n');
 
-  test('the unnarrowed spelling under `if @store.user` checks clean', () => {
+  test('the unnarrowed spelling under `if @store.user` checks clean', async () => {
     const dir = strictWorkspace({ 'narrow.rip': component('@store.user') });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.stdout).toContain('No type errors');
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
-  test('a branch on a different expression does not narrow: TS18047 at the read', () => {
+  test('a branch on a different expression does not narrow: TS18047 at the read', async () => {
     const dir = strictWorkspace({ 'narrow.rip': component('@store.other') });
     try {
-      const r = check(dir);
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS18047');
       expect(r.stdout).toContain('narrow.rip:5:');
@@ -5119,7 +5143,7 @@ describe('branch narrowing under the real checker', () => {
 // leave both hovers at the union, so this is the gate that separates the
 // two spellings. Strict, because without strict null checks the union
 // never exists and both hovers agree by accident.
-describeExtended('branch narrowing — what the editor says', () => {
+describeExtended.concurrent('branch narrowing — what the editor says', () => {
   test('the hover on a narrowed read drops null; the condition read keeps it', async () => {
     const base = JSON.parse(fs.readFileSync(TSCONFIG, 'utf8'));
     delete base.include;

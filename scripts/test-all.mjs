@@ -2,48 +2,31 @@
 
 // scripts/test-all.mjs — the lane orchestrator behind `bun run test:all`.
 //
-// The tests live behind a directory boundary: the root suite runs from
-// here (bunfig's pathIgnorePatterns excludes packages/**) and every
-// workspace package owns a suite that runs from its own directory, so no
-// single `bun test` can cover the repository. This script crosses that
-// boundary the only honest way — it spawns each suite as the process that
-// suite's own package.json declares — and aggregates the exit codes.
+// No single `bun test` covers the repository: bunfig keeps the root suite
+// out of packages/**, and each workspace package runs its own suite from
+// its own directory. This script spawns each suite as the process its
+// package.json declares and aggregates the exit codes. Lanes are found by
+// walking packages/*/ for a `test` script, never from a list kept here.
+// test/browser (Playwright) is not a lane: it needs installed browsers and
+// runs as `bun run test:browser` / CI's browser job.
 //
-// It is deliberately dumb. It discovers lanes, spawns them, labels their
-// output, and fails if any lane fails; the only thing it reads out of a
-// suite is how many tests that suite says it ran (the zero-test gate
-// below), and the package lanes are found by walking packages/*/ for a
-// `test` script, never from a list maintained here. One piece of
-// structural knowledge is unavoidable, and it is named:
+// scripts/preflight.mjs (tsgo resolves) runs before any lane, because a
+// missing tsgo otherwise shows up inside unrelated lanes or as a green run
+// with the editor surface skipped. A lane whose tool is missing SKIPS
+// locally behind a visible line and FAILS the run in CI, the same teeth
+// test/support/extended.js puts on the extended tier. Lane output is
+// buffered and printed as one labeled block when the lane finishes.
 //
-//   * test/browser (Playwright) is not a packages/*/ lane. It needs
-//     installed browsers; run `bun run test:browser` / CI's browser job.
-//     Local `bun run test:all` does not cover it.
+// Flags:  --root <dir>    repository to orchestrate (default: this checkout)
+//         --jobs <n>      lanes in flight at once (default: half the cores, min 2)
+//         --timeout <ms>  per-lane timeout (default: 600000)
+//         --plan          print the lanes that would run, spawn nothing
 //
-// Every other package runs the way its own package.json says to. A suite
-// that wants file-level parallelism asks for it in its own script, so the
-// developer in that directory gets exactly what this does — running a
-// suite differently here than it runs there is how the two drift apart.
-//
-// One guardrail runs before any lane: scripts/preflight.mjs (tsgo
-// resolves) — a failure whose symptoms otherwise appear inside
-// unrelated lanes, or worse, as a green run with the editor surface
-// skipped.
-//
-// Teeth, following test/support/extended.js: a lane whose tool is missing
-// SKIPS locally behind a visible line, and in CI (the CI environment
-// variable set) a skipped lane FAILS the run instead — a configuration
-// that quietly stops running a suite must not be able to go green.
-//
-// Lane output is buffered and flushed as one labeled block when the lane
-// finishes: with a couple dozen lanes in flight, interleaved live streams
-// are unreadable, and each block preserves its runner's own formatting.
-//
-// Flags (all optional; the defaults are what `bun run test:all` uses):
-//   --root <dir>     repository to orchestrate (default: this checkout)
-//   --jobs <n>       lanes in flight at once (default: half the cores, min 4)
-//   --timeout <ms>   per-lane timeout (default: 600000)
-//   --plan           print the lanes that would run, spawn nothing
+// Every package lane gets RIP_LANE_WORKERS, its share of the CPU budget
+// below: a suite that fans out CPU-bound work (packages/vscode's `bun test
+// --parallel`) sizes itself by it instead of by the machine. packages/sites
+// ignores it on purpose — its sub-suites mostly wait, so its cap of 4 is a
+// latency choice.
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -77,38 +60,35 @@ const number = (name, fallback, min) => {
 const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const ROOT = resolve(flag('root', HERE));
 
-// Everything below is one CPU budget, because the machine is one machine:
-// oversubscription does not fail loudly, it just stretches every clock
-// until the suites that time real machinery start missing deadlines they
-// meet idle (a reload doorbell, a scaling gate, a control-plane probe).
-//
-// availableParallelism, not cpus().length: it respects CPU affinity, so a
-// pinned or containerised runner is sized by what it may actually use.
+// One CPU budget for the whole run: oversubscription does not fail loudly,
+// it stretches every clock until the suites that time real machinery miss
+// deadlines they meet idle. availableParallelism respects CPU affinity, so
+// a pinned or containerised runner is sized by what it may actually use.
 const CORES = availableParallelism();
 
-// ONE ratio sets the peak, so it is the same multiple of the machine at
-// every size rather than whatever two independent formulas happen to
-// produce. Above 1.0 deliberately: lanes are not uniformly CPU-bound —
-// they spawn subprocesses, wait on sockets and block on I/O — so a strict
-// 1:1 budget leaves those cores idle. Measured on an 8-core box: a 1.0x
-// peak cost +29% wall (81s against 63s); 1.25x costs +6%. Push it past
-// ~1.5 and the suites that time real machinery start missing deadlines
-// they meet idle, which is the whole reason this budget exists.
-const OVERSUBSCRIBE = 1.25;
+// OVERSUBSCRIBE is the peak as a multiple of the cores. Above 1.0 because
+// lanes spawn subprocesses and wait on sockets rather than burn CPU flat
+// out, so a strict 1:1 budget leaves cores idle; past ~1.5 the timed
+// suites start missing deadlines. It only holds if every lane keeps to
+// its share, which is what RIP_LANE_WORKERS is for.
+const OVERSUBSCRIBE = 1.4;
 const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
 
-// Lane slots are a PACKING constraint, not a CPU one — the long sibling
-// lanes (sites, vscode, print) have to overlap the root lane or the wall
-// clock becomes their sum, which is what the old floor of 4 was really
-// buying. Half the cores, floor 2: on a two-core box the cores, not the
-// slots, are the constraint, and four lanes there only added contention.
+// Lane slots are a packing constraint, not a CPU one: the long sibling
+// lanes have to overlap the root lane or the wall clock becomes their sum.
 const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
 
-// The root lane is the critical path and the CPU-bound one, so it gets
-// whatever the budget has left after the siblings running beside it —
-// never more than the machine. Left bare, `bun test --parallel` defaults
-// to one worker per core and claims the whole machine on its own.
-const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - (JOBS - 1)));
+// The peak is split between the root lane and the JOBS-1 siblings beside
+// it. One sibling fans out (vscode, sized by RIP_LANE_WORKERS) and counts
+// at LANE_WORKERS, the rest are one process each, and the root lane — the
+// CPU-bound critical path — gets the remainder, never more than the
+// machine, never fewer than two. LANE_WORKERS is four where the peak
+// affords it and shrinks before the root lane would drop below two.
+const SIBLINGS = Math.max(0, JOBS - 1);
+const PLAIN_SIBLINGS = Math.max(0, SIBLINGS - 1);
+const LANE_WORKERS = Math.max(1, Math.min(4, PEAK - 2 - PLAIN_SIBLINGS));
+const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - PLAIN_SIBLINGS - LANE_WORKERS));
+
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
@@ -119,6 +99,20 @@ const EXCLUDED = new Map();
 // ~2x the work of a bare `bun run test`, so the two wall times are not
 // comparable.
 const ROOT_LANE = 'root (extended tier)';
+
+// Lanes start in this order, longest first, so a long lane picked up late
+// cannot stretch the wall clock past the root suite. A lane not listed
+// starts after every listed one, in discovery order.
+const LONGEST_FIRST = [
+  ROOT_LANE,
+  'packages/sites',
+  'packages/vscode',
+  'packages/ui',
+  'packages/print',
+  'packages/email',
+  'packages/db',
+  'packages/swarm',
+];
 
 // Bun's gate (TTY / NO_COLOR / FORCE_COLOR / CI). When this process will
 // paint, lanes get a PTY (Bun.spawn `terminal`) so runners see isTTY and
@@ -162,6 +156,11 @@ const readJson = (path) => { try { return JSON.parse(readFileSync(path, 'utf8'))
 const planLanes = () => {
   const lanes = [];
   const excluded = [];
+  // tsgo is a Go binary and every lane starts it many times (rip check,
+  // the editor server); with the default GOGC=100 half of a short session
+  // is the collector. 400 is a fifth of the collections, identical
+  // answers, measured 7% off the check gate — and bun ignores the variable.
+  const GO_ENV = { GOGC: process.env.GOGC ?? '400' };
 
   // The full root suite: in-process + test/spawn + the extended tier
   // (see test/support/extended.js). `bun run test` is the fast edit loop
@@ -174,7 +173,7 @@ const planLanes = () => {
     // 60s, not 15s: the extended tier's scaling gates budget up to three
     // full measurements, and a busy lane stretches one past 5s.
     args: ['test', `--parallel=${ROOT_WORKERS}`, '--timeout', '60000'],
-    env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
+    env: { ...GO_ENV, RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
   const packagesDir = join(ROOT, 'packages');
@@ -195,16 +194,14 @@ const planLanes = () => {
       cwd,
       cmd: process.execPath,
       args: ['run', 'test'],
+      env: { ...GO_ENV, RIP_LANE_WORKERS: String(LANE_WORKERS) },
       skip: resolveTool(tool, cwd) ? undefined : `\`${tool}\` is not on PATH or in node_modules/.bin`,
     });
   }
 
-  // Scheduling hint only: the longest lanes are started first so a late
-  // start cannot stretch the wall clock past the root suite. Correctness
-  // does not depend on the order.
-  const weight = (lane) =>
-    lane.label === ROOT_LANE ? 0 : lane.label === 'packages/vscode' ? 1 : lane.label === 'packages/sites' ? 2 : 3;
-  lanes.sort((a, b) => weight(a) - weight(b));
+  // Stable sort: unlisted lanes keep discovery order after the listed ones.
+  const rank = (lane) => { const i = LONGEST_FIRST.indexOf(lane.label); return i === -1 ? LONGEST_FIRST.length : i; };
+  lanes.sort((a, b) => rank(a) - rank(b));
 
   return { lanes, excluded };
 };
@@ -249,6 +246,14 @@ const testsReported = (output) => {
   return total; // null → the lane never printed a count
 };
 
+// Every lane process in flight, so an interrupted run can take them
+// down. Left alone, Ctrl-C kills only this process: the lanes run in
+// their own sessions (the PTY below), keep going without a reader, and
+// a suite that dies of the closed PTY mid-flight strands whatever it
+// had spawned detached — a Playwright web server on :4180, say, which
+// the NEXT run then trips over.
+const live = new Set();
+
 const runLane = async (lane) => {
   const started = Date.now();
   const chunks = [];
@@ -288,12 +293,23 @@ const runLane = async (lane) => {
   } catch (e) {
     return finish({ status: 'fail', why: `could not spawn: ${e?.message ?? e}` });
   }
+  live.add(proc);
+  proc.exited.then(() => live.delete(proc));
 
+  // A lane past its deadline is told to stop, then killed. The exit wait
+  // below is bounded too: a lane that has been killed is finished whether
+  // or not its exit is ever observed (a PTY lane's can go unreported).
   let timedOut = false;
+  let killed;
+  const gaveUp = new Promise((resolve) => { killed = resolve; });
   const timer = setTimeout(() => {
     timedOut = true;
     try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* already dead */ } }, 5000).unref();
+    setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      try { proc.terminal?.close(); } catch { /* closed */ }
+      setTimeout(() => killed(null), 5000).unref();
+    }, 5000).unref();
   }, TIMEOUT_MS);
 
   if (!usePty) {
@@ -304,7 +320,7 @@ const runLane = async (lane) => {
     await Promise.all([pull(proc.stdout), pull(proc.stderr)]);
   }
 
-  const code = await proc.exited;
+  const code = await Promise.race([proc.exited, gaveUp]);
   clearTimeout(timer);
   try { proc.terminal?.close(); } catch { /* closed */ }
 
@@ -316,6 +332,22 @@ const runLane = async (lane) => {
   return finish({ status: 'pass', ran });
 };
 
+// Interrupted (Ctrl-C, a supervisor's SIGTERM): tell every lane in
+// flight, give it a moment to tear down what it spawned, then leave
+// with the conventional status. A lane that will not stop is killed.
+const interrupt = (signal) => {
+  for (const proc of live) { try { proc.kill('SIGTERM'); } catch { /* gone */ } }
+  const status = signal === 'SIGINT' ? 130 : 143;
+  const deadline = setTimeout(() => {
+    for (const proc of live) { try { proc.kill('SIGKILL'); } catch { /* gone */ } }
+    process.exit(status);
+  }, 3000);
+  deadline.unref?.();
+  Promise.all([...live].map((proc) => proc.exited)).then(() => process.exit(status));
+};
+process.on('SIGINT', () => interrupt('SIGINT'));
+process.on('SIGTERM', () => interrupt('SIGTERM'));
+
 const runAll = async (lanes) => {
   const queue = lanes.filter((l) => !l.skip);
   const results = [];
@@ -326,7 +358,7 @@ const runAll = async (lanes) => {
     const now = Date.now();
     const running = [...live.entries()].map(([label, at]) => `${label} ${secs(now - at)}`).join(', ');
     console.log(dim(`  … ${live.size} running: ${running}`));
-  }, 15_000);
+  }, 5_000);
   heartbeat.unref?.();
 
   let next = 0;
@@ -383,7 +415,7 @@ const skipped = lanes.filter((l) => l.skip);
 
 // "repo", not "root" — `root` names a lane, and the two would read as
 // the same thing on adjacent lines.
-console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers), repo ${ROOT}`);
+console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers, ${LANE_WORKERS} per sibling lane), repo ${ROOT}`);
 for (const { name, why } of excluded) console.log(dim(`  · packages/${name} excluded: ${why}`));
 for (const lane of skipped) {
   console.log((CI ? red : yellow)(`  ⊘ ${lane.label} SKIPPED: ${lane.skip}`));
@@ -393,6 +425,11 @@ for (const lane of skipped) {
 // run; printing the plan without spawning is what makes it assertable.
 if (argv.includes('--plan')) {
   for (const lane of lanes.filter((l) => !l.skip)) console.log(`▸ ${lane.label}`);
+  // The budget as it reaches the lanes, so a plan is assertable on the
+  // arguments as well as the list.
+  const root = lanes.find((l) => l.label === ROOT_LANE);
+  console.log(dim(`  · root lane: bun ${root.args.join(' ')}`));
+  console.log(dim(`  · package lanes: bun run test  (RIP_LANE_WORKERS=${LANE_WORKERS})`));
   process.exit(0);
 }
 

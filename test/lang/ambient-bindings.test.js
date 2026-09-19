@@ -7,7 +7,7 @@
 // readonly writes reject positioned, seeded names never re-hoist, and
 // minted temps dodge them.
 import { describe, test, expect } from 'bun:test';
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 
 const seeded = (src, bindings, opts = {}) =>
   compile(src, { runtimeDelivery: 'none', ambientBindings: bindings, ...opts });

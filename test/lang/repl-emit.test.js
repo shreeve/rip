@@ -6,7 +6,7 @@
 // (b) top-level static imports lower to awaited dynamic imports so
 // the program is evaluable inside an async function body.
 import { describe, test, expect } from 'bun:test';
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 
 const repl = (src, opts = {}) => compile(src, { runtimeDelivery: 'none', repl: true, ...opts });
 

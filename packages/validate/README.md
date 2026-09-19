@@ -62,7 +62,7 @@ registerValidator 'even', (v) ->
 | numbers | `id` `int` `whole` `float` |
 | money | `money` `money_even` `cents` `decimal` |
 | strings | `string` `text` `name` `address` `slug` |
-| date/time | `date` `time` `time12` |
+| date/time | `date` `datetime` `time` `time12` |
 | booleans | `truthy` `falsy` `bool` |
 | identity | `email` `state` `zip` `zipplus4` `ssn` `sex` `phone` `username` |
 | technical | `ip` `mac` `url` `color` `uuid` `semver` |
@@ -73,8 +73,15 @@ Contracts worth knowing:
 - `money`/`money_even` take **dollars** and return **integer cents**;
   `cents` takes a value already in cents; `decimal` is a lossless
   arbitrary-scale **string**
-- `date` requires a real calendar date and always answers the
-  canonical `YYYY-MM-DD` spelling
+- `date` and `datetime` accept every spelling rip/time reads, not ISO
+  alone (`2024-02-15`, `2/15/24`, `Feb 15, 2024`, `15-FEB-2024`, all-digit
+  runs, colon-less clocks, am/pm, zones), and are strict about the
+  calendar: years are 1900–2099, and Feb 30 is a miss, never Mar 1. `date`
+  answers the day as written, `YYYY-MM-DD`, dropping any clock; `datetime`
+  requires a clock and answers the wall clock as written,
+  `YYYY-MM-DDTHH:MM:SS[.fff]`, with the fraction truncated to milliseconds
+  and shown only when nonzero, and the zone as written when there was one:
+  `±HH:MM`, or `Z` for any zero offset (`Z`, `UTC`, `GMT`, `+00:00`)
 - `id` is a positive integer with no leading zero, at most 15 digits
   (safe-integer territory); `ids` parses, dedupes, and sorts a list of
   them
@@ -106,7 +113,7 @@ a name.
 bun run test
 ```
 
-The suite pins all 37 validators row by row (152 contracts), the
+The suite pins all 37 validators row by row (191 contracts), the
 registry's rejection paths, the utility functions, and the schema
 bridge — including fresh-process registration and collision loudness as
 real subprocesses.

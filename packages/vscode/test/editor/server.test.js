@@ -23,15 +23,8 @@
 import { test, expect, describe } from 'bun:test';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { tsgoAvailable, LspClient, SERVER } from './support/harness.mjs';
 
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed; tsgo-broker.test.js owns the loud notice */ }
-
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
 const uri = 'file:///demo/app.rip';
 
 // Lines chosen for the GPT repro: `greeting` on line 0, `count` on
@@ -41,7 +34,6 @@ const uri = 'file:///demo/app.rip';
 const GOOD = 'greeting = "hello"\ncount = 42\nconsole.log greeting, count\n';
 
 async function startServer(onDiagnostics) {
-  const { LspClient } = await import('../../src/tsgo.js');
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     onNotification: (method, params) => {
       if (method === 'textDocument/publishDiagnostics') onDiagnostics(params);
@@ -52,14 +44,17 @@ async function startServer(onDiagnostics) {
   return client;
 }
 
-const nextDiagnostics = (published) => {
+// The newest publish after this point — or, given `accept`, the newest one
+// it accepts. Bounded: 15 s, then a loud failure.
+const nextDiagnostics = (published, accept = () => true) => {
   const before = published.length;
   return async () => {
-    for (let i = 0; i < 150 && published.length === before; i++) {
+    for (let i = 0; i < 150; i++) {
+      const fresh = published.slice(before).filter(accept);
+      if (fresh.length > 0) return fresh[fresh.length - 1];
       await new Promise((r) => setTimeout(r, 100));
     }
-    expect(published.length).toBeGreaterThan(before);
-    return published[published.length - 1];
+    throw new Error(`no accepted publishDiagnostics within 15 s (${published.length - before} arrived)`);
   };
 };
 
@@ -445,7 +440,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // An edit that makes a dynamic construct INVALID (a transition
       // on a static element — a compile rejection): the server keeps
       // serving the stale face and answers positions, never crashes.
-      const wait2 = nextDiagnostics(published, 2);
+      const wait2 = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: fixture.replace('div ref: el', 'div ~slide, ref: el') }],
@@ -506,7 +501,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       }
       // An edit that makes composition INVALID (a second slot — the
       // #166 rejection): the server keeps serving the stale face.
-      const wait2 = nextDiagnostics(published, 2);
+      const wait2 = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: fixture.replace('      slot\n', '      slot\n      slot\n') }],
@@ -1022,7 +1017,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(atWriteEnriched.range.start.line).toBe(4);
 
       // Inference has teeth: a type-violating use errors, positioned.
-      wait = nextDiagnostics(published);
+      wait = nextDiagnostics(published, (p) => p.diagnostics.some((d) => d.code === 2339));
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: fixture + '  total.toUpperCase()\n' }],

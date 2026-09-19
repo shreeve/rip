@@ -10,12 +10,15 @@ import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { join, dirname, resolve, relative, sep, delimiter } from 'path';
 import { fileURLToPath } from 'url';
-import { compile, CompileError } from '../src/compile.js';
-import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/cli/explain.js';
-import { tokenize, makeParserLexer } from '../src/lexer.js';
-import { Parser } from '../src/parser.js';
-import { toInlineMapComment } from '../src/sourcemap.js';
 import packageJson from '../package.json' with { type: 'json' };
+
+// The compiler (compile / lexer / parser / emitter — parser.js alone is
+// ~450 KB) loads only on the paths that compile in THIS process: -c/-o,
+// -t, -s, --dts, --ts, --explain, and the stdin pre-check. Every other
+// path — `rip check`, `rip test`, `rip sites`, running a file (which a
+// child bun compiles through the loader) — never pays for it, so
+// dispatch is a bun start plus this file.
+const loadCompiler = () => import('../src/compiler.js');
 
 const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
 const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/run.js');
@@ -125,19 +128,16 @@ if (args[0] === 'schema') {
   process.exit(r.status ?? 1);
 }
 
-// `rip check` — the headless type-checker: drive the editor's own
-// faces→mirror→tsgo→map-back pipeline over the given files/dirs and
-// report type diagnostics on the .rip source. Dispatched before option
-// parsing, like `schema` (a file literally named `check` runs as
-// `rip ./check`). No loader preload — the checker spawns the language
-// server, which owns compilation.
+// `rip check` — the headless type-checker, dispatched before option
+// parsing like `schema` (a file literally named `check` runs as
+// `rip ./check`). It runs in this process: check.js is a top-level
+// script that reads process.argv and exits itself on every path, so
+// it sees the same TTY, cwd and env it would as a child, minus a bun
+// start and a second compiler load.
 if (args[0] === 'check') {
   const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/check.js');
-  const r = spawnSync('bun', [checkCliPath, ...args.slice(1)], {
-    stdio: 'inherit',
-    env: process.env,
-  });
-  process.exit(r.status ?? 1);
+  process.argv = [process.argv[0], checkCliPath, ...args.slice(1)];
+  await import(checkCliPath);
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip
@@ -423,6 +423,8 @@ if (explainDirection !== null) {
   if (fileIndex !== -1) {
     fail(`rip: ${explainDirection} takes its file inside the target argument; unexpected: ${args.slice(fileIndex).join(' ')}\n\nRun 'rip --help' for usage.`, 2);
   }
+  const { explainSource, explainGenerated, parseTarget, UsageError, PositionError } = await import('../src/cli/explain.js');
+  const { CompileError } = await loadCompiler();
   let target;
   try {
     target = parseTarget(explainArg);
@@ -500,6 +502,7 @@ if (showTsFace) {
     fail(`rip: --ts is an inspection mode (stdout only, the TS face never ships) and cannot combine with other options: ${others.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
   }
   const tsFaceSource = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+  const { compile, CompileError } = await loadCompiler();
   try {
     const { code } = compile(tsFaceSource, { path: inputFile ?? '<stdin>', face: 'ts' });
     process.stdout.write(code.endsWith('\n') ? code : `${code}\n`);
@@ -534,18 +537,36 @@ const run = (path, argv) => {
       env.RIP_SHEBANG_ENTRY = entry;
     }
   }
-  const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
+  // The child is ours: a kill aimed at this launcher (Playwright, a
+  // lane timeout, a supervisor) is forwarded to the process holding
+  // the port, and a launcher orphaned without a word (reparented to
+  // pid 1) takes its child with it, so no test server outlives its
+  // run. SIGINT is not forwarded: the terminal already delivers Ctrl-C
+  // to the whole foreground group, and a second copy would read as a
+  // force quit. Daemons that outlive their launcher are spawned
+  // straight through Bun, never through this path.
+  const child = spawn('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',
     env,
   });
-  process.exit(r.status ?? 1);
+  const forward = (signal) => { try { child.kill(signal); } catch { /* already gone */ } };
+  process.on('SIGTERM', () => forward('SIGTERM'));
+  process.on('SIGHUP', () => forward('SIGHUP'));
+  const watchdog = setInterval(() => {
+    if (process.ppid === 1) forward('SIGTERM');
+  }, 500);
+  watchdog.unref();
+  return new Promise(() => {
+    child.once('error', () => process.exit(1));
+    child.once('exit', (code) => process.exit(code ?? 1));
+  });
 };
 
 // ---- Run mode ----
 
 if (!compileMode) {
   if (inputFile !== null) {
-    run(inputFile, scriptArgs);
+    await run(inputFile, scriptArgs);
   }
 
   // Stdin: materialize as a .rip scratch file IN THE CWD — that keeps
@@ -556,6 +577,7 @@ if (!compileMode) {
   // created. A cwd that refuses the write (read-only, no permission)
   // fails with a clear diagnostic.
   const source = readFileSync(0, 'utf8');
+  const { compile, CompileError } = await loadCompiler();
   try {
     compile(source, { path: '<stdin>' });
   } catch (err) {
@@ -592,6 +614,12 @@ if (!compileMode) {
 
 const path = inputFile ?? '<stdin>';
 const source = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+const { compile, CompileError } = await loadCompiler();
+const [{ tokenize, makeParserLexer }, { Parser }, { toInlineMapComment }] = await Promise.all([
+  import('../src/lexer.js'),
+  import('../src/parser.js'),
+  import('../src/sourcemap.js'),
+]);
 
 try {
   if (showTokens) {

@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cacheIdentityOf } from '../../packages/vscode/src/hash.js';
-import { compile } from '../compile.js';
+import { compile } from '../compiler.js';
 import { readProjectConfig } from '../config.js';
 import { identifierRunAt } from '../ident.js';
 import { startTsgo } from '../../packages/vscode/src/tsgo.js';
@@ -633,7 +633,7 @@ if (targets.length > 0) {
     // workspace, so per-project wrappers stop applying and @types
     // resolution changes — the user must know their diagnostics come
     // from a different posture than the editor's.
-    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
+    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-fallback-'));
     mirrorRootIsFallback = true;
     fallbackToClean = mirrorRoot;
     console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);

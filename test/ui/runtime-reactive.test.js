@@ -12,7 +12,7 @@ import { test, expect, describe } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
-import { compile as fullCompile } from '../../src/compile.js';
+import { compile as fullCompile } from '../../src/compiler.js';
 import { Mappings } from '../../src/stores.js';
 import { expectLinearDoubling } from '../support/scaling.js';
 import * as v4mod from '../../src/runtime/reactive.js';

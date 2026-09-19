@@ -14,10 +14,10 @@
 
 import { plugin } from 'bun';
 import { readFileSync } from 'fs';
-import { compile } from './compile.js';
 import { toInlineMapComment } from './sourcemap.js';
 import { registerModuleMap, remapStack } from './stackmap.js';
-import { bareSpecifierMap } from './resolve.js';
+import { compileCached } from './cacher.js';
+import { bareSpecifierMap } from './resolver.js';
 
 // Async effect failures are report-and-continue by design (the
 // record): the runtime prints them itself, and its default printer
@@ -39,7 +39,7 @@ const installReactiveReporter = async () => {
 };
 
 // Bare-specifier resolution (the `rip/<pkg>` stdlib namespace and the
-// bun-global-install fallback) is enumerated by src/resolve.js,
+// bun-global-install fallback) is enumerated by src/resolver.js,
 // shared with the sites artifact generator. Bun's runtime consults
 // plugins' onLoad but not onResolve (measured on 1.3.14: the hook
 // never fires for import statements), so here every name is registered
@@ -101,8 +101,11 @@ export default __configs;
       const source = readFileSync(args.path, 'utf8');
       // The loader is a toolchain path: feature runtimes arrive
       // as ONE injected import of the shared runtime module — every
-      // loaded module shares one copy per process.
-      const { code, map, runtimes } = compile(source, { path: args.path, runtimeDelivery: 'import' });
+      // loaded module shares one copy per process. The compile runs
+      // through the on-disk cache (src/cacher.js): a spawned
+      // process re-reads the emission of an unchanged module instead
+      // of recompiling it.
+      const { code, map, runtimes } = compileCached(source, { path: args.path, runtimeDelivery: 'import' });
       // The reporter must exist before the module's first effect can
       // run — awaited here, ahead of the module body's evaluation.
       if (runtimes.has('reactive')) await installReactiveReporter();

@@ -2,7 +2,7 @@
 // server-defined projections across the browser boundary.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { extractClientProjections } from '../../src/projections.js';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { __schema, SchemaRegistry } from '../../src/runtime/schema.js';
 // Models in the parity fixture need the persistence runtime loaded.
 import '../../src/runtime/orm.js';

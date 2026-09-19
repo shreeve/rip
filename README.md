@@ -35,6 +35,7 @@ package-local `TODO.md` files (for example
 - [docs/SERVER.md](docs/SERVER.md) — Sites, Janus, manager, worker architecture
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser publication / apply contract
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
+- [docs/VARIANTS.md](docs/VARIANTS.md) — `VARIANT` documents from SQL, Rip and the harbor REPL
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
 - [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work
@@ -54,6 +55,16 @@ bun run audit
 
 Package work: `bun run test` from that package directory (for example
 `packages/sites`). Browser smoke: `bun run test:browser`.
+
+### Compile cache
+
+`rip file.rip`, `rip test`, and the Sites bundler compile `.rip` modules
+through an on-disk cache at `.rip/cache/compile/` in this checkout
+(`src/cacher.js`), so a spawned process re-reads an unchanged module's
+emission instead of recompiling it. Any edit under `src/` invalidates
+every entry, and compile errors are never cached. `RIP_CACHE_DIR=<dir>`
+relocates the cache and `RIP_NO_CACHE=1` disables it. Entries unread for
+a week are pruned; `rm -rf .rip/cache` is the full reset.
 
 `test:all` needs `janus` on PATH for the Sites integration lane. Install
 [Janus](https://github.com/shreeve/janus#prebuilt-releases), or put a Janus

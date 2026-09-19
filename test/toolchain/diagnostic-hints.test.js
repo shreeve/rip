@@ -3,7 +3,7 @@
 // way they are typed, and the rejections with an obvious intended
 // spelling carry a hint naming it.
 import { test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 
 const rejection = (src) => {
   try { compile(src, { runtimeDelivery: 'none' }); } catch (e) { return e.message; }

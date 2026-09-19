@@ -146,3 +146,16 @@ let demand = function(value: string | null) { return value ?? (() => { throw new
 let held = (() => { try { return reject(503) } catch (caught) { return caught } })()
 
 console.log('held:', held, 'demand:', demand('present'))
+
+// ── annotated catch binding: the plain parameter at runtime, the annotation reaches the face ──
+
+let parseLoose = function(raw: string) {
+  try {
+    return JSON.parse(raw)
+  } catch (error: any) {
+    console.log('loose failed:', typeof error.message)
+    return null
+  }
+}
+
+console.log('loose:', parseLoose('{"ok":true}'), parseLoose('not json'))

@@ -95,8 +95,8 @@ import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfi
 // pair — and a source change still changes it, so the cache purges.
 async function loadCompiler() {
   const candidates = [
-    new URL('../../../src/compile.js', import.meta.url),   // in-repo
-    new URL('../compiler/src/compile.js', import.meta.url), // staged vsix
+    new URL('../../../src/compiler.js', import.meta.url),   // in-repo
+    new URL('../compiler/src/compiler.js', import.meta.url), // staged vsix
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
@@ -111,7 +111,7 @@ async function loadCompiler() {
       return (await import(candidate.href)).compile;
     }
   }
-  throw new Error('rip compiler not found (looked for ../../../src/compile.js and ../compiler/src/compile.js)');
+  throw new Error('rip compiler not found (looked for ../../../src/compiler.js and ../compiler/src/compiler.js)');
 }
 
 // The declaration-scope gate (scopes.js) reads the compile's own token tape
@@ -701,7 +701,11 @@ function handleTsgoExit(session) {
     connection.console.error('[rip] tsgo exited unexpectedly — restarting once');
     launchTsgo().then((restarted) => {
       if (!restarted) return;
-      for (const document of documents.all()) scheduleRefresh(document);
+      // A refresh already waiting on the restart carries on with the new
+      // session; scheduling another would publish the same buffer twice.
+      for (const document of documents.all()) {
+        if (!states.get(document.uri)?.settling) scheduleRefresh(document);
+      }
     });
   } else {
     connection.console.error('[rip] tsgo exited again — staying degraded (Rip parse diagnostics only)');
@@ -1822,10 +1826,18 @@ function isNoCheck(uri, state) {
   return isNoCheckPath(fsPath, state.configDir, state.noCheck);
 }
 
+// The end of a refresh's publishing for one buffer version — the final
+// set (parse rejections, the merged TS pull, or the post-probe re-publish
+// when a pin probe ran), whichever this refresh owed. Debug level, like
+// the other per-publish lines; the test harnesses wait on it instead of
+// guessing when a burst of publishes has ended.
+const announceSettled = (uri, version) => connection.console.debug(`[rip] settled ${uri} v${version}`);
+
 async function refresh(document) {
   ensureMirrorRoot(); // first materialization decides/creates the tree
   const state = stateOf(document.uri);
   const text = document.getText();
+  const version = document.version; // the buffer this refresh compiles
   const srcLineStarts = lineStartsOf(text);
 
   // rip.strict / rip.noCheck (package.json#rip, nearest wins, no
@@ -1885,6 +1897,7 @@ async function refresh(document) {
       uri: document.uri,
       diagnostics: [compileErrorDiagnostic(err, text, srcLineStarts)],
     });
+    announceSettled(document.uri, version);
     return;
   }
 
@@ -2089,6 +2102,7 @@ async function refresh(document) {
     // compile, the carried rejections on a tolerant one.
     state.lastGood = good;
     connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
+    announceSettled(document.uri, version);
     return;
   }
 
@@ -2127,10 +2141,10 @@ async function refresh(document) {
   if (isNoCheck(document.uri, state)) {
     connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
     repullOpenDocuments(document.uri);
+    announceSettled(document.uri, version);
     return;
   }
 
-  const versionAtRequest = document.version;
   let pulled;
   try {
     // Same cap as the re-pull: one shot per refresh, abandoned on
@@ -2142,7 +2156,7 @@ async function refresh(document) {
     return;
   }
   // Superseded by a newer edit — that edit's own refresh will publish.
-  if (documents.get(document.uri)?.version !== versionAtRequest) return;
+  if (documents.get(document.uri)?.version !== version) return;
 
   const items = pulled?.items ?? [];
   const mapped = [];
@@ -2173,10 +2187,17 @@ async function refresh(document) {
   // re-refresh; on that pass every key hits the cache, so the cycle
   // terminates. Rejected answers cache as null and never retry until
   // the defining expression changes (the key hashes its source text).
+  // The settle announcement waits for the probe when one runs: its
+  // re-refresh publishes again for this same version (and announces
+  // from inside refresh); a probe that pins nothing, or is declined
+  // because one is already in flight, leaves this publish as the last.
   if (result.pinnables?.some((p) => !state.pinCache.has(p.key))) {
-    probePinsFor(document, state, result).catch((err) =>
-      connection.console.error(`[rip] pin probe failed: ${err.message}`));
+    probePinsFor(document, state, result)
+      .catch((err) => { connection.console.error(`[rip] pin probe failed: ${err.message}`); return false; })
+      .then((rerefreshed) => { if (!rerefreshed) announceSettled(document.uri, version); });
+    return;
   }
+  announceSettled(document.uri, version);
 }
 
 // One probe round for a document: splice probe declarations into a
@@ -2185,11 +2206,14 @@ async function refresh(document) {
 // new pinned. The probe file is pulled once, for the verify round, and
 // its diagnostics are never published; it exports nothing, so it is
 // invisible to the user.
+// Resolves true when the round re-refreshed the document (its publish
+// then supersedes the pre-probe one), false when this publish stands.
 async function probePinsFor(document, state, result) {
-  if (state.probing || !tsgo) return;
+  if (state.probing || !tsgo) return false;
   const wanted = result.pinnables.filter((p) => !state.pinCache.has(p.key));
-  if (wanted.length === 0) return;
+  if (wanted.length === 0) return false;
   state.probing = true;
+  let rerefreshed = false;
   const versionAtProbe = documents.get(document.uri)?.version;
   const probePath = state.mirrorPath.replace(/\.ts$/, '.__rip_probe__.ts');
   const probeUri = 'file://' + probePath;
@@ -2232,22 +2256,25 @@ async function probePinsFor(document, state, result) {
     if (pinned > 0) {
       connection.console.log(`[rip] pinned ${pinned}/${wanted.length} hoisted binding(s) for ${path.basename(state.mirrorPath)}`);
       // Superseded edits refresh on their own; only re-refresh the text we probed.
-      if (documents.get(document.uri)?.version === versionAtProbe) await refresh(document);
+      if (documents.get(document.uri)?.version === versionAtProbe) { rerefreshed = true; await refresh(document); }
     }
   } finally {
     try { fs.unlinkSync(probePath); } catch { /* already gone */ }
     state.probing = false;
   }
+  return rerefreshed;
 }
+
+// Keystroke coalescing before a refresh runs; the test harnesses set RIP_LSP_DEBOUNCE_MS to shrink it.
+const REFRESH_DEBOUNCE_MS = Number(process.env.RIP_LSP_DEBOUNCE_MS) || 100;
 
 function scheduleRefresh(document) {
   const state = stateOf(document.uri);
-  // Keystroke coalescing; compiles are fast but tsgo round-trips add up.
   clearTimeout(state.refreshTimer);
   // The pending work is made AWAITABLE, because a debounce is invisible
   // to a request that arrives inside it: completion and signature help
-  // answer from `lastGood`, and for 100ms after a keystroke that is the
-  // face of the PREVIOUS text. Retyping a member dot is the case that
+  // answer from `lastGood`, and for the debounce window after a keystroke
+  // that is the face of the PREVIOUS text. Retyping a member dot is the case that
   // shows it — the buffer without the dot compiles clean, so `lastGood`
   // has plain statement context there and the popup serves the whole
   // global scope instead of the receiver's members. Recompiling locally
@@ -2268,7 +2295,7 @@ function scheduleRefresh(document) {
     catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
     finally { if (state.settling === settled) state.settling = null; done(); }
   };
-  state.refreshTimer = setTimeout(() => state.refreshRun(), 100);
+  state.refreshTimer = setTimeout(() => state.refreshRun(), REFRESH_DEBOUNCE_MS);
   state.settling = settled;
 }
 
@@ -4163,7 +4190,7 @@ connection.onCompletion(presented('textDocument/completion', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
-  // text of 100ms ago.
+  // text of a debounce window ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
@@ -4296,7 +4323,7 @@ connection.onSignatureHelp(presented('textDocument/signatureHelp', async (params
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
-  // text of 100ms ago.
+  // text of a debounce window ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;

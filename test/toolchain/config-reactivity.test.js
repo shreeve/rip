@@ -130,8 +130,9 @@ describeExtended('the config surface is reactive', () => {
       s.forget('legacy/old.rip');
       s.change('app/main.rip', "import { bad } from '../legacy/old.rip'\nconsole.log bad, 1\n");
 
-      // The re-pull must not republish old.rip's TS2322.
-      expect(s.codes(await s.diagnostics('legacy/old.rip'))).toEqual([]);
+      // The re-pull must not republish old.rip's TS2322. (A re-pull
+      // announces no settle line, so read its publication as it lands.)
+      expect(s.codes(await s.diagnosticsUntil('legacy/old.rip', () => true))).toEqual([]);
     } finally { await s.close(); }
   }, 90_000);
 
@@ -156,37 +157,44 @@ describeExtended('the config surface is reactive', () => {
   const FLOOR_PROBE = 'probe: unknown = Bun.nonsense\nconsole.log(probe)\n';
   const UNRESOLVED_BUN = [2304, 2580, 2867, 2868]; // "cannot find name" family, per checker context
 
-  test('installing @types retracts the floor live — the manifest edit re-governs the program', async () => {
+  // Host types are the toolchain's (docs/TYPES.md): the rip checkout
+  // declares `@types/bun` once, pinned to its .bun-version, and its
+  // node_modules/@types is a type root of every program. A project with
+  // no types of its own is typed by them — the bogus member is a real
+  // complaint from the first publish. A project's OWN install still comes
+  // first for a name both hold, and it takes over live: the manifest edit
+  // re-governs the open program with no re-open.
+  test('the project\'s own @types take precedence over the checkout\'s live — the manifest edit re-governs the program', async () => {
     const s = await openSession({ 'app.rip': FLOOR_PROBE, 'package.json': pkg(null) });
     try {
       s.open('app.rip');
-      // Floor active: Bun is an honest `any`; the bogus member is silent.
-      expect(s.codes(await s.diagnostics('app.rip'))).toEqual([]);
+      // The checkout's @types/bun governs: `Bun` is real, the member is a typo.
+      expect(s.codes(await s.diagnostics('app.rip'))).toEqual([2339]);
 
       // The install, offline: the fake package lands BEFORE the manifest
-      // event, exactly as `bun add` orders it.
+      // event, exactly as `bun add` orders it. Its `Bun` HAS the member.
       const typesDir = path.join(s.dir, 'node_modules', '@types', 'bun');
       fs.mkdirSync(typesDir, { recursive: true });
       fs.writeFileSync(path.join(typesDir, 'package.json'), '{ "name": "@types/bun", "version": "0.0.0", "types": "index.d.ts" }\n');
-      fs.writeFileSync(path.join(typesDir, 'index.d.ts'), 'declare var Bun: { version: string };\n');
+      fs.writeFileSync(path.join(typesDir, 'index.d.ts'), 'declare var Bun: { version: string, nonsense: number };\n');
 
       s.forget('app.rip');
       s.touch('package.json', JSON.stringify({ devDependencies: { '@types/bun': '0.0.0' } }, null, 2) + '\n');
 
-      // Real types govern now: the member typo surfaces, no reload. The
-      // re-govern lands in waves — an early wave still reads the floor,
-      // so wait for the state, not the next publication.
+      // The project's types govern now: the member resolves, no reload.
+      // The re-govern lands in waves — an early wave still reads the
+      // checkout's types, so wait for the state, not the next publication.
       await s.diagnosticsUntil('app.rip',
-        (d) => s.codes(d).includes(2339), { timeout: 75000 });
+        (d) => !s.codes(d).includes(2339), { timeout: 75000 });
     } finally { await s.close(); }
   }, 150_000);
 
-  test('partial supply: @types/node alone keeps the Bun floor and defers process to the real types', async () => {
+  test('partial supply: the project\'s @types/node governs process; the checkout\'s @types/bun still governs Bun', async () => {
     // The state a half-finished uninstall leaves behind (bun's prune can
     // strand @types/node after @types/bun is removed) — and equally a
-    // deliberate Node-typed project. Per-name floors make it coherent:
-    // `process` at its installed truth, `Bun` still an honest `any` — a
-    // single all-or-nothing floor would strand `Bun` unresolvable here.
+    // deliberate Node-typed project. Precedence is per name: `process`
+    // at the project's installed truth, `Bun` from the checkout — both
+    // real, so both typos are complaints, and neither name is unresolved.
     const s = await openSession({
       'app.rip': 'a: unknown = Bun.nonsense\nb: unknown = process.madeUp\nconsole.log(a, b)\n',
       'package.json': pkg(null),
@@ -196,8 +204,8 @@ describeExtended('the config surface is reactive', () => {
     try {
       s.open('app.rip');
       const codes = s.codes(await s.diagnostics('app.rip'));
-      expect(codes).toContain(2339);        // process.madeUp — real @types/node governs
-      expect(codes.length).toBe(1);         // Bun.nonsense — floored, silent any
+      expect(codes).toEqual([2339, 2339]);  // Bun.nonsense and process.madeUp, one each
+      expect(codes.some((c) => UNRESOLVED_BUN.includes(c))).toBe(false);
     } finally { await s.close(); }
   }, 90_000);
 
@@ -219,23 +227,25 @@ describeExtended('the config surface is reactive', () => {
     } finally { await s.close(); }
   }, 90_000);
 
-  test('flipping rip.strict retracts the floor live — Bun stops resolving until types are declared', async () => {
+  // Strict used to refuse the zero-config floor, leaving `Bun` unresolved
+  // until a project declared @types/bun. Host types now come from the
+  // checkout, so strict has nothing to refuse: a project installs nothing
+  // to type `Bun` under either posture. The flip must not unresolve it.
+  test('flipping rip.strict live keeps host names resolved — a project installs nothing to type Bun', async () => {
     const s = await openSession({ 'app.rip': FLOOR_PROBE, 'package.json': pkg(null) });
     try {
       s.open('app.rip');
-      expect(s.codes(await s.diagnostics('app.rip'))).toEqual([]);   // floor: silent any
+      expect(s.codes(await s.diagnostics('app.rip'))).toEqual([2339]);   // real Bun, typo member
 
       s.forget('app.rip');
       s.touch('package.json', pkg({ strict: true }));
 
-      // Strict refuses the floor: the free name stops resolving, and the
-      // diagnostic points the user at @types/bun. The re-govern lands in
-      // WAVES (the watched-file forward, an early re-pull, the
-      // regenerated floor, the real re-pull), so wait for the STATE —
-      // accepting whichever wave publishes first read a pre-re-govern
-      // snapshot as the answer on a slow machine.
-      await s.diagnosticsUntil('app.rip',
-        (d) => s.codes(d).some((c) => UNRESOLVED_BUN.includes(c)), { timeout: 75000 });
+      // Wait for the re-govern's own refresh to settle (the unannotated-param
+      // probe is not in this file, so nothing else marks the flip), then
+      // assert the host name is still real: the typo, never an unresolved name.
+      const codes = s.codes(await s.diagnostics('app.rip', { timeout: 75000 }));
+      expect(codes).toEqual([2339]);
+      expect(codes.some((c) => UNRESOLVED_BUN.includes(c))).toBe(false);
     } finally { await s.close(); }
   }, 150_000);
 

@@ -11,7 +11,7 @@
 // TypeScript face / declaration emission belong to CLI check and
 // packages/vscode — never to the in-page compiler.
 
-import { compile as compileSource } from './compile.js';
+import { compile as compileSource } from './compiler.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
 import * as schema from './runtime/schema.js';

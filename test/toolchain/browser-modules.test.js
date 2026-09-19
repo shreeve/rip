@@ -14,7 +14,7 @@ import { assembleBundle, assembleRipBundle } from '../../packages/sites/bundle.r
 // render-gate construction capability — and that claim belongs to the
 // browser-boot suite's module graph in this test process.
 import { createComponents } from '../../packages/app/components.rip';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 

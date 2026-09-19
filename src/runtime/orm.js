@@ -2630,10 +2630,17 @@ function isDocument(field) {
   return !!field && (field.typeName === 'json' || field.typeName === 'any' || field.typeName === 'variant');
 }
 
+// A document field is written as JSON text. For a `json` column that is
+// the objects and arrays only: a string handed to it is already JSON
+// text, and the column's own cast validates it. A `variant` field binds
+// through `?::JSON`, so what reaches the engine must be JSON, and a
+// value comes back exactly as it went in: an object, an array, a string,
+// a number or a boolean — so every non-null value is serialized, and a
+// bare string is a JSON string, not a document to parse.
 function serialize(v, field) {
-  if (field && (field.typeName === 'json' || field.typeName === 'variant') && v != null && typeof v === 'object') {
-    return JSON.stringify(v);
-  }
+  if (!field || v == null) return v;
+  if (field.typeName === 'variant') return JSON.stringify(v);
+  if (field.typeName === 'json' && typeof v === 'object') return JSON.stringify(v);
   return v;
 }
 

@@ -10,7 +10,7 @@ import { test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { stripFace } from '../../src/emitter.js';
 
 // Compile each .rip to .js beside it and return the entry's URL.

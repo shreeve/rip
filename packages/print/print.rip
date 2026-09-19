@@ -521,15 +521,20 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # Serve and open browser
 # ==============================================================================
 
-served = false
+# One request, then done: the process exits as soon as the page has gone
+# out, however slowly the browser reads it.
+respond = ->
+  setInterval (-> process.exit 0 if server.pendingRequests is 0), 10
+  Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
 
-server = Bun.serve
-  port: 9111
-  fetch: ->
-    served = true
-    Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+# 9111 when it is free, any free port when another print is still up.
+server = null
+try
+  server = Bun.serve { port: 9111, fetch: respond }
+catch
+  server = Bun.serve { port: 0, fetch: respond }
 
-console.log "\nOpening browser..."
+console.log "\nOpening http://localhost:#{server.port}/ ..."
 
 try
   if process.platform is 'darwin'
@@ -541,11 +546,3 @@ try
 catch
   console.log "Visit: http://localhost:#{server.port}/"
 
-poll = setInterval ->
-  if served
-    clearInterval(poll)
-    setTimeout ->
-      server.stop()
-      process.exit(0)
-    , 500
-, 200

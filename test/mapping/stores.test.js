@@ -1,5 +1,6 @@
 // NodeStore + RoleStore populated at reduce
-// time, asserted by OFFSET — plus the store invariants over the corpus.
+// time, asserted by OFFSET — plus the store invariants over the corpus and
+// the scaling gates (extended tier).
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -647,7 +648,7 @@ describe('the mapping query index', () => {
     .sort((a, b) => (a.sourceEnd - a.sourceStart) - (b.sourceEnd - b.sourceStart));
 
   test('answers byte-identically to the full scan over the corpus, order included', async () => {
-    const { compile } = await import('../../src/compile.js');
+    const { compile } = await import('../../src/compiler.js');
     const dir = join(import.meta.dir, '../corpus');
     for (const f of ripFiles(dir)) {
       const src = readFileSync(join(dir, f), 'utf8');
@@ -664,7 +665,7 @@ describe('the mapping query index', () => {
   }, 30000);
 
   test('rows appended after a query are visible to the next query (count-keyed rebuild)', async () => {
-    const { compile } = await import('../../src/compile.js');
+    const { compile } = await import('../../src/compiler.js');
     const r = compile('x = 1\ny = x + 2\n', { path: 'p.rip' });
     const m = r.mappings;
     const before = m.atGenerated(0).length;
@@ -679,7 +680,7 @@ describe('the mapping query index', () => {
   });
 
   test('scaling: an n-query batch over an n-statement program stays near-linear in index ops', async () => {
-    const { compile } = await import('../../src/compile.js');
+    const { compile } = await import('../../src/compiler.js');
     const { syncCounterFlag } = await import('../../src/counter.js');
     expectLinearOpsDoubling({
       prepare: (n) => {
