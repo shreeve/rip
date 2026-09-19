@@ -43,6 +43,8 @@
 //   --root <dir>     repository to orchestrate (default: this checkout)
 //   --jobs <n>       lanes in flight at once (default: half the cores, min 2)
 //   --timeout <ms>   per-lane timeout (default: 600000)
+//   --root-workers <n>  bun workers for the root lane (default: the budget below)
+//   --lane-workers <n>  RIP_LANE_WORKERS handed to package lanes (default: the budget below)
 //   --plan           print the lanes that would run, spawn nothing
 //
 // Environment handed to every package lane:
@@ -64,7 +66,7 @@
 // test/.timings.json`, refreshed by every run (see TIMINGS below).
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -144,8 +146,8 @@ const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
 // `bun test --parallel` defaults to one worker per core and claims the
 // whole machine on its own.
 const SIBLINGS = Math.max(0, JOBS - 1);
-const LANE_WORKERS = PEAK - SIBLINGS * 2 >= 2 ? 2 : 1;
-const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS));
+const LANE_WORKERS = number('lane-workers', PEAK - SIBLINGS * 2 >= 2 ? 2 : 1, 1);
+const ROOT_WORKERS = number('root-workers', Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS)), 1);
 
 // Root-lane file order. Bun 1.4.2 grew `--timings <json>`, per-file
 // durations that make --parallel start the slowest files first, so the
@@ -153,12 +155,18 @@ const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS)
 // lane. The file is measured, not authored: gitignored, seeded with
 // `touch test/.timings.json` (an empty file is tolerated), and refreshed
 // by every root-lane run through --update-timings. Absent, or under an
-// older bun (.bun-version pins one for CI), the root lane runs as before.
+// older bun, the root lane runs as before. The file is created on first
+// sight, so run two of any checkout is already ordered.
 const TIMINGS = 'test/.timings.json';
-const timingsArgs = () =>
-  Bun.semver.satisfies(Bun.version, '>=1.4.2') && existsSync(join(ROOT, TIMINGS))
-    ? [`--timings=${TIMINGS}`, '--update-timings']
-    : [];
+const timingsArgs = () => {
+  if (!Bun.semver.satisfies(Bun.version, '>=1.4.2')) return [];
+  const file = join(ROOT, TIMINGS);
+  // Seed on first sight: an empty file is a valid (empty) timings map, so
+  // the first run measures and every later run orders by what it saw.
+  // A root that refuses the write (read-only fixture) just runs unordered.
+  if (!existsSync(file)) { try { writeFileSync(file, ''); } catch { return []; } }
+  return [`--timings=${TIMINGS}`, '--update-timings'];
+};
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
