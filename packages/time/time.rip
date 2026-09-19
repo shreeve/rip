@@ -175,34 +175,38 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 # `Mon`, `Monday`, `Mon.`, `Mon,` — ignored.
 REGEX_WEEKDAY =! /^(?:sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?)\.?(?:, ?| )/i
 
-# One branch matches, so each component is whichever of its groups is set.
+# Every branch names its parts `y`, `m`, `d` (and the compact form `t`, a
+# glued clock), so the match tells us what was written without asking
+# which branch. A branch matches the date only; what follows is the time,
+# and a leftover the time grammar cannot read makes the whole string
+# unreadable.
 REGEX_DATE =! ///
   ^(?:
-    (?<cy>(?:19|20)\d\d)(?<cm>\d\d)(?<cd>\d\d)(?<ct>\d{4}|\d{6})?(?!\d)                                    # 20240229, 202402291430[00]
-  | (?<ay>[1-9]\d{3})(?!\d)(?<as>[-/\s]?)(?<aw>[a-z]{3,9})\.?\k<as>(?<ad>\d{1,2})(?!\d)(?:st|nd|rd|th)?         # 2024-Feb-09, 2024 Feb 9, 2024Feb9
-  | (?<by>[1-9]\d{3})(?!\d)(?:(?<bs>[-/.])(?<bm>\d{1,2})(?!\d)(?:\k<bs>(?<bd>\d{1,2})(?!\d))?                  # 2024-02-29, 2024/2/9, 2024.02.29, 2024-02, 2024
-                             |\s(?<bm2>\d\d)(?!\d)\s(?<bd2>\d\d)(?!\d))?                                     # 2024 02 29
-  | (?<dd>\d{1,2})(?!\d)(?:st|nd|rd|th)?(?<ds>[-/\s]?)(?<dw>[a-z]{3,9})\.?\k<ds>(?<dy>[1-9]\d{3})(?!\d)         # 9 Feb 2024, 09-FEB-2024, 9Feb2024, 22nd Feb 2024
-  | (?<ww>[a-z]{3,9})\.?(?<ws>[-/\s]?)(?<wd>\d{1,2})(?!\d)(?:st|nd|rd|th)?(?:,\s?|\k<ws>)(?<wy>[1-9]\d{3})(?!\d) # Feb 9 2024, Feb. 9th, 2024, Feb-09-2024
-  | (?<mm>\d{1,2})(?!\d)(?<ms>[-/.])(?<md>\d{1,2})(?!\d)\k<ms>(?<my>\d{4}|\d{2})(?!\d)                          # 2/9/2024, 02-09-2024, 2.9.24
+    (?<y>(?:19|20)\d\d)(?<m>\d\d)(?<d>\d\d)(?<t>\d{4}|\d{6})?                    # 20240229, 202402291430[00]
+  | (?<y>[1-9]\d{3})(?<s>[-/\s]?)(?<m>[a-z]{3,9})\.?\k<s>(?<d>\d{1,2})           # 2024-Feb-09, 2024 Feb 9, 2024Feb9
+  | (?<y>[1-9]\d{3})\s(?<m>\d\d)\s(?<d>\d\d)                                      # 2024 02 29
+  | (?<y>[1-9]\d{3})(?:(?<s>[-/.])(?<m>\d{1,2})(?:\k<s>(?<d>\d{1,2}))?)?         # 2024-02-29, 2024/2/9, 2024-02, 2024
+  | (?<d>\d{1,2})(?:st|nd|rd|th)?(?<s>[-/\s]?)(?<m>[a-z]{3,9})\.?\k<s>(?<y>[1-9]\d{3})            # 9 Feb 2024, 09-FEB-2024, 22nd Feb 2024
+  | (?<m>[a-z]{3,9})\.?(?<s>[-/\s]?)(?<d>\d{1,2})(?!\d)(?:st|nd|rd|th)?(?:,\s?|\k<s>)(?<y>[1-9]\d{3})  # Feb 9 2024, Feb. 9th, 2024, Feb-09-2024
+  | (?<m>\d{1,2})(?<s>[-/.])(?<d>\d{1,2})\k<s>(?<y>\d{4}|\d{2})                  # 2/9/2024, 02-09-2024, 2.9.24
   )
 ///i
 
-# The clock after a date: a separator, `h[:mm[:ss[.fff]]]` or `HHMM[SS[.fff]]`
+# The time after a date: a separator, `h[:mm[:ss[.fff]]]` or `HHMM[SS[.fff]]`
 # (a 2-digit hour: `930` is ambiguous), optional am/pm (`3:45 PM`, `3pm`,
 # `3 p.m.`), an optional zone, and nothing else but a parenthesized comment
 # (the shape of `Date#toString`). A bare hour needs am/pm (`3 PM`, never `3`);
 # the fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is
-# read only here, after a clock, so `2024-02-29+05:00` is invalid.
-REGEX_CLOCK =! ///
-  ^(?:T|,?\sat\s|\s|,\s)                                                            # T, space, ", ", " at "
+# read only here, after a time, so `2024-02-29+05:00` is invalid.
+REGEX_TIME =! ///
+  ^(?:T|,?\sat\s|\s|,\s)                                                  # T, space, ", ", " at "
   (?:
-    (?<h>\d{1,2})(?!\d)(?::(?<mi>\d\d)(?!\d)(?::(?<s>\d\d)(?!\d)(?:[.,](?<f>\d{1,9})(?!\d))?)?)?   # 14:30:45.25
-  | (?<h2>\d\d)(?<mi2>\d\d)(?:(?<s2>\d\d)(?:[.,](?<f2>\d{1,9})(?!\d))?)?(?![\d:])                 # 1430, 143045.25
+    (?<h>\d{1,2})(?::(?<m>\d\d)(?::(?<s>\d\d)(?:[.,](?<f>\d{1,9}))?)?)?     # 14:30:45.25
+  | (?<h>\d\d)(?<m>\d\d)(?:(?<s>\d\d)(?:[.,](?<f>\d{1,9}))?)?               # 1430, 143045.25
   )
-  (?:\s?(?<ap>[ap])\.?m\.?)?                                                         # am, pm, a.m., p.m.
-  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?                            # Z, UTC, +05:30, GMT-0700
-  (?:\s?\([^)]*\))?$                                                                 # (Mountain Standard Time)
+  (?:\s?(?<ap>[ap])\.?m\.?)?                                               # am, pm, a.m., p.m.
+  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?                  # Z, UTC, +05:30, GMT-0700
+  (?:\s?\([^)]*\))?$                                                       # (Mountain Standard Time)
 ///i
 
 # ==[ Unit Normalization ]==
@@ -479,19 +483,18 @@ def parseWithFormat(input, fmt, utc = false)
 
 # ---- Reading a string ----
 
-# The clock part, or null when `rest` is not one. Empty means midnight.
-def parseClock(rest)
+# The time part, or null when `rest` is not one. Empty means midnight.
+def parseTime(rest)
   return { hour: 0, minute: 0, second: 0, ms: 0, meridiem: null, zone: null } if rest is ''
-  g = rest.match(REGEX_CLOCK)?.groups
+  g = rest.match(REGEX_TIME)?.groups
   return null unless g
-  minute = g.mi ?? g.mi2
-  return null unless minute? or g.ap?                       # a bare hour needs am/pm
+  return null unless g.m? or g.ap?                          # a bare hour needs am/pm
   zone = if g.z? then parseOffset(g.z) else null
   return null if g.z? and not zone?
-  hour:     +(g.h ?? g.h2)
-  minute:   +(minute ?? 0)
-  second:   +(g.s ?? g.s2 ?? 0)
-  ms:       +((g.f ?? g.f2 ?? '') + '000').slice(0, 3)
+  hour:     +g.h
+  minute:   +(g.m ?? 0)
+  second:   +(g.s ?? 0)
+  ms:       +((g.f ?? '') + '000').slice(0, 3)
   meridiem: if g.ap? then (if /a/i.test(g.ap) then 'am' else 'pm') else null
   zone:     zone
 
@@ -504,17 +507,14 @@ def readParts(input, utc)
   s = input.trim().replace(/\s+/g, ' ').replace(REGEX_WEEKDAY, '')
   m = s.match(REGEX_DATE)
   return null unless m
-  g     = m.groups
-  year  = g.cy ?? g.ay ?? g.by ?? g.dy ?? g.wy ?? g.my
-  month = g.cm ?? g.aw ?? g.bm ?? g.bm2 ?? g.dw ?? g.ww ?? g.mm ?? '1'
-  day   = g.cd ?? g.ad ?? g.bd ?? g.bd2 ?? g.dd ?? g.wd ?? g.md ?? '1'
-  rest  = (if g.ct then "T#{g.ct}" else '') + s.slice(m[0].length)   # a glued compact clock reads as `T1430`
-  clock = parseClock(rest)
-  return null unless clock
-  parts = Object.assign clock,
-    year:  if year.length is 2 then parseTwoDigitYear(year) else +year
-    month: if /^\d/.test(month) then +month else parseMonthName(month)
-    day:   +day
+  { y, m: mo, d, t } = m.groups
+  rest = (if t then "T#{t}" else '') + s.slice(m[0].length)   # a glued compact clock reads as `T1430`
+  time = parseTime(rest)
+  return null unless time
+  parts = Object.assign time,
+    year:  if y.length is 2 then parseTwoDigitYear(y) else +y
+    month: if not mo? then 1 else if /^\d/.test(mo) then +mo else parseMonthName(mo)
+    day:   +(d ?? 1)
     clock: rest isnt ''
   { parts, date: assemble(parts, utc) }
 
