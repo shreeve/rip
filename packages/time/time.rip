@@ -194,21 +194,19 @@ REGEX_DATE =! ///
   )
 ///i
 
-# The time after a date. A bare hour needs am/pm (`3 PM`, never `3`); the
-# fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is read
-# only here, after a time, so `2024-02-29+05:00` is invalid.
+# The time after a date, in zones.rb's columns: the colons are optional, so
+# `14:30`, `1430` and `143045.25` all read, and the ranges keep a glued clock
+# honest (`930` has no 2-digit hour, so it is nothing). A bare hour needs
+# am/pm (`3 PM`, never `3`); the fraction is a decimal fraction of a second
+# (`.25` = 250 ms). A zone is read only here, after a time, so
+# `2024-02-29+05:00` is invalid.
 REGEX_TIME =! ///
   ^(?:T|,?\sat\s|\s|,\s)?                                # after the date: T, a space, ", ", " at ", or nothing
-  (?: (?<h>\d\d?)                                        # hour
-      (?::(?<m>\d\d))?                                   # :minute
-      (?::(?<s>\d\d)(?:[.,](?<f>\d+))?)?                 # :second[.fraction]
-  | # or, without colons (so a 2-digit hour: `930` is ambiguous)...
-      (?<h>\d\d)(?<m>\d\d)                               # hour minute
-      (?:(?<s>\d\d)(?:[.,](?<f>\d+))?)?                  # second[.fraction]
-  )
+  (?<h>[01]\d|2[0-3]|\d(?!\d))                           # hour
+  (?::?(?<m>[0-5]\d))?                                   # minute
+  (?::?(?<s>[0-5]\d)(?:[.,](?<f>\d+))?)?                 # second[.fraction]
   (?:\s?(?<ap>[ap])\.?m\.?)?                             # am, pm, a.m., p.m.
-  (?:\s?(?<z>z|utc|gmt                                  # zone: Z, UTC, GMT
-        |(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?              #   or an offset: +05:30, +0530, GMT-0700
+  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[-+]\d\d:?(?:\d\d)?))?  # zone: Z, UTC, GMT, +05:30, +0530, GMT-0700
   (?:\s?\([^)]*\))?$                                     # (Mountain Standard Time), then nothing
 ///i
 
