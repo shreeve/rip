@@ -225,8 +225,8 @@ describe('the lane orchestrator', () => {
   });
 
   // The budget the orchestrator computes has to REACH the suites that
-  // size themselves by it (vscode's --parallel count, sites' sub-suite
-  // cap), and it reaches them as an environment variable: the lane's
+  // size themselves by it (vscode's --parallel count; sites keeps its
+  // own latency-bound cap), and it reaches them as an environment variable: the lane's
   // own script still runs, it just reads a number the orchestrator set.
   // A budget that stops arriving is invisible from the exit code — the
   // lane sizes itself by the machine again and everything still passes,

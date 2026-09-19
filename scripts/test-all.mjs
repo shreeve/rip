@@ -47,13 +47,16 @@
 //
 // Environment handed to every package lane:
 //   RIP_LANE_WORKERS  that lane's share of the CPU budget below. A suite
-//                     that fans out (packages/vscode's `bun test
-//                     --parallel`, packages/sites' sub-suite cap) sizes
-//                     itself by this instead of by the machine; a
-//                     single-process suite ignores it. Unset — a
-//                     developer running `bun run test` in the package
-//                     directory — each of those suites uses its own
-//                     default (4).
+//                     that fans out CPU-bound work (packages/vscode's
+//                     `bun test --parallel`) sizes itself by this
+//                     instead of by the machine; a single-process suite
+//                     ignores it. Unset — a developer running `bun run
+//                     test` in the package directory — vscode uses its
+//                     own default (4). packages/sites deliberately does
+//                     NOT read it: its sub-suites wait on agent boots,
+//                     heartbeats and drain deadlines rather than burn
+//                     CPU, so its cap of 4 is a latency choice — at 2
+//                     the lane roughly doubles.
 //
 // Root-lane file order: if test/.timings.json exists, the root lane runs
 // with `--timings` so bun starts its slowest files first. The file is
@@ -124,12 +127,13 @@ const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
 // The peak is split between the root lane and the JOBS-1 sibling slots
 // beside it. Each sibling is budgeted LANE_WORKERS and told so through
 // RIP_LANE_WORKERS. Most siblings are one process and ignore it; the
-// two that fan out (vscode's `bun test --parallel`, sites' sub-suite
-// cap) used to size themselves by the MACHINE instead — vscode at one
-// worker per core, each spawning a language server and tsgo — so a
-// 10-core box ran ~25 bun workers plus their children against a budget
-// that had counted each sibling as one, and every clock stretched:
-// small lanes 3.4x, the root lane 2.7x. Two per sibling, not more: at
+// one that fans out CPU-bound work (vscode's `bun test --parallel`)
+// used to size itself by the MACHINE instead — one worker per core,
+// each spawning a language server and tsgo — so a 10-core box ran ~25
+// bun workers plus their children against a budget that had counted
+// each sibling as one, and every clock stretched: small lanes 3.4x,
+// the root lane 2.7x. (sites' sub-suite cap stays 4 on its own: those
+// suites mostly wait, see the header.) Two per sibling, not more: at
 // three, the root lane's remainder on a 10-core box is one worker. On
 // a box where even two would leave the root lane nothing, one.
 //
