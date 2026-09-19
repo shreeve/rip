@@ -32,10 +32,10 @@ d = time.parse('Apr 19, 2026', 'MMM D, YYYY')
 
 - Immutable — every mutator returns a new instance
 - Pure Rip, zero runtime deps
-- Parses a wide range of spellings: ISO (`2024-02-29`, `2024-2-9`, `2024/02/29`, `2024.02.29`, `2024 02 29`, `2024-02`, `2024`, compact `20240229`, `20240229T1430`, `20240229143000`), US numeric `m/d/yyyy` / `m/d/yy` / `m-d-yyyy` / `m.d.yyyy`, named months in any order (`Feb 9, 2024`, `February 9th 2024`, `Feb-09-2024`, `9-Feb-2024`, `09-FEB-2024`, `9Feb2024`, `2024 Feb 9`), an optional leading weekday and RFC 2822 (`Mon, 19 Aug 2024 14:30:00 +0000`), a time part (`T`, space, `, ` or ` at `; `14:30[:45[.250]]` or colon-less `1430` / `143000[.250]`, `3:45 PM`, `3 p.m.`) and a zone (`Z`, `UTC`, `GMT`, `+05:30`, `+0530`, `+05`); plus timestamps, `Date` objects and other `time` instances
+- Parses the date and time spellings people write by hand — ISO, US `m/d/yyyy`, named months in any order, all-digit runs, colon-less clocks, am/pm, zones, RFC 2822 and `Date#toString` — see [Parsing](#parsing) for the table; plus timestamps, `Date` objects and other `time` instances
 - Day-first is recognized only when the month is spelled with letters; a purely numeric small form is always month-first (US): `1/2/2024` is January 2 and `25/12/2024` is invalid — there is no "first number > 12" guessing
 - Strict calendar and clock, never rolled over: `2024-02-30`, `2023-02-29`, `Feb 30 2024`, `24:00`, `14:60`, `13:00 pm` are all invalid Dates (this also holds for `time.parse(input, format)`)
-- `time.parts(input)` — the recognized components exactly as written: `{ year, month, day, hour, minute, second, ms, clock, zone }` (calendar numbering, 24-hour, `zone` in minutes east of UTC or `null`, `clock` true when a time was written), or `null` when the string is not a real date; grammar only, no engine fallback
+- `time.parts(input)` — the recognized components exactly as written: `{ year, month, day, hour, minute, second, ms, clock, zone }` (calendar numbering, 24-hour, `zone` in minutes east of UTC or `null`, `clock` true when a time was written), or `null` when the string is not a real date; grammar only
 - Full formatting tokens (`YYYY`, `MMM`, `Do`, `h:mm A`, `z`, `zzz`, `[literal]`, etc.)
 - `add` / `subtract` / `startOf` / `endOf` / `diff` (symbol or string units)
 - `isSame` / `isBefore` / `isAfter` / `isSameOrBefore` / `isSameOrAfter` / `isBetween`
@@ -51,6 +51,53 @@ d = time.parse('Apr 19, 2026', 'MMM D, YYYY')
 - `time.min(...)` / `time.max(...)`
 - `time.duration(input, unit?)` — first-class `Duration` with ISO-8601 parse/format, `as*()` / `humanize()` / `format()`; usable directly in `.add()` / `.subtract()`
 - `age(dob, asOf?)` — completed years from a date of birth, birthday-aware; `null` for blank/invalid input
+
+## Parsing
+
+`time(input)`, `time.utc(input)` and `time.parts(input)` read a string with
+one grammar: flexible about the spelling, strict about the calendar. A date
+comes first, in one of the orders below, then an optional time, then an
+optional zone.
+
+| Date | Examples |
+| --- | --- |
+| Year first | `2024-02-29`, `2024-2-9`, `2024/02/29`, `2024.02.29`, `2024 02 29`, `2024-Feb-09`, `2024 Feb 9`, `2024Feb9` |
+| Year, or year and month | `2024`, `2024-02`, `2024 02`, `202402` — a date on its own, never followed by a clock |
+| Month first | `2/9/2024`, `02/09/2024`, `2-9-2024`, `2.9.2024`, `Feb 9 2024`, `Feb 9, 2024`, `February 9, 2024`, `Feb. 9, 2024`, `Feb-09-2024`, `feb/9/2024` |
+| Day first, named month only | `9 Feb 2024`, `9 February 2024`, `9-Feb-2024`, `09-FEB-2024`, `9/feb/2024`, `9Feb2024` |
+| Two-digit year, after a separator | `2/9/24`, `2.9.24`, `Feb-9-24`, `Feb 9, 24`, `9 Feb 24` — `69`–`99` is 19xx, `00`–`68` is 20xx |
+| All digits | `20240229`, `2024022`, `12252024`, `202402291430`, `20240229143000`, `122520241430` |
+| Ordinals and a leading weekday | `Feb 9th, 2024`, `22nd Feb 2024`, `Mon, 19 Aug 2024`, `Monday August 19 2024`, `Sun. 18 Aug 2024` |
+
+| Time | Examples |
+| --- | --- |
+| Joined by `T`, a space, `, ` or ` at ` | `2024-02-29T14:30`, `2024-02-29 14:30`, `2024-02-29, 14:30`, `Feb 9, 2024 at 3:45 PM` |
+| 24-hour clock, seconds and fraction optional | `14:30`, `14:30:45`, `14:30:45.250`, `14:30:45,5` |
+| Colon-less clock, two-digit hour | `1430`, `143000`, `143000.25`, `14:3000`, `20240229T1430` |
+| 12-hour clock, a bare hour needs am/pm | `3:45 PM`, `3:45pm`, `3 PM`, `3:45 a.m.`, `12:00am`, `0930 pm` |
+| Zone, only after a time | `Z`, `UTC`, `GMT`, `+05:30`, `+0530`, `+05`, `-08:00`, `GMT+0100` |
+| RFC 2822 and `Date#toString` | `Mon, 19 Aug 2024 14:30:00 +0000`, `Thu Feb 29 2024 14:30:00 GMT-0700 (Mountain Standard Time)` |
+
+The rules behind the table:
+
+- Years are 1900–2099. A date outside that range is not a date; a
+  two-digit year is read only after a separator, never glued to the day,
+  so `Feb 2024` is not February 20.
+- Separators are `-`, `/`, `.` or a space, and need not agree: `2024-02/29`
+  reads like `2024-02-29`.
+- Day-first is recognized only when the month is spelled with letters; a
+  numeric small form is always month-first (US): `1/2/2024` is January 2 and
+  `25/12/2024` is invalid.
+- A clock sits on a full date. A year alone or a year and month is a date
+  only when nothing follows, so `20241301` is invalid rather than 2024 at
+  13:01.
+- A fraction of a second is truncated to milliseconds: `14:30:45.123456`
+  is 45.123 s.
+- A parenthesized comment is read only after a zone, the shape of
+  `Date#toString`: `14:30 GMT-0700 (Mountain Standard Time)` reads and
+  `14:30 (Mountain Standard Time)` does not.
+- Nothing rolls over: `2024-02-30`, `24:00`, `14:60` and `13:00 pm` are
+  invalid Dates.
 
 ## Accessors
 

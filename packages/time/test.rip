@@ -897,10 +897,9 @@ UTC_ROWS =! [
   # month-day-year (numeric is ALWAYS month-first)
   ['2/9/2024',                    '2024-02-09T00:00:00.000Z']
   ['02/09/2024',                  '2024-02-09T00:00:00.000Z']
-  ['2/9/24',                      '2024-02-09T00:00:00.000Z']
-  ['2/9/69',                      '1969-02-09T00:00:00.000Z']
   ['2-9-2024',                    '2024-02-09T00:00:00.000Z']
   ['2.9.2024',                    '2024-02-09T00:00:00.000Z']
+  ['2 9 2024',                    '2024-02-09T00:00:00.000Z']
   ['1/2/2024',                    '2024-01-02T00:00:00.000Z']
   ['1-2-2024',                    '2024-01-02T00:00:00.000Z']
   ['Feb 9 2024',                  '2024-02-09T00:00:00.000Z']
@@ -920,6 +919,19 @@ UTC_ROWS =! [
   ['09-FEB-2024',                 '2024-02-09T00:00:00.000Z']
   ['9/feb/2024',                  '2024-02-09T00:00:00.000Z']
   ['9Feb2024',                    '2024-02-09T00:00:00.000Z']
+  # two-digit year, only after a separator (a space counts); 69-99 is 19xx
+  ['2/9/24',                      '2024-02-09T00:00:00.000Z']
+  ['2/9/69',                      '1969-02-09T00:00:00.000Z']
+  ['2.9.24',                      '2024-02-09T00:00:00.000Z']
+  ['2 9 24',                      '2024-02-09T00:00:00.000Z']
+  ['Feb-9-24',                    '2024-02-09T00:00:00.000Z']
+  ['Feb 9 24',                    '2024-02-09T00:00:00.000Z']
+  ['Feb 9, 24',                   '2024-02-09T00:00:00.000Z']
+  ['9 Feb 24',                    '2024-02-09T00:00:00.000Z']
+  ['09 FEB 24',                   '2024-02-09T00:00:00.000Z']
+  ['Feb 9 14',                    '2014-02-09T00:00:00.000Z']
+  ['Feb 9, 24 at 3:45 PM',        '2024-02-09T15:45:00.000Z']
+  ['Mon, 19 Aug 24 14:30:00 +0000', '2024-08-19T14:30:00.000Z']
   # ordinals
   ['Feb 9th, 2024',               '2024-02-09T00:00:00.000Z']
   ['March 1st 2024',              '2024-03-01T00:00:00.000Z']
@@ -929,6 +941,10 @@ UTC_ROWS =! [
   ['Mon, 19 Aug 2024',            '2024-08-19T00:00:00.000Z']
   ['Monday August 19 2024',       '2024-08-19T00:00:00.000Z']
   ['Sun. 18 Aug 2024',            '2024-08-18T00:00:00.000Z']
+  ['Sunday, August 18, 2024',     '2024-08-18T00:00:00.000Z']
+  ['Tues 20 Aug 2024',            '2024-08-20T00:00:00.000Z']
+  ['Wednesday 21 Aug 2024',       '2024-08-21T00:00:00.000Z']
+  ['Thurs, 22 Aug 2024',          '2024-08-22T00:00:00.000Z']
   ['Mon, 19 Aug 2024 14:30:00 +0000', '2024-08-19T14:30:00.000Z']
   ['Mon, 19 Aug 2024 14:30:00 GMT',   '2024-08-19T14:30:00.000Z']
   # time part
@@ -966,6 +982,7 @@ UTC_ROWS =! [
   ['2024-02-29 14:30 GMT',        '2024-02-29T14:30:00.000Z']
   ['2024-02-29 14:30:00 GMT+0100','2024-02-29T13:30:00.000Z']
   ['2024-02-29T23:30-01:00',      '2024-03-01T00:30:00.000Z']
+  ['2024-02-29 14:30 GMT+0100 (CET)', '2024-02-29T13:30:00.000Z']
   ['Thu Feb 29 2024 14:30:00 GMT-0700 (Mountain Standard Time)', '2024-02-29T21:30:00.000Z']
   # colon-less clocks after any date head (always a 2-digit hour)
   ['2024-02-29 1430',             '2024-02-29T14:30:00.000Z']
@@ -991,6 +1008,7 @@ UTC_ROWS =! [
   ['2024 02 29',                  '2024-02-29T00:00:00.000Z']
   ['2024 2 9',                    '2024-02-09T00:00:00.000Z']
   ['2024 02',                     '2024-02-01T00:00:00.000Z']
+  ['202402',                      '2024-02-01T00:00:00.000Z']
   ['2024 02 29 1430',             '2024-02-29T14:30:00.000Z']
   ['2024 02 29 14:30',            '2024-02-29T14:30:00.000Z']
   ['2024 02 29T14:30:45.25Z',     '2024-02-29T14:30:45.250Z']
@@ -1014,15 +1032,23 @@ INVALID_INPUTS =! [
   '13:00 pm', '0:30 am', '2/9/2024 13:00 pm', '2/9/2024 0:30 am', '2024-02-29T14:30 pm'
   '2024-02-29T', '2024-02-29Tx', '2024-02-29T14:30:', '2024-02-29T14:30:00.', '2024-02-29 14', 'Feb 9 2024 14'
   '2024-02-29+05:00', '2024-02-29 UTC', '2024-02-29T14:30 +25:00', '2024-02-29T14:30+05:3'
+  # a parenthesized comment only after a zone; an ordinal only on a day; a weekday only as spelled
+  '2024-02-29 14:30 (Mountain Standard Time)', '2024-02-29 14:30 ()', '2024-02-29 14:30 GMT+0100th'
+  'Feb 9th 2024 1st:30', 'Feb 9th2024', 'Monkey 19 Aug 2024', 'Mond 19 Aug 2024'
+  # a two-digit year never glued to the day or to a clock; a year needs 4 digits or a separator
+  'Feb 2024', 'Feb 0924', '9Feb24', '2/9/241430', '9 Feb 241430'
   'not-a-date', 'garbageZ', '', '   ', 'today', '1e3', 'Feb', '14:30', '12:00 PM'
   '1122024', '20240230', '202402291', '2/9/202'
   'Feb92024', 'Feb 30', '30 Feb'
   # colon-less clocks: wrong digit counts, mixed, out of range
   '2024-02-29 930', '2024-02-29 143', '2024-02-29 14300', '2024-02-29 1430000'
   '2024-02-29 2400', '2024-02-29 1460', '2024-02-29 143060', '2024-02-29 1330 pm', 'Feb 9, 2024 930'
-  # all-digit: only 4, 8, 12, 14 digits with a 19xx/20xx year
+  # all-digit: a year, a year-month or a date in the digits those take (4, 5-6, 7-8), or an
+  # 8-digit date glued to a 4- or 6-digit clock; a bare year or year-month never takes a clock
   '2024022914', '2024022914300', '202402291430000', '20240230143000', '202402291460', '202402291430x'
-  '2024 02 29 930'
+  '2024 02 29 930', '20241301', '20122024', '2024021430', '20240221430', '20240229143'
+  # a clock sits on a full date, never on a year or a year-month
+  '2024-1430', '2024 1430', '2024 14:30', '2024T14:30', '2024-02T14:30', '2024-02 14:30', '2024-', '2024-02-'
 ]
 
 for input in INVALID_INPUTS
@@ -1089,15 +1115,15 @@ test "time.parts: bare date has no clock and no zone", ->
   eq time.parts('Mon, 19 Aug 2024').day, 19
 
 test "time.parts: 12-hour clock is converted, zone stays null", ->
-  p = time.parts('2/9/2024 3:45 PM')
-  eq [p.hour, p.minute, p.clock, p.zone], [15, 45, true, null]
+  t = time.parts('2/9/2024 3:45 PM')
+  eq [t.hour, t.minute, t.clock, t.zone], [15, 45, true, null]
   eq time.parts('2/9/2024 12:00 AM').hour, 0
 
-test "time.parts: null for impossible, unknown, engine-only or non-string input", ->
+test "time.parts: null for impossible, unrecognized or non-string input", ->
   eq time.parts('Feb 30 2024'),  null
   eq time.parts('2024-02-29T24:00'), null
   eq time.parts('not-a-date'),   null
-  eq time.parts('Feb 2024'),     null    # engine-only shape: no fallback here
+  eq time.parts('Feb 2024'),     null    # a month and year alone is not a date
   eq time.parts(''),             null
   eq time.parts(42),             null
   eq time.parts(null),           null

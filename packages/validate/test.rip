@@ -228,6 +228,10 @@ rows: [string, string, unknown][] = [
   ['date', '2026-08-24T14:60', null]
   ['date', '2026-02-30T10:00', null]
   ['date', '2026-08-24T', null]
+  ['date', 'Feb 15, 24', '2024-02-15']
+  ['date', '1899-12-31', null]
+  ['date', '2100-01-01', null]
+  ['date', '20241301', null]
 
   # datetime: a clock is required; the wall clock as written, canonical
   # ISO 8601, with the zone as written when there was one
@@ -242,6 +246,10 @@ rows: [string, string, unknown][] = [
   ['datetime', '8/24/2026 2:30 PM', '2026-08-24T14:30:00']
   ['datetime', 'Aug 24, 2026 12:00am', '2026-08-24T00:00:00']
   ['datetime', '2026-08-24T14:30:00.25', '2026-08-24T14:30:00.250']
+  ['datetime', '2026-08-24T14:30:00.123456Z', '2026-08-24T14:30:00.123Z']
+  ['datetime', '2026-08-24T14:30:00+00:00', '2026-08-24T14:30:00Z']
+  ['datetime', '2026-08-24 14:30 GMT', '2026-08-24T14:30:00Z']
+  ['datetime', '24-AUG-2026 1430', '2026-08-24T14:30:00']
   ['datetime', '2026-02-30T10:00', null]
   ['datetime', '2026-08-24T24:00', null]
   ['datetime', '2026-08-24T14:60', null]

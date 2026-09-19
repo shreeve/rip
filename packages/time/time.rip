@@ -158,13 +158,13 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 # Flexible about spelling, strict about the calendar. The grammar reads the
 # components as written; `assemble` then refuses anything that is not a real
 # calendar date or clock, so Feb 30 never becomes Mar 1. The date is one
-# alternation, after the `parse_str` regex in zones.rb: three orderings,
-# with ranges in the pattern. THE RULE: day-first is recognized only when the month is
-# spelled with letters (`9 Feb 2024`, `09-FEB-2024`, `9Feb2024`); a purely
-# numeric small form is ALWAYS month-first (US), so `1/2/2024` is January 2
-# and `25/12/2024` is simply invalid (month 25). There is deliberately no
-# "swap when the first number is > 12" guess — guessing is how Feb 30
-# becomes Mar 1.
+# alternation, in the shape of the Ruby original: three orderings, with
+# ranges in the pattern. THE RULE: day-first is recognized only when the
+# month is spelled with letters (`9 Feb 2024`, `09-FEB-2024`, `9Feb2024`);
+# a purely numeric small form is ALWAYS month-first (US), so `1/2/2024` is
+# January 2 and `25/12/2024` is simply invalid (month 25). There is
+# deliberately no "swap when the first number is > 12" guess — guessing is
+# how Feb 30 becomes Mar 1.
 #
 # Input is trimmed and whitespace-collapsed first, and the noise dropped;
 # the date is matched only up to its end, and whatever follows is the time.
@@ -172,42 +172,55 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 # is as readable as `2024-02-29`.
 
 # Noise the grammar ignores: a leading weekday (`Mon`, `Monday`, `Mon.`,
-# `Mon,`) and an ordinal suffix on a day (`1st`, `22nd`).
-REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd|th)\b/gi
+# `Mon,`, `Tues`, `Thurs`) and an ordinal suffix on a day (`1st`, `22nd`): a
+# one- or two-digit number, then the suffix, then a separator, comma or the
+# end, so `0100th` and `1st:30` are left alone and fail as they should.
+REGEX_NOISE =! ///
+  ^(?:sun|mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?)(?:day)?\.?,?\s  # weekday
+  |
+  (?<=(?:^|\D)\d\d?)(?:st|nd|rd|th)(?=[-/.,\s]|$)                          # ordinal
+///gi
 
 # The date, in the orders people write one. Every branch names its parts
 # `y`, `m`, `d`, so the match says what was written without asking which
 # branch matched. The date ends at the day; the time grammar takes the rest.
+# A year alone or a year and month is a date only when nothing follows, so
+# `20241301` is not 2024 at 13:01 and a clock always sits on a full date. A
+# two-digit year is read only after a separator (`2/9/24`, `Feb 9, 24`,
+# `9 Feb 24`), never glued to the day (`Feb 2024` is not February 20).
 REGEX_DATE =! ///
   ^(?:
     (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d))[-/.\s]?             # day
     (?<m>[a-z]{3,9}\.?)[-/.\s]?                               # month, by name only (day-first is never numeric)
-    (?<y>(?:19|20)\d\d)                                       # year:  9 Feb 2024, 09-FEB-2024, 9Feb2024
+    (?<y>(?:19|20)\d\d|(?<=[-/.\s])\d\d(?!\d))                # year:  9 Feb 2024, 09-FEB-2024, 9Feb2024, 9 Feb 24
   |
-    (?<y>(?:19|20)\d\d)[-/.\s]?                               # year
-    (?:(?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?  # month
-    (?:(?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)))?)?              # day:   2024-02-29, 2024/2/9, 2024 Feb 9, 2024Feb9, 2024-02, 2024
+    (?<y>(?:19|20)\d\d)                                       # year
+    (?:[-/.\s]?(?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)  # month
+    (?:[-/.\s]?(?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d))|$)       # day, or the string ends: 2024-02-29, 2024/2/9, 2024 Feb 9, 2024Feb9, 2024-02
+    |$)                                                       # or the year alone, and the string ends: 2024
   |
     (?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?     # month
     (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)),?[-/.\s]?           # day
-    (?<y>(?:19|20)\d\d|(?<=[-/.])\d\d)                        # year, 2 digits only after a separator: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
+    (?<y>(?:19|20)\d\d|(?<=[-/.\s])\d\d(?!\d))                # year, 2 digits only after a separator: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24, Feb 9, 24
   )
 ///i
 
-# The time after a date, in zones.rb's columns: the colons are optional, so
+# The time after a date, one column per line: the colons are optional, so
 # `14:30`, `1430` and `143045.25` all read, and the ranges keep a glued clock
 # honest (`930` has no 2-digit hour, so it is nothing). A bare hour needs
 # am/pm (`3 PM`, never `3`); the fraction is a decimal fraction of a second
-# (`.25` = 250 ms). A zone is read only here, after a time, so
-# `2024-02-29+05:00` is invalid.
+# (`.25` = 250 ms), kept to milliseconds. A zone is read only here, after a
+# time, so `2024-02-29+05:00` is invalid, and a parenthesized comment only
+# after a zone, the shape of Date#toString, so a comment never stands in for
+# one.
 REGEX_TIME =! ///
   ^\s?(?:T|,?\sat|,)?\s?                  # T, a space, ", ", " at ", or nothing
   (?<h>[01]\d|2[0-3]|\d(?!\d))            # hour
   (?::?(?<m>[0-5]\d))?                    # minute
   (?::?(?<s>[0-5]\d)(?:[.,](?<f>\d+))?)?  # second[.fraction]
   (?:\s?(?<ap>[ap])\.?m\.?)?              # am, pm, a.m., p.m.
-  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[-+]\d\d:?(?:\d\d)?))?  # zone: Z, UTC, GMT, +05:30, +0530, GMT-0700
-  (?:\s?\([^)]*\))?$                      # (Mountain Standard Time), then nothing
+  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[-+]\d\d:?(?:\d\d)?)   # zone: Z, UTC, GMT, +05:30, +0530, GMT-0700
+  (?:\s?\([^)]*\))?)?$                    # (Mountain Standard Time) only after a zone, then nothing
 ///i
 
 # ==[ Unit Normalization ]==
@@ -304,8 +317,8 @@ def zonedParts(date, zone)
 # Returns the zone's offset from UTC, in minutes EAST of UTC (time convention).
 # Honolulu => -600, New York winter => -300, New York summer => -240, UTC => 0.
 def zoneOffsetMinutes(date, zone)
-  p = zonedParts(date, zone)
-  asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second)
+  w = zonedParts(date, zone)
+  asUTC = Date.UTC(+w.year, +w.month - 1, +w.day, +w.hour, +w.minute, +w.second)
   Math.round((asUTC - date.getTime()) / 60000)
 
 # Zone name abbreviation (e.g., "HST", "EDT") or long name ("Eastern Daylight Time").
@@ -502,8 +515,7 @@ def parseTime(rest)
 # Run the grammar over a string: { parts, date } when the string is a shape
 # we know — `parts` as written (plus `clock`, whether a time was written) and
 # `date` assemble's verdict, invalid when a component is out of range — or
-# null when it is not. There is no engine fallback: a string the grammar does
-# not read is not a date, as the Ruby raised "can't parse".
+# null when it is not. A string the grammar does not read is not a date.
 def readParts(input, utc)
   s = input.trim().replace(/\s+/g, ' ').replace(REGEX_NOISE, '')
   m = s.match(REGEX_DATE)
@@ -520,8 +532,8 @@ def readParts(input, utc)
   { parts, date: assemble(parts, utc) }
 
 # `time.parts(input)`: the components exactly as written, for a string the
-# grammar recognizes that passes every range check; null otherwise. No engine
-# fallback — only the grammar counts. The zone is reported, not applied.
+# grammar recognizes that passes every range check; null otherwise. Only the
+# grammar counts. The zone is reported, not applied.
 def dateParts(input)
   return null unless typeof input is 'string'
   r = readParts(input, true)
@@ -560,13 +572,13 @@ export class Time
   _refresh: (): Time ->
     d = @$d
     if @$z
-      p = zonedParts(d, @$z)
-      @$y:  number = +p.year
-      @$M:  number = +p.month - 1
-      @$D:  number = +p.day
-      @$H:  number = +p.hour
-      @$m:  number = +p.minute
-      @$s:  number = +p.second
+      w = zonedParts(d, @$z)
+      @$y:  number = +w.year
+      @$M:  number = +w.month - 1
+      @$D:  number = +w.day
+      @$H:  number = +w.hour
+      @$m:  number = +w.minute
+      @$s:  number = +w.second
       @$ms: number = d.getUTCMilliseconds()    # Intl doesn't give milliseconds
       # Derive weekday from reconstructed wall-clock date (zone-independent).
       @$W:  number = Date.new(Date.UTC(@$y, @$M, @$D)).getUTCDay()
@@ -1210,7 +1222,7 @@ def makeTime()
 
     # The recognized components as written — `time.parts('2024-03-01T02:00+05:30')`
     # → `{ year: 2024, month: 3, day: 1, hour: 2, ..., clock: true, zone: 330 }`,
-    # or null when the string is not a real date. Grammar only, no fallback.
+    # or null when the string is not a real date. Grammar only.
     parts: (input: TimeInput): DateParts | null -> dateParts(input)
 
     # Parse an input and anchor it to an IANA zone. If the input is a string
