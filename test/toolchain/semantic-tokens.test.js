@@ -15,9 +15,28 @@
 // would satisfy the `:=` expectation for free — the clearing has to be surgical,
 // not a blanket strip. Every assertion is paired with a liveness check, so an
 // empty token list can only ever be a real failure.
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
+
+// One server for the whole file. Every test here is a read-only token
+// pull over its own document, so they share a session over one workspace:
+// a test lays its fixture down as its own file(s), opens the one it
+// reads, and pulls tokens — nothing edits, so no test sees another's
+// state, and the file names are distinct so nothing is opened twice with
+// different text.
+let shared = null;
+const opened = new Set();
+async function tokensOf(files, name = Object.keys(files)[0]) {
+  shared ??= openSession({});
+  const session = await shared;
+  for (const [f, text] of Object.entries(files)) fs.writeFileSync(path.join(session.dir, f), text);
+  if (!opened.has(name)) { opened.add(name); session.open(name); }
+  return session.semanticTokens(name);
+}
+afterAll(async () => { if (shared) await (await shared).close(); });
 
 // One binding per form. `plain` and `state` are writable in rip; `pinned`,
 // `computed` and `effect` are not — the compiler rejects a write to them.
@@ -63,68 +82,56 @@ const at = (tokens, line, character) => tokens.find((t) => t.line === line && t.
 
 describeExtended('semantic tokens — the readonly modifier', () => {
   test('`readonly` is set IFF the binding is immutable in rip — `:=` is not', async () => {
-    const session = await openSession({ 'app.rip': SRC });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness: the server answered
+    const tokens = await tokensOf({ 'readonly.rip': SRC });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness: the server answered
 
-      // Positive controls FIRST. These are what give the assertion below its
-      // meaning: the probe demands `readonly` on every genuinely-immutable
-      // form and gets it, so it demonstrably reads modifiers.
-      for (const [name, line] of [['pinned', 1], ['computed', 3], ['effect', 4]]) {
-        const tok = at(tokens, line, 0);
-        expect(tok, `${name} has a token`).toBeDefined();
-        expect(tok.modifiers, `${name} is immutable in rip`).toContain('readonly');
-      }
-
-      // Negative control: a plain `=` binding hoists to an evolving `let`, so
-      // it carries no `readonly`. Both polarities are now exercised — the
-      // check cannot be passing vacuously.
-      const plain = at(tokens, 0, 0);
-      expect(plain).toBeDefined();
-      expect(plain.modifiers).not.toContain('readonly');
-
-      // `state := 3` is assignable in rip — `state = 9` compiles, lowering
-      // to `state.value = 9` — so the editor must not paint it as a constant.
-      // The bit is cleared for this form and no other; the controls above prove
-      // the clearing is surgical rather than a blanket strip.
-      const state = at(tokens, 2, 0);
-      expect(state).toBeDefined();
-      expect(state.modifiers).not.toContain('readonly');
-      expect(state.modifiers).toContain('declaration');   // still a declaration
-    } finally {
-      await session.close();
+    // Positive controls FIRST. These are what give the assertion below its
+    // meaning: the probe demands `readonly` on every genuinely-immutable
+    // form and gets it, so it demonstrably reads modifiers.
+    for (const [name, line] of [['pinned', 1], ['computed', 3], ['effect', 4]]) {
+      const tok = at(tokens, line, 0);
+      expect(tok, `${name} has a token`).toBeDefined();
+      expect(tok.modifiers, `${name} is immutable in rip`).toContain('readonly');
     }
+
+    // Negative control: a plain `=` binding hoists to an evolving `let`, so
+    // it carries no `readonly`. Both polarities are now exercised — the
+    // check cannot be passing vacuously.
+    const plain = at(tokens, 0, 0);
+    expect(plain).toBeDefined();
+    expect(plain.modifiers).not.toContain('readonly');
+
+    // `state := 3` is assignable in rip — `state = 9` compiles, lowering
+    // to `state.value = 9` — so the editor must not paint it as a constant.
+    // The bit is cleared for this form and no other; the controls above prove
+    // the clearing is surgical rather than a blanket strip.
+    const state = at(tokens, 2, 0);
+    expect(state).toBeDefined();
+    expect(state.modifiers).not.toContain('readonly');
+    expect(state.modifiers).toContain('declaration');   // still a declaration
   }, 60000);
 
   test('every lowering path that reaches a `:=` name — exported, nested, component member', async () => {
-    const session = await openSession({ 'app.rip': PATHS });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'paths.rip': PATHS });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      // `export s := 1` — reactiveDecl, same as a bare one.
-      const exported = at(tokens, 0, 7);
-      expect(exported, 'exported state has a token').toBeDefined();
-      expect(exported.modifiers).not.toContain('readonly');
+    // `export s := 1` — reactiveDecl, same as a bare one.
+    const exported = at(tokens, 0, 7);
+    expect(exported, 'exported state has a token').toBeDefined();
+    expect(exported.modifiers).not.toContain('readonly');
 
-      // `nested := 2` inside a def — still a reactiveDecl, still a `const` cell.
-      const nested = at(tokens, 2, 2);
-      expect(nested, 'nested state has a token').toBeDefined();
-      expect(nested.modifiers).not.toContain('readonly');
+    // `nested := 2` inside a def — still a reactiveDecl, still a `const` cell.
+    const nested = at(tokens, 2, 2);
+    expect(nested, 'nested state has a token').toBeDefined();
+    expect(nested.modifiers).not.toContain('readonly');
 
-      // A component member lowers to a `declare` field, not a `const` cell, so
-      // TypeScript classifies it a property and never marks it readonly. This
-      // asserts the OUTCOME, not the mechanism: whichever way it lowers, the one
-      // reactive form you may assign to must not read as a constant.
-      const member = at(tokens, 5, 2);
-      expect(member, 'component member has a token').toBeDefined();
-      expect(member.modifiers).not.toContain('readonly');
-    } finally {
-      await session.close();
-    }
+    // A component member lowers to a `declare` field, not a `const` cell, so
+    // TypeScript classifies it a property and never marks it readonly. This
+    // asserts the OUTCOME, not the mechanism: whichever way it lowers, the one
+    // reactive form you may assign to must not read as a constant.
+    const member = at(tokens, 5, 2);
+    expect(member, 'component member has a token').toBeDefined();
+    expect(member.modifiers).not.toContain('readonly');
   }, 60000);
 
   // `readonly` is a fact about the BINDING, so it holds wherever the name
@@ -143,29 +150,23 @@ describeExtended('semantic tokens — the readonly modifier', () => {
       'console.log doubled',     // line 4  a computed's read — keeps readonly
       '',
     ].join('\n');
-    const session = await openSession({ 'app.rip': USES });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'uses.rip': USES });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      const write = at(tokens, 2, 0);
-      expect(write, 'the write site has a token').toBeDefined();
-      expect(write.modifiers).not.toContain('readonly');
+    const write = at(tokens, 2, 0);
+    expect(write, 'the write site has a token').toBeDefined();
+    expect(write.modifiers).not.toContain('readonly');
 
-      const read = at(tokens, 3, 12);
-      expect(read, 'the read site has a token').toBeDefined();
-      expect(read.modifiers).not.toContain('readonly');
+    const read = at(tokens, 3, 12);
+    expect(read, 'the read site has a token').toBeDefined();
+    expect(read.modifiers).not.toContain('readonly');
 
-      // The positive control at a USE site, which is what makes the two
-      // assertions above mean something: a blanket strip would clear this
-      // one too, and rip's own ruling says a `~=` binding is immutable.
-      const computedRead = at(tokens, 4, 12);
-      expect(computedRead, 'the computed read has a token').toBeDefined();
-      expect(computedRead.modifiers).toContain('readonly');
-    } finally {
-      await session.close();
-    }
+    // The positive control at a USE site, which is what makes the two
+    // assertions above mean something: a blanket strip would clear this
+    // one too, and rip's own ruling says a `~=` binding is immutable.
+    const computedRead = at(tokens, 4, 12);
+    expect(computedRead, 'the computed read has a token').toBeDefined();
+    expect(computedRead.modifiers).toContain('readonly');
   }, 60000);
 });
 
@@ -187,27 +188,21 @@ describeExtended('semantic tokens — an enum name', () => {
   ].join('\n');
 
   test('every occurrence classifies `enum` — declaration, annotation, value use', async () => {
-    const session = await openSession({ 'app.rip': ENUMS });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'enums.rip': ENUMS });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      for (const [label, line, character] of [
-        ['the declaration', 0, 5],
-        ['the annotation', 3, 7],
-        ['the value use', 3, 15],
-        ['a parameter annotation', 4, 13],
-      ]) {
-        const tok = at(tokens, line, character);
-        expect(tok, `${label} has a token`).toBeDefined();
-        expect(tok.type, label).toBe('enum');
-        // The `readonly` the merged symbol carries off its const-object
-        // half goes with the type — TypeScript's own enum tokens have none.
-        expect(tok.modifiers, label).not.toContain('readonly');
-      }
-    } finally {
-      await session.close();
+    for (const [label, line, character] of [
+      ['the declaration', 0, 5],
+      ['the annotation', 3, 7],
+      ['the value use', 3, 15],
+      ['a parameter annotation', 4, 13],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).toBe('enum');
+      // The `readonly` the merged symbol carries off its const-object
+      // half goes with the type — TypeScript's own enum tokens have none.
+      expect(tok.modifiers, label).not.toContain('readonly');
     }
   }, 60000);
 
@@ -220,32 +215,26 @@ describeExtended('semantic tokens — an enum name', () => {
   // than one file this is where MOST enum uses are, so a correction that
   // stopped at the declaring file would leave the majority mis-colored.
   test('an enum imported from another module classifies `enum` at its uses', async () => {
-    const session = await openSession({
+    const tokens = await tokensOf({
       'lib.rip': 'export enum Color\n  Red = 1\n  Blue = 2\n\nexport plain = 7\n',
-      'app.rip': [
+      'enum-app.rip': [
         "import { Color, plain } from './lib.rip'",  // line 0
         '',
         'shade: Color = Color.Red',                  // line 2
         'console.log plain',                         // line 3
         '',
       ].join('\n'),
-    });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    }, 'enum-app.rip');
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      expect(at(tokens, 2, 7)?.type, 'the imported annotation').toBe('enum');
-      expect(at(tokens, 2, 15)?.type, 'the imported value use').toBe('enum');
-      // The negative control: an imported name that is NOT an enum keeps
-      // TypeScript's own answer. Without it, a correction that repainted
-      // every imported reference would pass the two assertions above.
-      const notAnEnum = at(tokens, 3, 12);
-      expect(notAnEnum, 'the plain import has a token').toBeDefined();
-      expect(notAnEnum.type, 'a non-enum import is untouched').not.toBe('enum');
-    } finally {
-      await session.close();
-    }
+    expect(at(tokens, 2, 7)?.type, 'the imported annotation').toBe('enum');
+    expect(at(tokens, 2, 15)?.type, 'the imported value use').toBe('enum');
+    // The negative control: an imported name that is NOT an enum keeps
+    // TypeScript's own answer. Without it, a correction that repainted
+    // every imported reference would pass the two assertions above.
+    const notAnEnum = at(tokens, 3, 12);
+    expect(notAnEnum, 'the plain import has a token').toBeDefined();
+    expect(notAnEnum.type, 'a non-enum import is untouched').not.toBe('enum');
   }, 60000);
 
   // Every position that re-uses the spelling, DECLARATIONS INCLUDED. The
@@ -267,28 +256,22 @@ describeExtended('semantic tokens — an enum name', () => {
       '  Color',                    // line 8
       '',
     ].join('\n');
-    const session = await openSession({ 'app.rip': SHADOW });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'shadow.rip': SHADOW });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      // The positive control: the enum itself still classifies, so a
-      // guard that simply stopped recording would not pass this.
-      expect(at(tokens, 0, 5)?.type, 'the enum itself').toBe('enum');
+    // The positive control: the enum itself still classifies, so a
+    // guard that simply stopped recording would not pass this.
+    expect(at(tokens, 0, 5)?.type, 'the enum itself').toBe('enum');
 
-      for (const [label, line, character] of [
-        ['the parameter declaration', 2, 10],
-        ['the parameter read', 3, 2],
-        ['the class member', 5, 2],
-        ['the shadowing local', 8, 2],
-      ]) {
-        const tok = at(tokens, line, character);
-        expect(tok, `${label} has a token`).toBeDefined();
-        expect(tok.type, label).not.toBe('enum');
-      }
-    } finally {
-      await session.close();
+    for (const [label, line, character] of [
+      ['the parameter declaration', 2, 10],
+      ['the parameter read', 3, 2],
+      ['the class member', 5, 2],
+      ['the shadowing local', 8, 2],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).not.toBe('enum');
     }
   }, 60000);
 });
@@ -348,17 +331,11 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   ].join('\n');
 
   const typeAt = async (files, file, line, character, label) => {
-    const session = await openSession(files);
-    try {
-      session.open(file);
-      const tokens = await session.semanticTokens(file);
-      expect(tokens.length, 'liveness').toBeGreaterThan(0);
-      const tok = at(tokens, line, character);
-      expect(tok, `${label} has a token`).toBeDefined();
-      return tok.type;
-    } finally {
-      await session.close();
-    }
+    const tokens = await tokensOf(files, file);
+    expect(tokens.length, 'liveness').toBeGreaterThan(0);
+    const tok = at(tokens, line, character);
+    expect(tok, `${label} has a token`).toBeDefined();
+    return tok.type;
   };
 
   // An EXPORTED forward reference needs no correction and gets none: the
@@ -375,9 +352,9 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   ].join('\n');
 
   test('a forward-referenced class declaration colors `class`, as the declared spelling does', async () => {
-    expect(await typeAt({ 'app.rip': FWD }, 'app.rip', 1, 0, 'the Box declaration')).toBe('class');
-    expect(await typeAt({ 'app.rip': PLAIN }, 'app.rip', 0, 0, 'the Shape declaration')).toBe('class');
-    expect(await typeAt({ 'app.rip': EXPORTED }, 'app.rip', 1, 7, 'the exported Box declaration')).toBe('class');
+    expect(await typeAt({ 'fwd.rip': FWD }, 'fwd.rip', 1, 0, 'the Box declaration')).toBe('class');
+    expect(await typeAt({ 'plain.rip': PLAIN }, 'plain.rip', 0, 0, 'the Shape declaration')).toBe('class');
+    expect(await typeAt({ 'exported.rip': EXPORTED }, 'exported.rip', 1, 7, 'the exported Box declaration')).toBe('class');
   }, 60000);
 
   // USE SITES, not just the declaration. A file has one declaration and many
@@ -387,18 +364,18 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   // the same funnel enum references use.
   test('every occurrence colors `class` — the use site, not only the declaration', async () => {
     // `new Box()` on line 0; the declaration below it on line 1.
-    expect(await typeAt({ 'app.rip': FWD }, 'app.rip', 0, 15, 'the Box use')).toBe('class');
+    expect(await typeAt({ 'fwd.rip': FWD }, 'fwd.rip', 0, 15, 'the Box use')).toBe('class');
     // Declare-in-place is repainted too, idempotently: tsgo already answers
     // `class` there, so this asserts the correction never makes it worse.
-    expect(await typeAt({ 'app.rip': PLAIN }, 'app.rip', 2, 17, 'the Shape use')).toBe('class');
+    expect(await typeAt({ 'plain.rip': PLAIN }, 'plain.rip', 2, 17, 'the Shape use')).toBe('class');
   }, 60000);
 
   test('a forward-referenced component declaration colors `class` too', async () => {
-    expect(await typeAt({ 'app.rip': COMPONENT }, 'app.rip', 4, 0, 'the Child declaration')).toBe('class');
+    expect(await typeAt({ 'component.rip': COMPONENT }, 'component.rip', 4, 0, 'the Child declaration')).toBe('class');
   }, 60000);
 
   test('a forward-referenced NON-class stays `variable` — the correction is the compiler\'s span, not the hoist', async () => {
-    expect(await typeAt({ 'app.rip': NOTACLASS }, 'app.rip', 1, 0, 'the obj declaration')).toBe('variable');
+    expect(await typeAt({ 'notaclass.rip': NOTACLASS }, 'notaclass.rip', 1, 0, 'the obj declaration')).toBe('variable');
   }, 60000);
 });
 
@@ -444,41 +421,35 @@ describeExtended('semantic tokens — a render attribute name', () => {
   ].join('\n');
 
   test('a plain prop and a two-way-bound prop on the same element classify alike — and only there', async () => {
-    const session = await openSession({ 'app.rip': ATTRS });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'attrs.rip': ATTRS });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      // The consistency the row demands: NO semantic token on any
-      // attribute name, in either spelling — every one falls back to the
-      // TextMate attribute scope, the one fact all of them can share.
-      for (const [label, line, character] of [
-        ['the block plain prop', 15, 8],
-        ['the block bind name', 16, 8],
-        ['the inline plain prop', 17, 12],
-        ['the inline bind name', 17, 29],
-      ]) {
-        expect(at(tokens, line, character), `${label} carries no semantic token`).toBeUndefined();
-      }
+    // The consistency the row demands: NO semantic token on any
+    // attribute name, in either spelling — every one falls back to the
+    // TextMate attribute scope, the one fact all of them can share.
+    for (const [label, line, character] of [
+      ['the block plain prop', 15, 8],
+      ['the block bind name', 16, 8],
+      ['the inline plain prop', 17, 12],
+      ['the inline bind name', 17, 29],
+    ]) {
+      expect(at(tokens, line, character), `${label} carries no semantic token`).toBeUndefined();
+    }
 
-      // The survivors, which make the absences above mean something: the
-      // suppression is keyed by the compiler's attribute span, so every
-      // other `property` in the file keeps its token.
-      for (const [label, line, character] of [
-        ['the member declaration', 1, 3],
-        ['the reactive member declaration', 2, 3],
-        ['the render-body member read', 5, 9],
-        ['the object literal property', 7, 8],
-        ['the member read', 8, 16],
-        ['the bind\'s value side', 16, 18],
-      ]) {
-        const tok = at(tokens, line, character);
-        expect(tok, `${label} has a token`).toBeDefined();
-        expect(tok.type, label).toBe('property');
-      }
-    } finally {
-      await session.close();
+    // The survivors, which make the absences above mean something: the
+    // suppression is keyed by the compiler's attribute span, so every
+    // other `property` in the file keeps its token.
+    for (const [label, line, character] of [
+      ['the member declaration', 1, 3],
+      ['the reactive member declaration', 2, 3],
+      ['the render-body member read', 5, 9],
+      ['the object literal property', 7, 8],
+      ['the member read', 8, 16],
+      ['the bind\'s value side', 16, 18],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).toBe('property');
     }
   }, 60000);
 });
@@ -522,45 +493,39 @@ describeExtended('semantic tokens — a render loop binding', () => {
   ].join('\n');
 
   test('the loop name is `variable` at its binding and every read — a handler\'s parameter stays `parameter`', async () => {
-    const session = await openSession({ 'app.rip': LOOP });
-    try {
-      session.open('app.rip');
-      const tokens = await session.semanticTokens('app.rip');
-      expect(tokens.length).toBeGreaterThan(0);   // liveness
+    const tokens = await tokensOf({ 'loop.rip': LOOP });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
 
-      // The baseline: outside a render body the same construct already
-      // answers `variable`, at the binding and the read alike.
-      expect(at(tokens, 1, 4)?.type, 'the plain loop binding').toBe('variable');
-      expect(at(tokens, 2, 14)?.type, 'the plain loop read').toBe('variable');
+    // The baseline: outside a render body the same construct already
+    // answers `variable`, at the binding and the read alike.
+    expect(at(tokens, 1, 4)?.type, 'the plain loop binding').toBe('variable');
+    expect(at(tokens, 2, 14)?.type, 'the plain loop read').toBe('variable');
 
-      // The render loop must answer the same. All three positions answer
-      // separately — the face gives the binding to the block signature and
-      // the reads to the keyed callback, so one corrected span cannot
-      // cover another's position.
-      for (const [label, line, character] of [
-        ['the render loop binding', 8, 10],
-        ['the key read', 9, 16],
-        ['the content read', 9, 24],
-      ]) {
-        const tok = at(tokens, line, character);
-        expect(tok, `${label} has a token`).toBeDefined();
-        expect(tok.type, label).toBe('variable');
-      }
+    // The render loop must answer the same. All three positions answer
+    // separately — the face gives the binding to the block signature and
+    // the reads to the keyed callback, so one corrected span cannot
+    // cover another's position.
+    for (const [label, line, character] of [
+      ['the render loop binding', 8, 10],
+      ['the key read', 9, 16],
+      ['the content read', 9, 24],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).toBe('variable');
+    }
 
-      // The control: the handler's own parameter is a parameter in the
-      // source, not only in the face, and keeps its color at both
-      // positions. A blanket retype inside the component clears the three
-      // assertions above and fails here.
-      for (const [label, line, character] of [
-        ['the handler parameter declaration', 10, 23],
-        ['the handler parameter read', 10, 41],
-      ]) {
-        const tok = at(tokens, line, character);
-        expect(tok, `${label} has a token`).toBeDefined();
-        expect(tok.type, label).toBe('parameter');
-      }
-    } finally {
-      await session.close();
+    // The control: the handler's own parameter is a parameter in the
+    // source, not only in the face, and keeps its color at both
+    // positions. A blanket retype inside the component clears the three
+    // assertions above and fails here.
+    for (const [label, line, character] of [
+      ['the handler parameter declaration', 10, 23],
+      ['the handler parameter read', 10, 41],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).toBe('parameter');
     }
   }, 60000);
 });

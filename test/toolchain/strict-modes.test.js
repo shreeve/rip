@@ -22,19 +22,8 @@
 // rip.strict is always false there and the strict path never runs.
 
 import { describe, expect, test } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { LspClient } from '../../packages/vscode/src/tsgo.js';
+import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(HERE, '../..');
-const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
-const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Both defects in one file: an unannotated parameter (the implicit-any
 // family's headline case, TS7006) and a typed forward read before it is
@@ -50,42 +39,19 @@ const SRC = [
 
 // Drive the REAL editor server over LSP against a workspace whose
 // package.json carries `rip` verbatim. Returns the published
-// diagnostics for the document.
+// diagnostics for the document, once the server has settled it.
 async function diagnose(ripConfig) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-strict-'));
-  const diags = new Map();
-  let client;
+  // The server reads package.json#rip from disk (readProjectConfig,
+  // nearest wins) on every refresh — writing the file IS the config.
+  const session = await openSession({
+    'probe.rip': SRC,
+    'package.json': JSON.stringify(ripConfig ? { rip: ripConfig } : {}, null, 2),
+  });
   try {
-    fs.writeFileSync(path.join(dir, 'probe.rip'), SRC);
-    if (fs.existsSync(TSCONFIG)) fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
-    // The server reads package.json#rip from disk (readProjectConfig,
-    // nearest wins) on every refresh — writing the file IS the config.
-    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(ripConfig ? { rip: ripConfig } : {}, null, 2));
-
-    client = new LspClient('bun', [SERVER, '--stdio'], {
-      cwd: path.join(ROOT, 'packages/vscode'),
-      onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') diags.set(p.uri, p.diagnostics); },
-    });
-    client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-    client.onServerRequest('client/registerCapability', () => null);
-    client.onServerRequest('client/unregisterCapability', () => null);
-    client.onServerRequest('window/workDoneProgress/create', () => null);
-
-    await client.request('initialize', {
-      processId: process.pid,
-      rootUri: 'file://' + dir,
-      capabilities: { workspace: { configuration: true } },
-    });
-    client.notify('initialized', {});
-
-    const uri = 'file://' + path.join(dir, 'probe.rip');
-    client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: SRC } });
-    for (let i = 0; i < 60 && !diags.has(uri); i++) await sleep(100);
-    await sleep(500);
-    return diags.get(uri) ?? [];
+    session.open('probe.rip');
+    return await session.diagnostics('probe.rip');
   } finally {
-    await client?.stop().catch(() => {});
-    fs.rmSync(dir, { recursive: true, force: true });
+    await session.close();
   }
 }
 

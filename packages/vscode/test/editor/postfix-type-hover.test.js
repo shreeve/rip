@@ -4,50 +4,17 @@
 // translate.js), take semantic tokens on their own Rip span, and a
 // satisfies mismatch lands where TypeScript itself anchors it.
 import { test, expect, describe } from 'bun:test'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { decodeSemanticTokens } from '../../src/tsgo.js'
+import { tsgoAvailable, inWorkspace, decodeSemanticTokens } from './support/harness.mjs'
 
-let tsgoAvailable = false
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js')
-  tsgoBinaryPath()
-  tsgoAvailable = true
-} catch { /* dependencies not installed */ }
-
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js')
-
-async function withFile(text, fn) {
-  const { LspClient } = await import('../../src/tsgo.js')
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-postfix-'))
-  const published = []
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') published.push(p); },
+const withFile = (text, fn) => inWorkspace({}, async (api) => {
+  await api.open('a.rip', text)
+  await fn({
+    legend: api.capabilities.semanticTokensProvider.legend,
+    hover: (line, character) => api.hover('a.rip', line, character),
+    semanticTokens: () => api.semanticTokens('a.rip'),
+    diagnostics: () => api.diagnostics('a.rip'),
   })
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})))
-  const uri = 'file://' + path.join(ws, 'a.rip')
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-  try {
-    const init = await client.request('initialize', {
-      processId: process.pid, rootUri: 'file://' + ws,
-      capabilities: { workspace: { configuration: true } },
-    })
-    client.notify('initialized', {})
-    client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text } })
-    for (let i = 0; i < 60 && !published.some((p) => p.uri === uri); i++) await sleep(100)
-    await sleep(120)
-    await fn({
-      legend: init.capabilities.semanticTokensProvider.legend,
-      hover: (line, character) => client.request('textDocument/hover', { textDocument: { uri }, position: { line, character } }),
-      semanticTokens: () => client.request('textDocument/semanticTokens/full', { textDocument: { uri } }),
-      diagnostics: () => published.filter((p) => p.uri === uri).at(-1)?.diagnostics ?? [],
-    })
-  } finally {
-    await client.stop()
-    fs.rmSync(ws, { recursive: true, force: true })
-  }
-}
+}, { prefix: 'rip-postfix-' })
 
 describe.skipIf(!tsgoAvailable)('postfix type operators in the editor', () => {
   const SRC = 'type Wide = string | number\nraw = JSON.parse("1")\na = raw as Wide\nb = 1 satisfies Wide\n'

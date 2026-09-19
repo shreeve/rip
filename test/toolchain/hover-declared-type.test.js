@@ -20,17 +20,8 @@
 // one. So the assertion is narrow and deliberate: the declared type wins.
 
 import { describe, expect, test } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { LspClient } from '../../packages/vscode/src/tsgo.js';
+import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(HERE, '../..');
-const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
-const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -61,35 +52,12 @@ const norm = (h) => String(h?.contents?.value ?? h?.contents ?? '')
 // One server, one document, every position — the answers are independent, so
 // paying the startup cost per case would only make the suite slower.
 async function hoverAll() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-hover-declared-'));
-  const diags = new Map();
-  let client;
+  const session = await openSession({ 'probe.rip': SRC, 'package.json': '{}' });
   try {
-    fs.writeFileSync(path.join(dir, 'probe.rip'), SRC);
-    if (fs.existsSync(TSCONFIG)) fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
-    fs.writeFileSync(path.join(dir, 'package.json'), '{}');
-
-    client = new LspClient('bun', [SERVER, '--stdio'], {
-      cwd: path.join(ROOT, 'packages/vscode'),
-      onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') diags.set(p.uri, p.diagnostics); },
-    });
-    client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-    client.onServerRequest('client/registerCapability', () => null);
-    client.onServerRequest('client/unregisterCapability', () => null);
-    client.onServerRequest('window/workDoneProgress/create', () => null);
-
-    await client.request('initialize', {
-      processId: process.pid, rootUri: 'file://' + dir,
-      capabilities: { workspace: { configuration: true } },
-    });
-    client.notify('initialized', {});
-
-    const uri = 'file://' + path.join(dir, 'probe.rip');
-    client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: SRC } });
+    session.open('probe.rip');
     // Wait for the program, not a fixed interval: an `any` here would otherwise
     // be indistinguishable from a hover taken before the build finished.
-    for (let i = 0; i < 60 && !diags.has(uri); i++) await sleep(100);
-    await sleep(500);
+    await session.diagnostics('probe.rip');
 
     const lines = SRC.split('\n');
     const out = new Map();
@@ -97,8 +65,8 @@ async function hoverAll() {
       const line = lines.findIndex((l) => l.startsWith(`${c.name}:`));
       let text = '';
       for (let i = 0; i < 10; i++) {
-        text = norm(await client.request('textDocument/hover', {
-          textDocument: { uri }, position: { line, character: 0 },
+        text = norm(await session.request('textDocument/hover', {
+          textDocument: { uri: session.uri('probe.rip') }, position: { line, character: 0 },
         }).catch(() => null));
         if (text && !/:\s*any$/.test(text)) break;
         await sleep(200);
@@ -107,8 +75,7 @@ async function hoverAll() {
     }
     return out;
   } finally {
-    await client?.stop().catch(() => {});
-    fs.rmSync(dir, { recursive: true, force: true });
+    await session.close();
   }
 }
 

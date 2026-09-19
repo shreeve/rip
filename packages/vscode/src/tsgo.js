@@ -62,8 +62,8 @@ export function tsgoBinaryPath() {
 
 // Minimal JSON-RPC 2.0 client over child-process stdio with LSP framing.
 export class LspClient {
-  constructor(command, args, { cwd = process.cwd(), onNotification = null } = {}) {
-    this.proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+  constructor(command, args, { cwd = process.cwd(), env = process.env, onNotification = null } = {}) {
+    this.proc = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.nextId = 1;
     this.pending = new Map();
     this.notificationHandlers = new Map();

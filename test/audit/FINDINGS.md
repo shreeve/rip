@@ -113,12 +113,12 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 13 | Single-rooted tsconfig — a nested project's own config was ignored | `check-diagnostics-3`, `editor-gaps-synthetic-project` |
 | 14 | Unused `@ts-expect-error` silently swallowed | `check-diagnostics-3` |
 | 15 | Reactive `:=` bindings tagged `readonly` | `semantic-tokens`, token audit's `readonly` invariant |
-| 17 | A directive swallows the unused-local fade | `editor-features` |
+| 17 | A directive swallows the unused-local fade | `editor-features-actions` |
 | 18 | A directive blinded its whole indented block | `check-diagnostics-3`'s head-line-only case |
 | 19 | Inline render-block directive lost from the face | `check-diagnostics-3`'s inline component-prop and two-way-bind directive cases; audit `verdict` |
 | 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check-diagnostics-2`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
 | 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
-| 22 | Completion and signature help fired exactly where the compile died — a trailing dot in the parser, an open call in the lexer before the parser ran | `incomplete-expression` (inverted): compile-level repair-driver pins plus barriered editor requests for the member list at a bare dot and signature help in an open call; every recovered request asserts the buffer's own rejection. `arrival` owns the no-barrier debounce probes. `editor-features` owns positional quick-fix edits and whole-file rename. The batch checker still exits non-zero. |
+| 22 | Completion and signature help fired exactly where the compile died — a trailing dot in the parser, an open call in the lexer before the parser ran | `incomplete-expression` (inverted): compile-level repair-driver pins plus barriered editor requests for the member list at a bare dot and signature help in an open call; every recovered request asserts the buffer's own rejection. `arrival` owns the no-barrier debounce probes. `editor-features-actions` owns positional quick-fix edits, `editor-features-rename` whole-file rename. The batch checker still exits non-zero. |
 | 23 | An in-face value declaration could have retired the Tier 3 pin probe | none — closed by ruling, refused on measurement; the reasoning that would re-propose it is answered in pins.js, where it would be built |
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
 | 25 | Event handler parameters get no event type | `check-diagnostics-2`'s handler case; `dom-vocab-lib` |
