@@ -633,7 +633,7 @@ if (targets.length > 0) {
     // workspace, so per-project wrappers stop applying and @types
     // resolution changes — the user must know their diagnostics come
     // from a different posture than the editor's.
-    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
+    mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-fallback-'));
     mirrorRootIsFallback = true;
     fallbackToClean = mirrorRoot;
     console.error(`rip check: workspace mirror root unavailable (${err.code ?? err.message}) — using a temp fallback (tsconfig/@types fidelity degrades)`);

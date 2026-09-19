@@ -10,12 +10,15 @@ import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { join, dirname, resolve, relative, sep, delimiter } from 'path';
 import { fileURLToPath } from 'url';
-import { compile, CompileError } from '../src/compile.js';
-import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/cli/explain.js';
-import { tokenize, makeParserLexer } from '../src/lexer.js';
-import { Parser } from '../src/parser.js';
-import { toInlineMapComment } from '../src/sourcemap.js';
 import packageJson from '../package.json' with { type: 'json' };
+
+// The compiler (compile / lexer / parser / emitter — parser.js alone is
+// ~450 KB) loads only on the paths that compile in THIS process: -c/-o,
+// -t, -s, --dts, --ts, --explain, and the stdin pre-check. Every other
+// path — `rip check`, `rip test`, `rip sites`, running a file (which a
+// child bun compiles through the loader) — never pays for it, so
+// dispatch is a bun start plus this file.
+const loadCompiler = () => import('../src/compile.js');
 
 const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
 const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/run.js');
@@ -131,13 +134,17 @@ if (args[0] === 'schema') {
 // parsing, like `schema` (a file literally named `check` runs as
 // `rip ./check`). No loader preload — the checker spawns the language
 // server, which owns compilation.
+//
+// Dispatched IN THIS PROCESS rather than through a second bun: check.js
+// is a top-level script that reads process.argv and owns its exit codes
+// (it always ends in process.exit), so it runs here exactly as it would
+// as a child — same fds (its color and width read the same TTY), same
+// cwd and env — minus a bun start and a second compiler load.
 if (args[0] === 'check') {
   const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/check.js');
-  const r = spawnSync('bun', [checkCliPath, ...args.slice(1)], {
-    stdio: 'inherit',
-    env: process.env,
-  });
-  process.exit(r.status ?? 1);
+  process.argv = [process.argv[0], checkCliPath, ...args.slice(1)];
+  await import(checkCliPath);
+  process.exit(0); // unreachable: check.js exits on every path
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip
@@ -423,6 +430,8 @@ if (explainDirection !== null) {
   if (fileIndex !== -1) {
     fail(`rip: ${explainDirection} takes its file inside the target argument; unexpected: ${args.slice(fileIndex).join(' ')}\n\nRun 'rip --help' for usage.`, 2);
   }
+  const { explainSource, explainGenerated, parseTarget, UsageError, PositionError } = await import('../src/cli/explain.js');
+  const { CompileError } = await loadCompiler();
   let target;
   try {
     target = parseTarget(explainArg);
@@ -500,6 +509,7 @@ if (showTsFace) {
     fail(`rip: --ts is an inspection mode (stdout only, the TS face never ships) and cannot combine with other options: ${others.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
   }
   const tsFaceSource = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+  const { compile, CompileError } = await loadCompiler();
   try {
     const { code } = compile(tsFaceSource, { path: inputFile ?? '<stdin>', face: 'ts' });
     process.stdout.write(code.endsWith('\n') ? code : `${code}\n`);
@@ -556,6 +566,7 @@ if (!compileMode) {
   // created. A cwd that refuses the write (read-only, no permission)
   // fails with a clear diagnostic.
   const source = readFileSync(0, 'utf8');
+  const { compile, CompileError } = await loadCompiler();
   try {
     compile(source, { path: '<stdin>' });
   } catch (err) {
@@ -592,6 +603,12 @@ if (!compileMode) {
 
 const path = inputFile ?? '<stdin>';
 const source = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+const { compile, CompileError } = await loadCompiler();
+const [{ tokenize, makeParserLexer }, { Parser }, { toInlineMapComment }] = await Promise.all([
+  import('../src/lexer.js'),
+  import('../src/parser.js'),
+  import('../src/sourcemap.js'),
+]);
 
 try {
   if (showTokens) {
