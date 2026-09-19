@@ -44,14 +44,19 @@ async function startServer(onDiagnostics) {
   return client;
 }
 
-const nextDiagnostics = (published) => {
+// The newest publish after this point — or, given `accept`, the newest one
+// it accepts, since a publish for a superseded version can still land
+// after the next edit goes out (a refresh scheduled by the tsgo restart
+// races the edit's own). Bounded: 15 s, then a loud failure.
+const nextDiagnostics = (published, accept = () => true) => {
   const before = published.length;
   return async () => {
-    for (let i = 0; i < 150 && published.length === before; i++) {
+    for (let i = 0; i < 150; i++) {
+      const fresh = published.slice(before).filter(accept);
+      if (fresh.length > 0) return fresh[fresh.length - 1];
       await new Promise((r) => setTimeout(r, 100));
     }
-    expect(published.length).toBeGreaterThan(before);
-    return published[published.length - 1];
+    throw new Error(`no accepted publishDiagnostics within 15 s (${published.length - before} arrived)`);
   };
 };
 
@@ -182,7 +187,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // a diagnostic the gradual gate publishes. Same caveat as above: the
       // revival can land another diagnostic in this publish, so assert the
       // mapped TS diagnostic is present rather than counting the batch.
-      wait = nextDiagnostics(published);
+      wait = nextDiagnostics(published, (p) => p.diagnostics.some((d) => d.code === 2339));
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: GOOD + 'n: number = 42\nbad = n.toUpperCase()\nconsole.log bad\n' }],
@@ -437,7 +442,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // An edit that makes a dynamic construct INVALID (a transition
       // on a static element — a compile rejection): the server keeps
       // serving the stale face and answers positions, never crashes.
-      const wait2 = nextDiagnostics(published, 2);
+      const wait2 = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: fixture.replace('div ref: el', 'div ~slide, ref: el') }],
@@ -498,7 +503,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       }
       // An edit that makes composition INVALID (a second slot — the
       // #166 rejection): the server keeps serving the stale face.
-      const wait2 = nextDiagnostics(published, 2);
+      const wait2 = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: fixture.replace('      slot\n', '      slot\n      slot\n') }],
@@ -979,7 +984,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(atWriteEnriched.range.start.line).toBe(4);
 
       // Inference has teeth: a type-violating use errors, positioned.
-      wait = nextDiagnostics(published);
+      wait = nextDiagnostics(published, (p) => p.diagnostics.some((d) => d.code === 2339));
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: fixture + '  total.toUpperCase()\n' }],
