@@ -9,8 +9,7 @@
 // report as a clean public surface.
 //
 // Shape only, and no server is started: behavior is proven by the
-// `--public` cases in test/spawn/cli/check.test.js, which
-// drive the real
+// `--public` cases in test/spawn/cli/check.test.js, which drive the real
 // checker end to end.
 import { test, expect } from 'bun:test';
 import fs from 'node:fs';
