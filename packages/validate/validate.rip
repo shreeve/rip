@@ -152,14 +152,14 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 # `THH:MM:SS`, `.fff` only when nonzero — and the zone as written (`Z` or
 # `±HH:MM`) when there was one.
 iso = (t, hms = false) ->
-  two = (n) -> String(n).padStart(2, '0')
-  out = "#{String(t.year).padStart(4, '0')}-#{two t.month}-#{two t.day}"
+  pad = (s, n = 2) -> String(s).padStart(n, '0')
+  out = "#{pad t.year, 4}-#{pad t.month}-#{pad t.day}"
   hms or return out
-  out += "T#{two t.hour}:#{two t.minute}:#{two t.second}"
-  out += ".#{String(t.ms).padStart(3, '0')}" if t.ms
+  out += "T#{pad t.hour}:#{pad t.minute}:#{pad t.second}"
+  out += ".#{pad t.ms, 3}" if t.ms
   if t.zone?
     mins = Math.abs t.zone
-    out += if mins is 0 then 'Z' else "#{if t.zone < 0 then '-' else '+'}#{two Math.floor(mins / 60)}:#{two mins % 60}"
+    out += if mins is 0 then 'Z' else "#{if t.zone < 0 then '-' else '+'}#{pad Math.floor(mins / 60)}:#{pad mins % 60}"
   out
 
 # ==============================================================================
