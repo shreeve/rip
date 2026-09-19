@@ -5,25 +5,15 @@
 // timeout), and a launcher whose parent vanished sat in a synchronous
 // wait forever with the child still holding its port. Both are pinned
 // against the real bin/rip so the shape cannot quietly return.
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { alive, until } from '../../support/wait.js';
 
 const ROOT = join(import.meta.dir, '..', '..', '..');
 const BIN = join(ROOT, 'bin', 'rip');
-
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (predicate, ms) => {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
-    await sleep(50);
-  }
-  return predicate();
-};
 
 // A script that announces its pid and then waits to be told to stop.
 const lingering = (dir) => {
@@ -49,7 +39,7 @@ const launch = (file, extra = {}) => new Promise((resolve, reject) => {
 describe('rip file.rip owns its child', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rip-owns-'));
   const file = lingering(dir);
-  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   test('SIGTERM to the launcher reaches the child, and the launcher exits with it', async () => {
     const { launcher, child } = await launch(file);
@@ -76,6 +66,5 @@ describe('rip file.rip owns its child', () => {
     shell.kill('SIGKILL');
     // The launcher polls its parent every 500ms; allow a few polls.
     expect(await until(() => !alive(child), 4000)).toBe(true);
-    cleanup();
   });
 });
