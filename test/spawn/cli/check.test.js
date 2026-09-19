@@ -12,9 +12,8 @@
 // Every case builds its own workspace and shares nothing, so the
 // describes run CONCURRENT: `bun test` schedules files across workers
 // but the tests inside a file one after another, and 200 spawns in
-// series would be the longest file in the repository by far. `(await check())`
-// holds a slot (RIP_CHECK_SLOTS, default 6) so the tsgo processes never
-// pile up past the machine.
+// series would be the longest file in the repository by far. `await check()`
+// holds one of SLOTS so the tsgo processes never pile up past the machine.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
@@ -103,8 +102,8 @@ function freshProject({ withTypes = true } = {}) {
   return dir;
 }
 
-// One `rip check` over `dir`, awaited. At most RIP_CHECK_SLOTS run at once.
-const SLOTS = Number(process.env.RIP_CHECK_SLOTS ?? 6);
+// One `rip check` over `dir`, awaited. At most SLOTS run at once.
+const SLOTS = 6;
 let running = 0;
 const waiting = [];
 async function check(dir, args = []) {
@@ -137,7 +136,7 @@ async function withUnreadable(file, fn) {
 }
 
 describe.concurrent('rip check: usage surface (no server)', () => {
-  test('--help prints usage and exits 0', async () => {
+  test('--help prints usage and exits 0', () => {
     const r = spawnSync('bun', [BIN, 'check', '--help'], { encoding: 'utf8' });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('rip check');
@@ -147,7 +146,7 @@ describe.concurrent('rip check: usage surface (no server)', () => {
   test('a directory with no .rip files is clean (exit 0)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-empty-'));
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('no .rip files found');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -157,7 +156,7 @@ describe.concurrent('rip check: usage surface (no server)', () => {
   // editor logs the same identity in its ready line, computed over the
   // same two trees (compiler + server) by content, so an installed
   // extension and a worktree CLI agree exactly when their code does.
-  test('--build prints the build identity and exits 0', async () => {
+  test('--build prints the build identity and exits 0', () => {
     const r = spawnSync('bun', [BIN, 'check', '--build'], { encoding: 'utf8' });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/^rip check build [0-9a-f]+\n  compiler  .+\n  server    .+\n$/);
@@ -166,7 +165,7 @@ describe.concurrent('rip check: usage surface (no server)', () => {
   test('an unknown flag exits 2', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-flag-'));
     try {
-      const r = (await check(dir, ['--nope']));
+      const r = await check(dir, ['--nope']);
       expect(r.status).toBe(2);
       expect(r.stderr).toContain('unknown option');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -177,7 +176,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a clean file passes (exit 0)', async () => {
     const dir = workspace({ 'clean.rip': 'add = (a: number, b: number): number -> a + b\nconsole.log add(1, 2)\n' });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -193,7 +192,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('an empty file is a legal program: compiles, checks clean, and counts as checked', async () => {
     const dir = workspace({ 'empty.rip': '' });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
       expect(r.stdout).toContain('1 file checked');   // present in the run, not skipped
@@ -206,7 +205,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a type error surfaces at the .rip position and exits 1', async () => {
     const dir = workspace({ 'bad.rip': "n: number = 'oops'\nconsole.log n\n" });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       // Mapped back to the .rip source, not the generated face: 1:1 on `n`.
       expect(r.stdout).toContain('bad.rip:1:1 - error'); // tsc-style header
@@ -219,7 +218,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     // it; tsc anchors a whole-shape miss on the `satisfies` keyword.
     const dir = workspace({ 'sat.rip': 'type Entry = { href: string, name: string }\nx = { href: "/a" } satisfies Entry\nconsole.log x\n' });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('sat.rip:2:20 - error TS2741');
       expect(r.stdout).not.toContain('hidden in unannotated code');
@@ -236,7 +235,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'ci.rip': 'type A = Record<string, any> & { constructor: Function & { __hmrId?: string } }\nx: A = {}\nconsole.log x, Object.keys({})\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -280,7 +279,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('live.rip:1:1 - error TS2322');       // liveness: the checker really reports
       // Nothing anywhere in the match file — not a code, not a line.
@@ -798,7 +797,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const gradual = workspace({ 'a.rip': src });
     const strict = workspace({ 'a.rip': src }, { strict: true });
     try {
-      const r = (await check(gradual));
+      const r = await check(gradual);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('2 `any` annotations');
       expect(r.stdout).toMatch(/\n  a\.rip:1\n  a\.rip:4\n/);
@@ -962,7 +961,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(leaky, 'package.json'),
       JSON.stringify({ name: 'leaky-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const ok = (await check(clean, ['--public']));
+      const ok = await check(clean, ['--public']);
       // The whole point: `made` carries no annotation and still counts.
       // A declaration-based audit calls this untyped, which is the answer
       // that gets WORSE as a package improves.
@@ -972,7 +971,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(ok.stdout).toContain('2/2 exports fully typed (100.0%)');
       expect(ok.status).toBe(0);
 
-      const bad = (await check(leaky, ['--public']));
+      const bad = await check(leaky, ['--public']);
       // The path names the member that leaks, through the type that owns it.
       expect(bad.stdout).toContain('any at: Outer.inner.extra');
       expect(bad.stdout).toMatch(/\u2713 fine/);      // foreign types stay opaque
@@ -1026,7 +1025,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'sig-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // A construct signature's parameter, on a class that declares no
       // annotated member of its own — nothing about a class's own surface
       // decides whether its constructor is read.
@@ -1074,7 +1073,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'own-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: Late.new(seed)');
       expect(out.stdout).toContain('any at: Anon.new(seed)');
       expect(out.stdout).toContain('0/2 exports fully typed (0.0%)');
@@ -1083,9 +1082,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
-});
 
-describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
   // `--public` is a mode, not a modifier: it replaces the type-checking
   // report, so a compile failure has no other way out and must leave
   // through this one. An entry that does not compile publishes nothing a
@@ -1224,7 +1221,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'inside.rip': 'export here: number = 1\n',
     });
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/publishes from outside the package/);
       expect(out.stdout).toContain('../shared/api.rip');
       expect(out.stdout).not.toContain('no package publishes');
@@ -1287,12 +1284,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect((await check(dir, ['--public'])).status).toBe(0);
       // `--json` is not a form this mode has; say so rather than answer a
       // machine in prose.
-      const json = (await check(dir, ['--public', '--json']));
+      const json = await check(dir, ['--public', '--json']);
       expect(json.stderr).toContain('--public has no --json form');
       expect(json.status).toBe(2);
       // A file the run cannot read leaves the surface unaudited.
       fs.chmodSync(path.join(dir, 'secret.rip'), 0o000);
-      const blocked = (await check(dir, ['--public']));
+      const blocked = await check(dir, ['--public']);
       expect(blocked.status).toBe(2);
       fs.chmodSync(path.join(dir, 'secret.rip'), 0o644);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1411,7 +1408,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         'export holds: { e: Empty } = { e: ({} as Empty) }'].join('\n') + '\n',
     });
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // A property and a return, each unclaimed, each reached through a
       // sibling that reports nothing.
       expect(out.stdout).toContain('{} at: Box#slot');
@@ -1446,7 +1443,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         'export def alone(n: number): string', "  'y'"].join('\n') + '\n',
     });
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // One edit, named once, under the row that has to make it.
       expect(out.stdout).toMatch(/any at: Bag\.hole/);
       expect(out.stdout).toContain('1 position needs a type');
@@ -1522,12 +1519,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(a).toMatch(/fromImport/);
       expect(a).not.toMatch(/fromRequire/);   // the mirror builds a face for one
 
-      const b = (await check(patterned, ['--public']));
+      const b = await check(patterned, ['--public']);
       expect(b.stdout).toContain('every count below is a floor');
       expect(b.stdout).not.toMatch(/notPublished/);   // never audit an unpublished file
       expect(b.status).toBe(2);
 
-      const c = (await check(bare, ['--public']));
+      const c = await check(bare, ['--public']);
       expect(c.stdout).toMatch(/only/);
       expect(c.status).toBe(1);
     } finally {
@@ -1563,13 +1560,13 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'index.rip'),
         "export { Session, solid } from '@q3/lib'\nexport def mine(n: number): number\n  n\n");
 
-      const own = (await check(path.join(dir, 'packages', 'lib'), ['--public']));
+      const own = await check(path.join(dir, 'packages', 'lib'), ['--public']);
       expect(own.stdout).toMatch(/✗ Session/);        // leaking, and it says where
       expect(own.stdout).toMatch(/✓ solid/);          // clean
       expect(own.stdout).toContain('1/2 exports fully typed');
       expect(own.status).toBe(1);
 
-      const fwd = (await check(path.join(dir, 'packages', 'app'), ['--public']));
+      const fwd = await check(path.join(dir, 'packages', 'app'), ['--public']);
       // All three published names are LISTED, none silently dropped.
       for (const n of ['mine', 'Session', 'solid']) expect(fwd.stdout).toContain(n);
       // The two it cannot audit are marked as such, not scored clean.
@@ -1622,7 +1619,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     try {
       // (a) followed: the forwarded name is a row, audited, positioned in
       // the file that declares it — and no floor, because nothing was missed.
-      const a = (await check(live, ['--public']));
+      const a = await check(live, ['--public']);
       expect(a.stdout).toMatch(/✗ leaf/);
       expect(a.stdout).toMatch(/a\.rip:\d+:\d+\s+any at: leaf\(x\)/);
       expect(a.stdout).toContain('1/2 exports fully typed');
@@ -1630,20 +1627,20 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(a.status).toBe(1);
 
       // (b) unfollowable: a floor, and never a clean bill.
-      const b = (await check(dead, ['--public']));
+      const b = await check(dead, ['--public']);
       expect(b.stdout).toContain('every count below is a floor');
       expect(b.stdout).not.toContain('exports nothing');
       expect(b.status).toBe(2);
 
       // (c) a dead star does not hide behind a live one.
-      const c = (await check(mixed, ['--public']));
+      const c = await check(mixed, ['--public']);
       expect(c.stdout).toMatch(/✓ good/);            // the live star is enumerated
       expect(c.stdout).toContain('every count below is a floor');   // the dead one still counts
       expect(c.status).toBe(2);
 
       // (e) stars compose: the names behind a barrel-of-barrels are
       // published too, and are found by following through.
-      const e = (await check(nestedBarrel, ['--public']));
+      const e = await check(nestedBarrel, ['--public']);
       expect(e.stdout).toMatch(/✗ deep/);
       expect(e.stdout).toMatch(/c\.rip:\d+:\d+\s+any at: deep\(x\)/);
       expect(e.stdout).not.toContain('exports nothing');
@@ -1651,7 +1648,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
 
       // (d) a star whose names are shadowed by direct exports was followed
       // successfully — nothing was missed, so nothing is floored.
-      const d = (await check(shadowed, ['--public']));
+      const d = await check(shadowed, ['--public']);
       expect(d.stdout).not.toContain('every count below is a floor');
       expect(d.status).toBe(0);
     } finally {
@@ -1725,7 +1722,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'broken-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).not.toContain('no package publishes a .rip entry here');
       expect(out.status).toBe(1);
@@ -1733,9 +1730,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 90_000);
-});
 
-describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
   // The manifest is the audit's INPUT, not a filter over whatever else got
   // compiled: the published entries are read first and become the compile
   // targets. Each case here is a way the old direction — audit what the
@@ -1748,7 +1743,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'dangling-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).not.toContain('no .rip files found');
       expect(out.status).toBe(1);
@@ -1766,7 +1761,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'aimed-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public', 'util.rip']));
+      const out = await check(dir, ['--public', 'util.rip']);
       expect(out.stdout).not.toContain('publishes nothing a consumer can resolve');
       expect(out.stdout).toContain('1/1 exports fully typed');
       expect(out.status).toBe(0);
@@ -1787,7 +1782,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'solo-broken', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('publishes nothing a consumer can resolve');
       expect(out.status).toBe(1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1807,7 +1802,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         exports: { '.': './index.rip', './internal/*': null, './styles/*': './styles/*.css' },
       }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).not.toContain('every count below is a floor');
       expect(out.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1826,7 +1821,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         exports: { '.': './a.rip', './b': './b.rip', './*': './src/*.rip' },
       }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('1 `export *` re-export not enumerated');
       expect(out.status).toBe(2);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -1852,7 +1847,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'deep-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Named at its full path, and counted as the leak it is — no floor
       // stands between the reader and it.
       expect(out.stdout).toContain(`any at: deep${'.next'.repeat(depth)}`);
@@ -1889,7 +1884,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'held-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: arr()[]');       // array element
       expect(out.stdout).toContain('any at: prom()<0>');     // type argument
       expect(out.stdout).toContain('any at: rec()[]');       // index value
@@ -1922,7 +1917,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'idx-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any at: open[]');
       expect(out.stdout).toContain('any at: Open[]');
       expect(out.stdout).toMatch(/✓ shut/);
@@ -1955,7 +1950,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'nullable-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/✓ send/);
       expect(out.stdout).toMatch(/✓ Opts/);
       // The `any` this package actually wrote is still its own.
@@ -1987,7 +1982,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-out', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/any\s+at: rAny\(\)/);
       expect(out.stdout).toMatch(/Function\s+at: rFunction\(\)/);
       expect(out.stdout).toMatch(/✓ rUnknown/);
@@ -2019,7 +2014,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-in', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Stated: a contract, and trusted.
       expect(out.stdout).toMatch(/✓ stated\b/);
       expect(out.stdout).toMatch(/✓ statedObj/);
@@ -2065,7 +2060,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-read', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Written, and read: a claim about what belongs there, and trusted.
       expect(out.stdout).toMatch(/\u2713 stated\b/);
       expect(out.stdout).not.toMatch(/at: stated\(\)/);
@@ -2110,7 +2105,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'own-claim', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/\{\}\s+at: rootBare/);
       expect(out.stdout).toMatch(/✓ rootAnn/);
       expect(out.stdout).toMatch(/✓ AliasEmpty/);
@@ -2152,7 +2147,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'pinned', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Written by hand, and trusted — the pin beside it changes nothing.
       expect(out.stdout).toMatch(/✓ fromAuthored/);
       // The compiler's own description of what it found.
@@ -2189,7 +2184,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'undirected', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toMatch(/✓ Wrap/);
       expect(out.stdout).toMatch(/✓ make/);
       expect(out.stdout).toMatch(/✓ Options/);
@@ -2221,7 +2216,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'origin-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Surfaces at the export…
       expect(out.stdout).toMatch(/any\s+at: thing\(input\)/);
       // …and carries the lambda's parameter position, column and all.
@@ -2259,7 +2254,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'whole-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
       // Both parameters, not just the first.
       expect(found.some((l) => /at: thing\(input\)/.test(l))).toBe(true);
@@ -2345,7 +2340,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'shadow-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       const found = out.stdout.split('\n').filter((l) => l.includes(' at: '));
       expect(found.some((l) => /at: Holder\.new\(first\)/.test(l))).toBe(true);
       expect(found.some((l) => /at: Holder\.new\(second\)/.test(l))).toBe(true);
@@ -2380,7 +2375,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'sibling-pkg', rip: { strict: true }, exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Reported once, under the export that owns it.
       expect(out.stdout).toContain('at: Boom.new(payload)');
       expect(out.stdout).not.toContain('at: api.Boom.new(payload)');
@@ -2409,7 +2404,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'unres-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       expect(out.stdout).toContain('any (written: NotDeclaredAnywhere<string>)');
       expect(out.stdout).toContain('any at: box');
       // A type that resolves is shown once, not doubled.
@@ -2435,7 +2430,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'wide-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // Flattened, because a long type wraps across lines by design.
       const flat = out.stdout.replace(/\s+/g, ' ');
       expect(flat).toContain('aRatherLongMemberName0: string;');
@@ -2501,7 +2496,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       fs.mkdirSync(path.join(dir, 'node_modules', '@rip'), { recursive: true });
       fs.symlinkSync(path.join('..', '..', 'packages', 'util'), path.join(dir, 'node_modules', '@rip', 'util'));
 
-      const out = (await check(dir, [path.join('packages', 'app')]));
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@rip/util`');
       expect(out.stdout).toContain('`leaky`');
       // Imported and clean: not named.
@@ -2535,7 +2530,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       // asked for diagnostics, and does not report what it inherits either.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
         JSON.stringify({ name: '@rip/app-under-test', rip: { strict: true, noCheck: ['*.rip'] } }));
-      const excluded = (await check(dir, [path.join('packages', 'app')]));
+      const excluded = await check(dir, [path.join('packages', 'app')]);
       expect(excluded.stdout).not.toContain('imported from `@rip/util`');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -2567,7 +2562,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         JSON.stringify({ name: '@d/app', rip: { strict: true } }));
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'app.rip'),
         "import { api } from '@d/lib'\nconsole.log api.session.run(1)\n");
-      const out = (await check(dir, [path.join('packages', 'app')]));
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@d/lib`');
       expect(out.stdout).toContain('`api`');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -2595,15 +2590,13 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       // Import and forward only — no consumption.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'forward.rip'),
         "import { leaky } from '@f/lib'\nexport { leaky }\n");
-      const out = (await check(dir, [path.join('packages', 'app')]));
+      const out = await check(dir, [path.join('packages', 'app')]);
       expect(out.stdout).toContain('imported from `@f/lib`');
       expect(out.stdout).toMatch(/app\.rip/);
       expect(out.stdout).not.toMatch(/forward\.rip/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
-});
 
-describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
   // Several packages leaking at once is the ordinary case for an app, and
   // the advisories have to survive it as a READABLE unit: each package is
   // its own finding with its own remedy, so each is set off by a blank
@@ -2691,18 +2684,18 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
 
       // Gradual: silent. Not the summary either — there is nothing here
       // for a posture that accepts `any` to do.
-      const gradual = (await check(dir, [path.join('packages', 'app')]));
+      const gradual = await check(dir, [path.join('packages', 'app')]);
       expect(gradual.stdout).not.toContain('imported from `@rip/util`');
 
       // The same code, asked what strict would say.
-      const preview = (await check(dir, ['--strict', path.join('packages', 'app')]));
+      const preview = await check(dir, ['--strict', path.join('packages', 'app')]);
       expect(preview.stdout).toContain('imported from `@rip/util`');
       expect(preview.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
 
       // And once the project actually flips, without asking.
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
         JSON.stringify({ name: '@rip/held', rip: { strict: true } }));
-      const strict = (await check(dir, [path.join('packages', 'app')]));
+      const strict = await check(dir, [path.join('packages', 'app')]);
       expect(strict.stdout).toMatch(/app\.rip:\d+:\d+\s+leaky/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -2738,7 +2731,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     fs.writeFileSync(path.join(dir, 'package.json'),
       JSON.stringify({ name: 'ident-pkg', exports: { '.': './index.rip' } }, null, 2));
     try {
-      const out = (await check(dir, ['--public']));
+      const out = await check(dir, ['--public']);
       // The SECOND `Config` is a different type than the first, and the
       // only one that leaks. Keyed by name, it never gets walked.
       expect(out.stdout).toContain('any at: Pair.second.leak');
@@ -3429,7 +3422,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'writecomp.rip': 'doubled ~= 2 * 2\ndoubled = 5\nconsole.log(doubled)\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toMatch(/writecomp\.rip:2:\d+ - error: emitter: cannot assign to computed 'doubled'/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -3462,7 +3455,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     ].join('\n');
     const dir = workspace({ 'c.rip': src });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('c.rip:11:20 - error'); // `toUpperCase`, inside the branch body
       expect(r.stdout).toContain("Property 'toUpperCase' does not exist on type 'number'");
@@ -3502,7 +3495,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     ].join('\n');
     const dir = workspace({ 'c.rip': src });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       const strict = (await check(dir, ['--strict'])).stdout;
       expect(strict.match(/TS7006/g)).toHaveLength(2);
@@ -3544,7 +3537,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     ].join('\n');
     const dir = workspace({ 'h.rip': src });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('h.rip:5:22 - error'); // named ref: at the method definition
       expect(r.stdout).toContain("Property 'notAnEventProperty' does not exist");
@@ -3561,10 +3554,10 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const loose = workspace({ 'a.rip': src }, null);
     const strict = workspace({ 'a.rip': src }, { strict: true });
     try {
-      const l = (await check(loose));
+      const l = await check(loose);
       expect(l.status).toBe(0); // unannotated code is legal rip
 
-      const s = (await check(strict));
+      const s = await check(strict);
       expect(s.status).toBe(1);
       expect(s.stdout).toContain('TS7006');
       expect(s.stdout).toContain('a.rip:1:10 - error'); // the `name` parameter
@@ -3573,9 +3566,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       fs.rmSync(strict, { recursive: true, force: true });
     }
   }, 90_000);
-});
 
-describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
   test('a yield read in an unannotated generator is permissive by default, strict under rip.strict', async () => {
     // TS7057 fires on `yield` whose generator lacks a return-type annotation —
     // the same demands-an-annotation class as TS7006, discovered leaking as a
@@ -3585,10 +3576,10 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const loose = workspace({ 'g.rip': src }, null);
     const strict = workspace({ 'g.rip': src }, { strict: true });
     try {
-      const l = (await check(loose));
+      const l = await check(loose);
       expect(l.status).toBe(0); // an unannotated generator is legal rip
 
-      const s = (await check(strict));
+      const s = await check(strict);
       expect(s.status).toBe(1);
       expect(s.stdout).toContain('TS7057');
       expect(s.stdout).toContain('g.rip:2:9 - error'); // the `yield` expression
@@ -3641,7 +3632,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     try {
       expect((await check(guarded)).status).toBe(0);   // directive survives the multi-line emit and absorbs
 
-      const b = (await check(bare));                   // control: the error is genuinely there
+      const b = await check(bare);                   // control: the error is genuinely there
       expect(b.status).toBe(1);
       expect(b.stdout).toContain('TS2322');
     } finally {
@@ -3662,12 +3653,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const expectErr = workspace({ 'u.rip': "# @ts-expect-error — nothing wrong here\nbadCount = 'oops'\n" });
     const ignore = workspace({ 'i.rip': "# @ts-ignore — nothing wrong here\nbadCount = 'oops'\n" });
     try {
-      const e = (await check(expectErr));
+      const e = await check(expectErr);
       expect(e.status).toBe(1);
       expect(e.stdout).toContain('TS2578');
       expect(e.stdout).toContain('u.rip:1:1 - error'); // on the directive itself
 
-      const i = (await check(ignore));
+      const i = await check(ignore);
       expect(i.status).toBe(0);              // an unused @ts-ignore is never flagged
       expect(i.stdout).not.toContain('TS2578');
     } finally {
@@ -3704,7 +3695,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).not.toContain('single.rip');                 // the control: still absorbed
       expect(r.stdout).toContain('blocks.rip:1:1 - error TS2578');  // the def directive did nothing
@@ -3758,7 +3749,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const r = (await check(dir, ['--json']));
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.filter((d) => d.file.endsWith('acked.rip'))).toEqual([]);
@@ -3802,7 +3793,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const r = (await check(dir, ['--json']));
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.filter((d) => d.file.endsWith('bound.rip'))).toEqual([]);
@@ -3832,7 +3823,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const r = (await check(dir, ['--json']));
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const diags = JSON.parse(r.stdout);
       expect(diags.map((d) => [d.code, d.line])).toEqual([[2339, 10]]);
@@ -3845,7 +3836,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'app.rip': "import { shout } from './util.rip'\nconsole.log shout(42)\n",
     });
     try {
-      const r = (await check(dir, ['app.rip', 'util.rip']));
+      const r = await check(dir, ['app.rip', 'util.rip']);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('app.rip:2:'); // the call site in app.rip
       expect(r.stdout).toContain('TS2345');
@@ -3855,7 +3846,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('--json emits a structured array of diagnostics', async () => {
     const dir = workspace({ 'bad.rip': "n: number = 'oops'\nconsole.log n\n" });
     try {
-      const r = (await check(dir, ['--json']));
+      const r = await check(dir, ['--json']);
       expect(r.status).toBe(1);
       const parsed = JSON.parse(r.stdout);
       expect(Array.isArray(parsed)).toBe(true);
@@ -3929,7 +3920,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       // Clean: the directive is USED (the string[]→number mismatch fires),
       // which only happens if `items` was pinned to string[]. A pins-less
       // batch would report TS2578 here and exit 1.
@@ -3967,7 +3958,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('relatedInformation ("declared here") is reported, mapped to .rip source', async () => {
     const dir = workspace({ 'rel.rip': 'count: number = 0\ntotal = countz + count\nconsole.log total\n' });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2552');                 // the primary
       expect(r.stdout).toContain("'count' is declared here"); // the secondary note
@@ -3987,21 +3978,21 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const dir = workspace({ 'a.rip': 'x: number = 0\nconsole.log x\n' });
     try {
       const mirror = path.join(dir, '.rip', 'check');
-      (await check(dir));
+      await check(dir);
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);           // the face is retained
       expect(fs.readFileSync(path.join(mirror, '.gitignore'), 'utf8')).toBe('*\n'); // and git never sees it
       expect(fs.readFileSync(path.join(mirror, '.build'), 'utf8').trim()).not.toBe(''); // stamped with the build that wrote it
       // A face whose source no longer exists is wiped by the next run,
       // not trusted from the cache.
       fs.writeFileSync(path.join(mirror, 'deleted.rip.ts'), 'const ghost: number = 0;\n');
-      (await check(dir));
+      await check(dir);
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(true);
       expect(fs.existsSync(path.join(mirror, 'deleted.rip.ts'))).toBe(false);
       // The wipe is unconditional: a run whose only target fails to PARSE
       // still clears the previous run's faces, so the tree never shows a
       // face for source that no longer compiles.
       fs.writeFileSync(path.join(dir, 'a.rip'), 'x = (\n');
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);                                          // the parse error still reports
       expect(fs.existsSync(path.join(mirror, 'a.rip.ts'))).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -4020,7 +4011,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       // The fallback root's own prefix, not the fixtures' `rip-check-`: sibling
       // check-*.test.js files build workspaces concurrently on other workers.
       const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('rip-check-fallback-')));
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.stderr).toContain('temp fallback');                       // degraded, never silent
       expect(r.status).toBe(0);                                          // the clean file still checks clean
       expect(fs.existsSync(path.join(dir, '.rip'))).toBe(false);         // nothing forced into the workspace
@@ -4040,7 +4031,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       const editorDir = path.join(dir, '.rip', 'editor');
       fs.mkdirSync(editorDir, { recursive: true });
       fs.writeFileSync(path.join(editorDir, 'marker'), 'keep me\n');
-      (await check(dir));
+      await check(dir);
       expect(fs.existsSync(path.join(editorDir, 'marker'))).toBe(true);          // editor mirror untouched
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
@@ -4051,7 +4042,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a dangling .rip import earns TS2307 on the importer, not an incomplete run', async () => {
     const dir = workspace({ 'a.rip': "p: import('./gone.rip').T = 5\nconsole.log p\n" });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2307');
       expect(r.stdout).toContain('a.rip:1');
@@ -4066,7 +4057,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a dangling import under @ts-nocheck stays silent (exit 0)', async () => {
     const dir = workspace({ 'a.rip': "# @ts-nocheck\np: import('./gone.rip').T = 5\nconsole.log p\n" });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('No type errors');
       expect(r.stderr).not.toContain('incomplete');
@@ -4083,7 +4074,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'lib.rip': 'export x = 1\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS2307');
       expect(r.stderr).not.toContain('incomplete');
@@ -4103,7 +4094,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     try {
       const exercised = await withUnreadable(path.join(dir, 'locked.rip'), async () => {
         // a.rip is the explicit target; locked.rip is reached only as its import.
-        const r = (await check(dir, [path.join(dir, 'a.rip')]));
+        const r = await check(dir, [path.join(dir, 'a.rip')]);
         expect(r.stderr).toContain('locked.rip (EACCES)');
         expect(r.stderr).toContain('the run is incomplete');
         expect(r.status).toBe(1); // tsgo's TS2307 on the missing face outranks exit 2
@@ -4120,7 +4111,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const dir = workspace({ 'ok.rip': 'x: number = 1\nconsole.log x\n', 'locked.rip': 'y: number = 2\nconsole.log y\n' });
     try {
       const exercised = await withUnreadable(path.join(dir, 'locked.rip'), async () => {
-        const r = (await check(dir));
+        const r = await check(dir);
         expect(r.status).toBe(2);                          // incomplete coverage → never 0
         expect(r.stderr).toContain('the run is incomplete');
         expect(r.stdout).not.toContain('No type errors');  // ok.rip is clean, but the run isn't
@@ -4176,7 +4167,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a fresh project checks clean under permissive mode', async () => {
     const dir = freshProject();
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(JSON.parse((await check(dir, ['--json'])).stdout)).toEqual([]);
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -4234,9 +4225,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2322]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
-});
 
-describeExtended.concurrent('rip check: type diagnostics over the real server', () => {
   test('the same project is quiet before anything is installed', async () => {
     const dir = freshProject({ withTypes: false });
     try {
@@ -4312,7 +4301,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'bad.rip': 'zz = (1\n',
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('app.rip:2:1 - error');
       expect(r.stdout).toContain("bad.rip:1:6 - error: unclosed '('");
@@ -4329,7 +4318,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'shown.rip': "z: number = 'oops'\nconsole.log z\n__DATA__\nit's payload\n",
     });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('shown.rip:1:1 - error');
       expect(r.stdout).not.toContain('held.rip:');
@@ -4353,7 +4342,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'pkg/a.rip': 'console.log FOO_MARK\n',
     });
     try {
-      const r = (await check(dir, ['--json']));
+      const r = await check(dir, ['--json']);
       const rows = JSON.parse(r.stdout);
       expect(rows.map((d) => [d.file, d.code])).toEqual([['root.rip', 2304]]);
       expect(r.status).toBe(1);
@@ -4394,9 +4383,9 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     };
     const dir = workspace(files, { strict: true });
     try {
-      const whole = (await check(dir, ['--json']));
+      const whole = await check(dir, ['--json']);
       expect(JSON.parse(whole.stdout)).toEqual([]);
-      const single = (await check(dir, ['app/routes/page.rip', '--json']));
+      const single = await check(dir, ['app/routes/page.rip', '--json']);
       expect(JSON.parse(single.stdout)).toEqual([]);
       // The face carries the splice; the stash face carries its type.
       const face = fs.readFileSync(path.join(dir, '.rip/check/app/routes/page.rip.ts'), 'utf8');
@@ -4413,14 +4402,14 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       // gate road (the face twin IS the read the author wrote) — instead
       // of collapsing to error-`any`.
       fs.writeFileSync(path.join(dir, 'app/routes/typo.rip'), "export Typo = component\n  bad ~= @stash.missing\n  worse <~ @stash.absent\n  render null\n");
-      const typo = (await check(dir, ['app/routes/typo.rip', '--json']));
+      const typo = await check(dir, ['app/routes/typo.rip', '--json']);
       const typoRows = JSON.parse(typo.stdout);
       expect(typoRows.some((d) => d.code === 2339 && /missing/.test(d.message))).toBe(true);
       expect(typoRows.some((d) => d.code === 2339 && /absent/.test(d.message))).toBe(true);
       // Without the anchor the same route types nothing and strict says so.
       const bare = workspace({ 'page.rip': files['app/routes/page.rip'] }, { strict: true });
       try {
-        const r = (await check(bare, ['--json']));
+        const r = await check(bare, ['--json']);
         expect(JSON.parse(r.stdout).some((d) => d.code === 7006)).toBe(true);
       } finally { fs.rmSync(bare, { recursive: true, force: true }); }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -4442,9 +4431,9 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const gradual = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) });
     const strict = workspace({ ...files, 'pkg/package.json': JSON.stringify({ rip: { strict: true } }) }, { strict: true });
     try {
-      const plain = (await check(gradual, ['--json']));
-      const forced = (await check(gradual, ['--strict', '--json']));
-      const real = (await check(strict, ['--json']));
+      const plain = await check(gradual, ['--json']);
+      const forced = await check(gradual, ['--strict', '--json']);
+      const real = await check(strict, ['--json']);
       const rows = (r) => JSON.parse(r.stdout);
       expect(plain.status).toBe(1);                       // the nested strict package reports on its own
       expect(rows(plain).map((d) => d.file)).toEqual(['pkg/b.rip']);
@@ -4602,7 +4591,7 @@ describeExtended.concurrent('rip check: typed routes over the real server', () =
       ].join('\n'),
     }, { strict: true });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.stdout).toContain('No type errors');
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -4634,7 +4623,7 @@ describeExtended.concurrent('rip check: typed routes over the real server', () =
     ].join('\n');
     const dir = workspace({ ...ROUTE_FILES, 'app/routes/index.rip': BAD }, { strict: true });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       const diags = JSON.parse((await check(dir, ['--json'])).stdout)
         .filter((d) => d.file.endsWith('app/routes/index.rip'));
@@ -4788,9 +4777,7 @@ describeExtended.concurrent('rip check: typed routes over the real server', () =
       expect(at('docs/[[page]].rip')).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
-});
 
-describeExtended.concurrent('rip check: typed routes over the real server', () => {
   test('a defaulted-D stash handle answers unknown — a consumer narrows, never receives any', async () => {
     // Bare `createStash()` types its handles off StashMethods' DEFAULT
     // `D`; the untyped arm of SourceHandleFor must answer the bare
@@ -4938,7 +4925,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
     for (const strict of [true, false]) {
       const dir = workspace({ 'app.rip': comp(["input placeholdr: 'x'"]) }, strict ? { strict: true } : null);
       try {
-        expect((await diagsOf(dir)), `strict=${strict}`).toEqual([[2345, 5, 13]]);
+        expect(await diagsOf(dir), `strict=${strict}`).toEqual([[2345, 5, 13]]);
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     }
   }, 120_000);
@@ -4951,7 +4938,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
     // element, and the pair — answers at its own bytes, beside the rest.
     const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly']) });
     try {
-      expect((await diagsOf(dir))).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
       const out = (await check(dir, ['--json'])).stdout;
       expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(3);
       // Nothing near it: the reading it took, and the two ways out.
@@ -4968,7 +4955,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
       'app.rip': ['export P = component', '  val: string | null := null', '  render', '    div', '      div notAnAttr: val', ''].join('\n'),
     });
     try {
-      expect((await diagsOf(dir))).toEqual([[2345, 5, 11]]);
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 11]]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
@@ -4986,7 +4973,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
       ]),
     }, { strict: true });
     try {
-      expect((await diagsOf(dir))).toEqual([[2345, 7, 11], [2345, 9, 13]]);   // img alt: 42, then maxLength — anchored on the key, as in the editor
+      expect(await diagsOf(dir)).toEqual([[2345, 7, 11], [2345, 9, 13]]);   // img alt: 42, then maxLength — anchored on the key, as in the editor
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 
@@ -5037,7 +5024,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
         '      span class: lit', '      p class: 42', ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = (await diagsOf(dir));
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2322);
       expect(rows[0][1]).toBe(6);                       // the `p class: 42` pair
@@ -5055,7 +5042,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
         ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = (await diagsOf(dir));
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2352);
       expect(rows[0][1]).toBe(7);
@@ -5068,14 +5055,14 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
         '    div ref: el', '      input ref: inp', ''].join('\n'),
     }, { strict: true });
     try {
-      expect((await diagsOf(clean))).toEqual([]);
+      expect(await diagsOf(clean)).toEqual([]);
     } finally { fs.rmSync(clean, { recursive: true, force: true }); }
     const bad = workspace({
       'app.rip': ['export P = component', '  vis := true', '  divCell: HTMLDivElement | null := null', '  render',
         '    div', '      if vis', '        input ref: divCell', ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = (await diagsOf(bad));
+      const rows = await diagsOf(bad);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2345);
       expect(rows[0][1]).toBe(7);                       // the dynamic ref's own line
@@ -5092,7 +5079,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
         ''].join('\n'),
     }, { strict: true });
     try {
-      const rows = (await diagsOf(dir));
+      const rows = await diagsOf(dir);
       expect(rows).toHaveLength(1);
       expect(rows[0][0]).toBe(2345);
       expect(rows[0][1]).toBe(6);                       // the misspelled viewbox key
@@ -5104,7 +5091,7 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
       'app.rip': comp(['form novalidate', 'input required', 'button disabled', "  'go'"]),
     }, { strict: true });
     try {
-      expect((await diagsOf(dir))).toEqual([]);
+      expect(await diagsOf(dir)).toEqual([]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 });
@@ -5132,7 +5119,7 @@ describe.concurrent('branch narrowing under the real checker', () => {
   test('the unnarrowed spelling under `if @store.user` checks clean', async () => {
     const dir = strictWorkspace({ 'narrow.rip': component('@store.user') });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.stdout).toContain('No type errors');
       expect(r.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -5141,7 +5128,7 @@ describe.concurrent('branch narrowing under the real checker', () => {
   test('a branch on a different expression does not narrow: TS18047 at the read', async () => {
     const dir = strictWorkspace({ 'narrow.rip': component('@store.other') });
     try {
-      const r = (await check(dir));
+      const r = await check(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain('TS18047');
       expect(r.stdout).toContain('narrow.rip:5:');
