@@ -22,6 +22,7 @@ now = time()
 d = time('2026-04-19')
 d = time('04/19/2026')             # US format
 d = time('04/19/2026 3:45 PM')     # US datetime
+d = time('Apr 19, 2026 at 3:45 PM') # named month, any order (day-first needs a named month)
 d = time.utc('2026-04-19T12:00:00Z')
 d = time.unix(1760000000)
 d = time.parse('Apr 19, 2026', 'MMM D, YYYY')
@@ -31,7 +32,10 @@ d = time.parse('Apr 19, 2026', 'MMM D, YYYY')
 
 - Immutable — every mutator returns a new instance
 - Pure Rip, zero runtime deps
-- Parses ISO, US `MM/DD/YYYY`, timestamps, `Date` objects, and other `time` instances
+- Parses a wide range of spellings: ISO (`2024-02-29`, `2024-2-9`, `2024/02/29`, `2024.02.29`, `2024 02 29`, `2024-02`, `2024`, compact `20240229`, `20240229T1430`, `20240229143000`), US numeric `m/d/yyyy` / `m/d/yy` / `m-d-yyyy` / `m.d.yyyy`, named months in any order (`Feb 9, 2024`, `February 9th 2024`, `Feb-09-2024`, `9-Feb-2024`, `09-FEB-2024`, `9Feb2024`, `2024 Feb 9`), an optional leading weekday and RFC 2822 (`Mon, 19 Aug 2024 14:30:00 +0000`), a time part (`T`, space, `, ` or ` at `; `14:30[:45[.250]]` or colon-less `1430` / `143000[.250]`, `3:45 PM`, `3 p.m.`) and a zone (`Z`, `UTC`, `GMT`, `+05:30`, `+0530`, `+05`); plus timestamps, `Date` objects and other `time` instances
+- Day-first is recognized only when the month is spelled with letters; a purely numeric small form is always month-first (US): `1/2/2024` is January 2 and `25/12/2024` is invalid — there is no "first number > 12" guessing
+- Strict calendar and clock, never rolled over: `2024-02-30`, `2023-02-29`, `Feb 30 2024`, `24:00`, `14:60`, `13:00 pm` are all invalid Dates (this also holds for `time.parse(input, format)`)
+- `time.parts(input)` — the recognized components exactly as written: `{ year, month, day, hour, minute, second, ms, clock, zone }` (calendar numbering, 24-hour, `zone` in minutes east of UTC or `null`, `clock` true when a time was written), or `null` when the string is not a real date; grammar only, no engine fallback
 - Full formatting tokens (`YYYY`, `MMM`, `Do`, `h:mm A`, `z`, `zzz`, `[literal]`, etc.)
 - `add` / `subtract` / `startOf` / `endOf` / `diff` (symbol or string units)
 - `isSame` / `isBefore` / `isAfter` / `isSameOrBefore` / `isSameOrAfter` / `isBetween`
@@ -306,6 +310,7 @@ time(input?, opts?)            # construct (ISO, US, Date, timestamp, Time)
 time.utc(input?)               # construct in UTC mode
 time.unix(seconds)             # construct from unix seconds
 time.parse(input, format)      # construct with an explicit format
+time.parts(input)              # components as written, or null
 time.tz(input, zone)           # construct wall-clock time in a zone
 time.min(...) / time.max(...)  # earliest / latest of several instants
 time.duration(input, unit?)    # first-class Duration
