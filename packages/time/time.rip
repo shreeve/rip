@@ -201,7 +201,7 @@ REGEX_DATE =! ///
 # (`.25` = 250 ms). A zone is read only here, after a time, so
 # `2024-02-29+05:00` is invalid.
 REGEX_TIME =! ///
-  ^(?:T|,?\sat\s|\s|,\s)?                 # T, a space, ", ", " at ", or nothing
+  ^\s?(?:T|,?\sat|,)?\s?                  # T, a space, ", ", " at ", or nothing
   (?<h>[01]\d|2[0-3]|\d(?!\d))            # hour
   (?::?(?<m>[0-5]\d))?                    # minute
   (?::?(?<s>[0-5]\d)(?:[.,](?<f>\d+))?)?  # second[.fraction]
