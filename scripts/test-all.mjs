@@ -41,12 +41,27 @@
 //
 // Flags (all optional; the defaults are what `bun run test:all` uses):
 //   --root <dir>     repository to orchestrate (default: this checkout)
-//   --jobs <n>       lanes in flight at once (default: half the cores, min 4)
+//   --jobs <n>       lanes in flight at once (default: half the cores, min 2)
 //   --timeout <ms>   per-lane timeout (default: 600000)
 //   --plan           print the lanes that would run, spawn nothing
+//
+// Environment handed to every package lane:
+//   RIP_LANE_WORKERS  that lane's share of the CPU budget below. A suite
+//                     that fans out (packages/vscode's `bun test
+//                     --parallel`, packages/sites' sub-suite cap) sizes
+//                     itself by this instead of by the machine; a
+//                     single-process suite ignores it. Unset — a
+//                     developer running `bun run test` in the package
+//                     directory — each of those suites uses its own
+//                     default (4).
+//
+// Root-lane file order: if test/.timings.json exists, the root lane runs
+// with `--timings` so bun starts its slowest files first. The file is
+// measured, not authored — gitignored, seeded with `touch
+// test/.timings.json`, refreshed by every run (see TIMINGS below).
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,7 +108,9 @@ const CORES = availableParallelism();
 // 1:1 budget leaves those cores idle. Measured on an 8-core box: a 1.0x
 // peak cost +29% wall (81s against 63s); 1.25x costs +6%. Push it past
 // ~1.5 and the suites that time real machinery start missing deadlines
-// they meet idle, which is the whole reason this budget exists.
+// they meet idle, which is the whole reason this budget exists. The
+// ratio only means something if every lane keeps to its share — which
+// is what RIP_LANE_WORKERS (below) is for.
 const OVERSUBSCRIBE = 1.25;
 const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
 
@@ -104,11 +121,40 @@ const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
 // slots, are the constraint, and four lanes there only added contention.
 const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
 
+// The peak is split between the root lane and the JOBS-1 sibling slots
+// beside it. Each sibling is budgeted LANE_WORKERS and told so through
+// RIP_LANE_WORKERS. Most siblings are one process and ignore it; the
+// two that fan out (vscode's `bun test --parallel`, sites' sub-suite
+// cap) used to size themselves by the MACHINE instead — vscode at one
+// worker per core, each spawning a language server and tsgo — so a
+// 10-core box ran ~25 bun workers plus their children against a budget
+// that had counted each sibling as one, and every clock stretched:
+// small lanes 3.4x, the root lane 2.7x. Two per sibling, not more: at
+// three, the root lane's remainder on a 10-core box is one worker. On
+// a box where even two would leave the root lane nothing, one.
+//
 // The root lane is the critical path and the CPU-bound one, so it gets
-// whatever the budget has left after the siblings running beside it —
-// never more than the machine. Left bare, `bun test --parallel` defaults
-// to one worker per core and claims the whole machine on its own.
-const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - (JOBS - 1)));
+// the remainder — never more than the machine, never fewer than two.
+// Worked on 10 cores: PEAK 13, JOBS 5 → 4 siblings × 2 = 8, root 5;
+// 5 + 8 = 13, the peak, whichever siblings are in flight. Left bare,
+// `bun test --parallel` defaults to one worker per core and claims the
+// whole machine on its own.
+const SIBLINGS = Math.max(0, JOBS - 1);
+const LANE_WORKERS = PEAK - SIBLINGS * 2 >= 2 ? 2 : 1;
+const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS));
+
+// Root-lane file order. Bun 1.4.2 grew `--timings <json>`, per-file
+// durations that make --parallel start the slowest files first, so the
+// longest file cannot be picked up last and add its whole length to the
+// lane. The file is measured, not authored: gitignored, seeded with
+// `touch test/.timings.json` (an empty file is tolerated), and refreshed
+// by every root-lane run through --update-timings. Absent, or under an
+// older bun (.bun-version pins one for CI), the root lane runs as before.
+const TIMINGS = 'test/.timings.json';
+const timingsArgs = () =>
+  Bun.semver.satisfies(Bun.version, '>=1.4.2') && existsSync(join(ROOT, TIMINGS))
+    ? [`--timings=${TIMINGS}`, '--update-timings']
+    : [];
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
@@ -119,6 +165,21 @@ const EXCLUDED = new Map();
 // ~2x the work of a bare `bun run test`, so the two wall times are not
 // comparable.
 const ROOT_LANE = 'root (extended tier)';
+
+// Lane walls in seconds, measured under `test:all` on a 10-core box
+// (before the budget above reached the lanes; the ranking held after).
+// Only the RANKING is read, so the digits need refreshing only when a
+// lane changes tier; a lane not listed sorts after every listed one.
+const DURATIONS = {
+  [ROOT_LANE]: 106.7,
+  'packages/sites': 77.0,
+  'packages/vscode': 55.6,
+  'packages/ui': 33.3,
+  'packages/print': 20.7,
+  'packages/email': 17.1,
+  'packages/db': 12.7,
+  'packages/swarm': 10.5,
+};
 
 // Bun's gate (TTY / NO_COLOR / FORCE_COLOR / CI). When this process will
 // paint, lanes get a PTY (Bun.spawn `terminal`) so runners see isTTY and
@@ -173,7 +234,7 @@ const planLanes = () => {
     cmd: process.execPath,
     // 60s, not 15s: the extended tier's scaling gates budget up to three
     // full measurements, and a busy lane stretches one past 5s.
-    args: ['test', `--parallel=${ROOT_WORKERS}`, '--timeout', '60000'],
+    args: ['test', `--parallel=${ROOT_WORKERS}`, '--timeout', '60000', ...timingsArgs()],
     env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
@@ -195,16 +256,18 @@ const planLanes = () => {
       cwd,
       cmd: process.execPath,
       args: ['run', 'test'],
+      env: { RIP_LANE_WORKERS: String(LANE_WORKERS) },
       skip: resolveTool(tool, cwd) ? undefined : `\`${tool}\` is not on PATH or in node_modules/.bin`,
     });
   }
 
-  // Scheduling hint only: the longest lanes are started first so a late
-  // start cannot stretch the wall clock past the root suite. Correctness
-  // does not depend on the order.
-  const weight = (lane) =>
-    lane.label === ROOT_LANE ? 0 : lane.label === 'packages/vscode' ? 1 : lane.label === 'packages/sites' ? 2 : 3;
-  lanes.sort((a, b) => weight(a) - weight(b));
+  // Scheduling hint only: the longest lanes start first, so a long lane
+  // picked up late cannot stretch the wall clock past the root suite —
+  // in discovery (alphabetical) order packages/ui, the fourth-longest,
+  // started at ~68s of a ~110s run and finished within 6s of the wall.
+  // The sort is stable, so lanes not listed keep discovery order after
+  // the listed ones. Correctness does not depend on the order.
+  lanes.sort((a, b) => (DURATIONS[b.label] ?? 0) - (DURATIONS[a.label] ?? 0));
 
   return { lanes, excluded };
 };
@@ -383,7 +446,7 @@ const skipped = lanes.filter((l) => l.skip);
 
 // "repo", not "root" — `root` names a lane, and the two would read as
 // the same thing on adjacent lines.
-console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers), repo ${ROOT}`);
+console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers, ${LANE_WORKERS} per sibling lane), repo ${ROOT}`);
 for (const { name, why } of excluded) console.log(dim(`  · packages/${name} excluded: ${why}`));
 for (const lane of skipped) {
   console.log((CI ? red : yellow)(`  ⊘ ${lane.label} SKIPPED: ${lane.skip}`));
@@ -393,6 +456,11 @@ for (const lane of skipped) {
 // run; printing the plan without spawning is what makes it assertable.
 if (argv.includes('--plan')) {
   for (const lane of lanes.filter((l) => !l.skip)) console.log(`▸ ${lane.label}`);
+  // The budget as it reaches the lanes, so a plan is assertable on the
+  // arguments as well as the list.
+  const root = lanes.find((l) => l.label === ROOT_LANE);
+  console.log(dim(`  · root lane: bun ${root.args.join(' ')}`));
+  console.log(dim(`  · package lanes: bun run test  (RIP_LANE_WORKERS=${LANE_WORKERS})`));
   process.exit(0);
 }
 

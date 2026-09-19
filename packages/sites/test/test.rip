@@ -22,7 +22,7 @@ throw Error.new('server tests found no test/*/test.rip files') unless tests.leng
 # starves those clocks into flakes. Output pipes start draining at
 # spawn so a chatty suite can't block on a full pipe; each suite's
 # block then prints whole, in launch order.
-CAP = 4
+CAP = Number(process.env.RIP_LANE_WORKERS or 4)
 queue = tests.entries()
 results = Array.new tests.length
 
