@@ -86,6 +86,7 @@ async function inWorkspace(files, fn, { traceTsgo = false } = {}) {
       return [];
     },
     hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
+    definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
     completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
     resolve: (item) => client.request('completionItem/resolve', item),
     signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
@@ -492,6 +493,41 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       expect(use?.contents?.value).not.toContain('title');
       expect(use?.contents?.value).not.toContain('HTMLElementTagNameMap');
       expect(use?.contents?.value).not.toContain('ConstructorParameters');
+    });
+  });
+
+  test('definition: an imported host navigates from the extends head and from its construction in render', async () => {
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      const popup = [
+        'export Popup = component extends dialog',  // 0
+        "  @title := ''",                            // 1
+        '  render',                                  // 2
+        '    dialog',                                // 3
+        '      slot',                                // 4
+        '',
+      ].join('\n');
+      const sheet = [
+        "import { Popup } from './popup.rip'",      // 0
+        'export Sheet = component extends Popup',    // 1
+        "  @side := 'left'",                          // 2
+        '  render',                                   // 3
+        '    Popup',                                  // 4
+        '      data-side: side',                      // 5
+        '      slot',                                 // 6
+        '',
+        'export Plain = component',                   // 8
+        '  render',                                   // 9
+        "    Popup title: 'x'",                       // 10
+        '',
+      ].join('\n');
+      await api.open('popup.rip', popup);
+      await api.open('sheet.rip', sheet);
+      const target = (def) => ({ file: def?.[0]?.uri?.split('/').pop() ?? def?.[0]?.targetUri?.split('/').pop() ?? null, line: def?.[0]?.range?.start?.line ?? def?.[0]?.targetRange?.start?.line ?? null, raw: def });
+      const head = target(await api.definition('sheet.rip', 1, 33));   // `Popup` in the head
+      const use = target(await api.definition('sheet.rip', 4, 6));     // `Popup` constructed as the host
+      const plain = target(await api.definition('sheet.rip', 10, 6));  // `Popup` in an ordinary render
+      expect({ head: [head.file, head.line], use: [use.file, use.line], plain: [plain.file, plain.line] })
+        .toEqual({ head: ['popup.rip', 0], use: ['popup.rip', 0], plain: ['popup.rip', 0] });
     });
   });
 

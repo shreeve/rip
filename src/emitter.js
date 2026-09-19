@@ -9821,8 +9821,13 @@ class Emitter {
         // The runtime's rest seam reads this: undeclared constructor
         // props collect into the reactive `rest` view and forward
         // onto the host (the rest machinery lives on __Component).
+        // A tag's string claims the head's occurrence of the tag; a
+        // component's never claims — the head's bytes belong to the face
+        // reference, and the next free occurrence would be the render's
+        // construction of the host.
         this.b.emit(`${pad}static __extends = `);
-        this.emitQuotedPrimitive(extendsHost);
+        if (extendsTag !== null) this.emitQuotedPrimitive(extendsTag);
+        else this.b.emit(`'${extendsComponent}'`);
         this.b.emit(';\n');
       }
       // HMR identity/signature — module-scope named components only.

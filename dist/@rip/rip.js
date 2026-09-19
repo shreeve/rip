@@ -15950,7 +15950,10 @@ ${pad ?? ""}`);
       }
       if (extendsHost !== null) {
         this.b.emit(`${pad}static __extends = `);
-        this.emitQuotedPrimitive(extendsHost);
+        if (extendsTag !== null)
+          this.emitQuotedPrimitive(extendsTag);
+        else
+          this.b.emit(`'${extendsComponent}'`);
         this.b.emit(`;
 `);
       }
