@@ -180,7 +180,7 @@ REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd
 # match says what was written without asking which branch matched.
 REGEX_DATE =! ///
   ^(?:
-      (?<y>[1-9]\d{3})                                   # year, then either
+      (?<y>(?:19|20)\d\d)                                # year, then either
       (?: (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                  #   month day, glued:  20240229, 202402291430[00]
         | (?<s>[-/\s]?)(?<m>[a-z]+)\.?\k<s>(?<d>\d\d?)   #   month name, day:   2024-Feb-09, 2024 Feb 9, 2024Feb9
         | \s(?<m>\d\d)\s(?<d>\d\d)                       #   month day, spaced: 2024 02 29
@@ -189,15 +189,15 @@ REGEX_DATE =! ///
   | # or...
       (?<d>\d\d?)(?<s>[-/\s]?)                           # day
       (?<m>[a-z]+)\.?\k<s>                               # month name
-      (?<y>[1-9]\d{3})                                   # year:               9 Feb 2024, 09-FEB-2024, 9Feb2024
+      (?<y>(?:19|20)\d\d)                                # year:                9 Feb 2024, 09-FEB-2024, 9Feb2024
   | # or...
       (?<m>[a-z]+)\.?(?<s>[-/\s])                        # month name
       (?<d>\d\d?)(?:,\s?|\k<s>)                          # day, then a comma or the separator again
-      (?<y>[1-9]\d{3})                                   # year:               Feb 9 2024, Feb. 9, 2024, Feb-09-2024
+      (?<y>(?:19|20)\d\d)                                # year:                Feb 9 2024, Feb. 9, 2024, Feb-09-2024
   | # or...
       (?<m>\d\d?)(?<s>[-/.])                             # month
       (?<d>\d\d?)\k<s>                                   # day
-      (?<y>\d{4}|\d\d)                                   # year:               2/9/2024, 02-09-2024, 2.9.24
+      (?<y>\d{4}|\d\d)                                   # year:                2/9/2024, 02-09-2024, 2.9.24
   )
 ///i
 
@@ -214,7 +214,8 @@ REGEX_TIME =! ///
       (?:(?<s>\d\d)(?:[.,](?<f>\d+))?)?                  # second[.fraction]
   )
   (?:\s?(?<ap>[ap])\.?m\.?)?                             # am, pm, a.m., p.m.
-  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?   # zone: Z, UTC, +05:30, GMT-0700
+  (?:\s?(?<z>z|utc|gmt                                  # zone: Z, UTC, GMT
+        |(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?              #   or an offset: +05:30, +0530, GMT-0700
   (?:\s?\([^)]*\))?$                                     # (Mountain Standard Time), then nothing
 ///i
 
