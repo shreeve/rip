@@ -24,7 +24,7 @@
 // IS spawning processes, and a stubbed spawn would gate nothing. It stays
 // out of the extended tier even so — the fixtures are trivial, and a
 // broken aggregation is precisely what a green fast loop would hide.
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from '../../support/spawn.js';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,8 +39,20 @@ const FAILING = "import { expect, test } from 'bun:test';\ntest('no', () => { ex
 // A minimal stand-in for this repository's shape: a root suite plus
 // packages/*/ suites, with the same bunfig boundary (the root run must not
 // reach into packages/**, or a package's failure would be counted twice).
+// Every fixture root, removed when the file is done (a leaked root per
+// test per run adds up: 1,500 of them were found in one TMPDIR).
+const roots = [];
+afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
+
+// A nested orchestrator that will not finish is terminated with the test
+// instead of outliving it: SIGTERM, which it handles by stopping its own
+// lanes and exiting 143. One left running was found three hours later,
+// still holding a lane's port.
+const BOUND = { timeout: 60_000, killSignal: 'SIGTERM' };
+
 const fixture = (packages) => {
   const root = mkdtempSync(join(tmpdir(), 'rip-test-all-'));
+  roots.push(root);
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', private: true }));
   writeFileSync(join(root, 'bunfig.toml'), '[test]\npathIgnorePatterns = ["packages/**"]\n');
   mkdirSync(join(root, 'test'));
@@ -58,6 +70,7 @@ const orchestrate = (root, env = {}, ...extra) =>
   spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000', ...extra], {
     encoding: 'utf8',
     env: { ...process.env, CI: '', NO_COLOR: '1', ...env },
+    ...BOUND,
   });
 
 // Spawns nothing; what it prints is the schedule.
@@ -186,6 +199,7 @@ describe('the lane orchestrator', () => {
       encoding: 'utf8',
       env,
       keepForceColor: true, // orchestrator must see FORCE_COLOR to enable PTYs without a TTY
+      ...BOUND,
     });
     expect(r.status).toBe(0);
     // The live output line (not the echoed `bun -e` source) carries the

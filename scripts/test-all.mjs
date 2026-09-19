@@ -385,11 +385,20 @@ const runLane = async (lane) => {
   live.add(proc);
   proc.exited.then(() => live.delete(proc));
 
+  // A lane past its deadline is told to stop, then killed. The exit wait
+  // below is bounded too: a lane that has been killed is finished whether
+  // or not its exit is ever observed (a PTY lane's can go unreported).
   let timedOut = false;
+  let killed;
+  const gaveUp = new Promise((resolve) => { killed = resolve; });
   const timer = setTimeout(() => {
     timedOut = true;
     try { proc.kill('SIGTERM'); } catch { /* already dead */ }
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* already dead */ } }, 5000).unref();
+    setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+      try { proc.terminal?.close(); } catch { /* closed */ }
+      setTimeout(() => killed(null), 5000).unref();
+    }, 5000).unref();
   }, TIMEOUT_MS);
 
   if (!usePty) {
@@ -400,7 +409,7 @@ const runLane = async (lane) => {
     await Promise.all([pull(proc.stdout), pull(proc.stderr)]);
   }
 
-  const code = await proc.exited;
+  const code = await Promise.race([proc.exited, gaveUp]);
   clearTimeout(timer);
   try { proc.terminal?.close(); } catch { /* closed */ }
 
