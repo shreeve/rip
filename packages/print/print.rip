@@ -522,7 +522,7 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # ==============================================================================
 
 # The page goes out in pieces as the browser takes them, and the process
-# exits a moment after the last piece is handed over: a slow reader still
+# exits once the server has no request left in flight: a slow reader still
 # gets every byte, and an idle connection the browser opened alongside
 # cannot hold the exit.
 respond = ->
@@ -532,7 +532,7 @@ respond = ->
     pull: (c) ->
       if offset >= bytes.length
         c.close()
-        setTimeout (-> process.exit 0), 1000
+        setInterval (-> process.exit 0 if server.pendingRequests is 0), 10
       else
         c.enqueue bytes.subarray(offset, offset + 65536)
         offset += 65536
