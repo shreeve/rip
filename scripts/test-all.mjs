@@ -316,6 +316,14 @@ const testsReported = (output) => {
   return total; // null → the lane never printed a count
 };
 
+// Every lane process in flight, so an interrupted run can take them
+// down. Left alone, Ctrl-C kills only this process: the lanes run in
+// their own sessions (the PTY below), keep going without a reader, and
+// a suite that dies of the closed PTY mid-flight strands whatever it
+// had spawned detached — a Playwright web server on :4180, say, which
+// the NEXT run then trips over.
+const live = new Set();
+
 const runLane = async (lane) => {
   const started = Date.now();
   const chunks = [];
@@ -355,6 +363,8 @@ const runLane = async (lane) => {
   } catch (e) {
     return finish({ status: 'fail', why: `could not spawn: ${e?.message ?? e}` });
   }
+  live.add(proc);
+  proc.exited.then(() => live.delete(proc));
 
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -382,6 +392,22 @@ const runLane = async (lane) => {
   if (ran === 0) return finish({ status: 'fail', why: 'exited 0 having run no tests' });
   return finish({ status: 'pass', ran });
 };
+
+// Interrupted (Ctrl-C, a supervisor's SIGTERM): tell every lane in
+// flight, give it a moment to tear down what it spawned, then leave
+// with the conventional status. A lane that will not stop is killed.
+const interrupt = (signal) => {
+  for (const proc of live) { try { proc.kill('SIGTERM'); } catch { /* gone */ } }
+  const status = signal === 'SIGINT' ? 130 : 143;
+  const deadline = setTimeout(() => {
+    for (const proc of live) { try { proc.kill('SIGKILL'); } catch { /* gone */ } }
+    process.exit(status);
+  }, 3000);
+  deadline.unref?.();
+  Promise.all([...live].map((proc) => proc.exited)).then(() => process.exit(status));
+};
+process.on('SIGINT', () => interrupt('SIGINT'));
+process.on('SIGTERM', () => interrupt('SIGTERM'));
 
 const runAll = async (lanes) => {
   const queue = lanes.filter((l) => !l.skip);
