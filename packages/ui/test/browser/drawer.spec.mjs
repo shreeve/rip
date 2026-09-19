@@ -69,3 +69,13 @@ test('a swipe that starts on a link dismisses the drawer without following the l
   await expect.poll(() => isModal(page)).toBe(false)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rip UI')
 })
+
+test('the parent drives the cell through the binding, and the close part closes', async ({ page }) => {
+  await page.goto('/drawer')
+  await page.getByRole('button', { name: 'Open from the Parent' }).click()
+  await expect.poll(() => isModal(page)).toBe(true)
+  await expect(page.getByText('open: true')).toBeVisible()
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click()
+  await expect.poll(() => isModal(page)).toBe(false)
+  await expect(page.getByText('open: false')).toBeVisible()
+})
