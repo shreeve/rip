@@ -26,7 +26,8 @@
 // broken aggregation is precisely what a green fast loop would hide.
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from '../../support/spawn.js';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -64,6 +65,13 @@ const plan = (root) => orchestrate(root, {}, '--plan');
 const planned = (r) => [...r.stdout.matchAll(/^▸ (.+)$/gm)].map((m) => m[1]);
 
 const GREEN = { script: 'bun test suite.test.js', body: PASSING };
+
+// A lane that parks: it records its pid in the fixture and waits to be
+// told to stop, standing in for a suite mid-flight when the run is
+// interrupted.
+const PARKED = {
+  script: `bun -e "require('fs').writeFileSync('lane.pid', String(process.pid)); setInterval(() => {}, 1000)"`,
+};
 const RED = { script: 'bun test suite.test.js', body: FAILING };
 // Exits 0 having run nothing — what a suite whose every describe is
 // skipped looks like from outside. Indistinguishable from GREEN by exit
@@ -355,4 +363,35 @@ test('the plan for this repository is one lane per packages/*/ suite plus root',
   // something a developer running `bun run test` in that directory would
   // not get. Parallelism inside a suite is that suite's own business.
   expect(discovered.length).toBe(declared.length + 1); // packages + root
+});
+
+describe('an interrupted run takes its lanes down', () => {
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (predicate, ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sleep(50);
+    }
+    return predicate();
+  };
+
+  test('SIGTERM to the orchestrator stops a lane in flight and exits 143', async () => {
+    const root = fixture({ parked: PARKED });
+    const pidFile = join(root, 'packages', 'parked', 'lane.pid');
+    const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+      stdio: 'ignore',
+      env: { ...process.env, CI: '', NO_COLOR: '1' },
+    });
+    expect(await until(() => existsSync(pidFile), 15000)).toBe(true);
+    const lane = Number(readFileSync(pidFile, 'utf8'));
+    expect(alive(lane)).toBe(true);
+    const exited = new Promise((resolve) => orchestrator.once('exit', (code, signal) => resolve({ code, signal })));
+    orchestrator.kill('SIGTERM');
+    expect(await until(() => !alive(lane), 5000)).toBe(true);
+    const status = await exited;
+    expect(status).toEqual({ code: 143, signal: null });
+    rmSync(root, { recursive: true, force: true });
+  });
 });

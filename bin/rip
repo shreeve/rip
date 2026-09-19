@@ -544,18 +544,45 @@ const run = (path, argv) => {
       env.RIP_SHEBANG_ENTRY = entry;
     }
   }
-  const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
+  // The child is OURS. A `kill` aimed at this launcher — Playwright
+  // ending the web server it started, an orchestrator's lane timeout,
+  // a supervisor — has to reach the process actually holding the port,
+  // and a launcher whose own parent vanished without a word (SIGKILL, a
+  // PTY that closed under it) must not leave that process running
+  // forever: that is how a test server ends up squatting on :4180 for
+  // the next run to trip over. So: spawn asynchronously, forward the
+  // terminating signals, and watch our parent — reparented to pid 1
+  // means orphaned, and an orphaned launcher takes its child with it.
+  // SIGINT is deliberately not forwarded: a terminal delivers Ctrl-C
+  // to the whole foreground group already, and a second copy would
+  // read as "force quit" to a child that handles the first (a manager
+  // draining its workers). Daemons that outlive their launcher (the
+  // sites agent and managers) are spawned straight through Bun with
+  // the loader, never through this path, so nothing legitimate is
+  // orphaned here on purpose. The child's exit status is ours, as
+  // before; a child that died of a signal reports 1, as before.
+  const child = spawn('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',
     env,
   });
-  process.exit(r.status ?? 1);
+  const forward = (signal) => { try { child.kill(signal); } catch { /* already gone */ } };
+  process.on('SIGTERM', () => forward('SIGTERM'));
+  process.on('SIGHUP', () => forward('SIGHUP'));
+  const watchdog = setInterval(() => {
+    if (process.ppid === 1) forward('SIGTERM');
+  }, 500);
+  watchdog.unref();
+  return new Promise(() => {
+    child.once('error', () => process.exit(1));
+    child.once('exit', (code) => process.exit(code ?? 1));
+  });
 };
 
 // ---- Run mode ----
 
 if (!compileMode) {
   if (inputFile !== null) {
-    run(inputFile, scriptArgs);
+    await run(inputFile, scriptArgs);
   }
 
   // Stdin: materialize as a .rip scratch file IN THE CWD — that keeps
