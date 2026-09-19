@@ -732,7 +732,7 @@ describe('the static render DSL: emission pins', () => {
     // The arm is TOTAL: whatever the word spells, the readings above it
     // having declined, it is the attribute it names. Emission asks
     // nothing about the vocabulary — that is the typed surface's
-    // question (test/spawn/cli/check-intrinsics-and-narrowing.test.js pins the diagnostic and
+    // question (test/spawn/cli/check.test.js pins the diagnostic and
     // its wording) — because the untyped road answers no other name
     // question either: both lines below compile, and the FIRST is the
     // one that breaks at runtime.
@@ -761,7 +761,7 @@ describe('the static render DSL: emission pins', () => {
     // The arm is TOTAL here too. A word outside the vocabulary — a
     // misspelling, or a DOM property's camelCase — is the attribute it
     // spells and the typed surface's to reject (test/spawn/cli/
-    // check-intrinsics-and-narrowing.test.js pins the diagnostic and its wording); it is never
+    // check.test.js pins the diagnostic and its wording); it is never
     // an element, which no face could see and which changes the DOM
     // tree. A non-hyphen word outside the tag tables names no custom
     // element either — the platform requires the hyphen.
