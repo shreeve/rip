@@ -45,9 +45,7 @@ async function startServer(onDiagnostics) {
 }
 
 // The newest publish after this point — or, given `accept`, the newest one
-// it accepts, since a publish for a superseded version can still land
-// after the next edit goes out (a refresh scheduled by the tsgo restart
-// races the edit's own). Bounded: 15 s, then a loud failure.
+// it accepts. Bounded: 15 s, then a loud failure.
 const nextDiagnostics = (published, accept = () => true) => {
   const before = published.length;
   return async () => {
@@ -187,7 +185,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // a diagnostic the gradual gate publishes. Same caveat as above: the
       // revival can land another diagnostic in this publish, so assert the
       // mapped TS diagnostic is present rather than counting the batch.
-      wait = nextDiagnostics(published, (p) => p.diagnostics.some((d) => d.code === 2339));
+      wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: GOOD + 'n: number = 42\nbad = n.toUpperCase()\nconsole.log bad\n' }],
