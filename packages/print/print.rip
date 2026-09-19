@@ -521,18 +521,17 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # Serve and open browser
 # ==============================================================================
 
-# The page is one self-contained response; once it has gone out the
-# process is done. A short delay lets the response flush before the
-# server closes its connections.
-finish = ->
-  server.stop(true)
-  process.exit(0)
+# The page is one self-contained response; once the browser has read it
+# the process is done. `Connection: close` ends the socket after the body,
+# and a graceful stop resolves only when that has happened, so a large
+# page or a slow reader still gets every byte.
+finish = -> server.stop().then -> process.exit 0
 
 server = Bun.serve
   port: 9111
   fetch: ->
-    setTimeout finish, 50
-    Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+    setTimeout finish, 0
+    Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' }
 
 console.log "\nOpening browser..."
 
