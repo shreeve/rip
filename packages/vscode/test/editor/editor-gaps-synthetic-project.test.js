@@ -150,9 +150,13 @@ describe.skipIf(!tsgoAvailable)('per-project tsconfig resolution', () => {
   // The row's THIRD symptom: the host floor was generated once, from the
   // workspace root, so a nested project's own strictness could not govern
   // whether ITS files see it. Each wrapper now carries its own floor,
-  // emitted from that project's gate answers — asserted here by the one
-  // observable difference, since `rip.strict` deactivates the floor.
-  test('the host floor is per project — a nested strict package loses it while the root keeps it', async () => {
+  // emitted from that project's gate answers. Host types have since
+  // become the toolchain's (docs/TYPES.md): the checkout's @types/bun is
+  // a type root of every program, so the floor is inactive here and the
+  // observable is the contract that replaced it — host names resolve in
+  // BOTH projects, the strict nested one included; a nested package never
+  // has to install @types/bun to name `process`.
+  test('host types reach every project — a nested strict package resolves process like the root', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'rip-mono-floor-'));
     const files = {
       ...monorepo({ rootStrict: false, nestedStrict: false }),
@@ -172,11 +176,8 @@ describe.skipIf(!tsgoAvailable)('per-project tsconfig resolution', () => {
         await api.open(nestedFile, USES_HOST);
         return { root: api.codes(rootFile), nested: api.codes(nestedFile) };
       });
-      // The floor carries the root: `process` is answered.
       expect(codes.root).not.toContain(2580);
-      // The nested package asked for strict, so missing host types are
-      // complaints there — which is only expressible with a per-project floor.
-      expect(codes.nested).toContain(2580);
+      expect(codes.nested).not.toContain(2580);
     } finally { rmSync(ws, { recursive: true, force: true }); }
   }, 40000);
 
