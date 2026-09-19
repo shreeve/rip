@@ -68,6 +68,14 @@ export function makeWorkspace(files, prefix = 'rip-ws-') {
 //                 notification method the server sent
 //   awaitReady    resolve only after the startup cache revalidation logged
 //                 (`project cache:` — the persistent-cache suites read it)
+// At most RIP_SESSION_SLOTS sessions (server + tsgo each) live at once per
+// test process: the suites run their tests concurrently.
+const SLOTS = Number(process.env.RIP_SESSION_SLOTS ?? 3);
+let live = 0;
+const queue = [];
+const acquire = async () => { if (live >= SLOTS) await new Promise((r) => queue.push(r)); live++; };
+const release = () => { live--; queue.shift()?.(); };
+
 export async function inSession(ws, fn, {
   capabilities = { workspace: { configuration: true } },
   traceTsgo = false,
@@ -218,6 +226,7 @@ export async function inSession(ws, fn, {
     tsgoNotifications: () => (trace ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean) : []),
   };
 
+  await acquire();
   try {
     const init = await client.request('initialize', { processId: process.pid, rootUri: uriOf(ws), capabilities });
     api.capabilities = init.capabilities;
@@ -226,6 +235,7 @@ export async function inSession(ws, fn, {
     return await fn(api);
   } finally {
     await client.stop();
+    release();
     if (trace) fs.rmSync(trace, { force: true });
   }
 }

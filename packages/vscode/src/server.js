@@ -1308,7 +1308,7 @@ function isCurrentStub(mirror) {
 // the one eager act, because a candidate written late is no candidate
 // at all. Its writes stay inside `.rip/editor`, its bytes come from a
 // scan and never a compile, and the disk-layer hygiene gates
-// (project-model-disk-hygiene.test.js) enforce exactly those edges.
+// (project-model.test.js) enforce exactly those edges.
 //
 // A candidate is offered only from tsgo's PROGRAM, and the program is the
 // open buffers' mirror closure — so a workspace `.rip` nothing has opened
