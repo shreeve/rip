@@ -34,7 +34,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(HERE, '..', '..')
 const { LspClient } = await import(path.join(repoRoot, 'packages/vscode/src/tsgo.js'))
 const { lineStartsOf, offsetToPosition } = await import(path.join(repoRoot, 'packages/vscode/src/translate.js'))
-const { compile } = await import(path.join(repoRoot, 'src/compile.js'))
+const { compile } = await import(path.join(repoRoot, 'src/compiler.js'))
 const { topLevelDecls } = await import('./landing.js')
 const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
 

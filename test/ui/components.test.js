@@ -24,7 +24,7 @@ import { test, expect, describe } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
-import { compile as fullCompile } from '../../src/compile.js';
+import { compile as fullCompile } from '../../src/compiler.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';

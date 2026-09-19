@@ -8,7 +8,7 @@
 // the key — and a semantic token or a rename meant for the member lands
 // on the attribute name.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { decodeMappings } from '../../src/sourcemap.js';
 
 // The source column each named segment on the pair's line maps to,

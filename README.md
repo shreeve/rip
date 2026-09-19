@@ -60,7 +60,7 @@ Package work: `bun run test` from that package directory (for example
 
 `rip file.rip`, `rip test`, and the Sites bundler compile `.rip` modules
 through an on-disk cache at `.rip/cache/compile/` in this checkout
-(`src/compile-cache.js`). An entry is keyed by the compiler's own bytes
+(`src/cacher.js`). An entry is keyed by the compiler's own bytes
 (every `src/**/*.js`), the checkout root, the compile options, and the
 module source, so a spawned process re-reads an unchanged module's
 emission instead of recompiling it, and any edit under `src/` invalidates

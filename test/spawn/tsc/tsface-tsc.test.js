@@ -24,7 +24,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'fs';
 import { spawnSync } from '../../support/spawn.js';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 import { describeExtended, EXTENDED } from '../../support/extended.js';
 import { tscBatch } from '../../support/tscbatch.js';
 import { resolveTsc } from '../../support/tsc.js';

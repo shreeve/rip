@@ -21,7 +21,7 @@
 // all-or-nothing, so the separators keep each construct's
 // claim — and its face regions — attributable to that construct
 // alone.
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { stripFace } from '../../src/emitter.js';
 
 // mulberry32 — deterministic, seedable, good-enough dispersion for

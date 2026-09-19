@@ -14,7 +14,7 @@
 // through the one honest mapping road (mapTsDiagnostic) over real
 // compile() output.
 import { test, expect } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { mapTsDiagnostic } from '../../src/diagnostics.js';
 import { lineStartsOf, offsetToPosition } from '../../src/translate.js';
 

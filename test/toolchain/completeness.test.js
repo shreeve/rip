@@ -8,7 +8,7 @@
 // got 'end of input' is incomplete; any other diagnostic classifies
 // by the single owned probe — an indented continuation line.
 import { describe, test, expect } from 'bun:test';
-import { classifyCompleteness, CompileError } from '../../src/compile.js';
+import { classifyCompleteness, CompileError } from '../../src/compiler.js';
 
 const status = (src) => classifyCompleteness(src).status;
 

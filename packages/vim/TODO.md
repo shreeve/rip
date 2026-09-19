@@ -120,7 +120,7 @@ does not compile, and on a machine without `bun`/tsgo.
       (`src/lexer.js:2030`); the one legitimate use is a template-literal type
       (`src/lexer.js:2017-2027`).
 - [ ] `__DATA__` is unhandled in vscode and `packages/highlight`
-      (`src/compile.js:178-193`). Vim covers it at `syntax/rip.vim:22`.
+      (`src/compiler.js:178-193`). Vim covers it at `syntax/rip.vim:22`.
 
 ## Verifying a change
 
@@ -139,7 +139,7 @@ call writefile(s:o, $OUT) | qa!
 OUT=/tmp/out.txt vim -es -u NONE -N --cmd 'set runtimepath^=PATH/TO/packages/vim' \
   -c 'syntax on' -c 'set filetype=rip' -S /tmp/dump.vim FILE.rip >/dev/null 2>&1
 
-bun -e "import {compile} from './src/compile.js'; import {readFileSync} from 'fs';
+bun -e "import {compile} from './src/compiler.js'; import {readFileSync} from 'fs';
   console.log(compile(readFileSync(process.argv[1],'utf8'),{runtimeDelivery:'none'}).code)" FILE.rip
 ```
 

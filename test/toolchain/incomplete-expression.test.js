@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 
 // The REPAIR DRIVER's compile-level gates — no server, no debounce. These
 // shapes died at the parser before the driver learned two generic

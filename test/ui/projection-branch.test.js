@@ -3,7 +3,7 @@
 // functions run with the block as `this`, and the receiver is held on
 // the component.
 import { test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 import * as R from '../../src/runtime/reactive.js';
 import * as Cm from '../../src/runtime/components.js';

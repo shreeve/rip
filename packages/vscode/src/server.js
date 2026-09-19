@@ -95,8 +95,8 @@ import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfi
 // pair — and a source change still changes it, so the cache purges.
 async function loadCompiler() {
   const candidates = [
-    new URL('../../../src/compile.js', import.meta.url),   // in-repo
-    new URL('../compiler/src/compile.js', import.meta.url), // staged vsix
+    new URL('../../../src/compiler.js', import.meta.url),   // in-repo
+    new URL('../compiler/src/compiler.js', import.meta.url), // staged vsix
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(fileURLToPath(candidate))) {
@@ -111,7 +111,7 @@ async function loadCompiler() {
       return (await import(candidate.href)).compile;
     }
   }
-  throw new Error('rip compiler not found (looked for ../../../src/compile.js and ../compiler/src/compile.js)');
+  throw new Error('rip compiler not found (looked for ../../../src/compiler.js and ../compiler/src/compiler.js)');
 }
 
 // The declaration-scope gate (scopes.js) reads the compile's own token tape

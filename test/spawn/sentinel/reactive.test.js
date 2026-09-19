@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { spawnSync } from '../../support/spawn.js';
-import { compile as fullCompile } from '../../../src/compile.js';
+import { compile as fullCompile } from '../../../src/compiler.js';
 
 const BIN = resolve(import.meta.dir, '../../../bin/rip');
 

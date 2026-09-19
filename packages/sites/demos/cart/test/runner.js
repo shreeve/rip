@@ -5,7 +5,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { compile } from '../../../../../src/compile.js'
+import { compile } from '../../../../../src/compiler.js'
 import { toInlineMapComment } from '../../../../../src/sourcemap.js'
 
 const demo = dirname(import.meta.dirname)

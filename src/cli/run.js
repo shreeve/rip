@@ -21,7 +21,7 @@
 
 import { realpathSync } from 'fs';
 import { pathToFileURL } from 'url';
-import { CompileError } from '../compile.js';
+import { CompileError } from '../compiler.js';
 import { remapStack } from '../stackmap.js';
 
 // The stdlib anchor is spent: the loader preload has already read it

@@ -5,7 +5,7 @@
 // the ambient seed for its next line, so the kind vocabulary is
 // exactly the ambientBindings vocabulary.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 
 const bindingsOf = (src) => compile(src, { runtimeDelivery: 'none' }).bindings;
 const byName = (list) => Object.fromEntries(list.map(({ name, kind }) => [name, kind]));

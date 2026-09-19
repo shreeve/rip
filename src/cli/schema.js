@@ -27,7 +27,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { pathToFileURL } from 'url';
-import { CompileError } from '../compile.js';
+import { CompileError } from '../compiler.js';
 import { adapterFor } from '../runtime/orm.js';
 import * as migration from './migrate.js';
 

@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { spawnSync } from '../../support/spawn.js';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../../../src/cli/explain.js';
 import { Stores, Mappings } from '../../../src/stores.js';
 

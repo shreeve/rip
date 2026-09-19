@@ -38,7 +38,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { ripFiles } from '../support/rip-files.js';
 
 const corpusDir = join(import.meta.dir, '../corpus');

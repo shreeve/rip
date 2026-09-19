@@ -21,7 +21,7 @@ const files = [
   'src/ts/dts.js',
   'src/ts/types.js',
   'src/render.js',
-  'src/compile.js',
+  'src/compiler.js',
   'src/builder.js',
   'src/stores.js',
   'src/browser.js',

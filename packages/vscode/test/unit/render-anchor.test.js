@@ -8,7 +8,7 @@
 // with the diagnostics synthesized at the spans the pinned tsgo uses
 // (test/spawn/cli/check-*.test.js drive the same rows through tsgo).
 import { test, expect } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { mapTsDiagnostic } from '../../src/diagnostics.js';
 import { lineStartsOf, offsetToPosition } from '../../src/translate.js';
 

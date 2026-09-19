@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliDecompressSync } from 'node:zlib';
 import { describeExtended } from '../../support/extended.js';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const artifactPath = resolve(root, 'dist/@rip/rip.js');
@@ -87,7 +87,7 @@ describe('browser entry graph', () => {
     for (const file of FORBIDDEN) {
       expect(seen.has(file)).toBeFalse();
     }
-    expect(seen.has('src/compile.js')).toBeTrue();
+    expect(seen.has('src/compiler.js')).toBeTrue();
     expect(seen.has('packages/app/index.rip')).toBeTrue();
     expect(seen.has('src/runtime/reactive.js')).toBeTrue();
     expect(seen.has('src/runtime/components.js')).toBeTrue();

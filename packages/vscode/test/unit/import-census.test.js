@@ -4,7 +4,7 @@
 // NAMED `type` keeps its reading, and the identifier class matches the
 // lexer's, which binds beyond ASCII.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { importBindingsOf } from '../../src/scopes.js';
 
 const bindingsOf = (source) => {

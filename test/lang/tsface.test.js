@@ -26,7 +26,7 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 import { toMatchable } from '../../src/runtime/stdlib.js';
 import { stripFace } from '../../src/emitter.js';
 import { routeArgType } from '../../src/ts/components.js';

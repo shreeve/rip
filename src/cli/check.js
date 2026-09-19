@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cacheIdentityOf } from '../../packages/vscode/src/hash.js';
-import { compile } from '../compile.js';
+import { compile } from '../compiler.js';
 import { readProjectConfig } from '../config.js';
 import { identifierRunAt } from '../ident.js';
 import { startTsgo } from '../../packages/vscode/src/tsgo.js';

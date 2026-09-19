@@ -1489,7 +1489,7 @@ describe('sibling runs of bare typed forwards claim all-or-nothing', () => {
   });
 
   test('the rejection reaches both faces (one lexer, one discipline)', () => {
-    const { compile: fullCompile } = require('../../src/compile.js');
+    const { compile: fullCompile } = require('../../src/compiler.js');
     for (const face of ['js', 'ts']) {
       let err = null;
       try { fullCompile('a: number\nb: string\na = 1', { runtimeDelivery: 'none', face }); } catch (e) { err = e; }

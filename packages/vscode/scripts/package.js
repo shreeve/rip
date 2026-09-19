@@ -109,7 +109,7 @@ const bundle = async (entry, out, opts) => {
 await bundle('extension.js', 'extension.js', { target: 'node', format: 'cjs', external: ['vscode'] });
 await bundle('server.js', 'server.js', { target: 'bun', format: 'esm' });
 
-// The compiler, as a tree (server.js resolves compiler/src/compile.js at
+// The compiler, as a tree (server.js resolves compiler/src/compiler.js at
 // runtime, and the emitter reads its runtime modules relative to its own
 // URL, so the layout must stay intact). Two subtrees are never reached
 // from it and have no business in a published artifact: grammar/ holds

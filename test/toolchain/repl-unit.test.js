@@ -17,7 +17,7 @@ import {
   RecallTracker, isHistoryNavKey, Osc11Matcher, preloadRepl,
 } from '../../src/cli/repl.js';
 import { identifierRuns } from '../../src/ident.js';
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 
 describe('wrapper generation', () => {
   test('strict prologue, block-nested user code, restore and save from reported names', () => {
