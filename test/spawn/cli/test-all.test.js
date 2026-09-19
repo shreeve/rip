@@ -255,11 +255,13 @@ describe('the lane orchestrator', () => {
     // which carries the expression rather than a number.
     expect(perLane).toBeGreaterThanOrEqual(1);
     expect(r.stdout).toContain(`lane-workers=${perLane}\n`);
-    // One budget: root + siblings never exceeds the peak (1.25x cores)
-    // unless the root lane is pinned at its floor of two.
-    const peak = Math.max(3, Math.round(cores * 1.25));
+    // One budget: root + one fan-out sibling at perLane + the other
+    // sibling at one never exceeds the peak (1.4x cores) unless the root
+    // lane is pinned at its floor of two.
+    const peak = Math.max(3, Math.round(cores * 1.4));
     expect(root).toBeGreaterThanOrEqual(2);
-    expect(root + 2 * perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 2 * perLane));
+    expect(perLane).toBeLessThanOrEqual(4);
+    expect(root + 1 + perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 1 + perLane));
   });
 
   test('lanes are planned longest-first, unlisted lanes last in discovery order', () => {
