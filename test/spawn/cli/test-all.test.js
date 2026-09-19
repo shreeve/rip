@@ -255,11 +255,13 @@ describe('the lane orchestrator', () => {
     // which carries the expression rather than a number.
     expect(perLane).toBeGreaterThanOrEqual(1);
     expect(r.stdout).toContain(`lane-workers=${perLane}\n`);
-    // One budget: root + siblings never exceeds the peak (1.25x cores)
-    // unless the root lane is pinned at its floor of two.
-    const peak = Math.max(3, Math.round(cores * 1.25));
+    // One budget: root + one fan-out sibling at perLane + the other
+    // sibling at one never exceeds the peak (1.4x cores) unless the root
+    // lane is pinned at its floor of two.
+    const peak = Math.max(3, Math.round(cores * 1.4));
     expect(root).toBeGreaterThanOrEqual(2);
-    expect(root + 2 * perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 2 * perLane));
+    expect(perLane).toBeLessThanOrEqual(4);
+    expect(root + 1 + perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 1 + perLane));
   });
 
   test('lanes are planned longest-first, unlisted lanes last in discovery order', () => {
@@ -291,29 +293,39 @@ describe('the lane orchestrator', () => {
   });
 
   // Bun 1.4.2's --timings makes --parallel start the slowest files
-  // first. The file is opt-in (touch it) and gitignored; a repository
-  // without one must run exactly as before, and an older bun — CI pins
-  // one through .bun-version — must never be handed the flag.
-  test('the root lane takes --timings from test/.timings.json only when it exists', () => {
+  // first. The file is gitignored and MEASURED: the orchestrator seeds an
+  // empty one on first sight, so the first run measures and every later
+  // run is ordered. An older bun must never be handed the flag.
+  test('the root lane takes --timings from test/.timings.json, seeded on first sight', () => {
     const root = fixture({});
-    const bare = plan(root);
-    expect(bare.status).toBe(0);
-    expect(bare.stdout).toMatch(/· root lane: bun test --parallel=\d+ --timeout 60000\n/);
-    expect(bare.stdout).not.toContain('--timings');
-
-    writeFileSync(join(root, 'test/.timings.json'), '');
-    const seeded = plan(root);
-    expect(seeded.status).toBe(0);
+    const timingsFile = join(root, 'test/.timings.json');
+    expect(existsSync(timingsFile)).toBe(false);
+    const first = plan(root);
+    expect(first.status).toBe(0);
     if (!Bun.semver.satisfies(Bun.version, '>=1.4.2')) {
-      expect(seeded.stdout).not.toContain('--timings');
+      expect(first.stdout).not.toContain('--timings');
+      expect(existsSync(timingsFile)).toBe(false);
       return;
     }
-    expect(seeded.stdout).toContain('--timings=test/.timings.json --update-timings');
+    // Seeded by the plan itself (empty is a valid timings map), and named
+    // in the root lane's args from the very first run.
+    expect(existsSync(timingsFile)).toBe(true);
+    expect(readFileSync(timingsFile, 'utf8')).toBe('');
+    expect(first.stdout).toMatch(/· root lane: bun test --parallel=\d+ --timeout 60000 --timings=test\/.timings.json --update-timings\n/);
     // The run measures into the seed, so the next run has real numbers.
     const r = orchestrate(root);
     expect(r.status).toBe(0);
-    const timings = JSON.parse(readFileSync(join(root, 'test/.timings.json'), 'utf8'));
+    const timings = JSON.parse(readFileSync(timingsFile, 'utf8'));
     expect(timings.files).toHaveProperty(['test/root.test.js']);
+  });
+
+  test('--root-workers and --lane-workers override the budget', () => {
+    const root = fixture({ zebra: GREEN });
+    const r = orchestrate(root, {}, '--plan', '--root-workers', '7', '--lane-workers', '3');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/root lane 7 workers, 3 per sibling lane/);
+    expect(r.stdout).toMatch(/· root lane: bun test --parallel=7 /);
+    expect(r.stdout).toContain('RIP_LANE_WORKERS=3');
   });
 });
 

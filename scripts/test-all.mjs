@@ -43,6 +43,8 @@
 //   --root <dir>     repository to orchestrate (default: this checkout)
 //   --jobs <n>       lanes in flight at once (default: half the cores, min 2)
 //   --timeout <ms>   per-lane timeout (default: 600000)
+//   --root-workers <n>  bun workers for the root lane (default: the budget below)
+//   --lane-workers <n>  RIP_LANE_WORKERS handed to package lanes (default: the budget below)
 //   --plan           print the lanes that would run, spawn nothing
 //
 // Environment handed to every package lane:
@@ -64,7 +66,7 @@
 // test/.timings.json`, refreshed by every run (see TIMINGS below).
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,8 +115,14 @@ const CORES = availableParallelism();
 // ~1.5 and the suites that time real machinery start missing deadlines
 // they meet idle, which is the whole reason this budget exists. The
 // ratio only means something if every lane keeps to its share — which
-// is what RIP_LANE_WORKERS (below) is for.
-const OVERSUBSCRIBE = 1.25;
+// is what RIP_LANE_WORKERS (below) is for. 1.4x, re-measured on a
+// 10-core box once every lane kept to its share and the sites lane
+// stopped burning CPU on recompiles: the root lane alone runs 50s on 5
+// workers, 45s on 7, 38s on 9 with the same 234 CPU-s, so it is the
+// worker count, not the machine, that was holding it; in the full run,
+// root 7 with the fan-out lane at 4 was the best of eight trials
+// (55s against 68s at the old 5/2), and 9 gained nothing further.
+const OVERSUBSCRIBE = 1.4;
 const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
 
 // Lane slots are a PACKING constraint, not a CPU one — the long sibling
@@ -125,27 +133,26 @@ const PEAK = Math.max(3, Math.round(CORES * OVERSUBSCRIBE));
 const JOBS = Math.floor(number('jobs', Math.max(2, Math.floor(CORES / 2)), 1));
 
 // The peak is split between the root lane and the JOBS-1 sibling slots
-// beside it. Each sibling is budgeted LANE_WORKERS and told so through
-// RIP_LANE_WORKERS. Most siblings are one process and ignore it; the
-// one that fans out CPU-bound work (vscode's `bun test --parallel`)
-// used to size itself by the MACHINE instead — one worker per core,
-// each spawning a language server and tsgo — so a 10-core box ran ~25
-// bun workers plus their children against a budget that had counted
-// each sibling as one, and every clock stretched: small lanes 3.4x,
-// the root lane 2.7x. (sites' sub-suite cap stays 4 on its own: those
-// suites mostly wait, see the header.) Two per sibling, not more: at
-// three, the root lane's remainder on a 10-core box is one worker. On
-// a box where even two would leave the root lane nothing, one.
-//
-// The root lane is the critical path and the CPU-bound one, so it gets
-// the remainder — never more than the machine, never fewer than two.
-// Worked on 10 cores: PEAK 13, JOBS 5 → 4 siblings × 2 = 8, root 5;
-// 5 + 8 = 13, the peak, whichever siblings are in flight. Left bare,
-// `bun test --parallel` defaults to one worker per core and claims the
-// whole machine on its own.
+// beside it. ONE sibling fans out CPU-bound work — vscode's `bun test
+// --parallel`, sized by RIP_LANE_WORKERS — and it used to size itself
+// by the MACHINE instead: one worker per core, each spawning a language
+// server and tsgo, so a 10-core box ran ~25 bun workers plus their
+// children against a budget that had counted each sibling as one, and
+// every clock stretched (small lanes 3.4x, the root lane 2.7x). Every
+// other sibling is one process and ignores the variable; sites keeps its
+// own sub-suite cap of 4 because those suites mostly wait (see the
+// header). So the budget counts one fan-out sibling at LANE_WORKERS and
+// the rest at one each, and the root lane — the critical path and the
+// CPU-bound one — gets the remainder, never more than the machine,
+// never fewer than two. LANE_WORKERS is four where the peak affords it
+// (vscode's editor suite is latency-bound: 20s at two workers, 13s at
+// four) and shrinks before the root lane would drop below two.
+// Worked on 10 cores: PEAK 14, JOBS 5 → 3 plain siblings + vscode at 4
+// = 7, root 7; 7 + 7 = 14, the peak.
 const SIBLINGS = Math.max(0, JOBS - 1);
-const LANE_WORKERS = PEAK - SIBLINGS * 2 >= 2 ? 2 : 1;
-const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS));
+const PLAIN_SIBLINGS = Math.max(0, SIBLINGS - 1);
+const LANE_WORKERS = number('lane-workers', Math.max(1, Math.min(4, PEAK - 2 - PLAIN_SIBLINGS)), 1);
+const ROOT_WORKERS = number('root-workers', Math.max(2, Math.min(CORES, PEAK - PLAIN_SIBLINGS - LANE_WORKERS)), 1);
 
 // Root-lane file order. Bun 1.4.2 grew `--timings <json>`, per-file
 // durations that make --parallel start the slowest files first, so the
@@ -153,12 +160,18 @@ const ROOT_WORKERS = Math.max(2, Math.min(CORES, PEAK - SIBLINGS * LANE_WORKERS)
 // lane. The file is measured, not authored: gitignored, seeded with
 // `touch test/.timings.json` (an empty file is tolerated), and refreshed
 // by every root-lane run through --update-timings. Absent, or under an
-// older bun (.bun-version pins one for CI), the root lane runs as before.
+// older bun, the root lane runs as before. The file is created on first
+// sight, so run two of any checkout is already ordered.
 const TIMINGS = 'test/.timings.json';
-const timingsArgs = () =>
-  Bun.semver.satisfies(Bun.version, '>=1.4.2') && existsSync(join(ROOT, TIMINGS))
-    ? [`--timings=${TIMINGS}`, '--update-timings']
-    : [];
+const timingsArgs = () => {
+  if (!Bun.semver.satisfies(Bun.version, '>=1.4.2')) return [];
+  const file = join(ROOT, TIMINGS);
+  // Seed on first sight: an empty file is a valid (empty) timings map, so
+  // the first run measures and every later run orders by what it saw.
+  // A root that refuses the write (read-only fixture) just runs unordered.
+  if (!existsSync(file)) { try { writeFileSync(file, ''); } catch { return []; } }
+  return [`--timings=${TIMINGS}`, '--update-timings'];
+};
 const TIMEOUT_MS = number('timeout', 600_000, 1);
 const CI = Boolean(process.env.CI);
 
