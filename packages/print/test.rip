@@ -74,21 +74,39 @@ scratch = -> mkdtempSync join(tmpdir(), 'print-tree-')
 run = (args, cwd = fixtures) ->
   spawnSync process.execPath, [ripCli, printRip, ...args], { cwd, env, encoding: 'utf8' }
 
-# Run the CLI, fetch the served page, and wait for the self-exit.
+# Run the CLI, fetch the served page, and wait for the self-exit. The
+# server announces its URL on stdout (9111, or a free port when 9111 is
+# taken), so two runs never fetch each other's page. A run that never
+# announces or never answers is killed: a lane cannot hang on it.
 serve = (args, cwd = fixtures) ->
   proc = Bun.spawn [process.execPath, ripCli, printRip, ...args], { cwd, env, stdout: 'pipe', stderr: 'pipe' }
+  reader = proc.stdout.getReader()
+  decoder = TextDecoder.new()
+  stdout = ''
+  url = null
+  loop
+    { value, done } = reader.read!
+    break if done
+    stdout += decoder.decode(value, { stream: true })
+    found = stdout.match(/http:\/\/localhost:\d+\//)
+    if found then url = found[0]; break
   html = null
   headers = null
-  for _i in [0...200]
-    try
-      res = fetch! 'http://localhost:9111/'
-      headers = res.headers
-      html = res.text!
-      break
-    catch
-      sleep! 50
+  if url
+    for _i in [0...100]
+      try
+        res = fetch! url
+        headers = res.headers
+        html = res.text!
+        break
+      catch
+        sleep! 50
+  proc.kill() unless html?
   exitCode = await proc.exited
-  stdout = Response.new(proc.stdout).text!
+  loop
+    { value, done } = reader.read!
+    break if done
+    stdout += decoder.decode(value, { stream: true })
   stderr = Response.new(proc.stderr).text!
   { html, headers, stdout, stderr, exitCode }
 
@@ -172,7 +190,7 @@ test! "two files: TOC, headers, nav, highlighting, light theme", ->
   ok stdout.includes('2 files\n')
   ok stdout.includes('  hello.rip (8 lines) [rip]\n')
   ok stdout.includes('  util.js (2 lines) [javascript]\n')
-  ok stdout.includes('Opening browser...')
+  ok /Opening http:\/\/localhost:\d+\/ \.\.\./.test(stdout)
 
   # Serving posture
   eq headers.get('content-type'), 'text/html; charset=utf-8'

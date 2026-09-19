@@ -527,13 +527,18 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # page or a slow reader still gets every byte.
 finish = -> server.stop().then -> process.exit 0
 
-server = Bun.serve
-  port: 9111
-  fetch: ->
-    setTimeout finish, 0
-    Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' }
+respond = ->
+  setTimeout finish, 0
+  Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' }
 
-console.log "\nOpening browser..."
+# 9111 when it is free; any free port when another print is still up.
+server = null
+try
+  server = Bun.serve { port: 9111, fetch: respond }
+catch
+  server = Bun.serve { port: 0, fetch: respond }
+
+console.log "\nOpening http://localhost:#{server.port}/ ..."
 
 try
   if process.platform is 'darwin'
