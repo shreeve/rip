@@ -23,6 +23,12 @@ const TSCONFIG = path.join(ROOT, 'test/audit/tsconfig.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The server's keystroke debounce (RIP_LSP_DEBOUNCE_MS; 100 ms for an
+// editor). Every open/change here pays it once before the refresh runs,
+// so the sessions run it short; askWhileTyping still lands inside it,
+// and settleDocument's flush is what answers there, at any width.
+const DEBOUNCE_MS = 10;
+
 // Start a server over a temp workspace laid out from `files`
 // ({ 'app.rip': '…', 'package.json': '…' }). A tsconfig.json is copied in
 // unless the caller supplies one, matching what the runner does.
@@ -48,6 +54,7 @@ export async function openSession(files) {
   const logs = [];
   const client = new LspClient('bun', [SERVER, '--stdio'], {
     cwd: path.join(ROOT, 'packages/vscode'),
+    env: { ...process.env, RIP_LSP_DEBOUNCE_MS: String(DEBOUNCE_MS) },
     onNotification: (m, p) => {
       // The server's own log stream. It is where a brokered surface says
       // WHY it declined — a dropped code action names itself and its

@@ -35,6 +35,12 @@ try { tsgoBinaryPath(); tsgoAvailable = true; } catch { /* dependencies not inst
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The server's keystroke debounce (RIP_LSP_DEBOUNCE_MS; 100 ms for an
+// editor). Every open/change here pays it once before the refresh runs,
+// and no test types inside it — settleDocument flushes a pending refresh
+// for any request that arrives early — so the harness runs it short.
+export const DEBOUNCE_MS = 10;
+
 // "declared but never read" / "all variables are unused" — filtered from codes().
 const NOISE = new Set([6133, 6199]);
 
@@ -69,7 +75,7 @@ export async function inSession(ws, fn, {
   const trace = traceTsgo ? path.join(os.tmpdir(), path.basename(ws) + '.tsgo-trace') : null;
   if (trace) fs.writeFileSync(trace, '');
   const client = new LspClient('bun', [...(trace ? ['--preload', TSGO_TRACE_TAP] : []), SERVER, '--stdio'], {
-    env: { ...process.env, ...(trace ? { RIP_TSGO_TRACE: trace } : {}) },
+    env: { ...process.env, RIP_LSP_DEBOUNCE_MS: String(DEBOUNCE_MS), ...(trace ? { RIP_TSGO_TRACE: trace } : {}) },
     onNotification: (m, p) => {
       if (m === 'textDocument/publishDiagnostics') published.push(p);
       if (m === 'window/logMessage') logs.push(p.message);

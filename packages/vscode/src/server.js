@@ -2240,14 +2240,23 @@ async function probePinsFor(document, state, result) {
   }
 }
 
+// Keystroke coalescing: compiles are fast but tsgo round-trips add up, so
+// a refresh waits this long for the next keystroke before it runs.
+// RIP_LSP_DEBOUNCE_MS overrides it — the test harnesses shrink it, since
+// every open/change they make pays the window once, and nothing they ask
+// inside it escapes settleDocument's flush.
+const REFRESH_DEBOUNCE_MS = (() => {
+  const n = Number(process.env.RIP_LSP_DEBOUNCE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 100;
+})();
+
 function scheduleRefresh(document) {
   const state = stateOf(document.uri);
-  // Keystroke coalescing; compiles are fast but tsgo round-trips add up.
   clearTimeout(state.refreshTimer);
   // The pending work is made AWAITABLE, because a debounce is invisible
   // to a request that arrives inside it: completion and signature help
-  // answer from `lastGood`, and for 100ms after a keystroke that is the
-  // face of the PREVIOUS text. Retyping a member dot is the case that
+  // answer from `lastGood`, and for the debounce window after a keystroke
+  // that is the face of the PREVIOUS text. Retyping a member dot is the case that
   // shows it — the buffer without the dot compiles clean, so `lastGood`
   // has plain statement context there and the popup serves the whole
   // global scope instead of the receiver's members. Recompiling locally
@@ -2268,7 +2277,7 @@ function scheduleRefresh(document) {
     catch (err) { connection.console.error(`[rip] refresh failed: ${err.stack ?? err}`); }
     finally { if (state.settling === settled) state.settling = null; done(); }
   };
-  state.refreshTimer = setTimeout(() => state.refreshRun(), 100);
+  state.refreshTimer = setTimeout(() => state.refreshRun(), REFRESH_DEBOUNCE_MS);
   state.settling = settled;
 }
 
@@ -4154,7 +4163,7 @@ connection.onCompletion(presented('textDocument/completion', async (params) => {
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
-  // text of 100ms ago.
+  // text of a debounce window ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return (await dotProbeCompletion(params)) ?? pairSpliceProbe(params);
@@ -4287,7 +4296,7 @@ connection.onSignatureHelp(presented('textDocument/signatureHelp', async (params
   await tsgoReady;
   // The buffer being typed is the whole point of these two
   // surfaces, so they wait for it rather than answering about the
-  // text of 100ms ago.
+  // text of a debounce window ago.
   await settleDocument(params.textDocument.uri);
   const ctx = requestContext(params);
   if (!ctx) return null;
