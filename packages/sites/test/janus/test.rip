@@ -28,6 +28,13 @@ releasedCaddy = ->
   binary
 
 CADDY = releasedCaddy()
+
+# The lease clocks, injected into both processes so the waits below are
+# multiples of what the test controls rather than of production's 5s
+# heartbeat against Janus's default TTL. The manager must beat faster
+# than the edge forgets it; the ratio here mirrors production's.
+HEARTBEAT_MS = 500
+TTL_S = 2
 TITLE = 'released Janus carries registration, public-file isolation, sendfile, reload, and deregistration'
 
 waitFor = (name, fn, timeout = 8000) ->
@@ -106,7 +113,7 @@ certification = ->
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
-      env: { ...process.env, JANUS_HEARTBEAT_TTL: '6s', XDG_DATA_HOME: join(dir, 'data'), XDG_CONFIG_HOME: join(dir, 'config') }
+      env: { ...process.env, JANUS_HEARTBEAT_TTL: "#{TTL_S}s", XDG_DATA_HOME: join(dir, 'data'), XDG_CONFIG_HOME: join(dir, 'config') }
   try
     caddy = startEdge()
     caddyOut = Response.new(caddy.stdout).text()
@@ -123,6 +130,7 @@ certification = ->
       stdin: 'ignore'
       stdout: 'pipe'
       stderr: 'pipe'
+      env: { ...process.env, RIP_HEARTBEAT_MS: String(HEARTBEAT_MS) }
     managerText = ''
     managerOut = do ->
       outputReader = manager.stdout.getReader()
@@ -215,7 +223,8 @@ certification = ->
     eq partial.status, 206
     eq partial.text!, 'authorized'
 
-    sleep! 6200
+    # The registration outlives its TTL only because heartbeats renew it.
+    sleep! TTL_S * 1000 + 200
     alive = edgeFetch! port, '/api/version'
     eq alive.status, 200
     eq alive.json!, { version: 'one' }
@@ -239,7 +248,7 @@ certification = ->
     await caddy.exited
     # Keep the edge down through a heartbeat to exercise both control
     # clients' connection diagnostics before registration recovery.
-    sleep! 5100
+    sleep! HEARTBEAT_MS + 100
     caddy = startEdge()
     caddyOut = Response.new(caddy.stdout).text()
     caddyErr = Response.new(caddy.stderr).text()
