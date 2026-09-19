@@ -245,7 +245,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';

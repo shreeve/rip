@@ -17,7 +17,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CodeBuilder } from '../../src/builder.js';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { ripFiles } from '../support/rip-files.js';
 
 // endMark with matchesSource replaced by the definition, verbatim.

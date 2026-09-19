@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { compile } from '../../../src/compile.js';
+import { compile } from '../../../src/compiler.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
 const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'persist', 'launch', 'aria', 'links', 'index'];

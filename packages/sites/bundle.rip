@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { rash } from 'rip/app/rash'
-import { compile } from '../../src/compile.js'
+import { compile } from '../../src/compiler.js'
 import { extractClientProjections } from '../../src/projections.js'
 
 RUNTIME_RE =! /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/

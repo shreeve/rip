@@ -13,7 +13,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, generatedSpanToSource, SUPPRESSED_TS_CODES,

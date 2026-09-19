@@ -245,7 +245,7 @@ describe('enum: stores and mappings', () => {
 
 describe('enum: declaration emission', () => {
   test('enums declare as TS enum declarations with the declare prefix', async () => {
-    const { compile: fullCompile } = await import('../../src/compile.js');
+    const { compile: fullCompile } = await import('../../src/compiler.js');
     const src = 'enum Color\n  red = 0\n  green = 1\nexport enum Tier\n  free = "f"\n  pro = "p"';
     const dts = fullCompile(src).declarations;
     expect(dts).toBe(

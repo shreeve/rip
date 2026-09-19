@@ -61,7 +61,7 @@
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
-import { compile } from './compile.js';
+import { compile } from './compiler.js';
 
 const FORMAT = 1;
 const checkoutRoot = join(import.meta.dir, '..');

@@ -10,7 +10,7 @@ import { spawnSync } from '../../support/spawn.js';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
-import { compile, CompileError } from '../../../src/compile.js';
+import { compile, CompileError } from '../../../src/compiler.js';
 import { decodeMappings } from '../../../src/sourcemap.js';
 import { registerModuleMap, remapStack } from '../../../src/stackmap.js';
 

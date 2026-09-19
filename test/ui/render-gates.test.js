@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { tokenize } from '../../src/lexer.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';

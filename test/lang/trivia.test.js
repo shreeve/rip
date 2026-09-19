@@ -8,7 +8,7 @@
 // exactly the v1 scope; leading/trailing attachment stays out until
 // a consumer needs it).
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 

@@ -25,7 +25,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { compile, CompileError } from '../../src/compile.js';
+import { compile, CompileError } from '../../src/compiler.js';
 import { stripFace } from '../../src/emitter.js';
 import { pluralize } from '../../src/runtime/vocab.js';
 

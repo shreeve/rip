@@ -3,7 +3,7 @@
 // conversion, source → generated hover mapping, generated → source
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isImportFixTitle,
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated, sourceSlotToGenerated,

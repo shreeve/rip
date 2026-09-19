@@ -20,7 +20,7 @@ function makeTree(files) {
 }
 
 const BASE = {
-  'compile.js': 'export const compile = 1;\n',
+  'compiler.js': 'export const compile = 1;\n',
   'runtime/reactive.js': 'export const r = 1;\n',
   'runtime/schema.js': 'export const s = 1;\n',
 };

@@ -11,7 +11,7 @@
 // lineStarts, for display alongside the offsets themselves.
 
 import { SourceFile } from '../source.js';
-import { compile } from '../compile.js';
+import { compile } from '../compiler.js';
 
 // Malformed --explain arguments (not a position error): the CLI exits 2.
 export class UsageError extends Error {

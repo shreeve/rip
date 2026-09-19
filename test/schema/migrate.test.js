@@ -3046,7 +3046,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
 
 describe('migrate: the CLI-only boundary — no migration bytes in delivered output', () => {
   test('an inline model program carries the CLI-pointing stubs and NONE of the differ/runner', async () => {
-    const { compile } = await import('../../src/compile.js');
+    const { compile } = await import('../../src/compiler.js');
     const { code } = compile('export User = schema :model\n  name! string\n', { path: 'm.rip', runtimeDelivery: 'inline' });
     expect(code).toContain('migrationStub');
     expect(code).toContain('CLI-only');

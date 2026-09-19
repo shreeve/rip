@@ -1,4 +1,4 @@
-// Process pins for the compile cache (src/compile-cache.js): a hit is
+// Process pins for the compile cache (src/cacher.js): a hit is
 // byte-identical to a miss and to an uncached compile; the compiler
 // fingerprint invalidates; torn entries, a disabled cache, and an
 // unwritable directory all degrade to a plain compile; concurrent
@@ -11,7 +11,7 @@ import { spawn, spawnSync } from '../../support/spawn.js';
 
 const ROOT = resolve(import.meta.dir, '../../..');
 const LOADER = join(ROOT, 'src', 'loader.js');
-const CACHE_MODULE = join(ROOT, 'src', 'compile-cache.js');
+const CACHE_MODULE = join(ROOT, 'src', 'cacher.js');
 
 // Prints the cached triple for one module, so the bytes a hit hands
 // back can be compared with a miss's and with compile()'s own.
@@ -108,7 +108,7 @@ describe('compile cache: the fingerprint', () => {
     rmSync(copy, { recursive: true, force: true });
     mkdirSync(copy);
     cpSync(join(ROOT, 'src'), join(copy, 'src'), { recursive: true });
-    const copiedModule = join(copy, 'src', 'compile-cache.js');
+    const copiedModule = join(copy, 'src', 'cacher.js');
     const cacheDir = fresh('fingerprint');
     const real = emit(CACHE_MODULE, hello, withCache(cacheDir));
     const moved = emit(copiedModule, hello, withCache(cacheDir));

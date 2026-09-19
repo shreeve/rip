@@ -19,7 +19,7 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'node:path';
-import { compile } from '../../../../src/compile.js';
+import { compile } from '../../../../src/compiler.js';
 import { BOOLEAN_ATTRS } from '../../../../src/dom.js';
 
 const grammar = JSON.parse(readFileSync(

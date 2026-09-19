@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { compile } from '../compile.js';
+import { compile } from '../compiler.js';
 import { ripManifestTarget, isSubpathExportsMap } from '../../packages/vscode/src/mirror.js';
 
 // The `.rip` modules a package publishes, resolved the way the MIRROR

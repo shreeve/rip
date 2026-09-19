@@ -39,7 +39,7 @@ const { LspClient } = await import(path.join(repoRoot, 'packages/vscode/src/tsgo
 const { tokenize } = await import(path.join(repoRoot, 'src/lexer.js'))
 const { lineStartsOf, offsetToPosition } = await import(path.join(repoRoot, 'packages/vscode/src/translate.js'))
 const { censusStarts, ruledSilent } = await import('./sweep.js')
-const { compile } = await import(path.join(repoRoot, 'src/compile.js'))
+const { compile } = await import(path.join(repoRoot, 'src/compiler.js'))
 const SERVER = path.join(repoRoot, 'packages/vscode/src/server.js')
 
 const SCAFFOLD_NAME = /^(?:__[A-Za-z$][\w$]*|_(?:el|t|inst|frag|anchor|empty|slot)\d+|_factory[A-Za-z]*|create_block_\d+|_ref\d*)$/

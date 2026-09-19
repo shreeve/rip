@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { compile } from '../../src/compile.js';
+import { compile } from '../../src/compiler.js';
 import * as reactive from '../../src/runtime/reactive.js';
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;

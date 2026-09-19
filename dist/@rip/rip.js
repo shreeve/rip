@@ -22858,7 +22858,7 @@ var emitDeclarations = () => {
   throw new Error("rip: declaration emission is unavailable in the browser");
 };
 
-// src/compile.js
+// src/compiler.js
 class CompileError extends Error {
   constructor(message, { path, start = null, end = null, line = null, col = null } = {}) {
     super(message);

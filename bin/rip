@@ -18,7 +18,7 @@ import packageJson from '../package.json' with { type: 'json' };
 // path — `rip check`, `rip test`, `rip sites`, running a file (which a
 // child bun compiles through the loader) — never pays for it, so
 // dispatch is a bun start plus this file.
-const loadCompiler = () => import('../src/compile.js');
+const loadCompiler = () => import('../src/compiler.js');
 
 const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
 const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/run.js');
