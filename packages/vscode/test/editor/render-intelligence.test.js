@@ -16,97 +16,13 @@
 //
 // Same availability guard as the other live suites.
 import { test, expect, describe } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { decodeSemanticTokens } from '../../src/tsgo.js';
-
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
-
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
-const TSGO_TRACE_TAP = path.resolve(import.meta.dir, 'support', 'tsgo-trace.mjs');
+import { tsgoAvailable, inWorkspace as inHarness, decodeSemanticTokens } from './support/harness.mjs';
 
 // `traceTsgo` preloads the test-only tap (support/tsgo-trace.mjs) into
 // the server, and `api.tsgoNotifications()` reads back every
 // tsgo-bound notification method it has sent — the face swaps a probe
 // costs are otherwise invisible from this side of the stdio.
-async function inWorkspace(files, fn, { traceTsgo = false } = {}) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-render-intel-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  const published = [];
-  const trace = traceTsgo ? path.join(os.tmpdir(), path.basename(ws) + '.tsgo-trace') : null;
-  if (trace) { fs.writeFileSync(trace, ''); process.env.RIP_TSGO_TRACE = trace; }
-  const client = new LspClient('bun', [...(trace ? ['--preload', TSGO_TRACE_TAP] : []), SERVER, '--stdio'], {
-    onNotification: (m, p) => { if (m === 'textDocument/publishDiagnostics') published.push(p); },
-  });
-  if (trace) delete process.env.RIP_TSGO_TRACE;
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const versions = new Map();
-  async function awaitPublish(rel, sinceLen) {
-    const u = uriOf(rel);
-    for (let i = 0; i < 60; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${rel} arrived`);
-  }
-  const at = (rel, line, character) => ({ textDocument: { uri: uriOf(rel) }, position: { line, character } });
-  const api = {
-    async open(rel, text) {
-      const before = published.length;
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      await awaitPublish(rel, before);
-    },
-    async change(rel, text, { waitPublish = true } = {}) {
-      const before = published.length;
-      const v = (versions.get(rel) || 1) + 1;
-      versions.set(rel, v);
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version: v }, contentChanges: [{ text }] });
-      if (waitPublish) await awaitPublish(rel, before);
-      else await sleep(400);
-    },
-    diagnostics(rel) {
-      const u = uriOf(rel);
-      for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i].diagnostics;
-      return [];
-    },
-    hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
-    completion: (rel, line, character) => client.request('textDocument/completion', at(rel, line, character)),
-    resolve: (item) => client.request('completionItem/resolve', item),
-    signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
-    semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
-    tsgoNotifications: () => (trace ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean) : []),
-  };
-  try {
-    const init = await client.request('initialize', {
-      processId: process.pid,
-      rootUri: 'file://' + ws,
-      capabilities: { workspace: { configuration: true } },
-    });
-    api.capabilities = init.capabilities;
-    client.notify('initialized', {});
-    return await fn(api);
-  } finally {
-    await client.stop();
-    fs.rmSync(ws, { recursive: true, force: true });
-    if (trace) fs.rmSync(trace, { force: true });
-  }
-}
+const inWorkspace = (files, fn, options = {}) => inHarness(files, fn, { prefix: 'rip-render-intel-', ...options });
 
 const STRICT_PKG = JSON.stringify({ name: 'render-intel', rip: { strict: true } });
 

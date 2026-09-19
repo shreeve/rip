@@ -29,129 +29,20 @@
 // hard failure first (tsgo-broker.test.js owns the loud skip notice).
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSemanticTokens } from '../../src/tsgo.js';
 import { SCAFFOLD_FAMILIES } from '../../src/translate.js';
+import { tsgoAvailable, inWorkspace as inHarness, decodeSemanticTokens } from './support/harness.mjs';
 
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
-
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
-
-function makeWorkspace(files) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-feat-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  return ws;
-}
-
-// One live session over a fresh workspace; the api wraps every feature
-// request in current-buffer coordinates.
-async function inWorkspace(files, fn) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const ws = makeWorkspace(files);
-  const published = [];
-  const logs = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => {
-      if (m === 'textDocument/publishDiagnostics') published.push(p);
-      if (m === 'window/logMessage') logs.push(p.message);
-    },
-  });
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function awaitPublish(rel, sinceLen) {
-    const u = uriOf(rel);
-    for (let i = 0; i < 60; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${rel} arrived`);
-  }
-  const versions = new Map();
-  const at = (rel, line, character) => ({
-    textDocument: { uri: uriOf(rel) },
-    position: { line, character },
-  });
-  const api = {
-    ws,
-    logs,
-    uriOf,
-    sleep,
-    capabilities: null,
-    async open(rel, text) {
-      const before = published.length;
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      await awaitPublish(rel, before);
-    },
-    // didOpen with NO wait for the first compile — the editor's own
-    // cold-open ordering, where a cached answer is the only answer.
-    openNoWait(rel, text) {
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-    },
-    async change(rel, text) {
-      const before = published.length;
-      const v = (versions.get(rel) || 1) + 1;
-      versions.set(rel, v);
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version: v }, contentChanges: [{ text }] });
-      await awaitPublish(rel, before);
-    },
-    diagnostics(rel) {
-      const u = uriOf(rel);
-      for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i].diagnostics;
-      return [];
-    },
-    hover: (rel, line, character) => client.request('textDocument/hover', at(rel, line, character)),
-    completion: (rel, line, character, context) => client.request('textDocument/completion', {
-      ...at(rel, line, character), ...(context ? { context } : {}),
-    }),
-    resolveItem: (item) => client.request('completionItem/resolve', item),
-    definition: (rel, line, character) => client.request('textDocument/definition', at(rel, line, character)),
-    typeDefinition: (rel, line, character) => client.request('textDocument/typeDefinition', at(rel, line, character)),
-    references: (rel, line, character, includeDeclaration = true) => client.request('textDocument/references', { ...at(rel, line, character), context: { includeDeclaration } }),
-    signatureHelp: (rel, line, character) => client.request('textDocument/signatureHelp', at(rel, line, character)),
-    prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
-    rename: (rel, line, character, newName) => client.request('textDocument/rename', { ...at(rel, line, character), newName }),
-    documentSymbol: (rel) => client.request('textDocument/documentSymbol', { textDocument: { uri: uriOf(rel) } }),
-    documentLink: (rel) => client.request('textDocument/documentLink', { textDocument: { uri: uriOf(rel) } }),
-    workspaceSymbol: (query) => client.request('workspace/symbol', { query }),
-    semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
-    semanticTokensRange: (rel, range) => client.request('textDocument/semanticTokens/range', { textDocument: { uri: uriOf(rel) }, range }),
-    codeAction: (rel, range, diagnostics, only) => client.request('textDocument/codeAction', {
-      textDocument: { uri: uriOf(rel) }, range, context: { diagnostics, ...(only ? { only } : {}) },
-    }),
-  };
-  try {
-    const init = await client.request('initialize', {
-      processId: process.pid,
-      rootUri: 'file://' + ws,
-      // linkSupport mirrors VS Code: a definition may answer LocationLink,
-      // and the specifier-origin test below depends on it. Identifier
-      // definitions still answer plain locations either way.
-      capabilities: { workspace: { configuration: true }, textDocument: { definition: { linkSupport: true } } },
-    });
-    api.capabilities = init.capabilities;
-    client.notify('initialized', {});
-    return await fn(api);
-  } finally {
-    await client.stop();
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-}
+// One live session over a fresh workspace (support/harness.mjs); the api
+// wraps every feature request in current-buffer coordinates. linkSupport
+// mirrors VS Code: a definition may answer LocationLink, and the
+// specifier-origin test below depends on it. Identifier definitions still
+// answer plain locations either way.
+const inWorkspace = (files, fn) => inHarness(files, fn, {
+  prefix: 'rip-feat-',
+  capabilities: { workspace: { configuration: true }, textDocument: { definition: { linkSupport: true } } },
+});
 
 // Apply LSP TextEdits to a text (bottom-up, so earlier offsets stay valid).
 function applyEdits(text, edits) {

@@ -35,158 +35,19 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-let tsgoAvailable = false;
-try {
-  const { tsgoBinaryPath } = await import('../../src/tsgo.js');
-  tsgoBinaryPath();
-  tsgoAvailable = true;
-} catch { /* dependencies not installed */ }
+import {
+  tsgoAvailable, makeWorkspace as makeWs, inSession as inHarnessSession, inWorkspace as inHarnessWorkspace,
+} from './support/harness.mjs';
 
-const SERVER = path.resolve(import.meta.dir, '..', '..', 'src', 'server.js');
-
-function makeWorkspace(files) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-pm-'));
-  for (const [rel, content] of Object.entries(files)) {
-    const p = path.join(ws, rel);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content);
-  }
-  return ws;
-}
-
-// One live server session over a real workspace directory. The api
-// extends the gaps harness with hover, watched-files notifications, and
-// the server's log lines; `initialized` resolves after the cache
-// revalidation log line arrives (startup complete).
-async function inSession(ws, fn) {
-  const { LspClient } = await import('../../src/tsgo.js');
-  const published = [];
-  const logs = [];
-  const client = new LspClient('bun', [SERVER, '--stdio'], {
-    onNotification: (m, p) => {
-      if (m === 'textDocument/publishDiagnostics') published.push(p);
-      if (m === 'window/logMessage') logs.push(p.message);
-    },
-  });
-  const uriOf = (rel) => 'file://' + path.join(ws, rel);
-  const latest = (rel) => {
-    const u = uriOf(rel);
-    for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i];
-    return null;
-  };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function awaitPublish(rel, sinceLen) {
-    const u = uriOf(rel);
-    for (let i = 0; i < 60; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${rel} arrived`);
-  }
-  const versions = new Map();
-  const api = {
-    ws,
-    logs,
-    uriOf,
-    sleep,
-    async open(rel, text) {
-      const before = published.length;
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-      await awaitPublish(rel, before);
-    },
-    close(rel) {
-      client.notify('textDocument/didClose', { textDocument: { uri: uriOf(rel) } });
-    },
-    // didOpen with NO wait — for sequences where the next notification
-    // must land before the server's first refresh of this buffer.
-    openNoWait(rel, text) {
-      versions.set(rel, 1);
-      client.notify('textDocument/didOpen', { textDocument: { uri: uriOf(rel), languageId: 'rip', version: 1, text } });
-    },
-    // Every publish for `rel` at or after index `since` in arrival order.
-    publishesSince(rel, since) {
-      return published.slice(since).filter((p) => p.uri === uriOf(rel));
-    },
-    get publishedCount() { return published.length; },
-    // Open a document by RAW uri (non-file schemes — the __external__ path).
-    async openUri(uri, text) {
-      const before = published.length;
-      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text } });
-      for (let i = 0; i < 60; i++) {
-        for (let j = published.length - 1; j >= before; j--) {
-          if (published[j].uri === uri) { await sleep(120); return; }
-        }
-        await sleep(100);
-      }
-      throw new Error(`no publishDiagnostics for ${uri} arrived`);
-    },
-    // Poll until `fn()` is truthy (async prunes land off the request path).
-    async poll(fn, what) {
-      for (let i = 0; i < 60; i++) {
-        if (fn()) return;
-        await sleep(150);
-      }
-      throw new Error(`condition never held: ${what}`);
-    },
-    async change(rel, text) {
-      const before = published.length;
-      const v = (versions.get(rel) || 1) + 1;
-      versions.set(rel, v);
-      client.notify('textDocument/didChange', { textDocument: { uri: uriOf(rel), version: v }, contentChanges: [{ text }] });
-      await awaitPublish(rel, before);
-    },
-    watched(changes) {
-      client.notify('workspace/didChangeWatchedFiles', {
-        changes: changes.map(([rel, type]) => ({ uri: uriOf(rel), type })),
-      });
-    },
-    codes(rel) {
-      return (latest(rel)?.diagnostics ?? []).map((d) => d.code).filter((c) => c !== 6133 && c !== 6199);
-    },
-    has(rel, re) { return (latest(rel)?.diagnostics ?? []).some((d) => re.test(d.message)); },
-    hover(rel, line, character) {
-      return client.request('textDocument/hover', { textDocument: { uri: uriOf(rel) }, position: { line, character } });
-    },
-    // Wait until `pred(codes)` holds for `rel` — cross-file re-checks
-    // land asynchronously after watched-file events.
-    async until(rel, pred) {
-      for (let i = 0; i < 60; i++) {
-        if (pred(api.codes(rel))) return;
-        await sleep(150);
-      }
-      throw new Error(`condition never held for ${rel}; last codes ${JSON.stringify(api.codes(rel))}`);
-    },
-    async untilLog(re) {
-      for (let i = 0; i < 60; i++) {
-        const line = logs.find((l) => re.test(l));
-        if (line) return line;
-        await sleep(100);
-      }
-      throw new Error(`no log line matching ${re}; got:\n${logs.join('\n')}`);
-    },
-  };
-  try {
-    await client.request('initialize', { processId: process.pid, rootUri: 'file://' + ws, capabilities: {} });
-    client.notify('initialized', {});
-    await api.untilLog(/project cache:/); // startup revalidation complete
-    return await fn(api);
-  } finally {
-    await client.stop();
-  }
-}
-
-// Convenience: one session over a fresh workspace, torn down after.
-async function inWorkspace(files, fn) {
-  const ws = makeWorkspace(files);
-  try {
-    return await inSession(ws, fn);
-  } finally {
-    fs.rmSync(ws, { recursive: true, force: true });
-  }
-}
+// One live server session over a real workspace directory
+// (support/harness.mjs); `awaitReady` holds the session until the cache
+// revalidation log line arrives (startup complete), which the persistent
+// cache pins read. `inSession` runs over an EXISTING directory — a restart
+// over the same tree — and `inWorkspace` lays one out and removes it after.
+const SESSION = { capabilities: {}, awaitReady: true };
+const makeWorkspace = (files) => makeWs(files, 'rip-pm-');
+const inSession = (ws, fn) => inHarnessSession(ws, fn, SESSION);
+const inWorkspace = (files, fn) => inHarnessWorkspace(files, fn, { prefix: 'rip-pm-', ...SESSION });
 
 // The .rip mirrors present in a workspace's tree.
 const mirrorPaths = (ws) => {
