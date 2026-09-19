@@ -435,7 +435,7 @@ test! "read's loud-optional '?' rejects supplied garbage, allows absence", ->
   eq good.json!, { dob: '2024-02-29', email: 'a@b.co' }
   # A supplied value that fails its validator names the field, 422 —
   # never a silent null impersonating an omitted field.
-  bad = handle! jsonRequest 'POST', '/loud', { dob: '02/29/2024' }
+  bad = handle! jsonRequest 'POST', '/loud', { dob: '02/30/2024' }   # Feb 30: a real calendar miss, never rolled to Mar 1
   eq bad.status, 422
   eq bad.json!, { error: 'dob is not a valid date', code: 'invalid_field', fields: { dob: 'dob is not a valid date' } }
 

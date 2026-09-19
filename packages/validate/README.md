@@ -73,10 +73,13 @@ Contracts worth knowing:
 - `money`/`money_even` take **dollars** and return **integer cents**;
   `cents` takes a value already in cents; `decimal` is a lossless
   arbitrary-scale **string**
-- `date` and `datetime` read the same ISO 8601 spelling, calendar-true
-  with leap years; `date` accepts a time part but always answers the
-  canonical `YYYY-MM-DD`, while `datetime` requires one and answers
-  `YYYY-MM-DDTHH:MM:SS[.fff][zone]`
+- `date` and `datetime` are read by rip/time's parser, flexible about
+  the spelling (`2024-02-15`, `2/15/24`, `Feb 15, 2024`, `15-FEB-2024`,
+  compact digits, am/pm, zones) and strict about the calendar (Feb 30 is a
+  miss, never Mar 1); `date` answers the day as written, `YYYY-MM-DD`,
+  dropping any clock, and `datetime` requires a clock and answers the
+  wall clock as written, `YYYY-MM-DDTHH:MM:SS[.fff]`, with the zone as
+  written (`Z` or `±HH:MM`) when there was one
 - `id` is a positive integer with no leading zero, at most 15 digits
   (safe-integer territory); `ids` parses, dedupes, and sorts a list of
   them

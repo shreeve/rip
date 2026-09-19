@@ -21,7 +21,7 @@ test "named exports + default factory", ->
   eq Object.keys(mod).sort(), ['Duration', 'Time', 'age', 'default', 'isDuration', 'isTime', 'time']
   eq mod.default, mod.time
   eq mod.default('2026-04-19') instanceof Time, true
-  for name in ['utc', 'parse', 'tz', 'unix', 'isTime', 'isDuration', 'duration', 'min', 'max']
+  for name in ['utc', 'parse', 'parts', 'tz', 'unix', 'isTime', 'isDuration', 'duration', 'min', 'max']
     eq typeof mod.default[name], 'function'
   eq mod.default.Time, Time
   eq mod.default.Duration, Duration
@@ -850,3 +850,241 @@ test "asZone reinterprets — wall-clock kept, instant shifts", ->
 test "asUTC labels the wall-clock as UTC", ->
   ny = time.utc('2026-06-15T12:00:00Z').toZone('America/New_York')   # 08:00 EDT
   eq ny.asUTC().toISOString(), '2026-06-15T08:00:00.000Z'
+
+# ==[ parseDate: flexible but accurate ]==
+#
+# Auto-detect parsing accepts many spellings but never rolls over; dayjs DOES
+# roll over (Feb 30 → Mar 1), so these are checked against fixed expectations
+# rather than the oracle. `time.utc(input)` makes the ISO string deterministic.
+
+console.log "\nparseDate: flexible but accurate"
+
+def expectUTC(input, expected)
+  test "utc #{JSON.stringify(input)} → #{expected ?? 'invalid'}", ->
+    t = time.utc(input)
+    actual = if t.isValid() then t.toISOString() else null
+    eq actual, expected
+
+# ---- accepted forms → instant ----
+UTC_ROWS =! [
+  # ISO year-first
+  ['2024-02-29',                  '2024-02-29T00:00:00.000Z']
+  ['2024-2-9',                    '2024-02-09T00:00:00.000Z']
+  ['2024/02/29',                  '2024-02-29T00:00:00.000Z']
+  ['2024.02.29',                  '2024-02-29T00:00:00.000Z']
+  ['2024-Feb-09',                 '2024-02-09T00:00:00.000Z']
+  ['2024 Feb 9',                  '2024-02-09T00:00:00.000Z']
+  ['2024Feb9',                    '2024-02-09T00:00:00.000Z']
+  ['2024-02',                     '2024-02-01T00:00:00.000Z']
+  ['2024',                        '2024-01-01T00:00:00.000Z']
+  ['1000-01-01',                  '1000-01-01T00:00:00.000Z']
+  ['9999-12-31',                  '9999-12-31T00:00:00.000Z']
+  # compact
+  ['20240229',                    '2024-02-29T00:00:00.000Z']
+  ['20240229T1430',               '2024-02-29T14:30:00.000Z']
+  ['20240229T143000',             '2024-02-29T14:30:00.000Z']
+  ['20240229T143000Z',            '2024-02-29T14:30:00.000Z']
+  # month-day-year (numeric is ALWAYS month-first)
+  ['2/9/2024',                    '2024-02-09T00:00:00.000Z']
+  ['02/09/2024',                  '2024-02-09T00:00:00.000Z']
+  ['2/9/24',                      '2024-02-09T00:00:00.000Z']
+  ['2/9/69',                      '1969-02-09T00:00:00.000Z']
+  ['2-9-2024',                    '2024-02-09T00:00:00.000Z']
+  ['2.9.2024',                    '2024-02-09T00:00:00.000Z']
+  ['1/2/2024',                    '2024-01-02T00:00:00.000Z']
+  ['1-2-2024',                    '2024-01-02T00:00:00.000Z']
+  ['Feb 9 2024',                  '2024-02-09T00:00:00.000Z']
+  ['Feb 9, 2024',                 '2024-02-09T00:00:00.000Z']
+  ['Feb 9,2024',                  '2024-02-09T00:00:00.000Z']
+  ['February 9, 2024',            '2024-02-09T00:00:00.000Z']
+  ['Feb. 9, 2024',                '2024-02-09T00:00:00.000Z']
+  ['Feb-09-2024',                 '2024-02-09T00:00:00.000Z']
+  ['feb/9/2024',                  '2024-02-09T00:00:00.000Z']
+  ['Sept 9, 2024',                '2024-09-09T00:00:00.000Z']
+  ['May 5 2024',                  '2024-05-05T00:00:00.000Z']
+  # day-month-year (named month only)
+  ['9 Feb 2024',                  '2024-02-09T00:00:00.000Z']
+  ['9 February 2024',             '2024-02-09T00:00:00.000Z']
+  ['9-Feb-2024',                  '2024-02-09T00:00:00.000Z']
+  ['09-FEB-2024',                 '2024-02-09T00:00:00.000Z']
+  ['9/feb/2024',                  '2024-02-09T00:00:00.000Z']
+  ['9Feb2024',                    '2024-02-09T00:00:00.000Z']
+  # ordinals
+  ['Feb 9th, 2024',               '2024-02-09T00:00:00.000Z']
+  ['March 1st 2024',              '2024-03-01T00:00:00.000Z']
+  ['22nd Feb 2024',               '2024-02-22T00:00:00.000Z']
+  ['September 3rd 2024',          '2024-09-03T00:00:00.000Z']
+  # leading weekday, RFC 2822
+  ['Mon, 19 Aug 2024',            '2024-08-19T00:00:00.000Z']
+  ['Monday August 19 2024',       '2024-08-19T00:00:00.000Z']
+  ['Sun. 18 Aug 2024',            '2024-08-18T00:00:00.000Z']
+  ['Mon, 19 Aug 2024 14:30:00 +0000', '2024-08-19T14:30:00.000Z']
+  ['Mon, 19 Aug 2024 14:30:00 GMT',   '2024-08-19T14:30:00.000Z']
+  # time part
+  ['2024-02-29T14:30',            '2024-02-29T14:30:00.000Z']
+  ['2024-02-29t14:30',            '2024-02-29T14:30:00.000Z']
+  ['2024-02-29 14:30',            '2024-02-29T14:30:00.000Z']
+  ['  2024-02-29   14:30  ',      '2024-02-29T14:30:00.000Z']
+  ['2024-02-29, 14:30',           '2024-02-29T14:30:00.000Z']
+  ['Feb 9, 2024 at 3:45 PM',      '2024-02-09T15:45:00.000Z']
+  ['2024-02-29T14:30:45',         '2024-02-29T14:30:45.000Z']
+  ['2024-02-29T14:30:45.250',     '2024-02-29T14:30:45.250Z']
+  ['2024-02-29T14:30:45.25',      '2024-02-29T14:30:45.250Z']
+  ['2024-02-29T14:30:45.5',       '2024-02-29T14:30:45.500Z']
+  ['2024-02-29T14:30:45.123456',  '2024-02-29T14:30:45.123Z']
+  ['2024-02-29T14:30:45,5',       '2024-02-29T14:30:45.500Z']
+  ['2024-02-29 7:05',             '2024-02-29T07:05:00.000Z']
+  ['2/9/2024 3:45 PM',            '2024-02-09T15:45:00.000Z']
+  ['2/9/2024 3:45pm',             '2024-02-09T15:45:00.000Z']
+  ['2/9/2024 3 PM',               '2024-02-09T15:00:00.000Z']
+  ['2/9/2024 3:45 a.m.',          '2024-02-09T03:45:00.000Z']
+  ['2/9/2024 3:45 p.m.',          '2024-02-09T15:45:00.000Z']
+  ['2/9/2024 12:00am',            '2024-02-09T00:00:00.000Z']
+  ['2/9/2024 12:00pm',            '2024-02-09T12:00:00.000Z']
+  ['2/9/2024 12:00 AM',           '2024-02-09T00:00:00.000Z']
+  # zones (only after a time)
+  ['2024-02-29T14:30Z',           '2024-02-29T14:30:00.000Z']
+  ['2024-02-29T14:30z',           '2024-02-29T14:30:00.000Z']
+  ['2024-02-29T14:30:00.000Z',    '2024-02-29T14:30:00.000Z']
+  ['2024-02-29T14:30:00+05:30',   '2024-02-29T09:00:00.000Z']
+  ['2024-02-29T14:30:00+0530',    '2024-02-29T09:00:00.000Z']
+  ['2024-02-29T14:30:00+05',      '2024-02-29T09:30:00.000Z']
+  ['2024-02-29T14:30:00-08:00',   '2024-02-29T22:30:00.000Z']
+  ['2024-02-29T14:30:00 +05:30',  '2024-02-29T09:00:00.000Z']
+  ['2024-02-29 14:30 UTC',        '2024-02-29T14:30:00.000Z']
+  ['2024-02-29 14:30 GMT',        '2024-02-29T14:30:00.000Z']
+  ['2024-02-29 14:30:00 GMT+0100','2024-02-29T13:30:00.000Z']
+  ['2024-02-29T23:30-01:00',      '2024-03-01T00:30:00.000Z']
+  ['Thu Feb 29 2024 14:30:00 GMT-0700 (Mountain Standard Time)', '2024-02-29T21:30:00.000Z']
+  # colon-less clocks after any date head (always a 2-digit hour)
+  ['2024-02-29 1430',             '2024-02-29T14:30:00.000Z']
+  ['2024-02-29 143000',           '2024-02-29T14:30:00.000Z']
+  ['2024-02-29T143000.25+0530',   '2024-02-29T09:00:00.250Z']
+  ['2024-02-29 1430Z',            '2024-02-29T14:30:00.000Z']
+  ['2024-02-29 1430 UTC',         '2024-02-29T14:30:00.000Z']
+  ['2024-02-29, 0930 pm',         '2024-02-29T21:30:00.000Z']
+  ['Feb 9, 2024 1430',            '2024-02-09T14:30:00.000Z']
+  ['9 Feb 2024 at 1430',          '2024-02-09T14:30:00.000Z']
+  ['2/9/2024 143000',             '2024-02-09T14:30:00.000Z']
+  # all-digit datetimes and compact date + clock
+  ['202402291430',                '2024-02-29T14:30:00.000Z']
+  ['20240229143000',              '2024-02-29T14:30:00.000Z']
+  ['20240229 1430',               '2024-02-29T14:30:00.000Z']
+  ['20240229 143000',             '2024-02-29T14:30:00.000Z']
+  ['20240229 14:30',              '2024-02-29T14:30:00.000Z']
+  ['20240229T143000.5Z',          '2024-02-29T14:30:00.500Z']
+  # space-separated year-first (2-digit month and day only)
+  ['2024 02 29',                  '2024-02-29T00:00:00.000Z']
+  ['2024 02 29 1430',             '2024-02-29T14:30:00.000Z']
+  ['2024 02 29 14:30',            '2024-02-29T14:30:00.000Z']
+  ['2024 02 29T14:30:45.25Z',     '2024-02-29T14:30:45.250Z']
+  # leap years
+  ['2000-02-29',                  '2000-02-29T00:00:00.000Z']
+  ['2024-02-29',                  '2024-02-29T00:00:00.000Z']
+  ['2/29/2024',                   '2024-02-29T00:00:00.000Z']
+  ['29 Feb 2024',                 '2024-02-29T00:00:00.000Z']
+]
+
+for row in UTC_ROWS
+  expectUTC row[0], row[1]
+
+# ---- recognized but not real → invalid, never rolled over ----
+INVALID_INPUTS =! [
+  '2024-02-30', '2023-02-29', '1900-02-29', '2024-04-31', '2024-13-01', '2024-01-32', '2024-00-10', '2024-01-00'
+  '2/30/2024', '2/29/2023', '13/13/2024', '25/12/2024', '0/9/2024', '2/0/2024'
+  'Feb 30 2024', 'Feb 30, 2024', '30 Feb 2024', '29 Feb 2023', 'Sat Feb 30 2024', 'Sept 31 2024', '2024-Feb-30'
+  'Foo 9 2024', '9 Foo 2024', 'Ju 5 2024'
+  '2024-02-29T24:00', '2024-02-29T14:60', '2024-02-29T14:30:60', '2024-02-29 25:00'
+  '13:00 pm', '0:30 am', '2/9/2024 13:00 pm', '2/9/2024 0:30 am', '2024-02-29T14:30 pm'
+  '2024-02-29T', '2024-02-29Tx', '2024-02-29T14:30:', '2024-02-29T14:30:00.', '2024-02-29 14', 'Feb 9 2024 14'
+  '2024-02-29+05:00', '2024-02-29 UTC', '2024-02-29T14:30 +25:00', '2024-02-29T14:30+05:3'
+  'not-a-date', 'garbageZ', '', '   ', 'today', '1e3', 'Feb', '14:30', '12:00 PM'
+  '2024-02/29', '2024/02-29', '2/9-2024', 'Feb 9-2024', '9 Feb-2024', 'Feb-9, 2024', '2024-Feb 9', '2024Feb 9'
+  '1122024', '20240230', '12252024', '2024022', '202402291', '0999-01-01', '2/9/202'
+  'Feb92024', 'Feb 30', '30 Feb'
+  # colon-less clocks: wrong digit counts, mixed, out of range
+  '2024-02-29 930', '2024-02-29 143', '2024-02-29 14300', '2024-02-29 1430000', '2024-02-29 14:3000', '2024-02-29 1430:00'
+  '2024-02-29 2400', '2024-02-29 1460', '2024-02-29 143060', '2024-02-29 1330 pm', 'Feb 9, 2024 930'
+  # all-digit: only 4, 8, 12, 14 digits with a 19xx/20xx year
+  '2024022914', '2024022914300', '202402291430000', '122520241430', '20240230143000', '202402291460', '202402291430x'
+  # space-separated year-first needs 2-digit month and day
+  '2024 2 9', '2024 02 9', '2024 2 29', '2024 02', '2024 02 29 930'
+]
+
+for input in INVALID_INPUTS
+  expectUTC input, null
+
+# ---- local mode: components only (zone-independent) ----
+test "local 2/9/2024 3:45 PM", ->
+  d = time('2/9/2024 3:45 PM')
+  eq [d.year(), d.month(), d.date(), d.hour(), d.minute(), d.second(), d.millisecond()], [2024, 1, 9, 15, 45, 0, 0]
+
+test "local 9 Feb 2024 (day-first, named month)", ->
+  d = time('9 Feb 2024')
+  eq [d.year(), d.month(), d.date(), d.hour(), d.minute()], [2024, 1, 9, 0, 0]
+
+test "local 1-2-2024 is January 2 (numeric is month-first)", ->
+  d = time('1-2-2024')
+  eq [d.year(), d.month(), d.date()], [2024, 0, 2]
+
+test "local fraction is a decimal fraction of a second", ->
+  d = time('2024-02-29T14:30:45.25')
+  eq [d.hour(), d.minute(), d.second(), d.millisecond()], [14, 30, 45, 250]
+
+test "local 'Feb 9, 2024 at 7:05 am'", ->
+  d = time('Feb 9, 2024 at 7:05 am')
+  eq [d.year(), d.month(), d.date(), d.hour(), d.minute()], [2024, 1, 9, 7, 5]
+
+test "local Mon, 19 Aug 2024 (weekday ignored)", ->
+  d = time('Mon, 19 Aug 2024')
+  eq [d.year(), d.month(), d.date(), d.day()], [2024, 7, 19, 1]
+
+test "local Date#toString round-trips to the same instant", ->
+  d = Date.new(2024, 1, 29, 14, 30, 45)
+  eq time(d.toString()).valueOf(), d.valueOf()
+
+test "local mode rejects the same impossible dates", ->
+  eq time('2/30/2024').isValid(),         false
+  eq time('2024-02-30').isValid(),        false
+  eq time('Feb 30 2024').isValid(),       false
+  eq time('2024-02-29T24:00').isValid(),  false
+  eq time('25/12/2024').isValid(),        false
+
+# ---- explicit formats are strict too ----
+test "time.parse: out-of-range components are invalid, not rolled", ->
+  eq time.parse('02/30/2024', 'MM/DD/YYYY').isValid(),            false
+  eq time.parse('02/29/2024', 'MM/DD/YYYY').isValid(),            true
+  eq time.parse('02/29/2023', 'MM/DD/YYYY').isValid(),            false
+  eq time.parse('Feb 30, 2024', 'MMM D, YYYY').isValid(),         false
+  eq time.parse('13:00 PM', 'h:mm A').isValid(),                  false
+  eq time.parse('2024-02-29 24:00', 'YYYY-MM-DD HH:mm').isValid(), false
+  eq time.parse('2024-02-29 14:60', 'YYYY-MM-DD HH:mm').isValid(), false
+
+test "time.parse: valid inputs still parse", ->
+  eq time.parse('02/29/2024 11:59 PM', 'MM/DD/YYYY h:mm A').format('YYYY-MM-DD HH:mm'), '2024-02-29 23:59'
+  eq time.parse('2024-02-29 14:30:00 +05:30', 'YYYY-MM-DD HH:mm:ss Z', true).toISOString(), '2024-02-29T09:00:00.000Z'
+
+# ---- time.parts: the components as written ----
+test "time.parts: clock and zone reported, not applied", ->
+  eq time.parts('2024-03-01T02:00+05:30'), { year: 2024, month: 3, day: 1, hour: 2, minute: 0, second: 0, ms: 0, clock: true, zone: 330 }
+  eq time.parts('2024-02-29 143000.25-08:00'), { year: 2024, month: 2, day: 29, hour: 14, minute: 30, second: 0, ms: 250, clock: true, zone: -480 }
+  eq time.parts('2024-02-29T14:30Z').zone, 0
+
+test "time.parts: bare date has no clock and no zone", ->
+  eq time.parts('9 Feb 2024'), { year: 2024, month: 2, day: 9, hour: 0, minute: 0, second: 0, ms: 0, clock: false, zone: null }
+  eq time.parts('Mon, 19 Aug 2024').day, 19
+
+test "time.parts: 12-hour clock is converted, zone stays null", ->
+  p = time.parts('2/9/2024 3:45 PM')
+  eq [p.hour, p.minute, p.clock, p.zone], [15, 45, true, null]
+  eq time.parts('2/9/2024 12:00 AM').hour, 0
+
+test "time.parts: null for impossible, unknown, engine-only or non-string input", ->
+  eq time.parts('Feb 30 2024'),  null
+  eq time.parts('2024-02-29T24:00'), null
+  eq time.parts('not-a-date'),   null
+  eq time.parts('Feb 2024'),     null    # engine-only shape: no fallback here
+  eq time.parts(''),             null
+  eq time.parts(42),             null
+  eq time.parts(null),           null
+  eq time.parts(undefined),      null

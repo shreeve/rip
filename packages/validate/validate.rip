@@ -25,6 +25,7 @@
 # `check()` passes the string form untouched.
 
 import { registerCoercer } from '../../src/runtime/schema.js'
+import time from 'rip/time'
 
 type Validator = (value: unknown) => unknown
 
@@ -141,33 +142,29 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 # Calendar
 # ==============================================================================
 
-# Validity comes from the written components: pure calendar math, leap
-# years included, no Date construction, so an impossible date can never
-# normalize itself into a neighboring real one.
-MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+# Dates and datetimes are read by rip/time's parser: flexible about the
+# spelling (ISO, `m/d/yyyy`, `9 Feb 2024`, `Feb 9, 2024`, compact digits,
+# colon-less clocks, am/pm, zones) and strict about the calendar, so an
+# impossible date is a miss and never a neighboring real one. `time.parts`
+# answers the components exactly as written, before any zone is applied.
 
-leapYear = (year) -> (year % 4 is 0 and year % 100 isnt 0) or year % 400 is 0
+pad2 = (n) -> if n < 10 then "0#{n}" else "#{n}"
 
-daysInMonth = (year, month) ->
-  if month is 2 and leapYear(year) then 29 else MONTH_DAYS[month - 1]
+# The calendar day as written, `YYYY-MM-DD`.
+toDay = (p) -> "#{String(p.year).padStart(4, '0')}-#{pad2 p.month}-#{pad2 p.day}"
 
-# `date` and `datetime` read one ISO 8601 spelling: a calendar-true date
-# (`YYYY-MM-DD` or `YYYYMMDD`), then optionally a 'T' or space, a
-# two-digit 24h time, and a zone (Z or ±HH:MM). The parse answers the
-# canonical date and, when one was written, the canonical time.
-ISO_DATETIME = /^(\d{4})(-?)(\d{2})\2(\d{2})(?:[T ](2[0-3]|[01]\d):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,6}))?)?(Z|[+-](?:2[0-3]|[01]\d):?[0-5]\d)?)?$/i
+# The wall clock as written, `HH:MM:SS[.fff]`: seconds always, the
+# fraction only when it is nonzero.
+toClock = (p) ->
+  frac = if p.ms then ".#{String(p.ms).padStart(3, '0')}" else ''
+  "#{pad2 p.hour}:#{pad2 p.minute}:#{pad2 p.second}#{frac}"
 
-toDateTime = (v) ->
-  m = ISO_DATETIME.exec v
-  return null unless m
-  [year, month, day] = [parseInt(m[1], 10), parseInt(m[3], 10), parseInt(m[4], 10)]
-  return null unless month >= 1 and month <= 12
-  return null unless day >= 1 and day <= daysInMonth(year, month)
-  date = "#{m[1]}-#{m[3]}-#{m[4]}"
-  return { date, time: null } unless m[5]
-  frac = if m[8] then ".#{m[8]}" else ''
-  zone = if m[9] then m[9].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, '$1:$2') else ''
-  { date, time: "#{m[5]}:#{m[6]}:#{m[7] or '00'}#{frac}#{zone}" }
+# The zone as written, canonically: `Z`, or `±HH:MM`.
+toZone = (mins) ->
+  return 'Z' if mins is 0
+  sign = if mins < 0 then '-' else '+'
+  abs  = Math.abs mins
+  "#{sign}#{pad2 Math.floor(abs / 60)}:#{pad2 abs % 60}"
 
 # ==============================================================================
 # The vocabulary
@@ -212,19 +209,21 @@ BUILTIN =
   name:       (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'name'
   address:    (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'address'
 
-  # Date & time: a date must exist on the real calendar. `date` accepts
-  # the same spelling as `datetime`, time part and all, but answers only
-  # the canonical `YYYY-MM-DD`.
+  # Date & time (see Calendar above). `date` answers the day as written,
+  # dropping any clock; a zone is not applied, so `2024-03-01T02:00+05:30`
+  # is March 1, the day the sender wrote.
   date:      (v) ->
-    d = toDateTime v
-    if d then d.date else null
+    p = time.parts v
+    if p then toDay(p) else null
   time:      (v) -> v[/^(2[0-3]|[01]?\d):([0-5]\d)(?::([0-5]\d))?$/]            and _[0]
   time12:    (v) -> v[/^(1[0-2]|0?[1-9]):([0-5]\d)(?::([0-5]\d))?\s?(am|pm)$/i] and _[0].toLowerCase()
-  # A datetime requires the time part and answers the canonical ISO
-  # 8601 `YYYY-MM-DDTHH:MM:SS[.fff][zone]` spelling.
+  # A datetime requires a clock and answers the wall clock as written,
+  # `YYYY-MM-DDTHH:MM:SS[.fff]`, plus the zone as written (`Z` or
+  # `±HH:MM`) when there was one.
   datetime:  (v) ->
-    d = toDateTime v
-    if d and d.time then "#{d.date}T#{d.time}" else null
+    p = time.parts v
+    return null unless p and p.clock
+    "#{toDay p}T#{toClock p}#{if p.zone? then toZone(p.zone) else ''}"
 
   # Booleans
   truthy:    (v) -> (v =~ /^(true|t|1|yes|y|on)$/i)  and true
