@@ -158,8 +158,8 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 # Flexible about spelling, strict about the calendar. The grammar reads the
 # components as written; `assemble` then refuses anything that is not a real
 # calendar date or clock, so Feb 30 never becomes Mar 1. The date is one
-# alternation, after the `parse_str` regex in zones.rb: the compact form and
-# three orderings. THE RULE: day-first is recognized only when the month is
+# alternation, after the `parse_str` regex in zones.rb: three orderings,
+# with ranges in the pattern. THE RULE: day-first is recognized only when the month is
 # spelled with letters (`9 Feb 2024`, `09-FEB-2024`, `9Feb2024`); a purely
 # numeric small form is ALWAYS month-first (US), so `1/2/2024` is January 2
 # and `25/12/2024` is simply invalid (month 25). There is deliberately no
@@ -201,13 +201,13 @@ REGEX_DATE =! ///
 # (`.25` = 250 ms). A zone is read only here, after a time, so
 # `2024-02-29+05:00` is invalid.
 REGEX_TIME =! ///
-  ^(?:T|,?\sat\s|\s|,\s)?                                # after the date: T, a space, ", ", " at ", or nothing
-  (?<h>[01]\d|2[0-3]|\d(?!\d))                           # hour
-  (?::?(?<m>[0-5]\d))?                                   # minute
-  (?::?(?<s>[0-5]\d)(?:[.,](?<f>\d+))?)?                 # second[.fraction]
-  (?:\s?(?<ap>[ap])\.?m\.?)?                             # am, pm, a.m., p.m.
+  ^(?:T|,?\sat\s|\s|,\s)?                 # T, a space, ", ", " at ", or nothing
+  (?<h>[01]\d|2[0-3]|\d(?!\d))            # hour
+  (?::?(?<m>[0-5]\d))?                    # minute
+  (?::?(?<s>[0-5]\d)(?:[.,](?<f>\d+))?)?  # second[.fraction]
+  (?:\s?(?<ap>[ap])\.?m\.?)?              # am, pm, a.m., p.m.
   (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[-+]\d\d:?(?:\d\d)?))?  # zone: Z, UTC, GMT, +05:30, +0530, GMT-0700
-  (?:\s?\([^)]*\))?$                                     # (Mountain Standard Time), then nothing
+  (?:\s?\([^)]*\))?$                      # (Mountain Standard Time), then nothing
 ///i
 
 # ==[ Unit Normalization ]==
