@@ -20,6 +20,17 @@ jobs:
       - name: Install workspace
         run: bun install --frozen-lockfile
 
+      # The ui lane (packages/ui) drives Playwright; the runner image ships no
+      # browsers. Same cache key as test.yml's browser job.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('test/browser/package.json') }}
+
+      - name: Install Playwright browsers
+        run: bunx playwright install --with-deps
+
       # Janus is a separate program that Rip consumes as a released binary:
       # the Sites lane finds `janus` on PATH, nothing else. Pinned so a
       # certification run is reproducible; bump alongside the README's pin.

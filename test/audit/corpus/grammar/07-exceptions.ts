@@ -13,6 +13,19 @@ let parseConfig = function(raw: string) {
 
 console.log('config:', parseConfig('{"port":8080}'), parseConfig('not json'))
 
+// ── annotated catch binding: the plain parameter at runtime, the annotation reaches the face ──
+
+let parseLoose = function(raw: string) {
+  try {
+    return JSON.parse(raw)
+  } catch (error: any) {
+    console.log('loose failed:', typeof error.message)
+    return null
+  }
+}
+
+console.log('loose:', parseLoose('{"ok":true}'), parseLoose('not json'))
+
 // ── pattern catch bindings: the object kind and the array kind ──
 
 let summarize = function(raw: string) {
