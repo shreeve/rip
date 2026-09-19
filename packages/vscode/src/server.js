@@ -701,7 +701,11 @@ function handleTsgoExit(session) {
     connection.console.error('[rip] tsgo exited unexpectedly — restarting once');
     launchTsgo().then((restarted) => {
       if (!restarted) return;
-      for (const document of documents.all()) scheduleRefresh(document);
+      // A refresh already waiting on the restart carries on with the new
+      // session; scheduling another would publish the same buffer twice.
+      for (const document of documents.all()) {
+        if (!states.get(document.uri)?.settling) scheduleRefresh(document);
+      }
     });
   } else {
     connection.console.error('[rip] tsgo exited again — staying degraded (Rip parse diagnostics only)');
