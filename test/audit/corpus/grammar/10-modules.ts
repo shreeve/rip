@@ -68,10 +68,18 @@ export const announceCarried =
 function(): void { console.log('announce carried ran') }
 export const announceDropped =
   function(): void { console.log('announce indented ran') }
+export const flush = function(): void { console.log('flush ran') }
+export const flushCarried =
+function(): void { console.log('flush carried ran') }
+export const flushDropped =
+  function(): void { console.log('flush indented ran') }
 
 announce()
 announceCarried()
 announceDropped()
+flush()
+flushCarried()
+flushDropped()
 console.log('bindings:', plainFlag, carriedFlag, droppedFlag, typedFlag, typedCarried, typedDropped)
 
 // ── local export lists: empty, single, aliased pairs, and both layouts ──

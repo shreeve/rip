@@ -44,6 +44,18 @@ reportCarried()
 reportDropped()
 reportFat()
 
+# ── Void readonly: the bang and the readonly glyph compose — a function that never changes and never returns ──
+
+wipe! =! -> console.log('wipe ran')
+wipeCarried! =!
+-> console.log('wipe carried ran')
+wipeDropped! =!
+  -> console.log('wipe dropped ran')
+
+wipe()
+wipeCarried()
+wipeDropped()
+
 # ── Compound assignment: inline, carried, indented ──
 
 total = 10

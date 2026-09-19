@@ -1884,11 +1884,12 @@ function expectedTokenType(d, form) {
   // behavior — a permanent red on a green gauge, indistinguishable
   // from a real regression.
   if (/^\s*[A-Za-z_$][\w$.]*\??::/.test(val)) return null;
-  // A function-valued PLAIN binding classifies as `function`, not
-  // `variable` — TS's own rule, and the right one. Restricted to `plain`:
-  // an arrow handed to `:=`/`~=` is wrapped in a cell, so the NAME stays a
-  // variable no matter what the arrow is.
-  if (form === 'plain' && IS_ARROW.test(val)) return 'function';
+  // A function-valued PLAIN or PINNED binding classifies as `function`,
+  // not `variable` — TS's own rule, and the right one: both lower to a
+  // bare declaration holding the arrow (`wipe! =! ->` is `const wipe =
+  // function`). Not `:=`/`~=`: an arrow handed to those is wrapped in a
+  // cell, so the NAME stays a variable no matter what the arrow is.
+  if ((form === 'plain' || form === 'pinned') && IS_ARROW.test(val)) return 'function';
   return 'variable';
 }
 // A LOOP HEAD declares its bindings, and the audit reads that from the
