@@ -1802,6 +1802,48 @@ App = component
 `, /`key:` identifies loop rows/s);
   });
 
+  test('a spread argument rejects positioned at the spread, on a child component and on a tag', () => {
+    const at = (src, pattern) => {
+      const err = emitFails(src, pattern);
+      expect(src.slice(err.start, err.end)).toMatch(/^\.\.\./);
+    };
+    at(`${KID}App = component extends div
+  render
+    div
+      Kid ...@rest
+`, /spread has no reading on a child component.*component extends Kid/s);
+    at(`${KID}App = component extends div
+  render
+    div
+      Kid label: 'a', ...@rest
+`, /spread has no reading on a child component/);
+    at(`App = component extends div
+  render
+    div
+      span ...@rest
+`, /spread has no render reading/);
+    at(`App = component
+  items := [1, 2]
+  render
+    span ...items
+`, /spread has no render reading/);
+    at(`App = component
+  render
+    span title: 'a', ...@rest
+`, /spread has no render reading/);
+    at(`App = component
+  render
+    span ...[1, 2]
+`, /spread has no render reading/);
+    at(`App = component
+  items := [1, 2]
+  render
+    = ...items
+`, /spread has no render reading/);
+    // A spread INSIDE an expression is that expression's own.
+    expect(() => compile('App = component\n  items := [1, 2]\n  render\n    = Math.max(...items)\n    span title: [...items].join(\',\')\n')).not.toThrow();
+  });
+
   test('a cross-scope render local read in a prop value rejects (the F2 class holds on component positions)', () => {
     emitFails(`${KID}App = component
   vis := true

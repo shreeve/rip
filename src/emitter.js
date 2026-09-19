@@ -266,6 +266,7 @@ const isRelation = (x) => isNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] =
   x[0] === '!in' || x[0] === '!of' || x[0] === '!instanceof') && x.length === 3;
 const isIf = (x) => isNode(x) && x[0] === 'if';
 const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
+const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
 const isObject = (x) => isNode(x) && x[0] === 'object';
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
 // What findCapturedCtrl looks for.
@@ -10653,11 +10654,23 @@ class Emitter {
       typeof stmt[1] === 'string' && RENDER_LOCAL_RE.test(stmt[1]);
   }
 
+  // `component` names the child component the spread sits on; null
+  // anywhere else in a render.
+  renderSpreadError(spread, component = null) {
+    return this.positionedError(spread, component !== null
+      ? 'emitter: a spread has no reading on a child component — pass each prop as a named pair; to forward the ' +
+        `caller's undeclared props onto '${component}', declare the wrapper \`component extends ${component}\` and ` +
+        'construct it in the render'
+      : 'emitter: a spread has no render reading — an element takes named attribute pairs, and `= expr` renders ONE value',
+    this.rstate.node);
+  }
+
   // The main render-tree dispatch. Returns the created node's var
   // name, or null for a statement with no DOM child (a render local).
   renderNode(sexpr) {
     // Render-scope locals: `x = expr` declares, compound forms mutate.
     if (this.isRenderBinding(sexpr)) return this.renderBinding(sexpr);
+    if (isSpread(sexpr)) throw this.renderSpreadError(sexpr);
     // Any OTHER assignment shape at a child position has no render
     // reading (a member write belongs in a handler
     // assignment's value as text or emits a bare write that dies).
@@ -10796,6 +10809,7 @@ class Emitter {
           'render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method ' +
           'chain; put the whole expression on the `=` line, or bind it in a method)', this.rstate.node);
       }
+      if (isSpread(sexpr[1])) throw this.renderSpreadError(sexpr[1]);
       return this.renderTextExpr(sexpr[1] ?? 'undefined', sexpr, true);
     }
 
@@ -11443,6 +11457,7 @@ class Emitter {
     };
 
     const addPair = (pair) => {
+      if (isSpread(pair)) throw this.renderSpreadError(pair, name);
       if (!isNode(pair) || pair.length !== 3) {
         throw this.positionedError(pair, 'emitter: unsupported attribute form on a child component', markNode ?? this.rstate.node);
       }
@@ -11644,6 +11659,7 @@ class Emitter {
          this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null));
     const classifyChild = (arg) => {
       if (arg == null) return;
+      if (isSpread(arg)) throw this.renderSpreadError(arg, name);
       const isBareWord = typeof arg === 'string' && RENDER_LOCAL_RE.test(arg) &&
         this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
       if (isBareWord && (isHtmlTag(arg) || arg === 'slot')
@@ -12160,6 +12176,7 @@ class Emitter {
       }
     }
     for (const pair of objExpr.slice(1)) {
+      if (isSpread(pair)) throw this.renderSpreadError(pair);
       if (!isNode(pair) || pair.length !== 3) {
         throw this.positionedError(pair, 'emitter: unsupported attribute form in render', objExpr);
       }
