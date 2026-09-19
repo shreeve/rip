@@ -240,6 +240,12 @@ const readJson = (path) => { try { return JSON.parse(readFileSync(path, 'utf8'))
 const planLanes = () => {
   const lanes = [];
   const excluded = [];
+  // tsgo is a Go binary and every lane starts it many times (rip check,
+  // the editor server); with the default GOGC=100 half of a short session
+  // is the collector. 400 is a fifth of the collections, identical
+  // answers, measured 7% off the check gate — and bun ignores the variable.
+  const GO_ENV = { GOGC: process.env.GOGC ?? '400' };
+
 
   // The full root suite: in-process + test/spawn + the extended tier
   // (see test/support/extended.js). `bun run test` is the fast edit loop
@@ -252,7 +258,7 @@ const planLanes = () => {
     // 60s, not 15s: the extended tier's scaling gates budget up to three
     // full measurements, and a busy lane stretches one past 5s.
     args: ['test', `--parallel=${ROOT_WORKERS}`, '--timeout', '60000', ...timingsArgs()],
-    env: { RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
+    env: { ...GO_ENV, RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
   });
 
   const packagesDir = join(ROOT, 'packages');
@@ -273,7 +279,7 @@ const planLanes = () => {
       cwd,
       cmd: process.execPath,
       args: ['run', 'test'],
-      env: { RIP_LANE_WORKERS: String(LANE_WORKERS) },
+      env: { ...GO_ENV, RIP_LANE_WORKERS: String(LANE_WORKERS) },
       skip: resolveTool(tool, cwd) ? undefined : `\`${tool}\` is not on PATH or in node_modules/.bin`,
     });
   }

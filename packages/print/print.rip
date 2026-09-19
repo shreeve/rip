@@ -521,12 +521,17 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # Serve and open browser
 # ==============================================================================
 
-served = false
+# The page is one self-contained response; once it has gone out the
+# process is done. A short delay lets the response flush before the
+# server closes its connections.
+finish = ->
+  server.stop(true)
+  process.exit(0)
 
 server = Bun.serve
   port: 9111
   fetch: ->
-    served = true
+    setTimeout finish, 50
     Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
 
 console.log "\nOpening browser..."
@@ -541,11 +546,3 @@ try
 catch
   console.log "Visit: http://localhost:#{server.port}/"
 
-poll = setInterval ->
-  if served
-    clearInterval(poll)
-    setTimeout ->
-      server.stop()
-      process.exit(0)
-    , 500
-, 200
