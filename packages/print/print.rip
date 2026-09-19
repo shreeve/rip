@@ -522,14 +522,16 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # ==============================================================================
 
 # The page is one self-contained response; once the browser has read it
-# the process is done. `Connection: close` ends the socket after the body,
-# and a graceful stop resolves only when that has happened, so a large
-# page or a slow reader still gets every byte.
+# the process is done. The graceful stop resolves only when the body has
+# been sent, so a large page or a slow reader still gets every byte; the
+# 5 s timer exits anyway when a browser's idle preconnect socket keeps the
+# stop from resolving.
 finish = -> server.stop().then -> process.exit 0
 
 respond = ->
   setTimeout finish, 0
-  Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' }
+  setTimeout (-> process.exit 0), 5000
+  Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
 
 # 9111 when it is free; any free port when another print is still up.
 server = null

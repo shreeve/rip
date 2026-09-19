@@ -2,8 +2,8 @@
 # print tests: flags, discovery, served page, markdown mode, shared grammar
 #
 # print.rip is a pure CLI: it highlights the requested files, serves the
-# result ONCE on http://localhost:9111/, opens a browser, and exits after
-# the first request. Every case runs it as a real subprocess through this
+# result ONCE on http://localhost:9111/ (or a free port, announced on
+# stdout), opens a browser, and exits after the first request. Every case runs it as a real subprocess through this
 # repository's rip, with a stub open/xdg-open/start first on PATH so no
 # browser ever launches. Expected values were pinned from the running v3
 # implementation (the port's behavioral oracle); the declared divergences
