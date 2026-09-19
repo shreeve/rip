@@ -176,23 +176,21 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd|th)\b/gi
 
 # The date, in the orders people write one. Every branch names its parts
-# `y`, `m`, `d` (and `t`, digits glued on after a compact date), so the
-# match says what was written without asking which branch matched.
+# `y`, `m`, `d`, so the match says what was written without asking which
+# branch matched. The date ends at the day; the time grammar takes the rest.
 REGEX_DATE =! ///
   ^(?:
-      (?<y>(?:19|20)\d\d)(?<m>\d\d)(?<d>\d\d)(?<t>\d*)           # compact: 20240229, 202402291430[00]
-  | # or...
-      (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d))[-/.\s]?               # day
-      (?<m>[a-z]{3,9}\.?)[-/.\s]?                                 # month, by name only (day-first is never numeric)
-      (?<y>(?:19|20)\d\d)                                         # year:  9 Feb 2024, 09-FEB-2024, 9Feb2024
-  | # or...
-      (?<y>(?:19|20)\d\d)                                         # year
-      (?:[-/.\s]?(?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)    # month
-      (?:[-/.\s]?(?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)))?)?        # day:   2024-02-29, 2024/2/9, 2024 Feb 9, 2024Feb9, 2024-02, 2024
-  | # or...
-      (?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?       # month
-      (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)),?[-/.\s]?             # day
-      (?<y>(?:19|20)\d\d|(?<=[-/.])\d\d)                          # year, 2 digits only after a separator: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
+    (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d))[-/.\s]?             # day
+    (?<m>[a-z]{3,9}\.?)[-/.\s]?                               # month, by name only (day-first is never numeric)
+    (?<y>(?:19|20)\d\d)                                       # year:  9 Feb 2024, 09-FEB-2024, 9Feb2024
+  |
+    (?<y>(?:19|20)\d\d)[-/.\s]?                               # year
+    (?:(?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?  # month
+    (?:(?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)))?)?              # day:   2024-02-29, 2024/2/9, 2024 Feb 9, 2024Feb9, 2024-02, 2024
+  |
+    (?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?     # month
+    (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)),?[-/.\s]?           # day
+    (?<y>(?:19|20)\d\d|(?<=[-/.])\d\d)                        # year, 2 digits only after a separator: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
   )
 ///i
 
@@ -200,7 +198,7 @@ REGEX_DATE =! ///
 # fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is read
 # only here, after a time, so `2024-02-29+05:00` is invalid.
 REGEX_TIME =! ///
-  ^(?:T|,?\sat\s|\s|,\s)                                 # after the date: T, a space, ", " or " at "
+  ^(?:T|,?\sat\s|\s|,\s)?                                # after the date: T, a space, ", ", " at ", or nothing
   (?: (?<h>\d\d?)                                        # hour
       (?::(?<m>\d\d))?                                   # :minute
       (?::(?<s>\d\d)(?:[.,](?<f>\d+))?)?                 # :second[.fraction]
@@ -512,8 +510,8 @@ def readParts(input, utc)
   s = input.trim().replace(/\s+/g, ' ').replace(REGEX_NOISE, '')
   m = s.match(REGEX_DATE)
   return null unless m
-  { y, m: mo, d, t } = m.groups
-  rest = (if t then "T#{t}" else '') + s.slice(m[0].length)   # a glued compact clock reads as `T1430`
+  { y, m: mo, d } = m.groups
+  rest = s.slice(m[0].length)
   time = parseTime(rest)
   return null unless time
   parts = Object.assign time,
