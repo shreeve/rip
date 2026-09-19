@@ -168,8 +168,8 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 #
 # Input is trimmed and whitespace-collapsed first, and the noise dropped;
 # the date is matched only up to its end, and whatever follows is the time.
-# A separator is captured once and matched again by name, so `2024-02/29`
-# is refused rather than guessed at.
+# Separators are `-`, `/`, `.` or a space, and need not agree: `2024-02/29`
+# is as readable as `2024-02-29`.
 
 # Noise the grammar ignores: a leading weekday (`Mon`, `Monday`, `Mon.`,
 # `Mon,`) and an ordinal suffix on a day (`1st`, `22nd`).
@@ -180,19 +180,19 @@ REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd
 # match says what was written without asking which branch matched.
 REGEX_DATE =! ///
   ^(?:
-      (?<y>(?:19|20)\d\d)                                          # year, then either
-      (?: (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                            #   month day, glued:       20240229, 202402291430[00]
-        | (?<m>[a-z]+)(?<d>\d\d?)                                  #   month name, day, glued: 2024Feb9
-        | (?<s>[-/.\s])(?<m>\d\d?|[a-z]+\.?)(?:\k<s>(?<d>\d\d?))?  #   month[, day]:           2024-02-29, 2024/2/9, 2024 Feb 9, 2024-02
-      )?                                                           #   or nothing:             2024
+      (?<y>(?:19|20)\d\d)                                # year, then either
+      (?: (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                  #   month day, glued:  20240229, 202402291430[00]
+        | [-/.\s]?(?<m>[a-z]+\.?)(?:[-/.\s]?(?<d>\d\d?))?  #   month name[, day]: 2024-Feb-09, 2024 Feb 9, 2024Feb9
+        | [-/.\s](?<m>\d\d?)(?:[-/.\s](?<d>\d\d?))?      #   month[, day]:      2024-02-29, 2024/2/9, 2024-02
+      )?                                                 #   or nothing:        2024
   | # or...
-      (?<d>\d\d?)(?<s>[-/.\s]?)                                    # day
-      (?<m>[a-z]+\.?)\k<s>                                         # month name (day-first only when spelled out)
-      (?<y>(?:19|20)\d\d)                                          # year:                    9 Feb 2024, 09-FEB-2024, 9Feb2024
+      (?<d>\d\d?)[-/.\s]?                                # day
+      (?<m>[a-z]+\.?)[-/.\s]?                            # month name (day-first only when spelled out)
+      (?<y>(?:19|20)\d\d)                                # year:               9 Feb 2024, 09-FEB-2024, 9Feb2024
   | # or...
-      (?<m>\d\d?|[a-z]+\.?)(?<s>[-/.\s])                           # month
-      (?<d>\d\d?)(?:,\s?|\k<s>)                                    # day, then a comma or the separator again
-      (?<y>(?:19|20)?\d\d)                                         # year, 2 or 4 digits:     2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
+      (?<m>\d\d?|[a-z]+\.?)[-/.\s]                       # month
+      (?<d>\d\d?)(?:,\s?|[-/.\s])                        # day, then a comma or a separator
+      (?<y>(?:19|20)?\d\d)                               # year, 2 or 4 digits: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
   )
 ///i
 
