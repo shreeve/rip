@@ -83,7 +83,7 @@ TICK_MS = Number(process.env.RIP_AGENT_TICK_MS) or 2000
 # answer in under 1ms at idle). Generous on purpose — with DOWN_TICKS
 # gating recovery, slow detection costs seconds, while a false verdict
 # costs a running edge.
-PROBE_TIMEOUT = Number(process.env.RIP_AGENT_PROBE_TIMEOUT_MS) or 5000
+PROBE_TIMEOUT = 5000
 # Consecutive failed reconcile ticks before recovery acts.
 DOWN_TICKS = 3
 
@@ -396,7 +396,7 @@ snapshotEdge = ->
 # and then waits, unbounded, for the manager to go quiet — nothing is
 # marked running for that entire span. Boot counts too; nobody spawns a
 # control plane with nothing to ask it.
-IDLE_GRACE = Number(process.env.RIP_AGENT_IDLE_GRACE_MS) or 2000
+IDLE_GRACE = 2000
 inFlight = 0
 lastActivity = Date.now()
 
