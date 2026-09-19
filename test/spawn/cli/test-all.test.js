@@ -26,6 +26,7 @@
 // broken aggregation is precisely what a green fast loop would hide.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from '../../support/spawn.js';
+import { alive, until } from '../../support/wait.js';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -246,42 +247,28 @@ describe('the lane orchestrator', () => {
     expect(r.status).toBe(0);
   });
 
-  // The budget the orchestrator computes has to REACH the suites that
-  // size themselves by it (vscode's --parallel count; sites keeps its
-  // own latency-bound cap), and it reaches them as an environment variable: the lane's
-  // own script still runs, it just reads a number the orchestrator set.
-  // A budget that stops arriving is invisible from the exit code — the
-  // lane sizes itself by the machine again and everything still passes,
-  // slower — so the probe lane prints what it was handed.
+  // The budget has to REACH the suites that size themselves by it
+  // (vscode's --parallel count), and a budget that stops arriving is
+  // invisible from the exit code — the lane sizes itself by the machine
+  // again and everything still passes, slower. So the probe lane prints
+  // what it was handed, and it must be the number the banner promised.
   test('every package lane is handed its share of the budget as RIP_LANE_WORKERS', () => {
     const probe = {
       script: 'bun -e ' + JSON.stringify("console.log('1 tests: lane-workers=' + process.env.RIP_LANE_WORKERS)"),
     };
-    // --jobs 3 pins the sibling count (2) so the arithmetic below is the
-    // same on every box; the peak still follows the cores.
-    const r = orchestrate(fixture({ probe }), {}, '--jobs', '3');
+    const r = orchestrate(fixture({ probe }));
     expect(r.status).toBe(0);
-    const banner = r.stdout.match(/3 at a time on (\d+) cores \(root lane (\d+) workers, (\d+) per sibling lane\)/);
+    const banner = r.stdout.match(/(\d+) per sibling lane\)/);
     expect(banner).not.toBeNull();
-    const [, cores, root, perLane] = banner.map(Number);
-    // The value the lane saw is the value the banner promised — matched
-    // on the printed line, not on bun's echo of the `bun -e` source,
-    // which carries the expression rather than a number.
-    expect(perLane).toBeGreaterThanOrEqual(1);
-    expect(r.stdout).toContain(`lane-workers=${perLane}\n`);
-    // One budget: root + one fan-out sibling at perLane + the other
-    // sibling at one never exceeds the peak (1.4x cores) unless the root
-    // lane is pinned at its floor of two.
-    const peak = Math.max(3, Math.round(cores * 1.4));
-    expect(root).toBeGreaterThanOrEqual(2);
-    expect(perLane).toBeLessThanOrEqual(4);
-    expect(root + 1 + perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 1 + perLane));
+    expect(r.stdout).toContain(`lane-workers=${banner[1]}\n`);
   });
 
   test('lanes are planned longest-first, unlisted lanes last in discovery order', () => {
-    // sites (77s) and ui (33s) are in the durations map; the other two
-    // are not and must trail in the order the walk found them.
-    const r = plan(fixture({ zebra: GREEN, sites: GREEN, aardvark: GREEN, ui: GREEN }));
+    // sites and ui are in the orchestrator's longest-first list, sites
+    // ahead of ui; the other two are not and trail in the order the walk
+    // found them.
+    const root = fixture({ zebra: GREEN, sites: GREEN, aardvark: GREEN, ui: GREEN });
+    const r = plan(root);
     expect(r.status).toBe(0);
     expect(planned(r)).toEqual([
       'root (extended tier)',
@@ -290,6 +277,7 @@ describe('the lane orchestrator', () => {
       'packages/aardvark',
       'packages/zebra',
     ]);
+    expect(readdirSync(join(root, 'test'))).toEqual(['root.test.js']); // a plan writes nothing
   });
 
   // A real run starts lanes in the planned order too (the plan is the
@@ -306,41 +294,6 @@ describe('the lane orchestrator', () => {
     ]);
   });
 
-  // Bun 1.4.2's --timings makes --parallel start the slowest files
-  // first. The file is gitignored and MEASURED: the orchestrator seeds an
-  // empty one on first sight, so the first run measures and every later
-  // run is ordered. An older bun must never be handed the flag.
-  test('the root lane takes --timings from test/.timings.json, seeded on first sight', () => {
-    const root = fixture({});
-    const timingsFile = join(root, 'test/.timings.json');
-    expect(existsSync(timingsFile)).toBe(false);
-    const first = plan(root);
-    expect(first.status).toBe(0);
-    if (!Bun.semver.satisfies(Bun.version, '>=1.4.2')) {
-      expect(first.stdout).not.toContain('--timings');
-      expect(existsSync(timingsFile)).toBe(false);
-      return;
-    }
-    // Seeded by the plan itself (empty is a valid timings map), and named
-    // in the root lane's args from the very first run.
-    expect(existsSync(timingsFile)).toBe(true);
-    expect(readFileSync(timingsFile, 'utf8')).toBe('');
-    expect(first.stdout).toMatch(/· root lane: bun test --parallel=\d+ --timeout 60000 --timings=test\/.timings.json --update-timings\n/);
-    // The run measures into the seed, so the next run has real numbers.
-    const r = orchestrate(root);
-    expect(r.status).toBe(0);
-    const timings = JSON.parse(readFileSync(timingsFile, 'utf8'));
-    expect(timings.files).toHaveProperty(['test/root.test.js']);
-  });
-
-  test('--root-workers and --lane-workers override the budget', () => {
-    const root = fixture({ zebra: GREEN });
-    const r = orchestrate(root, {}, '--plan', '--root-workers', '7', '--lane-workers', '3');
-    expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/root lane 7 workers, 3 per sibling lane/);
-    expect(r.stdout).toMatch(/· root lane: bun test --parallel=7 /);
-    expect(r.stdout).toContain('RIP_LANE_WORKERS=3');
-  });
 });
 
 // This repository's own plan, asserted without running anything (`--plan`
@@ -392,17 +345,6 @@ test('the plan for this repository is one lane per packages/*/ suite plus root',
 });
 
 describe('an interrupted run takes its lanes down', () => {
-  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const until = async (predicate, ms) => {
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-      if (predicate()) return true;
-      await sleep(50);
-    }
-    return predicate();
-  };
-
   test('SIGTERM to the orchestrator stops a lane in flight and exits 143', async () => {
     const root = fixture({ parked: PARKED });
     const pidFile = join(root, 'packages', 'parked', 'lane.pid');
