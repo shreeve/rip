@@ -191,7 +191,8 @@ export class LspClient {
 // a server-to-client ask arriving during the handshake already has its
 // answer (an unhandled ask gets a -32601 error, which tsgo may cache).
 export async function startTsgo(rootDir, { onNotification = null, clientCapabilities = {}, serverRequests = {} } = {}) {
-  const client = new LspClient(tsgoBinaryPath(), ['--lsp', '--stdio'], { cwd: rootDir, onNotification });
+  // GOGC=400: tsgo trades heap for fewer collections unless the caller set its own.
+  const client = new LspClient(tsgoBinaryPath(), ['--lsp', '--stdio'], { cwd: rootDir, onNotification, env: { ...process.env, GOGC: process.env.GOGC ?? '400' } });
   for (const [method, handler] of Object.entries(serverRequests)) {
     client.onServerRequest(method, handler);
   }
