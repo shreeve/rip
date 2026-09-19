@@ -154,7 +154,7 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 iso = (t, clock = false) ->
   two = (n) -> String(n).padStart(2, '0')
   out = "#{String(t.year).padStart(4, '0')}-#{two t.month}-#{two t.day}"
-  return out unless clock
+  clock or return out
   out += "T#{two t.hour}:#{two t.minute}:#{two t.second}"
   out += ".#{String(t.ms).padStart(3, '0')}" if t.ms
   if t.zone?
