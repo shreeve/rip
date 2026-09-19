@@ -40,7 +40,7 @@
       "character": 16,
       "code": 18046,
       "token": "err",
-      "why": "catch bindings: reached scope, held by posture (useUnknownInCatchVariables) \u2014 the family TypeScript 7 turned on by default"
+      "why": "catch bindings: reached scope, held by posture (useUnknownInCatchVariables) — the family TypeScript 7 turned on by default"
     },
     {
       "line": 45,
@@ -61,21 +61,21 @@
       "character": 16,
       "code": 2339,
       "token": "factor",
-      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything \u2014 the bare literal"
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — the bare literal"
     },
     {
       "line": 58,
       "character": 16,
       "code": 2339,
       "token": "amount",
-      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything \u2014 a paramless `->`"
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a paramless `->`"
     },
     {
       "line": 61,
       "character": 15,
       "code": 2339,
       "token": "width",
-      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything \u2014 a parenthesized literal"
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a parenthesized literal"
     },
     {
       "line": 63,
@@ -89,21 +89,21 @@
       "character": 15,
       "code": 2339,
       "token": "depth",
-      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything \u2014 a literal passed as a call argument"
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a literal passed as a call argument"
     },
     {
       "line": 69,
       "character": 17,
       "code": 2339,
       "token": "speed",
-      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything \u2014 a method inside an object literal"
+      "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a method inside an object literal"
     },
     {
       "line": 79,
       "character": 6,
       "code": 2339,
       "token": "status",
-      "why": "property seeding: `.new` on a typed line is a member name, not a binding \u2014 `Error.new` types nothing, so the expando write is held; strict publishes it"
+      "why": "property seeding: `.new` on a typed line is a member name, not a binding — `Error.new` types nothing, so the expando write is held; strict publishes it"
     },
     {
       "line": 88,
@@ -124,7 +124,7 @@
       "character": 0,
       "code": 2322,
       "token": "box",
-      "why": "inferred receiver: the field annotation sits on the class and nothing annotated reaches `box`, so the write is held \u2014 inference alone never publishes; strict checks it"
+      "why": "inferred receiver: the field annotation sits on the class and nothing annotated reaches `box`, so the write is held — inference alone never publishes; strict checks it"
     }
   ],
   "published.rip": [
@@ -168,14 +168,14 @@
       "character": 28,
       "code": 2353,
       "token": "active",
-      "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared \u2014 anchored on the key that names it, the body\u2019s own word, which is a mapped position"
+      "why": "reach by construction: models are compiler-typed, and the scope filters a column the schema never declared — anchored on the key that names it, the body’s own word, which is a mapped position"
     },
     {
       "line": 32,
       "character": 20,
       "code": 2339,
       "token": "length",
-      "why": "reach by flow through a CALL: a binding assigned from a typed call is typed \u2014 a call is a value, unlike a function body"
+      "why": "reach by flow through a CALL: a binding assigned from a typed call is typed — a call is a value, unlike a function body"
     },
     {
       "line": 36,
