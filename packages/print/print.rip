@@ -521,15 +521,22 @@ html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 # Serve and open browser
 # ==============================================================================
 
-# The page is one self-contained response; once the browser has read it
-# the process is done. `Connection: close` ends the socket after the body,
-# and a graceful stop resolves only when that has happened, so a large
-# page or a slow reader still gets every byte.
-finish = -> server.stop().then -> process.exit 0
-
+# The page goes out in pieces as the browser takes them, and the process
+# exits a moment after the last piece is handed over: a slow reader still
+# gets every byte, and an idle connection the browser opened alongside
+# cannot hold the exit.
 respond = ->
-  setTimeout finish, 0
-  Response.new html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' }
+  bytes = Buffer.from html
+  offset = 0
+  body = ReadableStream.new
+    pull: (c) ->
+      if offset >= bytes.length
+        c.close()
+        setTimeout (-> process.exit 0), 1000
+      else
+        c.enqueue bytes.subarray(offset, offset + 65536)
+        offset += 65536
+  Response.new body, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
 
 # 9111 when it is free; any free port when another print is still up.
 server = null

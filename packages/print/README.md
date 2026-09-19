@@ -5,8 +5,9 @@
 > **Syntax-highlighted source code printer — highlight.js under the hood, 40+ file extensions routed to their grammars, served once to your browser, print-ready.**
 
 `rip-print` highlights the files you point it at, serves the result
-once on `http://localhost:9111/`, opens your browser, and exits — no
-output files, no cleanup, nothing left running. Rip sources highlight
+once on `http://localhost:9111/` (or a free port when 9111 is taken —
+the URL is printed), opens your browser, and exits — no output files,
+no cleanup, nothing left running. Rip sources highlight
 through the repository's shared grammar (`rip/highlight`), so
 Rip Print and the editor surfaces stay in lockstep. This is a pure
 CLI: `print.rip` is the whole program and there is no library export

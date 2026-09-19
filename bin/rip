@@ -128,23 +128,16 @@ if (args[0] === 'schema') {
   process.exit(r.status ?? 1);
 }
 
-// `rip check` — the headless type-checker: drive the editor's own
-// faces→mirror→tsgo→map-back pipeline over the given files/dirs and
-// report type diagnostics on the .rip source. Dispatched before option
-// parsing, like `schema` (a file literally named `check` runs as
-// `rip ./check`). No loader preload — the checker spawns the language
-// server, which owns compilation.
-//
-// Dispatched IN THIS PROCESS rather than through a second bun: check.js
-// is a top-level script that reads process.argv and owns its exit codes
-// (it always ends in process.exit), so it runs here exactly as it would
-// as a child — same fds (its color and width read the same TTY), same
-// cwd and env — minus a bun start and a second compiler load.
+// `rip check` — the headless type-checker, dispatched before option
+// parsing like `schema` (a file literally named `check` runs as
+// `rip ./check`). It runs in this process: check.js is a top-level
+// script that reads process.argv and exits itself on every path, so
+// it sees the same TTY, cwd and env it would as a child, minus a bun
+// start and a second compiler load.
 if (args[0] === 'check') {
   const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/check.js');
   process.argv = [process.argv[0], checkCliPath, ...args.slice(1)];
   await import(checkCliPath);
-  process.exit(0); // unreachable: check.js exits on every path
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip
@@ -544,23 +537,14 @@ const run = (path, argv) => {
       env.RIP_SHEBANG_ENTRY = entry;
     }
   }
-  // The child is OURS. A `kill` aimed at this launcher — Playwright
-  // ending the web server it started, an orchestrator's lane timeout,
-  // a supervisor — has to reach the process actually holding the port,
-  // and a launcher whose own parent vanished without a word (SIGKILL, a
-  // PTY that closed under it) must not leave that process running
-  // forever: that is how a test server ends up squatting on :4180 for
-  // the next run to trip over. So: spawn asynchronously, forward the
-  // terminating signals, and watch our parent — reparented to pid 1
-  // means orphaned, and an orphaned launcher takes its child with it.
-  // SIGINT is deliberately not forwarded: a terminal delivers Ctrl-C
-  // to the whole foreground group already, and a second copy would
-  // read as "force quit" to a child that handles the first (a manager
-  // draining its workers). Daemons that outlive their launcher (the
-  // sites agent and managers) are spawned straight through Bun with
-  // the loader, never through this path, so nothing legitimate is
-  // orphaned here on purpose. The child's exit status is ours, as
-  // before; a child that died of a signal reports 1, as before.
+  // The child is ours: a kill aimed at this launcher (Playwright, a
+  // lane timeout, a supervisor) is forwarded to the process holding
+  // the port, and a launcher orphaned without a word (reparented to
+  // pid 1) takes its child with it, so no test server outlives its
+  // run. SIGINT is not forwarded: the terminal already delivers Ctrl-C
+  // to the whole foreground group, and a second copy would read as a
+  // force quit. Daemons that outlive their launcher are spawned
+  // straight through Bun, never through this path.
   const child = spawn('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
     stdio: 'inherit',
     env,
