@@ -216,7 +216,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
       // TS2322 onto the `Chip label: 123` head line the directive governs —
       // absorbed, and absorbing it marked the directive USED, so the TS2578
       // drops. A hint alone would NOT have marked it used: that guard is
-      // pinned by check.test.js ('an unused @ts-expect-error stays loud').
+      // pinned by check-diagnostics-3.test.js ('an unused @ts-expect-error stays loud').
       const chip = 'export Chip = component\n  @label: string := ""\n\n  render\n    span label\n\n';
       await api.open('app.rip',
         chip + 'export App = component\n  render\n    div\n      # @ts-expect-error — label expects string\n      Chip label: 123\n');
