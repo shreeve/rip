@@ -7,9 +7,9 @@ import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { Stores } from '../../src/stores.js';
-import { ripFiles } from '../support/rip-files.js';
 import { expectLinearDoubling, expectLinearOpsDoubling } from '../support/scaling.js';
 import { describeExtended } from '../support/extended.js';
+import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
 
@@ -257,146 +257,6 @@ describe('$self extent: spans cover exactly real content', () => {
     const { stores } = parse(src);
     const [assign] = stores.nodesByKind('assign');
     expect(src.slice(...stores.selfSpan(assign.nodeId))).toBe('x =\n  5');
-  });
-});
-
-describe('CodeBuilder mark-span protocol', () => {
-  test('an out-of-range source span rejects loudly, never clamps', async () => {
-    // Every span derives from token offsets into the compiled source,
-    // so an out-of-range span can only mean store corruption — and the
-    // exactness check's length gate reads the span's nominal width,
-    // which is equivalent to slicing only in-range. Rule 5: fail with
-    // an identifying error instead of silently comparing over a clamp.
-    const { CodeBuilder } = await import('../../src/builder.js');
-    const stores = { node: () => ({ sourceStart: 0, sourceEnd: 1 }) };
-    const b = new CodeBuilder(stores, { source: '' });
-    b.beginMark(1, '$self');
-    expect(() => b.endMark()).toThrow(
-      /source span \[0, 1\) outside the source text \[0, 0\) — store-protocol violation/,
-    );
-  });
-});
-
-describe('store invariants over the corpus', () => {
-  const corpusDir = join(import.meta.dir, '../corpus');
-  const files = ripFiles(corpusDir);
-
-  for (const file of files) {
-    test(file, () => {
-      const src = readFileSync(join(corpusDir, file), 'utf8');
-      const { stores } = parse(src);
-      const { nodes, roles } = stores;
-
-      // Whitespace inside string/heredoc literals IS content: spans whose
-      // edges land inside a STRING token's raw extent are exempt from the
-      // no-whitespace-edges check (an interpolation chunk legitimately
-      // starts at a newline).
-      const { tokenize } = require('../../src/lexer.js');
-      const stringRanges = tokenize(src).tokens
-        .filter(t => t.kind === 'STRING' || t.kind === 'STRING_START' || t.kind === 'STRING_END')
-        .map(t => [t.start, t.end]);
-      const inString = (o) => stringRanges.some(([s, e]) => s <= o && o <= e);
-
-      // Dense nodeIds from 1, in registration order.
-      nodes.forEach((n, i) => expect(n.nodeId).toBe(i + 1));
-
-      for (const n of nodes) {
-        expect(n.fileId).toBe(0);
-        expect(n.sourceStart).toBeGreaterThanOrEqual(0);
-        expect(n.sourceEnd).toBeGreaterThanOrEqual(n.sourceStart);
-        expect(n.sourceEnd).toBeLessThanOrEqual(src.length);
-        // $self extent: the span covers the construct's non-trivia
-        // source extent, including any real delimiter tokens — so its
-        // edges land on real content, never on whitespace or trivia. One
-        // matched TERMINATOR may close a span (its newline is a real
-        // grammar symbol: `When ... TERMINATOR`) — and symmetrically may
-        // OPEN one: a list rule whose first symbol is an empty production
-        // anchored at its separator (`AssignList(ε) OptComma TERMINATOR
-        // AssignObj` in an unindented brace body) starts on that matched
-        // newline. A single newline at either edge is legal; anything
-        // more is leakage. String-literal interiors are content, exempt
-        // from the edge check.
-        const slice = src.slice(n.sourceStart, n.sourceEnd);
-        if (!inString(n.sourceStart)) {
-          const led = slice.startsWith('\r\n') ? slice.slice(2) : (slice.startsWith('\n') ? slice.slice(1) : slice);
-          expect(led).not.toMatch(/^\s/);
-        }
-        if (!inString(n.sourceEnd)) {
-          const trimmed = slice.endsWith('\n') ? slice.slice(0, -1) : slice;
-          expect(trimmed).not.toMatch(/\s$/);
-        }
-      }
-
-      for (const r of roles) {
-        const owner = stores.node(r.nodeId);
-        expect(owner).not.toBeNull();
-        expect(r.fileId).toBe(0);
-        if ('literal' in r) {
-          // Literal-sourced: value only, never a span.
-          expect(r.grammarRef).toBeNull();
-          expect('sourceStart' in r).toBe(false);
-          expect('childNodeId' in r).toBe(false);
-        } else {
-          // A nested-node role has no grammarRef but a real span and a
-          // child; a ref role has both.
-          if (r.grammarRef === null) expect(stores.node(r.childNodeId)).not.toBeNull();
-          // Containment: every role span sits inside its owner's span.
-          expect(r.sourceStart).toBeGreaterThanOrEqual(owner.sourceStart);
-          expect(r.sourceEnd).toBeLessThanOrEqual(owner.sourceEnd);
-          expect(r.sourceStart).toBeLessThanOrEqual(r.sourceEnd);
-          // Every childNodeId resolves to an existing node row.
-          if (r.childNodeId !== null) {
-            expect(stores.node(r.childNodeId)).not.toBeNull();
-          }
-          if (r.spread) expect(r.childNodeId).toBeNull();
-        }
-      }
-    });
-  }
-});
-
-// ── the mapping query index ──────────────────────────────────────────
-// atGenerated/atSource answer through a centered interval tree. These
-// pins hold it to the full-scan CONTRACT (same rows, same order) and
-// to its scaling promise.
-describe('the mapping query index', () => {
-  const bruteAtGenerated = (rows, x) => rows
-    .filter((r) => r.generatedStart <= x && x < r.generatedEnd)
-    .sort((a, b) => (a.generatedEnd - a.generatedStart) - (b.generatedEnd - b.generatedStart));
-  const bruteAtSource = (rows, x) => rows
-    .filter((r) => r.sourceStart <= x && x < r.sourceEnd)
-    .sort((a, b) => (a.sourceEnd - a.sourceStart) - (b.sourceEnd - b.sourceStart));
-
-  test('answers byte-identically to the full scan over the corpus, order included', async () => {
-    const { compile } = await import('../../src/compiler.js');
-    const dir = join(import.meta.dir, '../corpus');
-    for (const f of ripFiles(dir)) {
-      const src = readFileSync(join(dir, f), 'utf8');
-      const r = compile(src, { path: f });
-      const m = r.mappings;
-      const probes = [0, Math.max(0, r.code.length - 1)];
-      for (let x = 0; x < r.code.length; x += 61) probes.push(x);
-      for (let x = 0; x < src.length; x += 61) probes.push(x);
-      for (const x of probes) {
-        expect(m.atGenerated(x)).toEqual(bruteAtGenerated(m.rows, x));
-        expect(m.atSource(x)).toEqual(bruteAtSource(m.rows, x));
-      }
-    }
-  }, 30000);
-
-  test('rows appended after a query are visible to the next query (count-keyed rebuild)', async () => {
-    const { compile } = await import('../../src/compiler.js');
-    const r = compile('x = 1\ny = x + 2\n', { path: 'p.rip' });
-    const m = r.mappings;
-    const before = m.atGenerated(0).length;
-    expect(before).toBeGreaterThan(0);
-    m.rows.push({
-      nodeId: -1, role: '$self', mappingKind: 'cover',
-      sourceStart: 0, sourceEnd: 1, generatedStart: 0, generatedEnd: r.code.length, fileId: 0,
-    });
-    const after = m.atGenerated(0);
-    expect(after.length).toBe(before + 1);
-    expect(after).toEqual(bruteAtGenerated(m.rows, 0));
   });
 });
 
@@ -680,10 +540,145 @@ describeExtended('emission scaling', () => {
   });
 });
 
+describe('CodeBuilder mark-span protocol', () => {
+  test('an out-of-range source span rejects loudly, never clamps', async () => {
+    // Every span derives from token offsets into the compiled source,
+    // so an out-of-range span can only mean store corruption — and the
+    // exactness check's length gate reads the span's nominal width,
+    // which is equivalent to slicing only in-range. Rule 5: fail with
+    // an identifying error instead of silently comparing over a clamp.
+    const { CodeBuilder } = await import('../../src/builder.js');
+    const stores = { node: () => ({ sourceStart: 0, sourceEnd: 1 }) };
+    const b = new CodeBuilder(stores, { source: '' });
+    b.beginMark(1, '$self');
+    expect(() => b.endMark()).toThrow(
+      /source span \[0, 1\) outside the source text \[0, 0\) — store-protocol violation/,
+    );
+  });
+});
+
+describe('store invariants over the corpus', () => {
+  const corpusDir = join(import.meta.dir, '../corpus');
+  const files = ripFiles(corpusDir);
+
+  for (const file of files) {
+    test(file, () => {
+      const src = readFileSync(join(corpusDir, file), 'utf8');
+      const { stores } = parse(src);
+      const { nodes, roles } = stores;
+
+      // Whitespace inside string/heredoc literals IS content: spans whose
+      // edges land inside a STRING token's raw extent are exempt from the
+      // no-whitespace-edges check (an interpolation chunk legitimately
+      // starts at a newline).
+      const { tokenize } = require('../../src/lexer.js');
+      const stringRanges = tokenize(src).tokens
+        .filter(t => t.kind === 'STRING' || t.kind === 'STRING_START' || t.kind === 'STRING_END')
+        .map(t => [t.start, t.end]);
+      const inString = (o) => stringRanges.some(([s, e]) => s <= o && o <= e);
+
+      // Dense nodeIds from 1, in registration order.
+      nodes.forEach((n, i) => expect(n.nodeId).toBe(i + 1));
+
+      for (const n of nodes) {
+        expect(n.fileId).toBe(0);
+        expect(n.sourceStart).toBeGreaterThanOrEqual(0);
+        expect(n.sourceEnd).toBeGreaterThanOrEqual(n.sourceStart);
+        expect(n.sourceEnd).toBeLessThanOrEqual(src.length);
+        // $self extent: the span covers the construct's non-trivia
+        // source extent, including any real delimiter tokens — so its
+        // edges land on real content, never on whitespace or trivia. One
+        // matched TERMINATOR may close a span (its newline is a real
+        // grammar symbol: `When ... TERMINATOR`) — and symmetrically may
+        // OPEN one: a list rule whose first symbol is an empty production
+        // anchored at its separator (`AssignList(ε) OptComma TERMINATOR
+        // AssignObj` in an unindented brace body) starts on that matched
+        // newline. A single newline at either edge is legal; anything
+        // more is leakage. String-literal interiors are content, exempt
+        // from the edge check.
+        const slice = src.slice(n.sourceStart, n.sourceEnd);
+        if (!inString(n.sourceStart)) {
+          const led = slice.startsWith('\r\n') ? slice.slice(2) : (slice.startsWith('\n') ? slice.slice(1) : slice);
+          expect(led).not.toMatch(/^\s/);
+        }
+        if (!inString(n.sourceEnd)) {
+          const trimmed = slice.endsWith('\n') ? slice.slice(0, -1) : slice;
+          expect(trimmed).not.toMatch(/\s$/);
+        }
+      }
+
+      for (const r of roles) {
+        const owner = stores.node(r.nodeId);
+        expect(owner).not.toBeNull();
+        expect(r.fileId).toBe(0);
+        if ('literal' in r) {
+          // Literal-sourced: value only, never a span.
+          expect(r.grammarRef).toBeNull();
+          expect('sourceStart' in r).toBe(false);
+          expect('childNodeId' in r).toBe(false);
+        } else {
+          // A nested-node role has no grammarRef but a real span and a
+          // child; a ref role has both.
+          if (r.grammarRef === null) expect(stores.node(r.childNodeId)).not.toBeNull();
+          // Containment: every role span sits inside its owner's span.
+          expect(r.sourceStart).toBeGreaterThanOrEqual(owner.sourceStart);
+          expect(r.sourceEnd).toBeLessThanOrEqual(owner.sourceEnd);
+          expect(r.sourceStart).toBeLessThanOrEqual(r.sourceEnd);
+          // Every childNodeId resolves to an existing node row.
+          if (r.childNodeId !== null) {
+            expect(stores.node(r.childNodeId)).not.toBeNull();
+          }
+          if (r.spread) expect(r.childNodeId).toBeNull();
+        }
+      }
+    });
+  }
+});
+
 // ── the mapping query index ──────────────────────────────────────────
-// The count gate on atGenerated/atSource's centered interval tree; the
-// full-scan contract pins sit beside the index in stores.test.js.
+// atGenerated/atSource answer through a centered interval tree. These
+// pins hold it to the full-scan CONTRACT (same rows, same order) and
+// to its scaling promise.
 describe('the mapping query index', () => {
+  const bruteAtGenerated = (rows, x) => rows
+    .filter((r) => r.generatedStart <= x && x < r.generatedEnd)
+    .sort((a, b) => (a.generatedEnd - a.generatedStart) - (b.generatedEnd - b.generatedStart));
+  const bruteAtSource = (rows, x) => rows
+    .filter((r) => r.sourceStart <= x && x < r.sourceEnd)
+    .sort((a, b) => (a.sourceEnd - a.sourceStart) - (b.sourceEnd - b.sourceStart));
+
+  test('answers byte-identically to the full scan over the corpus, order included', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    const dir = join(import.meta.dir, '../corpus');
+    for (const f of ripFiles(dir)) {
+      const src = readFileSync(join(dir, f), 'utf8');
+      const r = compile(src, { path: f });
+      const m = r.mappings;
+      const probes = [0, Math.max(0, r.code.length - 1)];
+      for (let x = 0; x < r.code.length; x += 61) probes.push(x);
+      for (let x = 0; x < src.length; x += 61) probes.push(x);
+      for (const x of probes) {
+        expect(m.atGenerated(x)).toEqual(bruteAtGenerated(m.rows, x));
+        expect(m.atSource(x)).toEqual(bruteAtSource(m.rows, x));
+      }
+    }
+  }, 30000);
+
+  test('rows appended after a query are visible to the next query (count-keyed rebuild)', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    const r = compile('x = 1\ny = x + 2\n', { path: 'p.rip' });
+    const m = r.mappings;
+    const before = m.atGenerated(0).length;
+    expect(before).toBeGreaterThan(0);
+    m.rows.push({
+      nodeId: -1, role: '$self', mappingKind: 'cover',
+      sourceStart: 0, sourceEnd: 1, generatedStart: 0, generatedEnd: r.code.length, fileId: 0,
+    });
+    const after = m.atGenerated(0);
+    expect(after.length).toBe(before + 1);
+    expect(after).toEqual(bruteAtGenerated(m.rows, 0));
+  });
+
   test('scaling: an n-query batch over an n-statement program stays near-linear in index ops', async () => {
     const { compile } = await import('../../src/compiler.js');
     const { syncCounterFlag } = await import('../../src/counter.js');
