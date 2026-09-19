@@ -150,8 +150,8 @@ RELATIVE_THRESHOLDS =! [
 
 # ==[ Regex ]==
 
-REGEX_FORMAT   =! /\[([^\]]+)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|d|HH|H|hh|h|mm|m|ss|s|SSS|a|A|Q|ZZ|Z|zzz|z/g
-REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH|H|hh|h|mm|m|ss|s|SSS|SS|S|a|A|Q|ZZ|Z)/g
+REGEX_FORMAT   =! /\[([^\]]+)\]|Y{2,4}|M{1,4}|Do|D{1,2}|d{1,4}|H{1,2}|h{1,2}|m{1,2}|s{1,2}|SSS|a|A|Q|Z{1,2}|z{1,3}/g
+REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(Y{2,4}|M{1,4}|D{1,2}|H{1,2}|h{1,2}|m{1,2}|s{1,2}|S{1,3}|a|A|Q|Z{1,2})/g
 
 # ---- Auto-detect grammar (see parseDate) ----
 #
@@ -992,7 +992,7 @@ def durationUnit(u)
   "#{key}s"
 
 DURATION_REGEX_PARSE  =! /^(-|\+)?P(?:([-+]?[0-9,.]*)Y)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)W)?(?:([-+]?[0-9,.]*)D)?(?:T(?:([-+]?[0-9,.]*)H)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)S)?)?$/
-DURATION_REGEX_FORMAT =! /\[([^\]]+)\]|YYYY|YY|Y|MM|M|DD|D|HH|H|mm|m|ss|s|SSS/g
+DURATION_REGEX_FORMAT =! /\[([^\]]+)\]|Y{1,4}|M{1,2}|D{1,2}|H{1,2}|m{1,2}|s{1,2}|SSS/g
 
 export def isDuration(x: unknown): boolean
   x instanceof Duration
