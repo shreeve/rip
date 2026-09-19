@@ -72,21 +72,9 @@ managerEnv = ->
   env
 
 # The agent's clocks. Production runs the defaults; the appliance suite
-# sets these lower so waits that PROVE a clock elapsed (idle exit, the
-# superseded-agent tick) are bounded by the injected value, not by
-# seconds of wall time. Same rule as manager.rip's table: an integer
-# greater than zero, or the process refuses to start.
-#
-#   RIP_AGENT_PROBE_TIMEOUT_MS  manager / peer probe deadline (PROBE_TIMEOUT)
-#   RIP_AGENT_IDLE_GRACE_MS     quiet time before an idle agent may exit (IDLE_GRACE)
-#   RIP_AGENT_TICK_MS           reconcile + idle-sweep interval (TICK_MS)
-positiveEnv = (name, fallback) ->
-  text = process.env[name] or String(fallback)
-  value = parseInt text
-  abort "rip-agent: #{name} must be an integer greater than zero" unless Number.isFinite(value) and value > 0 and String(value) is text
-  value
-
-TICK_MS = positiveEnv 'RIP_AGENT_TICK_MS', 2000
+# sets these lower so a test that must watch a clock run out (idle exit,
+# the superseded-agent tick) waits milliseconds, not seconds.
+TICK_MS = Number(process.env.RIP_AGENT_TICK_MS) or 2000
 
 # Probe verdicts ride the agent's OWN event loop: AbortSignal.timeout
 # is wall-clock, so with every core busy a healthy peer's reply sits
@@ -95,7 +83,7 @@ TICK_MS = positiveEnv 'RIP_AGENT_TICK_MS', 2000
 # answer in under 1ms at idle). Generous on purpose — with DOWN_TICKS
 # gating recovery, slow detection costs seconds, while a false verdict
 # costs a running edge.
-PROBE_TIMEOUT = positiveEnv 'RIP_AGENT_PROBE_TIMEOUT_MS', 5000
+PROBE_TIMEOUT = Number(process.env.RIP_AGENT_PROBE_TIMEOUT_MS) or 5000
 # Consecutive failed reconcile ticks before recovery acts.
 DOWN_TICKS = 3
 
@@ -408,7 +396,7 @@ snapshotEdge = ->
 # and then waits, unbounded, for the manager to go quiet — nothing is
 # marked running for that entire span. Boot counts too; nobody spawns a
 # control plane with nothing to ask it.
-IDLE_GRACE = positiveEnv 'RIP_AGENT_IDLE_GRACE_MS', 2000
+IDLE_GRACE = Number(process.env.RIP_AGENT_IDLE_GRACE_MS) or 2000
 inFlight = 0
 lastActivity = Date.now()
 
