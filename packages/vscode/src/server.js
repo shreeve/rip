@@ -2141,7 +2141,6 @@ async function refresh(document) {
     return;
   }
 
-  const versionAtRequest = document.version;
   let pulled;
   try {
     // Same cap as the re-pull: one shot per refresh, abandoned on
@@ -2153,7 +2152,7 @@ async function refresh(document) {
     return;
   }
   // Superseded by a newer edit — that edit's own refresh will publish.
-  if (documents.get(document.uri)?.version !== versionAtRequest) return;
+  if (documents.get(document.uri)?.version !== version) return;
 
   const items = pulled?.items ?? [];
   const mapped = [];
@@ -2262,15 +2261,8 @@ async function probePinsFor(document, state, result) {
   return rerefreshed;
 }
 
-// Keystroke coalescing: compiles are fast but tsgo round-trips add up, so
-// a refresh waits this long for the next keystroke before it runs.
-// RIP_LSP_DEBOUNCE_MS overrides it — the test harnesses shrink it, since
-// every open/change they make pays the window once, and nothing they ask
-// inside it escapes settleDocument's flush.
-const REFRESH_DEBOUNCE_MS = (() => {
-  const n = Number(process.env.RIP_LSP_DEBOUNCE_MS);
-  return Number.isFinite(n) && n >= 0 ? n : 100;
-})();
+// Keystroke coalescing before a refresh runs; the test harnesses set RIP_LSP_DEBOUNCE_MS to shrink it.
+const REFRESH_DEBOUNCE_MS = Number(process.env.RIP_LSP_DEBOUNCE_MS) || 100;
 
 function scheduleRefresh(document) {
   const state = stateOf(document.uri);

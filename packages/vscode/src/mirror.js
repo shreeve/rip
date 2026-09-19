@@ -84,7 +84,12 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
 
 // The zero-config host floor: host globals (`process`, `Bun`) declared
 // by EXISTENCE as `any` — otherwise unresolvable on every face in a
-// workspace with no installed host types. Gated per name by a DISK probe
+// workspace with no installed host types. In this checkout the floor is
+// inactive (its own @types/bun is a type root of every program); it
+// survives for the installed .vsix, which carries neither stdlib nor
+// @types and follows the `rip` bin home for both — with no rip bin
+// reachable, or a checkout never installed, these names would otherwise
+// be unresolved. Gated per name by a DISK probe
 // of ancestor node_modules, never module resolution (Bun's resolve falls
 // back to the machine-global install cache, which tsgo's typeRoots walk
 // never consults — a resolve probe false-positives). A floored name that

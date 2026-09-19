@@ -130,8 +130,9 @@ describeExtended('the config surface is reactive', () => {
       s.forget('legacy/old.rip');
       s.change('app/main.rip', "import { bad } from '../legacy/old.rip'\nconsole.log bad, 1\n");
 
-      // The re-pull must not republish old.rip's TS2322.
-      expect(s.codes(await s.diagnostics('legacy/old.rip'))).toEqual([]);
+      // The re-pull must not republish old.rip's TS2322. (A re-pull
+      // announces no settle line, so read its publication as it lands.)
+      expect(s.codes(await s.diagnosticsUntil('legacy/old.rip', () => true))).toEqual([]);
     } finally { await s.close(); }
   }, 90_000);
 
@@ -239,11 +240,10 @@ describeExtended('the config surface is reactive', () => {
       s.forget('app.rip');
       s.touch('package.json', pkg({ strict: true }));
 
-      // Wait for the strict posture to land (the unannotated-param probe
-      // is not in this file, so read a full settle), then assert the
-      // host name is still real: the typo, never an unresolved name.
-      await s.diagnosticsUntil('app.rip', (d) => s.codes(d).includes(2339), { timeout: 75000 });
-      const codes = s.codes(await s.diagnostics('app.rip'));
+      // Wait for the re-govern's own refresh to settle (the unannotated-param
+      // probe is not in this file, so nothing else marks the flip), then
+      // assert the host name is still real: the typo, never an unresolved name.
+      const codes = s.codes(await s.diagnostics('app.rip', { timeout: 75000 }));
       expect(codes).toEqual([2339]);
       expect(codes.some((c) => UNRESOLVED_BUN.includes(c))).toBe(false);
     } finally { await s.close(); }

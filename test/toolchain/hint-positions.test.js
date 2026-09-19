@@ -43,7 +43,7 @@ describeExtended('hint positions — the await hint lands on the operator the au
     const session = await openSession({ 'app.rip': SRC });
     try {
       session.open('app.rip');
-      const ds = await session.diagnostics('app.rip', { settle: 600, timeout: 20000 });
+      const ds = await session.diagnostics('app.rip', { timeout: 20000 });
       const hints = ds.filter((d) => d.code === 80007);
       expect(hints.length, 'the four synchronous awaits each draw the hint').toBe(4);
       // No Error-severity strays: the fixture is a legal program, so a

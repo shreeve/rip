@@ -44,8 +44,8 @@ export async function openSession(files) {
   // The ORDER of arrivals across both streams: a settle line is only an
   // answer to the publication it followed.
   let seq = 0;
-  const pubSeq = new Map();     // uri → seq of the latest publication
-  const settledSeq = new Map(); // uri → seq of the latest settle line
+  const pubSeqs = new Map();    // uri → seq of each publication, in order
+  const settledSeq = new Map(); // `<uri> v<n>` → seq of its latest settle line
 
   for (const [name, text] of Object.entries(files)) {
     const p = path.join(dir, name);
@@ -70,14 +70,15 @@ export async function openSession(files) {
         logs.push(message);
         // `[rip] settled <uri> v<n>`: the refresh's last publish for that
         // buffer version is on the wire — diagnostics() reads it below.
-        const settled = /^\[rip\] settled (\S+) v\d+$/.exec(message);
+        const settled = /^\[rip\] settled (\S+ v\d+)$/.exec(message);
         if (settled) settledSeq.set(settled[1], ++seq);
         return;
       }
       if (m !== 'textDocument/publishDiagnostics') return;
       diags.set(p.uri, p.diagnostics);
       pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
-      pubSeq.set(p.uri, ++seq);
+      if (!pubSeqs.has(p.uri)) pubSeqs.set(p.uri, []);
+      pubSeqs.get(p.uri).push(++seq);
     },
   });
   // Capture what the server asks the CLIENT to watch. This matters: a
@@ -146,8 +147,8 @@ export async function openSession(files) {
       });
     },
 
-    // Wait for a diagnostics publication for `name`, then settle, and return
-    // what was published.
+    // Wait for a diagnostics publication for `name`, then for the settle
+    // line that follows it, and return what was published.
     //
     // THROWS if nothing is published within the window. This is the whole
     // point: an empty publication ("the server looked and found nothing") and
@@ -166,7 +167,7 @@ export async function openSession(files) {
     // long a caller is willing to wait are independent, and tying them means a
     // change to `every` silently rescales every caller's timeout — a re-govern
     // that needs 15s gets 3.75s and reports the server never answered.
-    async diagnostics(name, { settle = 150, timeout = 8000, every = 25 } = {}) {
+    async diagnostics(name, { timeout = 8000, every = 25 } = {}) {
       const u = uri(name);
       const want = (seen.get(u) ?? 0) + 1;
       const deadline = Date.now() + timeout;
@@ -187,28 +188,31 @@ export async function openSession(files) {
               'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
-      // Then let a burst finish — an intermediate publication must not
+      // Then let the burst finish — an intermediate publication must not
       // decide the answer. The server announces `[rip] settled <uri> v<n>`
       // after the LAST publish a refresh owes (the merged set, and the
       // post-probe re-publish when a pin probe ran), so a settle line
-      // newer than the latest publication ends the wait at once. A
-      // publication with no refresh behind it — a cross-file re-pull —
-      // announces nothing, and there the count must hold still for
-      // `settle` instead.
-      let quiet = 0;
-      while (quiet < settle && Date.now() < deadline + settle) {
-        if ((settledSeq.get(u) ?? -1) > (pubSeq.get(u) ?? -1)) break;
-        const at = pubs.get(u);
+      // newer than that publication ends the wait. None by the deadline
+      // THROWS: a renamed line reads as red, never as slow. A publication
+      // with no refresh behind it — a cross-file re-pull — announces
+      // nothing; diagnosticsUntil() reads those.
+      const key = `${u} v${versions.get(name) ?? 1}`;
+      const at = pubSeqs.get(u)[want - 1];
+      while ((settledSeq.get(key) ?? -1) < at) {
+        if (Date.now() >= deadline) {
+          throw new Error(`no '[rip] settled ${key}' line after publication #${want} for ${name} within ${timeout / 1000}s`);
+        }
         await sleep(every);
-        quiet = pubs.get(u) === at ? quiet + every : 0;
       }
       seen.set(u, pubs.get(u) ?? 0);
       return diags.get(u) ?? [];
     },
 
     // Wait until `pred(payload)` holds for `name`, reading every NEW
-    // publication as it lands. For callers asserting a STATE the server
-    // must reach — a config re-govern that lands in waves (watched-file
+    // publication as it lands. For a publication no refresh announces (a
+    // cross-file re-pull: `() => true` after forget()), and for callers
+    // asserting a STATE the server must reach — a config re-govern that
+    // lands in waves (watched-file
     // forward, an early re-pull, the regenerated floor, the real
     // re-pull) — where `diagnostics()` would accept whichever wave
     // published first and read a pre-re-govern snapshot as the answer
@@ -277,7 +281,7 @@ export async function openSession(files) {
     // "the open doc was re-governed" observable.
     // Drops the counters with the payload: a later read then waits for the
     // first publication AFTER this point, which is what forgetting means.
-    forget(name) { const u = uri(name); diags.delete(u); pubs.delete(u); seen.delete(u); },
+    forget(name) { const u = uri(name); diags.delete(u); pubs.delete(u); pubSeqs.delete(u); seen.delete(u); },
 
     codes: (ds) => ds.map((d) => d.code),
 

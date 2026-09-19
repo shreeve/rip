@@ -422,7 +422,7 @@ describeExtended('completion and signature help on an incomplete expression', ()
       // watched-file touch never reaches the re-pull.
       s.forget('a.rip');
       s.change('b.rip', 'y = 2\nconsole.log y\n');
-      const after = await s.diagnostics('a.rip');
+      const after = await s.diagnosticsUntil('a.rip', () => true);   // a re-pull announces no settle line
       expect(after.some((d) => /Unexpected end of input/.test(d.message ?? ''))).toBe(true);
     } finally { await s.close(); }
   }, 90_000);
