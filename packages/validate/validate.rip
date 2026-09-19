@@ -151,6 +151,24 @@ leapYear = (year) -> (year % 4 is 0 and year % 100 isnt 0) or year % 400 is 0
 daysInMonth = (year, month) ->
   if month is 2 and leapYear(year) then 29 else MONTH_DAYS[month - 1]
 
+# `date` and `datetime` read one ISO 8601 spelling: a calendar-true date
+# (`YYYY-MM-DD` or `YYYYMMDD`), then optionally a 'T' or space, a
+# two-digit 24h time, and a zone (Z or ±HH:MM). The parse answers the
+# canonical date and, when one was written, the canonical time.
+ISO_DATETIME = /^(\d{4})(-?)(\d{2})\2(\d{2})(?:[T ](2[0-3]|[01]\d):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,6}))?)?(Z|[+-](?:2[0-3]|[01]\d):?[0-5]\d)?)?$/i
+
+toDateTime = (v) ->
+  m = ISO_DATETIME.exec v
+  return null unless m
+  [year, month, day] = [parseInt(m[1], 10), parseInt(m[3], 10), parseInt(m[4], 10)]
+  return null unless month >= 1 and month <= 12
+  return null unless day >= 1 and day <= daysInMonth(year, month)
+  date = "#{m[1]}-#{m[3]}-#{m[4]}"
+  return { date, time: null } unless m[5]
+  frac = if m[8] then ".#{m[8]}" else ''
+  zone = if m[9] then m[9].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, '$1:$2') else ''
+  { date, time: "#{m[5]}:#{m[6]}:#{m[7] or '00'}#{frac}#{zone}" }
+
 # ==============================================================================
 # The vocabulary
 # ==============================================================================
@@ -194,29 +212,19 @@ BUILTIN =
   name:       (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'name'
   address:    (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'address'
 
-  # Date & time: a date must exist on the real calendar, and it
-  # normalizes to its canonical `YYYY-MM-DD` spelling.
+  # Date & time: a date must exist on the real calendar. `date` accepts
+  # the same spelling as `datetime`, time part and all, but answers only
+  # the canonical `YYYY-MM-DD`.
   date:      (v) ->
-    m = v[/^(\d{4})(-?)(\d{2})\2(\d{2})$/]
-    return null unless m
-    [year, month, day] = [parseInt(_[1], 10), parseInt(_[3], 10), parseInt(_[4], 10)]
-    return null unless month >= 1 and month <= 12
-    return null unless day >= 1 and day <= daysInMonth(year, month)
-    "#{_[1]}-#{_[3]}-#{_[4]}"
+    d = toDateTime v
+    if d then d.date else null
   time:      (v) -> v[/^(2[0-3]|[01]?\d):([0-5]\d)(?::([0-5]\d))?$/]            and _[0]
   time12:    (v) -> v[/^(1[0-2]|0?[1-9]):([0-5]\d)(?::([0-5]\d))?\s?(am|pm)$/i] and _[0].toLowerCase()
-  # A datetime is a calendar-true date, a 'T' or space, a two-digit 24h
-  # time, and an optional zone (Z or ±HH:MM); it normalizes to the
-  # canonical ISO 8601 `YYYY-MM-DDTHH:MM:SS[.fff][zone]` spelling.
+  # A datetime requires the time part and answers the canonical ISO
+  # 8601 `YYYY-MM-DDTHH:MM:SS[.fff][zone]` spelling.
   datetime:  (v) ->
-    m = v[/^(\d{4})(-?)(\d{2})\2(\d{2})[T ](2[0-3]|[01]\d):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,6}))?)?(Z|[+-](?:2[0-3]|[01]\d):?[0-5]\d)?$/i]
-    return null unless m
-    [year, month, day] = [parseInt(_[1], 10), parseInt(_[3], 10), parseInt(_[4], 10)]
-    return null unless month >= 1 and month <= 12
-    return null unless day >= 1 and day <= daysInMonth(year, month)
-    frac = if _[8] then ".#{_[8]}" else ''
-    zone = if _[9] then _[9].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, '$1:$2') else ''
-    "#{_[1]}-#{_[3]}-#{_[4]}T#{_[5]}:#{_[6]}:#{_[7] or '00'}#{frac}#{zone}"
+    d = toDateTime v
+    if d and d.time then "#{d.date}T#{d.time}" else null
 
   # Booleans
   truthy:    (v) -> (v =~ /^(true|t|1|yes|y|on)$/i)  and true

@@ -208,6 +208,14 @@ rows: [string, string, unknown][] = [
   ['date', '2024-2-15', null]
   ['date', '2024-02-15 ', null]
   ['date', '99-01-01', null]
+  # date reads datetime's spelling and answers the date part only
+  ['date', '2026-08-24T14:30:00Z', '2026-08-24']
+  ['date', '2026-08-24 14:30', '2026-08-24']
+  ['date', '20260824t14:30:00.250+0530', '2026-08-24']
+  ['date', '2026-08-24T24:00', null]
+  ['date', '2026-08-24T14:60', null]
+  ['date', '2026-02-30T10:00', null]
+  ['date', '2026-08-24T', null]
 
   # datetime: calendar-true date + strict 24h time, canonical ISO 8601
   ['datetime', '2026-08-24T14:30:00Z', '2026-08-24T14:30:00Z']

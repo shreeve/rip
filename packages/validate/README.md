@@ -62,7 +62,7 @@ registerValidator 'even', (v) ->
 | numbers | `id` `int` `whole` `float` |
 | money | `money` `money_even` `cents` `decimal` |
 | strings | `string` `text` `name` `address` `slug` |
-| date/time | `date` `time` `time12` |
+| date/time | `date` `datetime` `time` `time12` |
 | booleans | `truthy` `falsy` `bool` |
 | identity | `email` `state` `zip` `zipplus4` `ssn` `sex` `phone` `username` |
 | technical | `ip` `mac` `url` `color` `uuid` `semver` |
@@ -73,8 +73,10 @@ Contracts worth knowing:
 - `money`/`money_even` take **dollars** and return **integer cents**;
   `cents` takes a value already in cents; `decimal` is a lossless
   arbitrary-scale **string**
-- `date` requires a real calendar date and always answers the
-  canonical `YYYY-MM-DD` spelling
+- `date` and `datetime` read the same ISO 8601 spelling, calendar-true
+  with leap years; `date` accepts a time part but always answers the
+  canonical `YYYY-MM-DD`, while `datetime` requires one and answers
+  `YYYY-MM-DDTHH:MM:SS[.fff][zone]`
 - `id` is a positive integer with no leading zero, at most 15 digits
   (safe-integer territory); `ids` parses, dedupes, and sorts a list of
   them
