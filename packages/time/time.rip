@@ -155,108 +155,55 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 
 # ---- Auto-detect grammar (see parseDate) ----
 #
-# Flexible about spelling, strict about the calendar. The date part is a port
-# of this Ruby grammar from an older project, kept here because it encodes the
-# disambiguation policy:
+# Flexible about spelling, strict about the calendar. The grammar reads the
+# components as written; `assemble` then refuses anything that is not a real
+# calendar date or clock, so Feb 30 never becomes Mar 1. The date is one
+# alternation, after the `parse_str` regex in zones.rb: the compact form and
+# three orderings. THE RULE: day-first is recognized only when the month is
+# spelled with letters (`9 Feb 2024`, `09-FEB-2024`, `9Feb2024`); a purely
+# numeric small form is ALWAYS month-first (US), so `1/2/2024` is January 2
+# and `25/12/2024` is simply invalid (month 25). There is deliberately no
+# "swap when the first number is > 12" guess — guessing is how Feb 30
+# becomes Mar 1.
 #
-#   def self.parse_str(str)
-#     case str
-#     when %r!^((?:19|20)\d\d)(\d\d)(\d\d)!
-#       ymd = [$1.to_i, $2.to_i, $3.to_i]
-#     when %r!^
-#       (?:(0[1-9]|[12]\d|3[01]|[1-9](?=\D))[-/\s]?          #  $1: day
-#          (                          (?>[a-z]{3,9}))[-/\s]? #  $2: month (no digits allowed here)
-#          ((?>19|20)\d\d)                                   #  $3: year
-#       | # or...
-#          ((?>19|20)\d\d)[-/\s]?                            #  $4: year
-#          (0[1-9]|1[012]|[1-9](?=\D)|(?>[a-z]{3,9}))[-/\s]? #  $5: month
-#          (0[1-9]|[12]\d|3[01]|[1-9]\b)                     #  $6: day
-#       | # or...
-#          (0[1-9]|1[012]|[1-9](?=\D)|(?>[a-z]{3,9}))[-/\s]? #  $7: month
-#          (0[1-9]|[12]\d|3[01]|[1-9](?=\D)),?[-/\s]?        #  $8: day
-#          ((?>19|20)\d\d)                                   #  $9: year
-#       )
-#     !iox
-#       ymd =   $1 ? [ $3.to_i, month_value($2), $1.to_i] : \
-#               $4 ? [ $4.to_i, month_value($5), $6.to_i] : \
-#                    [ $9.to_i, month_value($7), $8.to_i]
-#     else
-#       raise "can't parse: #{str}"
-#     end
-#     ymd
-#   end
-#
-# Three orderings: day-month-year, year-month-day, month-day-year.
-#
-# THE RULE: day-first is only recognized when the month is spelled with
-# letters (`9 Feb 2024`, `09-FEB-2024`, `9Feb2024`). A purely numeric small
-# form is ALWAYS month-first (US): `1/2/2024` and `1-2-2024` are January 2.
-# There is deliberately no "swap when the first number is > 12" heuristic —
-# `25/12/2024` is simply invalid (month 25). Guessing is how Feb 30 becomes
-# Mar 1; we would rather say no.
-#
-# Differences from the Ruby: the alternation is split into one small anchored
-# regex per ordering; each captures both separators and the head rejects the
-# date when they differ, so `2024-02/29` is refused instead of guessed at; 1..2
-# digit fields are captured loosely and range-checked by `assemble`, so a
-# shape we recognize with a bad value (`Feb 30 2024`) is REJECTED rather than
-# handed to the engine; years are any 4 digits from 1000 (the compact form
-# keeps the 19xx/20xx rule so random 8-digit strings are not dates); the
-# numeric month-day-year form also takes a 2-digit year and `.` separators.
-#
-# Input is trimmed and whitespace-collapsed first, so one space stands for any
-# run of whitespace. Every 1..2 digit field is followed by `(?!\d)` (the Ruby
-# `(?=\D)`): a single-digit day or month must be followed by a non-digit, so
-# `20240229` is compact ISO and `1122024` is nothing. Separators: `-`, `/`,
-# a space, or nothing when the month is a word; `-`, `/` or `.` when the date
-# is all digits (plus a space in the 2-digit year-first form, `2024 02 29`);
-# the only no-separator numeric forms are the compact ones.
-# The remainder after a date head is the clock, handled by one shared grammar.
+# Every 1..2 digit field is followed by `(?!\d)`, so `20240229` is compact
+# ISO and `1122024` is nothing. A separator is captured once and matched
+# again by name, so `2024-02/29` is refused rather than guessed at. Input is
+# trimmed and whitespace-collapsed first, and a leading weekday is dropped;
+# whatever follows the date is the clock.
 
-# A leading weekday name — `Mon`, `Monday`, `Mon.`, `Mon,` — is ignored.
+# `Mon`, `Monday`, `Mon.`, `Mon,` — ignored.
 REGEX_WEEKDAY =! /^(?:sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?)\.?(?:, ?| )/i
 
-# Compact `YYYYMMDD` (19xx/20xx only), optionally run straight into a compact
-# clock: `YYYYMMDDHHMM` / `YYYYMMDDHHMMSS`. (`20240229T1430` and `20240229 1430`
-# are the same date followed by an ordinary colon-less clock.)
-REGEX_COMPACT =! /^((?:19|20)\d\d)(\d\d)(\d\d)(\d{4}|\d{6})?(?!\d)/
+# One branch matches, so each component is whichever of its groups is set.
+REGEX_DATE =! ///
+  ^(?:
+    (?<cy>(?:19|20)\d\d)(?<cm>\d\d)(?<cd>\d\d)(?<ct>\d{4}|\d{6})?(?!\d)                                    # 20240229, 202402291430[00]
+  | (?<ay>[1-9]\d{3})(?!\d)(?<as>[-/\s]?)(?<aw>[a-z]{3,9})\.?\k<as>(?<ad>\d{1,2})(?!\d)(?:st|nd|rd|th)?         # 2024-Feb-09, 2024 Feb 9, 2024Feb9
+  | (?<by>[1-9]\d{3})(?!\d)(?:(?<bs>[-/.])(?<bm>\d{1,2})(?!\d)(?:\k<bs>(?<bd>\d{1,2})(?!\d))?                  # 2024-02-29, 2024/2/9, 2024.02.29, 2024-02, 2024
+                             |\s(?<bm2>\d\d)(?!\d)\s(?<bd2>\d\d)(?!\d))?                                     # 2024 02 29
+  | (?<dd>\d{1,2})(?!\d)(?:st|nd|rd|th)?(?<ds>[-/\s]?)(?<dw>[a-z]{3,9})\.?\k<ds>(?<dy>[1-9]\d{3})(?!\d)         # 9 Feb 2024, 09-FEB-2024, 9Feb2024, 22nd Feb 2024
+  | (?<ww>[a-z]{3,9})\.?(?<ws>[-/\s]?)(?<wd>\d{1,2})(?!\d)(?:st|nd|rd|th)?(?:,\s?|\k<ws>)(?<wy>[1-9]\d{3})(?!\d) # Feb 9 2024, Feb. 9th, 2024, Feb-09-2024
+  | (?<mm>\d{1,2})(?!\d)(?<ms>[-/.])(?<md>\d{1,2})(?!\d)\k<ms>(?<my>\d{4}|\d{2})(?!\d)                          # 2/9/2024, 02-09-2024, 2.9.24
+  )
+///i
 
-# Year-first, numeric: `2024-02-29`, `2024-2-9`, `2024/02/29`, `2024.02.29`,
-# and the truncations `2024-02` and `2024` (missing parts default to 1). A
-# space separator is accepted only with 2-digit month AND day (`2024 02 29`);
-# `2024 2 9` is too loose.
-REGEX_YMD =! /^([1-9]\d{3})(?!\d)(?:([-\/.])(\d{1,2})(?!\d)(?:([-\/.])(\d{1,2})(?!\d))?| (\d{2})(?!\d) (\d{2})(?!\d))?/
-
-# Year-first, named month: `2024-Feb-09`, `2024 Feb 9`, `2024/feb/9`, `2024Feb9`.
-REGEX_YWD =! /^([1-9]\d{3})(?!\d)([-\/ ]?)([a-z]{3,9})\.?([-\/ ]?)(\d{1,2})(?!\d)(?:st|nd|rd|th)?/i
-
-# Day-first, named month ONLY: `9 Feb 2024`, `09-FEB-2024`, `9/feb/2024`,
-# `9Feb2024`, `22nd Feb 2024`.
-REGEX_DWY =! /^(\d{1,2})(?!\d)(?:st|nd|rd|th)?([-\/ ]?)([a-z]{3,9})\.?([-\/ ]?)([1-9]\d{3})(?!\d)/i
-
-# Month-first, named month: `Feb 9 2024`, `Feb 9, 2024`, `February 9, 2024`,
-# `Feb. 9th, 2024`, `March 1st 2024`, `Feb-09-2024`. A comma may follow the day.
-REGEX_WDY =! /^([a-z]{3,9})\.?([-\/ ]?)(\d{1,2})(?!\d)(?:st|nd|rd|th)?(, ?|[-\/ ]?)([1-9]\d{3})(?!\d)/i
-
-# Month-first, numeric — the only numeric small form (see THE RULE above):
-# `2/9/2024`, `02/09/2024`, `2-9-2024`, `2.9.2024`, and `2/9/24` (2-digit year
-# via parseTwoDigitYear). The year is captured loosely and checked by headMDY.
-REGEX_MDY =! /^(\d{1,2})(?!\d)([-\/.])(\d{1,2})(?!\d)([-\/.])(\d+)/
-
-# Clock after the date: a separator (`T`, a space, `, `, ` at `), then
-# `h[:mm[:ss[.fff]]]` with a 1..2 digit hour, then optional am/pm (`3:45 PM`,
-# `3:45pm`, `3 PM`, `3 p.m.`). A bare hour needs am/pm (`3 PM`, never `3`).
-# The fraction is a decimal fraction of a second (`.25` = 250 ms). Colon-less
-# clocks `HHMM` / `HHMMSS` (always a 2-digit hour: `930` is ambiguous and
-# invalid) are normalized to `HH:MM[:SS]` by REGEX_CLOCK_COMPACT first.
-REGEX_CLOCK_COMPACT =! /^([Tt]|,? at | |, )(\d\d)(\d\d)(\d\d)?(?![\d:])/
-REGEX_CLOCK =! /^(?:[Tt]|,? at | |, )(\d{1,2})(?!\d)(?::(\d{2})(?!\d)(?::(\d{2})(?!\d)(?:[.,](\d{1,9})(?!\d))?)?)?(?: ?([ap])\.?m\.?)?/i
-
-# Zone after the clock, then end of string: `Z`, `UTC`, `GMT`, `±HH`, `±HHMM`,
-# `±HH:MM`, `GMT±HHMM`, optionally preceded by a space and followed by a
-# parenthesized comment (the shape of `Date#toString`). A zone is only read
-# here, after a clock, so `2024-02-29+05:00` is invalid.
-REGEX_ZONE =! /^(?: ?(z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?(?: ?\([^)]*\))?$/i
+# The clock after a date: a separator, `h[:mm[:ss[.fff]]]` or `HHMM[SS[.fff]]`
+# (a 2-digit hour: `930` is ambiguous), optional am/pm (`3:45 PM`, `3pm`,
+# `3 p.m.`), an optional zone, and nothing else but a parenthesized comment
+# (the shape of `Date#toString`). A bare hour needs am/pm (`3 PM`, never `3`);
+# the fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is
+# read only here, after a clock, so `2024-02-29+05:00` is invalid.
+REGEX_CLOCK =! ///
+  ^(?:T|,?\sat\s|\s|,\s)                                                            # T, space, ", ", " at "
+  (?:
+    (?<h>\d{1,2})(?!\d)(?::(?<mi>\d\d)(?!\d)(?::(?<s>\d\d)(?!\d)(?:[.,](?<f>\d{1,9})(?!\d))?)?)?   # 14:30:45.25
+  | (?<h2>\d\d)(?<mi2>\d\d)(?:(?<s2>\d\d)(?:[.,](?<f2>\d{1,9})(?!\d))?)?(?![\d:])                 # 1430, 143045.25
+  )
+  (?:\s?(?<ap>[ap])\.?m\.?)?                                                         # am, pm, a.m., p.m.
+  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?                            # Z, UTC, +05:30, GMT-0700
+  (?:\s?\([^)]*\))?$                                                                 # (Mountain Standard Time)
+///i
 
 # ==[ Unit Normalization ]==
 
@@ -530,120 +477,46 @@ def parseWithFormat(input, fmt, utc = false)
 
   assemble(parts, utc)
 
-# ---- Auto-detect date heads ----
-# Each returns { year, month, day, rest } when the string starts with a date in
-# its shape (month may be 0 for an unknown month name — assemble rejects it),
-# or null when the shape doesn't apply at all. BAD_HEAD marks a shape that did
-# apply but cannot be a date (so it is rejected, never handed to the engine).
+# ---- Reading a string ----
 
-BAD_HEAD =! { year: NaN, month: NaN, day: NaN, rest: '' }
-
-# `20240229`, `202402291430`, `20240229143000`; a clock glued straight onto
-# the date is handed to parseClock behind a `T`.
-def headCompact(s)
-  m = s.match(REGEX_COMPACT)
-  return null unless m
-  rest = (if m[4] then "T#{m[4]}" else '') + s.slice(m[0].length)
-  { year: +m[1], month: +m[2], day: +m[3], rest }
-
-# `2024-02-29`, `2024-2-9`, `2024/02/29`, `2024.02.29`, `2024 02 29`,
-# `2024-02`, `2024`.
-def headYMD(s)
-  m = s.match(REGEX_YMD)
-  return null unless m
-  return BAD_HEAD if m[4]? and m[4] isnt m[2]
-  { year: +m[1], month: +(m[3] ?? m[6] ?? 1), day: +(m[5] ?? m[7] ?? 1), rest: s.slice(m[0].length) }
-
-# `2024-Feb-09`, `2024 Feb 9`, `2024Feb9`.
-def headYWD(s)
-  m = s.match(REGEX_YWD)
-  return null unless m
-  return BAD_HEAD if m[4] isnt m[2]
-  { year: +m[1], month: parseMonthName(m[3]), day: +m[5], rest: s.slice(m[0].length) }
-
-# `9 Feb 2024`, `09-FEB-2024`, `9Feb2024`, `22nd Feb 2024` — day-first, and
-# the month MUST be a word (see THE RULE by the regexes).
-def headDWY(s)
-  m = s.match(REGEX_DWY)
-  return null unless m
-  return BAD_HEAD if m[4] isnt m[2]
-  { year: +m[5], month: parseMonthName(m[3]), day: +m[1], rest: s.slice(m[0].length) }
-
-# `Feb 9 2024`, `Feb 9, 2024`, `Feb. 9th, 2024`, `Feb-09-2024`. The comma
-# form only pairs with a space (or nothing) before the day: `Feb-9, 2024` is
-# mixed and refused.
-def headWDY(s)
-  m = s.match(REGEX_WDY)
-  return null unless m
-  return BAD_HEAD unless m[4] is m[2] or (m[4][0] is ',' and m[2] isnt '-' and m[2] isnt '/')
-  { year: +m[5], month: parseMonthName(m[1]), day: +m[3], rest: s.slice(m[0].length) }
-
-# `2/9/2024`, `02/09/2024`, `2-9-2024`, `2.9.2024`, `2/9/24` — always
-# month-first; a year must have exactly 2 or 4 digits.
-def headMDY(s)
-  m = s.match(REGEX_MDY)
-  return null unless m
-  return BAD_HEAD if m[4] isnt m[2]
-  y = m[5]
-  return BAD_HEAD unless y.length is 2 or y.length is 4
-  year = if y.length is 2 then parseTwoDigitYear(y) else +y
-  { year, month: +m[1], day: +m[3], rest: s.slice(m[0].length) }
-
-# ---- Clock + zone ----
-# `rest` is whatever followed the date. Empty means midnight. Otherwise it must
-# be a separator (`T`, space, `, `, ` at `), a time, an optional am/pm, an
-# optional zone, and nothing else. Returns null when the remainder isn't a
-# clock; the caller turns that into an invalid Date.
+# The clock part, or null when `rest` is not one. Empty means midnight.
 def parseClock(rest)
-  clock = { hour: 0, minute: 0, second: 0, ms: 0, meridiem: null, zone: null }
-  return clock if rest is ''
-  # `1430` / `143000` → `14:30` / `14:30:00`, keeping the separator in front
-  if c = rest.match(REGEX_CLOCK_COMPACT)
-    rest = "#{c[1]}#{c[2]}:#{c[3]}" + (if c[4] then ":#{c[4]}" else '') + rest.slice(c[0].length)
-  m = rest.match(REGEX_CLOCK)
-  return null unless m
-  return null unless m[2]? or m[5]?                       # bare hour needs am/pm
-  clock.hour   = +m[1]
-  clock.minute = +m[2] if m[2]?
-  clock.second = +m[3] if m[3]?
-  clock.ms     = +((m[4] + '00').slice(0, 3)) if m[4]?   # decimal fraction → ms
-  clock.meridiem = (if m[5].toLowerCase() is 'a' then 'am' else 'pm') if m[5]?
-  z = rest.slice(m[0].length).match(REGEX_ZONE)
-  return null unless z
-  if z[1]?
-    clock.zone = parseOffset(z[1])
-    return null unless clock.zone?
-  clock
+  return { hour: 0, minute: 0, second: 0, ms: 0, meridiem: null, zone: null } if rest is ''
+  g = rest.match(REGEX_CLOCK)?.groups
+  return null unless g
+  minute = g.mi ?? g.mi2
+  return null unless minute? or g.ap?                       # a bare hour needs am/pm
+  zone = if g.z? then parseOffset(g.z) else null
+  return null if g.z? and not zone?
+  hour:     +(g.h ?? g.h2)
+  minute:   +(minute ?? 0)
+  second:   +(g.s ?? g.s2 ?? 0)
+  ms:       +((g.f ?? g.f2 ?? '') + '000').slice(0, 3)
+  meridiem: if g.ap? then (if /a/i.test(g.ap) then 'am' else 'pm') else null
+  zone:     zone
 
-# Run the grammar over a string. Returns null when the string isn't in a
-# shape we know at all; REJECTED when it is a shape but can't be a date; else
-# { parts, date } where `parts` are the components as written (plus `clock`,
-# whether a time was written) and `date` is assemble's verdict — invalid when
-# a component is out of range. Both parseFlexible and `time.parts` sit on this.
-REJECTED =! { parts: null, date: null }
-
+# Run the grammar over a string: { parts, date } when the string is a shape
+# we know — `parts` as written (plus `clock`, whether a time was written) and
+# `date` assemble's verdict, invalid when a component is out of range — or
+# null when it is not. There is no engine fallback: a string the grammar does
+# not read is not a date, as the Ruby raised "can't parse".
 def readParts(input, utc)
-  s = input.trim().replace(/\s+/g, ' ')
-  return REJECTED if s is ''
-  s = s.replace(REGEX_WEEKDAY, '')
-  # Digit-only strings: exactly 4 (a year), 8 (compact date), 12 or 14 digits
-  # (compact datetime) with a 19xx/20xx year are readable; any other run of
-  # digits is never a date, and never goes to the engine.
-  return REJECTED if /^\d+$/.test(s) and s.length isnt 4 and not REGEX_COMPACT.test(s)
-  head = headCompact(s) ?? headYWD(s) ?? headYMD(s) ?? headDWY(s) ?? headWDY(s) ?? headMDY(s)
-  return null unless head
-  clock = parseClock(head.rest)
-  return REJECTED unless clock
-  parts = Object.assign({ clock: head.rest isnt '' }, head, clock)
+  s = input.trim().replace(/\s+/g, ' ').replace(REGEX_WEEKDAY, '')
+  m = s.match(REGEX_DATE)
+  return null unless m
+  g     = m.groups
+  year  = g.cy ?? g.ay ?? g.by ?? g.dy ?? g.wy ?? g.my
+  month = g.cm ?? g.aw ?? g.bm ?? g.bm2 ?? g.dw ?? g.ww ?? g.mm ?? '1'
+  day   = g.cd ?? g.ad ?? g.bd ?? g.bd2 ?? g.dd ?? g.wd ?? g.md ?? '1'
+  rest  = (if g.ct then "T#{g.ct}" else '') + s.slice(m[0].length)   # a glued compact clock reads as `T1430`
+  clock = parseClock(rest)
+  return null unless clock
+  parts = Object.assign clock,
+    year:  if year.length is 2 then parseTwoDigitYear(year) else +year
+    month: if /^\d/.test(month) then +month else parseMonthName(month)
+    day:   +day
+    clock: rest isnt ''
   { parts, date: assemble(parts, utc) }
-
-# Try the grammar on a string. Returns a Date (valid, or invalid when the
-# string is recognized but not a real calendar date/time) or null when the
-# string isn't in a shape we know at all.
-def parseFlexible(input, utc)
-  r = readParts(input, utc)
-  return null unless r
-  r.date ?? Date.new(NaN)
 
 # `time.parts(input)`: the components exactly as written, for a string the
 # grammar recognizes that passes every range check; null otherwise. No engine
@@ -651,32 +524,18 @@ def parseFlexible(input, utc)
 def dateParts(input)
   return null unless typeof input is 'string'
   r = readParts(input, true)
-  return null unless r and r.date and not isNaN(r.date.getTime())
+  return null unless r and not isNaN(r.date.getTime())
   { year, month, day, hour, minute, second, ms, meridiem, zone, clock } = r.parts
   { year, month, day, hour: toHour24(hour, meridiem), minute, second, ms, clock, zone }
 
-# Auto-detect parsing. Never throws; returns an invalid Date for garbage.
-# Strings go through the flexible grammar above (which handles zones itself);
-# only a string the grammar doesn't recognize at all falls back to the engine's
-# own `new Date(string)`, so exotic engine-supported spellings keep working.
+# Auto-detect parsing. Never throws; a string the grammar does not read, or
+# reads as an impossible date, is an invalid Date.
 def parseDate(input, utc = false)
   return Date.new(NaN) if input is null
   return Date.new()    unless input?
   return Date.new(input.getTime()) if input instanceof Date
   return Date.new(input) if typeof input is 'number'
-
-  if typeof input is 'string'
-    parsed = parseFlexible(input, utc)
-    return parsed if parsed
-    # Engine fallback for shapes the grammar doesn't know at all. The engine
-    # is creative: it invents a year for `Feb 30` (2001, then rolls it to Mar
-    # 2) and reads `Feb92024` as the year 92024. So: no 4-digit year in the
-    # string, no fallback; and a result outside 1000..9999 is garbage.
-    return Date.new(NaN) unless /\d{4}/.test(input)
-    d = Date.new(input)
-    return Date.new(NaN) unless d.getUTCFullYear() >= 1000 and d.getUTCFullYear() <= 9999
-    return d
-
+  return readParts(input, utc)?.date ?? Date.new(NaN) if typeof input is 'string'
   Date.new(input)
 
 # ==[ Time class ]==
