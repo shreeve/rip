@@ -166,50 +166,56 @@ REGEX_PARSE    =! /(\[[^\[]*\])|([\-_:\/.,()\s]+)|(YYYY|YY|MMMM|MMM|MM|M|DD|D|HH
 # "swap when the first number is > 12" guess — guessing is how Feb 30
 # becomes Mar 1.
 #
-# Every 1..2 digit field is followed by `(?!\d)`, so `20240229` is compact
-# ISO and `1122024` is nothing. A separator is captured once and matched
-# again by name, so `2024-02/29` is refused rather than guessed at. Input is
-# trimmed and whitespace-collapsed first, and a leading weekday is dropped;
-# whatever follows the date is the clock.
+# Input is trimmed and whitespace-collapsed first, and the noise dropped;
+# the date is matched only up to its end, and whatever follows is the time.
+# A separator is captured once and matched again by name, so `2024-02/29`
+# is refused rather than guessed at.
 
 # Noise the grammar ignores: a leading weekday (`Mon`, `Monday`, `Mon.`,
 # `Mon,`) and an ordinal suffix on a day (`1st`, `22nd`).
 REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd|th)\b/gi
 
-# Every branch names its parts `y`, `m`, `d` (and the compact form `t`, the
-# digits glued on after the date), so the match tells us what was written
-# without asking which branch. A branch matches the date only; what follows
-# is the time, and a leftover the time grammar cannot read makes the whole
-# string unreadable.
+# The date, in the orders people write one. Every branch names its parts
+# `y`, `m`, `d` (and `t`, digits glued on after a compact date), so the
+# match says what was written without asking which branch matched.
 REGEX_DATE =! ///
   ^(?:
-    (?<y>[1-9]\d{3})(?:                                       # year first
-      (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                           #   20240229, 202402291430[00]
-    | (?<s>[-/\s]?)(?<m>[a-z]+)\.?\k<s>(?<d>\d\d?)            #   2024-Feb-09, 2024 Feb 9, 2024Feb9
-    | \s(?<m>\d\d)\s(?<d>\d\d)                                #   2024 02 29
-    | (?<s>[-/.])(?<m>\d\d?)(?:\k<s>(?<d>\d\d?))?             #   2024-02-29, 2024/2/9, 2024-02
-    )?                                                        #   2024
-  | (?<d>\d\d?)(?<s>[-/\s]?)(?<m>[a-z]+)\.?\k<s>(?<y>[1-9]\d{3})          # 9 Feb 2024, 09-FEB-2024, 9Feb2024
-  | (?<m>[a-z]+)\.?(?<s>[-/\s])(?<d>\d\d?)(?:,\s?|\k<s>)(?<y>[1-9]\d{3})  # Feb 9 2024, Feb. 9, 2024, Feb-09-2024
-  | (?<m>\d\d?)(?<s>[-/.])(?<d>\d\d?)\k<s>(?<y>\d{4}|\d\d)                # 2/9/2024, 02-09-2024, 2.9.24
+      (?<y>[1-9]\d{3})                                   # year, then either
+      (?: (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                  #   month day, glued:  20240229, 202402291430[00]
+        | (?<s>[-/\s]?)(?<m>[a-z]+)\.?\k<s>(?<d>\d\d?)   #   month name, day:   2024-Feb-09, 2024 Feb 9, 2024Feb9
+        | \s(?<m>\d\d)\s(?<d>\d\d)                       #   month day, spaced: 2024 02 29
+        | (?<s>[-/.])(?<m>\d\d?)(?:\k<s>(?<d>\d\d?))?    #   month[, day]:      2024-02-29, 2024/2/9, 2024-02
+      )?                                                 #   or nothing:        2024
+  | # or...
+      (?<d>\d\d?)(?<s>[-/\s]?)                           # day
+      (?<m>[a-z]+)\.?\k<s>                               # month name
+      (?<y>[1-9]\d{3})                                   # year:               9 Feb 2024, 09-FEB-2024, 9Feb2024
+  | # or...
+      (?<m>[a-z]+)\.?(?<s>[-/\s])                        # month name
+      (?<d>\d\d?)(?:,\s?|\k<s>)                          # day, then a comma or the separator again
+      (?<y>[1-9]\d{3})                                   # year:               Feb 9 2024, Feb. 9, 2024, Feb-09-2024
+  | # or...
+      (?<m>\d\d?)(?<s>[-/.])                             # month
+      (?<d>\d\d?)\k<s>                                   # day
+      (?<y>\d{4}|\d\d)                                   # year:               2/9/2024, 02-09-2024, 2.9.24
   )
 ///i
 
-# The time after a date: a separator, `h[:mm[:ss[.fff]]]` or `HHMM[SS[.fff]]`
-# (a 2-digit hour: `930` is ambiguous), optional am/pm (`3:45 PM`, `3pm`,
-# `3 p.m.`), an optional zone, and nothing else but a parenthesized comment
-# (the shape of `Date#toString`). A bare hour needs am/pm (`3 PM`, never `3`);
-# the fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is
-# read only here, after a time, so `2024-02-29+05:00` is invalid.
+# The time after a date. A bare hour needs am/pm (`3 PM`, never `3`); the
+# fraction is a decimal fraction of a second (`.25` = 250 ms). A zone is read
+# only here, after a time, so `2024-02-29+05:00` is invalid.
 REGEX_TIME =! ///
-  ^(?:T|,?\sat\s|\s|,\s)                                                  # T, space, ", ", " at "
-  (?:
-    (?<h>\d{1,2})(?::(?<m>\d\d)(?::(?<s>\d\d)(?:[.,](?<f>\d{1,9}))?)?)?     # 14:30:45.25
-  | (?<h>\d\d)(?<m>\d\d)(?:(?<s>\d\d)(?:[.,](?<f>\d{1,9}))?)?               # 1430, 143045.25
+  ^(?:T|,?\sat\s|\s|,\s)                                 # after the date: T, a space, ", " or " at "
+  (?: (?<h>\d\d?)                                        # hour
+      (?::(?<m>\d\d))?                                   # :minute
+      (?::(?<s>\d\d)(?:[.,](?<f>\d+))?)?                 # :second[.fraction]
+  | # or, without colons (so a 2-digit hour: `930` is ambiguous)...
+      (?<h>\d\d)(?<m>\d\d)                               # hour minute
+      (?:(?<s>\d\d)(?:[.,](?<f>\d+))?)?                  # second[.fraction]
   )
-  (?:\s?(?<ap>[ap])\.?m\.?)?                                               # am, pm, a.m., p.m.
-  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?                  # Z, UTC, +05:30, GMT-0700
-  (?:\s?\([^)]*\))?$                                                       # (Mountain Standard Time)
+  (?:\s?(?<ap>[ap])\.?m\.?)?                             # am, pm, a.m., p.m.
+  (?:\s?(?<z>z|utc|gmt|(?:utc|gmt)?[+-]\d\d(?::?\d\d)?))?   # zone: Z, UTC, +05:30, GMT-0700
+  (?:\s?\([^)]*\))?$                                     # (Mountain Standard Time), then nothing
 ///i
 
 # ==[ Unit Normalization ]==
