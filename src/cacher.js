@@ -61,7 +61,13 @@
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
-import { compile } from './compiler.js';
+// The compiler loads on the first MISS, not at import: every process the
+// loader is preloaded into pays for this module, and a process whose
+// every .rip is a hit (a test lane spawning `rip` hundreds of times)
+// never needs parser.js and emitter.js parsed at all — ~20 ms of the
+// ~27 ms the preload used to cost.
+let compiler = null;
+const compile = (source, options) => (compiler ??= require('./compiler.js').compile)(source, options);
 
 const FORMAT = 1;
 const checkoutRoot = join(import.meta.dir, '..');
