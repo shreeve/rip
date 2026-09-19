@@ -151,15 +151,15 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 # `YYYY-MM-DD` from the parts as written; with `clock`, the wall time too —
 # `THH:MM:SS`, `.fff` only when nonzero — and the zone as written (`Z` or
 # `±HH:MM`) when there was one.
-iso = (p, clock = false) ->
+iso = (t, clock = false) ->
   two = (n) -> String(n).padStart(2, '0')
-  out = "#{String(p.year).padStart(4, '0')}-#{two p.month}-#{two p.day}"
+  out = "#{String(t.year).padStart(4, '0')}-#{two t.month}-#{two t.day}"
   return out unless clock
-  out += "T#{two p.hour}:#{two p.minute}:#{two p.second}"
-  out += ".#{String(p.ms).padStart(3, '0')}" if p.ms
-  if p.zone?
-    mins = Math.abs p.zone
-    out += if mins is 0 then 'Z' else "#{if p.zone < 0 then '-' else '+'}#{two Math.floor(mins / 60)}:#{two mins % 60}"
+  out += "T#{two t.hour}:#{two t.minute}:#{two t.second}"
+  out += ".#{String(t.ms).padStart(3, '0')}" if t.ms
+  if t.zone?
+    mins = Math.abs t.zone
+    out += if mins is 0 then 'Z' else "#{if t.zone < 0 then '-' else '+'}#{two Math.floor(mins / 60)}:#{two mins % 60}"
   out
 
 # ==============================================================================
@@ -209,8 +209,8 @@ BUILTIN =
   # dropping any clock; a zone is not applied, so `2024-03-01T02:00+05:30`
   # is March 1, the day the sender wrote. `datetime` requires a clock and
   # answers the wall clock as written, with the zone when there was one.
-  date:      (v) -> if (p = time.parts v)        then iso(p)       else null
-  datetime:  (v) -> if (p = time.parts v)?.clock then iso(p, true) else null
+  date:      (v) -> if (t = time.parts v)        then iso(t)       else null
+  datetime:  (v) -> if (t = time.parts v)?.clock then iso(t, true) else null
   time:      (v) -> v[/^(2[0-3]|[01]?\d):([0-5]\d)(?::([0-5]\d))?$/]            and _[0]
   time12:    (v) -> v[/^(1[0-2]|0?[1-9]):([0-5]\d)(?::([0-5]\d))?\s?(am|pm)$/i] and _[0].toLowerCase()
 
