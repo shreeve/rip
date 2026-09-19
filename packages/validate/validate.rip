@@ -148,13 +148,13 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 # impossible date is a miss and never a neighboring real one. `time.parts`
 # answers the components exactly as written, before any zone is applied.
 
-# `YYYY-MM-DD` from the parts as written; with `clock`, the wall time too —
+# `YYYY-MM-DD` from the parts as written; with `hms`, the wall time too —
 # `THH:MM:SS`, `.fff` only when nonzero — and the zone as written (`Z` or
 # `±HH:MM`) when there was one.
-iso = (t, clock = false) ->
+iso = (t, hms = false) ->
   two = (n) -> String(n).padStart(2, '0')
   out = "#{String(t.year).padStart(4, '0')}-#{two t.month}-#{two t.day}"
-  clock or return out
+  hms or return out
   out += "T#{two t.hour}:#{two t.minute}:#{two t.second}"
   out += ".#{String(t.ms).padStart(3, '0')}" if t.ms
   if t.zone?
