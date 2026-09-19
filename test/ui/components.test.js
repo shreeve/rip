@@ -2126,6 +2126,52 @@ describe('`extends <tag>`: the rest-forwarding surface', () => {
     expect(code).toContain('this._inheritedEl = this._el1;');
   });
 
+  test("a key the element's own line sets is the line's: recorded before rest applies", () => {
+    const own = (src) => {
+      const { code } = compile(src);
+      const m = code.match(/this\._inheritedOwn = new Set\(\[(.*?)\]\);/);
+      if (m === null) return null;
+      expect(code.indexOf(m[0])).toBeLessThan(code.indexOf('this._applyRestToInheritedEl();'));
+      expect(code.indexOf(m[0])).toBeGreaterThan(code.indexOf('this._inheritedEl ='));
+      return JSON.parse(`[${m[1]}]`).sort();
+    };
+    // Pairs on the line and in the body; a quoted key is its own spelling.
+    expect(own("Btn = component extends button\n  render\n    button type: 'button', \"aria-label\": 'x'\n      title: 't'\n      slot\n")).toEqual(['aria-label', 'title', 'type']);
+    // The selector spells `class` and `id`; `class` and `className` are one attribute.
+    expect(own("Btn = component extends button\n  render\n    button#go.primary\n      slot\n")).toEqual(['class', 'className', 'id']);
+    expect(own("Btn = component extends button\n  lit := true\n  render\n    button.('a', lit and 'b')\n      slot\n")).toEqual(['class', 'className']);
+    // Listeners, `ref:`, and a bind are not keys: the line's and the caller's both apply.
+    expect(own("Field = component extends input\n  el := null\n  text := ''\n  render\n    input ref: el, value <=> text, @input: (-> null)\n")).toBeNull();
+    // Only the inherited element's line counts.
+    expect(own("Btn = component extends button\n  render\n    div title: 'outer'\n      button\n        span lang: 'en'\n")).toBeNull();
+  });
+
+  test('a rest key the line sets never reaches the element, fixed or updated; the others still do', () => {
+    const source = `Btn = component extends button
+  render
+    button type: 'button'
+      slot
+App = component
+  kind := 'submit'
+  render
+    div
+      Btn type: (kind + ''), title: (kind + '!'), 'go'
+`;
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      expect(serialize(target)).toBe('<main><div data-part="App"><button title="submit!" data-part="Btn" type="button">go</button></div></main>');
+      app.kind.value = 'reset';
+      expect(serialize(target)).toBe('<main><div data-part="App"><button title="reset!" data-part="Btn" type="button">go</button></div></main>');
+    } finally {
+      app.unmount();
+    }
+  });
+
   test('`@rest.disabled` reads through the reactive rest view', () => {
     const { code } = compile('Btn = component extends button\n  render\n    button\n      = @rest.disabled\n');
     expect(code).toContain('this.rest.value.disabled');

@@ -1120,9 +1120,8 @@ class __Component {
   }
   // The host is the inherited element, or under `extends <Component>`
   // the host instance the render constructed with rest spread into its
-  // props. A key the render's own line passes is the line's: the
-  // spread put the line's value after rest at construction, and an
-  // update to the rest key stops here.
+  // props. A key the host's own render line sets is the line's, on
+  // either host: rest never writes it, at mount or on an update.
   _applyInheritedProp(host, key, value) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
     if (!host || key === 'key' || key === 'ref' || key === 'children' || key.startsWith('__bind_')) return;

@@ -10893,12 +10893,43 @@ class Emitter {
   // extended tag is the rest-forwarding target (the fixed
   // _bindInheritedTarget: class scope only, first match wins;
   // factories never bind it).
-  bindInheritedTarget(node, tag, el) {
+  // A key the element's own line sets is the line's: rest never
+  // writes it, at mount or on a later update, as under a component
+  // host. Listeners are not keys here — the line's and the caller's
+  // both run.
+  bindInheritedTarget(node, tag, el, own) {
     const R = this.rstate;
     if (R.frame.extendsTag !== tag || R.sink.kind !== 'class' || R.frame.inheritedBound === true) return;
     R.frame.inheritedBound = true;
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
+    if (own.length > 0) {
+      this.renderLine(node, () => this.b.emit(`this._inheritedOwn = new Set([${own.map((k) => JSON.stringify(k)).join(', ')}])`));
+    }
     this.renderLine(node, () => this.b.emit('this._applyRestToInheritedEl()'));
+  }
+
+  // The attribute keys an element's line sets: its pairs, on the line
+  // or in its body, plus what the selector spells. `class` and
+  // `className` are one attribute.
+  elementOwnKeys(hasClass, args, id) {
+    const keys = new Set();
+    if (id) keys.add('id');
+    if (hasClass) keys.add('class');
+    const take = (obj) => {
+      for (const pair of obj.slice(1)) {
+        if (!isNode(pair) || pair.length !== 3 || typeof pair[1] !== 'string') continue;
+        const key = pair[1];
+        keys.add(key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key);
+      }
+    };
+    for (const arg of args) {
+      if (isObject(arg)) take(arg);
+      else if (isFunc(arg) && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isObject(child)) take(child);
+    }
+    for (const k of ['ref', 'key']) keys.delete(k);
+    for (const k of [...keys]) if (k.startsWith('__')) keys.delete(k);
+    if (keys.has('class') || keys.has('className')) { keys.add('class'); keys.add('className'); }
+    return [...keys];
   }
 
   // A static element: create, id, data-part (the component's first
@@ -10936,10 +10967,10 @@ class Emitter {
     return { el, isSvg };
   }
 
-  renderElementBasics(node, tag, el, id) {
+  renderElementBasics(node, tag, el, id, own) {
     const R = this.rstate;
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
-    this.bindInheritedTarget(node, tag, el);
+    this.bindInheritedTarget(node, tag, el, own);
     if (R.frame.name !== null && R.elCount === 1 && R.sink.kind === 'class') {
       this.renderLine(node, () => this.b.emit(`${el}.setAttribute('data-part', '${R.frame.name}')`));
     }
@@ -10949,7 +10980,7 @@ class Emitter {
     this.noteShorthandClasses(classes, node);
     const R = this.rstate;
     const { el, isSvg } = this.renderElementPrologue(node, tag);
-    this.renderElementBasics(node, tag, el, id);
+    this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(classes.length > 0, args, id));
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
     const prevKeys = R.pendingClassKeys;
@@ -11012,7 +11043,7 @@ class Emitter {
     this.noteShorthandClasses(staticClasses, node);
     const R = this.rstate;
     const { el, isSvg } = this.renderElementPrologue(node, tag);
-    this.renderElementBasics(node, tag, el, id);
+    this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(true, children, id));
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
     const prevArgs = R.pendingClassArgs;
     const prevEl = R.pendingClassEl;
