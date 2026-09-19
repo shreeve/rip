@@ -215,7 +215,7 @@ rows: [string, string, unknown][] = [
   ['date', '2024-00-10', null]
   ['date', '2024-01-00', null]
   ['date', '2024-01-32', null]
-  ['date', '2024-0215', null]
+  ['date', '2024-0215', '2024-02-15']
   ['date', '15/02/2024', null]
   ['date', '99-01-01', null]
   # a clock is dropped and a zone is not applied: the day as written

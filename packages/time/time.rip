@@ -180,19 +180,19 @@ REGEX_NOISE =! /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s|(?<=\d)(?:st|nd|rd
 # match says what was written without asking which branch matched.
 REGEX_DATE =! ///
   ^(?:
-      (?<y>(?:19|20)\d\d)                                # year, then either
-      (?: (?<m>\d\d)(?<d>\d\d)(?<t>\d*)                  #   month day, glued:  20240229, 202402291430[00]
-        | [-/.\s]?(?<m>[a-z]+\.?)(?:[-/.\s]?(?<d>\d\d?))?  #   month name[, day]: 2024-Feb-09, 2024 Feb 9, 2024Feb9
-        | [-/.\s](?<m>\d\d?)(?:[-/.\s](?<d>\d\d?))?      #   month[, day]:      2024-02-29, 2024/2/9, 2024-02
-      )?                                                 #   or nothing:        2024
+      (?<y>(?:19|20)\d\d)(?<m>\d\d)(?<d>\d\d)(?<t>\d*)           # compact: 20240229, 202402291430[00]
   | # or...
-      (?<d>\d\d?)[-/.\s]?                                # day
-      (?<m>[a-z]+\.?)[-/.\s]?                            # month name (day-first only when spelled out)
-      (?<y>(?:19|20)\d\d)                                # year:               9 Feb 2024, 09-FEB-2024, 9Feb2024
+      (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d))[-/.\s]?               # day
+      (?<m>[a-z]{3,9}\.?)[-/.\s]?                                 # month, by name only (day-first is never numeric)
+      (?<y>(?:19|20)\d\d)                                         # year:  9 Feb 2024, 09-FEB-2024, 9Feb2024
   | # or...
-      (?<m>\d\d?|[a-z]+\.?)[-/.\s]                       # month
-      (?<d>\d\d?)(?:,\s?|[-/.\s])                        # day, then a comma or a separator
-      (?<y>(?:19|20)?\d\d)                               # year, 2 or 4 digits: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
+      (?<y>(?:19|20)\d\d)                                         # year
+      (?:[-/.\s]?(?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)    # month
+      (?:[-/.\s]?(?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)))?)?        # day:   2024-02-29, 2024/2/9, 2024 Feb 9, 2024Feb9, 2024-02, 2024
+  | # or...
+      (?<m>0[1-9]|1[012]|[1-9](?!\d)|[a-z]{3,9}\.?)[-/.\s]?       # month
+      (?<d>0[1-9]|[12]\d|3[01]|[1-9](?!\d)),?[-/.\s]?             # day
+      (?<y>(?:19|20)\d\d|(?<=[-/.])\d\d)                          # year, 2 digits only after a separator: 2/9/2024, Feb 9 2024, Feb. 9, 2024, 2.9.24
   )
 ///i
 
