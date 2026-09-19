@@ -674,7 +674,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // the buffer's own face cannot answer — the probe splices
       // `pla` into a well-formed pair and asks inside the key.
       const broken = APP.replace('      input ref: el', '      input pla');
-      await api.change('app.rip', broken, { waitPublish: false });
+      await api.change('app.rip', broken);
       const completion = await api.completion('app.rip', 10, 15);  // after `pla`
       const labels = labelsOf(completion);
       expect(labels).toContain('placeholder');
@@ -686,7 +686,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
     await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
       await api.open('app.rip', APP);
       const withSlot = APP.replace("        value: q", "        value: q\n        ");
-      await api.change('app.rip', withSlot, { waitPublish: false });
+      await api.change('app.rip', withSlot);
       const completion = await api.completion('app.rip', 9, 8);    // the blank slot line
       const labels = labelsOf(completion);
       expect(labels).toContain('placeholder');
@@ -777,14 +777,14 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // the ask into the `setAttribute` name position and answers it
       // there, at no probe cost.
       const broken = APP.replace('      input ref: el', '      input pla');
-      await api.change('app.rip', broken, { waitPublish: false });
+      await api.change('app.rip', broken);
       const settled = swaps();
       expect(labelsOf(await api.completion('app.rip', 10, 15))).toContain('placeholder');
       expect(swaps() - settled).toBe(0);
       // The EMPTY slot is what the buffer's face still cannot answer:
       // the cursor stands on no key at all, so the probe splices one.
       const withSlot = APP.replace('        value: q', '        value: q\n        ');
-      await api.change('app.rip', withSlot, { waitPublish: false });
+      await api.change('app.rip', withSlot);
       const beforeSlot = swaps();
       expect(labelsOf(await api.completion('app.rip', 9, 8))).toContain('required');
       expect(swaps() - beforeSlot).toBeGreaterThanOrEqual(2);  // the probe face and its restore

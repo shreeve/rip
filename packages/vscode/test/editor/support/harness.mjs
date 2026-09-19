@@ -12,8 +12,11 @@
 // candidates — so a test owns its workspace and its server, and the
 // harness keeps the session cheap instead.
 //
-// api.open/change return after the server publishes diagnostics for that
-// document. api.codes(p) / api.has(p, re) read the LAST published
+// api.open/change return once the server has SETTLED that buffer version:
+// it announces `[rip] settled <uri> v<n>` (window/logMessage) after the
+// last publish a refresh owes — the merged set, and the post-probe
+// re-publish when a pin probe ran — so nothing here sleeps to let a burst
+// finish. api.codes(p) / api.has(p, re) read the LAST published
 // diagnostics for it (unused-var noise filtered); every feature request
 // is wrapped in current-buffer coordinates.
 import fs from 'node:fs';
@@ -72,13 +75,20 @@ export async function inSession(ws, fn, {
 } = {}) {
   const published = [];
   const logs = [];
+  // Event-driven waits: a waiter is { test, resolve } over one stream,
+  // tried against each arrival and dropped once it matches.
+  const logWaiters = new Set();
+  const publishWaiters = new Set();
+  const arrive = (waiters, item) => {
+    for (const w of waiters) if (w.test(item)) { waiters.delete(w); w.resolve(item); }
+  };
   const trace = traceTsgo ? path.join(os.tmpdir(), path.basename(ws) + '.tsgo-trace') : null;
   if (trace) fs.writeFileSync(trace, '');
   const client = new LspClient('bun', [...(trace ? ['--preload', TSGO_TRACE_TAP] : []), SERVER, '--stdio'], {
     env: { ...process.env, RIP_LSP_DEBOUNCE_MS: String(DEBOUNCE_MS), ...(trace ? { RIP_TSGO_TRACE: trace } : {}) },
     onNotification: (m, p) => {
-      if (m === 'textDocument/publishDiagnostics') published.push(p);
-      if (m === 'window/logMessage') logs.push(p.message);
+      if (m === 'textDocument/publishDiagnostics') { published.push(p); arrive(publishWaiters, p); }
+      if (m === 'window/logMessage') { logs.push(p.message); arrive(logWaiters, p.message); }
     },
   });
   client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
@@ -91,19 +101,26 @@ export async function inSession(ws, fn, {
     for (let i = published.length - 1; i >= 0; i--) if (published[i].uri === u) return published[i];
     return null;
   };
-  // Wait for a publishDiagnostics for `p` that arrived after `sinceLen`,
-  // then let the burst finish (the server publishes an unpinned pass and,
-  // when a pin probe ran, a post-probe re-publish).
-  async function awaitPublish(p, sinceLen) {
-    const u = uriOf(p);
-    for (let i = 0; i < 100; i++) {
-      for (let j = published.length - 1; j >= sinceLen; j--) {
-        if (published[j].uri === u) { await sleep(120); return; }
-      }
-      await sleep(100);
-    }
-    throw new Error(`no publishDiagnostics for ${p} arrived`);
-  }
+  // The first item of `stream` (already arrived at or after index `since`,
+  // or arriving later) that `test` accepts; rejects at the deadline so a
+  // server that never answers reads as that, not as a hung test.
+  const awaitFrom = (stream, waiters, since, test, what, timeoutMs) => {
+    for (let i = since; i < stream.length; i++) if (test(stream[i])) return Promise.resolve(stream[i]);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { waiters.delete(w); reject(new Error(`${what} — nothing within ${timeoutMs} ms`)); }, timeoutMs);
+      const w = { test, resolve: (item) => { clearTimeout(timer); resolve(item); } };
+      waiters.add(w);
+    });
+  };
+  const awaitLog = (since, test, what, timeoutMs = 15000) => awaitFrom(logs, logWaiters, since, test, what, timeoutMs);
+  const awaitPublished = (since, test, what, timeoutMs = 15000) => awaitFrom(published, publishWaiters, since, test, what, timeoutMs);
+  // The server's settle line for `u` at `version`, arriving at or after
+  // logs index `since` (versions restart at 1 on every open, so an older
+  // open's line never satisfies a newer one's wait).
+  const awaitSettled = (u, version, since) => {
+    const line = `[rip] settled ${u} v${version}`;
+    return awaitLog(since, (l) => l === line, `no settle for ${u} v${version}`);
+  };
   const versions = new Map();
   const at = (p, line, character) => ({ textDocument: { uri: uriOf(p) }, position: { line, character } });
   const didOpen = (p, text) => {
@@ -123,9 +140,9 @@ export async function inSession(ws, fn, {
     publishesSince(p, since) { return published.slice(since).filter((x) => x.uri === uriOf(p)); },
 
     async open(p, text) {
-      const before = published.length;
+      const since = logs.length;
       didOpen(p, text);
-      await awaitPublish(p, before);
+      await awaitSettled(uriOf(p), 1, since);
     },
     // didOpen with NO wait for the first compile — the editor's own
     // cold-open ordering (a cached answer is the only answer), and the
@@ -134,20 +151,19 @@ export async function inSession(ws, fn, {
     openNoWait(p, text) { didOpen(p, text); },
     // Open a document by RAW uri (non-file schemes — the __external__ path).
     async openUri(uri, text) {
-      const before = published.length;
+      const since = logs.length;
       client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text } });
-      await awaitPublish(uri, before);
+      await awaitSettled(uri, 1, since);
     },
     close(p) {
       client.notify('textDocument/didClose', { textDocument: { uri: uriOf(p) } });
     },
-    async change(p, text, { waitPublish = true } = {}) {
-      const before = published.length;
+    async change(p, text) {
+      const since = logs.length;
       const v = (versions.get(p) || 1) + 1;
       versions.set(p, v);
       client.notify('textDocument/didChange', { textDocument: { uri: uriOf(p), version: v }, contentChanges: [{ text }] });
-      if (waitPublish) await awaitPublish(p, before);
-      else await sleep(400);
+      await awaitSettled(uriOf(p), v, since);
     },
     watched(changes) {
       client.notify('workspace/didChangeWatchedFiles', {
@@ -168,22 +184,16 @@ export async function inSession(ws, fn, {
       throw new Error(`condition never held: ${what}`);
     },
     // Wait until `pred(codes)` holds for `p` — cross-file re-checks land
-    // asynchronously after watched-file events.
+    // asynchronously after watched-file events. Read on every publish
+    // for `p` as it lands, and at once when the latest already satisfies.
     async until(p, pred) {
-      for (let i = 0; i < 60; i++) {
-        if (pred(api.codes(p))) return;
-        await sleep(150);
-      }
-      throw new Error(`condition never held for ${p}; last codes ${JSON.stringify(api.codes(p))}`);
+      const u = uriOf(p);
+      if (pred(api.codes(p))) return;
+      await awaitPublished(published.length, (x) => x.uri === u && pred(api.codes(p)),
+        `condition never held for ${p}; last codes ${JSON.stringify(api.codes(p))}`);
     },
-    async untilLog(re) {
-      for (let i = 0; i < 60; i++) {
-        const line = logs.find((l) => re.test(l));
-        if (line) return line;
-        await sleep(100);
-      }
-      throw new Error(`no log line matching ${re}; got:\n${logs.join('\n')}`);
-    },
+    // The first log line matching `re`, however long ago it arrived.
+    untilLog(re) { return awaitLog(0, (l) => re.test(l), `no log line matching ${re}`); },
 
     hover: (p, line, character) => client.request('textDocument/hover', at(p, line, character)),
     completion: (p, line, character, context) => client.request('textDocument/completion', {

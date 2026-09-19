@@ -41,6 +41,11 @@ export async function openSession(files) {
   const pubs = new Map();
   const seen = new Map();
   const versions = new Map();
+  // The ORDER of arrivals across both streams: a settle line is only an
+  // answer to the publication it followed.
+  let seq = 0;
+  const pubSeq = new Map();     // uri → seq of the latest publication
+  const settledSeq = new Map(); // uri → seq of the latest settle line
 
   for (const [name, text] of Object.entries(files)) {
     const p = path.join(dir, name);
@@ -60,10 +65,19 @@ export async function openSession(files) {
       // WHY it declined — a dropped code action names itself and its
       // reason — so a test that only sees the empty result cannot tell a
       // refusal from an absence.
-      if (m === 'window/logMessage') { logs.push(p.message ?? ''); return; }
+      if (m === 'window/logMessage') {
+        const message = p.message ?? '';
+        logs.push(message);
+        // `[rip] settled <uri> v<n>`: the refresh's last publish for that
+        // buffer version is on the wire — diagnostics() reads it below.
+        const settled = /^\[rip\] settled (\S+) v\d+$/.exec(message);
+        if (settled) settledSeq.set(settled[1], ++seq);
+        return;
+      }
       if (m !== 'textDocument/publishDiagnostics') return;
       diags.set(p.uri, p.diagnostics);
       pubs.set(p.uri, (pubs.get(p.uri) ?? 0) + 1);
+      pubSeq.set(p.uri, ++seq);
     },
   });
   // Capture what the server asks the CLIENT to watch. This matters: a
@@ -173,11 +187,17 @@ export async function openSession(files) {
               'the server never (re)published. An empty result is NOT the same as silence.',
         );
       }
-      // Then let a burst finish: return once the count has held still for
-      // `settle`, rather than after `settle` regardless of what is in
-      // flight — an intermediate publication must not decide the answer.
+      // Then let a burst finish — an intermediate publication must not
+      // decide the answer. The server announces `[rip] settled <uri> v<n>`
+      // after the LAST publish a refresh owes (the merged set, and the
+      // post-probe re-publish when a pin probe ran), so a settle line
+      // newer than the latest publication ends the wait at once. A
+      // publication with no refresh behind it — a cross-file re-pull —
+      // announces nothing, and there the count must hold still for
+      // `settle` instead.
       let quiet = 0;
       while (quiet < settle && Date.now() < deadline + settle) {
+        if ((settledSeq.get(u) ?? -1) > (pubSeq.get(u) ?? -1)) break;
         const at = pubs.get(u);
         await sleep(every);
         quiet = pubs.get(u) === at ? quiet + every : 0;

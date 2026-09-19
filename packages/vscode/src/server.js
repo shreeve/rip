@@ -1822,10 +1822,18 @@ function isNoCheck(uri, state) {
   return isNoCheckPath(fsPath, state.configDir, state.noCheck);
 }
 
+// The end of a refresh's publishing for one buffer version — the final
+// set (parse rejections, the merged TS pull, or the post-probe re-publish
+// when a pin probe ran), whichever this refresh owed. Debug level, like
+// the other per-publish lines; the test harnesses wait on it instead of
+// guessing when a burst of publishes has ended.
+const announceSettled = (uri, version) => connection.console.debug(`[rip] settled ${uri} v${version}`);
+
 async function refresh(document) {
   ensureMirrorRoot(); // first materialization decides/creates the tree
   const state = stateOf(document.uri);
   const text = document.getText();
+  const version = document.version; // the buffer this refresh compiles
   const srcLineStarts = lineStartsOf(text);
 
   // rip.strict / rip.noCheck (package.json#rip, nearest wins, no
@@ -1885,6 +1893,7 @@ async function refresh(document) {
       uri: document.uri,
       diagnostics: [compileErrorDiagnostic(err, text, srcLineStarts)],
     });
+    announceSettled(document.uri, version);
     return;
   }
 
@@ -2089,6 +2098,7 @@ async function refresh(document) {
     // compile, the carried rejections on a tolerant one.
     state.lastGood = good;
     connection.sendDiagnostics({ uri: document.uri, diagnostics: ripParseDiagnostics(good) });
+    announceSettled(document.uri, version);
     return;
   }
 
@@ -2127,6 +2137,7 @@ async function refresh(document) {
   if (isNoCheck(document.uri, state)) {
     connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
     repullOpenDocuments(document.uri);
+    announceSettled(document.uri, version);
     return;
   }
 
@@ -2173,10 +2184,17 @@ async function refresh(document) {
   // re-refresh; on that pass every key hits the cache, so the cycle
   // terminates. Rejected answers cache as null and never retry until
   // the defining expression changes (the key hashes its source text).
+  // The settle announcement waits for the probe when one runs: its
+  // re-refresh publishes again for this same version (and announces
+  // from inside refresh); a probe that pins nothing, or is declined
+  // because one is already in flight, leaves this publish as the last.
   if (result.pinnables?.some((p) => !state.pinCache.has(p.key))) {
-    probePinsFor(document, state, result).catch((err) =>
-      connection.console.error(`[rip] pin probe failed: ${err.message}`));
+    probePinsFor(document, state, result)
+      .catch((err) => { connection.console.error(`[rip] pin probe failed: ${err.message}`); return false; })
+      .then((rerefreshed) => { if (!rerefreshed) announceSettled(document.uri, version); });
+    return;
   }
+  announceSettled(document.uri, version);
 }
 
 // One probe round for a document: splice probe declarations into a
@@ -2185,11 +2203,14 @@ async function refresh(document) {
 // new pinned. The probe file is pulled once, for the verify round, and
 // its diagnostics are never published; it exports nothing, so it is
 // invisible to the user.
+// Resolves true when the round re-refreshed the document (its publish
+// then supersedes the pre-probe one), false when this publish stands.
 async function probePinsFor(document, state, result) {
-  if (state.probing || !tsgo) return;
+  if (state.probing || !tsgo) return false;
   const wanted = result.pinnables.filter((p) => !state.pinCache.has(p.key));
-  if (wanted.length === 0) return;
+  if (wanted.length === 0) return false;
   state.probing = true;
+  let rerefreshed = false;
   const versionAtProbe = documents.get(document.uri)?.version;
   const probePath = state.mirrorPath.replace(/\.ts$/, '.__rip_probe__.ts');
   const probeUri = 'file://' + probePath;
@@ -2232,12 +2253,13 @@ async function probePinsFor(document, state, result) {
     if (pinned > 0) {
       connection.console.log(`[rip] pinned ${pinned}/${wanted.length} hoisted binding(s) for ${path.basename(state.mirrorPath)}`);
       // Superseded edits refresh on their own; only re-refresh the text we probed.
-      if (documents.get(document.uri)?.version === versionAtProbe) await refresh(document);
+      if (documents.get(document.uri)?.version === versionAtProbe) { rerefreshed = true; await refresh(document); }
     }
   } finally {
     try { fs.unlinkSync(probePath); } catch { /* already gone */ }
     state.probing = false;
   }
+  return rerefreshed;
 }
 
 // Keystroke coalescing: compiles are fast but tsgo round-trips add up, so
