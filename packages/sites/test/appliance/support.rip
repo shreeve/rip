@@ -1,0 +1,85 @@
+# Shared by the appliance suites (test/appliance, test/appliance-control):
+# how to spawn the CLI, wait, build a fixture home, stop an agent, and
+# stand up a fixture Janus. Nothing here is a test.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+export PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+export APP = join(import.meta.dir, '..', '..', 'sites.rip')
+export MANAGER = join(import.meta.dir, '..', '..', 'manager.rip')
+export AGENT = join(import.meta.dir, '..', '..', 'agent.rip')
+
+export run = (file, args, env, cwd = null) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, file, ...args],
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+    env: { ...process.env, ...env }
+    cwd: cwd or process.cwd()
+  out = Response.new(proc.stdout).text()
+  err = Response.new(proc.stderr).text()
+  { proc, out, err }
+
+export cli = (file, args, env, cwd = null) ->
+  result = run file, args, env, cwd
+  code = await result.proc.exited
+  { code, out: await result.out, err: await result.err }
+
+export waitFor = (name, fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn!
+    return value if value
+    throw Error.new("timed out waiting for #{name}") if Date.now() >= deadline
+    sleep! 10
+
+# Accumulates a pipe as bytes arrive, so a test can wait for a line from
+# a process that has not exited. Reading the whole stream as one text
+# settles only at EOF.
+export streamText = (stream) ->
+  decoder = TextDecoder.new()
+  log = { text: '' }
+  log.done = do ->
+    for await chunk as stream
+      log.text += decoder.decode chunk, { stream: true }
+    log.text += decoder.decode()
+    log.text
+  log
+
+export fixture = (prefix) ->
+  root = mkdtempSync join(tmpdir(), prefix)
+  state = join root, 'state'
+  runtime = join root, 'runtime'
+  mkdirSync state, { mode: 0o700 }
+  mkdirSync runtime, { mode: 0o700 }
+  { root, state, runtime }
+
+export stopAgent = (runtime) ->
+  owner = join runtime, 'agent.json'
+  return unless existsSync owner
+  pid = JSON.parse(readFileSync(owner, 'utf8')).pid
+  try process.kill pid, 'SIGTERM'
+  waitFor! 'agent shutdown', -> not existsSync(owner)
+
+export alive = (pid) ->
+  try
+    process.kill pid, 0
+    true
+  catch then false
+
+export ownerPid = (runtime) ->
+  try JSON.parse(readFileSync(join(runtime, 'agent.json'), 'utf8')).pid catch then null
+
+export startJanus = (socket, calls) ->
+  serial = 0
+  Bun.serve
+    unix: socket
+    fetch: (request) ->
+      url = URL.new request.url
+      calls.push { method: request.method, path: url.pathname }
+      return Response.json({ type: 'janus', api_version: '1.0' }) if request.method is 'GET' and url.pathname is '/1.0'
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        serial++
+        return Response.json({ id: "app-#{serial}" }, { status: 201 })
+      Response.new null, { status: 204 }
