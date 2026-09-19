@@ -17,7 +17,7 @@ import { ripFiles } from '../support/rip-files.js';
 
 // Productions no battery row can or should reduce.
 const EXCLUDED = new Map([
-  ['Root → ε', 'the empty program has no row shape; that it compiles clean is guarded in test/spawn/cli/check-diagnostics-1.test.js'],
+  ['Root → ε', 'the empty program has no row shape; that it compiles clean is guarded in test/spawn/cli/check-diagnostics-1a.test.js'],
   ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
