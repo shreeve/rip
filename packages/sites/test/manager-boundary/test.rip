@@ -445,11 +445,15 @@ test! 'control commands reject every startup-only option', ->
     ['--workers', '1']
     ['--concurrency', '1']
   ]
+  # Every probe is refused at argument parsing, before any socket or file
+  # is touched, so they neither share state nor order: run them at once.
+  refused = (args, message) ->
+    { proc, err } = run project, args
+    eq await proc.exited, 1, args.join(' ')
+    ok (await err).includes(message), "#{args.join(' ')}: #{await err}"
   try
-    for option in startupOptions
-      { proc, err } = run project, ['status', project, ...option]
-      eq await proc.exited, 1
-      ok (await err).includes("status does not accept startup options: #{option[0]}")
+    Promise.all! startupOptions.map (option) ->
+      refused ['status', project, ...option], "status does not accept startup options: #{option[0]}"
     commands = [
       ['status', project]
       ['stop', project]
@@ -458,10 +462,8 @@ test! 'control commands reject every startup-only option', ->
       ['migrate']
       ['recover', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
     ]
-    for command in commands
-      { proc, err } = run project, [...command, '--watch']
-      eq await proc.exited, 1
-      ok (await err).includes("#{command[0]} does not accept startup options: --watch")
+    Promise.all! commands.map (command) ->
+      refused [...command, '--watch'], "#{command[0]} does not accept startup options: --watch"
   finally
     rmSync dir, { recursive: true, force: true }
 
@@ -540,7 +542,8 @@ test! 'standalone browse heartbeat lease deletes on orderly shutdown', ->
   control = startControl controlSocket, calls
   process = null
   try
-    launched = run dir, ['browse', files, '--host', 'live.example.test', '--control', controlSocket, '--access-log=off']
+    launched = run dir, ['browse', files, '--host', 'live.example.test', '--control', controlSocket, '--access-log=off'],
+      RIP_HEARTBEAT_MS: '100'
     process = launched.proc
     waitFor! 'browse heartbeat', (->
       calls.some (call) -> call.method is 'POST' and call.path.endsWith('/heartbeat')

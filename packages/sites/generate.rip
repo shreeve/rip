@@ -6,8 +6,10 @@ abort 'rip-site generate: the Rip loader is missing' unless preload?
 # This runs as a SPAWNED child, so it must load the compiler that is
 # actually running us — the one the parent passed as --preload — not a
 # fixed relative path that could resolve to a different installation.
-# The loader sits beside compile.js and resolve.js in src/.
-compiler = import!(join(dirname(resolve(preload)), 'compile.js')).compile
+# The loader sits beside compile-cache.js and resolve.js in src/; the
+# cached compile is the loader's own, so a module the loader already
+# compiled in another process is read back, not recompiled here.
+compiler = import!(join(dirname(resolve(preload)), 'compile-cache.js')).compileCached
 
 # Bare specifiers (`rip/<pkg>` stdlib, bun-global fallback) share the
 # loader's enumeration — but Bun.build never consults the runtime's

@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.zig-cache', '.vscode']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.zig-cache', '.vscode', '.rip']);
 const TEXT_EXT = new Set([
   '.js', '.mjs', '.cjs', '.ts', '.tsx', '.rip', '.json', '.md',
   '.zig', '.sh', '.html', '.css', '.toml', '.yml', '.yaml',

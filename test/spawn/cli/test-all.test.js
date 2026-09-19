@@ -12,6 +12,14 @@
 //     under CI, the same teeth test/support/extended.js puts on the
 //     extended tier.
 //
+// Two scheduling properties ride along, asserted on `--plan` and on a
+// probe lane: the CPU budget reaches every package lane as
+// RIP_LANE_WORKERS (the suites that fan out size themselves by it), and
+// lanes are planned longest-first. Neither is a correctness property of
+// the orchestrator — a wrong order still runs every lane — but a budget
+// that silently stops reaching the lanes is how a 10-core box came to
+// run ~25 workers, and that is worth a gate.
+//
 // The fixture is a real directory tree, not a mock: the orchestrator's job
 // IS spawning processes, and a stubbed spawn would gate nothing. It stays
 // out of the extended tier even so — the fixtures are trivial, and a
@@ -45,11 +53,15 @@ const fixture = (packages) => {
   return root;
 };
 
-const orchestrate = (root, env = {}) =>
-  spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+const orchestrate = (root, env = {}, ...extra) =>
+  spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000', ...extra], {
     encoding: 'utf8',
     env: { ...process.env, CI: '', NO_COLOR: '1', ...env },
   });
+
+// Spawns nothing; what it prints is the schedule.
+const plan = (root) => orchestrate(root, {}, '--plan');
+const planned = (r) => [...r.stdout.matchAll(/^▸ (.+)$/gm)].map((m) => m[1]);
 
 const GREEN = { script: 'bun test suite.test.js', body: PASSING };
 const RED = { script: 'bun test suite.test.js', body: FAILING };
@@ -210,6 +222,90 @@ describe('the lane orchestrator', () => {
     }));
     expect(r.stdout).not.toContain('packages/docs');
     expect(r.status).toBe(0);
+  });
+
+  // The budget the orchestrator computes has to REACH the suites that
+  // size themselves by it (vscode's --parallel count; sites keeps its
+  // own latency-bound cap), and it reaches them as an environment variable: the lane's
+  // own script still runs, it just reads a number the orchestrator set.
+  // A budget that stops arriving is invisible from the exit code — the
+  // lane sizes itself by the machine again and everything still passes,
+  // slower — so the probe lane prints what it was handed.
+  test('every package lane is handed its share of the budget as RIP_LANE_WORKERS', () => {
+    const probe = {
+      script: 'bun -e ' + JSON.stringify("console.log('1 tests: lane-workers=' + process.env.RIP_LANE_WORKERS)"),
+    };
+    // --jobs 3 pins the sibling count (2) so the arithmetic below is the
+    // same on every box; the peak still follows the cores.
+    const r = orchestrate(fixture({ probe }), {}, '--jobs', '3');
+    expect(r.status).toBe(0);
+    const banner = r.stdout.match(/3 at a time on (\d+) cores \(root lane (\d+) workers, (\d+) per sibling lane\)/);
+    expect(banner).not.toBeNull();
+    const [, cores, root, perLane] = banner.map(Number);
+    // The value the lane saw is the value the banner promised — matched
+    // on the printed line, not on bun's echo of the `bun -e` source,
+    // which carries the expression rather than a number.
+    expect(perLane).toBeGreaterThanOrEqual(1);
+    expect(r.stdout).toContain(`lane-workers=${perLane}\n`);
+    // One budget: root + siblings never exceeds the peak (1.25x cores)
+    // unless the root lane is pinned at its floor of two.
+    const peak = Math.max(3, Math.round(cores * 1.25));
+    expect(root).toBeGreaterThanOrEqual(2);
+    expect(root + 2 * perLane).toBeLessThanOrEqual(Math.max(peak, 2 + 2 * perLane));
+  });
+
+  test('lanes are planned longest-first, unlisted lanes last in discovery order', () => {
+    // sites (77s) and ui (33s) are in the durations map; the other two
+    // are not and must trail in the order the walk found them.
+    const r = plan(fixture({ zebra: GREEN, sites: GREEN, aardvark: GREEN, ui: GREEN }));
+    expect(r.status).toBe(0);
+    expect(planned(r)).toEqual([
+      'root (extended tier)',
+      'packages/sites',
+      'packages/ui',
+      'packages/aardvark',
+      'packages/zebra',
+    ]);
+  });
+
+  // A real run starts lanes in the planned order too (the plan is the
+  // queue, not a separate listing). One lane at a time makes the start
+  // order the output order.
+  test('a run starts lanes in the planned order', () => {
+    const r = orchestrate(fixture({ zebra: GREEN, ui: GREEN, aardvark: GREEN }), {}, '--jobs', '1');
+    expect(r.status).toBe(0);
+    expect(planned(r)).toEqual([
+      'root (extended tier)',
+      'packages/ui',
+      'packages/aardvark',
+      'packages/zebra',
+    ]);
+  });
+
+  // Bun 1.4.2's --timings makes --parallel start the slowest files
+  // first. The file is opt-in (touch it) and gitignored; a repository
+  // without one must run exactly as before, and an older bun — CI pins
+  // one through .bun-version — must never be handed the flag.
+  test('the root lane takes --timings from test/.timings.json only when it exists', () => {
+    const root = fixture({});
+    const bare = plan(root);
+    expect(bare.status).toBe(0);
+    expect(bare.stdout).toMatch(/· root lane: bun test --parallel=\d+ --timeout 60000\n/);
+    expect(bare.stdout).not.toContain('--timings');
+
+    writeFileSync(join(root, 'test/.timings.json'), '');
+    const seeded = plan(root);
+    expect(seeded.status).toBe(0);
+    if (!Bun.semver.satisfies(Bun.version, '>=1.4.2')) {
+      expect(seeded.stdout).not.toContain('--timings');
+      return;
+    }
+    expect(seeded.stdout).toContain('--timings=test/.timings.json --update-timings');
+    // The run measures into the seed, so the next run has real numbers.
+    const r = orchestrate(root);
+    expect(r.status).toBe(0);
+    const timings = JSON.parse(readFileSync(join(root, 'test/.timings.json'), 'utf8'));
+    expect(timings.files).toHaveProperty(['test/root.test.js']);
   });
 });
 

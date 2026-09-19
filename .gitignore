@@ -23,3 +23,7 @@ notes.txt
 
 # Reference checkouts the benchmarks race against (test/compare.rip)
 /misc/
+
+# Measured per-file durations for the root lane (bun test --timings);
+# seeded with `touch test/.timings.json`, refreshed by scripts/test-all.mjs
+/test/.timings.json

@@ -103,31 +103,31 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 3 | Reactive annotations not enforced | audit `verdict` |
 | 4 | Evolving-`let` reassignment not caught | audit `verdict` |
 | 5 | `typeof` unannotated → `undefined` | audit `verdict`/`twin`, `tsface-tsc` |
-| 6 | `@ts-expect-error` dropped on multi-line emit | `tsface`, `check` |
-| 7 | No headless `rip check` | `check` |
+| 6 | `@ts-expect-error` dropped on multi-line emit | `tsface`, `check-diagnostics-3` |
+| 7 | No headless `rip check` | `check-usage`, `check-diagnostics-1` |
 | 8 | Auto-import was closure-scoped — a workspace `.rip` nothing had opened was never offered | `auto-import` (inverted), `project-model`; the stub is bytes-only, so the prune path is byte-identical. **Accepted limit:** a file that joins the closure and later leaves stops being a candidate until the next session — restoring it means writing a mirror inside the prune, reversing an older invariant, and is the language owner's call |
 | 9 | Write-only locals hover any | hover audit's not-any invariant |
 | 10 | Reactive bindings hover cell wrapper | hover audit + `hover-pins.json` |
 | 11 | Config changes required a reload | `config-reactivity` |
 | 12 | `rip.noCheck` parsed but never applied | `config-reactivity` |
-| 13 | Single-rooted tsconfig — a nested project's own config was ignored | `check`, `editor-gaps-synthetic-project` |
-| 14 | Unused `@ts-expect-error` silently swallowed | `check` |
+| 13 | Single-rooted tsconfig — a nested project's own config was ignored | `check-diagnostics-3`, `editor-gaps-synthetic-project` |
+| 14 | Unused `@ts-expect-error` silently swallowed | `check-diagnostics-3` |
 | 15 | Reactive `:=` bindings tagged `readonly` | `semantic-tokens`, token audit's `readonly` invariant |
 | 17 | A directive swallows the unused-local fade | `editor-features-actions` |
-| 18 | A directive blinded its whole indented block | `check`'s head-line-only case |
-| 19 | Inline render-block directive lost from the face | `check`'s inline component-prop and two-way-bind directive cases; audit `verdict` |
-| 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
+| 18 | A directive blinded its whole indented block | `check-diagnostics-3`'s head-line-only case |
+| 19 | Inline render-block directive lost from the face | `check-diagnostics-3`'s inline component-prop and two-way-bind directive cases; audit `verdict` |
+| 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check-diagnostics-2`'s typed-factory-params case; audit `strict` (13-components' render branches and loops) |
 | 21 | Identifier reads carried no source span — hover, definition, diagnostics and tokens all resolved through a cover | `mapping`, audit `census`/`identity` |
 | 22 | Completion and signature help fired exactly where the compile died — a trailing dot in the parser, an open call in the lexer before the parser ran | `incomplete-expression` (inverted): compile-level repair-driver pins plus barriered editor requests for the member list at a bare dot and signature help in an open call; every recovered request asserts the buffer's own rejection. `arrival` owns the no-barrier debounce probes. `editor-features-actions` owns positional quick-fix edits, `editor-features-rename` whole-file rename. The batch checker still exits non-zero. |
 | 23 | An in-face value declaration could have retired the Tier 3 pin probe | none — closed by ruling, refused on measurement; the reasoning that would re-propose it is answered in pins.js, where it would be built |
 | 24 | A `schema` block's implicit `it` untyped | audit `strict` (14-schema's transforms); `schema-types`' transform case |
-| 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |
-| 26 | The match operator's emission was never null-clean | `check`, `tsface` |
-| 27 | A pattern catch destructured `unknown` | `check`, audit `verdict` (07-exceptions), `tsface` |
+| 25 | Event handler parameters get no event type | `check-diagnostics-2`'s handler case; `dom-vocab-lib` |
+| 26 | The match operator's emission was never null-clean | `check-diagnostics-1`, `tsface` |
+| 27 | A pattern catch destructured `unknown` | `check-diagnostics-2`, audit `verdict` (07-exceptions), `tsface` |
 | 28 | A postfix cast on an inline try body detached the catch arm | audit `compiles`, `verdict` |
 | 29 | `new` on an optional chain emitted an unconstructable spelling | audit `verdict`/`runtime`/`strict`, `rip` (classes.rip) |
 | 30 | `new` on a tagged template leaked the sexpr head | audit `compiles`/`verdict`/`runtime`, and `rip` (classes.rip) pinning the bytes; the parked production cleared |
-| 31 | A promoted param declared no field on the checked face | `check` (08-functions) |
+| 31 | A promoted param declared no field on the checked face | `check-diagnostics-2` (08-functions) |
 | 32 | Reassigning an exported plain binding double-declared | `rip` (modules.rip) |
 | 33 | An enum name's semantic token said `type`, not `enum` | audit `type`, `contract.js` (the enum reason clause deleted) |
 | 34 | The bare `~>` operator hovered the runtime's machinery | audit `silence` |
@@ -136,9 +136,9 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 37 | A state write site kept the lowering's `readonly` color | audit `readonly`, `contract.js` (the readonly reason clause deleted) |
 | 38 | Render-DSL positions hovered the lowering's scaffold | audit `ruled` (`hover-pins.json`) |
 | 39 | A component member's declaration hovered the container wrapper | audit `ruled` (`hover-pins.json`) |
-| 40 | A component member's initializer and in-method writes were never type-checked | `check`, `error-pins.json` (13-components) |
-| 41 | A forward-referenced class or component pinned the probe's own symbol — TS2304 on legal code | `check`, `pins` |
-| 42 | A wrong-typed schema default was never type-checked | `check`, `error-pins.json` (14-schema) |
+| 40 | A component member's initializer and in-method writes were never type-checked | `check-diagnostics-1`, `error-pins.json` (13-components) |
+| 41 | A forward-referenced class or component pinned the probe's own symbol — TS2304 on legal code | `check-diagnostics-2`, `pins` |
+| 42 | A wrong-typed schema default was never type-checked | `check-diagnostics-1`, `error-pins.json` (14-schema) |
 | 43 | A schema callable's output typed unknown | audit `verdict`/`strict` (14-schema) |
 | 44 | A `:mixin` declaration hovered the runtime's machinery | audit hover parity (`hover-pins.json` declaration pin), `schema-types` |
 | 45 | A type predicate in a type body collided with rip's `is` | audit `compiles`, `dts-tsc`, and `types`' predicate-admission rows |
@@ -148,7 +148,7 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 49 | An import type could not name a `.rip` module | audit `verdict` (11-types) |
 | 50 | A rewritten literal widened its neighbours' diagnostics to the whole element list | `mapping`, `contract.js` (the element-position reason clause deleted) |
 | 51 | A value word names a binding — every read became the literal, silently | `rip` (value-words.rip): rejection rows for every annotated binding site, property-position rows for the legal negative space |
-| 52 | A destructured binding read by a hoisted def was implicitly `any` under strict | `check`, audit `strict` (20-inference) |
+| 52 | A destructured binding read by a hoisted def was implicitly `any` under strict | `check-diagnostics-3`, audit `strict` (20-inference) |
 | 53 | A paren-injected call's arity error lands on the wrong argument | the Diagnostics Audit, position rows on 02-operations |
 | 54 | A generic component's shipped declarations referenced a type parameter they never declared | `dts-tsc` |
 | 55 | A computed member's type came from its expression's FORM, so most bodies typed `any` | audit `verdict`/`strict` |
@@ -156,7 +156,7 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 58 | A classed SVG element emitted an unclosed call | audit `runtime`/`verdict`/`strict` |
 | 59 | A type predicate shipped as `==` in the emitted declarations | `dts-tsc` |
 | 60 | A value word in a destructuring pattern bound — the module did not parse | `rip` (value-words.rip): rejection rows for every pattern form, negative-space rows for ordinary names |
-| 61 | A constructor body's `@field =` declared no field, so every read of it rejected | `check` |
+| 61 | A constructor body's `@field =` declared no field, so every read of it rejected | `check-diagnostics-1` |
 | 62 | An unannotated computed member's face type named the lowering | `hover-pins.json`, audit `ruled` — limit: a component nested in a FUNCTION keeps the form table's any, because the behavior object the inferred position reads is emitted only for a module-scope named component; the projection never reached that shape either |
 | 63 | A forward-referenced class binding lost its class color | `semantic-tokens` |
 | 64 | The await hint lit the whole construct — the synthetic keyword's cover | `mapping` (the keyword-maps case), `hint-positions` |

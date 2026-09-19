@@ -15,6 +15,13 @@ handlerText = process.env.RIP_HANDLER_DEADLINE_MS or '0'
 handlerMs = parseInt handlerText
 abort "worker #{workerId}: RIP_HANDLER_DEADLINE_MS must be a nonnegative integer" unless Number.isFinite(handlerMs) and handlerMs >= 0 and String(handlerMs) is handlerText
 
+# A worker whose boot failed keeps answering /ready with the failure long
+# enough for the manager to read it, then exits nonzero. Tests set this
+# low; the default gives a slow manager its full read.
+bootFailText = process.env.RIP_BOOT_FAIL_EXIT_MS or '1500'
+bootFailMs = parseInt bootFailText
+abort "worker #{workerId}: RIP_BOOT_FAIL_EXIT_MS must be an integer greater than zero" unless Number.isFinite(bootFailMs) and bootFailMs > 0 and String(bootFailMs) is bootFailText
+
 ppidText = process.env.RIP_PPID_MS or '1000'
 ppidMs = parseInt ppidText
 abort "worker #{workerId}: RIP_PPID_MS must be an integer greater than zero" unless Number.isFinite(ppidMs) and ppidMs > 0 and String(ppidMs) is ppidText
@@ -40,7 +47,7 @@ boot = ->
   catch error
     state.bootError = String error
     warn "[worker #{workerId}] boot failed: #{state.bootError}"
-    setTimeout (-> exit 1), 1500
+    setTimeout (-> exit 1), bootFailMs
 
 server = Bun.serve
   unix: socket

@@ -56,6 +56,19 @@ bun run audit
 Package work: `bun run test` from that package directory (for example
 `packages/sites`). Browser smoke: `bun run test:browser`.
 
+### Compile cache
+
+`rip file.rip`, `rip test`, and the Sites bundler compile `.rip` modules
+through an on-disk cache at `.rip/cache/compile/` in this checkout
+(`src/compile-cache.js`). An entry is keyed by the compiler's own bytes
+(every `src/**/*.js`), the checkout root, the compile options, and the
+module source, so a spawned process re-reads an unchanged module's
+emission instead of recompiling it, and any edit under `src/` invalidates
+every entry. Compile errors are never cached. `RIP_CACHE_DIR=<dir>`
+relocates the cache, `RIP_NO_CACHE=1` disables it, and `RIP_CACHE_DEBUG=1`
+prints a hit/miss summary on exit. Entries unread for a week are pruned;
+`rm -rf .rip/cache` is the full reset.
+
 `test:all` needs `janus` on PATH for the Sites integration lane. Install
 [Janus](https://github.com/shreeve/janus#prebuilt-releases), or put a Janus
 build on PATH. The lane exercises that binary and rejects a local Go module
