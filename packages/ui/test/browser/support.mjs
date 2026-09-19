@@ -3,7 +3,7 @@ import { expect } from '@playwright/test'
 export const parts = (page) => ({
   trigger: page.getByRole('button', { name: 'Open Dialog' }),
   popup: page.locator('main dialog'),
-  close: page.getByRole('button', { name: 'Close' }),
+  close: page.getByRole('button', { name: 'Close', exact: true }),
   fromParent: page.getByRole('button', { name: 'Open from the Parent' }),
 })
 export const boot = async (page) => {

@@ -1,3 +1,5 @@
+export type ClosedBy = 'any' | 'closerequest' | 'none'
+
 export Dialog = component
   offer @open := false
   offer labelledBy := ''
@@ -27,8 +29,9 @@ export DialogPopup = component extends dialog
   accept open
   accept labelledBy
   accept describedBy
+  @closedby?: ClosedBy | undefined := 'any'
   el: HTMLDialogElement | null := null
-  closedBy ~= @rest.closedby ?? 'any'
+  dismiss ~= closedby ?? 'any'
 
   # Safari ignores closedby, so backdrop presses and Escape under none are
   # handled here until it ships.
@@ -38,11 +41,11 @@ export DialogPopup = component extends dialog
     r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
     e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
   press = (e: PointerEvent) -> pressed = onBackdrop(e)
-  release = (e: PointerEvent) -> open = false if pressed and onBackdrop(e) and closedBy is 'any'
+  release = (e: PointerEvent) -> open = false if pressed and onBackdrop(e) and dismiss is 'any'
 
   cancel = (e: Event) ->
     e.preventDefault()
-    open = false unless closedBy is 'none'
+    open = false unless dismiss is 'none'
 
   ~>
     dialog = el
@@ -66,7 +69,7 @@ export DialogPopup = component extends dialog
   render
     dialog
       ref: el
-      closedby: closedBy
+      closedby: dismiss
       data-open: open or undefined
       data-closed: not open or undefined
       aria-labelledby: labelledBy or undefined

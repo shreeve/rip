@@ -87,6 +87,32 @@ for (const native of [true, false]) {
   })
 }
 
+const pass = (page, value) => page.getByRole('button', { name: `closedby: ${value}`, exact: true }).click()
+
+test('the popup carries the closedby the page passes, and any when it passes none', async ({ page }) => {
+  const { popup } = await boot(page)
+  await expect(popup).toHaveAttribute('closedby', 'any')
+  for (const value of ['none', 'closerequest', 'any']) {
+    await pass(page, value)
+    await expect(popup).toHaveAttribute('closedby', value)
+    await pass(page, 'not passed')
+    await expect(popup).toHaveAttribute('closedby', 'any')
+  }
+})
+
+test('without native closedby, a popup passed none refuses Escape and a press on the backdrop', async ({ page }) => {
+  const { trigger, popup } = await boot(page)
+  await pass(page, 'none')
+  await trigger.click()
+  await expect.poll(() => isModal(page)).toBe(true)
+  await popup.evaluate((el) => el.removeAttribute('closedby'))
+  await page.keyboard.press('Escape')
+  await page.mouse.click(2, 2)
+  await page.waitForTimeout(300)
+  await expect(popup).toHaveAttribute('data-open', 'true')
+  expect(await isModal(page)).toBe(true)
+})
+
 for (const how of ['mouse', 'keyboard']) {
   test(`opened by ${how}, the focused close part ${how === 'mouse' ? 'shows no' : 'shows a'} focus ring`, async ({ page }) => {
     const { trigger, close } = await boot(page)

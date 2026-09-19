@@ -1,8 +1,11 @@
 import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 
+type ClosedBy = 'any' | 'closerequest' | 'none' | undefined
+
 export DialogPage = component
   open := false
+  closedby: ClosedBy := undefined
   render
     div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
       h1 class: 'text-2xl font-semibold', COMPONENTS.dialog.name
@@ -14,6 +17,7 @@ export DialogPage = component
             class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
             'Open Dialog'
           DialogPopup
+            closedby: closedby
             class: [
               'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
               'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
@@ -36,3 +40,15 @@ export DialogPage = component
             class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
             @click: (-> open = true)
             'Open from the Parent'
+
+      section class: 'mt-8 rounded-xl border border-surface p-5'
+        h2 class: 'text-xs-plus font-medium text-tertiary', 'Dismissal'
+        p class: 'mt-2 text-sm text-secondary', 'The page passes closedby to the popup. Left out, the popup uses any: Escape and a click on the backdrop both close it.'
+        div class: 'mt-4 flex flex-wrap items-center gap-2'
+          for option in [undefined, 'any', 'closerequest', 'none'] as ClosedBy[]
+            button
+              type: 'button'
+              aria-pressed: if closedby is option then 'true' else 'false'
+              class: 'rounded-lg border border-input bg-input px-3 py-2 font-mono text-sm text-secondary hover:bg-input-hover active:bg-input-active aria-pressed:bg-surface-active aria-pressed:text-primary'
+              @click: (-> closedby = option)
+              "closedby: #{option ?? 'not passed'}"
