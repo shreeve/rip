@@ -127,7 +127,15 @@ type "export type from declares", 'export type { Shape, Side as Edge } from "./g
   '''
 code "a binding named type still exports", 'export type = 1', 'export const type = 1;'
 fail "export type needs its source", 'export type { Shape }', 'expected from'
-fail "no per-specifier type keyword", 'export { type Shape } from "./geometry"', 'Unexpected'
+# TypeScript's per-name `{ type A, B }` has no rip spelling, on either
+# statement; the rejection says where the keyword goes. A name that
+# happens to be `type` still binds.
+fail "no per-specifier type keyword on an export", 'export { type Shape } from "./geometry"', "write `export type { … } from '…'`"
+fail "no per-specifier type keyword on an import", 'import { type Shape, area } from "./geometry"', "write `import type { … } from '…'`"
+fail "nor after a default binding", 'import G, { type Shape } from "./geometry"', 'a specifier takes no `type` keyword'
+code "a specifier named type still binds", 'import { type, area } from "./geometry"', "import { type, area } from './geometry';"
+code "and takes an alias", 'import { type as kind } from "./geometry"', "import { type as kind } from './geometry';"
+code "and re-exports", 'export { type } from "./geometry"', "export { type } from './geometry';"
 
 # ==============================================================================
 # Meta Properties (ES6)

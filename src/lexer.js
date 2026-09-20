@@ -1466,6 +1466,23 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         return text[at] === '{';
       })()) {
         push('EXPORT_TYPE', word, start, pos);
+      } else if (word === 'type' && parens[parens.length - 1]?.specifiers === true && (() => {
+        // TypeScript's per-name `{ type A, B }` has no rip spelling:
+        // type-only is the statement's. `type` followed by a name is
+        // that spelling, where `{ type }`, `{ type, A }`, and
+        // `{ type as T }` bind a name called `type`. Left alone it
+        // parses as a call, `type(A)`, and the rejection names a
+        // parenthesis the author never wrote.
+        let at = pos;
+        while (text[at] === ' ' || text[at] === '\t') at++;
+        if (!IDENT_START.test(text[at] ?? '')) return false;
+        let j = at + 1;
+        while (j < text.length && IDENT_PART.test(text[j])) j++;
+        return text.slice(at, j) !== 'as';
+      })()) {
+        const verb = seenImport ? 'import' : 'export';
+        fail(`a specifier takes no \`type\` keyword — type-only is the whole statement's: write \`${verb} type { … } from '…'\` for the type names, beside a plain ${verb} for the rest` +
+          (seenImport ? '' : '; a local type exports at its own declaration'), start, pos);
       } else if (word === 'as' && seenFor !== null) {
         // After FOR on the same logical line, `as` is the iterator-
         // protocol connector (`for x as iterable`); `as!` is its
@@ -1937,7 +1954,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         openBracket('object', pos, { pick: true, pickKeys: text[pos + 1] !== ' ' && text[pos + 1] !== '\t' });
         push(dot.kind === '?.' ? 'OPTPICK_START' : 'PICK_START', '{', pos, pos + 1);
       } else {
-        openBracket('object', pos);
+        // A module statement's specifier list: the brace an import or
+        // export keyword opens, or the one after a default binding's comma.
+        const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'IMPORT_TYPE' ||
+          dot.kind === 'EXPORT' || dot.kind === 'EXPORT_TYPE' || (seenImport && dot.kind === ','));
+        openBracket('object', pos, specifiers ? { specifiers: true } : {});
         push('{', '{', pos, pos + 1);
       }
       pos++;

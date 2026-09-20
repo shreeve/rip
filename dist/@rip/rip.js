@@ -6470,6 +6470,19 @@ ${baseline}`).join(`
         return text[at] === "{";
       })()) {
         push("EXPORT_TYPE", word, start, pos);
+      } else if (word === "type" && parens[parens.length - 1]?.specifiers === true && (() => {
+        let at = pos;
+        while (text[at] === " " || text[at] === "\t")
+          at++;
+        if (!IDENT_START.test(text[at] ?? ""))
+          return false;
+        let j = at + 1;
+        while (j < text.length && IDENT_PART.test(text[j]))
+          j++;
+        return text.slice(at, j) !== "as";
+      })()) {
+        const verb = seenImport ? "import" : "export";
+        fail(`a specifier takes no \`type\` keyword — type-only is the whole statement's: write \`${verb} type { … } from '…'\` for the type names, beside a plain ${verb} for the rest` + (seenImport ? "" : "; a local type exports at its own declaration"), start, pos);
       } else if (word === "as" && seenFor !== null) {
         if (text[pos] === "!") {
           pos++;
@@ -6809,7 +6822,8 @@ ${baseline}`).join(`
         openBracket("object", pos, { pick: true, pickKeys: text[pos + 1] !== " " && text[pos + 1] !== "\t" });
         push(dot.kind === "?." ? "OPTPICK_START" : "PICK_START", "{", pos, pos + 1);
       } else {
-        openBracket("object", pos);
+        const specifiers = dot != null && (dot.kind === "IMPORT" || dot.kind === "IMPORT_TYPE" || dot.kind === "EXPORT" || dot.kind === "EXPORT_TYPE" || seenImport && dot.kind === ",");
+        openBracket("object", pos, specifiers ? { specifiers: true } : {});
         push("{", "{", pos, pos + 1);
       }
       pos++;
