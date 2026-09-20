@@ -5,6 +5,7 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 |    # | RFC                                                                                  | Tags                   | Status      |
 | ---: | ------------------------------------------------------------------------------------ | ---------------------- | ----------- |
 |    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟢 Implemented |
+|    2 | [Context names its provider: `accept name from Provider`](#rfc-2-context-names-its-provider-accept-name-from-provider) | `compiler`, `runtime`, `type-system` | 🟡 Proposed |
 
 ---
 
@@ -47,3 +48,67 @@ Styles are strings or objects. The object type is the one the compiler mints for
 ### One change
 
 The deletion, both packages, and every outside reference land together: `test/toolchain/dependencies.test.js` asserts no dependencies on either package instead of the Tailwind budget; the approved skip for the old types test leaves `test/toolchain/skips.test.js`; `test/rip/email.rip` is repointed at `rip/email` and pruned to the day-one surface, and `test/rip/email-internals.rip` goes; the roadmap's UI lines are rewritten and its open item on per-package browser flags closed; the Tailwind lockstep notes in `AGENTS.md` and `scripts/tailwind-bundle.mjs` go. medlabs changes its two import specifiers to `rip/email` in the same change.
+
+---
+
+## RFC 2: Context names its provider: `accept name from Provider`
+
+> **Status: Proposed.**
+
+`offer` takes one form, a `:=` declaration. `accept` names the component it reads from: `accept open from Dialog`. The runtime resolves the read to the nearest ancestor instance of that component instead of walking a string map, and the typed face types the accepted member as that component's own offered member. `packages/ui` moves in the same change. Nothing else in the language changes.
+
+### Why
+
+- **An accepted member has no type.** The face declares every accept `any`, unconditionally, because the accept carries a bare name and its provider is whichever ancestor happens to offer that string at mount time. Nothing static links `accept open` in `DialogPopup` to `offer @open := false` in `Dialog`. The offer side is typed and checked at the use site; the accept side is where the type story stops, and `rip check --public packages/ui` reports the accepted members as leaks. The audit's ruling row for the channel is parked as "model not settled". This RFC is the model.
+- **Three of the four offer forms misbehave at the accept.** The emitter admits `:=`, `=!`, `~=`, and a method as offer payloads. Every accept dereferences `.value`, and the runtime hands a readonly offer's plain value, so `offer limit =! 10` read through `accept limit` renders `undefined`; the recording-DOM harness shows it. A method offer publishes the unbound prototype method, and the accepting component calls it with its own `this`. Only `:=` is used anywhere in the repo.
+- **The key namespace is flat, and the package already collides in it.** `Dialog` and `Drawer` both offer `open`, `labelledBy`, and `describedBy`. A `DrawerClose` placed inside a `Dialog` with no `Drawer` above it closes the Dialog, silently, because `getContext('open')` stops at the nearest provider of that string. No type rule can catch this while the accept names a string, because the two providers carry the same type.
+
+### The change
+
+**`offer` takes a `:=` declaration and nothing else.** `=!`, `~=`, and method payloads are compile errors naming the one spelling. Every offered value is therefore a writable state container, which is what every accept already assumes.
+
+**`accept name from Provider`.** `Provider` is a component binding in module scope, defined in the module or imported. The lowering is `this.name = getContext(Provider, 'name')`. The runtime walks the parent chain for the nearest instance of `Provider`, reads the member from that instance's offered set, and returns its container; a miss throws at mount naming both the provider and the member. A `Provider` binding that is not a component is a compile error at the word. The bare `accept name` is a compile error naming the new spelling.
+
+**The type.** The face declares the accepted member as the provider's own member type, `declare open: Dialog['open']`, the taken container `{ value: boolean; read(): boolean; touch?(): void }`, so reads and writes through it type as `boolean`. Each component's companion interface carries a TS-only record of its offered names, and the accept indexes through it, so accepting a member the provider does not offer is a type error at the accept rather than a throw at mount. The `.d.ts` road shares the segments, so a package's consumers see the same types.
+
+**Hover.** An accepted name answers `(accept) open: boolean`, value-first, the kind minted from the spelling as `(state)` is. The keywords `offer` and `accept` decline as structure keywords do. An offered member answers as its own kind, and nothing in the answer says it is offered.
+
+**What it reaches.** An offered member is readable from anywhere that can import its provider. A library's parts name a provider inside the library. An app that wants a library themed renders the library's provider and hands it the value as a prop. A library cannot reach an app's provider, because it cannot import it. A root offering a value to every descendant is written as a provider component, the same shape the dialog already has:
+
+```
+# theme.rip
+export Theme = component
+  offer @theme := 'dark'
+  render
+    slot
+
+# card.rip
+import { Theme } from './theme.rip'
+
+export Card = component
+  accept theme from Theme
+  render
+    div class: "card card-#{theme}"
+      slot
+```
+
+### Alternatives
+
+- **Bare `accept name`, provider resolved from scope.** The same guarantees are reachable: the accept names the one component in module scope that offers `name`. The emitter cannot see what an imported name offers, so provenance moves to a type-level search over every in-scope binding and the runtime takes a candidate list instead of one class. The import that brings the provider into scope is referenced by nothing visible, so unused-import logic, go-to-definition, and auto-import all have to learn that an accept consumes it. A module in scope of two providers of one key has no way to say which, and the fix on that day is to add `from`. One word buys all of it directly. The rulings above survive unchanged if the bare form is preferred; only the resolution mechanism differs.
+- **Keep the string key, type it from a package-wide map.** Every module's face augments one interface with its offers, keyed by package, and an accept reads its key from it. The type is always right, since two offers of one key with different types error at the second offer, and tsgo confirms the mechanism on hand-written faces. It leaves the collision above untouched, since same-typed offers merge, and it needs a package identity in the emitter, a merge rule, and a collision diagnostic, all of which naming the provider deletes.
+
+### What it costs
+
+- **A part shared across roots.** One close button that works under either a Dialog or a Drawer has no provider to name, and components extend tags, not each other. The package ships `DialogClose` and `DrawerClose` separately, so nothing existing needs it. An optional accept mapped to `hasContext` is where such a part would be designed, and it is not in this RFC.
+- **The same-module spelling.** `accept open from Dialog` inside `dialog.rip` names a provider three lines up. It is the price of one spelling.
+- **Class identity.** The runtime matches the provider by constructor. HMR replaces classes, so a swapped provider must keep matching its mounted parts, or the swap must remount them.
+
+### Open
+
+- What `accept options from Select` types when the provider takes a type parameter.
+- HMR and constructor identity, above.
+- Whether an offered member should be reachable across a package boundary at all, or only from its provider's own package. The import makes the read explicit either way; restricting it is one rule at the resolution site.
+
+### One change
+
+The grammar production and the emitter's two lowerings, the JS read and the face's declare; the offered-names record in `src/ts/components.js`; the runtime's `getContext` signature; `dialog.rip` and `drawer.rip`; the components fixture in the corpus rewritten in the new spelling, its claims rows and error pins, and the ruling row unparked with its hover pin; the emitter-cases battery line and the runtime-components context scenario; `docs/TYPES.md`. medlabs offers and accepts nothing and needs no edit.
