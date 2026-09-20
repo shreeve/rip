@@ -748,6 +748,14 @@
       {
         "name": "Porch",
         "expect": "let Porch: typeof Porch"
+      },
+      {
+        "name": "Lamp",
+        "expect": "let Lamp: typeof Lamp"
+      },
+      {
+        "name": "Shade",
+        "expect": "let Shade: typeof Shade"
       }
     ],
     "positions": [
