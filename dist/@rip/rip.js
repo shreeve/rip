@@ -26195,6 +26195,12 @@ function __style(el, value) {
   for (const k of Object.keys(value))
     __writeStyle(el.style, k, value[k]);
 }
+var __restView = (rest) => new Proxy(rest, {
+  get(map, key) {
+    const held = map[key];
+    return held != null && typeof held === "object" && typeof held.read === "function" ? held.value : held;
+  }
+});
 function __splitProps(ctor, props) {
   const declared = ctor.__props ?? [];
   const extendsTag = ctor.__extends ?? null;
@@ -26264,7 +26270,7 @@ class __Component {
       this._hmrPropKeys = __hmrPropKeys(props);
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
-      this.rest = __state(this._rest);
+      this.rest = __state(__restView(this._rest));
     }
     this._frame = __ownerFrame({ nested: false });
     const prevC = __pushComponent(this);
@@ -26682,7 +26688,7 @@ class __Component {
     }
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
-      this.rest.value = this._rest;
+      this.rest.value = __restView(this._rest);
     }
   }
   _hmrDrainOrphans(report) {

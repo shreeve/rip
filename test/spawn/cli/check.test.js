@@ -361,6 +361,36 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  test('an undeclared key on an extends component takes a value or a reactive name of it, and nothing else', async () => {
+    const dir = workspace({
+      'app.rip': [
+        'Btn = component extends button',
+        '  pressed: boolean ~= @rest.disabled is true',
+        '  render',
+        '    button',
+        '      slot',
+        'export Page = component',
+        '  busy := false',
+        '  idle ~= not busy',
+        "  name := 'n'",
+        '  render',
+        '    div',
+        "      Btn disabled: busy, 'a state'",
+        "      Btn disabled: idle, 'a computed'",
+        "      Btn disabled: (busy or false), 'a value'",
+        "      Btn disabled: name, 'a state of the wrong type'",
+        "      Btn disabled: 'yes', 'a value of the wrong type'",
+        '',
+      ].join('\n'),
+    });
+    try {
+      const { stdout, status } = await check(dir);
+      expect(status).toBe(1);
+      const lines = stdout.split('\n').filter((l) => /^app\.rip:\d+:\d+ - error/.test(l)).map((l) => Number(l.split(':')[1]));
+      expect(lines).toEqual([15, 16]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The two face-only BEHAVIOR OBJECTS (a component's computed members, a
   // schema's callables) are re-emissions of bodies the descriptor and _init
   // already carry, and each has a shape that the fixtures which drove them

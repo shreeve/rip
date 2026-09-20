@@ -1611,8 +1611,23 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     const shared = RT.__state('s');
     const inst = makeBtn({ label: 'x', title: 'tip', disabled: true, children: document.createElement('i'), __bind_label__: shared });
     expect(inst._rest).toEqual({ title: 'tip', disabled: true });
-    expect(inst.rest.read()).toBe(inst._rest);
+    expect(inst.rest.read()).toEqual(inst._rest);
     expect(inst.label).toBe(shared);
+  });
+
+  test('the rest view reads a shared container through: the read answers the value and tracks it; the map keeps the container', () => {
+    const busy = RT.__state(false);
+    const inst = makeBtn({ disabled: busy, title: 'tip' });
+    expect(inst._rest.disabled).toBe(busy);
+    expect(inst.rest.read().disabled).toBe(false);
+    expect(inst.rest.read().title).toBe('tip');
+    expect(Object.keys(inst.rest.read())).toEqual(['disabled', 'title']);
+    const seen = [];
+    const stop = RT.__effect(() => { seen.push(inst.rest.value.disabled); });
+    busy.value = true;
+    inst._updateProp('disabled', 'later');
+    expect(seen).toEqual([false, true, 'later']);
+    stop();
   });
 
   test('_updateProp routes undeclared names to rest and applies onto the inherited element; declared props keep their contracts', () => {

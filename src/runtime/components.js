@@ -906,6 +906,16 @@ function __style(el, value) {
   for (const k of Object.keys(value)) __writeStyle(el.style, k, value[k]);
 }
 
+// What `@rest` reads: the rest map with every shared container read
+// through, so a read answers the value and tracks the container. The
+// map itself keeps the containers — the forwarding roads bind to them.
+const __restView = (rest) => new Proxy(rest, {
+  get(map, key) {
+    const held = map[key];
+    return held != null && typeof held === 'object' && typeof held.read === 'function' ? held.value : held;
+  },
+});
+
 // The prop keys a construction passes, checked against the definition:
 // `children` is the projection channel and always legal; `__bind_x__`
 // carries the shared container the `<=>` channel passes for a DECLARED
@@ -1007,7 +1017,7 @@ class __Component {
       // `this.rest.value`; `_setRestProp` mutates and touches. Set
       // BEFORE _init so member initializers and effects can read it.
       this._rest = rest ?? {};
-      this.rest = __state(this._rest);
+      this.rest = __state(__restView(this._rest));
     }
     // The instance's owner frame: NON-nested (cross-component
     // teardown is the _children cascade, never frame nesting), alive
@@ -1439,7 +1449,7 @@ class __Component {
     }
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
-      this.rest.value = this._rest;
+      this.rest.value = __restView(this._rest);
     }
   }
   _hmrDrainOrphans(report) {

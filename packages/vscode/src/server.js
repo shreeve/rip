@@ -3054,7 +3054,9 @@ function componentPropsAt(flat, open) {
     const out = [];
     let styleAt = -1;
     for (const raw of splitTypeAt(inner, ';')) {
-      const row = raw.trim();
+      // An extends surface row admits the value or a container of it
+      // (valueOrContainer); the row classifies by the value it wraps.
+      const row = raw.trim().replace(/^((?:"[^"]*"|'[^']*'|[\w$-]+)\??: )\((.*)\) extends infer __V \? __V \| \{ value: __V; read\(\): __V; touch\?\(\): void;? \} : never$/, '$1$2');
       // The DEFAULT projection slot stays out of the signature — it is the
       // channel every component has, not a prop this one declares — under
       // either spelling of its minted type; a declared `@children: T` shows.

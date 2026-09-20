@@ -523,6 +523,10 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
     expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed
     expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
+    // A caller passes an undeclared key its value or a container of it; the
+    // rest view above holds the value alone.
+    expect(d).toContain(`disabled?: (HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any) extends infer __V ? __V | { value: __V; read(): __V; touch?(): void } : never`);
+    expect(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1]).not.toContain('infer __V');
   });
 
   test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object', () => {

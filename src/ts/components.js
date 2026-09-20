@@ -361,6 +361,10 @@ export const selfArgsOf = (typeParams) => {
 export const containerType = (t, ro = '', notify = TAKEN) =>
   `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
 
+// What a caller may pass for an undeclared key: the value, or a
+// container of it (the rest view reads it through). `t` is spelled once.
+export const valueOrContainer = (t) => `(${t}) extends infer __V ? __V | ${containerType('__V')} : never`;
+
 // The rest view's container: readonly value WITH touch(). The runtime
 // holds this._rest by reference and _setRestProp mutates-then-touches
 // that same object — a write to `value` would orphan it (every later
@@ -784,7 +788,7 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
     // declared prop already owns.
     for (const [key, t] of restPassthroughEntries(info.extendsTag, road)) {
       if (used.has(key)) continue;
-      segs.push({ text: `; ${keyText(key)}?: ${t}` });
+      segs.push({ text: `; ${keyText(key)}?: ${valueOrContainer(t)}` });
     }
     segs.push({ text: `; ${REST_TEMPLATES}` });
   }
