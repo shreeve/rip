@@ -152,14 +152,14 @@ Quiet = component
 Terse = component
   render null;
 
-# ── hyphenated attribute keys: the presence road and the data- template ──
+# ── hyphenated attribute keys: the absence road and the data- template ──
 
 Held = component
   busy := false
 
   render
     div
-      aria-busy: busy?!
+      aria-busy: busy or undefined
       data-kind: 'row'
       'held'
 

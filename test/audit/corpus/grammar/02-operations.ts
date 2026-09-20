@@ -66,7 +66,7 @@ counter--
 --counter
 console.log('counter:', counter)
 
-// ── Existence ? and presence ?! — and the soak family ?. ?.[ ?.( ──
+// ── Existence ? — and the soak family ?. ?.[ ?.( ──
 
 let port: number | null = null
 let chosen = port ?? 8080
@@ -81,7 +81,7 @@ let scale: ((n: number) => number) | null = function(n: number) { return n * 2 }
 let scaled = scale?.(21) ?? 42
 let called = scale?.(21)
 
-console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
+console.log('existence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
 // ── Invocation: explicit parens, the implicit spelling, do, dammit, maybe-dammit, tagged ──
 

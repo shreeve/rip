@@ -1,0 +1,17 @@
+fetchUser = (id) -> Promise.resolve({ id: id ?? 0 })
+missing = null
+obj = { v: 7, load: -> Promise.resolve(@v) }
+bare = fetchUser?!
+none = missing?!
+args = fetchUser?! 1
+paren = fetchUser?!(2)
+method = obj.load?!
+chain = fetchUser?!(3).id
+fallback = missing?! ?? "absent"
+list = [missing?!, fetchUser?!(4)]
+text = "#{missing?!}"
+spread = {...fetchUser?!(6), extra: 1}
+nothing = {...missing?!, kept: true}
+run = (cb) -> cb?! 5
+ran = run (n) -> Promise.resolve(n * 2)
+out = [bare, none, args, paren, method, chain, fallback, list, text, spread, nothing, ran]

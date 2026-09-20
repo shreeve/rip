@@ -110,8 +110,8 @@ syn match  ripOperator      /===\|!==\|>>>\|\.\.\./
 " Compound assignment (longest alternatives first within alternation)
 syn match  ripOperator      />>>=\|\*\*=\|\/\/=\|%%=\|&&=\|||=\|??=\|<<=\|>>=\|+=\|-=\|\*=\|\/=\|%=\|&=\||=\|\^=/
 
-" Special. `?!` is the presence operator, one token — bare Houdini, or
-" maybe dammit when call arguments follow. `!?` is the reverse pair, two
+" Special. `?!` is maybe dammit, one token: the awaited optional call,
+" bare or with call arguments. `!?` is the reverse pair, two
 " tokens (dammit then postfix existence: `a!?` is `await a() != null`),
 " matched together because it reads as one idiom.
 syn match  ripOperator      /!?\|?!\|??\|?\./
@@ -181,6 +181,7 @@ syn match  ripMethodCall    /\.\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*(/
 " Dammit calls: name! (await shorthand) — but a!=b is inequality, and
 " a!== is strict inequality, so ! followed by = does not count
 syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze!=\@!/
+syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze?!/
 
 " --- Assignments ------------------------------------------------------------
 

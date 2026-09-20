@@ -36,8 +36,6 @@ const symbolRule = grammar.patterns.find((p) =>
   p.name === 'constant.other.symbol.rip');
 const maybeDammitRule = grammar.patterns.find((p) =>
   p.name === 'keyword.control.await.rip' && p.match?.startsWith('\\?!'));
-const presenceRule = grammar.patterns.find((p) =>
-  p.name === 'keyword.operator.presence.rip');
 const controlRule = grammar.patterns.find((p) =>
   p.name === 'keyword.control.rip' && p.match?.includes('finally'));
 const vimSyntax = readFileSync(
@@ -95,23 +93,32 @@ describe('symbol-literal lockstep (grammar ⇄ compiler)', () => {
   });
 });
 
-describe('Houdini / maybe dammit lockstep (editor grammars ⇄ compiler)', () => {
-  const maybeRe = new RegExp(maybeDammitRule.match);
-  const presenceRe = new RegExp(presenceRule.match);
+describe('maybe dammit lockstep (editor grammars ⇄ compiler)', () => {
+  // The first rule whose pattern matches AT the start of `source` is the
+  // one TextMate applies there, so rule ORDER decides what `?!` paints as.
+  const firstRuleAt = (source) => grammar.patterns.find((p) =>
+    typeof p.match === 'string' && new RegExp(`^(?:${p.match})`).test(source));
 
-  test('TextMate gives argument-bearing ?! await scope and leaves bare ?! as presence', () => {
-    for (const source of ['?!()', '?!(arg)', '?! arg', '?! 42', '?! {ok: true}', '?! [1]']) {
-      expect(source.match(maybeRe)?.[0]).toBe('?!');
+  test('TextMate paints every ?! in dammit\'s own scope, bare or with arguments', () => {
+    // Dammit's bang sits behind a value, so its rule is the first one
+    // that matches the `!` of `f!`.
+    const dammitRule = grammar.patterns.find((p) =>
+      typeof p.match === 'string' && new RegExp(p.match).exec('f!')?.index === 1);
+    expect(dammitRule.name).toBe('keyword.control.await.rip');
+    for (const tail of ['', '()', '(arg)', ' arg', ' 42', ' {ok: true}', ' [1]', ' ?? fallback', '\nnext', '.answer']) {
+      const rule = firstRuleAt(`?!${tail}`);
+      // Not the existence `?`, the nullish `??`, or the optional `?.`
+      // rule, each of which also matches a leading `?`.
+      expect(rule).toBe(maybeDammitRule);
+      expect(rule.name).toBe(dammitRule.name);
     }
-    for (const source of ['?!', '?! ?? fallback', '?! + 1', '?!\nnext']) {
-      expect(maybeRe.test(source)).toBe(false);
-      expect(source.match(presenceRe)?.[0]).toBe('?!');
-    }
+    expect(grammar.patterns.filter((p) => typeof p.match === 'string' && p.match.startsWith('\\?!'))).toHaveLength(1);
+    expect(JSON.stringify(grammar)).not.toContain('operator.presence');
   });
 
-  test('the TextMate split agrees with emitted meaning', () => {
+  test('the TextMate scope agrees with emitted meaning', () => {
     expect(compile('fn?!', { runtimeDelivery: 'none' }).code)
-      .toBe('(fn ? true : undefined);');
+      .toBe('await fn?.();');
     expect(compile('fn?!()', { runtimeDelivery: 'none' }).code)
       .toBe('await fn?.();');
     expect(compile('fn?! arg', { runtimeDelivery: 'none' }).code)
@@ -120,6 +127,12 @@ describe('Houdini / maybe dammit lockstep (editor grammars ⇄ compiler)', () =>
 
   test('Vim recognizes ?! as one special operator token', () => {
     expect(vimSyntax).toContain('syn match  ripOperator      /!?\\|?!\\|??\\|?\\./');
+  });
+
+  test('Vim paints the callee of maybe dammit the way it paints dammit\'s', () => {
+    const rules = vimSyntax.split('\n').filter((line) => line.startsWith('syn match  ripDammitCall'));
+    expect(rules.some((line) => line.includes('\\ze!=\\@!/'))).toBe(true);
+    expect(rules.some((line) => line.includes('\\ze?!/'))).toBe(true);
   });
 });
 

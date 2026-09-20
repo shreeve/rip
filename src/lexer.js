@@ -476,7 +476,7 @@ const UNFINISHED = new Set([
 // DAMMIT is callable: `f!(1, 2)` calls (and awaits) f. DYNAMIC_IMPORT
 // exists only when a '(' or '!(' follows (the lexer mints it from that
 // lookahead), so `import(url)` and `import!(url)` are real calls.
-const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'PRESENCE', 'DYNAMIC_IMPORT']);
+const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'MAYBE_DAMMIT', 'DYNAMIC_IMPORT']);
 
 // Token kinds after which an unspaced '[' indexes rather than opening an
 // array literal (the scan-time rule: !prev.spaced && INDEXABLE.has(prev)).
@@ -1806,9 +1806,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (ch === '?') {
       // Spaced '?' is the ternary operator. Unspaced: '?(' and '?['
       // are the optional call/index (the dotless '?.' spelling), '?!'
-      // directly after a value-ending token is the postfix presence
-      // check when bare (`a?!` → `a ? true : undefined`) and maybe
-      // dammit when followed by arguments (`f?!(x)` → `await f?.(x)`),
+      // directly after a value-ending token is maybe dammit, the
+      // awaited optional call (`f?!` → `await f?.()`, `f?!(x)` /
+      // `f?! x` → `await f?.(x)`) — dammit's `f!` with an optional callee,
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
       // A juxta argument after that existence token (`f? x`) is an
@@ -1823,7 +1823,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         const prev = last();
         if (text[pos + 1] === '!' && prev && !prev.generated && INDEXABLE.has(prev.kind)) {
-          push('PRESENCE', '?!', pos, pos + 2);
+          // Maybe dammit calls what dammit calls: a name (`f?!`,
+          // `obj.method?!`). After any other value it has no reading.
+          if (prev.kind !== 'IDENTIFIER' && prev.kind !== 'PROPERTY') {
+            fail("maybe dammit '?!' follows a name, as dammit does (`f?!`, `obj.method?!`) — bind the value to a name first", pos, pos + 2);
+          }
+          push('MAYBE_DAMMIT', '?!', pos, pos + 2);
           pos += 2;
           continue;
         }
@@ -2033,7 +2038,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         prevTok.kind === 'HEREGEX_END' || prevTok.kind === 'BOOL' ||
         prevTok.kind === 'NULL' || prevTok.kind === 'UNDEFINED' ||
         prevTok.kind === 'DAMMIT' || prevTok.kind === '?' ||
-        prevTok.kind === 'PRESENCE' || prevTok.kind === 'OPT_MARKER' ||
+        prevTok.kind === 'MAYBE_DAMMIT' || prevTok.kind === 'OPT_MARKER' ||
         prevTok.kind === 'THIS' || prevTok.kind === '@' || prevTok.kind === 'SYMBOL' ||
         // A pending ternary's ELSE colon: after a bare identifier the
         // colon closes the ternary (`c ? d :e`); after `?` or another

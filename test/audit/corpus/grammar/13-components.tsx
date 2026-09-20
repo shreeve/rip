@@ -135,12 +135,12 @@ function Terse() {
   return null
 }
 
-// ── hyphenated attribute keys: the presence road and the data- template ──
+// ── hyphenated attribute keys: the absence road and the data- template ──
 
 function Held() {
   let busy = false
   return (
-    <div aria-busy={busy ? true : undefined} data-kind='row'>held</div>
+    <div aria-busy={busy || undefined} data-kind='row'>held</div>
   )
 }
 

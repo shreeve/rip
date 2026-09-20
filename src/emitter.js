@@ -6940,6 +6940,8 @@ class Emitter {
       if (vars.length !== 1) {
         throw this.positionedError(node, 'emitter: for-as takes ONE loop variable — the iterator protocol yields single values (destructure with a pattern instead)');
       }
+      // An awaited for-as carries its await in a flag, not a node.
+      if (aux === true) this.renderSyncGuard(node);
       this.b.emit(aux === true ? 'for await (let ' : 'for (let ');
       markVar(vars[0]);
       this.b.emit(' of ');
@@ -7932,8 +7934,6 @@ class Emitter {
     if (isTernary(x) || (isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
     if (x[0] === '?' && x.length === 2) return 'binary';
-    // Postfix presence emits a ternary — the ternary tier.
-    if (x[0] === 'presence' && x.length === 2) return 'ternary';
     if (Emitter.isStrRepeat(x)) return 'primary';
     if (isBinary(x) || isRelation(x)) return 'binary';
     if (isUnary(x)) return 'unary';
@@ -8000,7 +8000,6 @@ class Emitter {
       (tier === 'function' && child[0] === '->') ||
       (isNode(child) && (child[0] === 'class' || child[0] === 'component')) ||
       (isTernary(child) && !Emitter.ternaryHoists(child)) ||
-      (isNode(child) && child[0] === 'presence' && child.length === 2) ||
       (tier === 'unary' && child[0] === 'delete');
   }
 
@@ -8169,7 +8168,6 @@ class Emitter {
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
     if ((head === 'cast' || head === 'satisfies') && node.length === 3) return this.postfixType(node);
     if (head === '?' && node.length === 2) return this.existence(node);
-    if (head === 'presence' && node.length === 2 && this.lockedHead(node, 'presence')) return this.presence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
     if (head === 'dammit?') return this.maybeDammit(node);
@@ -9078,19 +9076,43 @@ class Emitter {
   // `__effect` name (the bare form; the bound form's operator is its
   // `=`).
   // A render body's expressions embed inside synchronous generated
-  // scopes — _create, updater effects, event listeners, and their
-  // __batch windows — none of which is async or a generator. A
-  // function VALUE (an event handler arrow) passes through untouched
-  // and owns its own control context, so only a bare await/yield in a
-  // render expression is illegal. Returns the first offending node.
-  static findRenderControl(n) {
+  // scopes — _create, updater effects, block factories, event listeners
+  // and their __batch windows — none of which is async or a generator.
+  // A function VALUE (a handler arrow, a function prop, a callback)
+  // owns its own control context. The rule is enforced where the
+  // awaiting forms EMIT: no render emission pushes a function scope, and
+  // every function value does (emitFunc), so inside a render body the
+  // scope depth equals the depth the render opened at exactly when the
+  // form sits in a generated scope. Nothing about render's structure is
+  // re-derived, so no render shape can disagree with the check.
+  renderSyncGuard(node) {
+    const R = this.rstate;
+    if (R && this.scopes.length === R.scopeDepth) throw this.renderSyncError(node);
+  }
+
+  renderSyncError(node) {
+    return this.positionedError(node,
+      "emitter: a render body evaluates synchronously — 'await'/'yield' cannot appear in a render expression " +
+      "(text, attributes, props, and event listeners emit into non-async generated scopes); compute the value " +
+      "into a member (a state written by an effect), or make the handler a function ('-> await ...')", this.rstate.node);
+  }
+
+  // The first await/yield an EXPRESSION evaluates in its own scope. An
+  // expression holds no render structure, so every function in it is a
+  // value and the walk stops there. A render local's value is scanned
+  // with this before its binding is judged: the dead-local diagnostic
+  // runs at collection, ahead of emission, and would otherwise answer
+  // for a line whose defect is the await.
+  static firstAwaitIn(n) {
     if (!isNode(n)) return null;
     const head = n[0];
     if (head === 'await' || head === 'dammit!' || head === 'dammit?' || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return null;
+    // An effect body is a function too: effectValue pushes its scope
+    // and emits it async when it awaits.
+    if (isFunc(n) || isDefHead(head) || head === 'class' || head === 'effect') return null;
     for (const el of n) {
-      const hit = Emitter.findRenderControl(el);
+      const hit = Emitter.firstAwaitIn(el);
       if (hit !== null) return hit;
     }
     return null;
@@ -9478,13 +9500,6 @@ class Emitter {
         if (renderNode !== null) {
           throw this.positionedError(stmt,
             'emitter: duplicate render block — a component takes exactly one', node);
-        }
-        const ctrl = Emitter.findRenderControl(stmt);
-        if (ctrl !== null) {
-          throw this.positionedError(ctrl,
-            "emitter: a render body evaluates synchronously — 'await'/'yield' cannot appear in a render expression " +
-            "(text, attributes, props, and event listeners emit into non-async generated scopes); compute the value " +
-            "into a member (a state written by an effect), or make the handler a function ('-> await ...')", stmt);
         }
         renderNode = stmt;
         return;
@@ -10327,7 +10342,7 @@ class Emitter {
       pad: ipad, frame, node: renderNode,
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
-      slotSeen: false,
+      slotSeen: false, scopeDepth: this.scopes.length,
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
@@ -11756,6 +11771,14 @@ class Emitter {
         for (const pair of arg.slice(1)) addPair(pair);
         scanAdvance(arg);
       } else if (isFunc(arg)) {
+        // The injected children arrow carries no parameters, as an
+        // element's does not; a spelled one has no reading here, and its
+        // parameters (defaults included) would never emit.
+        if (isNode(arg[1]) && arg[1].length > 0) {
+          throw this.positionedError(arg,
+            `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` +
+            '(a callback the component should run is passed as a named prop)', this.rstate.node);
+        }
         // The injected children arrow: objects are props, bare words
         // follow the scope rule, everything else is child DOM.
         const block = arg[2];
@@ -12643,7 +12666,6 @@ class Emitter {
         continue;
       }
 
-      const isPresence = isNode(value) && value[0] === 'presence' && value.length === 2;
       // A style OBJECT has no attribute serialization — a browser's
       // setAttribute stringifies it to `[object Object]` — so `style:`
       // has its own road, one for every spelling: `__style(el, value)`,
@@ -12654,7 +12676,7 @@ class Emitter {
       // the scratch const's annotation (the absence fork's shape), and the
       // key's hover answers that type from a record, since no instantiated
       // call stands beside it to read it off.
-      if (key === 'style' && !isPresence) {
+      if (key === 'style') {
         const recv = this.tsElReceiver(el);
         const write = () => {
           this.b.emit('{ const __v');
@@ -12770,7 +12792,7 @@ class Emitter {
         this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | undefined` : ': any'));
       };
       if (this.renderReactive(value)) {
-        if (isPresence || nullable) {
+        if (nullable) {
           this.renderEffect(pair, () => {
             this.b.emit('{ const __v');
             // The scratch const's NAME is the pair's relation site: the
@@ -12824,7 +12846,7 @@ class Emitter {
             if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
           }, value);
         }
-      } else if (isPresence || nullable) {
+      } else if (nullable) {
         // A fresh element holds no attribute yet, so absence needs no
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
@@ -12913,6 +12935,8 @@ class Emitter {
   renderBinding(stmt) {
     const [op, name, value] = stmt;
     const rec = this.rstate.sink;
+    const control = Emitter.firstAwaitIn(value);
+    if (control !== null) throw this.renderSyncError(control);
     if (name.startsWith('__')) {
       throw this.positionedError(stmt,
         `emitter: render local '${name}' — double-underscore names are the compiler/runtime namespace inside render ` +
@@ -15071,16 +15095,6 @@ class Emitter {
     });
   }
 
-  // Postfix presence: `expr?!` lowers to `expr ? true : undefined` —
-  // truthy yields true, anything falsy yields undefined (the Houdini
-  // operator). The value evaluates exactly once.
-  presence(node) {
-    this.mark(node, '$self', () => {
-      this.operand(node, 'value', node[1]);
-      this.b.emit(' ? true : undefined');
-    });
-  }
-
   unary(node) {
     // `delete` on a bare REACTIVE name is its own rejection class —
     // no reading exists for it at all
@@ -16904,6 +16918,7 @@ class Emitter {
     // This spelling keeps its inline path; every other call emits
     // through the chain driver.
     if (isNode(node[0]) && node[0][0] === 'dammit!') {
+      this.renderSyncGuard(node);
       if (node[0].parenthesized) {
         this.mark(node, '$self', () => {
           this.b.emit('(');
@@ -17488,6 +17503,7 @@ class Emitter {
   // ["await", value] — the value is an operand position (compound
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {
+    this.renderSyncGuard(node);
     this.mark(node, '$self', () => {
       // The keyword's own row, off the operator role the grammar labels
       // on the AWAIT/DAMMIT token: verbatim-exact where the author
@@ -17543,6 +17559,7 @@ class Emitter {
 
   // ["dammit!", target] standing alone: call-plus-await with no args.
   dammit(node) {
+    this.renderSyncGuard(node);
     // The keyword rides the operator role (the labeled DAMMIT token) in
     // both branches — the same row awaitExpr records, for the same
     // reason: TS80007's position resolves to the `!`, not the construct.
@@ -17563,12 +17580,23 @@ class Emitter {
     });
   }
 
-  // ["dammit?", callee, ...args] — optional call plus await.
-  // Arguments are part of the construct even when empty: bare `value?!`
-  // is the distinct Houdini/presence operator.
+  // ["dammit?", callee, ...args] — optional call plus await. Bare
+  // `f?!` carries no arguments and calls with none, as dammit's `f!` does.
   maybeDammit(node) {
+    this.renderSyncGuard(node);
+    // A constructor is never an optional callee. `?!` follows a name, so
+    // on a construction it lands on the spine (`new X?!`, `new a.b?!`,
+    // the `X.new?!` alias) and would make the constructor one, which
+    // JavaScript refuses. A method of the instance is an ordinary callee
+    // (`new X(1).go?!`).
+    const callee = node[1];
+    if ((isNode(callee) && callee[0] === 'new') || isRubyNew(callee)) {
+      throw this.positionedError(node,
+        "emitter: maybe dammit has no reading on a constructor — `?!` on a construction would make the " +
+        "constructor an optional callee; construct and await with `new X!`");
+    }
     this.mark(node, '$self', () => {
-      // The keyword's row maps to the labeled PRESENCE token — the `?`
+      // The keyword's row maps to the labeled MAYBE_DAMMIT token — the `?!`
       // is this spelling's awaiting operator, the way `!` is dammit's.
       this.mark(node, 'operator', () => this.b.emit('await'));
       this.b.emit(' ');
@@ -17587,6 +17615,7 @@ class Emitter {
 
   // ["yield"] | ["yield", value] | ["yield-from", value]
   yieldExpr(node) {
+    this.renderSyncGuard(node);
     if (this.scopes.length <= 1) {
       throw this.positionedError(node, "emitter: 'yield' outside a function");
     }

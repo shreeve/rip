@@ -114,7 +114,7 @@ does not compile, and on a machine without `bun`/tsgo.
       as one operator. The spelling is real — `a!?` compiles to
       `await a() != null` — but it is DAMMIT plus postfix existence, two
       tokens, so the name points at an operator that does not exist. The
-      single-token spelling is `?!`, already scoped as `presence`.
+      single-token spelling is `?!`, maybe dammit, scoped as await.
 - [ ] `=== INLINE JAVASCRIPT ===` (`rip.tmLanguage.json:83`) embeds `source.js`
       in backticks. A backtick in value position is a hard lexer error
       (`src/lexer.js:2030`); the one legitimate use is a template-literal type
