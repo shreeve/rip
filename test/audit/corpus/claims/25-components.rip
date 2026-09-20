@@ -140,7 +140,7 @@ console.log('defaults:', typeof Latch, typeof Porch)
 # ── An accept is typed from what its named provider offers ──
 
 Lamp = component
-  offer glow := 0
+  offer glow: number := 0
 
   render
     slot

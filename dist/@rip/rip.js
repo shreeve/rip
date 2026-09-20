@@ -4253,7 +4253,7 @@ var atStatementBoundary = (tokens, k) => {
   const t = tokens[k];
   if (!t)
     return true;
-  if (t.kind === "TERMINATOR" || t.kind === "EXPORT")
+  if (t.kind === "TERMINATOR" || t.kind === "EXPORT" || t.kind === "OFFER")
     return true;
   if (t.kind !== "INDENT" && t.kind !== "OUTDENT")
     return false;

@@ -714,6 +714,39 @@ test 'accept from a binding that holds no component throws at mount, naming the 
     e.message
 ''', 'context: the provider named for "theme" is not a component'
 
+# `offer` opens a declaration the way `export` does, so an offer takes an
+# annotation like any other state.
+test 'an annotated offer is a state declaration, shared with its accept', '''
+  result = null
+  Child = component
+    accept level from Parent
+    ~> result = level + 1
+  Parent = component
+    offer level: number := 41
+  p = __pushComponent(Parent.new())
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 42
+
+test 'an annotated public offer is a prop the caller can set', '''
+  result = null
+  Child = component
+    accept side from Parent
+    ~> result = side
+  Parent = component
+    offer @side: string := "left"
+  p = __pushComponent(Parent.new(side: "right"))
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 'right'
+
+fail 'an annotated offer is still a state declaration, not a readonly', '''
+  Root = component
+    offer limit: number =! 10
+''', 'emitter: offer takes a state declaration'
+
 fail 'accept names its provider', '''
   Child = component
     accept active

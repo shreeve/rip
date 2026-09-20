@@ -1454,6 +1454,24 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('[key: `_${string}`]: any;');               // the minted/runtime slot namespace
   });
 
+  test("an offer's annotation types the member, the record of what is offered, and the accept that reads it", () => {
+    const code = ts([
+      "type Side = 'left' | 'right'",
+      'Root = component',
+      '  offer depth: number := 0',
+      "  offer @side: Side := 'left'",
+      'Part = component',
+      '  accept side from Root',
+      '',
+    ].join('\n')).code;
+    expect(code).toContain('declare depth: { value: number; read(): number; touch(): void };');
+    expect(code).toContain('declare side: { value: Side; read(): Side; touch?(): void };');
+    expect(code).toContain('declare __offers: { depth: { value: number; read(): number; touch(): void }; side: { value: Side; read(): Side; touch?(): void } };');
+    expect(code).toContain("declare side: NonNullable<InstanceType<typeof Root>['__offers']>['side'];");
+    // A component that offers nothing still declares the record, empty.
+    expect(code).toContain('declare __offers: {};');
+  });
+
   test('methods and hooks are REAL class methods with annotations — never declares', () => {
     const code = ts(FIXTURE).code;
     expect(code).toContain('bump(n: number): number {');

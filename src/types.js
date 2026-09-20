@@ -351,12 +351,14 @@ const VALUE_INDENT_OPENERS = new Set([
 
 // Is the token at index k (the one directly before a candidate `name :`)
 // a statement boundary? EXPORT counts (`export x: T = v` — the binding
-// starts a statement). INDENT/OUTDENT boundaries additionally require
+// starts a statement), and so does a component body's OFFER (`offer
+// depth: number := 0`), the same prefix word before a declaration.
+// INDENT/OUTDENT boundaries additionally require
 // the enclosing block to be a STATEMENT block (see VALUE_INDENT_OPENERS).
 export const atStatementBoundary = (tokens, k) => {
   const t = tokens[k];
   if (!t) return true; // start of file
-  if (t.kind === 'TERMINATOR' || t.kind === 'EXPORT') return true;
+  if (t.kind === 'TERMINATOR' || t.kind === 'EXPORT' || t.kind === 'OFFER') return true;
   if (t.kind !== 'INDENT' && t.kind !== 'OUTDENT') return false;
   // Walk back past balanced INDENT/OUTDENT pairs to the enclosing
   // block's INDENT and inspect its opener.
