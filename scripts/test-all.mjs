@@ -468,12 +468,15 @@ for (const { name } of excluded) {
 // A runner prints a failure's DETAIL where the test ran and only its
 // NAME in the closing summary, so the tail alone carries the name and
 // loses the assertion message — which for a measurement gate is the
-// whole point. Lift the lines leading up to each `(fail)` marker too.
+// whole point. Lift the lines leading up to each failure marker too:
+// bun's `(fail)` line, and the rip harness's `✗ name: message` line,
+// which a package lane of many sub-suites prints far above its tail.
+const FAILURE_MARK = /^\(fail\)|^ *✗ /;
 const failureDetail = (output, lead = 30) => {
   const lines = output.split('\n');
   const out = [];
   lines.forEach((line, i) => {
-    if (!/^\(fail\)/.test(line) || out.length > 400) return;
+    if (!FAILURE_MARK.test(line) || out.length > 400) return;
     out.push(...lines.slice(Math.max(0, i - lead), i + 1), '');
   });
   return out.join('\n').trimEnd();

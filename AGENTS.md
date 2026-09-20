@@ -391,12 +391,18 @@ alters surface syntax updates ALL THREE in the same change.
   (protocol/lockstep, seconds, no tsgo preflight); full package /
   `test:all` still runs `bun run test` — unit then editor certification
   (~60s with tsgo).
-- An unreproduced single-failure suite run is a KNOWN open mystery
- (sightings: `test:all` 2026-07-20/21, an audit lane 2026-07-28, one
- Playwright firefox spec 2026-07-29 — all unreproduced; evidence
- points at timing sensitivity under machine load). If a logged run
- ever fails, capture the test NAME verbatim — identifying it matters
- more than the green rerun.
+- A single-failure suite run that a rerun does not reproduce is timing
+ sensitivity under machine load until its test is named (sightings
+ still unnamed: `test:all` 2026-07-20/21, an audit lane 2026-07-28).
+ The one named so far was a bet on a process race: the Sites `stop`
+ test read the manager's exit code the instant `stop` returned, and
+ `stop` returns when the manager's control socket stops answering —
+ before the process has exited. A test asserts an exit by AWAITING it
+ (`await proc.exited`), never by reading `exitCode` after a sibling
+ command returns. If a logged run fails, capture the test NAME
+ verbatim — identifying it matters more than the green rerun;
+ `test:all` repeats each failing lane's `(fail)` and `✗` lines after
+ the summary so the name survives a truncated log.
 
 ## Commands
 

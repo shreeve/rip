@@ -222,7 +222,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 | Command | What it does |
 | --- | --- |
 | `rip sites start <app\|all\|agent>` | Start a supervised app, every app, or the control agent. Apps register with Janus, so the edge must be running (`janus autostart`). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
-| `rip sites stop [noun]` | Stop a supervised app, `all`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. |
+| `rip sites stop [noun]` | Stop a supervised app, `all`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. Returns once the manager’s control socket stops answering, a moment before the process itself exits. |
 | `rip sites restart <app\|all\|agent>` | Restart. For `agent` this is a recycle (stop then start). |
 | `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). The edge line is Janus's status and scope plus whether this machine trusts the local CA. |
 | `rip sites status all` | Apps only. |
