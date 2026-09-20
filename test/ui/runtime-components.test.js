@@ -1630,6 +1630,28 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     stop();
   });
 
+  test('a forwarded key the element reflects as a property: a boolean takes presence, a nullish string is the attribute\'s absence', () => {
+    // The recording DOM reflects nothing, so the element models the two
+    // reflector kinds a browser has: `hidden` (boolean) and `title` (string).
+    const inst = makeBtn({});
+    const el = document.createElement('button');
+    let hidden = false;
+    Object.defineProperty(el, 'hidden', { get: () => hidden, set: (v) => { hidden = v; el.toggleAttribute('hidden', v); } });
+    Object.defineProperty(el, 'title', { get: () => el.getAttribute('title') ?? '', set: (v) => el.setAttribute('title', String(v)) });
+    inst._inheritedEl = el;
+    inst._applyInheritedProp(el, 'title', 'tip');
+    expect(el.getAttribute('title')).toBe('tip');
+    inst._applyInheritedProp(el, 'title', undefined);
+    expect(el.getAttribute('title')).toBeNull();
+    inst._applyInheritedProp(el, 'hidden', undefined);
+    expect(hidden).toBe(false);
+    inst._applyInheritedProp(el, 'hidden', 'yes');
+    expect(hidden).toBe(true);
+    expect(el.getAttribute('hidden')).toBe('');
+    inst._applyInheritedProp(el, 'value', undefined);
+    expect(el.value).toBe('');
+  });
+
   test('_updateProp routes undeclared names to rest and applies onto the inherited element; declared props keep their contracts', () => {
     const inst = makeBtn({});
     const el = document.createElement('button');

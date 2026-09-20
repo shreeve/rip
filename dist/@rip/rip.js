@@ -26408,12 +26408,17 @@ class __Component {
       __style(el, value);
       return;
     }
-    if (key === "innerHTML" || key === "textContent" || key === "innerText") {
+    if (key === "innerHTML" || key === "textContent" || key === "innerText" || key === "value") {
       el[key] = value ?? "";
       return;
     }
     if (key in el && !key.includes("-")) {
-      el[key] = value;
+      if (typeof el[key] === "boolean")
+        el[key] = !!value;
+      else if (value == null)
+        el.removeAttribute(key);
+      else
+        el[key] = value;
       return;
     }
     if (value == null || value === false) {

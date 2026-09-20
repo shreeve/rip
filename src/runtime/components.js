@@ -1192,12 +1192,18 @@ class __Component {
       return;
     }
     if (key === 'style') { __style(el, value); return; }
-    if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
+    if (key === 'innerHTML' || key === 'textContent' || key === 'innerText' || key === 'value') {
       el[key] = value ?? '';
       return;
     }
+    // A key the element reflects as a property is written as one, as the
+    // render's own line writes it: a boolean reflector takes presence,
+    // and a nullish value on any other is the attribute's absence, never
+    // the word "undefined" a string reflector would make of it.
     if (key in el && !key.includes('-')) {
-      el[key] = value;
+      if (typeof el[key] === 'boolean') el[key] = !!value;
+      else if (value == null) el.removeAttribute(key);
+      else el[key] = value;
       return;
     }
     if (value == null || value === false) {
