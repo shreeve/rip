@@ -36,6 +36,13 @@ const bundleText = JSON.stringify({
   list: assembleRipBundle({ modules: MODULES, packagesDir: join(root, 'packages') }),
 });
 const bundleTag = `"${Bun.hash(bundleText).toString(16)}"`;
+// The element writer's page (elements.spec): its one route is a fixture
+// file, so the rules read as a page rather than as strings.
+const elementsBundleText = JSON.stringify({
+  hash: 'ELEM01',
+  list: assembleRipBundle({ modules: { 'routes/index.rip': readFileSync(join(here, 'fixture', 'elements.rip'), 'utf8') }, packagesDir: join(root, 'packages') }),
+});
+const elementsBundleTag = `"${Bun.hash(elementsBundleText).toString(16)}"`;
 
 // POST /__test/bump publishes a new complete bundle/latest pair and sends one
 // source-carrying Rip change. GET /__test/frames exposes the wire contract.
@@ -77,8 +84,9 @@ Bun.serve({
       // ?watch=1 is the workspace certification bundle (harness-only); the
       // plain URL is the non-workspace app.spec bundle.
       const watch = url.searchParams.has('watch');
-      const text = watch ? wsBundleText : bundleText;
-      const tag = watch ? wsBundleTag : bundleTag;
+      const elements = url.searchParams.has('elements');
+      const text = watch ? wsBundleText : elements ? elementsBundleText : bundleText;
+      const tag = watch ? wsBundleTag : elements ? elementsBundleTag : bundleTag;
       if (request.headers.get('If-None-Match') === tag) {
         return new Response(null, { status: 304, headers: { ETag: tag } });
       }

@@ -1,0 +1,82 @@
+# The element writer's rules, in one page: what an element carries for a
+# value the page passes, on every road that can carry it — a plain render
+# line, a key forwarded through `extends <tag>`, a key forwarded through
+# `extends <Component>`, and a two-way binding. The wrapper and the plain
+# tag beside it must always agree.
+shared := 'x'
+
+WrapA = component extends a
+  render
+    a 'wrapped'
+
+WrapInput = component extends input
+  render
+    input
+
+# Btn's line owns `type`; a caller's value for it never lands.
+Btn = component extends button
+  render
+    button type: 'button'
+      slot
+
+Host = component extends Btn
+  render
+    Btn
+      slot
+
+# Reads the forwarded `title` four ways and shows what it got.
+Probe = component extends span
+  @value?: string
+  seen ~= @rest.title
+  render
+    span
+      data-typeof: typeof seen
+      data-is: String(seen is 'x')
+      data-fallback: String(seen ?? 'fallback')
+      data-text: String(seen)
+      = String(value)
+
+Wrapped = component extends Probe
+  render
+    Probe
+
+export Home = component
+  tip: string | undefined := undefined
+  flag: boolean | undefined := undefined
+  kind: 'submit' | 'reset' := 'submit'
+  state := 'x'
+  derived ~= state
+  text: string | undefined := 'hello'
+
+  render
+    div
+      section
+        button id: 'nullish-set', @click: (-> tip = 'hello'; flag = true), 'set'
+        button id: 'nullish-unset', @click: (-> tip = undefined; flag = undefined), 'unset'
+        WrapA id: 'wrap-a', title: tip, hidden: flag, lang: tip
+        a id: 'plain-a', title: tip, hidden: flag, lang: tip, 'plain'
+        WrapInput id: 'wrap-input', value: tip, disabled: flag, placeholder: tip
+        input id: 'plain-input', value: tip, disabled: flag, placeholder: tip
+
+      section
+        button id: 'owned-change', @click: (-> kind = 'reset'), 'change'
+        # The props type refuses `type` here (the line owns it); an untyped
+        # caller can still pass it, and the element must not take it.
+        Btn id: 'owned-fixed', type: 'submit', title: 'fixed', 'fixed'
+        Btn id: 'owned-reactive', type: kind, title: kind, 'reactive'
+        Host id: 'owned-host', type: kind, title: kind, 'host'
+
+      section
+        button id: 'reactive-change', @click: (-> state = 'y'), 'change'
+        Probe id: 'probe-literal', title: 'x', value: 'x'
+        Probe id: 'probe-state', title: state, value: state
+        Probe id: 'probe-computed', title: derived, value: derived
+        Probe id: 'probe-module', title: shared, value: shared
+        Probe id: 'probe-empty', title: tip
+        Wrapped id: 'probe-wrapped', title: state, value: state
+
+      section
+        button id: 'bind-clear', @click: (-> text = undefined), 'clear'
+        input id: 'bound', value <=> text
+        input id: 'oneway', value: text
+        code id: 'bind-cell', JSON.stringify(text)

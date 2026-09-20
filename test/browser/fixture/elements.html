@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rip elements</title>
+<div id="app"></div>
+<script type="module">
+  import { bootApp } from '/dist/@rip/rip.js';
+  globalThis.__bootResult = bootApp({ url: '/bundle.json?elements', hash: true })
+    .then(result => { globalThis.__rip = result; return 'ok'; })
+    .catch(error => { console.error('[Rip]', String(error)); return 'failed: ' + error.message; });
+</script>
