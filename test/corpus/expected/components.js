@@ -213,7 +213,7 @@ let Roster = class extends __Component {
       });
       __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
     }
-    __effect(() => { this._el8.value = this.sel.value; });
+    __effect(() => { this._el8.value = this.sel.value ?? ''; });
   }
   create_block_0(ctx) {
     let _el2, _t1;

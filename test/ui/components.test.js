@@ -739,9 +739,9 @@ describe('the static render DSL: emission pins', () => {
     expect(code).toContain(`this._el2.setAttribute('type', "text");`);
   });
 
-  test('value/checked with reactive deps push as properties (one-way)', () => {
+  test('value/checked with reactive deps push as properties (one-way); a nullish value is the empty field', () => {
     const { code } = compile('P = component\n  name := ""\n  render\n    input type: "text", value: name\n');
-    expect(code).toContain('__effect(() => { this._el0.value = this.name.value; });');
+    expect(code).toContain("__effect(() => { this._el0.value = this.name.value ?? ''; });");
   });
 
   test('a bare identifier that resolves to nothing sets the attribute it names', () => {
@@ -1315,7 +1315,7 @@ describe('two-way binding: the `<=>` matrix and its loudness fork', () => {
     expect(code).toContain("this._el4.addEventListener('change', (e) => { this.done.value = e.target.checked; });");
     expect(code).toContain("this._el5.addEventListener('input', (e) => { this.bio.value = e.target.value; });");
     expect(code).toContain("this._el6.addEventListener('input', (e) => { this.pick.value = e.target.value; });");
-    expect(code).toContain('__effect(() => { this._el1.value = this.name.value; });');
+    expect(code).toContain("__effect(() => { this._el1.value = this.name.value ?? ''; });");
     expect(code).toContain('__effect(() => { this._el4.checked = this.done.value; });');
     expect(() => new Function(code)).not.toThrow();
   });

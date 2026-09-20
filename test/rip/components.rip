@@ -1297,7 +1297,7 @@ code 'two-way binding value (text input)', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.value = this.name.value; });
+      __effect(() => { this._el0.value = this.name.value ?? ''; });
     }
   };
   '''
@@ -1343,7 +1343,7 @@ code 'two-way binding valueAsNumber (number input)', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.value = this.age.value; });
+      __effect(() => { this._el0.value = this.age.value ?? ''; });
     }
   };
   '''
@@ -1365,7 +1365,7 @@ code 'value: reactive is one-way push (use <=> for two-way)', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.value = this.name.value; });
+      __effect(() => { this._el0.value = this.name.value ?? ''; });
     }
   };
   '''
@@ -3095,7 +3095,7 @@ code 'indented inline @event handler binds a listener', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { this._el0.value = this.msg.value; });
+      __effect(() => { this._el0.value = this.msg.value ?? ''; });
     }
   };
   '''

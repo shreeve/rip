@@ -12523,6 +12523,8 @@ class Emitter {
           site([lhsStart, this.b.offset]);
           this.b.emit(' = ');
           this.renderExpr(value);
+          // A nullish `value` is the empty field, never the word.
+          if (key === 'value') this.b.emit(" ?? ''");
           this.b.emit(';');
         }, value);
         continue;
@@ -14049,6 +14051,7 @@ class Emitter {
       if (gen !== null && span !== null) {
         this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: prop, gen });
       }
+      if (prop === 'value') this.b.emit(" ?? ''");
       this.b.emit(';');
     }, value);
     const touch = this.bindRootTouch(value);

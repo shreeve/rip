@@ -17996,6 +17996,8 @@ ${this.replayPad}}` : " }");
           site([lhsStart, this.b.offset]);
           this.b.emit(" = ");
           this.renderExpr(value);
+          if (key === "value")
+            this.b.emit(" ?? ''");
           this.b.emit(";");
         }, value);
         continue;
@@ -19233,6 +19235,8 @@ ${this.replayPad}}` : " }");
       if (gen !== null && span !== null) {
         this.intrinsics.push({ start: span[0], end: span[1], kind: "bind", name: prop, gen });
       }
+      if (prop === "value")
+        this.b.emit(" ?? ''");
       this.b.emit(";");
     }, value);
     const touch = this.bindRootTouch(value);

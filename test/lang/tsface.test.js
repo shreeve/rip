@@ -1733,7 +1733,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     }
     expect(faced.code).toContain('({ __key: String(item.id) }).__key');
     expect(faced.code).toContain('({ __key: it.ids[0] }).__key');
-    expect(faced.code).toContain('({ __bind: this.nums.value[0] }).__bind;');
+    expect(faced.code).toContain("({ __bind: this.nums.value[0] }).__bind ?? '';");
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
