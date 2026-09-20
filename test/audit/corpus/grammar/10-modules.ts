@@ -102,11 +102,12 @@ export { sectionF, sectionA as tailA }
 
 console.log('sections:', sectionA, sectionB, sectionC, sectionD, sectionE, sectionF)
 
-// ── re-exports through specifier lists: empty, aliased, the default resold ──
+// ── re-exports through specifier lists: empty, aliased, the default resold, a type resold ──
 
 export {} from './10-modules-lib'
 export { host as resoldHost, station as resoldStation } from './10-modules-lib'
 export { default as resoldTheme } from './10-modules-lib'
+export type { Parcel } from './10-modules-lib'
 
 // ── export default: the expression form ──
 
